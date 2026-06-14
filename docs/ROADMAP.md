@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `9c8efbdf3` · Build UI 1.25 — emoji reactions on cards & the review queue (#548)
+**Last updated:** 2026-06-14 · `d23995171` · docs: mark UI2.1 done on the roadmap (#577)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -134,7 +134,6 @@ parallel session**; 🟡 = touches a shared file (the `.btn` system or a list fi
 sequence it or merge with care.
 
 <!-- ROADMAP:TODO -->
-- **UI2.1** · UI2 (top priority) — **Cutout before/after**: wire the kit's `.mh-compare` slider onto a real original-photo ↔ background-removed *cutout* preview in the media/graphic flow, so a user can drag to see exactly what rembg removed · 🟢 parallel-safe (self-contained surface) · ❌ **NOT STARTED**
 - **UI2.2** · UI2 (top priority) — **Athlete tooltips**: hover Animated-Tooltips on athlete avatars / rosters (review + spotlight surfaces) showing name, club and key stat, via a kit `.mh-tooltip` · 🟢 parallel-safe · ❌ **NOT STARTED**
 - **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) · ❌ **NOT STARTED**
 - **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
@@ -144,19 +143,13 @@ sequence it or merge with care.
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.9** · Phase 1 (Product polish) — Multi-select + bulk actions (from Frame.io): checkboxes + select-all + bulk approve/export/delete in the Media Library and review queue; pure HTML form multi-select with progressive JS enhancement · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.11** · Phase 1 (Product polish) — Tabbed code-example switcher (from Resend): language tabs + syntax highlighting + copy button on the Developer/API docs page; pure HTML/CSS tabs, Prism.js or equivalent bundled locally · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.12** · Phase 1 (Product polish) — Results data table (from Wope): sortable/filterable parsed-results view with inline sparklines (athlete progress over time) and coloured delta badges (PB/improvement); server-side sort, vanilla JS sparklines · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.13** · Phase 1 (Product polish) — Annotated UI callouts (from Liveblocks): labelled hotspots + SVG connector lines on a sample card / the review UI ('anatomy of a card') for the landing or onboarding tour; static HTML/SVG, no new lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.14** · Phase 1 (Product polish) — Notifications inbox (from Liveblocks): a bell icon + unread count badge + dropdown listing render-complete, pack-ready, and error events; backed by the existing scheduler/notify layer, polled via lightweight SSE or fetch · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.15** · Phase 1 (Product polish) — Command palette / Cmd-K (from GitHub): fast keyboard navigation + quick actions (jump to Create / Library / Settings, run common actions); vanilla JS, no framework, keyboard-accessible · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.16** · Phase 1 (Product polish) — Dashboard activity feed (from GitHub): recent runs/approvals/exports shown as cards with status badges, relative timestamps, and expandable detail; server-rendered from the existing audit log · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.17** · Phase 1 (Product polish) — Content-cadence heatmap (from GitHub): a calendar activity grid showing generation/posting consistency over the past year; server-rendered SVG from run history, no JS lib required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.18** · Phase 1 (Product polish) — Inspector/properties panel (from Sketch): a lightweight side panel to tweak a generated card before approval — edit caption text, swap brand palette swatch, toggle elements, adjust crop; posted back to existing Flask card-edit routes · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.19** · Phase 1 (Product polish) — Testimonial/social-proof carousel (from Sketch): club/coach quote cards + avatar initials with arrow controls + autoplay on the landing; pure CSS/JS, no carousel lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.21** · Phase 1 (Product polish) — Text-scramble/decode animation (from Locomotive): character-by-character scramble-then-decode reveal for the 'engine is generating…' processing state and optional hero headline reveal; vanilla JS, respects `prefers-reduced-motion` · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.23** · Phase 1 (Product polish) — Light/dark theme toggle (from AuthKit): dark-first with an optional light mode; CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme` default; no new build step · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.28** · Phase 1 (Product polish) — Keyboard shortcuts overlay (from GitHub): press `?` to reveal a modal of available shortcuts; quick keys to approve/reject/next in the review flow; vanilla JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1511,16 +1504,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `09d0df3c1` | docs: mark UI2.1 done on the roadmap |
+| 2026-06-14 | `6f7ffd995` | Build UI 1.12 — sortable/filterable results data table with sparklines |
+| 2026-06-14 | `59c981934` | Apply ruff-format to the UI 1.19 testimonials block |
+| 2026-06-14 | `d78fd596c` | Build UI 1.28 — global keyboard-shortcuts overlay (?) |
+| 2026-06-14 | `a9fdf0a5a` | Apply ruff-format to the UI 1.11 additions |
+| 2026-06-14 | `e5a2f3843` | Build UI 1.23 — light/dark theme toggle |
 | 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
 | 2026-06-14 | `b8a8581ed` | Tidy reaction GET query onto one line (ruff-format) |
 | 2026-06-14 | `7a121d84c` | Build UI 1.24 — moment-type marquee/ticker on the landing |
-| 2026-06-14 | `8261b091a` | Build UI 1.14 — notifications inbox (bell + unread badge + dropdown) |
-| 2026-06-14 | `c921af047` | Build UI 1.25 — emoji reactions on cards & the review queue |
-| 2026-06-14 | `41171c57d` | Add visual template/archetype gallery (UI 1.10) |
-| 2026-06-14 | `e25ace721` | Build UI2.1 — cut-out before/after compare slider |
-| 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
-| 2026-06-14 | `487758deb` | feat(ui): UI2.6 Vanish search on the activity/global run search |
-| 2026-06-14 | `72cd136a7` | Build UI2.7 — caption type-on "AI is writing" reveal |
-| 2026-06-14 | `5a8a66d72` | Align UI 1.3/U.8 fix with main's #532 (pipeline_html prepend) |
-| 2026-06-14 | `71ec23f6a` | Fix U.8/UI1.3 pipeline_html collision + add application-suite CI gate |
 <!-- /ROADMAP:ACTIVITY -->

@@ -220,6 +220,100 @@
     });
   }
 
+  /* --- Text-scramble / decode (UI 1.21, Locomotive-style) -------------
+     Each character flickers through a random glyph alphabet then settles to
+     its final value, staggered left-to-right so the string "decodes" in.
+     XSS-safe by construction: it only rewrites the .data of the element's
+     existing text nodes — never innerHTML, never a node built from text — so
+     embedded markup (<br>, <em>) survives untouched. The final text is
+     already in the DOM, so no-JS and reduced-motion users simply read it
+     (runScramble no-ops under reduce). Two ways to drive it:
+       declarative  <h1 class="mh-scramble">…</h1>  decodes in once on reveal;
+       imperative   MH.scrambleTo(el, "new text")    decodes to new text
+                    (the processing screen's live "generating" stage label). */
+  var SCRAMBLE_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*+/<>";
+  function randGlyph() {
+    return SCRAMBLE_GLYPHS.charAt((Math.random() * SCRAMBLE_GLYPHS.length) | 0);
+  }
+  function isWS(ch) {
+    return ch === " " || ch === "\n" || ch === "\t" || ch === " ";
+  }
+  function runScramble(el) {
+    if (!el) return;
+    if (el.mhScrambleRaf) { cancelAnimationFrame(el.mhScrambleRaf); el.mhScrambleRaf = 0; }
+    var finalText = el.textContent;
+    // Reduced motion / nothing useful to do: leave the (already-final) text be.
+    if (REDUCE || !finalText || finalText.length > 240) {
+      el.classList.remove("is-scrambling");
+      el.removeAttribute("aria-busy");
+      el.removeAttribute("aria-label");
+      return;
+    }
+    var nodes = [];
+    try {
+      var walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walk.nextNode())) { if (node.nodeValue) nodes.push(node); }
+    } catch (e) { return; }
+    if (!nodes.length) return;
+
+    // Per text node: a working char array + a settle-frame per character.
+    // Whitespace settles at frame 0 so word gaps (and layout) never wobble.
+    var plan = [], live = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var s = nodes[i].nodeValue, work = [], ends = [];
+      for (var c = 0; c < s.length; c++) {
+        if (isWS(s.charAt(c))) { work.push(s.charAt(c)); ends.push(0); }
+        else { work.push(randGlyph()); ends.push(-1); live++; }
+      }
+      plan.push({ node: nodes[i], chars: s, work: work, ends: ends });
+    }
+    if (!live) return; // whitespace only — nothing to decode
+
+    // Stagger the settle frames left-to-right with jitter (≈0.5–0.9s total).
+    var MIN = 6, STEP = 1.15, JITTER = 9, k = 0;
+    for (var p = 0; p < plan.length; p++) {
+      var en = plan[p].ends;
+      for (var q = 0; q < en.length; q++) {
+        if (en[q] === -1) { en[q] = MIN + ((k * STEP) | 0) + ((Math.random() * JITTER) | 0); k++; }
+      }
+    }
+
+    // Transient a11y name while the glyphs resolve; removed on settle so the
+    // element's natural accessible name (which renders <br> as a pause) takes
+    // back over once the real text is in place.
+    el.setAttribute("aria-label", finalText);
+    el.classList.add("is-scrambling");
+    el.setAttribute("aria-busy", "true");
+    var frame = 0;
+    function tick() {
+      var pending = 0;
+      for (var pp = 0; pp < plan.length; pp++) {
+        var row = plan[pp], changed = false;
+        for (var qq = 0; qq < row.work.length; qq++) {
+          if (frame >= row.ends[qq]) {
+            if (row.work[qq] !== row.chars.charAt(qq)) { row.work[qq] = row.chars.charAt(qq); changed = true; }
+          } else {
+            pending++;
+            if (Math.random() < 0.5) { row.work[qq] = randGlyph(); changed = true; }
+          }
+        }
+        if (changed) row.node.nodeValue = row.work.join("");
+      }
+      if (!pending) { // everything locked in — restore the pristine text + clear state
+        for (var f = 0; f < plan.length; f++) plan[f].node.nodeValue = plan[f].chars;
+        el.classList.remove("is-scrambling");
+        el.removeAttribute("aria-busy");
+        el.removeAttribute("aria-label"); // natural accessible name takes over
+        el.mhScrambleRaf = 0;
+        return;
+      }
+      frame++;
+      el.mhScrambleRaf = requestAnimationFrame(tick);
+    }
+    el.mhScrambleRaf = requestAnimationFrame(tick);
+  }
+
   /* --- IntersectionObserver: reveal / text-generate / count / flap ---- */
   var io = null;
   function observe(el) {
@@ -236,6 +330,8 @@
   function fire(el) {
     el.classList.add("is-in"); // align to the existing Phase-10 reveal convention
     if (el.classList.contains("mh-flapboard")) runFlap(el);
+    // Decode-in once: the guard stops a re-observed node re-scrambling.
+    if (el.classList.contains("mh-scramble") && once(el, "data-mh-scrambled")) runScramble(el);
   }
 
   /* --- Flip-words: cycle the active child ----------------------------- */
@@ -286,6 +382,61 @@
     });
     requestAnimationFrame(function () { move(active()); });
     window.addEventListener("resize", function () { move(active()); }, { passive: true });
+  }
+
+  /* --- Copy-to-clipboard for code blocks / switchers (UI 1.11) -------- */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Legacy fallback: an off-screen textarea + execCommand('copy').
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) resolve(); else reject();
+      } catch (e) { reject(e); }
+    });
+  }
+  function bindCopy(btn) {
+    if (!once(btn, "data-mh-copy-init")) return;
+    btn.addEventListener("click", function () {
+      var host = btn.closest(".mh-code");
+      if (!host) return;
+      var panel;
+      if (host.classList.contains("mh-code-switcher")) {
+        // Copy whichever language panel the (pure-CSS) tabs have selected.
+        var radios = host.querySelectorAll(".mh-cs-radio"), idx = 0;
+        for (var i = 0; i < radios.length; i++) { if (radios[i].checked) { idx = i; break; } }
+        panel = host.querySelectorAll(".mh-cs-panel")[idx];
+      } else {
+        panel = host.querySelector(".mh-cs-panel");
+      }
+      if (!panel) return;
+      var codeEl = panel.querySelector("code") || panel;
+      var label = btn.querySelector(".mh-cs-copy-label");
+      copyText(codeEl.textContent || "").then(function () {
+        btn.classList.add("is-copied");
+        btn.setAttribute("aria-label", "Copied to clipboard");
+        if (label) {
+          if (!label.getAttribute("data-mh-label")) label.setAttribute("data-mh-label", label.textContent);
+          label.textContent = "Copied";
+        }
+        window.clearTimeout(btn._mhCopyT);
+        btn._mhCopyT = window.setTimeout(function () {
+          btn.classList.remove("is-copied");
+          btn.setAttribute("aria-label", "Copy code to clipboard");
+          if (label && label.getAttribute("data-mh-label")) label.textContent = label.getAttribute("data-mh-label");
+        }, 1600);
+      }).catch(function () { /* clipboard blocked — code stays selectable */ });
+    });
   }
 
   /* --- Compare: before/after slider (pointer + keyboard) -------------- */
@@ -437,6 +588,25 @@
     btn.setAttribute("data-mh-state", state || "idle");
   };
 
+  /* --- Text-scramble API (UI 1.21) ------------------------------------- */
+  // Decode the element's current text in place (re-runs cleanly).
+  MH.scramble = function (el) {
+    if (typeof el === "string") el = document.querySelector(el);
+    runScramble(el);
+  };
+  // Decode *to* a new string — used by the processing poller as each pipeline
+  // stage arrives. A no-op when the target text is unchanged, so polling the
+  // same stage label never re-triggers the flicker.
+  MH.scrambleTo = function (el, text) {
+    if (typeof el === "string") el = document.querySelector(el);
+    if (!el) return;
+    text = String(text == null ? "" : text);
+    if (el.getAttribute("data-mh-scramble-target") === text) return;
+    el.setAttribute("data-mh-scramble-target", text);
+    el.textContent = text; // final text first → correct with no JS / reduced motion
+    runScramble(el);
+  };
+
   /* --- Live multi-step loader rendered from a pipeline log array ------- */
   MH.renderLogSteps = function (container, log, status) {
     if (typeof container === "string") container = document.getElementById(container);
@@ -569,9 +739,10 @@
     each(root, ".mh-tilt", bindTilt);
     each(root, ".mh-marquee", bindMarquee);
     each(root, ".mh-text-generate", function (el) { splitWords(el); observe(el); });
-    each(root, ".mh-highlight, .mh-flapboard", observe);
+    each(root, ".mh-highlight, .mh-flapboard, .mh-scramble", observe);
     each(root, ".mh-flip-words", bindFlipWords);
     each(root, ".mh-tabs", bindTabs);
+    each(root, ".mh-cs-copy", bindCopy);
     each(root, ".mh-compare", bindCompare);
     each(root, ".mh-drag-scroll", bindDragScroll);
     each(root, ".mh-tracing-beam", bindBeam);

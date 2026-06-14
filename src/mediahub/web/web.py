@@ -62,6 +62,7 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from .humanise import humanise as _humanise
+from . import results_table as _rt
 from .club_profile import (
     ClubProfile,
     list_profiles,
@@ -2766,7 +2767,7 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     return f"""
 <div style="text-align:center;padding:64px 24px">
   <div class="mh-spinner" style="margin:0 auto 24px"></div>
-  <h1 style="margin-bottom:10px">Still processing your run</h1>
+  <h1 class="mh-scramble" style="margin-bottom:10px">Still processing your run</h1>
   <p class="dim" style="max-width:480px;margin:0 auto 24px">
     The pipeline is reading the file, finding your athletes, and drafting
     captions. This usually takes 20&ndash;60 seconds. We&rsquo;ll auto-refresh
@@ -5187,11 +5188,13 @@ html { background: var(--bg-deep); }
 body {
   font-family: var(--font-body);
   background:
-    /* One subtle radial lift at top centre — stadium-light fall-off */
-    radial-gradient(1400px 600px at 50% -10%, rgba(245,242,232,0.04), transparent 70%),
+    /* One subtle radial lift at top centre — stadium-light fall-off.
+       Light mode swaps the cream tint for a faint ink tint so the lift
+       and the grid lattice stay visible on the paper page. */
+    radial-gradient(1400px 600px at 50% -10%, light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04)), transparent 70%),
     /* Faint 40px grid lattice — pit-wall / scoreboard substrate */
-    linear-gradient(rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
-    linear-gradient(90deg, rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(light-dark(rgba(20,23,31,0.03), rgba(245,242,232,0.022)) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, light-dark(rgba(20,23,31,0.03), rgba(245,242,232,0.022)) 1px, transparent 1px) 0 0 / 40px 40px,
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
@@ -5205,14 +5208,63 @@ body {
   font-variant-numeric: oldstyle-nums;
 }
 a {
-  color: var(--lane);
+  /* Dark: pure lane-yellow (unchanged). Light: a dark-olive brand tone
+     (--mh-link) — lane-yellow text is illegible on the paper page. */
+  color: light-dark(var(--mh-link), var(--lane));
   text-decoration: none;
   transition: color var(--transition);
   text-underline-offset: 0.18em;
   text-decoration-thickness: 1px;
 }
-a:hover { color: var(--lane-h); text-decoration: underline; text-decoration-color: var(--lane); }
+a:hover { color: light-dark(var(--mh-link-hover), var(--lane-h)); text-decoration: underline; text-decoration-color: light-dark(var(--mh-link), var(--lane)); }
 ::selection { background: var(--lane); color: var(--lane-ink); }
+
+/* UI 1.23 — Light/dark theme toggle (a compact Light · System · Dark
+   segmented control in the masthead). The control is pure chrome; the
+   active segment is driven by the data-theme attribute the boot script
+   writes onto <html> from localStorage. Every colour flows through the
+   light-dark() token layer, so the control itself re-themes. */
+/* The toggle is a JS control (it persists + forces the mode), so hide
+   it when JS is unavailable — those visitors still get the OS-default
+   theme via color-scheme. Matches the .mh-js progressive-enhancement
+   pattern used elsewhere. */
+html:not(.mh-js) .mh-theme-toggle { display: none; }
+.mh-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-pill);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
+  flex-shrink: 0;
+}
+.mh-theme-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 24px;
+  padding: 0; margin: 0; border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  transition: color var(--transition), background var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+.mh-theme-toggle button svg { width: 15px; height: 15px; display: block; }
+.mh-theme-toggle button:hover { color: var(--ink); }
+.mh-theme-toggle button:focus-visible { outline: 2px solid var(--mh-focus); outline-offset: 2px; }
+/* Active segment = the one matching the current data-theme (or System
+   before the boot script / for no-JS visitors). */
+html[data-theme="light"]  .mh-theme-toggle button[data-theme-value="light"],
+html[data-theme="dark"]   .mh-theme-toggle button[data-theme-value="dark"],
+html[data-theme="system"] .mh-theme-toggle button[data-theme-value="system"],
+html:not([data-theme])    .mh-theme-toggle button[data-theme-value="system"] {
+  background: var(--lane);
+  color: var(--lane-ink);
+}
 
 /* TOPNAV — pit-wall masthead: condensed wordmark + mono control panel */
 header.topnav {
@@ -5222,8 +5274,9 @@ header.topnav {
   padding: 0 var(--sp-7);
   height: 64px;
   border-bottom: 1px solid var(--hairline);
-  background: rgba(10,11,17,0.92);
-  /* No blur — glass is banned by every audit. Solid pit-wall instead. */
+  background: light-dark(rgba(248,246,239,0.92), rgba(10,11,17,0.92));
+  /* No blur — glass is banned by every audit. Solid pit-wall (dark) /
+     solid paper (light) instead. */
   position: sticky;
   top: 0;
   z-index: 100;
@@ -5785,7 +5838,7 @@ p:last-child { margin-bottom: 0; }
 }
 .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--chrome); }
 .btn.secondary:hover {
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
   color: var(--ink);
   border-color: var(--lane);
   box-shadow: none;
@@ -5872,7 +5925,7 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
   font-size: 10px; font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
   color: var(--ink-dim);
   border: 1px solid var(--hairline);
   white-space: nowrap;
@@ -5946,7 +5999,7 @@ label.mh-choice input { margin: 0; }
   text-transform: uppercase;
 }
 input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], input[type=number], textarea, select {
-  background: rgba(245,242,232,0.025); color: var(--ink);
+  background: light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025)); color: var(--ink);
   border: 1px solid var(--chrome);
   border-radius: var(--radius-sm); padding: 11px 14px;
   /* 44px touch-target floor for every text/file/email/number field. */
@@ -5961,7 +6014,7 @@ input[type=text]:hover, input[type=email]:hover, textarea:hover, select:hover {
 input[type=text]:focus, input[type=email]:focus, input[type=password]:focus, input[type=url]:focus, input[type=number]:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--lane);
   box-shadow: 0 0 0 2px rgba(212,255,58,0.18);
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
 }
 input[type=checkbox], input[type=radio] {
   /* Bump native checkbox/radio from the browser's ~13px default so it
@@ -6003,7 +6056,7 @@ input[type=color] {
      on phone / tablet. Width stays compact so the hex input next to it
      dominates the row. */
   height: 44px; min-width: 44px; padding: 2px; cursor: pointer;
-  background: rgba(245,242,232,0.04); border-color: var(--chrome);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04)); border-color: var(--chrome);
 }
 /* Pair the bumped checkbox with a 44px-tall click target on the wrapping
    label. Covers /organisation/setup's `palette_use_fourth` row plus the
@@ -6076,7 +6129,8 @@ label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio
 
 /* PROGRESS LOG */
 .progress-log {
-  background: rgba(0,0,0,0.3); color: #9EB3C8;
+  background: light-dark(rgba(20,23,31,0.05), rgba(0,0,0,0.3));
+  color: light-dark(var(--mh-on-surface-variant), #9EB3C8);
   border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px; white-space: pre-wrap; max-height: 360px; overflow-y: auto; line-height: 1.7;
@@ -6174,7 +6228,9 @@ a.card:hover, .card[data-interactive]:hover {
 /* Loading overlay */
 #mh-loader {
   position: fixed; inset: 0;
-  background: rgba(11,18,32,0.78);
+  /* Light: a translucent paper scrim so the (now dark) loader text
+     stays readable; dark: the original deep-ink scrim. */
+  background: light-dark(rgba(245,243,237,0.82), rgba(11,18,32,0.78));
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   z-index: 9999;
   display: none; align-items: center; justify-content: center;
@@ -6432,15 +6488,15 @@ a.card:hover, .card[data-interactive]:hover {
   font-weight: 600;
   padding: 0 4px;
   border-radius: 4px;
-  background: rgba(245, 242, 232, 0.06);   /* faint --ink wash */
+  background: light-dark(rgba(20, 23, 31, 0.07), rgba(245, 242, 232, 0.06));   /* faint --ink wash */
   /* clone the pill across wrapped lines and keep the line box tight */
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 /* Athlete — the person: the brightest neutral pill (the hero of the card). */
-.mh-fact--athlete { background: rgba(245, 242, 232, 0.08); }
+.mh-fact--athlete { background: light-dark(rgba(20, 23, 31, 0.09), rgba(245, 242, 232, 0.08)); }
 /* Event — the race: a quieter neutral pill. */
-.mh-fact--event { background: rgba(245, 242, 232, 0.045); }
+.mh-fact--event { background: light-dark(rgba(20, 23, 31, 0.055), rgba(245, 242, 232, 0.045)); }
 /* Time — the data: monospace + tabular figures with a faint gold edge. */
 .mh-fact--time {
   font-family: var(--font-mono);
@@ -6831,7 +6887,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   transition: opacity var(--transition);
 }
 .mh-step:hover {
-  background: rgba(245,242,232,0.025);
+  background: light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025));
   border-color: var(--hairline);
 }
 .mh-step:hover::before { opacity: 1; }
@@ -6893,7 +6949,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   content: '';
   position: absolute; inset: 0;
   background:
-    linear-gradient(rgba(245,242,232,0.025) 1px, transparent 1px) 0 0 / 100% 64px,
+    linear-gradient(light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025)) 1px, transparent 1px) 0 0 / 100% 64px,
     linear-gradient(90deg, rgba(245,242,232,0.018) 1px, transparent 1px) 0 0 / 64px 100%;
   pointer-events: none;
   mask-image: radial-gradient(ellipse 80% 70% at 30% 50%, black 30%, transparent 75%);
@@ -7050,7 +7106,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   border-color: var(--chrome);
 }
 .mh-cta-secondary:hover {
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
   border-color: var(--lane);
   color: var(--ink);
   transform: translateY(-1px);
@@ -7060,7 +7116,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
    settles the hover lift (so the button feels responsive to the click),
    and a visible focus ring keeps them keyboard-navigable. */
 .mh-cta-primary:active { transform: translateY(0); background: var(--lane-deep); box-shadow: none; }
-.mh-cta-secondary:active { transform: translateY(0); background: rgba(245,242,232,0.07); }
+.mh-cta-secondary:active { transform: translateY(0); background: light-dark(rgba(20,23,31,0.08), rgba(245,242,232,0.07)); }
 .mh-cta-primary:focus-visible,
 .mh-cta-secondary:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
@@ -7621,6 +7677,7 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web import code_highlight as _code_hl  # noqa: E402
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -9026,6 +9083,24 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
 <meta name="color-scheme" content="dark light" />
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
+<script>
+  /* UI 1.23 — theme boot. Runs BEFORE any CSS paints so the chosen
+     light/dark mode is applied on first frame (no flash). Reads the
+     persisted preference (light | dark | system; default System =
+     follow the OS, dark-first). For an explicit choice we force the
+     mode by writing color-scheme onto <html> (an inline style beats
+     the stylesheet's OS-aware default); System leaves it to the CSS.
+     Every visible colour resolves through light-dark() against this. */
+  (function(){
+    try {
+      var pref = localStorage.getItem('mh-theme');
+      if (pref !== 'light' && pref !== 'dark') pref = 'system';
+      var el = document.documentElement;
+      el.setAttribute('data-theme', pref);
+      if (pref === 'light' || pref === 'dark') el.style.colorScheme = pref;
+    } catch (e) {}
+  })();
+</script>
 <title>{{ title }} &mdash; MediaHub</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
 <link rel="manifest" href="{{ url_for('web_manifest') }}" />
@@ -9139,6 +9214,17 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       <a href="{{ url_for('login_page') }}">Log in</a>
       <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
     {% endif %}
+    <div class="mh-theme-toggle" role="radiogroup" aria-label="Colour theme">
+      <button type="button" role="radio" data-theme-value="light" aria-checked="false" aria-label="Light theme" title="Light theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+      <button type="button" role="radio" data-theme-value="system" aria-checked="false" aria-label="System theme (follow device)" title="System theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      </button>
+      <button type="button" role="radio" data-theme-value="dark" aria-checked="false" aria-label="Dark theme" title="Dark theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+      </button>
+    </div>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
@@ -9250,6 +9336,8 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
@@ -9307,6 +9395,57 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     Settings
   </a>
 </nav>
+{# UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style). Press ? on any
+   page to open it; lists the navigation + general shortcuts, and reveals the
+   review-flow quick keys when a review surface is on the page. Vanilla JS
+   (bindShortcuts) reuses MH.openModal for the focus-trap. Navigation rows are
+   real url_for() links, so the keyboard map is read straight back off the DOM —
+   one source of truth, and the rows still work as a click menu with no JS. #}
+<div class="mh-kbd-overlay" id="mh-shortcuts-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="mh-shortcuts-title" aria-hidden="true">
+  <div class="mh-kbd-overlay-panel" role="document">
+    <button type="button" class="mh-kbd-overlay-close" data-mh-modal-close
+            aria-label="Close keyboard shortcuts">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+    </button>
+    <h3 id="mh-shortcuts-title">Keyboard shortcuts</h3>
+    <section data-mh-shortcuts-group="nav">
+      <h4>Navigation</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>h</kbd></span>
+        <a class="desc" data-mh-go="h" href="{{ url_for('home') }}">Go to Home</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>p</kbd></span>
+        <a class="desc" data-mh-go="p" href="{{ url_for('plan_page') }}">Go to Plan</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>c</kbd></span>
+        <a class="desc" data-mh-go="c" href="{{ url_for('make_page') }}">Go to Create</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>m</kbd></span>
+        <a class="desc" data-mh-go="m" href="{{ url_for('media_library_page') }}">Go to Media library</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>a</kbd></span>
+        <a class="desc" data-mh-go="a" href="{{ url_for('activity_page') }}">Go to Activity</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>s</kbd></span>
+        <a class="desc" data-mh-go="s" href="{{ url_for('settings_page') }}">Go to Settings</a>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="review" hidden>
+      <h4>Review &amp; approve</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>j</kbd></span><span class="desc">Focus next card</span>
+        <span class="keys"><kbd>k</kbd></span><span class="desc">Focus previous card</span>
+        <span class="keys"><kbd>a</kbd></span><span class="desc">Approve the focused card</span>
+        <span class="keys"><kbd>u</kbd></span><span class="desc">Send the focused card back to the queue</span>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="general">
+      <h4>General</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>?</kbd></span><span class="desc">Open or close this help</span>
+        <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close this help</span>
+      </div>
+    </section>
+    <div class="mh-kbd-overlay-foot">Shortcuts pause while you're typing in a field.</div>
+  </div>
+</div>
 {% if dock %}
 <!-- U.13 — Floating mobile action dock. A bottom-centre thumb-reachable
      capsule for the review/approve flow on mobile (Create / Library /
@@ -9547,6 +9686,73 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     }
   }
   tick(); setInterval(tick, 1000);
+})();
+</script>
+<script>
+/* UI 1.23 — theme-toggle behaviour. The <head> boot script already
+   applied the saved preference before first paint; this wires the
+   masthead control: reflects the active choice, persists clicks to
+   localStorage, forces (light/dark) or clears (system) color-scheme on
+   <html>, and keeps the mobile browser theme-colour in sync with the
+   resolved page colour. Keyboard: arrow keys move between segments
+   (the WAI-ARIA radiogroup pattern, with roving tabindex). */
+(function(){
+  var group = document.querySelector('.mh-theme-toggle');
+  if (!group) return;
+  var buttons = Array.prototype.slice.call(group.querySelectorAll('button[data-theme-value]'));
+  if (!buttons.length) return;
+
+  function syncMeta(){
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta || !document.body) return;
+    var c = getComputedStyle(document.body).backgroundColor;
+    if (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') meta.setAttribute('content', c);
+  }
+  function current(){
+    var p = document.documentElement.getAttribute('data-theme');
+    return (p === 'light' || p === 'dark') ? p : 'system';
+  }
+  function reflect(){
+    var pref = current();
+    buttons.forEach(function(b){
+      var on = b.getAttribute('data-theme-value') === pref;
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;
+    });
+  }
+  function apply(pref, focusIt){
+    if (pref !== 'light' && pref !== 'dark') pref = 'system';
+    var el = document.documentElement;
+    el.setAttribute('data-theme', pref);
+    if (pref === 'light' || pref === 'dark') el.style.colorScheme = pref;
+    else el.style.removeProperty('color-scheme');
+    try { localStorage.setItem('mh-theme', pref); } catch (e) {}
+    reflect();
+    requestAnimationFrame(syncMeta);
+    if (focusIt){
+      var active = group.querySelector('button[aria-checked="true"]');
+      if (active) active.focus();
+    }
+  }
+  buttons.forEach(function(b, i){
+    b.addEventListener('click', function(){ apply(b.getAttribute('data-theme-value'), false); });
+    b.addEventListener('keydown', function(e){
+      var dir = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1
+              : (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   ? -1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      var next = buttons[(i + dir + buttons.length) % buttons.length];
+      apply(next.getAttribute('data-theme-value'), true);
+    });
+  });
+  try {
+    var mq = window.matchMedia('(prefers-color-scheme: light)');
+    var onOS = function(){ if (current() === 'system') requestAnimationFrame(syncMeta); };
+    if (mq.addEventListener) mq.addEventListener('change', onOS);
+    else if (mq.addListener) mq.addListener(onOS);
+  } catch (e) {}
+  reflect();
+  syncMeta();
 })();
 </script>
 <script>
@@ -10541,6 +10747,127 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   else document.addEventListener('DOMContentLoaded', bindBeforeAfter);
   MH.bindBeforeAfter = bindBeforeAfter;
 
+  // === Testimonial / social-proof carousel (UI 1.19) ===
+  // Club/coach quote cards advanced by arrow controls, position dots and a
+  // gentle autoplay. The viewport is a native CSS scroll-snap row that works
+  // on its own with no JS (swipe / scroll / focus + arrow keys), so content is
+  // never trapped behind script. This initialiser progressively enhances it:
+  // it reveals the JS-only controls (`is-ready`, so no-JS visitors never see
+  // dead buttons), re-centres the active card on each control, keeps the dots
+  // in sync with manual swipes via an IntersectionObserver, announces the slide
+  // through a polite live region, and runs autoplay ONLY when motion is allowed
+  // — paused on hover/focus and while the tab is hidden, never started under
+  // prefers-reduced-motion. No carousel library. Inspired by Sketch.
+  function bindTestimonials() {
+    document.querySelectorAll('[data-mh-testi]').forEach(function(root){
+      if (root.getAttribute('data-mh-testi-bound')) return;
+      root.setAttribute('data-mh-testi-bound', '1');
+      var viewport = root.querySelector('.mh-testi-viewport');
+      var cards = Array.prototype.slice.call(root.querySelectorAll('.mh-testi-card'));
+      var dots = Array.prototype.slice.call(root.querySelectorAll('.mh-testi-dot'));
+      var prevBtn = root.querySelector('[data-mh-testi-prev]');
+      var nextBtn = root.querySelector('[data-mh-testi-next]');
+      var status = root.querySelector('[data-mh-testi-status]');
+      var n = cards.length;
+      if (!viewport || n === 0) return;
+      // Reveal the JS-only controls now that they are wired (arrows + dots are
+      // CSS-hidden until this class lands).
+      root.classList.add('is-ready');
+
+      var idx = 0;
+      var interval = parseInt(root.getAttribute('data-mh-testi-interval') || '6500', 10);
+      if (!(interval > 0)) interval = 6500;
+
+      function setActive(i) {
+        idx = i;
+        for (var d = 0; d < dots.length; d++) {
+          var on = d === i;
+          dots[d].classList.toggle('is-active', on);
+          if (on) dots[d].setAttribute('aria-current', 'true');
+          else dots[d].removeAttribute('aria-current');
+        }
+        if (status) status.textContent = 'Testimonial ' + (i + 1) + ' of ' + n;
+      }
+
+      function scrollToCard(i, smooth) {
+        var card = cards[i];
+        if (!card) return;
+        // Centre the card in the viewport (matches scroll-snap-align: center),
+        // clamped to the scrollable range.
+        var target = card.offsetLeft - (viewport.clientWidth - card.offsetWidth) / 2;
+        var max = viewport.scrollWidth - viewport.clientWidth;
+        target = Math.max(0, Math.min(target, max));
+        var behavior = (smooth && !prefersReduced) ? 'smooth' : 'auto';
+        if (viewport.scrollTo) viewport.scrollTo({left: target, behavior: behavior});
+        else viewport.scrollLeft = target;
+      }
+
+      function go(i, smooth) {
+        i = (i % n + n) % n;
+        setActive(i);
+        scrollToCard(i, smooth);
+      }
+
+      // --- Autoplay (motion-allowed only) ---
+      var timer = null;
+      function stop() { if (timer) { clearInterval(timer); timer = null; } }
+      function play() {
+        stop();
+        if (prefersReduced || n <= 1) return;
+        timer = setInterval(function(){
+          var next = idx + 1;
+          if (next >= n) go(0, false);     // instant rewind, not a long pan
+          else go(next, true);
+        }, interval);
+      }
+      function restart() { stop(); play(); }
+
+      // --- Controls ---
+      if (prevBtn) prevBtn.addEventListener('click', function(){ go(idx - 1, true); restart(); });
+      if (nextBtn) nextBtn.addEventListener('click', function(){ go(idx + 1, true); restart(); });
+      dots.forEach(function(dot, di){
+        dot.addEventListener('click', function(){ go(di, true); restart(); });
+      });
+      viewport.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowLeft') { e.preventDefault(); go(idx - 1, true); restart(); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); go(idx + 1, true); restart(); }
+      });
+
+      // Keep the dots honest when the visitor swipes/scrolls the viewport
+      // directly: whichever card is most visible becomes active.
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function(entries){
+          var best = null;
+          entries.forEach(function(en){
+            if (en.isIntersecting && (!best || en.intersectionRatio > best.intersectionRatio)) {
+              best = en;
+            }
+          });
+          if (best) {
+            var i = cards.indexOf(best.target);
+            if (i >= 0 && i !== idx) setActive(i);
+          }
+        }, {root: viewport, threshold: [0.5, 0.75, 1]});
+        cards.forEach(function(c){ io.observe(c); });
+      }
+
+      // Pause while the visitor is reading, or the tab is backgrounded.
+      root.addEventListener('mouseenter', stop);
+      root.addEventListener('mouseleave', play);
+      root.addEventListener('focusin', stop);
+      root.addEventListener('focusout', play);
+      document.addEventListener('visibilitychange', function(){
+        if (document.hidden) stop(); else play();
+      });
+
+      setActive(0);
+      play();
+    });
+  }
+  if (document.readyState !== 'loading') bindTestimonials();
+  else document.addEventListener('DOMContentLoaded', bindTestimonials);
+  MH.bindTestimonials = bindTestimonials;
+
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
   // data-mh-card-id triggers a POST to /api/workflow and optimistically
@@ -10834,6 +11161,133 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   if (document.readyState !== 'loading') bindCyclePlaceholders();
   else document.addEventListener('DOMContentLoaded', bindCyclePlaceholders);
   MH.bindCyclePlaceholders = bindCyclePlaceholders;
+
+  // === UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style) =============
+  // Press '?' on any page to open #mh-shortcuts-overlay. 'g' then a key jumps to
+  // a primary destination — the rows are server-rendered url_for() links, so the
+  // navigation map is read straight back off the DOM (one source of truth). On a
+  // review surface (.ach-row present) j/k move the focus ring and a/u approve or
+  // re-queue the focused card. This is a FUNCTIONAL surface, so — unlike the
+  // decorative motion layers — it must NOT early-return under reduced motion;
+  // only the CSS entrance animation is suppressed there (and the focus-ring
+  // scroll falls back to an instant jump). Reuses MH.openModal for the
+  // focus-trap + Esc/Tab/backdrop close when it is available.
+  function bindShortcuts() {
+    var overlay = document.getElementById('mh-shortcuts-overlay');
+    if (!overlay || overlay.dataset.mhShortcuts === '1') return;
+    overlay.dataset.mhShortcuts = '1';
+
+    // Build the go-to map from the server-rendered links (url_for is the source).
+    var navMap = {};
+    overlay.querySelectorAll('[data-mh-go]').forEach(function(a){
+      var k = (a.getAttribute('data-mh-go') || '').toLowerCase();
+      var href = a.getAttribute('href');
+      if (k && href) navMap[k] = href;
+    });
+
+    // Reveal the review group + arm its keys only when a review surface is here.
+    var reviewActive = !!document.querySelector('.ach-row');
+    var reviewGroup = overlay.querySelector('[data-mh-shortcuts-group="review"]');
+    if (reviewActive && reviewGroup) reviewGroup.hidden = false;
+
+    function isTyping(e) {
+      var t = e.target;
+      if (!t) return false;
+      var tag = (t.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    }
+
+    // ----- open / close (reuse the house focus-trap when present) -----
+    var closeFn = null;
+    function isOpen() { return overlay.classList.contains('is-open'); }
+    function openOverlay() {
+      if (isOpen()) return;
+      if (window.MH && typeof MH.openModal === 'function') {
+        closeFn = MH.openModal(overlay, { onClose: function(){ closeFn = null; } });
+      } else {
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+      }
+    }
+    function closeOverlay() {
+      if (!isOpen()) return;
+      if (closeFn) { var fn = closeFn; closeFn = null; fn(); return; }
+      overlay.classList.remove('is-open');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    function toggleOverlay() { if (isOpen()) closeOverlay(); else openOverlay(); }
+    // Backdrop + close-button wiring for the no-MH.openModal fallback only
+    // (when openModal owns the modal it already wires these).
+    overlay.addEventListener('click', function(e){ if (e.target === overlay && !closeFn) closeOverlay(); });
+    overlay.querySelectorAll('[data-mh-modal-close]').forEach(function(b){
+      b.addEventListener('click', function(){ if (!closeFn) closeOverlay(); });
+    });
+
+    // ----- review focus ring + approve / re-queue -----
+    function cards() {
+      return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
+        .filter(function(el){ return el.offsetParent !== null; });
+    }
+    var focusIdx = -1;
+    function setFocus(idx) {
+      var list = cards();
+      if (!list.length) return;
+      if (idx < 0) idx = 0;
+      if (idx >= list.length) idx = list.length - 1;
+      list.forEach(function(c){ c.classList.remove('mh-kbd-focus'); });
+      var el = list[idx];
+      el.classList.add('mh-kbd-focus');
+      el.scrollIntoView({ block: 'center', behavior: prefersReduced ? 'auto' : 'smooth' });
+      focusIdx = idx;
+    }
+    function clickWf(state) {
+      var list = cards();
+      if (focusIdx < 0 || focusIdx >= list.length) return;
+      var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
+      if (btn) btn.click();
+    }
+
+    // ----- the one global key handler -----
+    var gPending = false, gTimer = null;
+    function clearG() { gPending = false; if (gTimer) { clearTimeout(gTimer); gTimer = null; } }
+
+    document.addEventListener('keydown', function(e){
+      if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // While the help is open only '?'/Esc act (Esc is owned by MH.openModal).
+      if (isOpen()) {
+        if (e.key === '?') { e.preventDefault(); closeOverlay(); }
+        return;
+      }
+
+      // 'g' then <key> — GitHub-style go-to navigation.
+      if (gPending) {
+        var dest = navMap[(e.key || '').toLowerCase()];
+        clearG();
+        if (dest) { e.preventDefault(); window.location.href = dest; return; }
+        // not a nav key -> fall through, let the key act normally below
+      }
+
+      if (e.key === '?') { e.preventDefault(); openOverlay(); return; }
+      if (e.key === 'g' || e.key === 'G') { gPending = true; gTimer = setTimeout(clearG, 1200); return; }
+
+      if (reviewActive) {
+        switch (e.key) {
+          case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
+          case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
+          case 'a': case 'A': if (focusIdx >= 0) { e.preventDefault(); clickWf('approved'); } break;
+          case 'u': case 'U': if (focusIdx >= 0) { e.preventDefault(); clickWf('queue'); } break;
+        }
+      }
+    });
+
+    MH.openShortcuts = openOverlay;
+    MH.closeShortcuts = closeOverlay;
+    MH.toggleShortcuts = toggleOverlay;
+  }
+  if (document.readyState !== 'loading') bindShortcuts();
+  else document.addEventListener('DOMContentLoaded', bindShortcuts);
+  MH.bindShortcuts = bindShortcuts;
 })();
 </script>
 {% if dock %}
@@ -11835,6 +12289,9 @@ def create_app() -> Flask:
             # passwordless: one click on /developer grants the operator session.
             "developer_login",
             "developer_login_post",
+            # UI 1.11 — the public Developer/API reference (code-example docs).
+            # A docs page, like the legal pages above: readable before sign-up.
+            "api_docs_page",
             # Phase C operator commercial console (PC.4/PC.6) — operator-only
             # (redirects non-operator sessions to the developer sign-in) and
             # org-independent, so it bypasses the org gate exactly like the
@@ -12858,6 +13315,154 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # --- UI 1.19 · Testimonial / social-proof carousel ------------------
+        # Club/coach quote cards with avatar initials, flanked by arrow
+        # controls and advanced on a gentle autoplay. Pure CSS/JS, no carousel
+        # library: the viewport is a native scroll-snap row that works on its
+        # own (swipe / scroll / keyboard), progressively enhanced by
+        # `bindTestimonials` with arrows, position dots, a polite live-region
+        # slide announcement, and autoplay that pauses on hover/focus and when
+        # the tab is hidden — and never starts under prefers-reduced-motion.
+        # Inspired by Sketch (sketch.com).
+        #
+        # HONESTY (this is why the copy is framed the way it is): MediaHub is
+        # pre-launch with no paying clubs yet, and the landing already promises
+        # "we don't invent results". So these are presented as *illustrative* —
+        # the voices of the volunteer / coach / committee roles the engine is
+        # built for, on the same fictional sample clubs ("Riverside SC") used
+        # elsewhere on this page — never passed off as real customer
+        # endorsements. The avatar shows the (sample) club's initials, the
+        # attribution is the role, and the note under the carousel says so
+        # plainly. Swap in real, attributed quotes post-launch.
+        _testimonials = [
+            {
+                "quote": "Sunday used to mean three hours rebuilding the same "
+                "graphics by hand. Now I drop the results file in, read the "
+                "drafts over coffee, and approve the ones that are right — the "
+                "committee sees content the same weekend.",
+                "initials": "RS",
+                "role": "Club secretary",
+                "org": "Riverside SC",
+                "sport": "Swimming",
+            },
+            {
+                "quote": "It surfaces the swims that matter — the lifetime "
+                "bests, the near-misses on a qualifying time — before I've "
+                "finished my notes. I still decide what gets posted; it just "
+                "stops me missing the moment.",
+                "initials": "KA",
+                "role": "Head coach",
+                "org": "Kingsmead Aquatics",
+                "sport": "Swimming",
+            },
+            {
+                "quote": "Every post lands in our colours and our voice without "
+                "me touching a template. As a volunteer with a dissertation to "
+                "write, getting the weekend back is the whole point.",
+                "initials": "US",
+                "role": "Social secretary",
+                "org": "University Swim Society",
+                "sport": "University",
+            },
+            {
+                "quote": "The bit I trusted least about 'AI' — making things up "
+                "— is the bit it refuses to do. If the time isn't in the file, "
+                "the caption doesn't claim one. That is why I will put my name "
+                "to what it drafts.",
+                "initials": "HR",
+                "role": "Comms volunteer",
+                "org": "Harbourside Rowing",
+                "sport": "Rowing",
+            },
+            {
+                "quote": "One results sheet in, a weekend of stories, feed "
+                "posts and a reel out — all waiting for a yes. Nothing goes "
+                "live until someone clicks approve, which is exactly how our "
+                "club wants it.",
+                "initials": "PN",
+                "role": "Team manager",
+                "org": "Parkside Netball",
+                "sport": "Netball",
+            },
+        ]
+        _n_testi = len(_testimonials)
+        # These are static, developer-authored literals (no user input on this
+        # path), so they are inlined raw exactly like the bento / audience /
+        # promise copy above — no _h() escaping. Any future caller feeding
+        # dynamic text here MUST switch to _h().
+        _testi_cards = ""
+        for _i, _t in enumerate(_testimonials):
+            _testi_cards += (
+                '<figure class="mh-testi-card" role="group" '
+                'aria-roledescription="slide" '
+                f'aria-label="Testimonial {_i + 1} of {_n_testi}">'
+                f'<blockquote class="mh-testi-quote">{_t["quote"]}</blockquote>'
+                '<figcaption class="mh-testi-by">'
+                '<span class="mh-testi-avatar" aria-hidden="true">'
+                f'{_t["initials"]}</span>'
+                '<span class="mh-testi-id">'
+                f'<b class="mh-testi-name">{_t["role"]}</b>'
+                f'<span class="mh-testi-org">{_t["org"]}'
+                '<span class="sep">·</span>'
+                f'{_t["sport"]}</span>'
+                "</span>"
+                "</figcaption>"
+                "</figure>"
+            )
+        _testi_dots = ""
+        for _i in range(_n_testi):
+            _active = " is-active" if _i == 0 else ""
+            _cur = ' aria-current="true"' if _i == 0 else ""
+            _testi_dots += (
+                f'<button type="button" class="mh-testi-dot{_active}" '
+                f'data-mh-testi-to="{_i}" '
+                f'aria-label="Show testimonial {_i + 1}"{_cur}></button>'
+            )
+        _arrow_prev_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>'
+        )
+        _arrow_next_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>'
+        )
+        testimonials_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">In their words</span></div>'
+            + _reveal_lines(["The weekend it", 'hands <em class="editorial">back</em>.'])
+            + '<div class="mh-testi mh-reveal" data-mh-testi '
+            'data-mh-testi-interval="6500" role="group" '
+            'aria-roledescription="carousel" '
+            'aria-label="What clubs and coaches say (illustrative)">'
+            + '<div class="mh-testi-rail">'
+            + '<button type="button" class="mh-testi-arrow prev" '
+            'data-mh-testi-prev aria-label="Previous testimonial">'
+            + _arrow_prev_svg
+            + "</button>"
+            + '<div class="mh-testi-viewport" tabindex="0">'
+            + _testi_cards
+            + "</div>"
+            + '<button type="button" class="mh-testi-arrow next" '
+            'data-mh-testi-next aria-label="Next testimonial">'
+            + _arrow_next_svg
+            + "</button>"
+            + "</div>"  # .mh-testi-rail
+            + '<div class="mh-testi-dots" role="group" '
+            'aria-label="Choose a testimonial">'
+            + _testi_dots
+            + "</div>"
+            + '<p class="mh-sr-only" data-mh-testi-status aria-live="polite">'
+            f"Testimonial 1 of {_n_testi}</p>"
+            + "</div>"  # .mh-testi
+            + '<p class="mh-testi-note">Illustrative — these voice the '
+            "volunteers, coaches and committee members MediaHub is built for. "
+            "We are pre-launch, so they are representative of the workflow, "
+            "not paid endorsements.</p>" + "</section>"
+        )
+
         # --- Promise / what we don't do. Lane-yellow left-stripe trust
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
@@ -13032,6 +13637,7 @@ def create_app() -> Flask:
             + moment_ticker_html
             + frames_html
             + audience_html
+            + testimonials_html
             + promise_html
             + final_cta_html,
             active="home",
@@ -13735,7 +14341,7 @@ def create_app() -> Flask:
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
-  <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
+  <h1 class="mh-scramble">Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
@@ -14634,12 +15240,12 @@ def create_app() -> Flask:
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Pipeline running</span>
-  <h1>Processing run</h1>
+  <h1 class="mh-scramble">Processing run</h1>
   <p class="lede">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds. This page will redirect you to the review queue the moment it's ready.</p>
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
+  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage" class="mh-scramble">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
@@ -14675,6 +15281,15 @@ def create_app() -> Flask:
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
+
+  // UI 1.21 — decode each new "engine is generating…" stage label in. The
+  // helper falls back to a plain text swap if the UI kit hasn't loaded, and
+  // scrambleTo itself no-ops when the label is unchanged between polls.
+  function setStage(txt) {{
+    if (!stage) return;
+    if (window.MH && MH.scrambleTo) MH.scrambleTo(stage, txt);
+    else stage.textContent = txt;
+  }}
 
   function fillBar(colour) {{
     if (!bar) return;
@@ -14747,7 +15362,7 @@ def create_app() -> Flask:
       return;
     }}
     // queued / running — keep the indeterminate bar moving.
-    if (stage) stage.textContent = log[log.length - 1] || 'Starting…';
+    setStage(log[log.length - 1] || 'Starting…');
     if (bar) bar.classList.add('indeterminate');
     if (waited > SOFT_CAP_MS && lede) {{
       lede.textContent = "Still working — large meets and personal-best lookups can take a few minutes. This page redirects automatically the moment it's ready.";
@@ -15774,6 +16389,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn secondary" href="{url_for("run_results_table", run_id=run_id)}">Browse all results &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
   </div>
   <details style="margin-top:var(--sp-4)">
@@ -15971,80 +16587,12 @@ function copyWhyCard(btn, taId) {{
 
 </script>
 
-<!-- Phase 6 — keyboard navigation + bulk approve + help overlay -->
-<div class="mh-kbd-overlay" id="mh-kbd-overlay" role="dialog" aria-modal="true" aria-labelledby="mh-kbd-title" aria-hidden="true">
-  <div class="mh-kbd-overlay-panel">
-    <h3 id="mh-kbd-title">Keyboard shortcuts</h3>
-    <div class="mh-kbd-table">
-      <span class="keys"><kbd>J</kbd></span><span class="desc">Focus next card</span>
-      <span class="keys"><kbd>K</kbd></span><span class="desc">Focus previous card</span>
-      <span class="keys"><kbd>A</kbd></span><span class="desc">Approve the focused card</span>
-      <span class="keys"><kbd>U</kbd></span><span class="desc">Send focused card back to queue</span>
-      <span class="keys"><kbd>?</kbd></span><span class="desc">Toggle this help</span>
-      <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close help</span>
-    </div>
-    <div style="margin-top:var(--sp-5);text-align:right">
-      <button type="button" class="btn secondary" data-mh-kbd-close>Got it</button>
-    </div>
-  </div>
-</div>
-
+<!-- Phase 6 — bulk approve + expand-all reasoning. (Keyboard navigation and the
+     '?' help overlay are now provided globally by the UI 1.28 shortcuts engine
+     in _layout, which detects this review surface via its .ach-row cards — so
+     the review page no longer ships its own '?' handler or modal.) -->
 <script>
 (function(){{
-  // ----- Keyboard navigation across .ach-row cards -----
-  function cards() {{
-    return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
-      .filter(function(el){{ return el.offsetParent !== null; }});
-  }}
-  var focusIdx = -1;
-  function setFocus(idx) {{
-    var list = cards();
-    if (!list.length) return;
-    if (idx < 0) idx = 0;
-    if (idx >= list.length) idx = list.length - 1;
-    list.forEach(function(c){{ c.classList.remove('mh-kbd-focus'); }});
-    var el = list[idx];
-    el.classList.add('mh-kbd-focus');
-    el.scrollIntoView({{block: 'center', behavior: 'smooth'}});
-    focusIdx = idx;
-  }}
-  function clickWf(state) {{
-    var list = cards();
-    if (focusIdx < 0 || focusIdx >= list.length) return;
-    var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
-    if (btn) btn.click();
-  }}
-  function isTyping(e) {{
-    var t = e.target;
-    if (!t) return false;
-    var tag = (t.tagName || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
-  }}
-  var overlay = document.getElementById('mh-kbd-overlay');
-  function toggleHelp(force) {{
-    if (!overlay) return;
-    var open = force !== undefined ? force : !overlay.classList.contains('is-open');
-    overlay.classList.toggle('is-open', open);
-    overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
-  }}
-  if (overlay) {{
-    overlay.addEventListener('click', function(e){{ if (e.target === overlay) toggleHelp(false); }});
-    overlay.querySelectorAll('[data-mh-kbd-close]').forEach(function(b){{
-      b.addEventListener('click', function(){{ toggleHelp(false); }});
-    }});
-  }}
-  document.addEventListener('keydown', function(e){{
-    if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-    switch (e.key) {{
-      case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
-      case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
-      case 'a': case 'A': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('approved'); }} break;
-      case 'u': case 'U': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('queue'); }} break;
-      case '?': e.preventDefault(); toggleHelp(); break;
-      case 'Escape': toggleHelp(false); break;
-    }}
-  }});
-
   // ----- Bulk approve -----
   var bulkBtn = document.getElementById('mh-bulk-approve');
   if (bulkBtn) {{
@@ -16099,6 +16647,294 @@ function copyWhyCard(btn, taId) {{
             else None
         )
         return _layout("Recognition", body, active="home", dock=_review_dock)
+
+    @app.route("/runs/<run_id>/results")
+    def run_results_table(run_id):
+        """UI 1.12 — Wope-style sortable/filterable parsed-results table.
+
+        A flat, scannable grid of every individual swim in the run, each with a
+        per-athlete progress sparkline and a PB/improvement delta badge. Sort
+        and filter are server-side (this route re-renders from query params); the
+        sparklines are drawn client-side on ``<canvas>`` from an embedded series
+        payload, so the page stays fully usable without JavaScript.
+        """
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
+        if not data:
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                eyebrow="Results table",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+
+        meet = data.get("meet") or {}
+        _review_url = url_for("review", run_id=run_id)
+
+        # Cross-meet history per athlete — read-only registry lookups (resolve by
+        # name, then that athlete's full swim log). Best-effort: a missing/empty
+        # registry just means no prior history yet (the current swim still shows
+        # as the latest point and the badge reads "first on record").
+        pid = _active_profile_id() or (data.get("profile_id") or "")
+        history: dict[str, list[dict]] = {}
+        if pid:
+            try:
+                from mediahub.athletes import athlete_swims as _ath_swims
+                from mediahub.athletes import resolve as _ath_resolve
+
+                swimmers = meet.get("swimmers") or {}
+                for res in meet.get("results") or []:
+                    sk = res.get("swimmer_key") or ""
+                    if not sk or sk in history:
+                        continue
+                    sw = swimmers.get(sk) or {}
+                    name = (
+                        f"{(sw.get('first_name') or '').strip()} "
+                        f"{(sw.get('last_name') or '').strip()}"
+                    ).strip()
+                    rec = _ath_resolve(pid, name) if name else None
+                    history[sk] = _ath_swims(pid, rec.athlete_id) if rec else []
+            except Exception:
+                history = {}
+
+        rows = _rt.build_rows(meet, history, run_id)
+
+        # Empty run (no individual results at all) — honest empty state.
+        if not rows:
+            empty_body = (
+                '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Results table</span>'
+                "<h1>No parsed results on this run</h1>"
+                '<p class="lede">This run has no individual swim results to tabulate &mdash; '
+                "it may have parsed only relays, or failed before extracting results.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{_review_url}">Back to review &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("upload")}">Upload another file</a>'
+                "</div></section>"
+            )
+            return _layout("Results table", empty_body, active="create")
+
+        # ---- server-side sort + filter from query params ----
+        sort, order = _rt.normalise_sort(request.args.get("sort"), request.args.get("order"))
+        f_event = (request.args.get("event") or "").strip()
+        f_q = (request.args.get("q") or "").strip()
+        f_pb = (request.args.get("pb") or "") in ("1", "on", "true")
+        filtered = _rt.filter_rows(rows, event=f_event, query=f_q, pb_only=f_pb)
+        visible = _rt.sort_rows(filtered, sort, order)
+
+        # ---- summary stats (over ALL rows, not the filtered view) ----
+        n_swims = len(rows)
+        n_athletes = len({r.swimmer_key for r in rows if r.swimmer_key})
+        n_pb = sum(1 for r in rows if r.delta.kind == "pb")
+        n_impr = sum(1 for r in rows if r.delta.kind == "improvement")
+
+        # ---- sortable column headers (server-side; toggle asc/desc) ----
+        def _sort_href(col: str) -> str:
+            new_order = "desc" if (sort == col and order == "asc") else "asc"
+            return url_for(
+                "run_results_table",
+                run_id=run_id,
+                sort=col,
+                order=new_order,
+                event=f_event or None,
+                q=f_q or None,
+                pb="1" if f_pb else None,
+            )
+
+        def _th(col: str, label: str) -> str:
+            arrow = ""
+            aria = ""
+            if sort == col:
+                arrow = (
+                    ' <span aria-hidden="true">▲</span>'
+                    if order == "asc"
+                    else ' <span aria-hidden="true">▼</span>'
+                )
+                aria = ' aria-sort="ascending"' if order == "asc" else ' aria-sort="descending"'
+            return (
+                f'<th{aria}><a href="{_sort_href(col)}" '
+                'style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">'
+                f"{label}{arrow}</a></th>"
+            )
+
+        # ---- rows + sparkline payload ----
+        _DELTA_TAG = {
+            "pb": "medal",
+            "improvement": "good",
+            "matched": "info",
+            "first": "",
+            "slower": "bad",
+            "none": "",
+        }
+        spark_payload: dict[str, dict] = {}
+        body_rows = ""
+        for i, r in enumerate(visible):
+            if r.delta.kind == "none" or not r.delta.label:
+                delta_html = '<span class="muted" style="font-size:12px">—</span>'
+            else:
+                cls = _DELTA_TAG.get(r.delta.kind, "")
+                delta_html = f'<span class="tag {cls}" title="{_h(r.delta.title)}">{_h(r.delta.label)}</span>'
+
+            if len(r.series_cs) >= 2:
+                sid = f"s{i}"
+                spark_payload[sid] = _rt.sparkline_series(r)
+                _trend = (
+                    f" ({r.delta.label})"
+                    if r.delta.kind in ("pb", "improvement", "matched")
+                    else ""
+                )
+                aria = _h(f"Progress over {len(r.series_cs)} swims, latest {r.time_str}{_trend}")
+                spark_html = (
+                    f'<canvas class="mh-spark" data-spark="{sid}" role="img" '
+                    f'aria-label="{aria}" width="104" height="28" '
+                    'style="width:104px;height:28px;display:block"></canvas>'
+                )
+            elif len(r.series_cs) == 1:
+                spark_html = '<span class="muted" style="font-size:11px" title="No earlier swim on record yet">1 swim</span>'
+            else:
+                spark_html = '<span class="muted" style="font-size:12px">—</span>'
+
+            gender_html = (
+                f' <span class="muted" style="font-size:11px">{_h(r.gender)}</span>'
+                if r.gender
+                else ""
+            )
+            if r.is_dq:
+                time_cell = f'<span class="tag bad" title="{_h(r.status.upper())}">{_h(r.status.upper() or "DQ")}</span>'
+            else:
+                time_cell = _h(r.time_str)
+            body_rows += (
+                "<tr>"
+                f'<td class="mono" style="color:var(--ink-dim)">{r.place if r.place is not None else "—"}</td>'
+                f"<td><strong>{_h(r.swimmer_name)}</strong></td>"
+                f"<td>{_h(r.event_label)}{gender_html}</td>"
+                f'<td class="muted">{_h(r.age_band or "—")}</td>'
+                f'<td class="mono" style="white-space:nowrap">{time_cell}</td>'
+                f"<td>{delta_html}</td>"
+                f"<td>{spark_html}</td>"
+                "</tr>"
+            )
+
+        # ---- event filter dropdown ----
+        ev_opts = '<option value="">All events</option>'
+        for ek, elabel in _rt.event_options(rows):
+            sel = " selected" if ek == f_event else ""
+            ev_opts += f'<option value="{_h(ek)}"{sel}>{_h(elabel)}</option>'
+
+        any_filter = bool(f_event or f_q or f_pb)
+        clear_link = (
+            f'<a class="btn ghost" style="font-size:13px" '
+            f'href="{url_for("run_results_table", run_id=run_id, sort=sort, order=order)}">Clear filters</a>'
+            if any_filter
+            else ""
+        )
+        count_line = f"Showing <strong>{len(visible)}</strong> of {n_swims} swims" + (
+            " (filtered)" if any_filter else ""
+        )
+        no_match_row = (
+            '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">'
+            "No swims match these filters.</td></tr>"
+        )
+        spark_json = json.dumps(spark_payload)
+
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Results table</span>
+  <h1>{_h(meet.get("name") or "(unknown meet)")}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(meet.get("start_date") or "?")} – {_h(meet.get("end_date") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("course") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("venue") or "venue unknown")}</span>
+  </div>
+  <div class="mh-hero-actions" style="margin-top:var(--sp-4)">
+    <a class="mh-cta-secondary" href="{_review_url}">&larr; Back to review</a>
+  </div>
+</section>
+
+<div class="stat-block" style="margin-bottom:var(--sp-5)">
+  <div class="stat"><div class="l">Swims</div><div class="v">{n_swims}</div></div>
+  <div class="stat"><div class="l">Athletes</div><div class="v">{n_athletes}</div></div>
+  <div class="stat"><div class="l">Personal bests</div><div class="v" style="color:var(--medal)">{n_pb}</div></div>
+  <div class="stat"><div class="l">Improvements</div><div class="v" style="color:var(--good)">{n_impr}</div></div>
+</div>
+
+<div class="card">
+  <form method="get" class="filters-bar" data-no-loader="1" style="margin-bottom:0">
+    <input type="hidden" name="sort" value="{_h(sort)}">
+    <input type="hidden" name="order" value="{_h(order)}">
+    <input type="search" name="q" value="{_h(f_q)}" placeholder="Search swimmer…"
+           style="min-width:180px" aria-label="Search swimmer name">
+    <select name="event" aria-label="Filter by event">{ev_opts}</select>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-dim)">
+      <input type="checkbox" name="pb" value="1"{" checked" if f_pb else ""} style="width:auto">
+      PBs &amp; improvements only
+    </label>
+    <button class="btn secondary" type="submit" style="font-size:13px">Apply</button>
+    {clear_link}
+    <span class="muted" style="font-size:12px;align-self:center;margin-left:auto">{count_line}</span>
+  </form>
+</div>
+
+<div class="card" style="margin-top:var(--sp-4)">
+  <table class="mh-table">
+    <thead><tr>
+      {_th("place", "#")}
+      {_th("name", "Swimmer")}
+      {_th("event", "Event")}
+      {_th("age", "Age")}
+      {_th("time", "Time")}
+      {_th("delta", "Δ vs PB")}
+      <th>Progress</th>
+    </tr></thead>
+    <tbody>{body_rows or no_match_row}</tbody>
+  </table>
+  <p class="muted" style="font-size:11px;margin:12px 2px 0">
+    Sparkline shows this athlete's time for the event over time &mdash; higher is faster.
+    Delta badges compare each swim to the athlete's prior best <em>on record</em>.
+  </p>
+</div>
+
+<script>
+(function(){{
+  var DATA = {spark_json};
+  function cssColor(name, fb){{
+    try {{
+      var el=document.createElement('span');
+      el.style.cssText='color:var('+name+');position:absolute;visibility:hidden';
+      document.body.appendChild(el);
+      var c=getComputedStyle(el).color; document.body.removeChild(el);
+      return c||fb;
+    }} catch(e){{ return fb; }}
+  }}
+  var ACCENT=cssColor('--lane','#D4FF3A'), MEDAL=cssColor('--medal','#F4D58D');
+  function draw(cv){{
+    var s=DATA[cv.getAttribute('data-spark')];
+    if(!s||!s.t||s.t.length<2) return;
+    var dpr=window.devicePixelRatio||1;
+    var w=cv.clientWidth||104, h=cv.clientHeight||28, pad=3;
+    cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+    var ctx=cv.getContext('2d'); if(!ctx) return;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var t=s.t, n=t.length, mn=Math.min.apply(null,t), mx=Math.max.apply(null,t), span=(mx-mn)||1;
+    function X(i){{ return pad + (w-2*pad)*(n===1?0.5:i/(n-1)); }}
+    function Y(v){{ return pad + (h-2*pad)*((v-mn)/span); }}
+    ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.strokeStyle=ACCENT;
+    ctx.beginPath();
+    for(var i=0;i<n;i++){{ var px=X(i), py=Y(t[i]); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }}
+    ctx.stroke();
+    var ci=(s.cur>=0&&s.cur<n)?s.cur:n-1;
+    ctx.fillStyle=(s.kind==='pb'||s.kind==='matched')?MEDAL:ACCENT;
+    ctx.beginPath(); ctx.arc(X(ci),Y(t[ci]),2.4,0,6.2832); ctx.fill();
+  }}
+  function drawAll(){{ var c=document.querySelectorAll('canvas.mh-spark'); for(var i=0;i<c.length;i++) draw(c[i]); }}
+  drawAll();
+  var rt; window.addEventListener('resize', function(){{ clearTimeout(rt); rt=setTimeout(drawAll,150); }});
+}})();
+</script>
+"""
+        return _layout(f"Results — {meet.get('name') or run_id}", body, active="create")
 
     # ---- V5 API ROUTES -------------------------------------------------
     @app.route("/api/runs/<run_id>/recognition")
@@ -17275,6 +18111,342 @@ Relay team broke club record"></textarea>
             f'<div class="card">{html}</div>'
         )
         return _layout("Research", body, active="research")
+
+    # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
+    @app.route("/developer/api")
+    def api_docs_page():
+        """Public Developer/API reference.
+
+        Documents the real HTTP + JSON endpoints the app exposes, each with a
+        tabbed cURL / Python / JavaScript code-example switcher. Highlighting is
+        rendered server-side by ``code_highlight.py`` (no Prism, no CDN); the
+        language tabs are pure CSS and the copy button is JS-enhanced (UI 1.11).
+        """
+        return _layout("Developer API", _render_api_docs_body(), active="")
+
+    def _render_api_docs_body() -> str:
+        # Concrete base URL for the examples (the deployment the docs render on).
+        base = (request.host_url or "").rstrip("/") or "https://your-mediahub.example"
+
+        def _sub(text: str) -> str:
+            return text.replace("__BASE__", base)
+
+        def _switcher(slug: str, curl: str, python: str, js: str) -> str:
+            return _code_hl.code_switcher(
+                [
+                    ("cURL", "bash", _sub(curl)),
+                    ("Python", "python", _sub(python)),
+                    ("JavaScript", "javascript", _sub(js)),
+                ],
+                group_id=f"ep-{slug}",
+            )
+
+        def _endpoint(
+            method: str,
+            path: str,
+            anchor: str,
+            summary_html: str,
+            *,
+            params=None,
+            curl: str,
+            python: str,
+            js: str,
+            response: str = "",
+            note_html: str = "",
+        ) -> str:
+            sig = (
+                '<div class="mh-api-sig">'
+                f'<span class="mh-method mh-method-{method.lower()}">{_h(method)}</span>'
+                f"<code>{_h(path)}</code></div>"
+            )
+            params_html = ""
+            if params:
+                rows = "".join(
+                    f"<tr><td><code>{_h(name)}</code></td><td>{_h(req)}</td>"
+                    f"<td>{desc}</td></tr>"
+                    for name, req, desc in params
+                )
+                params_html = (
+                    '<table class="mh-api-params"><thead><tr>'
+                    "<th>Parameter</th><th>Required</th><th>Description</th>"
+                    f"</tr></thead><tbody>{rows}</tbody></table>"
+                )
+            resp_html = (
+                _code_hl.code_block(_sub(response), "json", label="Response") if response else ""
+            )
+            return (
+                f'<section class="card mh-api-endpoint" id="{_h(anchor)}">'
+                f"{sig}"
+                f'<p class="dim">{summary_html}</p>'
+                f"{params_html}"
+                f"{_switcher(anchor, curl, python, js)}"
+                f"{resp_html}"
+                f"{note_html}"
+                "</section>"
+            )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Developer</span>'
+            '<h1>API <em class="editorial">reference</em></h1>'
+            '<p class="lede">Drive MediaHub from your own scripts: poll a run, pull the '
+            "generated cards, export a content pack, or render a reel &mdash; over plain "
+            "HTTP and JSON.</p>"
+            "</section>"
+        )
+
+        intro = (
+            '<section class="card">'
+            "<h2>Overview</h2>"
+            "<p>MediaHub exposes a small HTTP&nbsp;+&nbsp;JSON API &mdash; the same endpoints "
+            "the web app uses to take a run from upload to export. Call them to poll a "
+            "pipeline, pull generated cards, export a content pack, or render a reel.</p>"
+            '<ul class="mh-api-facts">'
+            f"<li><strong>Base URL</strong> &mdash; <code>{_h(base)}</code></li>"
+            "<li><strong>Responses</strong> &mdash; JSON (<code>application/json</code>), except "
+            "media routes, which stream the file (e.g. <code>video/mp4</code>).</li>"
+            "<li><strong>Errors</strong> &mdash; a JSON body with an <code>error</code> key and a "
+            "matching HTTP status (<code>404</code> unknown/forbidden run, <code>202</code> still "
+            "processing).</li>"
+            "</ul>"
+            "</section>"
+        )
+
+        auth = (
+            '<section class="card">'
+            "<h2>Authentication</h2>"
+            "<p>Most endpoints are scoped to your signed-in organisation and authenticate with "
+            "the <strong>session cookie</strong> the app sets when you log in &mdash; send it with "
+            'each request (<code>credentials: "include"</code> in the browser, or a '
+            "<code>Cookie:</code> header from a script). A request for a run that is not yours "
+            "returns <code>404</code> &mdash; never another organisation's data.</p>"
+            "<p><code>/health</code> is the one public endpoint; it needs no session. There is no "
+            "public API-key programme yet &mdash; if you need machine-to-machine access, get in "
+            "touch.</p>"
+            "</section>"
+        )
+
+        quickstart = (
+            '<section class="card" id="quickstart">'
+            "<h2>Quickstart</h2>"
+            '<p class="dim">Poll a run until the recognition&nbsp;+&nbsp;content pipeline '
+            "finishes, then pull the cards it produced.</p>"
+            + _switcher(
+                "quickstart",
+                "# 1. Poll the run until the pipeline finishes…\n"
+                'RUN_ID="run_8f2c1a"\n'
+                'curl -s "__BASE__/api/runs/$RUN_ID/status"\n\n'
+                "# 2. …then pull the generated content cards.\n"
+                'curl -s "__BASE__/api/runs/$RUN_ID/cards"\n',
+                "import time\n"
+                "import requests\n\n"
+                'BASE = "__BASE__"\n'
+                'run_id = "run_8f2c1a"\n\n'
+                "# Poll until the recognition + content pipeline is done.\n"
+                "while True:\n"
+                '    status = requests.get(f"{BASE}/api/runs/{run_id}/status").json()\n'
+                '    if status["status"] in ("done", "error"):\n'
+                "        break\n"
+                "    time.sleep(4)\n\n"
+                'cards = requests.get(f"{BASE}/api/runs/{run_id}/cards").json()\n'
+                'print(f"{len(cards)} cards ready")\n',
+                'const BASE = "__BASE__";\n'
+                'const runId = "run_8f2c1a";\n\n'
+                "// Poll until the pipeline finishes, then fetch the cards.\n"
+                "let status;\n"
+                "do {\n"
+                "  const res = await fetch(`${BASE}/api/runs/${runId}/status`, {\n"
+                '    credentials: "include",\n'
+                "  });\n"
+                "  status = await res.json();\n"
+                '  if (status.status === "running") await new Promise((r) => setTimeout(r, 4000));\n'
+                '} while (status.status !== "done" && status.status !== "error");\n\n'
+                "const cards = await fetch(`${BASE}/api/runs/${runId}/cards`, {\n"
+                '  credentials: "include",\n'
+                "}).then((r) => r.json());\n"
+                "console.log(`${cards.length} cards ready`);\n",
+            )
+            + "</section>"
+        )
+
+        endpoints = [
+            _endpoint(
+                "GET",
+                "/health",
+                "health",
+                "Deployment health and dependency checks. Public &mdash; no session "
+                "required. Returns <code>200</code> when healthy, <code>503</code> when a "
+                "dependency is down.",
+                curl='curl -s "__BASE__/health"\n',
+                python=(
+                    "import requests\n\n"
+                    'health = requests.get("__BASE__/health")\n'
+                    'print(health.status_code, health.json()["ok"])\n'
+                ),
+                js=(
+                    'const res = await fetch("__BASE__/health");\n'
+                    "const health = await res.json();\n"
+                    "console.log(res.status, health.ok);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "ok": true,\n'
+                    '  "checks": {\n'
+                    '    "database": {"ok": true},\n'
+                    '    "data_dir": {"ok": true},\n'
+                    '    "llm_provider": {"ok": true}\n'
+                    "  }\n"
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/status",
+                "run-status",
+                "Poll a run's pipeline status. <code>status</code> is one of "
+                "<code>queued</code>, <code>running</code>, <code>done</code>, "
+                "<code>error</code> or <code>unknown</code>; <code>log</code> streams the "
+                "human-readable progress lines.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/status"\n',
+                python=(
+                    "import requests\n\n"
+                    'status = requests.get("__BASE__/api/runs/run_8f2c1a/status").json()\n'
+                    'print(status["status"], status.get("n_achievements"))\n'
+                ),
+                js=(
+                    'const status = await fetch("__BASE__/api/runs/run_8f2c1a/status", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(status.status, status.n_achievements);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "status": "done",\n'
+                    '  "error": null,\n'
+                    '  "log": [\n'
+                    '    "Parsing results file…",\n'
+                    '    "Detecting achievements…",\n'
+                    '    "Ranking content opportunities…"\n'
+                    "  ],\n"
+                    '  "n_achievements": 12\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/cards",
+                "run-cards",
+                "The generated content cards, ranked by content-worthiness. While the run is "
+                "still processing this returns <code>202</code> with "
+                '<code>{"error": "in_progress", "retry_after": 4}</code> &mdash; retry after '
+                "the given delay.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/cards"\n',
+                python=(
+                    "import requests\n\n"
+                    'cards = requests.get("__BASE__/api/runs/run_8f2c1a/cards").json()\n'
+                    "for card in cards:\n"
+                    '    print(card["post_angle"], round(card["confidence"], 2))\n'
+                ),
+                js=(
+                    'const cards = await fetch("__BASE__/api/runs/run_8f2c1a/cards", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "cards.forEach((c) => console.log(c.post_angle, c.confidence));\n"
+                ),
+                response=(
+                    "[\n"
+                    "  {\n"
+                    '    "id": "ind_0",\n'
+                    '    "post_angle": "personal_best",\n'
+                    '    "confidence": 0.92,\n'
+                    '    "caption": "A new PB for Ava in the 100m Freestyle.",\n'
+                    '    "graphic_text": {\n'
+                    '      "headline_line1": "AVA CARTER",\n'
+                    '      "headline_line2": "100M FREE PB"\n'
+                    "    }\n"
+                    "  }\n"
+                    "]\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/export",
+                "run-export",
+                "The full run document &mdash; parsed results, recognition decisions, ranked "
+                "cards, and the trust report &mdash; as one JSON object. Use it to archive a "
+                "pack or feed a downstream system.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/export" -o pack.json\n',
+                python=(
+                    "import requests\n\n"
+                    'pack = requests.get("__BASE__/api/runs/run_8f2c1a/export").json()\n'
+                    'print(pack["recognition_report"]["n_achievements"], len(pack["cards"]))\n'
+                ),
+                js=(
+                    'const pack = await fetch("__BASE__/api/runs/run_8f2c1a/export", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(pack.cards.length);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "recognition_report": {"n_achievements": 12},\n'
+                    '  "cards": [{"id": "ind_0", "post_angle": "personal_best", "confidence": 0.92}],\n'
+                    '  "trust": {"grounded": true}\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "POST",
+                "/api/runs/{run_id}/reel",
+                "run-reel",
+                "Render the meet reel from the top-ranked cards and stream it back as an MP4 "
+                "(<code>Content-Type: video/mp4</code>). Cache hits return in under 30s; cold "
+                "renders take 30&ndash;90s on the worker.",
+                params=[
+                    (
+                        "format",
+                        "no",
+                        "<code>story</code> (default), <code>portrait</code>, "
+                        "<code>square</code> or <code>landscape</code>.",
+                    ),
+                    (
+                        "n",
+                        "no",
+                        "How many top cards to include &mdash; 1&ndash;5 (default 3).",
+                    ),
+                ],
+                curl=(
+                    'curl -X POST "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3" \\\n'
+                    "  -o reel.mp4\n"
+                ),
+                python=(
+                    "import requests\n\n"
+                    "reel = requests.post(\n"
+                    '    "__BASE__/api/runs/run_8f2c1a/reel",\n'
+                    '    params={"format": "story", "n": 3},\n'
+                    ")\n"
+                    'with open("reel.mp4", "wb") as fh:\n'
+                    "    fh.write(reel.content)\n"
+                ),
+                js=(
+                    "const res = await fetch(\n"
+                    '  "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3",\n'
+                    '  { method: "POST", credentials: "include" },\n'
+                    ");\n"
+                    "const blob = await res.blob(); // video/mp4\n"
+                ),
+                note_html=(
+                    '<p class="dim" style="margin-top:var(--sp-3)">The matching '
+                    "<code>POST /api/runs/{run_id}/card/{card_id}/motion</code> route renders a "
+                    "single story card with the same <code>format</code> options.</p>"
+                ),
+            ),
+        ]
+
+        endpoints_html = '<h2 style="margin-top:var(--sp-7)">Endpoints</h2>' + "".join(endpoints)
+
+        return hero + intro + auth + quickstart + endpoints_html
 
     # ---- PRIVACY -------------------------------------------------------
     @app.route("/privacy")

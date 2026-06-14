@@ -187,26 +187,28 @@ def test_no_env_no_provider(app):
 # ---------------------------------------------------------------------------
 
 def test_rendered_page_has_only_topnav_settings_link(app):
-    """The Settings navigation anchors exist (the desktop topnav link plus
-    the mobile bottom-tab link — both plain navigation, both to the
-    consolidated Operations page). Beyond those, no JS error message or
-    the scheduler flow is allowed to redirect to /settings — those paths still
-    need to steer the user to their administrator, since the Settings
-    page has no credential controls."""
+    """The Settings navigation anchors exist (the desktop topnav link, the
+    mobile bottom-tab link, and the UI 1.28 keyboard-shortcuts overlay's
+    'Go to Settings' row — all three plain navigation, all to the consolidated
+    Operations page). Beyond those, no JS error message or the scheduler flow
+    is allowed to redirect to /settings — those paths still need to steer the
+    user to their administrator, since the Settings page has no credential
+    controls."""
     import re
     c = app.test_client()
     r = c.get("/", follow_redirects=True)
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    # The Settings anchors are navigation only: the desktop topnav link
-    # and the mobile bottom-tab link. (The bottom-tab nav was added in the
-    # mobile-nav pass; it's display:none on desktop but always in the DOM.)
+    # The Settings anchors are navigation only: the desktop topnav link, the
+    # mobile bottom-tab link (added in the mobile-nav pass; display:none on
+    # desktop but always in the DOM), and the global shortcuts-overlay 'g s'
+    # row (UI 1.28 — a plain url_for() link that doubles as a click menu).
     settings_anchors = re.findall(
         r"""<a[^>]+href\s*=\s*["']/settings["'][^>]*>""", html,
     )
-    assert len(settings_anchors) == 2, (
-        f"expected the topnav + mobile-bottomnav /settings anchors, "
-        f"found {len(settings_anchors)}"
+    assert len(settings_anchors) == 3, (
+        f"expected the topnav + mobile-bottomnav + shortcuts-overlay /settings "
+        f"anchors, found {len(settings_anchors)}"
     )
     # Both must be plain navigation anchors, not credential-flow links.
     assert all("aria-label" in a or 'class="' in a for a in settings_anchors)
