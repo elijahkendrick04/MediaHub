@@ -8466,6 +8466,69 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
 
+  // === Atlas-style 3D tilt on the sample output cards (U.16) ===
+  // Pointer-tracked perspective tilt + a sheen that follows the cursor,
+  // inspired by atlascard.com. The transform is written inline (so it
+  // beats the reveal-group's own transform without a specificity fight);
+  // CSS owns the sheen fade + the lifted stacking order. Gated to fine,
+  // hover-capable pointers and suppressed entirely under
+  // prefers-reduced-motion — touch and the reduced-motion cohort keep the
+  // static card. Targets .mh-sample plus a reusable [data-mh-tilt] opt-in.
+  var TILT_REST =
+    'perspective(900px) rotateX(0deg) rotateY(0deg) translate3d(0,0,0) scale(1)';
+  function bindCardTilt() {
+    if (prefersReduced) return;
+    var fine = window.matchMedia &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (!fine) return;
+    var MAX = 7;  // degrees — subtle and premium, never gimmicky
+    document.querySelectorAll('.mh-sample, [data-mh-tilt]').forEach(function(card){
+      var raf = 0, pending = null;
+      function apply(){
+        raf = 0;
+        if (!pending) return;
+        var r = card.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        var px = Math.max(0, Math.min(1, (pending.clientX - r.left) / r.width));
+        var py = Math.max(0, Math.min(1, (pending.clientY - r.top) / r.height));
+        var ry = (px - 0.5) * 2 * MAX;   // pointer right → tilt right edge back
+        var rx = (0.5 - py) * 2 * MAX;   // pointer up → tilt top edge back
+        // Instant transform follow (beats the reveal-group's 520ms transform
+        // transition); keep the border accent on a gentle fade.
+        card.style.transition = 'transform 0s, border-color 200ms';
+        card.style.transform =
+          'perspective(900px) rotateX(' + rx.toFixed(2) + 'deg) rotateY(' +
+          ry.toFixed(2) + 'deg) translate3d(0,-6px,0) scale(1.02)';
+        card.style.setProperty('--mh-gx', (px * 100).toFixed(1) + '%');
+        card.style.setProperty('--mh-gy', (py * 100).toFixed(1) + '%');
+      }
+      card.addEventListener('pointerenter', function(e){
+        if (e.pointerType === 'touch') return;
+        card.classList.add('is-tilting');
+      });
+      card.addEventListener('pointermove', function(e){
+        if (e.pointerType === 'touch') return;
+        pending = e;
+        if (!raf) raf = requestAnimationFrame(apply);
+      });
+      card.addEventListener('pointerleave', function(){
+        pending = null;
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        card.classList.remove('is-tilting');
+        // Settle back to rest on a smooth ease; the inline rest transform
+        // equals the stylesheet rest, so the card is never stuck askew.
+        card.style.transition =
+          'transform 460ms cubic-bezier(0.2,0.7,0.2,1), border-color 200ms';
+        card.style.transform = TILT_REST;
+        card.style.removeProperty('--mh-gx');
+        card.style.removeProperty('--mh-gy');
+      });
+    });
+  }
+  if (document.readyState !== 'loading') bindCardTilt();
+  else document.addEventListener('DOMContentLoaded', bindCardTilt);
+  MH.bindCardTilt = bindCardTilt;
+
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
   // data-mh-card-id triggers a POST to /api/workflow and optimistically
