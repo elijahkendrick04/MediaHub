@@ -2445,3 +2445,164 @@ kbd {
   border-bottom-color: var(--lane);
   text-decoration: none;
 }
+
+/* =====================================================================
+   U.14 — CURSOR-FOLLOWING HOVER PREVIEW
+   =====================================================================
+   A single floating thumbnail that trails the pointer and cross-dissolves
+   between items as you sweep a list. Two surfaces use it:
+     • Media library — the row's full photo, shown at a useful size
+       (the row only carries a 60px chip).
+     • Create list — a branded "output frame" poster per content type
+       (orientation + canonical dimensions + the format chips).
+   Pure CSS + JS, no external dep. The host element carries class .mh-hp
+   and a child <template class="mh-hp-tpl"> whose content becomes the
+   floating frame; the JS (in _layout) clones it, positions the wrapper
+   with translate3d and swaps .is-front between the two layers to dissolve.
+   Decorative only: aria-hidden + pointer-events:none, and every datum is
+   already present in the row/tile, so screen-reader / no-JS / touch users
+   lose nothing. Activated only on fine-pointer, non-reduced-motion devices
+   (the JS bails otherwise; the media queries below are belt-and-braces).
+   ===================================================================== */
+.mh-hover-preview {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 9000;            /* under the loader (9999) / toast (10000) / modals */
+  pointer-events: none;     /* never eats clicks or becomes the hover target */
+  opacity: 0;
+  transition: opacity var(--dur-med, 180ms) var(--ease-out-quick, ease);
+  will-change: transform, opacity;
+}
+.mh-hover-preview.is-visible { opacity: 1; }
+.mh-hp-frame {
+  position: relative;
+  width: clamp(190px, 20vw, 280px);
+  aspect-ratio: 3 / 4;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--rule);
+  background: var(--surface-2);
+  overflow: hidden;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55),
+              0 2px 8px rgba(0, 0, 0, 0.4);
+  transform: scale(0.94);
+  transition: transform var(--dur-med, 180ms) var(--ease-out-quick, cubic-bezier(0.2, 0.7, 0.3, 1));
+}
+.mh-hover-preview.is-visible .mh-hp-frame { transform: scale(1); }
+/* Stadium corner-mark, mirroring .mh-sample::after — keeps the preview
+   reading as part of the same branded family. */
+.mh-hp-frame::after {
+  content: '';
+  position: absolute;
+  bottom: 6px; right: 6px;
+  width: 13px; height: 13px;
+  border-right: 2px solid var(--lane);
+  border-bottom: 2px solid var(--lane);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.mh-hp-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity var(--dur-slow, 260ms) var(--ease-out-quick, ease);
+}
+.mh-hp-layer.is-front { opacity: 1; }
+
+/* --- Media-library photo preview --------------------------------------- */
+.mh-hp-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-deep);
+}
+.mh-hp-cap {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 22px var(--sp-3) var(--sp-3);
+  display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10, 10.5px);
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: linear-gradient(to top, rgba(6, 7, 12, 0.92) 0%, rgba(6, 7, 12, 0.55) 55%, transparent 100%);
+}
+.mh-hp-cap b {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-hp-cap span { color: var(--ink-dim); text-transform: none; letter-spacing: 0.02em; }
+
+/* --- Create-list output-frame poster ----------------------------------- */
+.mh-hp-poster {
+  position: absolute;
+  inset: 0;
+  display: flex; flex-direction: column;
+  padding: var(--sp-4);
+  color: var(--ink);
+  background:
+    radial-gradient(130% 90% at 100% 0%, color-mix(in oklab, var(--lane) 10%, transparent), transparent 60%),
+    var(--surface);
+}
+.mh-hp-poster-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--sp-2);
+}
+.mh-hp-poster-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9, 9.5px);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-hp-poster-mark { color: var(--lane); flex-shrink: 0; line-height: 0; }
+.mh-hp-poster-mark svg { width: 22px; height: 22px; }
+.mh-hp-poster-title {
+  margin-top: auto;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 26px;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-hp-poster-dims {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10, 10.5px);
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  margin-top: var(--sp-1);
+}
+.mh-hp-poster-formats {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  margin-top: var(--sp-3);
+}
+.mh-hp-poster-fmt {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+}
+
+/* Touch / no-hover devices: never paint the follower (JS also bails). */
+@media (hover: none), (pointer: coarse) {
+  .mh-hover-preview { display: none !important; }
+}
+/* Reduced motion: the follower IS motion, so the JS never builds it; if a
+   stray node ever exists, strip the transitions so nothing animates. */
+@media (prefers-reduced-motion: reduce) {
+  .mh-hover-preview, .mh-hp-frame, .mh-hp-layer { transition: none !important; }
+}
+/* Forced-colors: drop the decorative follower entirely — the system
+   palette can't render the layered frame meaningfully. */
+@media (forced-colors: active) {
+  .mh-hover-preview { display: none !important; }
+}
