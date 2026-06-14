@@ -5552,6 +5552,11 @@ input[type=checkbox], input[type=radio] {
 }
 textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
 select { cursor: pointer; }
+/* Open <select> dropdown legibility: the native option popup renders on a
+   light OS background, but options inherit the theme's light --ink colour →
+   light-on-light (the unreadable grey text). Pin a readable dark-on-cream pair
+   on the options themselves so every dropdown list stays clear when open. */
+select option { background-color: #f5f2e8; color: #14160f; }
 
 /* Custom-styled file input — replaces ugly native OS button */
 input[type=file] { padding: 7px 10px; cursor: pointer; }
