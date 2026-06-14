@@ -62,6 +62,10 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from .humanise import humanise as _humanise
+from .weekend_glance import (
+    build_weekend_glance as _build_weekend_glance,
+    render_weekend_glance_html as _render_weekend_glance_html,
+)
 from . import results_table as _rt
 from .club_profile import (
     ClubProfile,
@@ -16452,6 +16456,18 @@ def create_app() -> Flask:
             ]
         )
 
+        # --- UI 1.30 "Weekend at a glance" digest (deterministic; no new LLM
+        # call — surfaces the recognition report the pipeline already produced).
+        # Fail-soft: a summary panel must never 500 the review page, so any
+        # surprise in the run shape collapses to no panel rather than an error.
+        try:
+            weekend_glance_html = _render_weekend_glance_html(_build_weekend_glance(data))
+        except Exception:
+            # The builder is written to be total, but a summary panel must never
+            # be the thing that 500s the review page — degrade to no panel.
+            log.exception("weekend-glance: render failed for run %s", run_id)
+            weekend_glance_html = ""
+
         # --- Meet context card
         mctx = rr.get("meet_context") or {}
         ctx_sources = mctx.get("research_sources") or []
@@ -17225,6 +17241,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 {warn_html}
 
 {_render_explainability_key()}
+
+{weekend_glance_html}
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
