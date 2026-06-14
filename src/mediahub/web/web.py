@@ -15254,7 +15254,6 @@ def create_app() -> Flask:
         body = season_css + hero + summary_html + timeline_html
         return _layout("Season timeline", body, active="season")
 
-
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
     def upload():
