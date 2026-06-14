@@ -69,8 +69,12 @@
      copy gets a lifted variant: same hue, raised lightness. The base
      palette's lane-yellow stays lane-yellow because it's already
      bright. */
-  --mh-link: color-mix(in oklab, var(--mh-primary) 70%, var(--mh-on-surface) 30%);
-  --mh-link-hover: var(--mh-primary);
+  --mh-link: light-dark(
+    color-mix(in oklab, var(--mh-primary) 30%, var(--mh-on-surface) 70%),
+    color-mix(in oklab, var(--mh-primary) 70%, var(--mh-on-surface) 30%));
+  --mh-link-hover: light-dark(
+    color-mix(in oklab, var(--mh-primary) 45%, var(--mh-on-surface) 55%),
+    var(--mh-primary));
 }
 
 /* ---------------------------------------------------------------------
