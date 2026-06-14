@@ -8677,7 +8677,86 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     var fracPart = dot < 0 ? '' : s.slice(dot);
     return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + fracPart;
   }
+  // U.12 — odometer numerals: zero-padded digit reels that roll upward and
+  // land EXACTLY on the target. Each column is a strip of cells [0..9,0]; the
+  // trailing 0 makes the 9->0 wrap seamless. Lower-order columns spin more than
+  // higher ones (the authentic odometer cascade); leading-zero columns stay
+  // still. Driven per-frame by requestAnimationFrame, so it needs no CSS
+  // transition. Shares animateCount's reveal trigger + reduced-motion gate.
+  function animateOdometer(el) {
+    var target = Math.round(parseFloat(el.getAttribute('data-mh-count')));
+    if (isNaN(target) || target < 0) target = 0;
+    var pad = parseInt(el.getAttribute('data-mh-count-pad') || '1', 10);
+    var dur = parseInt(el.getAttribute('data-mh-count-dur') || '1100', 10);
+    var s = String(target);
+    var digits = Math.max(pad, s.length);
+    // Most-significant active place (0 = ones). target 0 => nothing rolls.
+    var maxActiveS = target > 0 ? s.length - 1 : -1;
+
+    el.textContent = '';
+    el.classList.add('mh-odo--live');
+    var cols = [];
+    for (var c = 0; c < digits; c++) {
+      var sig = digits - 1 - c;                 // significance of this column
+      var finalDigit = Math.floor(target / Math.pow(10, sig)) % 10;
+      var active = sig <= maxActiveS;           // leading zeros never roll
+      var spins = active ? (1 + (maxActiveS - sig)) : 0;
+      var travel = active ? (spins * 10 + finalDigit) : 0;
+
+      var colEl = document.createElement('span');
+      colEl.className = 'mh-odo-col';
+      colEl.setAttribute('aria-hidden', 'true');
+      // Hidden spacer = one glyph in normal flow: gives the column its width
+      // AND a real text baseline (the absolutely-positioned reel cannot), so
+      // the digits sit on the surrounding text's baseline, font-independently.
+      var spacer = document.createElement('span');
+      spacer.className = 'mh-odo-spacer';
+      spacer.textContent = String(finalDigit);
+      var clip = document.createElement('span');
+      clip.className = 'mh-odo-clip';
+      var strip = document.createElement('span');
+      strip.className = 'mh-odo-strip';
+      for (var d = 0; d <= 10; d++) {
+        var cell = document.createElement('span');
+        cell.className = 'mh-odo-d';
+        cell.textContent = String(d % 10);
+        strip.appendChild(cell);
+      }
+      clip.appendChild(strip);
+      colEl.appendChild(spacer);
+      colEl.appendChild(clip);
+      el.appendChild(colEl);
+      cols.push({strip: strip, travel: travel, finalDigit: finalDigit});
+    }
+
+    function place(prog) {
+      for (var i = 0; i < cols.length; i++) {
+        var off = (cols[i].travel * prog) % 10;       // 0..<10, wraps seamlessly
+        cols[i].strip.style.transform = 'translateY(' + (-off) + 'em)';
+      }
+    }
+    function settle() {
+      for (var i = 0; i < cols.length; i++) {
+        cols[i].strip.style.transform = 'translateY(' + (-cols[i].finalDigit) + 'em)';
+      }
+    }
+    if (prefersReduced) { settle(); return; }
+    var oStart = null;
+    function oTick(ts) {
+      if (oStart === null) oStart = ts;
+      var p = Math.min(1, (ts - oStart) / dur);
+      var eased = 1 - Math.pow(1 - p, 3);            // ease-out cubic
+      if (p < 1) { place(eased); requestAnimationFrame(oTick); }
+      else settle();                                  // exact landing, no jump
+    }
+    requestAnimationFrame(oTick);
+  }
   function animateCount(el) {
+    // Idempotent: the reveal observer + the 1.5s safety net can both fire on
+    // the same element; never restart a counter (or rebuild an odometer).
+    if (el._mhCounted) return;
+    el._mhCounted = true;
+    if (el.hasAttribute('data-mh-odometer')) { animateOdometer(el); return; }
     var target = parseFloat(el.getAttribute('data-mh-count'));
     if (isNaN(target)) return;
     var dur = parseInt(el.getAttribute('data-mh-count-dur') || '900', 10);
@@ -10236,13 +10315,25 @@ def create_app() -> Flask:
         existing = list_profiles()
         n_orgs = len(existing)
 
-        # Compute a small run-count for the hero meta line so the page
-        # doesn't feel hollow once the user has activity.
+        # Compute small deployment-wide tallies for the hero meta line so the
+        # page doesn't feel hollow once the user has activity. The third figure
+        # is the REAL engine output — the sum of recognised moments
+        # (n_achievements) — NOT the legacy n_cards column, which the V5
+        # recognition-first pipeline leaves at ~0 and would read as a falsehood
+        # ("0 cards generated"). COALESCE keeps NULL rows (pre-column runs that
+        # were never relisted) as 0: an honest lower bound, never a fabrication.
         n_runs = 0
+        n_moments = 0
         try:
             conn = _db()
-            n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
-            conn.close()
+            try:
+                n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+                n_moments = int(
+                    conn.execute("SELECT COALESCE(SUM(n_achievements), 0) FROM runs").fetchone()[0]
+                    or 0
+                )
+            finally:
+                conn.close()
         except Exception:
             pass
 
@@ -10303,14 +10394,31 @@ def create_app() -> Flask:
             lane_no = "01"
 
         # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
+        # U.12: the live tallies are odometer numerals — zero-padded digit
+        # reels that roll upward on page load + scroll-into-view via the shared
+        # reveal/counter system (data-mh-count + data-mh-odometer). Progressive
+        # enhancement: the padded value is the element's text, so it reads
+        # correctly with JS off; role="img" + aria-label hand assistive tech the
+        # clean (unpadded, comma-grouped) value on both the JS and no-JS paths.
+        def _odometer(value: int, pad: int) -> str:
+            return (
+                f'<b class="mh-odo" role="img" aria-label="{value:,}" '
+                f'data-mh-count="{value}" data-mh-odometer data-mh-count-pad="{pad}">'
+                f"{value:0{pad}d}</b>"
+            )
+
         meta_parts = []
         if n_orgs:
             meta_parts.append(
-                f"<span><b>{n_orgs:02d}</b> {'organisation' if n_orgs == 1 else 'organisations'}</span>"
+                f"<span>{_odometer(n_orgs, 2)} {'organisation' if n_orgs == 1 else 'organisations'}</span>"
             )
         if n_runs:
             meta_parts.append(
-                f"<span><b>{n_runs:03d}</b> total {'run' if n_runs == 1 else 'runs'}</span>"
+                f"<span>{_odometer(n_runs, 3)} total {'run' if n_runs == 1 else 'runs'}</span>"
+            )
+        if n_moments:
+            meta_parts.append(
+                f"<span>{_odometer(n_moments, 3)} {'moment' if n_moments == 1 else 'moments'} detected</span>"
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
             meta_parts.append("<span>Brand voice <b>captured</b></span>")
