@@ -59,6 +59,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **U.1** · Phase 1 (Product polish) — Core-flow polish: Home, Add Input, the content-pack review, and Settings → Autonomy raised to a credible sport-editorial standard — strong hierarchy, one obvious primary action per screen, dark-first on the existing `--bg`/`--accent`/`--ink`/`--panel` CSS variables *(completed 2026-06-13)*
 - ✅ **U.2** · Phase 1 (Product polish) — Every state designed across the primary flow (empty / loading / error / success), including the honest AI-unavailable error and the parse-uncertainty / flag-for-review surfaces *(completed 2026-06-13)*
 - ✅ **U.3** · Phase 1 (Product polish) — Explainability + confidence surfaces: "why this card / why not" and confidence displays made clear and trustworthy in the review UI *(completed 2026-06-13)*
+- ✅ **U.5** · Phase 1 (Product polish) — Scroll-driven progressive reveal (inspired by Opal): landing sections reveal line-by-line on scroll; dark editorial theme throughout · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
