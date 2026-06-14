@@ -97,6 +97,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) *(completed 2026-06-14)*
 - ✅ **UI2.2** · UI2 (top priority) — **Athlete tooltips**: hover Animated-Tooltips on athlete avatars / rosters (review + spotlight surfaces) showing name, club and key stat, via a kit `.mh-tooltip` · 🟢 parallel-safe *(completed 2026-06-14)*
 - ✅ **UI 1.30** · Phase 1 (Product polish) — AI 'weekend at a glance' summary panel (from Mixpanel/Fey): an at-a-glance summary card of the meet's key story (top swims, PBs, medals) using MediaHub's existing summarisation pipeline — no external API, no new LLM call beyond what the pack already made · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)

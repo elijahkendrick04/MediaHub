@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `c889f7dd7` · Merge pull request #565: Build UI 1.30 — "Weekend at a glance" summary panel
+**Last updated:** 2026-06-14 · `c1e2792e0` · Merge pull request #558 from elijahkendrick04/claude/festive-ride-98il6j
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -145,7 +145,6 @@ sequence it or merge with care.
 - **UI 1.18** · Phase 1 (Product polish) — Inspector/properties panel (from Sketch): a lightweight side panel to tweak a generated card before approval — edit caption text, swap brand palette swatch, toggle elements, adjust crop; posted back to existing Flask card-edit routes · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1498,5 +1497,4 @@ list and the auto table below, not here.
 | 2026-06-14 | `5cafe2886` | Harden bulk-status against non-string status (contract sweep) |
 | 2026-06-14 | `b8e3d3fa3` | docs: mark UI 1.28 done on the roadmap |
 | 2026-06-14 | `423d2a521` | Build UI 1.6 — animated results/data charts (Mixpanel-inspired) |
-| 2026-06-14 | `4c5f79818` | Build UI 1.27 — horizontal drag/scroll gallery (Media Library + landing) |
 <!-- /ROADMAP:ACTIVITY -->
