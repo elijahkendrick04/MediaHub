@@ -4600,6 +4600,29 @@ def _start_run(
                     notify_pack_ready(run_id)
                 except Exception:
                     pass
+                # In-app notifications inbox (UI 1.14) — always-on, no-config:
+                # record the "pack ready" milestone against the owning org so it
+                # lands in the bell dropdown even with no push channel set up.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
+                except Exception:
+                    pass
+            else:
+                # The pipeline reported a terminal error (rather than raising) —
+                # surface it in the inbox so the operator isn't left guessing.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        profile_id,
+                        "Run couldn't be processed",
+                        str(run.error),
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             import traceback
 
@@ -4609,6 +4632,17 @@ def _start_run(
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
             conn.commit()
             conn.close()
+            try:
+                from mediahub.notify import inbox as _inbox
+
+                _inbox.record_error(
+                    profile_id,
+                    "Run couldn't be processed",
+                    str(e),
+                    run_id=run_id,
+                )
+            except Exception:
+                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -5278,6 +5312,131 @@ header.topnav nav a.live::before {
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
+/* === UI 1.14 — Notifications inbox (bell + unread badge + dropdown) ===
+   Masthead-consistent: mono labels, --chrome rule, --lane accent. The panel
+   is position:fixed and JS-anchored under the bell so the scrollable /
+   hamburger nav can never clip it. */
+.mh-notif {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 6px;
+}
+.mh-notif-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  border-radius: 2px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.mh-notif-btn:hover,
+.mh-notif-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-notif-btn svg { width: 17px; height: 17px; display: block; }
+.mh-notif-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; line-height: 1;
+  color: #0A0B11;
+  background: var(--lane);
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 10px var(--lane-glow);
+  pointer-events: none;
+}
+.mh-notif-badge[hidden] { display: none; }
+.mh-notif-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  width: 360px; max-width: calc(100vw - 24px);
+  max-height: min(70vh, 480px);
+  display: flex; flex-direction: column;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200;
+  overflow: hidden;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-notif-panel[hidden] { display: none; }
+@keyframes mh-notif-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mh-notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--chrome);
+  flex-shrink: 0;
+}
+.mh-notif-h-title {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-notif-readall {
+  background: transparent; border: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  cursor: pointer; padding: 2px 4px;
+  transition: color var(--transition);
+}
+.mh-notif-readall:hover { color: var(--lane); }
+.mh-notif-readall:disabled { opacity: 0.35; cursor: default; }
+.mh-notif-list { overflow-y: auto; flex: 1; }
+.mh-notif-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  background: transparent; border: 0;
+  border-bottom: 1px solid rgba(245,242,232,0.07);
+  cursor: pointer; color: var(--ink); font: inherit;
+  transition: background var(--transition);
+}
+.mh-notif-item:hover { background: rgba(245,242,232,0.04); }
+.mh-notif-item.is-unread { background: rgba(212,255,58,0.05); }
+.mh-notif-item.is-unread:hover { background: rgba(212,255,58,0.09); }
+.mh-notif-dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 5px; background: var(--ink-faint);
+}
+.mh-notif-item[data-level="success"] .mh-notif-dot { background: var(--good); box-shadow: 0 0 8px rgba(94,227,154,0.5); }
+.mh-notif-item[data-level="warning"] .mh-notif-dot { background: var(--warn); }
+.mh-notif-item[data-level="error"]   .mh-notif-dot { background: var(--bad);  box-shadow: 0 0 8px rgba(255,107,107,0.5); }
+.mh-notif-item.is-read .mh-notif-dot { background: var(--ink-faint); box-shadow: none; }
+.mh-notif-text { min-width: 0; flex: 1; }
+.mh-notif-t {
+  display: block;
+  font-size: 13px; font-weight: 600; line-height: 1.3;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.mh-notif-item.is-read .mh-notif-t { color: var(--ink-muted); font-weight: 500; }
+.mh-notif-m {
+  display: block; margin-top: 2px;
+  font-size: 12px; line-height: 1.4;
+  color: var(--ink-muted); overflow-wrap: anywhere;
+}
+.mh-notif-time {
+  display: block; margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.04em;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+.mh-notif-empty {
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 34px 20px 38px; text-align: center;
+}
+.mh-notif-panel.is-empty .mh-notif-empty { display: flex; }
+.mh-notif-panel.is-empty .mh-notif-list { display: none; }
+.mh-notif-empty svg { width: 26px; height: 26px; color: var(--ink-faint); opacity: 0.7; }
+.mh-notif-empty-t { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.mh-notif-empty-s { font-size: 11.5px; color: var(--ink-faint); max-width: 220px; line-height: 1.4; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -8963,6 +9122,44 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       <span id="backend-pill-dot"></span>
       <span id="backend-pill-text">checking&hellip;</span>
     </a>
+    {% if signed_in %}
+    {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
+       render-complete, pack-ready and error events for the active org, backed
+       by the notify-layer inbox store and polled on the same light cadence as
+       the health pill. The dropdown panel is JS-positioned (fixed) so the
+       scrollable / hamburger nav can never clip it. #}
+    <div id="mh-notif" class="mh-notif">
+      <button id="mh-notif-btn" class="mh-notif-btn" type="button"
+              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-controls="mh-notif-panel"
+              data-list-url="{{ url_for('api_notifications') }}"
+              data-readall-url="{{ url_for('api_notifications_read_all') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
+      </button>
+      <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
+           aria-label="Notifications" hidden>
+        <div class="mh-notif-head">
+          <span class="mh-notif-h-title">Notifications</span>
+          <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
+        </div>
+        <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
+        <div id="mh-notif-empty" class="mh-notif-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="mh-notif-empty-t">You're all caught up</span>
+          <span class="mh-notif-empty-s">Render, pack, and error updates show up here.</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% if signed_in and signed_in_name %}
     <a id="active-org-chip"
        href="{{ url_for('organisation_setup') }}"
@@ -9143,6 +9340,156 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       .catch(function(){ paint(false); });
   }
   check(); setInterval(check, 30000);
+})();
+</script>
+<script>
+/* UI 1.14 — Notifications inbox. Polls /api/notifications on the same light
+   cadence as the health pill, paints the unread badge, and renders the bell
+   dropdown. The panel is position:fixed and anchored under the bell in JS so
+   the scrollable / hamburger nav can never clip it. All notification text is
+   written with textContent (never innerHTML), so a caption or error string can
+   never inject markup. Self-contained — no dependency on the MH framework. */
+(function(){
+  var btn = document.getElementById('mh-notif-btn');
+  if (!btn) return;  // signed out — no bell rendered
+  var panel   = document.getElementById('mh-notif-panel');
+  var list    = document.getElementById('mh-notif-list');
+  var badge   = document.getElementById('mh-notif-badge');
+  var readAll = document.getElementById('mh-notif-readall');
+  var LIST_URL    = btn.getAttribute('data-list-url');
+  var READALL_URL = btn.getAttribute('data-readall-url');
+  var POLL_MS = 30000;
+  var open = false;
+  var lastUnread = 0;
+
+  function ago(iso){
+    var t = Date.parse(iso);
+    if (isNaN(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 45)   return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+    try { return new Date(t).toLocaleDateString(); } catch (e) { return ''; }
+  }
+
+  function paintBadge(n){
+    lastUnread = n;
+    if (n > 0){
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.hidden = false;
+      btn.setAttribute('aria-label', 'Notifications (' + n + ' unread)');
+    } else {
+      badge.hidden = true;
+      btn.setAttribute('aria-label', 'Notifications');
+    }
+    if (readAll) readAll.disabled = (n === 0);
+  }
+
+  function el(tag, cls, text){
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render(items){
+    list.textContent = '';
+    if (!items || !items.length){ panel.classList.add('is-empty'); return; }
+    panel.classList.remove('is-empty');
+    items.forEach(function(it){
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mh-notif-item ' + (it.read ? 'is-read' : 'is-unread');
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-level', it.level || 'info');
+      row.setAttribute('data-id', it.id);
+      if (it.link) row.setAttribute('data-link', it.link);
+      row.appendChild(el('span', 'mh-notif-dot'));
+      var body = el('span', 'mh-notif-text');
+      body.appendChild(el('span', 'mh-notif-t', it.title || ''));
+      if (it.body) body.appendChild(el('span', 'mh-notif-m', it.body));
+      body.appendChild(el('span', 'mh-notif-time', ago(it.created_at)));
+      row.appendChild(body);
+      row.addEventListener('click', function(){ onItem(it); });
+      list.appendChild(row);
+    });
+  }
+
+  function poll(){
+    if (document.hidden && !open) return;
+    fetch(LIST_URL, {cache:'no-store', headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok) return;
+        paintBadge(d.unread || 0);
+        if (open) render(d.items || []);
+      })
+      .catch(function(){ /* offline — leave the last good state */ });
+  }
+
+  function safeLink(u){
+    /* Only ever follow an in-app path ("/review/…") — never an absolute /
+       cross-origin ("//host") or javascript: URL, even though links are
+       server-built today. Defence-in-depth: the text flows through a DB. */
+    if (!u || typeof u !== 'string') return '';
+    return (u.charAt(0) === '/' && u.charAt(1) !== '/') ? u : '';
+  }
+
+  function onItem(it){
+    if (!it.read){
+      fetch(LIST_URL + '/' + encodeURIComponent(it.id) + '/read',
+            {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if (d && typeof d.unread === 'number') paintBadge(d.unread); })
+        .catch(function(){});
+    }
+    var dest = safeLink(it.link);
+    if (dest){ window.location.href = dest; return; }
+    poll();
+  }
+
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.hidden = false;
+      position();
+      poll();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.hidden = true;
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
+  if (readAll){
+    readAll.addEventListener('click', function(e){
+      e.stopPropagation();
+      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(){ paintBadge(0); poll(); })
+        .catch(function(){});
+    });
+  }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+
+  poll();
+  setInterval(poll, POLL_MS);
 })();
 </script>
 <script>
@@ -12524,6 +12871,54 @@ def create_app() -> Flask:
             + "</div></div></section>"
         )
 
+        # --- UI 1.24 — moment-type ticker (editorial section divider). A pure-CSS
+        # marquee naming the *kinds of moments* the engine detects and ranks,
+        # used as the divider between the outputs grid (bento) and the in-feed
+        # frames. Distinct from the sport-agnostic marquee band above (small
+        # mono chips): this is a large display-type band in the SavoirFaire /
+        # SuperHi register. The item list is rendered TWICE in markup so the
+        # -50% track loop is seamless with NO JavaScript — it deliberately does
+        # NOT reuse the `.mh-marquee`/`.mh-marquee__track` classes (whose seam is
+        # JS-cloned by ui-kit.js; reusing them here would double-clone to 4
+        # copies and break the seam). Vocabulary maps 1:1 onto real detectors
+        # (PBs, medals, comebacks, finals, club records, first-time swims,
+        # qualifiers, sub-barrier breaks, relays, multi-PB weekends) — no
+        # invented achievement types; the roadmap's five lead the list.
+        moment_types = (
+            "Personal bests",
+            "Medal finishes",
+            "Comebacks",
+            "Finals",
+            "Club records",
+            "First-time swims",
+            "Qualifying times",
+            "Barrier breaks",
+            "Relay wins",
+            "Multi-PB weekends",
+        )
+
+        def _moment_ticker_run(hidden: bool) -> str:
+            # One pass over the vocabulary. Even items are filled, odd items are
+            # outline ("ghost") — the filled↔outline rhythm of the reference
+            # tickers. The alternation is set here (not via :nth-child) so it
+            # continues cleanly across the seam between the two identical copies.
+            aria = ' aria-hidden="true"' if hidden else ""
+            return "".join(
+                f'<span class="mh-moment-ticker__item'
+                f'{" is-ghost" if i % 2 else ""}"{aria}>{_h(m)}</span>'
+                for i, m in enumerate(moment_types)
+            )
+
+        moment_ticker_html = (
+            '<section class="mh-moment-ticker" '
+            'aria-label="Moments MediaHub detects and ranks">'
+            '<div class="mh-moment-ticker__viewport">'
+            '<div class="mh-moment-ticker__track">'
+            + _moment_ticker_run(hidden=False)
+            + _moment_ticker_run(hidden=True)
+            + "</div></div></section>"
+        )
+
         # U.8 — animated how-it-works pipeline diagram. Sits right after the
         # hero as a visual amplification of its "reads X … writes Y" claim,
         # ahead of the UI 1.3 inline-thumbnail headline and the numbered steps.
@@ -12543,6 +12938,7 @@ def create_app() -> Flask:
             + steps_html
             + before_after_html
             + bento_html
+            + moment_ticker_html
             + frames_html
             + audience_html
             + promise_html
@@ -18781,6 +19177,74 @@ Relay team broke club record"></textarea>
                 "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
             }
         )
+
+    # ---- Notifications inbox (UI 1.14) ---------------------------------
+    #
+    # The bell-icon dropdown in the app chrome: render-complete, pack-ready,
+    # and error events for the active organisation, backed by the notify-layer
+    # inbox store (mediahub.notify.inbox). Polled by the header on a light
+    # cadence; org-scoped via _active_profile_id() so one club never sees
+    # another's events. Deep links are built here (in request context) with
+    # url_for, not persisted, so they always match the live routing.
+    def _notification_link(item: dict) -> str:
+        explicit = (item.get("click_url") or "").strip()
+        if explicit:
+            return explicit
+        rid = (item.get("run_id") or "").strip()
+        if not rid:
+            return ""
+        # A finished render lives on the content-pack page; everything else
+        # (pack-ready / error) points at the review page for that run.
+        endpoint = "content_pack" if item.get("kind") == "render_complete" else "review"
+        try:
+            return url_for(endpoint, run_id=rid)
+        except Exception:
+            return ""
+
+    @app.route("/api/notifications", methods=["GET"])
+    def api_notifications():
+        """List the active org's notifications plus its unread count.
+
+        Signed-out (no active org) returns an empty, zero-unread payload so the
+        header poll is harmless on public pages rather than a 403 the client
+        has to special-case.
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "unread": 0, "items": []})
+        unread_only = (request.args.get("unread") or "").strip().lower() in ("1", "true", "yes")
+        try:
+            limit = int(request.args.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        from mediahub.notify import inbox as _inbox
+
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        for it in items:
+            it["link"] = _notification_link(it)
+        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+
+    @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
+    def api_notifications_read(notif_id: str):
+        """Mark one notification read for the active org (tenant-scoped)."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        changed = _inbox.mark_read(pid, notif_id)
+        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+
+    @app.route("/api/notifications/read-all", methods=["POST"])
+    def api_notifications_read_all():
+        """Mark every unread notification read for the active org."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        n = _inbox.mark_all_read(pid)
+        return jsonify({"ok": True, "marked": n, "unread": 0})
 
     # ---- /healthz/usage ------------------------------------------------
     #
@@ -26768,6 +27232,81 @@ what you're doing, what they should do.</p>
         return redirect(url_for("operator_commercial"))
 
     # ---- /pricing -----------------------------------------------------
+    # UI 1.20 — polished pricing page styling (scoped under .mh-pricing /
+    # .mh-compare). Plain strings (not f-strings): the CSS braces are literal.
+    # Reuses the existing token system (--surface, --accent, --good, --lane …)
+    # and the shared .mh-segmented control for the billing-period toggle.
+    _PRICING_CSS = (
+        "<style>"
+        ".mh-billing-toggle{display:flex;justify-content:center;margin-bottom:var(--sp-6)}"
+        ".mh-tier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));"
+        "gap:18px;align-items:stretch}"
+        ".mh-tier{position:relative;display:flex;flex-direction:column;gap:16px;padding:24px;"
+        "background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md)}"
+        ".mh-tier.is-recommended{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}"
+        ".mh-tier-badge{position:absolute;top:-11px;left:24px;background:var(--lane);"
+        "color:var(--lane-ink);font-family:var(--font-mono);font-size:var(--fs-9);font-weight:700;"
+        "letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border-radius:var(--radius-pill)}"
+        ".mh-tier-name{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;"
+        "letter-spacing:.08em;color:var(--ink-muted);margin-bottom:8px}"
+        ".mh-tier-price{min-height:46px}"
+        ".mh-price-fig{font-size:30px;font-weight:800;line-height:1}"
+        ".mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted);margin-left:2px}"
+        ".mh-price-note{display:block;font-size:12px;color:var(--ink-muted);margin-top:4px}"
+        ".mh-price-tbc{font-size:15px;color:var(--ink-muted)}"
+        ".mh-tier-blurb{font-size:13px;color:var(--ink-muted);margin-top:8px}"
+        ".mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1 1 auto;"
+        "display:flex;flex-direction:column;gap:9px}"
+        ".mh-feat{display:flex;align-items:baseline;gap:8px}"
+        ".mh-feat-mark{flex:0 0 auto;font-weight:700;width:1em;text-align:center}"
+        ".mh-feat-yes .mh-feat-mark{color:var(--good)}"
+        ".mh-feat-no{color:var(--ink-faint)}"
+        ".mh-feat-no .mh-feat-mark{color:var(--ink-faint)}"
+        ".mh-feat-val{margin-left:auto;padding-left:10px;font-weight:600;color:var(--ink);text-align:right}"
+        ".mh-feat-no .mh-feat-val{color:var(--ink-faint)}"
+        ".mh-tier-cta{margin-top:4px}"
+        ".mh-cta{width:100%;text-align:center}"
+        ".mh-cta-note{text-align:center;font-size:13px}"
+        ".mh-price-note-banner{font-size:13px;margin-top:24px;text-align:center}"
+        ".mh-pricing [data-pane=monthly]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=annual]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=monthly]{display:inline}"
+        ".mh-compare-title{margin:var(--sp-9) 0 var(--sp-4);text-align:center}"
+        ".mh-compare-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}"
+        ".mh-compare{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}"
+        ".mh-compare th,.mh-compare td{padding:12px 14px;border-bottom:1px solid var(--border)}"
+        ".mh-compare thead th{vertical-align:bottom}"
+        ".mh-th-plan{text-align:center;font-family:var(--font-mono);font-size:13px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.06em}"
+        ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
+        ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
+        ".mh-compare td{text-align:center;color:var(--ink-muted)}"
+        ".mh-compare .is-rec{background:rgba(212,255,58,.045)}"
+        ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
+        "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
+        "border-bottom-color:var(--border-h)}"
+        ".mh-cell-yes{color:var(--good);font-weight:700}"
+        ".mh-cell-no{color:var(--ink-faint)}"
+        ".mh-cell-val{color:var(--ink)}"
+        ".mh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
+        "clip:rect(0,0,0,0);white-space:nowrap;border:0}"
+        "@media(max-width:600px){.mh-tier-grid{grid-template-columns:1fr}}"
+        "</style>"
+    )
+    _PRICING_JS = (
+        "<script>(function(){"
+        "var root=document.getElementById('mh-pricing');if(!root)return;"
+        "var btns=root.querySelectorAll('.mh-segmented [data-period]');"
+        "function set(period){root.setAttribute('data-period',period);"
+        "for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute('data-period')===period;"
+        "btns[i].classList.toggle('is-active',on);"
+        "btns[i].setAttribute('aria-pressed',on?'true':'false');}}"
+        "for(var i=0;i<btns.length;i++){(function(b){"
+        "b.addEventListener('click',function(){set(b.getAttribute('data-period'));});"
+        "})(btns[i]);}"
+        "})();</script>"
+    )
+
     @app.route("/pricing", methods=["GET"])
     def pricing_page():
         from mediahub.commercial.wtp import QuoteStore, public_list_price
@@ -26783,106 +27322,174 @@ what you're doing, what they should do.</p>
         except Exception:
             list_price = None
 
+        _CUR_SYMBOL = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}
+
+        def _figure(symbol: str, pence: int) -> str:
+            # Whole pounds when even, else two decimals. The pence is always
+            # ledger-derived — never a hardcoded amount (ADR-0011 / PC.4).
+            if pence % 100 == 0:
+                return f"{symbol}{pence // 100}"
+            return f"{symbol}{pence / 100:.2f}"
+
+        def _price_block(plan: str) -> str:
+            """Annual + monthly price panes for a tier.
+
+            Honest billing-period toggle (UI 1.20): MediaHub sells annual
+            prepay only (ADR-0011; wtp.Quote.billing_interval == "year"), so the
+            "Monthly" view shows the *same committed annual price expressed per
+            month* (annual ÷ 12), explicitly "billed annually" — never a
+            fabricated monthly SKU or a made-up discount. While the PC.4 gate is
+            unmet there is no committed figure, so both views read "Pricing TBC"
+            and no "/year" or "/mo" suffix is emitted at all.
+            """
+            if plan == _auth.PLAN_FREE:
+                return '<div class="mh-price-fig">Free</div>'
+            if plan == _auth.PLAN_CLUB and list_price is not None:
+                symbol = _CUR_SYMBOL.get(list_price["currency"], "")
+                annual_pence = int(list_price["amount_pence"])
+                monthly_pence = round(annual_pence / 12)
+                annual = (
+                    '<span data-pane="annual">'
+                    f'<span class="mh-price-fig">{_figure(symbol, annual_pence)}'
+                    '<span class="mh-price-per">/year</span></span>'
+                    '<span class="mh-price-note">Billed annually</span></span>'
+                )
+                monthly = (
+                    '<span data-pane="monthly">'
+                    f'<span class="mh-price-fig">{_figure(symbol, monthly_pence)}'
+                    '<span class="mh-price-per">/mo</span></span>'
+                    '<span class="mh-price-note">billed annually</span></span>'
+                )
+                return annual + monthly
+            # Federation (no committed list price) or Club before the gate: the
+            # honest state is "Pricing TBC" — never a guessed number.
+            purchasable = _billing.plan_purchasable(plan)
+            title = (
+                "The exact price is shown at checkout"
+                if purchasable
+                else "Set STRIPE_PRICE_"
+                + ("CLUB" if plan == _auth.PLAN_CLUB else "FEDERATION")
+                + " to enable"
+            )
+            return f'<div class="mh-price-tbc" title="{title}">Pricing TBC</div>'
+
+        def _feature_li(row, plan: str) -> str:
+            val = row.value_for(plan)
+            if val is False:
+                return (
+                    '<li class="mh-feat mh-feat-no">'
+                    '<span class="mh-feat-mark" aria-hidden="true">&times;</span>'
+                    f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                    '<span class="mh-sr">— not included</span></li>'
+                )
+            value_html = (
+                f'<span class="mh-feat-val">{_h(val)}</span>' if isinstance(val, str) else ""
+            )
+            return (
+                '<li class="mh-feat mh-feat-yes">'
+                '<span class="mh-feat-mark" aria-hidden="true">&check;</span>'
+                f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                f'{value_html}<span class="mh-sr">— included</span></li>'
+            )
+
         cards = ""
         for tier in _billing.TIERS:
             is_current = tier.plan == plan_now and signed_in
-            features = "".join(
-                f'<li style="margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
-                '<span aria-hidden="true" style="color:var(--good);flex:0 0 auto">&check;</span>'
-                f"<span>{_h(f)}</span></li>"
-                for f in tier.features
-            )
-            # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
-            if tier.plan == _auth.PLAN_FREE:
-                price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
-            elif tier.plan == _auth.PLAN_CLUB and list_price is not None:
-                # PC.4 gate met: commit the evidence-derived annual price.
-                amount = list_price["amount_pence"]
-                symbol = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}.get(
-                    list_price["currency"], ""
-                )
-                if amount % 100 == 0:
-                    figure = f"{symbol}{amount // 100}"
-                else:
-                    figure = f"{symbol}{amount / 100:.2f}"
-                price_html = (
-                    f'<div style="font-size:30px;font-weight:800;line-height:1">{figure}'
-                    '<span style="font-size:14px;font-weight:600;color:var(--ink-muted)">'
-                    "/year</span></div>"
-                    '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
-                )
-            else:
-                # PC.4 gate unmet (or no evidence for this tier): the honest
-                # state is "Pricing TBC" — never a guessed number. When the
-                # tier is purchasable via an env-configured Stripe Price, the
-                # exact amount still shows at checkout.
-                purchasable = _billing.plan_purchasable(tier.plan)
-                if purchasable:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="The exact price is shown at checkout">Pricing TBC</div>'
-                    )
-                else:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="Set STRIPE_PRICE_'
-                        + ("CLUB" if tier.plan == _auth.PLAN_CLUB else "FEDERATION")
-                        + ' to enable">Pricing TBC</div>'
-                    )
+            recommended = tier.plan == _auth.PLAN_CLUB
+            features = "".join(_feature_li(row, tier.plan) for row in _billing.feature_rows())
+            price_html = _price_block(tier.plan)
 
-            # CTA
+            # CTA — purchase/upgrade logic (unchanged from the prior page).
             if is_current:
                 cta = (
-                    '<div class="btn secondary" style="width:100%;text-align:center;'
-                    'pointer-events:none;opacity:0.75">Current plan</div>'
+                    '<div class="btn secondary mh-cta" '
+                    'style="pointer-events:none;opacity:0.75">Current plan</div>'
                 )
             elif tier.plan == _auth.PLAN_FREE:
                 cta = (
-                    f'<a class="btn secondary" href="{url_for("signup_page")}" '
-                    'style="width:100%;text-align:center">Get started free</a>'
+                    f'<a class="btn secondary mh-cta" href="{url_for("signup_page")}">'
+                    "Get started free</a>"
                     if not signed_in
-                    else '<div class="dim" style="text-align:center;font-size:13px">Included</div>'
+                    else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
                 if not configured:
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6" '
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6" '
                         'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
                     )
                 elif not signed_in:
                     cta = (
-                        f'<a class="btn" href="{url_for("login_page", next=url_for("pricing_page"))}" '
-                        'style="width:100%;text-align:center">Log in to upgrade</a>'
+                        f'<a class="btn mh-cta" '
+                        f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
+                        "Log in to upgrade</a>"
                     )
                 elif not _billing.plan_purchasable(tier.plan):
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6">Not yet available</div>'
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
                     # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'<a class="btn mh-cta" '
                         f'href="{url_for("billing_confirm", plan=tier.plan)}">'
                         f"Upgrade to {_h(tier.name)}</a>"
                     )
 
-            highlight = (
-                "border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)"
-                if tier.plan == _auth.PLAN_CLUB
-                else "border:1px solid var(--border)"
-            )
+            badge = '<div class="mh-tier-badge">Recommended</div>' if recommended else ""
+            cls = "mh-tier" + (" is-recommended" if recommended else "")
             cards += (
-                f'<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px;{highlight}">'
-                f'<div><div style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;'
-                f'color:var(--ink-muted);margin-bottom:6px">{_h(tier.name)}</div>{price_html}'
-                f'<div class="dim" style="font-size:13px;margin-top:8px">{_h(tier.blurb)}</div></div>'
-                f'<ul style="list-style:none;padding:0;margin:0;font-size:13px;flex:1">{features}</ul>'
-                f"{cta}"
+                f'<div class="{cls}">{badge}'
+                '<div class="mh-tier-head">'
+                f'<div class="mh-tier-name">{_h(tier.name)}</div>'
+                f'<div class="mh-tier-price">{price_html}</div>'
+                f'<div class="mh-tier-blurb">{_h(tier.blurb)}</div>'
+                "</div>"
+                f'<ul class="mh-feat-list">{features}</ul>'
+                f'<div class="mh-tier-cta">{cta}</div>'
                 "</div>"
             )
+
+        # Feature comparison table — same single-source matrix as the cards.
+        def _cell(val) -> str:
+            if val is True:
+                return (
+                    '<span class="mh-cell-yes" aria-hidden="true">&check;</span>'
+                    '<span class="mh-sr">Included</span>'
+                )
+            if val is False:
+                return (
+                    '<span class="mh-cell-no" aria-hidden="true">&times;</span>'
+                    '<span class="mh-sr">Not included</span>'
+                )
+            return f'<span class="mh-cell-val">{_h(val)}</span>'
+
+        head_cells = ""
+        for t in _billing.TIERS:
+            rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+            tag = '<span class="mh-th-rec">Recommended</span>' if t.plan == _auth.PLAN_CLUB else ""
+            head_cells += f'<th scope="col" class="mh-th-plan{rec}">{_h(t.name)}{tag}</th>'
+        ncols = 1 + len(_billing.TIERS)
+        rows_html = ""
+        for group in _billing.FEATURE_MATRIX:
+            rows_html += (
+                f'<tr class="mh-compare-group"><th colspan="{ncols}" scope="colgroup">'
+                f"{_h(group.title)}</th></tr>"
+            )
+            for row in group.rows:
+                cells = ""
+                for t in _billing.TIERS:
+                    rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+                    cells += f'<td class="{rec.strip()}">{_cell(row.value_for(t.plan))}</td>'
+                rows_html += f'<tr><th scope="row">{_h(row.label)}</th>{cells}</tr>'
+        compare_table = (
+            '<div class="mh-compare-wrap"><table class="mh-compare">'
+            f'<thead><tr><th scope="col"></th>{head_cells}</tr></thead>'
+            f"<tbody>{rows_html}</tbody></table></div>"
+        )
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
@@ -26892,20 +27499,33 @@ what you're doing, what they should do.</p>
                 "Billing is not configured on this deployment, so paid plans "
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
-        note_html = (
-            f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
+        note_html = f'<p class="dim mh-price-note-banner">{note}</p>'
+
+        toggle = (
+            '<div class="mh-billing-toggle">'
+            '<div class="mh-segmented" role="group" aria-label="Billing period">'
+            '<button type="button" class="is-active" data-period="annual" '
+            'aria-pressed="true">Annually</button>'
+            '<button type="button" data-period="monthly" '
+            'aria-pressed="false">Monthly</button>'
+            "</div></div>"
         )
 
         body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
+            _PRICING_CSS
+            + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper &mdash; ask us.</p>"
+            "Annual prepay keeps it cheaper.</p>"
             "</section>"
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">'
-            f"{cards}</div>"
+            '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
+            f"{toggle}"
+            f'<div class="mh-tier-grid">{cards}</div>'
             f"{note_html}"
+            '<h2 class="mh-compare-title">Compare every plan</h2>'
+            f"{compare_table}"
+            "</div>" + _PRICING_JS
         )
         return _layout("Pricing", body, active="signin")
 
@@ -35045,6 +35665,19 @@ voice, and queues them for one-click approval.</p>
                     raise RuntimeError("mp4 missing after render")
                 job["status"] = "done"
                 job["video_url"] = file_url
+                # Render-complete milestone in the in-app inbox (UI 1.14). The
+                # async reel render is the "kick it off and walk away" flow, so
+                # this is the notification a user actually wants when they come
+                # back. Scoped to the org that owns the job; a no-op when signed
+                # out (empty owner_pid).
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel"
+                    )
+                except Exception:
+                    pass
             except _RenderBusy:
                 job["status"] = "error"
                 job["error"] = "renderer_busy"
@@ -35056,6 +35689,17 @@ voice, and queues them for one-click approval.</p>
                 job["status"] = "error"
                 job["error"] = str(_payload.get("detail") or e)
                 job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
             _variant_job_save(job)
 
         threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()
