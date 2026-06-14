@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `411a5403c` · Merge pull request #566: Build UI 1.18 — inspector / properties panel
+**Last updated:** 2026-06-14 · `62ee82673` · Build UI 1.15 — command palette (Cmd-K) for fast keyboard navigation (#543)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -138,7 +138,6 @@ sequence it or merge with care.
 - **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.15** · Phase 1 (Product polish) — Command palette / Cmd-K (from GitHub): fast keyboard navigation + quick actions (jump to Create / Library / Settings, run common actions); vanilla JS, no framework, keyboard-accessible · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
