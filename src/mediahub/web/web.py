@@ -7076,6 +7076,36 @@ _HERO_WORD_CYCLE_JS = """<script>
 </script>"""
 
 
+# UI 1.20 — scoped styles for the polished pricing page (/pricing). Uses only
+# the existing CSS custom properties so it tracks the active brand/theme.
+_PRICING_CSS = """<style>
+.mh-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.mh-plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;align-items:stretch}
+.mh-plan-card{padding:24px;display:flex;flex-direction:column;gap:16px;overflow:visible}
+.mh-plan-card.is-rec{border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.mh-rec-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--lane-ink);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding:3px 11px;border-radius:999px;white-space:nowrap}
+.mh-price{display:flex;align-items:baseline;gap:4px;flex-wrap:wrap}
+.mh-price-annual,.mh-price-monthly{display:inline-flex;align-items:baseline;gap:4px}
+.mh-price-fig{font-size:30px;font-weight:800;line-height:1}
+.mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted)}
+.mh-plan-grid[data-mh-period="annual"] .mh-price-monthly{display:none}
+.mh-plan-grid[data-mh-period="monthly"] .mh-price-annual{display:none}
+.mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1;display:flex;flex-direction:column;gap:9px}
+.mh-feat{display:flex;gap:8px;align-items:flex-start;line-height:1.4}
+.mh-feat-no{color:var(--ink-muted)}
+.mh-feat-check{color:var(--good);flex:0 0 auto;font-weight:700}
+.mh-feat-x{color:var(--ink-muted);flex:0 0 auto;opacity:0.75}
+.mh-period-toggle{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--panel)}
+.mh-period-toggle button{appearance:none;border:0;background:transparent;color:var(--ink-muted);font:inherit;font-size:13px;font-weight:600;padding:6px 16px;border-radius:999px;cursor:pointer;transition:background .15s ease,color .15s ease}
+.mh-period-toggle button.is-on{background:var(--accent);color:var(--lane-ink)}
+.mh-period-toggle button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mh-compare-tbl th.mh-cell,.mh-compare-tbl td.mh-cell{text-align:center}
+.mh-compare-tbl th.mh-col-rec,.mh-compare-tbl td.mh-col-rec{background:rgba(212,255,58,0.05)}
+.mh-compare-tbl tr.mh-grp td{font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-muted);font-weight:700;padding-top:18px;background:transparent;border-bottom:1px solid var(--border)}
+.mh-compare-tbl tbody tr.mh-grp:hover{background:transparent}
+</style>"""
+
+
 def _hero_word_cycle_html() -> str:
     """The signed-out hero's cycling content-type accent (U.9).
 
@@ -25863,41 +25893,83 @@ what you're doing, what they should do.</p>
         except Exception:
             list_price = None
 
+        # --- Price formatting (UI 1.20) -----------------------------------
+        # The ONLY real number is the evidence-gated annual list price; the
+        # per-month figure is that same annual price expressed per month for
+        # the display toggle (MediaHub bills annually only — never a separate,
+        # invented monthly price). Both are absent until the PC.4 gate is met.
+        _symbols = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}
+
+        def _money(pence: int, symbol: str) -> str:
+            return f"{symbol}{pence // 100}" if pence % 100 == 0 else f"{symbol}{pence / 100:.2f}"
+
+        club_price_html = ""
+        period_toggle_html = ""
+        if list_price is not None:
+            symbol = _symbols.get(list_price["currency"], "")
+            annual_pence = int(list_price["amount_pence"])
+            monthly_pence = round(annual_pence / 12)  # display-only per-month split
+            club_price_html = (
+                '<div class="mh-price">'
+                '<span class="mh-price-annual">'
+                f'<span class="mh-price-fig">{_money(annual_pence, symbol)}</span>'
+                '<span class="mh-price-per">/year</span></span>'
+                '<span class="mh-price-monthly">'
+                f'<span class="mh-price-fig">{_money(monthly_pence, symbol)}</span>'
+                '<span class="mh-price-per">/mo</span></span>'
+                "</div>"
+                '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
+            )
+            # The billing-period control is a per-year/per-month *display*
+            # toggle for the same annual plan — only shown when there is a real
+            # price to break down. Annual is the no-JS default.
+            period_toggle_html = (
+                '<div class="mh-period-toggle" role="group" aria-label="Show price per period">'
+                '<button type="button" class="is-on" data-period="annual" aria-pressed="true">Per year</button>'
+                '<button type="button" data-period="monthly" aria-pressed="false">Per month</button>'
+                "</div>"
+                '<p class="dim" style="font-size:12px;text-align:center;margin:10px auto 0;max-width:460px">'
+                "Every plan is billed annually &mdash; the per-month figure is simply the "
+                "annual price shown per month.</p>"
+            )
+
+        def _card_feature_li(row, plan) -> str:
+            """One check/cross feature line on a plan card (matrix-driven)."""
+            cell = _billing.cell_for(row, plan)
+            if cell is False:
+                return (
+                    '<li class="mh-feat mh-feat-no">'
+                    '<span class="mh-feat-x" aria-hidden="true">&times;</span>'
+                    '<span class="mh-sr-only">Not included: </span>'
+                    f"<span>{_h(row.label)}</span></li>"
+                )
+            label = _h(row.label)
+            if isinstance(cell, str):
+                label = f'{label} <span class="dim">&middot; {_h(cell)}</span>'
+            return (
+                '<li class="mh-feat mh-feat-yes">'
+                '<span class="mh-feat-check" aria-hidden="true">&check;</span>'
+                f"<span>{label}</span></li>"
+            )
+
         cards = ""
         for tier in _billing.TIERS:
             is_current = tier.plan == plan_now and signed_in
+            is_rec = tier.plan == _auth.PLAN_CLUB
             features = "".join(
-                f'<li style="margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
-                '<span aria-hidden="true" style="color:var(--good);flex:0 0 auto">&check;</span>'
-                f"<span>{_h(f)}</span></li>"
-                for f in tier.features
+                _card_feature_li(row, tier.plan) for row in _billing.card_rows()
             )
             # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
             if tier.plan == _auth.PLAN_FREE:
-                price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
-            elif tier.plan == _auth.PLAN_CLUB and list_price is not None:
-                # PC.4 gate met: commit the evidence-derived annual price.
-                amount = list_price["amount_pence"]
-                symbol = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}.get(
-                    list_price["currency"], ""
-                )
-                if amount % 100 == 0:
-                    figure = f"{symbol}{amount // 100}"
-                else:
-                    figure = f"{symbol}{amount / 100:.2f}"
-                price_html = (
-                    f'<div style="font-size:30px;font-weight:800;line-height:1">{figure}'
-                    '<span style="font-size:14px;font-weight:600;color:var(--ink-muted)">'
-                    "/year</span></div>"
-                    '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
-                )
+                price_html = '<div class="mh-price"><span class="mh-price-fig">Free</span></div>'
+            elif tier.plan == _auth.PLAN_CLUB and club_price_html:
+                price_html = club_price_html  # PC.4 gate met — evidence-derived
             else:
                 # PC.4 gate unmet (or no evidence for this tier): the honest
                 # state is "Pricing TBC" — never a guessed number. When the
                 # tier is purchasable via an env-configured Stripe Price, the
                 # exact amount still shows at checkout.
-                purchasable = _billing.plan_purchasable(tier.plan)
-                if purchasable:
+                if _billing.plan_purchasable(tier.plan):
                     price_html = (
                         '<div style="font-size:15px;color:var(--ink-muted)" '
                         'title="The exact price is shown at checkout">Pricing TBC</div>'
@@ -25949,20 +26021,62 @@ what you're doing, what they should do.</p>
                         f"Upgrade to {_h(tier.name)}</a>"
                     )
 
-            highlight = (
-                "border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)"
-                if tier.plan == _auth.PLAN_CLUB
-                else "border:1px solid var(--border)"
+            rec_badge = (
+                '<span class="mh-rec-badge">Recommended</span>' if is_rec else ""
             )
             cards += (
-                f'<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px;{highlight}">'
+                f'<div class="card mh-plan-card{" is-rec" if is_rec else ""}">'
+                f"{rec_badge}"
                 f'<div><div style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;'
                 f'color:var(--ink-muted);margin-bottom:6px">{_h(tier.name)}</div>{price_html}'
                 f'<div class="dim" style="font-size:13px;margin-top:8px">{_h(tier.blurb)}</div></div>'
-                f'<ul style="list-style:none;padding:0;margin:0;font-size:13px;flex:1">{features}</ul>'
+                f'<ul class="mh-feat-list">{features}</ul>'
                 f"{cta}"
                 "</div>"
             )
+
+        # --- Feature comparison table (UI 1.20) ---------------------------
+        def _table_cell(cell) -> str:
+            if cell is True:
+                return (
+                    '<span class="mh-feat-check" aria-hidden="true">&check;</span>'
+                    '<span class="mh-sr-only">Included</span>'
+                )
+            if cell is False:
+                return (
+                    '<span class="mh-feat-x" aria-hidden="true">&times;</span>'
+                    '<span class="mh-sr-only">Not included</span>'
+                )
+            return _h(str(cell))
+
+        rows_html = ""
+        for group, rows in _billing.comparison_groups():
+            rows_html += f'<tr class="mh-grp"><td colspan="4">{_h(group)}</td></tr>'
+            for row in rows:
+                rows_html += (
+                    "<tr>"
+                    f"<td>{_h(row.label)}</td>"
+                    f'<td class="mh-cell">{_table_cell(_billing.cell_for(row, _auth.PLAN_FREE))}</td>'
+                    f'<td class="mh-cell mh-col-rec">{_table_cell(_billing.cell_for(row, _auth.PLAN_CLUB))}</td>'
+                    f'<td class="mh-cell">{_table_cell(_billing.cell_for(row, _auth.PLAN_FEDERATION))}</td>'
+                    "</tr>"
+                )
+        compare_html = (
+            '<section style="margin-top:var(--sp-7)">'
+            '<h2 style="font-size:20px;margin:0 0 4px">Compare every plan</h2>'
+            '<p class="dim" style="font-size:13px;margin:0 0 16px">'
+            "Everything each plan includes, feature by feature.</p>"
+            '<div style="overflow-x:auto">'
+            '<table class="mh-compare-tbl" style="min-width:560px">'
+            "<thead><tr>"
+            '<th scope="col">Feature</th>'
+            '<th scope="col" class="mh-cell">Free</th>'
+            '<th scope="col" class="mh-cell mh-col-rec">Club</th>'
+            '<th scope="col" class="mh-cell">Federation</th>'
+            "</tr></thead>"
+            f"<tbody>{rows_html}</tbody>"
+            "</table></div></section>"
+        )
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
@@ -25976,18 +26090,39 @@ what you're doing, what they should do.</p>
             f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
         )
 
+        toggle_block = (
+            f'<div style="display:flex;justify-content:center;margin-bottom:var(--sp-5)">{period_toggle_html}</div>'
+            if period_toggle_html
+            else ""
+        )
+        # The toggle flips the grid's data-attribute; annual is the no-JS default.
+        toggle_js = (
+            "<script>(function(){var g=document.getElementById('mh-plan-grid'),"
+            "t=document.querySelector('.mh-period-toggle');if(!g||!t)return;"
+            "t.addEventListener('click',function(e){var b=e.target.closest('button[data-period]');"
+            "if(!b)return;g.setAttribute('data-mh-period',b.getAttribute('data-period'));"
+            "t.querySelectorAll('button').forEach(function(x){var on=x===b;"
+            "x.classList.toggle('is-on',on);x.setAttribute('aria-pressed',on?'true':'false');});});})();</script>"
+            if period_toggle_html
+            else ""
+        )
+
         body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
+            _PRICING_CSS
+            + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper &mdash; ask us.</p>"
+            "Every plan is billed annually &mdash; compare what&rsquo;s included below.</p>"
             "</section>"
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">'
+            + toggle_block
+            + '<div class="mh-plan-grid" id="mh-plan-grid" data-mh-period="annual">'
             f"{cards}</div>"
             f"{note_html}"
+            f"{compare_html}"
+            + toggle_js
         )
-        return _layout("Pricing", body, active="signin")
+        return _layout("Pricing", body, active="pricing")
 
     # ---- /billing -----------------------------------------------------
     @app.route("/billing", methods=["GET"])

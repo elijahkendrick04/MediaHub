@@ -96,6 +96,105 @@ TIERS: tuple[TierInfo, ...] = (
     ),
 )
 
+
+@dataclass(frozen=True)
+class FeatureRow:
+    """One row of the ``/pricing`` feature-comparison matrix (UI 1.20).
+
+    A cell is ``True`` (included → ✓), ``False`` (not included → ✗), or a
+    short string (a specific value/limit, e.g. ``"Unlimited"`` / ``"3 / month"``
+    — which implies *included*). The cell attribute names are deliberately the
+    plan ids (``free`` / ``club`` / ``federation``) so the web layer can read a
+    cell with ``getattr(row, plan)`` / :func:`cell_for`.
+
+    ``card`` flags the high-signal rows that also render as the per-tier
+    check/cross list on the plan cards. This matrix is the **single source of
+    truth** for both the cards' check/cross lists and the full comparison
+    table; like ``TIERS`` it carries **no price** — the figure is still the
+    evidence-gated annual list price resolved at render time.
+    """
+
+    group: str
+    label: str
+    free: "bool | str"
+    club: "bool | str"
+    federation: "bool | str"
+    card: bool = False
+
+
+# The pricing comparison matrix. Derived from (and kept consistent with) the
+# ``TIERS`` copy above — that is the marketing summary, this is the row-by-row
+# grid. Order here is the render order; rows sharing a ``group`` are emitted
+# under one group heading (see :func:`comparison_groups`).
+COMPARISON_ROWS: tuple[FeatureRow, ...] = (
+    FeatureRow(
+        "Content & generation", "Content runs",
+        "3 / month", "Unlimited", "Unlimited", card=True,
+    ),
+    FeatureRow(
+        "Content & generation", "On-brand captions, graphics & motion",
+        True, True, True,
+    ),
+    FeatureRow(
+        "Content & generation", "Priority rendering",
+        False, True, True, card=True,
+    ),
+    FeatureRow(
+        "Content & generation", "Manual export — copy & download",
+        True, True, True,
+    ),
+    FeatureRow(
+        "Branding", "Brand profiles",
+        "1", "1", "Multi-club", card=True,
+    ),
+    FeatureRow(
+        "Scheduling & scale", "Auto scheduling",
+        False, True, True, card=True,
+    ),
+    FeatureRow(
+        "Scheduling & scale", "Multi-club workspaces",
+        False, False, True, card=True,
+    ),
+    FeatureRow(
+        "Scheduling & scale", "Enterprise tools",
+        False, False, True,
+    ),
+    FeatureRow(
+        "Support", "Support",
+        "Community", "Email", "Onboarding & priority", card=True,
+    ),
+)
+
+
+def cell_for(row: FeatureRow, plan: str) -> "bool | str":
+    """Read a plan's cell from a comparison row.
+
+    Plan ids map straight onto the :class:`FeatureRow` attributes; an unknown
+    plan (e.g. the operator-only ``owner`` tier, never shown on /pricing) reads
+    as ``False`` rather than raising.
+    """
+    return getattr(row, plan, False)
+
+
+def comparison_groups() -> list[tuple[str, list[FeatureRow]]]:
+    """``COMPARISON_ROWS`` as ordered ``(group_name, rows)`` pairs.
+
+    Preserves declaration order and coalesces consecutive rows that share a
+    group — the render order is the data order.
+    """
+    groups: list[tuple[str, list[FeatureRow]]] = []
+    for row in COMPARISON_ROWS:
+        if not groups or groups[-1][0] != row.group:
+            groups.append((row.group, []))
+        groups[-1][1].append(row)
+    return groups
+
+
+def card_rows() -> tuple[FeatureRow, ...]:
+    """The high-signal rows shown as the per-tier check/cross list on cards."""
+    return tuple(r for r in COMPARISON_ROWS if r.card)
+
+
 # Map a paid plan to the env var holding its Stripe Price id.
 _PLAN_PRICE_ENV = {
     PLAN_CLUB: "STRIPE_PRICE_CLUB",
