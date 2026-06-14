@@ -161,3 +161,44 @@ def director_note(name: str) -> str:
         clipped = text[:_NOTE_MAX_CHARS].rsplit(" ", 1)[0].rstrip(",;:")
         text = clipped + " …"
     return text
+
+
+_SUMMARY_MAX_CHARS = 200
+
+
+@lru_cache(maxsize=None)
+def archetype_summary(name: str) -> str:
+    """One plain-text line describing WHAT an archetype is — its structural
+    signature — for the template/archetype gallery (UI 1.10).
+
+    Sourced from the same authored ``<name>.notes.md`` that feeds
+    :func:`director_note`, but from the prose *before* the "When the director
+    should pick it" passage (which ``director_note`` already surfaces). A
+    leading ``# heading`` and any leading bold section label
+    (``**Family / structural signature.**``) are dropped, markdown emphasis is
+    stripped, whitespace is collapsed, and the text is clipped to a clean first
+    sentence (or a word boundary) so a gallery card stays compact. Returns
+    ``""`` when the notes file is missing/unreadable; callers then fall back to
+    their own short blurb.
+    """
+    path = V2_DIR / f"{name}.notes.md"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = _WHEN_TO_PICK_RE.search(raw)
+    body = raw[: m.start()] if m else raw
+    # drop a leading "# name" heading …
+    body = re.sub(r"\A\s*#[^\n]*\n", "", body)
+    # … and a leading bold section label, e.g. "**Family / structural signature.**"
+    body = re.sub(r"\A\s*\*\*[^*]+\*\*\.?\s*", "", body)
+    text = " ".join(_MD_NOISE_RE.sub("", body).split())
+    if not text:
+        return ""
+    if len(text) > _SUMMARY_MAX_CHARS:
+        cut = text.rfind(". ", 0, _SUMMARY_MAX_CHARS)
+        if cut >= 60:
+            text = text[: cut + 1]
+        else:
+            text = text[:_SUMMARY_MAX_CHARS].rsplit(" ", 1)[0].rstrip(",;:") + " …"
+    return text

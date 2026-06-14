@@ -138,6 +138,58 @@
     }
   }
 
+  /* --- Text-generate (immediate): the "AI is writing" caption type-on ---
+     Reveals an element's text word-by-word *right now* — for a read-only
+     generated-caption preview that's already on screen (roadmap UI2.7), not a
+     scroll heading. Differs from splitWords() in two ways that matter for a
+     caption: it fires immediately (no IntersectionObserver), and it PRESERVES
+     the original whitespace/newlines (splitWords collapses them, which would
+     flatten a multi-line caption rendered under white-space:pre-wrap).
+     The caption's editable textarea is never passed here — it stays plain.
+     Re-building via textContent/createTextNode keeps it XSS-safe; CSS handles
+     prefers-reduced-motion (words just appear, no animation). Fails safe: any
+     error leaves the original text visible. Returns the element. */
+  MH.typeOn = function (el) {
+    if (!el) return el;
+    // Already typed (e.g. a re-init pass) — just ensure it's revealed.
+    if (el.getAttribute("data-mh-typed") === "1") { el.classList.add("is-in"); return el; }
+    try {
+      var text = el.textContent;
+      el.setAttribute("data-mh-typed", "1");
+      el.setAttribute("data-mh-split", "1"); // keep splitWords() off this node
+      el.classList.add("mh-text-generate");
+      if (!text || !text.trim()) { el.classList.add("is-in"); return el; }
+      // Tokenise into words + whitespace runs; wrap words, keep spaces verbatim.
+      var parts = text.split(/(\s+)/), wi = 0;
+      el.textContent = "";
+      for (var i = 0; i < parts.length; i++) {
+        var part = parts[i];
+        if (!part) continue;
+        if (/^\s+$/.test(part)) {
+          el.appendChild(document.createTextNode(part));
+        } else {
+          var span = document.createElement("span");
+          span.className = "mh-word";
+          span.style.setProperty("--i", wi++);
+          span.textContent = part;
+          el.appendChild(span);
+        }
+      }
+      // Keep the whole reveal time-bounded regardless of caption length:
+      // ~1.5s of stagger spread across the words, clamped to a readable 18–55ms.
+      var stagger = wi > 1 ? clamp(Math.round(1500 / wi), 18, 55) : 55;
+      el.style.setProperty("--mh-stagger", stagger + "ms");
+      // The element is already on screen, so trigger the stagger immediately
+      // (next frame, so the hidden initial state paints first). Under reduced
+      // motion the CSS shows every word at once — adding .is-in is still safe.
+      if (REDUCE) { el.classList.add("is-in"); return el; }
+      requestAnimationFrame(function () { el.classList.add("is-in"); });
+    } catch (e) {
+      el.classList.add("is-in"); // fail safe — never hide the caption
+    }
+    return el;
+  };
+
   /* --- Flapboard: split-flap settle to a target string ---------------- */
   var FLAP_GLYPHS = "0123456789:.";
   function runFlap(el) {
@@ -403,6 +455,111 @@
               '<span class="mh-steploader__label">' + esc(lines[i]) + "</span></div>";
     }
     container.innerHTML = html;
+  };
+
+  /* --- Cursor-anchored progress / status readout (UI1.26) -------------
+     A small "NN% · status" chip that follows the cursor during a long
+     action (render / upload) and is removed on completion. Imperative —
+     a long action creates one, feeds it progress, then dismisses it:
+
+         var r = MH.cursorReadout({ label: 'Rendering reel', percent: 0 });
+         r.set(42);                 // percent only (label unchanged)
+         r.set(null, 'Encoding');   // label only (percent unchanged)
+         r.set(80, 'Muxing audio'); // both
+         r.done();                  // fade out + remove (disappears)
+
+     Honours prefers-reduced-motion: instead of tracking the pointer (a
+     continuous pointer-driven motion) the chip PINS to a fixed corner,
+     so the readout still shows but nothing chases the cursor. It is
+     pointer-events:none (CSS) so it can never intercept a click, and is
+     fully isolated — a thrown error here never breaks the host action. */
+  MH.cursorReadout = function (opts) {
+    opts = opts || {};
+    var noop = { set: function () {}, status: function () {}, done: function () {}, remove: function () {} };
+    if (typeof document === "undefined" || !document.body) return noop;
+    var el, pctEl, labEl;
+    try {
+      el = document.createElement("div");
+      el.className = "mh-cursor-readout";
+      if (opts.accent === "medal") el.setAttribute("data-accent", "medal");
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      pctEl = document.createElement("span");
+      pctEl.className = "mh-cursor-readout__pct display-num";
+      labEl = document.createElement("span");
+      labEl.className = "mh-cursor-readout__label";
+      el.appendChild(pctEl);
+      el.appendChild(labEl);
+      document.body.appendChild(el);
+    } catch (e) { return noop; }
+
+    var pinned = REDUCE;            // reduced-motion: don't chase the pointer
+    var x = 0, y = 0, tracking = false, raf = 0, removed = false;
+    function place() {
+      raf = 0;
+      if (removed) return;
+      var w = el.offsetWidth || 0, h = el.offsetHeight || 0;
+      var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      // Offset down-right of the cursor; clamp so it never spills off-screen.
+      var px = clamp(x + 16, 8, Math.max(8, vw - w - 8));
+      var py = clamp(y + 18, 8, Math.max(8, vh - h - 8));
+      el.style.transform = "translate(" + px + "px," + py + "px)";
+    }
+    function onMove(ev) {
+      x = ev.clientX; y = ev.clientY;
+      if (!tracking) { tracking = true; el.classList.add("is-in"); }
+      if (!raf) raf = requestAnimationFrame(place);
+    }
+    if (pinned) {
+      el.classList.add("is-pinned", "is-in");
+    } else {
+      document.addEventListener("pointermove", onMove, { passive: true });
+      // If the pointer never moves (e.g. keyboard-triggered action), still
+      // reveal the readout after a beat, pinned to the corner.
+      setTimeout(function () {
+        if (!tracking && !removed) el.classList.add("is-pinned", "is-in");
+      }, 450);
+    }
+
+    var lastPct = null;
+    function fmtPct(p) {
+      if (p == null || typeof p !== "number" || isNaN(p)) return null;
+      return clamp(Math.round(p), 0, 100) + "%";
+    }
+    function set(pct, status) {
+      if (removed) return;
+      var s = fmtPct(pct);
+      if (s != null) { lastPct = s; pctEl.textContent = s; pctEl.style.display = ""; }
+      else if (lastPct == null) { pctEl.style.display = "none"; }
+      if (status != null) labEl.textContent = String(status);
+    }
+    set(opts.percent, opts.label != null ? opts.label : opts.status);
+
+    function cleanup() {
+      if (!pinned) { try { document.removeEventListener("pointermove", onMove); } catch (e) {} }
+    }
+    return {
+      set: set,
+      status: function (text) { set(null, text); },
+      done: function () {
+        if (removed) return;
+        removed = true; cleanup();
+        var rm = function () { if (el && el.parentNode) el.parentNode.removeChild(el); };
+        if (REDUCE) { rm(); return; }   // no exit animation under reduced motion
+        el.classList.remove("is-in");
+        el.classList.add("is-out");
+        var fired = false;
+        var go = function () { if (!fired) { fired = true; rm(); } };
+        try { el.addEventListener("transitionend", go); } catch (e) {}
+        setTimeout(go, 360);            // belt-and-braces if transitionend never fires
+      },
+      remove: function () {
+        if (removed) return;
+        removed = true; cleanup();
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      },
+    };
   };
 
   /* --- Init / re-init ------------------------------------------------- */

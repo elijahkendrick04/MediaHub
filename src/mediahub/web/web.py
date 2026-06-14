@@ -1376,6 +1376,92 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
+def _cutout_provider_label() -> str:
+    """Friendly name of the background remover that produces cut-outs.
+
+    Used for explainability on the cut-out before/after preview (UI2.1) so a
+    user knows *what* knocked the background out, not just the result.
+    """
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        name = (getattr(get_bg_remover(), "name", "") or "").lower()
+    except Exception:
+        name = ""
+    if "photoroom" in name:
+        return "Photoroom"
+    if "replicate" in name:
+        return "Replicate"
+    if "rembg" in name or "local" in name or "server" in name:
+        return "the on-server rembg model"
+    return "the configured background remover"
+
+
+def _v8_ensure_cutout(asset) -> "tuple[Optional[Path], str]":
+    """Resolve the background-removed cut-out PNG for a media asset (UI2.1).
+
+    Returns ``(path, status)`` where ``status`` is one of:
+
+      * ``"cached"``      — a persisted cut-out already exists, reused as-is
+      * ``"generated"``   — produced now (and persisted onto the asset)
+      * ``"unavailable"`` — no working background remover on this deployment
+      * ``"failed"``      — a remover ran but produced nothing usable
+      * ``"no_source"``   — the original file is missing
+
+    Honest-error rule (CLAUDE.md): when no real remover is available we return
+    ``"unavailable"`` rather than rembg's pass-through (which copies the whole
+    image with an alpha channel and removes *nothing*). A fake cut-out that
+    looks identical to the original is worse than an honest "not available".
+    The work is delegated to the renderer's own cut-out pipeline so the
+    preview shares the exact same DATA_DIR cache as the graphics engine.
+    """
+    if asset is None:
+        return None, "no_source"
+    # 1. Already have a usable cut-out on disk?
+    cp = getattr(asset, "cutout_path", None)
+    try:
+        if cp and Path(cp).exists() and Path(cp).stat().st_size > 1000:
+            return Path(cp), "cached"
+    except OSError:
+        pass
+    src = Path(getattr(asset, "path", "") or "")
+    if not src.exists():
+        return None, "no_source"
+    # 2. Is a *real* background remover available? Never fake it.
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        remover = get_bg_remover()
+    except Exception:
+        remover = None
+    if remover is None or not remover.is_available():
+        return None, "unavailable"
+    # 3. Generate via the shared renderer cut-out path (same cache the
+    #    graphics engine uses, so a preview warms the render and vice versa).
+    try:
+        from mediahub.graphic_renderer.render import _maybe_cut_out_athlete
+
+        out = Path(
+            _maybe_cut_out_athlete(src, profile_id=getattr(asset, "profile_id", None) or "default")
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("cutout preview: generation failed for %s: %s", getattr(asset, "id", "?"), exc)
+        return None, "failed"
+    try:
+        same = out.resolve() == src.resolve()
+    except OSError:
+        same = str(out) == str(src)
+    if same or not out.exists():
+        return None, "failed"
+    # 4. Persist the link so future loads (and the renderer) skip the work.
+    try:
+        if _v8_get_media_store is not None:
+            _v8_get_media_store().update_fields(getattr(asset, "id", ""), {"cutout_path": str(out)})
+    except Exception:  # pragma: no cover - best-effort persistence
+        pass
+    return out, "generated"
+
+
 _SRC_ROOT = Path(__file__).resolve().parents[1]  # src/mediahub/ &mdash; local dev default
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
@@ -1796,12 +1882,6 @@ _CYCLE_PH_MOMENT = (
     "Try: relay squad breaks the club record",
     "Try: medal haul from the regional gala",
 )
-_CYCLE_PH_SEARCH = (
-    "Try: county championships",
-    "Try: spring gala 2026",
-    "Try: regionals.hy3",
-    "Try: run id 7f3c9a",
-)
 _CYCLE_PH_RESEARCH = (
     "Try: 2024 county championship headline results",
     "Try: who set the regional 100m free record this season",
@@ -1828,9 +1908,43 @@ def _cycle_ph_attr(phrases) -> str:
 # Precomputed once at import — the lists are static, so there's no reason to
 # rebuild the escaped attribute on every request.
 _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
-_CYCLE_PH_ATTR_SEARCH = _cycle_ph_attr(_CYCLE_PH_SEARCH)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+
+# UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
+# Vanish input (.mh-vanish): a rotating overlay-placeholder element
+# (.mh-vanish__ph) that swap-fades through real example queries, instead of the
+# UI 1.1 typewriter-through-the-native-placeholder cycle. The native placeholder
+# is emptied (the overlay carries the hint), so the input keeps an explicit
+# aria-label as its accessible name. bindVanish() in ui-kit.js reads this
+# pipe-delimited list from data-mh-placeholders and rotates it (paused while the
+# field holds text, no rotation under prefers-reduced-motion). The first phrase
+# is also baked into the overlay element server-side so the hint reads with no
+# JS, and a :placeholder-shown CSS rule hides the overlay the instant the box
+# holds text even if .is-typing never gets toggled (no-JS / pre-init safety).
+_VANISH_PH_SEARCH = (
+    "Search meet name, file or run id…",
+    "Search county championships…",
+    "Search spring gala 2026…",
+    "Find a file like regionals.hy3…",
+    "Jump to a run id like 7f3c9a…",
+)
+
+
+def _vanish_ph_attr(phrases) -> str:
+    """Render the ``data-mh-placeholders`` attribute for a Vanish input.
+
+    Phrases are joined with `` | `` (``bindVanish()`` in ``ui-kit.js`` splits on
+    the pipe and trims) and HTML-escaped so the value is safe inside a
+    double-quoted attribute. Returns the whole ``data-mh-placeholders="…"`` token
+    so call sites just drop it onto the ``.mh-vanish`` container.
+    """
+    return f'data-mh-placeholders="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the list is static.
+_VANISH_PH_ATTR_SEARCH = _vanish_ph_attr(_VANISH_PH_SEARCH)
 
 
 # Console page body (Capability 3c). A plain string — NOT an f-string — so the
@@ -2134,6 +2248,22 @@ def _init_db():
             file_name TEXT,
             progress_log TEXT,       -- JSON array, streamed for cross-worker polls
             heartbeat_at TEXT        -- ISO ts, advanced while the pipeline runs
+        );
+        -- UI 1.25 — emoji reactions on generated cards + the review queue.
+        -- One row per (card, emoji, anonymous reactor): the per-card tally is
+        -- COUNT(*) grouped by emoji, so a reactor counts once per emoji and a
+        -- second tap toggles their row off. The composite PK is the only index
+        -- needed — its (run_id, card_id) leftmost prefix covers both the
+        -- per-card tally and the per-run "my reactions" lookup. `emoji` is
+        -- constrained to a server-side allowlist before any INSERT, so no
+        -- arbitrary user string ever lands here.
+        CREATE TABLE IF NOT EXISTS card_reactions (
+            run_id     TEXT NOT NULL,
+            card_id    TEXT NOT NULL,
+            emoji      TEXT NOT NULL,
+            reactor_id TEXT NOT NULL,
+            created_at TEXT,
+            PRIMARY KEY (run_id, card_id, emoji, reactor_id)
         );
     """)
     # Additive migration for DBs created before progress_log / heartbeat_at /
@@ -2559,6 +2689,73 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     )
 
 
+# UI 1.25 — Emoji reactions. A FIXED, server-controlled allowlist: these three
+# are the only values that can ever be written to `card_reactions` or rendered
+# into a reaction strip. Keeping the set closed means no user-supplied string
+# reaches the DB or the HTML, so the feature carries no stored-XSS / data-bloat
+# surface. The order here is the left-to-right render order of the buttons.
+REACTION_EMOJI: tuple[str, ...] = ("👍", "❤️", "🔥")
+
+
+def _reaction_counts_for_run(run_id: str) -> dict[str, dict[str, int]]:
+    """Server-side reaction tally for a whole run: ``{card_id: {emoji: count}}``.
+
+    One indexed query (the ``card_reactions`` PK covers ``WHERE run_id=?``), so a
+    150-card review page tallies every reaction without a per-card round-trip.
+    Best-effort: any DB error yields an empty map and the strips render at zero
+    rather than 500-ing the page. Only allowlisted emoji are surfaced.
+    """
+    out: dict[str, dict[str, int]] = {}
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT card_id, emoji, COUNT(*) AS n FROM card_reactions "
+            "WHERE run_id=? GROUP BY card_id, emoji",
+            (run_id,),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            if r["emoji"] in REACTION_EMOJI:
+                out.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
+    except Exception:
+        pass
+    return out
+
+
+def _render_reactions(
+    run_id: str, card_id: str, run_counts: dict[str, dict[str, int]] | None = None
+) -> str:
+    """Render the per-card emoji reaction strip (UI 1.25).
+
+    The counts are tallied server-side and baked into the markup so the strip is
+    correct on first paint and survives with JS disabled; the global reaction
+    script in ``_layout`` then enhances it (toggle via fetch, no page reload, and
+    a load-time highlight of *this* client's reactions). ``run_counts`` is the
+    whole-run tally from :func:`_reaction_counts_for_run`, looked up per card so
+    the page makes a single DB query rather than one per card. Every emoji comes
+    from the fixed :data:`REACTION_EMOJI` allowlist — nothing user-supplied is
+    rendered here.
+    """
+    counts = (run_counts or {}).get(card_id, {}) if run_counts else {}
+    btns = []
+    for emoji in REACTION_EMOJI:
+        n = int(counts.get(emoji, 0) or 0)
+        hidden = "" if n else " hidden"
+        btns.append(
+            f'<button type="button" class="mh-react-btn"'
+            f' data-mh-react-emoji="{_h(emoji)}"'
+            f' data-mh-react-run="{_h(run_id)}" data-mh-react-card="{_h(card_id)}"'
+            f' aria-pressed="false" aria-label="React {_h(emoji)}" title="React {_h(emoji)}">'
+            f'<span class="mh-react-emoji" aria-hidden="true">{emoji}</span>'
+            f'<span class="mh-react-count" data-mh-react-count{hidden}>{n}</span>'
+            f"</button>"
+        )
+    return (
+        f'<div class="mh-reactions" data-mh-react-card="{_h(card_id)}"'
+        f' role="group" aria-label="Quick reactions">' + "".join(btns) + "</div>"
+    )
+
+
 def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     """Return a friendly HTML page that auto-refreshes every 4 seconds."""
     try:
@@ -2631,6 +2828,9 @@ def _delete_run(run_id: str) -> bool:
         pass
     conn = _db()
     conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+    # UI 1.25 — cascade the run's emoji reactions so a deleted meet leaves no
+    # orphan tally behind (and a recycled run id can never inherit stale counts).
+    conn.execute("DELETE FROM card_reactions WHERE run_id = ?", (run_id,))
     conn.commit()
     conn.close()
     return existed
@@ -3176,7 +3376,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-      function _renderActive(idx) {
+      function _renderActive(idx, reveal) {
         var active = variants[idx] || text;
         if (captionDiv) {
           var pickerHtml = '';
@@ -3187,14 +3387,22 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.innerHTML = pickerHtml + '<span class="mh-cap-body" style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
             btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
           });
+          // UI2.7 — word-by-word "AI is writing" reveal, on the *read-only*
+          // caption preview only and only on a fresh generation (reveal=true);
+          // variant-pill swaps re-render plainly. The editable textarea below
+          // is set with the plain value and never typed on.
+          if (reveal && window.MH && typeof MH.typeOn === 'function') {
+            var capBody = captionDiv.querySelector('.mh-cap-body');
+            if (capBody) MH.typeOn(capBody);
+          }
         }
         if (textarea) { textarea.value = active; }
       }
-      _renderActive(0);
+      _renderActive(0, true);
       // W.13 (generalised): bilingual workspaces get the side-by-side
       // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
       // so both are approved in one pass. Label + text direction come from
@@ -4414,6 +4622,29 @@ def _start_run(
                     notify_pack_ready(run_id)
                 except Exception:
                     pass
+                # In-app notifications inbox (UI 1.14) — always-on, no-config:
+                # record the "pack ready" milestone against the owning org so it
+                # lands in the bell dropdown even with no push channel set up.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
+                except Exception:
+                    pass
+            else:
+                # The pipeline reported a terminal error (rather than raising) —
+                # surface it in the inbox so the operator isn't left guessing.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        profile_id,
+                        "Run couldn't be processed",
+                        str(run.error),
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             import traceback
 
@@ -4423,6 +4654,17 @@ def _start_run(
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
             conn.commit()
             conn.close()
+            try:
+                from mediahub.notify import inbox as _inbox
+
+                _inbox.record_error(
+                    profile_id,
+                    "Run couldn't be processed",
+                    str(e),
+                    run_id=run_id,
+                )
+            except Exception:
+                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -5092,6 +5334,131 @@ header.topnav nav a.live::before {
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
+/* === UI 1.14 — Notifications inbox (bell + unread badge + dropdown) ===
+   Masthead-consistent: mono labels, --chrome rule, --lane accent. The panel
+   is position:fixed and JS-anchored under the bell so the scrollable /
+   hamburger nav can never clip it. */
+.mh-notif {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 6px;
+}
+.mh-notif-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  border-radius: 2px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.mh-notif-btn:hover,
+.mh-notif-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-notif-btn svg { width: 17px; height: 17px; display: block; }
+.mh-notif-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; line-height: 1;
+  color: #0A0B11;
+  background: var(--lane);
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 10px var(--lane-glow);
+  pointer-events: none;
+}
+.mh-notif-badge[hidden] { display: none; }
+.mh-notif-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  width: 360px; max-width: calc(100vw - 24px);
+  max-height: min(70vh, 480px);
+  display: flex; flex-direction: column;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200;
+  overflow: hidden;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-notif-panel[hidden] { display: none; }
+@keyframes mh-notif-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mh-notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--chrome);
+  flex-shrink: 0;
+}
+.mh-notif-h-title {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-notif-readall {
+  background: transparent; border: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  cursor: pointer; padding: 2px 4px;
+  transition: color var(--transition);
+}
+.mh-notif-readall:hover { color: var(--lane); }
+.mh-notif-readall:disabled { opacity: 0.35; cursor: default; }
+.mh-notif-list { overflow-y: auto; flex: 1; }
+.mh-notif-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  background: transparent; border: 0;
+  border-bottom: 1px solid rgba(245,242,232,0.07);
+  cursor: pointer; color: var(--ink); font: inherit;
+  transition: background var(--transition);
+}
+.mh-notif-item:hover { background: rgba(245,242,232,0.04); }
+.mh-notif-item.is-unread { background: rgba(212,255,58,0.05); }
+.mh-notif-item.is-unread:hover { background: rgba(212,255,58,0.09); }
+.mh-notif-dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 5px; background: var(--ink-faint);
+}
+.mh-notif-item[data-level="success"] .mh-notif-dot { background: var(--good); box-shadow: 0 0 8px rgba(94,227,154,0.5); }
+.mh-notif-item[data-level="warning"] .mh-notif-dot { background: var(--warn); }
+.mh-notif-item[data-level="error"]   .mh-notif-dot { background: var(--bad);  box-shadow: 0 0 8px rgba(255,107,107,0.5); }
+.mh-notif-item.is-read .mh-notif-dot { background: var(--ink-faint); box-shadow: none; }
+.mh-notif-text { min-width: 0; flex: 1; }
+.mh-notif-t {
+  display: block;
+  font-size: 13px; font-weight: 600; line-height: 1.3;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.mh-notif-item.is-read .mh-notif-t { color: var(--ink-muted); font-weight: 500; }
+.mh-notif-m {
+  display: block; margin-top: 2px;
+  font-size: 12px; line-height: 1.4;
+  color: var(--ink-muted); overflow-wrap: anywhere;
+}
+.mh-notif-time {
+  display: block; margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.04em;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+.mh-notif-empty {
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 34px 20px 38px; text-align: center;
+}
+.mh-notif-panel.is-empty .mh-notif-empty { display: flex; }
+.mh-notif-panel.is-empty .mh-notif-list { display: none; }
+.mh-notif-empty svg { width: 26px; height: 26px; color: var(--ink-faint); opacity: 0.7; }
+.mh-notif-empty-t { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.mh-notif-empty-s { font-size: 11.5px; color: var(--ink-faint); max-width: 220px; line-height: 1.4; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -5437,6 +5804,32 @@ p:last-child { margin-bottom: 0; }
 .btn.mh-wf-approve:hover { border-color: var(--good); background: rgba(61,220,151,0.08); box-shadow: none; }
 .btn.mh-wf-approve.is-on { background: var(--good); color: var(--lane-ink); border-color: var(--good); cursor: default; }
 .btn.mh-wf-approve.is-on:hover { background: var(--good); transform: none; box-shadow: none; }
+/* UI 1.25 — emoji reaction chips on generated cards + the review queue.
+   Quiet pills that sit beside the approve strip; the active ("you reacted")
+   state picks up the lane accent so a viewer can spot their own taps, and the
+   count only shows once at least one reaction lands. */
+.mh-reactions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mh-react-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 30px; padding: 4px 10px;
+  background: rgba(245,242,232,0.04);
+  color: var(--ink-dim);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 12px; font-weight: 600; line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition),
+              transform var(--transition), color var(--transition);
+}
+.mh-react-btn:hover { background: rgba(245,242,232,0.07); border-color: var(--chrome); transform: translateY(-1px); }
+.mh-react-btn:active { transform: translateY(0); }
+.mh-react-btn:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-react-btn .mh-react-emoji { font-size: 14px; line-height: 1; }
+.mh-react-btn .mh-react-count { font-variant-numeric: tabular-nums; min-width: 7px; text-align: center; color: var(--ink-dim); }
+.mh-react-btn .mh-react-count[hidden] { display: none; }
+.mh-react-btn.is-on { background: rgba(212,255,58,0.10); border-color: rgba(212,255,58,0.45); color: var(--lane); }
+.mh-react-btn.is-on .mh-react-count { color: var(--lane); }
 .btn.large { padding: 14px 28px; font-size: 14px; }
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
 .btn.mono {
@@ -6913,6 +7306,199 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   letter-spacing: 0;
 }
 
+/* === UI 1.10 — Template / archetype gallery ============================== */
+.mh-arch-note {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim); line-height: 1.55;
+  max-width: 64ch; margin: 0 0 var(--sp-5);
+}
+/* Filter chips — server-nav links, JS-upgraded to instant client filtering. */
+.mh-arch-filters {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+}
+.mh-arch-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition),
+              background var(--transition);
+}
+.mh-arch-chip:hover { color: var(--ink); border-color: var(--rule); text-decoration: none; }
+.mh-arch-chip:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-arch-chip.is-active {
+  color: var(--lane-ink, #0A0B11);
+  background: var(--lane);
+  border-color: var(--lane);
+}
+.mh-arch-chip-n {
+  font-size: 10px; opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.mh-arch-chip.is-active .mh-arch-chip-n { opacity: 0.85; }
+/* Visually-hidden text (count read-out for screen readers). */
+.mh-arch-sr {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* Card grid */
+.mh-arch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-7);
+}
+.mh-arch-card {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-card:hover { border-color: var(--rule); background: var(--surface-2); }
+.mh-arch-card.is-hidden { display: none; }
+.mh-arch-thumb {
+  padding: var(--sp-4) var(--sp-4) 0;
+}
+.mh-arch-svg {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.mh-arch-body {
+  display: flex; flex-direction: column;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.mh-arch-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 4px;
+}
+.mh-arch-title {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 800; color: var(--ink);
+  letter-spacing: 0.01em; margin: 0;
+  text-transform: uppercase;
+}
+.mh-arch-tag {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.mh-arch-tag[data-cat="photo"] { color: #7fd4ff; border-color: rgba(127,212,255,0.32); }
+.mh-arch-tag[data-cat="data"] { color: var(--lane); border-color: rgba(212,255,58,0.32); }
+.mh-arch-tag[data-cat="editorial"] { color: #f6a5d0; border-color: rgba(246,165,208,0.32); }
+.mh-arch-slug {
+  font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--ink-muted, var(--ink-dim));
+  opacity: 0.7;
+  margin-bottom: var(--sp-2);
+  word-break: break-all;
+}
+.mh-arch-summary {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim);
+  line-height: 1.5; margin: 0 0 var(--sp-2);
+}
+.mh-arch-when {
+  font-family: var(--font-body);
+  font-size: 12.5px; color: var(--ink-dim);
+  line-height: 1.5; margin: auto 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hairline);
+}
+.mh-arch-when-label {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--lane);
+  margin-right: 6px;
+}
+.mh-arch-empty {
+  font-family: var(--font-body);
+  font-size: 14px; color: var(--ink-dim);
+  padding: var(--sp-6); text-align: center;
+  border: 1px dashed var(--rule); border-radius: var(--radius);
+  margin-bottom: var(--sp-7);
+}
+/* Bottom CTA strip back into the Create flow. */
+.mh-arch-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.mh-arch-cta-text { display: flex; flex-direction: column; gap: 4px; }
+.mh-arch-cta-text strong {
+  font-family: var(--font-display); font-size: 16px; color: var(--ink);
+  text-transform: uppercase; letter-spacing: 0.01em;
+}
+.mh-arch-cta-text span { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
+/* Link from the Create page into the gallery. */
+.mh-arch-gallery-link {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-gallery-link:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; }
+.mh-arch-gallery-link .mh-agl-text { display: flex; flex-direction: column; gap: 2px; }
+.mh-arch-gallery-link .mh-agl-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 800;
+  color: var(--ink); text-transform: uppercase; letter-spacing: 0.02em;
+}
+.mh-arch-gallery-link .mh-agl-sub { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-dim); }
+.mh-arch-gallery-link .mh-agl-cta {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--lane);
+  white-space: nowrap;
+}
+/* Schematic preview parts — scoped to .mh-arch-svg so the short class names
+   never leak. gd = brand ground, sf = surface/secondary zone, ac = accent,
+   ik/ik2 = muted/stronger type bars, ph = photo placeholder, ln = hairline,
+   acln = accent seam, paper/dk/dkln = light editorial ground + dark ink on it,
+   onac = ink on the accent panel, ln-f = ruled cell outline. */
+.mh-arch-svg .gd { fill: var(--surface-3); }
+.mh-arch-svg .sf { fill: var(--bg); }
+.mh-arch-svg .ac { fill: var(--lane); }
+.mh-arch-svg .ik { fill: rgba(245,242,232,0.30); }
+.mh-arch-svg .ik2 { fill: rgba(245,242,232,0.58); }
+.mh-arch-svg .ph { fill: rgba(245,242,232,0.10); }
+.mh-arch-svg .onac { fill: rgba(10,11,17,0.78); }
+.mh-arch-svg .ln { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .acln { fill: none; stroke: var(--lane); stroke-width: 2; }
+.mh-arch-svg .ln-f { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .paper { fill: rgba(245,242,232,0.92); }
+.mh-arch-svg .dk { fill: rgba(10,11,17,0.55); }
+.mh-arch-svg .dkln { fill: none; stroke: rgba(10,11,17,0.40); stroke-width: 1; }
+@media (max-width: 560px) {
+  .mh-arch-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
 /* === Provider badge on home — broadcast pill === */
 .mh-provider-badge {
   display: inline-flex; align-items: center; gap: 10px;
@@ -7793,6 +8379,11 @@ def _theme_seed_style_block() -> str:
 # via `setProgress` and the bar tracks the actual work. The number is monotonic
 # and never claims "done" before the artefact exists.
 #
+# UI1.26 — every renderProgress wait also spawns a cursor-anchored mirror via
+# MH.cursorReadout (ui-kit.js): a small "NN% · phase" chip that follows the
+# pointer during the wait and disappears on complete()/stop(). It is opt-out
+# (opts.cursor === false) and degrades safely if ui-kit.js hasn't loaded yet.
+#
 # Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
 # kept as a module constant so tests can exercise the controller directly.
 _RENDER_PROGRESS_JS = """
@@ -7825,6 +8416,13 @@ _RENDER_PROGRESS_JS = """
     var fillEl= container.querySelector('.mh-render-prog-fill');
     var labEl = container.querySelector('.mh-render-prog-label');
     var subEl = container.querySelector('.mh-render-prog-sub');
+    // UI1.26 — a cursor-anchored mirror of this readout: a small "NN% · phase"
+    // chip that follows the pointer through the wait and vanishes on completion.
+    // MH.cursorReadout ships in the deferred ui-kit.js and is always loaded by
+    // the time a user triggers a render; opt out with opts.cursor === false.
+    var cursor = (opts.cursor !== false && MH.cursorReadout)
+      ? MH.cursorReadout({ label: opts.label || 'Rendering', accent: accent, percent: 0 })
+      : null;
     var raf = window.requestAnimationFrame || function(cb){ return setTimeout(function(){ cb(Date.now()); }, 32); };
     var start = Date.now();
     var cur = 0, floor = 0, lastShown = -1;
@@ -7833,12 +8431,12 @@ _RENDER_PROGRESS_JS = """
       if (v < cur) v = cur;   // monotonic — never tick backwards on a stale frame
       cur = v;
       var shown = Math.floor(v);
-      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); }
+      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); if (cursor) cursor.set(shown); }
       fillEl.style.width = v.toFixed(1) + '%';
       if (root) root.setAttribute('aria-valuenow', String(Math.round(v)));
     }
     function setText(label, sub){
-      if (label != null) labEl.textContent = label;
+      if (label != null) { labEl.textContent = label; if (cursor) cursor.status(label); }
       if (sub != null) subEl.textContent = sub;
     }
     setText(opts.label || 'Rendering', opts.sub || '');
@@ -7850,6 +8448,7 @@ _RENDER_PROGRESS_JS = """
         paint(finishFrom + (100 - finishFrom) * t);
         if (t >= 1){
           stopped = true; paint(100);
+          if (cursor) cursor.done();
           if (finishCb) setTimeout(finishCb, 170);
           return;
         }
@@ -7870,7 +8469,7 @@ _RENDER_PROGRESS_JS = """
         if (stopped || finishing){ if (cb) cb(); return; }
         finishing = true; finishFrom = cur; finishStart = Date.now(); finishCb = cb || null;
       },
-      stop: function(){ stopped = true; }
+      stop: function(){ stopped = true; if (cursor) cursor.done(); }
     };
   };
 })();
@@ -8514,6 +9113,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
@@ -8544,6 +9144,44 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       <span id="backend-pill-dot"></span>
       <span id="backend-pill-text">checking&hellip;</span>
     </a>
+    {% if signed_in %}
+    {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
+       render-complete, pack-ready and error events for the active org, backed
+       by the notify-layer inbox store and polled on the same light cadence as
+       the health pill. The dropdown panel is JS-positioned (fixed) so the
+       scrollable / hamburger nav can never clip it. #}
+    <div id="mh-notif" class="mh-notif">
+      <button id="mh-notif-btn" class="mh-notif-btn" type="button"
+              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-controls="mh-notif-panel"
+              data-list-url="{{ url_for('api_notifications') }}"
+              data-readall-url="{{ url_for('api_notifications_read_all') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
+      </button>
+      <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
+           aria-label="Notifications" hidden>
+        <div class="mh-notif-head">
+          <span class="mh-notif-h-title">Notifications</span>
+          <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
+        </div>
+        <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
+        <div id="mh-notif-empty" class="mh-notif-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="mh-notif-empty-t">You're all caught up</span>
+          <span class="mh-notif-empty-s">Render, pack, and error updates show up here.</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% if signed_in and signed_in_name %}
     <a id="active-org-chip"
        href="{{ url_for('organisation_setup') }}"
@@ -8724,6 +9362,156 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       .catch(function(){ paint(false); });
   }
   check(); setInterval(check, 30000);
+})();
+</script>
+<script>
+/* UI 1.14 — Notifications inbox. Polls /api/notifications on the same light
+   cadence as the health pill, paints the unread badge, and renders the bell
+   dropdown. The panel is position:fixed and anchored under the bell in JS so
+   the scrollable / hamburger nav can never clip it. All notification text is
+   written with textContent (never innerHTML), so a caption or error string can
+   never inject markup. Self-contained — no dependency on the MH framework. */
+(function(){
+  var btn = document.getElementById('mh-notif-btn');
+  if (!btn) return;  // signed out — no bell rendered
+  var panel   = document.getElementById('mh-notif-panel');
+  var list    = document.getElementById('mh-notif-list');
+  var badge   = document.getElementById('mh-notif-badge');
+  var readAll = document.getElementById('mh-notif-readall');
+  var LIST_URL    = btn.getAttribute('data-list-url');
+  var READALL_URL = btn.getAttribute('data-readall-url');
+  var POLL_MS = 30000;
+  var open = false;
+  var lastUnread = 0;
+
+  function ago(iso){
+    var t = Date.parse(iso);
+    if (isNaN(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 45)   return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+    try { return new Date(t).toLocaleDateString(); } catch (e) { return ''; }
+  }
+
+  function paintBadge(n){
+    lastUnread = n;
+    if (n > 0){
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.hidden = false;
+      btn.setAttribute('aria-label', 'Notifications (' + n + ' unread)');
+    } else {
+      badge.hidden = true;
+      btn.setAttribute('aria-label', 'Notifications');
+    }
+    if (readAll) readAll.disabled = (n === 0);
+  }
+
+  function el(tag, cls, text){
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render(items){
+    list.textContent = '';
+    if (!items || !items.length){ panel.classList.add('is-empty'); return; }
+    panel.classList.remove('is-empty');
+    items.forEach(function(it){
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mh-notif-item ' + (it.read ? 'is-read' : 'is-unread');
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-level', it.level || 'info');
+      row.setAttribute('data-id', it.id);
+      if (it.link) row.setAttribute('data-link', it.link);
+      row.appendChild(el('span', 'mh-notif-dot'));
+      var body = el('span', 'mh-notif-text');
+      body.appendChild(el('span', 'mh-notif-t', it.title || ''));
+      if (it.body) body.appendChild(el('span', 'mh-notif-m', it.body));
+      body.appendChild(el('span', 'mh-notif-time', ago(it.created_at)));
+      row.appendChild(body);
+      row.addEventListener('click', function(){ onItem(it); });
+      list.appendChild(row);
+    });
+  }
+
+  function poll(){
+    if (document.hidden && !open) return;
+    fetch(LIST_URL, {cache:'no-store', headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok) return;
+        paintBadge(d.unread || 0);
+        if (open) render(d.items || []);
+      })
+      .catch(function(){ /* offline — leave the last good state */ });
+  }
+
+  function safeLink(u){
+    /* Only ever follow an in-app path ("/review/…") — never an absolute /
+       cross-origin ("//host") or javascript: URL, even though links are
+       server-built today. Defence-in-depth: the text flows through a DB. */
+    if (!u || typeof u !== 'string') return '';
+    return (u.charAt(0) === '/' && u.charAt(1) !== '/') ? u : '';
+  }
+
+  function onItem(it){
+    if (!it.read){
+      fetch(LIST_URL + '/' + encodeURIComponent(it.id) + '/read',
+            {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if (d && typeof d.unread === 'number') paintBadge(d.unread); })
+        .catch(function(){});
+    }
+    var dest = safeLink(it.link);
+    if (dest){ window.location.href = dest; return; }
+    poll();
+  }
+
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.hidden = false;
+      position();
+      poll();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.hidden = true;
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
+  if (readAll){
+    readAll.addEventListener('click', function(e){
+      e.stopPropagation();
+      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(){ paintBadge(0); poll(); })
+        .catch(function(){});
+    });
+  }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+
+  poll();
+  setInterval(poll, POLL_MS);
 })();
 </script>
 <script>
@@ -9864,6 +10652,113 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       btn.textContent = origLabel;
     });
   });
+
+  // === UI 1.25 — Emoji reactions (inspired by Liveblocks) =================
+  // Quick 👍 ❤️ 🔥 reactions on generated cards + the review queue. Counts are
+  // tallied server-side and rendered into the page; this enhances each strip so
+  // a tap toggles the current client's reaction via fetch (no page reload). The
+  // client identity is an anonymous random id kept in localStorage — it only
+  // decides which chips show as "yours"; the server holds the authoritative
+  // tally. Delegated, so it covers cards added after load too.
+  (function(){
+    var LS_KEY = 'mh_reactor_id';
+    function reactorId(){
+      var id = null;
+      try { id = window.localStorage.getItem(LS_KEY); } catch(e){}
+      if (!id) {
+        id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : ('r-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+        try { window.localStorage.setItem(LS_KEY, id); } catch(e){}
+      }
+      return id;
+    }
+    function base(){ return window._API_BASE || ''; }
+    function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : v; }
+
+    function setCount(btn, n){
+      var c = btn.querySelector('[data-mh-react-count]');
+      if (!c) return;
+      c.textContent = n;
+      if (n > 0) c.removeAttribute('hidden'); else c.setAttribute('hidden', '');
+    }
+    function syncCard(cardId, counts, mine){
+      // `counts` is the authoritative per-card tally (toggle response or the
+      // load reconcile), so an emoji absent from it is genuinely zero — default
+      // missing keys to 0 rather than leaving a stale server-rendered count.
+      counts = counts || {};
+      document.querySelectorAll('.mh-react-btn[data-mh-react-card="' + esc(cardId) + '"]').forEach(function(b){
+        var em = b.getAttribute('data-mh-react-emoji');
+        setCount(b, counts[em] || 0);
+        if (mine) {
+          var on = mine.indexOf(em) !== -1;
+          b.classList.toggle('is-on', on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+      });
+    }
+
+    // Load-time reconcile: one fetch per run on the page lights up this
+    // reactor's chips and refreshes counts against the server of record.
+    function loadReactions(){
+      var runs = {};
+      document.querySelectorAll('.mh-react-btn[data-mh-react-run]').forEach(function(b){
+        runs[b.getAttribute('data-mh-react-run')] = true;
+      });
+      var rid = reactorId();
+      Object.keys(runs).forEach(function(runId){
+        var url = base() + '/api/runs/' + encodeURIComponent(runId)
+                + '/reactions?reactor_id=' + encodeURIComponent(rid);
+        fetch(url, {headers: {'Accept': 'application/json'}})
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(j){
+            if (!j || !j.ok) return;
+            var counts = j.counts || {}, mine = j.mine || {};
+            var ids = {};
+            Object.keys(counts).forEach(function(c){ ids[c] = true; });
+            Object.keys(mine).forEach(function(c){ ids[c] = true; });
+            Object.keys(ids).forEach(function(c){ syncCard(c, counts[c] || {}, mine[c] || []); });
+          })
+          .catch(function(){});
+      });
+    }
+
+    document.addEventListener('click', function(e){
+      var btn = e.target.closest('.mh-react-btn');
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      var runId = btn.getAttribute('data-mh-react-run');
+      var cardId = btn.getAttribute('data-mh-react-card');
+      var emoji = btn.getAttribute('data-mh-react-emoji');
+      if (!runId || !cardId || !emoji) return;
+      btn.disabled = true;
+      var url = base() + '/api/runs/' + encodeURIComponent(runId)
+              + '/card/' + encodeURIComponent(cardId) + '/reactions';
+      fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({emoji: emoji, reactor_id: reactorId()})
+      }).then(function(r){
+        return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+      }).then(function(o){
+        btn.disabled = false;
+        if (!o.ok || !o.body || o.body.ok === false) {
+          var msg = (o.body && o.body.error) || 'reaction failed';
+          if (window.MH && MH.toast) MH.toast('Reaction failed: ' + msg, 'error', 3000);
+          return;
+        }
+        syncCard(cardId, o.body.counts || {}, o.body.mine || []);
+      }).catch(function(){
+        btn.disabled = false;
+        if (window.MH && MH.toast) MH.toast('Reaction failed', 'error', 3000);
+      });
+    });
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadReactions);
+    } else {
+      loadReactions();
+    }
+  })();
 
   // === UI 1.1 — Cycling example-prompt placeholder (inspired by Cosmos) ===
   // Any field tagged [data-mh-cycle-placeholder="phrase | phrase | …"] types
@@ -12066,6 +12961,54 @@ def create_app() -> Flask:
             + "</div></div></section>"
         )
 
+        # --- UI 1.24 — moment-type ticker (editorial section divider). A pure-CSS
+        # marquee naming the *kinds of moments* the engine detects and ranks,
+        # used as the divider between the outputs grid (bento) and the in-feed
+        # frames. Distinct from the sport-agnostic marquee band above (small
+        # mono chips): this is a large display-type band in the SavoirFaire /
+        # SuperHi register. The item list is rendered TWICE in markup so the
+        # -50% track loop is seamless with NO JavaScript — it deliberately does
+        # NOT reuse the `.mh-marquee`/`.mh-marquee__track` classes (whose seam is
+        # JS-cloned by ui-kit.js; reusing them here would double-clone to 4
+        # copies and break the seam). Vocabulary maps 1:1 onto real detectors
+        # (PBs, medals, comebacks, finals, club records, first-time swims,
+        # qualifiers, sub-barrier breaks, relays, multi-PB weekends) — no
+        # invented achievement types; the roadmap's five lead the list.
+        moment_types = (
+            "Personal bests",
+            "Medal finishes",
+            "Comebacks",
+            "Finals",
+            "Club records",
+            "First-time swims",
+            "Qualifying times",
+            "Barrier breaks",
+            "Relay wins",
+            "Multi-PB weekends",
+        )
+
+        def _moment_ticker_run(hidden: bool) -> str:
+            # One pass over the vocabulary. Even items are filled, odd items are
+            # outline ("ghost") — the filled↔outline rhythm of the reference
+            # tickers. The alternation is set here (not via :nth-child) so it
+            # continues cleanly across the seam between the two identical copies.
+            aria = ' aria-hidden="true"' if hidden else ""
+            return "".join(
+                f'<span class="mh-moment-ticker__item'
+                f'{" is-ghost" if i % 2 else ""}"{aria}>{_h(m)}</span>'
+                for i, m in enumerate(moment_types)
+            )
+
+        moment_ticker_html = (
+            '<section class="mh-moment-ticker" '
+            'aria-label="Moments MediaHub detects and ranks">'
+            '<div class="mh-moment-ticker__viewport">'
+            '<div class="mh-moment-ticker__track">'
+            + _moment_ticker_run(hidden=False)
+            + _moment_ticker_run(hidden=True)
+            + "</div></div></section>"
+        )
+
         # U.8 — animated how-it-works pipeline diagram. Sits right after the
         # hero as a visual amplification of its "reads X … writes Y" claim,
         # ahead of the UI 1.3 inline-thumbnail headline and the numbered steps.
@@ -12086,6 +13029,7 @@ def create_app() -> Flask:
             + before_after_html
             + bento_html
             + gallery_html
+            + moment_ticker_html
             + frames_html
             + audience_html
             + promise_html
@@ -12484,9 +13428,10 @@ def create_app() -> Flask:
             )
         toolbar_html = (
             '<div class="mh-toolbar">'
-            '<div class="grow mh-search">'
+            f'<div class="grow mh-search mh-vanish" {_VANISH_PH_ATTR_SEARCH}>'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            f'<input id="mh-activity-search" type="search" {_CYCLE_PH_ATTR_SEARCH} placeholder="Search meet name, file or run id…" autocomplete="off" />'
+            '<input id="mh-activity-search" type="search" placeholder="" autocomplete="off" aria-label="Search runs by meet name, file or run id" />'
+            f'<span class="mh-vanish__ph" aria-hidden="true">{_h(_VANISH_PH_SEARCH[0])}</span>'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
@@ -12732,6 +13677,9 @@ def create_app() -> Flask:
   function show(el, msg){ el.textContent = msg; el.hidden = false; }
   function hide(el){ el.hidden = true; }
   var lastPct = 0;
+  // UI1.26 — cursor-anchored readout for the (long) site-fetch ingest. Created
+  // when the fetch starts, fed the real percent each poll, removed on done/error.
+  var cursor = null;
   function setPct(p){
     if (typeof p !== 'number' || isNaN(p)) return;
     // Monotonic: never let the bar jump backwards on a stale poll.
@@ -12739,12 +13687,14 @@ def create_app() -> Flask:
     lastPct = p;
     if (barWrap) { barWrap.hidden = false; barWrap.setAttribute('aria-valuenow', String(p)); }
     if (barFill) barFill.style.width = p + '%';
+    if (cursor) cursor.set(p);
   }
   function go(){
     var url = (input.value || '').trim();
     hide(errEl);
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
+    cursor = (window.MH && MH.cursorReadout) ? MH.cursorReadout({ label: 'Fetching results', percent: 3 }) : null;
     lastPct = 0; setPct(3);
     var fd = new FormData(); fd.append('url', url);
     fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__', 'Accept': 'application/json' }, body: fd })
@@ -12754,16 +13704,17 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, e.message); });
+      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, e.message); });
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
         if (typeof j.percent === 'number') setPct(j.percent);
-        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, j.error || 'The fetch failed.'); return; }
+        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
+        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, j.error || 'The fetch failed.'); return; }
         show(statusEl, j.progress || 'Reading the site\\u2026');
+        if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
       }).catch(function(){ setTimeout(tick, 2500); });
     };
@@ -14525,6 +15476,9 @@ def create_app() -> Flask:
         # workflow status pill and the U.3 confidence / worthiness / "why this
         # card" / factor-breakdown surfaces. This is the only card render that
         # reaches the page (`#ach-list`).
+        # UI 1.25 — tally every card's emoji reactions in one indexed query so
+        # the per-card strips render server-side without a round-trip each.
+        _react_counts = _reaction_counts_for_run(run_id)
         ach_rows_html_wf = ""
         for _why_idx, ra in enumerate(ranked_achs):
             a = ra.get("achievement", {})
@@ -14592,6 +15546,8 @@ def create_app() -> Flask:
            all happen later in the Content builder (approved cards only). -->
       <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
+        <span style="flex:1;min-width:8px"></span>
+        {_render_reactions(run_id, card_id_raw, _react_counts)}
       </div>
       <details style="margin-top:10px">
         <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">How the ranking added up &amp; evidence</summary>
@@ -17991,6 +18947,74 @@ Relay team broke club record"></textarea>
             }
         )
 
+    # ---- Notifications inbox (UI 1.14) ---------------------------------
+    #
+    # The bell-icon dropdown in the app chrome: render-complete, pack-ready,
+    # and error events for the active organisation, backed by the notify-layer
+    # inbox store (mediahub.notify.inbox). Polled by the header on a light
+    # cadence; org-scoped via _active_profile_id() so one club never sees
+    # another's events. Deep links are built here (in request context) with
+    # url_for, not persisted, so they always match the live routing.
+    def _notification_link(item: dict) -> str:
+        explicit = (item.get("click_url") or "").strip()
+        if explicit:
+            return explicit
+        rid = (item.get("run_id") or "").strip()
+        if not rid:
+            return ""
+        # A finished render lives on the content-pack page; everything else
+        # (pack-ready / error) points at the review page for that run.
+        endpoint = "content_pack" if item.get("kind") == "render_complete" else "review"
+        try:
+            return url_for(endpoint, run_id=rid)
+        except Exception:
+            return ""
+
+    @app.route("/api/notifications", methods=["GET"])
+    def api_notifications():
+        """List the active org's notifications plus its unread count.
+
+        Signed-out (no active org) returns an empty, zero-unread payload so the
+        header poll is harmless on public pages rather than a 403 the client
+        has to special-case.
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "unread": 0, "items": []})
+        unread_only = (request.args.get("unread") or "").strip().lower() in ("1", "true", "yes")
+        try:
+            limit = int(request.args.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        from mediahub.notify import inbox as _inbox
+
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        for it in items:
+            it["link"] = _notification_link(it)
+        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+
+    @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
+    def api_notifications_read(notif_id: str):
+        """Mark one notification read for the active org (tenant-scoped)."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        changed = _inbox.mark_read(pid, notif_id)
+        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+
+    @app.route("/api/notifications/read-all", methods=["POST"])
+    def api_notifications_read_all():
+        """Mark every unread notification read for the active org."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        n = _inbox.mark_all_read(pid)
+        return jsonify({"ok": True, "marked": n, "unread": 0})
+
     # ---- /healthz/usage ------------------------------------------------
     #
     # Operator-facing LLM usage dashboard. Lives under /healthz/* (same
@@ -20707,6 +21731,26 @@ function mhPlanGenerate(btn) {{
     # V7 NEW ROUTES
     # ====================================================================
 
+    # ---- /templates &mdash; the visual template/archetype gallery (UI 1.10) ---
+    @app.route("/templates")
+    def template_gallery():
+        # Browse-only gallery of the content archetypes the design director
+        # draws from, shown *before* creating a pack. Renders existing data
+        # only (the live archetype catalog + each archetype's authored notes)
+        # with deterministic schematic previews + category filters — no new
+        # API, no external service, and no way to force an archetype (the
+        # engine still picks per moment). All logic lives in the Flask-free
+        # ``template_gallery`` helper so it unit-tests without a request.
+        from mediahub.web import template_gallery as _gallery
+
+        active = _gallery.valid_category(request.args.get("category"))
+        body = _gallery.render_gallery_body(
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            active_category=active,
+        )
+        return _layout("Templates", body, active="templates")
+
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
     def make_page():
@@ -20971,6 +22015,19 @@ function mhPlanGenerate(btn) {{
                     button_label="Generate a sample pack →",
                 )
 
+        # Browse-the-templates entry point — lets a user see the card styles
+        # the engine can produce *before* picking a starting point (UI 1.10).
+        gallery_link_html = (
+            f'<a class="mh-arch-gallery-link" href="{_h(url_for("template_gallery"))}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">Browse the template gallery</span>'
+            '<span class="mh-agl-sub">See the 12 card styles your packs are '
+            "composed from — the engine picks the right one per moment.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">View templates &rarr;</span>'
+            "</a>"
+        )
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
@@ -20980,6 +22037,7 @@ function mhPlanGenerate(btn) {{
             f"{_free_tier_banner_html()}"
             f"{brand_strip_html}"
             f"{first_run_cta}"
+            f"{gallery_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
@@ -21533,6 +22591,8 @@ function mhPlanGenerate(btn) {{
                 wf_states = ws.load(run_id)
         except Exception:
             wf_states = {}
+        # UI 1.25 — one indexed query for every card's reaction tally.
+        _react_counts = _reaction_counts_for_run(run_id)
 
         # Render achievements with the same approve strip the meet recap
         # uses (_render_wf_actions): outline "Approve" until approved,
@@ -21600,6 +22660,8 @@ function mhPlanGenerate(btn) {{
       {_render_wf_actions(run_id, card_id_raw, wf_status)}
       <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
       {sp_graphic_btn}
+      <span style="flex:1;min-width:8px"></span>
+      {_render_reactions(run_id, card_id_raw, _react_counts)}
       <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
     </div>
     {sp_visual_panel}
@@ -25939,6 +27001,81 @@ what you're doing, what they should do.</p>
         return redirect(url_for("operator_commercial"))
 
     # ---- /pricing -----------------------------------------------------
+    # UI 1.20 — polished pricing page styling (scoped under .mh-pricing /
+    # .mh-compare). Plain strings (not f-strings): the CSS braces are literal.
+    # Reuses the existing token system (--surface, --accent, --good, --lane …)
+    # and the shared .mh-segmented control for the billing-period toggle.
+    _PRICING_CSS = (
+        "<style>"
+        ".mh-billing-toggle{display:flex;justify-content:center;margin-bottom:var(--sp-6)}"
+        ".mh-tier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));"
+        "gap:18px;align-items:stretch}"
+        ".mh-tier{position:relative;display:flex;flex-direction:column;gap:16px;padding:24px;"
+        "background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md)}"
+        ".mh-tier.is-recommended{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}"
+        ".mh-tier-badge{position:absolute;top:-11px;left:24px;background:var(--lane);"
+        "color:var(--lane-ink);font-family:var(--font-mono);font-size:var(--fs-9);font-weight:700;"
+        "letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border-radius:var(--radius-pill)}"
+        ".mh-tier-name{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;"
+        "letter-spacing:.08em;color:var(--ink-muted);margin-bottom:8px}"
+        ".mh-tier-price{min-height:46px}"
+        ".mh-price-fig{font-size:30px;font-weight:800;line-height:1}"
+        ".mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted);margin-left:2px}"
+        ".mh-price-note{display:block;font-size:12px;color:var(--ink-muted);margin-top:4px}"
+        ".mh-price-tbc{font-size:15px;color:var(--ink-muted)}"
+        ".mh-tier-blurb{font-size:13px;color:var(--ink-muted);margin-top:8px}"
+        ".mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1 1 auto;"
+        "display:flex;flex-direction:column;gap:9px}"
+        ".mh-feat{display:flex;align-items:baseline;gap:8px}"
+        ".mh-feat-mark{flex:0 0 auto;font-weight:700;width:1em;text-align:center}"
+        ".mh-feat-yes .mh-feat-mark{color:var(--good)}"
+        ".mh-feat-no{color:var(--ink-faint)}"
+        ".mh-feat-no .mh-feat-mark{color:var(--ink-faint)}"
+        ".mh-feat-val{margin-left:auto;padding-left:10px;font-weight:600;color:var(--ink);text-align:right}"
+        ".mh-feat-no .mh-feat-val{color:var(--ink-faint)}"
+        ".mh-tier-cta{margin-top:4px}"
+        ".mh-cta{width:100%;text-align:center}"
+        ".mh-cta-note{text-align:center;font-size:13px}"
+        ".mh-price-note-banner{font-size:13px;margin-top:24px;text-align:center}"
+        ".mh-pricing [data-pane=monthly]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=annual]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=monthly]{display:inline}"
+        ".mh-compare-title{margin:var(--sp-9) 0 var(--sp-4);text-align:center}"
+        ".mh-compare-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}"
+        ".mh-compare{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}"
+        ".mh-compare th,.mh-compare td{padding:12px 14px;border-bottom:1px solid var(--border)}"
+        ".mh-compare thead th{vertical-align:bottom}"
+        ".mh-th-plan{text-align:center;font-family:var(--font-mono);font-size:13px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.06em}"
+        ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
+        ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
+        ".mh-compare td{text-align:center;color:var(--ink-muted)}"
+        ".mh-compare .is-rec{background:rgba(212,255,58,.045)}"
+        ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
+        "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
+        "border-bottom-color:var(--border-h)}"
+        ".mh-cell-yes{color:var(--good);font-weight:700}"
+        ".mh-cell-no{color:var(--ink-faint)}"
+        ".mh-cell-val{color:var(--ink)}"
+        ".mh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
+        "clip:rect(0,0,0,0);white-space:nowrap;border:0}"
+        "@media(max-width:600px){.mh-tier-grid{grid-template-columns:1fr}}"
+        "</style>"
+    )
+    _PRICING_JS = (
+        "<script>(function(){"
+        "var root=document.getElementById('mh-pricing');if(!root)return;"
+        "var btns=root.querySelectorAll('.mh-segmented [data-period]');"
+        "function set(period){root.setAttribute('data-period',period);"
+        "for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute('data-period')===period;"
+        "btns[i].classList.toggle('is-active',on);"
+        "btns[i].setAttribute('aria-pressed',on?'true':'false');}}"
+        "for(var i=0;i<btns.length;i++){(function(b){"
+        "b.addEventListener('click',function(){set(b.getAttribute('data-period'));});"
+        "})(btns[i]);}"
+        "})();</script>"
+    )
+
     @app.route("/pricing", methods=["GET"])
     def pricing_page():
         from mediahub.commercial.wtp import QuoteStore, public_list_price
@@ -25954,106 +27091,174 @@ what you're doing, what they should do.</p>
         except Exception:
             list_price = None
 
+        _CUR_SYMBOL = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}
+
+        def _figure(symbol: str, pence: int) -> str:
+            # Whole pounds when even, else two decimals. The pence is always
+            # ledger-derived — never a hardcoded amount (ADR-0011 / PC.4).
+            if pence % 100 == 0:
+                return f"{symbol}{pence // 100}"
+            return f"{symbol}{pence / 100:.2f}"
+
+        def _price_block(plan: str) -> str:
+            """Annual + monthly price panes for a tier.
+
+            Honest billing-period toggle (UI 1.20): MediaHub sells annual
+            prepay only (ADR-0011; wtp.Quote.billing_interval == "year"), so the
+            "Monthly" view shows the *same committed annual price expressed per
+            month* (annual ÷ 12), explicitly "billed annually" — never a
+            fabricated monthly SKU or a made-up discount. While the PC.4 gate is
+            unmet there is no committed figure, so both views read "Pricing TBC"
+            and no "/year" or "/mo" suffix is emitted at all.
+            """
+            if plan == _auth.PLAN_FREE:
+                return '<div class="mh-price-fig">Free</div>'
+            if plan == _auth.PLAN_CLUB and list_price is not None:
+                symbol = _CUR_SYMBOL.get(list_price["currency"], "")
+                annual_pence = int(list_price["amount_pence"])
+                monthly_pence = round(annual_pence / 12)
+                annual = (
+                    '<span data-pane="annual">'
+                    f'<span class="mh-price-fig">{_figure(symbol, annual_pence)}'
+                    '<span class="mh-price-per">/year</span></span>'
+                    '<span class="mh-price-note">Billed annually</span></span>'
+                )
+                monthly = (
+                    '<span data-pane="monthly">'
+                    f'<span class="mh-price-fig">{_figure(symbol, monthly_pence)}'
+                    '<span class="mh-price-per">/mo</span></span>'
+                    '<span class="mh-price-note">billed annually</span></span>'
+                )
+                return annual + monthly
+            # Federation (no committed list price) or Club before the gate: the
+            # honest state is "Pricing TBC" — never a guessed number.
+            purchasable = _billing.plan_purchasable(plan)
+            title = (
+                "The exact price is shown at checkout"
+                if purchasable
+                else "Set STRIPE_PRICE_"
+                + ("CLUB" if plan == _auth.PLAN_CLUB else "FEDERATION")
+                + " to enable"
+            )
+            return f'<div class="mh-price-tbc" title="{title}">Pricing TBC</div>'
+
+        def _feature_li(row, plan: str) -> str:
+            val = row.value_for(plan)
+            if val is False:
+                return (
+                    '<li class="mh-feat mh-feat-no">'
+                    '<span class="mh-feat-mark" aria-hidden="true">&times;</span>'
+                    f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                    '<span class="mh-sr">— not included</span></li>'
+                )
+            value_html = (
+                f'<span class="mh-feat-val">{_h(val)}</span>' if isinstance(val, str) else ""
+            )
+            return (
+                '<li class="mh-feat mh-feat-yes">'
+                '<span class="mh-feat-mark" aria-hidden="true">&check;</span>'
+                f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                f'{value_html}<span class="mh-sr">— included</span></li>'
+            )
+
         cards = ""
         for tier in _billing.TIERS:
             is_current = tier.plan == plan_now and signed_in
-            features = "".join(
-                f'<li style="margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
-                '<span aria-hidden="true" style="color:var(--good);flex:0 0 auto">&check;</span>'
-                f"<span>{_h(f)}</span></li>"
-                for f in tier.features
-            )
-            # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
-            if tier.plan == _auth.PLAN_FREE:
-                price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
-            elif tier.plan == _auth.PLAN_CLUB and list_price is not None:
-                # PC.4 gate met: commit the evidence-derived annual price.
-                amount = list_price["amount_pence"]
-                symbol = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}.get(
-                    list_price["currency"], ""
-                )
-                if amount % 100 == 0:
-                    figure = f"{symbol}{amount // 100}"
-                else:
-                    figure = f"{symbol}{amount / 100:.2f}"
-                price_html = (
-                    f'<div style="font-size:30px;font-weight:800;line-height:1">{figure}'
-                    '<span style="font-size:14px;font-weight:600;color:var(--ink-muted)">'
-                    "/year</span></div>"
-                    '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
-                )
-            else:
-                # PC.4 gate unmet (or no evidence for this tier): the honest
-                # state is "Pricing TBC" — never a guessed number. When the
-                # tier is purchasable via an env-configured Stripe Price, the
-                # exact amount still shows at checkout.
-                purchasable = _billing.plan_purchasable(tier.plan)
-                if purchasable:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="The exact price is shown at checkout">Pricing TBC</div>'
-                    )
-                else:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="Set STRIPE_PRICE_'
-                        + ("CLUB" if tier.plan == _auth.PLAN_CLUB else "FEDERATION")
-                        + ' to enable">Pricing TBC</div>'
-                    )
+            recommended = tier.plan == _auth.PLAN_CLUB
+            features = "".join(_feature_li(row, tier.plan) for row in _billing.feature_rows())
+            price_html = _price_block(tier.plan)
 
-            # CTA
+            # CTA — purchase/upgrade logic (unchanged from the prior page).
             if is_current:
                 cta = (
-                    '<div class="btn secondary" style="width:100%;text-align:center;'
-                    'pointer-events:none;opacity:0.75">Current plan</div>'
+                    '<div class="btn secondary mh-cta" '
+                    'style="pointer-events:none;opacity:0.75">Current plan</div>'
                 )
             elif tier.plan == _auth.PLAN_FREE:
                 cta = (
-                    f'<a class="btn secondary" href="{url_for("signup_page")}" '
-                    'style="width:100%;text-align:center">Get started free</a>'
+                    f'<a class="btn secondary mh-cta" href="{url_for("signup_page")}">'
+                    "Get started free</a>"
                     if not signed_in
-                    else '<div class="dim" style="text-align:center;font-size:13px">Included</div>'
+                    else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
                 if not configured:
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6" '
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6" '
                         'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
                     )
                 elif not signed_in:
                     cta = (
-                        f'<a class="btn" href="{url_for("login_page", next=url_for("pricing_page"))}" '
-                        'style="width:100%;text-align:center">Log in to upgrade</a>'
+                        f'<a class="btn mh-cta" '
+                        f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
+                        "Log in to upgrade</a>"
                     )
                 elif not _billing.plan_purchasable(tier.plan):
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6">Not yet available</div>'
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
                     # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'<a class="btn mh-cta" '
                         f'href="{url_for("billing_confirm", plan=tier.plan)}">'
                         f"Upgrade to {_h(tier.name)}</a>"
                     )
 
-            highlight = (
-                "border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)"
-                if tier.plan == _auth.PLAN_CLUB
-                else "border:1px solid var(--border)"
-            )
+            badge = '<div class="mh-tier-badge">Recommended</div>' if recommended else ""
+            cls = "mh-tier" + (" is-recommended" if recommended else "")
             cards += (
-                f'<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px;{highlight}">'
-                f'<div><div style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;'
-                f'color:var(--ink-muted);margin-bottom:6px">{_h(tier.name)}</div>{price_html}'
-                f'<div class="dim" style="font-size:13px;margin-top:8px">{_h(tier.blurb)}</div></div>'
-                f'<ul style="list-style:none;padding:0;margin:0;font-size:13px;flex:1">{features}</ul>'
-                f"{cta}"
+                f'<div class="{cls}">{badge}'
+                '<div class="mh-tier-head">'
+                f'<div class="mh-tier-name">{_h(tier.name)}</div>'
+                f'<div class="mh-tier-price">{price_html}</div>'
+                f'<div class="mh-tier-blurb">{_h(tier.blurb)}</div>'
+                "</div>"
+                f'<ul class="mh-feat-list">{features}</ul>'
+                f'<div class="mh-tier-cta">{cta}</div>'
                 "</div>"
             )
+
+        # Feature comparison table — same single-source matrix as the cards.
+        def _cell(val) -> str:
+            if val is True:
+                return (
+                    '<span class="mh-cell-yes" aria-hidden="true">&check;</span>'
+                    '<span class="mh-sr">Included</span>'
+                )
+            if val is False:
+                return (
+                    '<span class="mh-cell-no" aria-hidden="true">&times;</span>'
+                    '<span class="mh-sr">Not included</span>'
+                )
+            return f'<span class="mh-cell-val">{_h(val)}</span>'
+
+        head_cells = ""
+        for t in _billing.TIERS:
+            rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+            tag = '<span class="mh-th-rec">Recommended</span>' if t.plan == _auth.PLAN_CLUB else ""
+            head_cells += f'<th scope="col" class="mh-th-plan{rec}">{_h(t.name)}{tag}</th>'
+        ncols = 1 + len(_billing.TIERS)
+        rows_html = ""
+        for group in _billing.FEATURE_MATRIX:
+            rows_html += (
+                f'<tr class="mh-compare-group"><th colspan="{ncols}" scope="colgroup">'
+                f"{_h(group.title)}</th></tr>"
+            )
+            for row in group.rows:
+                cells = ""
+                for t in _billing.TIERS:
+                    rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+                    cells += f'<td class="{rec.strip()}">{_cell(row.value_for(t.plan))}</td>'
+                rows_html += f'<tr><th scope="row">{_h(row.label)}</th>{cells}</tr>'
+        compare_table = (
+            '<div class="mh-compare-wrap"><table class="mh-compare">'
+            f'<thead><tr><th scope="col"></th>{head_cells}</tr></thead>'
+            f"<tbody>{rows_html}</tbody></table></div>"
+        )
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
@@ -26063,20 +27268,33 @@ what you're doing, what they should do.</p>
                 "Billing is not configured on this deployment, so paid plans "
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
-        note_html = (
-            f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
+        note_html = f'<p class="dim mh-price-note-banner">{note}</p>'
+
+        toggle = (
+            '<div class="mh-billing-toggle">'
+            '<div class="mh-segmented" role="group" aria-label="Billing period">'
+            '<button type="button" class="is-active" data-period="annual" '
+            'aria-pressed="true">Annually</button>'
+            '<button type="button" data-period="monthly" '
+            'aria-pressed="false">Monthly</button>'
+            "</div></div>"
         )
 
         body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
+            _PRICING_CSS
+            + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper &mdash; ask us.</p>"
+            "Annual prepay keeps it cheaper.</p>"
             "</section>"
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">'
-            f"{cards}</div>"
+            '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
+            f"{toggle}"
+            f'<div class="mh-tier-grid">{cards}</div>'
             f"{note_html}"
+            '<h2 class="mh-compare-title">Compare every plan</h2>'
+            f"{compare_table}"
+            "</div>" + _PRICING_JS
         )
         return _layout("Pricing", body, active="signin")
 
@@ -29488,6 +30706,132 @@ function mhSetupMode(mode) {{
 
         return jsonify({"error": "unknown action"}), 400
 
+    # ---- Emoji reactions (UI 1.25) -------------------------------------
+    @app.route("/api/runs/<run_id>/card/<card_id>/reactions", methods=["POST"])
+    def api_card_reaction_toggle(run_id, card_id):
+        """Toggle one emoji reaction on a card for an anonymous reactor.
+
+        Body (JSON): ``{"emoji": "👍|❤️|🔥", "reactor_id": "<anon client id>"}``.
+        A reactor's first tap on an emoji adds their row; a second tap removes
+        it — so the server-side tally counts each reactor once per emoji and the
+        UI reads as a true toggle. Returns the fresh per-card tally plus the set
+        this reactor now holds, so the client can update without a reload::
+
+            {"ok": true, "counts": {"👍": 2, ...}, "mine": ["👍", ...]}
+
+        Tenant-isolated (same guard as the workflow API), so a reaction can't be
+        cast on a run another organisation owns; a genuinely missing run 404s
+        too, so a ghost id never accretes orphan reaction rows.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+
+        payload = request.get_json(silent=True) or {}
+        emoji = payload.get("emoji", "")
+        reactor = str(payload.get("reactor_id") or "").strip()
+        if emoji not in REACTION_EMOJI:
+            return jsonify({"error": "invalid emoji"}), 400
+        if not reactor or len(reactor) > 64:
+            return jsonify({"error": "invalid reactor_id"}), 400
+        # Card ids are short engine identifiers (swim_id / "sp:type:event"); a
+        # value far longer than that is junk, so reject it rather than store it.
+        if not card_id or len(card_id) > 256:
+            return jsonify({"error": "invalid card_id"}), 400
+
+        try:
+            conn = _db()
+            existing = conn.execute(
+                "SELECT 1 FROM card_reactions "
+                "WHERE run_id=? AND card_id=? AND emoji=? AND reactor_id=?",
+                (run_id, card_id, emoji, reactor),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "DELETE FROM card_reactions "
+                    "WHERE run_id=? AND card_id=? AND emoji=? AND reactor_id=?",
+                    (run_id, card_id, emoji, reactor),
+                )
+            else:
+                conn.execute(
+                    "INSERT OR IGNORE INTO card_reactions "
+                    "(run_id, card_id, emoji, reactor_id, created_at) VALUES (?,?,?,?,?)",
+                    (
+                        run_id,
+                        card_id,
+                        emoji,
+                        reactor,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+            conn.commit()
+            counts = {e: 0 for e in REACTION_EMOJI}
+            for r in conn.execute(
+                "SELECT emoji, COUNT(*) AS n FROM card_reactions "
+                "WHERE run_id=? AND card_id=? GROUP BY emoji",
+                (run_id, card_id),
+            ).fetchall():
+                if r["emoji"] in counts:
+                    counts[r["emoji"]] = r["n"]
+            mine = [
+                r["emoji"]
+                for r in conn.execute(
+                    "SELECT emoji FROM card_reactions "
+                    "WHERE run_id=? AND card_id=? AND reactor_id=?",
+                    (run_id, card_id, reactor),
+                ).fetchall()
+                if r["emoji"] in REACTION_EMOJI
+            ]
+            conn.close()
+        except Exception as e:
+            log.warning("reaction toggle failed run=%s card=%s: %s", run_id, card_id, e)
+            return jsonify({"error": "reaction_failed"}), 500
+
+        return jsonify({"ok": True, "counts": counts, "mine": mine})
+
+    @app.route("/api/runs/<run_id>/reactions", methods=["GET"])
+    def api_run_reactions(run_id):
+        """Reaction state for a whole run, for the review/builder page on load.
+
+        Query: ``?reactor_id=<anon client id>`` (optional). Returns the full
+        per-card tally plus, when a ``reactor_id`` is given, the cards/emoji that
+        reactor holds — so one fetch lets the client both reconcile counts and
+        light up the viewer's own reactions::
+
+            {"ok": true,
+             "counts": {"<card_id>": {"👍": 2, ...}, ...},
+             "mine":   {"<card_id>": ["👍", ...], ...}}
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+
+        reactor = str(request.args.get("reactor_id") or "").strip()
+        counts: dict[str, dict[str, int]] = {}
+        mine: dict[str, list[str]] = {}
+        try:
+            conn = _db()
+            for r in conn.execute(
+                "SELECT card_id, emoji, COUNT(*) AS n FROM card_reactions "
+                "WHERE run_id=? GROUP BY card_id, emoji",
+                (run_id,),
+            ).fetchall():
+                if r["emoji"] in REACTION_EMOJI:
+                    counts.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
+            if reactor and len(reactor) <= 64:
+                for r in conn.execute(
+                    "SELECT card_id, emoji FROM card_reactions WHERE run_id=? AND reactor_id=?",
+                    (run_id, reactor),
+                ).fetchall():
+                    if r["emoji"] in REACTION_EMOJI:
+                        mine.setdefault(r["card_id"], []).append(r["emoji"])
+            conn.close()
+        except Exception as e:
+            log.warning("reaction fetch failed run=%s: %s", run_id, e)
+            return jsonify({"error": "reaction_failed"}), 500
+
+        return jsonify({"ok": True, "counts": counts, "mine": mine})
+
     # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
     def api_turn_into(run_id):
@@ -30305,6 +31649,8 @@ function tiRegenerate() {{
                 _wf_states = _ws.load(run_id) or {}
         except Exception:
             _wf_states = {}
+        # UI 1.25 — per-card reaction tallies for this run, in one query.
+        _react_counts = _reaction_counts_for_run(run_id)
 
         try:
             grouped = _build_grouped_pack(run_data, profile_id)
@@ -30453,6 +31799,7 @@ function tiRegenerate() {{
   {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    {_render_reactions(run_id, str(card_id_raw), _react_counts) if card_id_raw else ""}
     <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
     <textarea id="cap-{card_id}-1" style="display:none">{cap_only}</textarea>
@@ -30898,6 +32245,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
+            _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -30939,7 +32287,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td>{_h(ad.get("permission_status", ""))}</td>
   <td><code>{_h(ad.get("id", "")[:12])}</code></td>
-  <td>
+  <td style="white-space:nowrap">
+    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <form method="post" action="{_delete_url}" style="display:inline"
           onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
       <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
@@ -31141,6 +32490,191 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/cutout/<asset_id>")
+    def api_media_library_cutout(asset_id: str):
+        """Serve the background-removed cut-out PNG for one asset (UI2.1).
+
+        Generated on first request and cached/persisted, then profile-scoped
+        exactly like the original-file route. Returns an honest 503 when no
+        background remover is available rather than a fake (pass-through)
+        cut-out, and 404 when there is no source or generation produced
+        nothing usable.
+        """
+        if not _v8_ok:
+            return "", 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return "", 404
+        if not _session_can_access_profile(a.profile_id):
+            return "", 403
+        path, status = _v8_ensure_cutout(a)
+        if path is None:
+            return "", (503 if status == "unavailable" else 404)
+        from flask import send_file
+
+        try:
+            resp = send_file(str(path), mimetype="image/png")
+            # Derived asset — let the browser cache it; it only changes if the
+            # source is re-uploaded (which mints a new asset id).
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
+        except Exception:
+            return "", 404
+
+    @app.route("/media-library/<asset_id>/cutout")
+    def media_library_cutout_page(asset_id: str):
+        """Before/after cut-out preview (UI2.1).
+
+        Drag the `.mh-compare` slider to see *exactly* what background removal
+        knocked out: the original photo on the left, the cut-out (subject on a
+        transparency checkerboard) on the right. Fails honestly — if no real
+        remover is available it shows the original with a plain explanation,
+        never a fake cut-out.
+        """
+        if not _v8_ok:
+            return _recovery_page(
+                "Media library unavailable",
+                "The V8 media engine isn't enabled on this deployment, so cut-out "
+                "previews can't be generated. Ask your operator to enable it.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library &mdash; it may have been deleted, "
+                "or the link might be out of date.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation, so it isn't "
+                "available from your current session.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+
+        ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+        subject = (
+            ", ".join(ad.get("linked_athlete_names") or [])
+            or ad.get("linked_venue")
+            or ad.get("linked_event")
+            or ad.get("filename")
+            or "this photo"
+        )
+        orig_url = url_for("api_media_library_file", asset_id=a.id)
+        cutout_url = url_for("api_media_library_cutout", asset_id=a.id)
+        back_url = url_for("media_library_page")
+
+        # Pixel-perfect alignment: size the slider to the photo's own aspect
+        # ratio so the before/after halves line up. Falls back to a portrait
+        # default when the file can't be measured (e.g. a placeholder blob).
+        aspect = "4 / 5"
+        try:
+            from PIL import Image
+
+            with Image.open(a.path) as _im:
+                _iw, _ih = _im.size
+            if _iw > 0 and _ih > 0:
+                aspect = f"{_iw} / {_ih}"
+        except Exception:
+            pass
+
+        path, status = _v8_ensure_cutout(a)
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Cut-out preview</span>'
+            f"<h1>{_h(subject)}</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(ad.get("type", "photo"))}</span><span class="sep">·</span>'
+            "<span>before &rarr; after background removal</span>"
+            "</div>"
+            "</section>"
+        )
+
+        if path is not None:
+            provider = _cutout_provider_label()
+            compare = (
+                '<div class="card">'
+                '<p class="dim" style="margin-bottom:var(--sp-4)">'
+                "Drag the handle to wipe between the original photo (left) and the "
+                "cut-out (right). The checkerboard is transparency &mdash; that&rsquo;s "
+                "exactly what was removed."
+                "</p>"
+                '<figure class="mh-compare" data-mh-pos="50" '
+                'aria-label="Before and after background removal" '
+                f'style="aspect-ratio:{aspect};max-width:560px;width:100%;margin:0 auto">'
+                f'<img src="{orig_url}" alt="Original photo of {_h(subject)}, background intact" />'
+                '<div class="mh-compare__after mh-compare__after--checker">'
+                f'<img src="{cutout_url}" alt="{_h(subject)} with the background removed" />'
+                "</div>"
+                '<div class="mh-compare__handle"></div>'
+                "</figure>"
+                '<p class="dim" style="margin-top:var(--sp-4);font-size:13px">'
+                f"Cut out by {_h(provider)} on MediaHub&rsquo;s servers &mdash; the same "
+                "background removal composited into your branded graphics."
+                "</p>"
+                "</div>"
+            )
+            body = hero + compare
+        else:
+            # Honest fallback — no fabricated cut-out (CLAUDE.md honest-error rule).
+            if status == "unavailable":
+                detail = (
+                    "Background removal isn&rsquo;t available on this deployment, so "
+                    "there&rsquo;s no cut-out to compare yet. Your operator can enable it "
+                    "(the on-server rembg model, or a Photoroom / Replicate key). The "
+                    "original photo is shown below."
+                )
+            elif status == "no_source":
+                detail = (
+                    "The original file for this photo is missing, so there&rsquo;s "
+                    "nothing to preview. Try re-uploading it to the library."
+                )
+            else:  # failed
+                detail = (
+                    "We couldn&rsquo;t produce a cut-out for this photo. The original is "
+                    "shown below &mdash; a clearer subject-on-background shot usually cuts "
+                    "out cleanly."
+                )
+            note = (
+                '<div class="card">'
+                '<div role="status" class="mh-ai-unavailable" '
+                'style="margin-bottom:var(--sp-4);padding:14px 18px;'
+                "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                'display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap">'
+                f"{_AI_UNAVAILABLE_ICON}"
+                '<span class="strap" style="color:var(--warn)">No cut-out to show</span>'
+                f'<span style="color:var(--ink-dim)">{detail}</span>'
+                "</div>"
+            )
+            if status != "no_source":
+                note += (
+                    f'<img src="{orig_url}" alt="Original photo of {_h(subject)}" '
+                    f'style="max-width:560px;width:100%;border-radius:var(--radius-md);display:block" />'
+                )
+            note += "</div>"
+            body = hero + note
+
+        body += (
+            '<div style="margin-top:var(--sp-5)">'
+            f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
+            "</div>"
+        )
+        return _layout("Cut-out preview", body, active="media")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):
@@ -33930,6 +35464,19 @@ voice, and queues them for one-click approval.</p>
                     raise RuntimeError("mp4 missing after render")
                 job["status"] = "done"
                 job["video_url"] = file_url
+                # Render-complete milestone in the in-app inbox (UI 1.14). The
+                # async reel render is the "kick it off and walk away" flow, so
+                # this is the notification a user actually wants when they come
+                # back. Scoped to the org that owns the job; a no-op when signed
+                # out (empty owner_pid).
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel"
+                    )
+                except Exception:
+                    pass
             except _RenderBusy:
                 job["status"] = "error"
                 job["error"] = "renderer_busy"
@@ -33941,6 +35488,17 @@ voice, and queues them for one-click approval.</p>
                 job["status"] = "error"
                 job["error"] = str(_payload.get("detail") or e)
                 job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
             _variant_job_save(job)
 
         threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()

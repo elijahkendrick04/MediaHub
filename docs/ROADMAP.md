@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `54a48ab3d` · Build UI 1.2 — bento-grid feature section on the landing (#505)
+**Last updated:** 2026-06-14 · `9c8efbdf3` · Build UI 1.25 — emoji reactions on cards & the review queue (#548)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -139,8 +139,6 @@ sequence it or merge with care.
 - **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) · ❌ **NOT STARTED**
 - **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
 - **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
-- **UI2.6** · UI2 (top priority) — **Vanish search**: properly wire the rotating-placeholder Vanish input (`.mh-vanish`) onto the activity / global search — the overlay-placeholder element + alignment past the search icon, native placeholder removed · 🟢 parallel-safe (self-contained search) · ❌ **NOT STARTED**
-- **UI2.7** · UI2 (top priority) — **Caption type-on reveal**: Text-Generate (`.mh-text-generate`) word-by-word reveal on a *read-only* generated-caption preview only (never the editable caption, which stays plain), so the "AI is writing" moment reads · 🟢 parallel-safe · ❌ **NOT STARTED**
 - **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -160,8 +158,6 @@ sequence it or merge with care.
 - **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.23** · Phase 1 (Product polish) — Light/dark theme toggle (from AuthKit): dark-first with an optional light mode; CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme` default; no new build step · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.25** · Phase 1 (Product polish) — Emoji reactions (from Liveblocks): quick emoji reactions (👍 ❤️ 🔥) on generated cards and in the review queue; stored per card in the existing DB, tallied server-side, updated via fetch without full reload · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.26** · Phase 1 (Product polish) — Cursor-anchored progress/info readout (from UNVEIL/Cosmos): a small percent/status label that follows the cursor during long actions (render/upload); vanilla JS position tracking, disappears on completion · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.28** · Phase 1 (Product polish) — Keyboard shortcuts overlay (from GitHub): press `?` to reveal a modal of available shortcuts; quick keys to approve/reject/next in the review flow; vanilla JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1515,10 +1511,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
+| 2026-06-14 | `b8a8581ed` | Tidy reaction GET query onto one line (ruff-format) |
+| 2026-06-14 | `7a121d84c` | Build UI 1.24 — moment-type marquee/ticker on the landing |
+| 2026-06-14 | `8261b091a` | Build UI 1.14 — notifications inbox (bell + unread badge + dropdown) |
+| 2026-06-14 | `c921af047` | Build UI 1.25 — emoji reactions on cards & the review queue |
+| 2026-06-14 | `41171c57d` | Add visual template/archetype gallery (UI 1.10) |
+| 2026-06-14 | `e25ace721` | Build UI2.1 — cut-out before/after compare slider |
+| 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
+| 2026-06-14 | `487758deb` | feat(ui): UI2.6 Vanish search on the activity/global run search |
+| 2026-06-14 | `72cd136a7` | Build UI2.7 — caption type-on "AI is writing" reveal |
 | 2026-06-14 | `5a8a66d72` | Align UI 1.3/U.8 fix with main's #532 (pipeline_html prepend) |
 | 2026-06-14 | `71ec23f6a` | Fix U.8/UI1.3 pipeline_html collision + add application-suite CI gate |
-| 2026-06-14 | `e0783d17f` | Make web UI phone-friendly: kill horizontal scroll on mobile |
-| 2026-06-14 | `f87368501` | U.11 — outputs inside real Instagram platform frames |
-| 2026-06-14 | `dd1c90857` | Read British (YoB) results correctly; flag impossible event/time pairings; surface PB-lookup failure |
-| 2026-06-14 | `19ecc71ae` | U.8 — animated how-it-works pipeline diagram on the landing page |
 <!-- /ROADMAP:ACTIVITY -->
