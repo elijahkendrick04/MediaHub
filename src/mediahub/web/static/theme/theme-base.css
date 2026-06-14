@@ -25,10 +25,15 @@
 
 :root {
   /* color-scheme tells the UA chrome (scrollbars, form controls,
-     text selection) to follow the user's preferred mode. Stage C
-     ships dark-mode as the visual default; Stage D may flip to
-     `light dark` once a real light-mode palette is signed off. */
-  color-scheme: dark;
+     text selection) which mode to render in, AND it is what
+     light-dark() below resolves against. Stage D (UI 1.23) ships a
+     real light palette, so the default is now dark-first but OS-aware
+     (`dark light` → no OS preference resolves to dark; an OS set to
+     light gets the light branch). The in-app theme toggle overrides
+     this by writing an explicit `color-scheme` onto <html>. The
+     authoritative declaration lives in responsive_guardrails.py
+     (appended last); this one keeps the base file self-consistent. */
+  color-scheme: dark light;
 
   /* ------------------------------------------------------------------
      SEED VARIABLES — the only hand-coded brand inputs
@@ -56,23 +61,36 @@
    ===================================================================== */
 
 :root {
-  /* Surfaces — the page, cards, raised elements */
-  --mh-surface:                light-dark(var(--mh-prim-neutral-950), var(--mh-prim-neutral-950));
-  --mh-surface-deep:           light-dark(var(--mh-prim-neutral-1000), var(--mh-prim-neutral-1000));
-  --mh-surface-variant:        light-dark(var(--mh-prim-neutral-900), var(--mh-prim-neutral-900));
-  --mh-surface-container:      light-dark(var(--mh-prim-neutral-850), var(--mh-prim-neutral-850));
-  --mh-surface-container-high: light-dark(var(--mh-prim-neutral-800), var(--mh-prim-neutral-800));
+  /* Surfaces — the page, cards, raised elements.
+     Stage D (UI 1.23): the LIGHT branch is the warm "paper" inversion
+     of the dark ramp — page = paper-cream (50), cards = white (0),
+     elevation carried by the (dark) drop-shadows, deepest plane a
+     touch deeper (100). The DARK branch is byte-identical to Stage C,
+     so dark mode does not move a pixel. */
+  --mh-surface:                light-dark(var(--mh-prim-neutral-50),  var(--mh-prim-neutral-950));
+  --mh-surface-deep:           light-dark(var(--mh-prim-neutral-100), var(--mh-prim-neutral-1000));
+  --mh-surface-variant:        light-dark(var(--mh-prim-neutral-0),   var(--mh-prim-neutral-900));
+  --mh-surface-container:      light-dark(var(--mh-prim-neutral-0),   var(--mh-prim-neutral-850));
+  --mh-surface-container-high: light-dark(var(--mh-prim-neutral-50),  var(--mh-prim-neutral-800));
 
-  /* On-surface (text + icons on neutral surfaces) */
-  --mh-on-surface:         light-dark(var(--mh-prim-neutral-50), var(--mh-prim-neutral-50));
-  --mh-on-surface-variant: light-dark(var(--mh-prim-neutral-300), var(--mh-prim-neutral-300));
-  --mh-on-surface-muted:   light-dark(var(--mh-prim-neutral-400), var(--mh-prim-neutral-400));
-  --mh-on-surface-faint:   light-dark(var(--mh-prim-neutral-600), var(--mh-prim-neutral-600));
+  /* On-surface (text + icons on neutral surfaces) — inverted: deep ink
+     on the light paper, paper-cream on the dark pit-wall. Every light
+     value clears WCAG AA on the paper page (muted ≈ 5.6:1). */
+  --mh-on-surface:         light-dark(var(--mh-prim-neutral-900), var(--mh-prim-neutral-50));
+  --mh-on-surface-variant: light-dark(var(--mh-prim-neutral-700), var(--mh-prim-neutral-300));
+  --mh-on-surface-muted:   light-dark(var(--mh-prim-neutral-600), var(--mh-prim-neutral-400));
+  --mh-on-surface-faint:   light-dark(var(--mh-prim-neutral-500), var(--mh-prim-neutral-600));
 
-  /* Primary (brand) — CTAs, links, focus, live state */
+  /* Primary (brand) — CTAs, links, focus, live state. The lane-yellow
+     FILL is brand identity and stays yellow in both modes (a yellow
+     button with dark on-primary text reads on light too). Only the
+     hover/pressed steps darken in light so the feedback is visible
+     against the paper. Yellow as *text* is handled by --mh-link /
+     --mh-focus, which darken for light (yellow text is illegible on
+     paper). */
   --mh-primary:               light-dark(var(--mh-prim-brand-400), var(--mh-prim-brand-400));
-  --mh-primary-hover:         light-dark(var(--mh-prim-brand-300), var(--mh-prim-brand-300));
-  --mh-primary-pressed:       light-dark(var(--mh-prim-brand-600), var(--mh-prim-brand-600));
+  --mh-primary-hover:         light-dark(var(--mh-prim-brand-500), var(--mh-prim-brand-300));
+  --mh-primary-pressed:       light-dark(var(--mh-prim-brand-700), var(--mh-prim-brand-600));
   --mh-on-primary:            light-dark(var(--mh-prim-neutral-950), var(--mh-prim-neutral-950));
   --mh-primary-container:     light-dark(var(--mh-prim-brand-100), var(--mh-prim-brand-100));
   --mh-on-primary-container:  light-dark(var(--mh-prim-brand-900), var(--mh-prim-brand-900));
@@ -83,8 +101,12 @@
   --mh-on-secondary: var(--mh-on-primary);
 
   /* Tertiary (medal) — RESERVED EXCLUSIVELY for athlete achievements
-     per the existing "Podium After Dark" convention */
-  --mh-tertiary:               light-dark(var(--mh-prim-tertiary-400), var(--mh-prim-tertiary-400));
+     per the existing "Podium After Dark" convention. The pale medal-
+     gold (400) glows on the dark pit-wall but washes out on paper, so
+     the LIGHT branch steps to a richer metallic gold (600) that holds
+     its weight on white cards; on-tertiary stays the dark medal brown
+     in both. */
+  --mh-tertiary:               light-dark(var(--mh-prim-tertiary-600), var(--mh-prim-tertiary-400));
   --mh-on-tertiary:            light-dark(var(--mh-prim-tertiary-950), var(--mh-prim-tertiary-950));
   --mh-tertiary-container:     light-dark(var(--mh-prim-tertiary-100), var(--mh-prim-tertiary-100));
   --mh-on-tertiary-container:  light-dark(var(--mh-prim-tertiary-900), var(--mh-prim-tertiary-900));
@@ -93,9 +115,9 @@
      Today's values are rgba(245,242,232,N) ink blends. Modern browsers
      in the @supports block (theme-derive.css) get color-mix() versions
      that pick up theme changes; this base file keeps the fallback. */
-  --mh-outline:         rgba(245, 242, 232, 0.14);
-  --mh-outline-variant: rgba(245, 242, 232, 0.06);
-  --mh-outline-rule:    rgba(245, 242, 232, 0.10);
+  --mh-outline:         light-dark(rgba(20, 23, 31, 0.18), rgba(245, 242, 232, 0.14));
+  --mh-outline-variant: light-dark(rgba(20, 23, 31, 0.10), rgba(245, 242, 232, 0.06));
+  --mh-outline-rule:    light-dark(rgba(20, 23, 31, 0.14), rgba(245, 242, 232, 0.10));
 
   /* Status roles — locked by hue family per cross-cultural-semantics
      research (Aslam 2006, WCAG 1.4.1). */
@@ -106,8 +128,10 @@
   --mh-warning: light-dark(var(--mh-prim-warning-400), var(--mh-prim-warning-400));
   --mh-info:    light-dark(var(--mh-prim-info-400), var(--mh-prim-info-400));
 
-  /* Focus */
-  --mh-focus: var(--mh-primary);
+  /* Focus — lane-yellow ring on dark, but a yellow ring is invisible
+     against the light paper, so the light branch steps to the dark
+     olive end of the brand ramp (≥ 3:1 vs paper, WCAG 2.4.11). */
+  --mh-focus: light-dark(var(--mh-prim-brand-800), var(--mh-primary));
 
   /* Elevation (shadows) — three depths */
   --mh-elevation-1: 0 1px 0 rgba(245, 242, 232, 0.04);

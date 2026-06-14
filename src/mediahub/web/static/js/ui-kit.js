@@ -11,6 +11,7 @@
      scroll progress  -> write --mh-progress (0–1)
      tabs             -> write --mh-ind-x / --mh-ind-w on the .mh-tabs
      compare          -> write --mh-pos (%)
+     tooltip          -> write --mh-tip-rot / --mh-tip-x (pointer parallax)
 
    Principles: every feature is wrapped so one failure can't break the page;
    continuous / pointer-driven motion is skipped under prefers-reduced-motion;
@@ -220,6 +221,100 @@
     });
   }
 
+  /* --- Text-scramble / decode (UI 1.21, Locomotive-style) -------------
+     Each character flickers through a random glyph alphabet then settles to
+     its final value, staggered left-to-right so the string "decodes" in.
+     XSS-safe by construction: it only rewrites the .data of the element's
+     existing text nodes — never innerHTML, never a node built from text — so
+     embedded markup (<br>, <em>) survives untouched. The final text is
+     already in the DOM, so no-JS and reduced-motion users simply read it
+     (runScramble no-ops under reduce). Two ways to drive it:
+       declarative  <h1 class="mh-scramble">…</h1>  decodes in once on reveal;
+       imperative   MH.scrambleTo(el, "new text")    decodes to new text
+                    (the processing screen's live "generating" stage label). */
+  var SCRAMBLE_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*+/<>";
+  function randGlyph() {
+    return SCRAMBLE_GLYPHS.charAt((Math.random() * SCRAMBLE_GLYPHS.length) | 0);
+  }
+  function isWS(ch) {
+    return ch === " " || ch === "\n" || ch === "\t" || ch === " ";
+  }
+  function runScramble(el) {
+    if (!el) return;
+    if (el.mhScrambleRaf) { cancelAnimationFrame(el.mhScrambleRaf); el.mhScrambleRaf = 0; }
+    var finalText = el.textContent;
+    // Reduced motion / nothing useful to do: leave the (already-final) text be.
+    if (REDUCE || !finalText || finalText.length > 240) {
+      el.classList.remove("is-scrambling");
+      el.removeAttribute("aria-busy");
+      el.removeAttribute("aria-label");
+      return;
+    }
+    var nodes = [];
+    try {
+      var walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walk.nextNode())) { if (node.nodeValue) nodes.push(node); }
+    } catch (e) { return; }
+    if (!nodes.length) return;
+
+    // Per text node: a working char array + a settle-frame per character.
+    // Whitespace settles at frame 0 so word gaps (and layout) never wobble.
+    var plan = [], live = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var s = nodes[i].nodeValue, work = [], ends = [];
+      for (var c = 0; c < s.length; c++) {
+        if (isWS(s.charAt(c))) { work.push(s.charAt(c)); ends.push(0); }
+        else { work.push(randGlyph()); ends.push(-1); live++; }
+      }
+      plan.push({ node: nodes[i], chars: s, work: work, ends: ends });
+    }
+    if (!live) return; // whitespace only — nothing to decode
+
+    // Stagger the settle frames left-to-right with jitter (≈0.5–0.9s total).
+    var MIN = 6, STEP = 1.15, JITTER = 9, k = 0;
+    for (var p = 0; p < plan.length; p++) {
+      var en = plan[p].ends;
+      for (var q = 0; q < en.length; q++) {
+        if (en[q] === -1) { en[q] = MIN + ((k * STEP) | 0) + ((Math.random() * JITTER) | 0); k++; }
+      }
+    }
+
+    // Transient a11y name while the glyphs resolve; removed on settle so the
+    // element's natural accessible name (which renders <br> as a pause) takes
+    // back over once the real text is in place.
+    el.setAttribute("aria-label", finalText);
+    el.classList.add("is-scrambling");
+    el.setAttribute("aria-busy", "true");
+    var frame = 0;
+    function tick() {
+      var pending = 0;
+      for (var pp = 0; pp < plan.length; pp++) {
+        var row = plan[pp], changed = false;
+        for (var qq = 0; qq < row.work.length; qq++) {
+          if (frame >= row.ends[qq]) {
+            if (row.work[qq] !== row.chars.charAt(qq)) { row.work[qq] = row.chars.charAt(qq); changed = true; }
+          } else {
+            pending++;
+            if (Math.random() < 0.5) { row.work[qq] = randGlyph(); changed = true; }
+          }
+        }
+        if (changed) row.node.nodeValue = row.work.join("");
+      }
+      if (!pending) { // everything locked in — restore the pristine text + clear state
+        for (var f = 0; f < plan.length; f++) plan[f].node.nodeValue = plan[f].chars;
+        el.classList.remove("is-scrambling");
+        el.removeAttribute("aria-busy");
+        el.removeAttribute("aria-label"); // natural accessible name takes over
+        el.mhScrambleRaf = 0;
+        return;
+      }
+      frame++;
+      el.mhScrambleRaf = requestAnimationFrame(tick);
+    }
+    el.mhScrambleRaf = requestAnimationFrame(tick);
+  }
+
   /* --- IntersectionObserver: reveal / text-generate / count / flap ---- */
   var io = null;
   function observe(el) {
@@ -236,6 +331,8 @@
   function fire(el) {
     el.classList.add("is-in"); // align to the existing Phase-10 reveal convention
     if (el.classList.contains("mh-flapboard")) runFlap(el);
+    // Decode-in once: the guard stops a re-observed node re-scrambling.
+    if (el.classList.contains("mh-scramble") && once(el, "data-mh-scrambled")) runScramble(el);
   }
 
   /* --- Flip-words: cycle the active child ----------------------------- */
@@ -288,6 +385,61 @@
     window.addEventListener("resize", function () { move(active()); }, { passive: true });
   }
 
+  /* --- Copy-to-clipboard for code blocks / switchers (UI 1.11) -------- */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Legacy fallback: an off-screen textarea + execCommand('copy').
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) resolve(); else reject();
+      } catch (e) { reject(e); }
+    });
+  }
+  function bindCopy(btn) {
+    if (!once(btn, "data-mh-copy-init")) return;
+    btn.addEventListener("click", function () {
+      var host = btn.closest(".mh-code");
+      if (!host) return;
+      var panel;
+      if (host.classList.contains("mh-code-switcher")) {
+        // Copy whichever language panel the (pure-CSS) tabs have selected.
+        var radios = host.querySelectorAll(".mh-cs-radio"), idx = 0;
+        for (var i = 0; i < radios.length; i++) { if (radios[i].checked) { idx = i; break; } }
+        panel = host.querySelectorAll(".mh-cs-panel")[idx];
+      } else {
+        panel = host.querySelector(".mh-cs-panel");
+      }
+      if (!panel) return;
+      var codeEl = panel.querySelector("code") || panel;
+      var label = btn.querySelector(".mh-cs-copy-label");
+      copyText(codeEl.textContent || "").then(function () {
+        btn.classList.add("is-copied");
+        btn.setAttribute("aria-label", "Copied to clipboard");
+        if (label) {
+          if (!label.getAttribute("data-mh-label")) label.setAttribute("data-mh-label", label.textContent);
+          label.textContent = "Copied";
+        }
+        window.clearTimeout(btn._mhCopyT);
+        btn._mhCopyT = window.setTimeout(function () {
+          btn.classList.remove("is-copied");
+          btn.setAttribute("aria-label", "Copy code to clipboard");
+          if (label && label.getAttribute("data-mh-label")) label.textContent = label.getAttribute("data-mh-label");
+        }, 1600);
+      }).catch(function () { /* clipboard blocked — code stays selectable */ });
+    });
+  }
+
   /* --- Compare: before/after slider (pointer + keyboard) -------------- */
   function bindCompare(el) {
     if (!once(el, "data-mh-compare-init")) return;
@@ -312,6 +464,90 @@
         else if (ev.key === "ArrowRight") { set(pos + 4); ev.preventDefault(); }
       });
     }
+  }
+
+  /* --- Animated tooltip: parallax tilt on the hovered athlete avatar --- */
+  function bindTooltip(el) {
+    if (!once(el, "data-mh-tip-init")) return;
+    if (REDUCE) return; // the CSS still reveals on hover/focus; just no tilt
+    var avatar = el.querySelector(".mh-tooltip__avatar") || el;
+    var raf = 0, rot = 0, tx = 0;
+    function apply() {
+      raf = 0;
+      el.style.setProperty("--mh-tip-rot", rot.toFixed(1) + "deg");
+      el.style.setProperty("--mh-tip-x", tx.toFixed(1) + "px");
+    }
+    avatar.addEventListener("pointermove", function (ev) {
+      var r = avatar.getBoundingClientRect();
+      if (!r.width) return;
+      var f = (ev.clientX - r.left) / r.width - 0.5; // -0.5 … 0.5
+      rot = clamp(f * 24, -12, 12);
+      tx = clamp(f * 16, -8, 8);
+      if (!raf) raf = requestAnimationFrame(apply);
+    }, { passive: true });
+    avatar.addEventListener("pointerleave", function () {
+      rot = 0; tx = 0;
+      el.style.setProperty("--mh-tip-rot", "0deg");
+      el.style.setProperty("--mh-tip-x", "0px");
+    });
+  }
+
+  /* --- Drag-scroll gallery: click-and-drag a horizontal overflow row ----
+     Native wheel / trackpad / touch / focused-arrow scrolling already work
+     (the row is a plain overflow-x container). This layer adds mouse / pen
+     click-drag panning and an HONEST grab cursor — `.is-grabbable` is set
+     only while the row actually overflows. A drag (past a small threshold)
+     pans freely with snap off, and its trailing click is swallowed so the
+     pan never also activates whatever sat under the pointer. */
+  function bindDragScroll(el) {
+    if (!once(el, "data-mh-drag-init")) return;
+    var hint = el.parentNode ? el.parentNode.querySelector(".mh-ds-hint") : null;
+    var hintDismissed = false, rafSync = 0;
+    function overflowing() { return (el.scrollWidth - el.clientWidth) > 2; }
+    function syncGrab() {
+      var over = overflowing();
+      el.classList.toggle("is-grabbable", over);
+      if (hint && !hintDismissed) hint.hidden = !over;
+    }
+    syncGrab();
+    window.addEventListener("resize", function () {
+      if (!rafSync) rafSync = requestAnimationFrame(function () { rafSync = 0; syncGrab(); });
+    }, { passive: true });
+
+    var down = false, moved = false, startX = 0, startScroll = 0, pid = null;
+    el.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") return;            // touch = native momentum scroll
+      if (ev.button != null && ev.button !== 0) return;  // primary button only
+      if (!overflowing()) return;                        // nothing to pan
+      down = true; moved = false;
+      startX = ev.clientX; startScroll = el.scrollLeft; pid = ev.pointerId;
+    });
+    el.addEventListener("pointermove", function (ev) {
+      if (!down) return;
+      var dx = ev.clientX - startX;
+      if (!moved) {
+        if (Math.abs(dx) < 4) return;                    // threshold keeps real clicks clickable
+        moved = true;
+        el.classList.add("is-dragging");
+        try { el.setPointerCapture(pid); } catch (e) {}
+        if (hint) { hint.hidden = true; hintDismissed = true; }
+      }
+      el.scrollLeft = startScroll - dx;
+    }, { passive: true });
+    function end() {
+      if (!down) return;
+      down = false;
+      el.classList.remove("is-dragging");
+      try { if (pid != null) el.releasePointerCapture(pid); } catch (e) {}
+      pid = null;
+    }
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    // A real drag is followed by a click — swallow it (capture phase) so the
+    // pan never also activates whatever sits under the pointer.
+    el.addEventListener("click", function (ev) {
+      if (moved) { ev.preventDefault(); ev.stopPropagation(); moved = false; }
+    }, true);
   }
 
   /* --- Scroll progress (tracing beam) --------------------------------- */
@@ -377,6 +613,25 @@
     if (typeof btn === "string") btn = document.querySelector(btn);
     if (!btn) return;
     btn.setAttribute("data-mh-state", state || "idle");
+  };
+
+  /* --- Text-scramble API (UI 1.21) ------------------------------------- */
+  // Decode the element's current text in place (re-runs cleanly).
+  MH.scramble = function (el) {
+    if (typeof el === "string") el = document.querySelector(el);
+    runScramble(el);
+  };
+  // Decode *to* a new string — used by the processing poller as each pipeline
+  // stage arrives. A no-op when the target text is unchanged, so polling the
+  // same stage label never re-triggers the flicker.
+  MH.scrambleTo = function (el, text) {
+    if (typeof el === "string") el = document.querySelector(el);
+    if (!el) return;
+    text = String(text == null ? "" : text);
+    if (el.getAttribute("data-mh-scramble-target") === text) return;
+    el.setAttribute("data-mh-scramble-target", text);
+    el.textContent = text; // final text first → correct with no JS / reduced motion
+    runScramble(el);
   };
 
   /* --- Live multi-step loader rendered from a pipeline log array ------- */
@@ -511,10 +766,13 @@
     each(root, ".mh-tilt", bindTilt);
     each(root, ".mh-marquee", bindMarquee);
     each(root, ".mh-text-generate", function (el) { splitWords(el); observe(el); });
-    each(root, ".mh-highlight, .mh-flapboard", observe);
+    each(root, ".mh-highlight, .mh-flapboard, .mh-scramble", observe);
     each(root, ".mh-flip-words", bindFlipWords);
     each(root, ".mh-tabs", bindTabs);
+    each(root, ".mh-cs-copy", bindCopy);
     each(root, ".mh-compare", bindCompare);
+    each(root, ".mh-tooltip", bindTooltip);
+    each(root, ".mh-drag-scroll", bindDragScroll);
     each(root, ".mh-tracing-beam", bindBeam);
     each(root, ".mh-vanish", bindVanish);
     if (beams.length) updateBeams();
