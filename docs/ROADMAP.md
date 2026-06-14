@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `98b7ba005` · Build UI 1.17: content-cadence heatmap on the Activity page (#550)
+**Last updated:** 2026-06-14 · `a604e3c8a` · Build UI 1.6 — animated results/data charts (#563)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -138,7 +138,6 @@ sequence it or merge with care.
 - **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) · ❌ **NOT STARTED**
 - **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
 - **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
-- **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.9** · Phase 1 (Product polish) — Multi-select + bulk actions (from Frame.io): checkboxes + select-all + bulk approve/export/delete in the Media Library and review queue; pure HTML form multi-select with progressive JS enhancement · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1503,12 +1502,11 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `423d2a521` | Build UI 1.6 — animated results/data charts (Mixpanel-inspired) |
 | 2026-06-14 | `09d0df3c1` | docs: mark UI2.1 done on the roadmap |
 | 2026-06-14 | `6f7ffd995` | Build UI 1.12 — sortable/filterable results data table with sparklines |
 | 2026-06-14 | `59c981934` | Apply ruff-format to the UI 1.19 testimonials block |
 | 2026-06-14 | `eeb5fe4ab` | Apply ruff-format (v0.8.4) to cadence_heatmap.py |
 | 2026-06-14 | `d78fd596c` | Build UI 1.28 — global keyboard-shortcuts overlay (?) |
 | 2026-06-14 | `a9fdf0a5a` | Apply ruff-format to the UI 1.11 additions |
-| 2026-06-14 | `e5a2f3843` | Build UI 1.23 — light/dark theme toggle |
-| 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
 <!-- /ROADMAP:ACTIVITY -->
