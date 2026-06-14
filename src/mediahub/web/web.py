@@ -2067,6 +2067,53 @@ def _iso_age_secs(iso_str: Optional[str]) -> Optional[float]:
         return None
 
 
+def _cadence_activity_counts(profile_id: str, end):
+    """Per-day content activity for one organisation over the heatmap window.
+
+    Returns ``(generated, posted)`` — two ``{YYYY-MM-DD: count}`` dicts scoped
+    to ``profile_id``: ``generated`` is pipeline runs created that day (the
+    run history that grounds UI 1.17), ``posted`` is successful publish
+    attempts that day (the posting log). ISO-8601 timestamps sort lexically,
+    so a ``>= start`` prefix compare bounds the scan to the rendered year and
+    ``substr(...,1,10)`` buckets by date in-engine. Fail-soft: any DB trouble
+    yields empty dicts so the Activity page never 500s over its decoration.
+    """
+    generated: dict[str, int] = {}
+    posted: dict[str, int] = {}
+    if not profile_id:
+        return generated, posted
+    start_iso = _cadence_window_start(end).isoformat()
+    try:
+        conn = _db()
+        try:
+            for r in conn.execute(
+                "SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS n FROM runs "
+                "WHERE profile_id = ? AND created_at >= ? GROUP BY d",
+                (profile_id, start_iso),
+            ).fetchall():
+                if r["d"]:
+                    generated[r["d"]] = int(r["n"] or 0)
+            # The posting_attempts table only exists once the posting log has
+            # been touched; tolerate its absence on publish-free deployments.
+            try:
+                for r in conn.execute(
+                    "SELECT substr(attempted_at, 1, 10) AS d, COUNT(*) AS n "
+                    "FROM posting_attempts "
+                    "WHERE profile_id = ? AND status = 'ok' AND attempted_at >= ? "
+                    "GROUP BY d",
+                    (profile_id, start_iso),
+                ).fetchall():
+                    if r["d"]:
+                        posted[r["d"]] = int(r["n"] or 0)
+            except sqlite3.Error:
+                pass
+        finally:
+            conn.close()
+    except Exception as e:  # pragma: no cover - defensive
+        log.warning("cadence: activity counts unavailable: %s", e)
+    return generated, posted
+
+
 def _persist_run_progress(
     run_id: str, status: str, log_list: list, error: Optional[str] = None
 ) -> None:
@@ -7013,6 +7060,11 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web.cadence_heatmap import (  # noqa: E402
+    CADENCE_HEATMAP_CSS as _MH_CAD_CSS,
+    cadence_panel_html as _cadence_panel_html,
+    window_start as _cadence_window_start,
+)
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -7036,6 +7088,7 @@ BASE_CSS = (
     + _MH_AUDIENCE_ICON_CSS
     + _MH_MOTION_CSS
     + _MH_PL_CSS
+    + _MH_CAD_CSS
     + _MH_RG_CSS
 )
 
@@ -12367,6 +12420,20 @@ def create_app() -> Flask:
             summary_html += f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):,}</div></div>'
         summary_html += "</div>"
 
+        # UI 1.17 — content-cadence heatmap. A GitHub-style year grid of this
+        # org's generate/post consistency, rendered server-side as inline SVG
+        # from run history + the posting log. Fail-soft: any trouble drops the
+        # panel rather than breaking the rest of the page.
+        cadence_html = ""
+        try:
+            end_day = datetime.now(timezone.utc).date()
+            _gen, _post = _cadence_activity_counts(prof.profile_id, end_day)
+            if _gen or _post:
+                cadence_html = _cadence_panel_html(_gen, _post, end=end_day)
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("activity: cadence heatmap failed: %s", e)
+            cadence_html = ""
+
         # Toolbar — search input + status segment filter.
         # Filter buttons use ?status= for server-side filtering plus the
         # client-side text search filters in-place. Counts are unfiltered
@@ -12456,6 +12523,7 @@ def create_app() -> Flask:
             "</div>"
             "</section>"
             f"{summary_html}"
+            f"{cadence_html}"
             f"{failure_callout}"
             f"{toolbar_html}"
             '<div class="card"><table class="mh-table-stack">'
