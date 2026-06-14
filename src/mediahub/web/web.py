@@ -26495,6 +26495,81 @@ what you're doing, what they should do.</p>
         return redirect(url_for("operator_commercial"))
 
     # ---- /pricing -----------------------------------------------------
+    # UI 1.20 — polished pricing page styling (scoped under .mh-pricing /
+    # .mh-compare). Plain strings (not f-strings): the CSS braces are literal.
+    # Reuses the existing token system (--surface, --accent, --good, --lane …)
+    # and the shared .mh-segmented control for the billing-period toggle.
+    _PRICING_CSS = (
+        "<style>"
+        ".mh-billing-toggle{display:flex;justify-content:center;margin-bottom:var(--sp-6)}"
+        ".mh-tier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));"
+        "gap:18px;align-items:stretch}"
+        ".mh-tier{position:relative;display:flex;flex-direction:column;gap:16px;padding:24px;"
+        "background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md)}"
+        ".mh-tier.is-recommended{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}"
+        ".mh-tier-badge{position:absolute;top:-11px;left:24px;background:var(--lane);"
+        "color:var(--lane-ink);font-family:var(--font-mono);font-size:var(--fs-9);font-weight:700;"
+        "letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border-radius:var(--radius-pill)}"
+        ".mh-tier-name{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;"
+        "letter-spacing:.08em;color:var(--ink-muted);margin-bottom:8px}"
+        ".mh-tier-price{min-height:46px}"
+        ".mh-price-fig{font-size:30px;font-weight:800;line-height:1}"
+        ".mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted);margin-left:2px}"
+        ".mh-price-note{display:block;font-size:12px;color:var(--ink-muted);margin-top:4px}"
+        ".mh-price-tbc{font-size:15px;color:var(--ink-muted)}"
+        ".mh-tier-blurb{font-size:13px;color:var(--ink-muted);margin-top:8px}"
+        ".mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1 1 auto;"
+        "display:flex;flex-direction:column;gap:9px}"
+        ".mh-feat{display:flex;align-items:baseline;gap:8px}"
+        ".mh-feat-mark{flex:0 0 auto;font-weight:700;width:1em;text-align:center}"
+        ".mh-feat-yes .mh-feat-mark{color:var(--good)}"
+        ".mh-feat-no{color:var(--ink-faint)}"
+        ".mh-feat-no .mh-feat-mark{color:var(--ink-faint)}"
+        ".mh-feat-val{margin-left:auto;padding-left:10px;font-weight:600;color:var(--ink);text-align:right}"
+        ".mh-feat-no .mh-feat-val{color:var(--ink-faint)}"
+        ".mh-tier-cta{margin-top:4px}"
+        ".mh-cta{width:100%;text-align:center}"
+        ".mh-cta-note{text-align:center;font-size:13px}"
+        ".mh-price-note-banner{font-size:13px;margin-top:24px;text-align:center}"
+        ".mh-pricing [data-pane=monthly]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=annual]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=monthly]{display:inline}"
+        ".mh-compare-title{margin:var(--sp-9) 0 var(--sp-4);text-align:center}"
+        ".mh-compare-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}"
+        ".mh-compare{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}"
+        ".mh-compare th,.mh-compare td{padding:12px 14px;border-bottom:1px solid var(--border)}"
+        ".mh-compare thead th{vertical-align:bottom}"
+        ".mh-th-plan{text-align:center;font-family:var(--font-mono);font-size:13px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.06em}"
+        ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
+        ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
+        ".mh-compare td{text-align:center;color:var(--ink-muted)}"
+        ".mh-compare .is-rec{background:rgba(212,255,58,.045)}"
+        ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
+        "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
+        "border-bottom-color:var(--border-h)}"
+        ".mh-cell-yes{color:var(--good);font-weight:700}"
+        ".mh-cell-no{color:var(--ink-faint)}"
+        ".mh-cell-val{color:var(--ink)}"
+        ".mh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
+        "clip:rect(0,0,0,0);white-space:nowrap;border:0}"
+        "@media(max-width:600px){.mh-tier-grid{grid-template-columns:1fr}}"
+        "</style>"
+    )
+    _PRICING_JS = (
+        "<script>(function(){"
+        "var root=document.getElementById('mh-pricing');if(!root)return;"
+        "var btns=root.querySelectorAll('.mh-segmented [data-period]');"
+        "function set(period){root.setAttribute('data-period',period);"
+        "for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute('data-period')===period;"
+        "btns[i].classList.toggle('is-active',on);"
+        "btns[i].setAttribute('aria-pressed',on?'true':'false');}}"
+        "for(var i=0;i<btns.length;i++){(function(b){"
+        "b.addEventListener('click',function(){set(b.getAttribute('data-period'));});"
+        "})(btns[i]);}"
+        "})();</script>"
+    )
+
     @app.route("/pricing", methods=["GET"])
     def pricing_page():
         from mediahub.commercial.wtp import QuoteStore, public_list_price
@@ -26510,106 +26585,174 @@ what you're doing, what they should do.</p>
         except Exception:
             list_price = None
 
+        _CUR_SYMBOL = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}
+
+        def _figure(symbol: str, pence: int) -> str:
+            # Whole pounds when even, else two decimals. The pence is always
+            # ledger-derived — never a hardcoded amount (ADR-0011 / PC.4).
+            if pence % 100 == 0:
+                return f"{symbol}{pence // 100}"
+            return f"{symbol}{pence / 100:.2f}"
+
+        def _price_block(plan: str) -> str:
+            """Annual + monthly price panes for a tier.
+
+            Honest billing-period toggle (UI 1.20): MediaHub sells annual
+            prepay only (ADR-0011; wtp.Quote.billing_interval == "year"), so the
+            "Monthly" view shows the *same committed annual price expressed per
+            month* (annual ÷ 12), explicitly "billed annually" — never a
+            fabricated monthly SKU or a made-up discount. While the PC.4 gate is
+            unmet there is no committed figure, so both views read "Pricing TBC"
+            and no "/year" or "/mo" suffix is emitted at all.
+            """
+            if plan == _auth.PLAN_FREE:
+                return '<div class="mh-price-fig">Free</div>'
+            if plan == _auth.PLAN_CLUB and list_price is not None:
+                symbol = _CUR_SYMBOL.get(list_price["currency"], "")
+                annual_pence = int(list_price["amount_pence"])
+                monthly_pence = round(annual_pence / 12)
+                annual = (
+                    '<span data-pane="annual">'
+                    f'<span class="mh-price-fig">{_figure(symbol, annual_pence)}'
+                    '<span class="mh-price-per">/year</span></span>'
+                    '<span class="mh-price-note">Billed annually</span></span>'
+                )
+                monthly = (
+                    '<span data-pane="monthly">'
+                    f'<span class="mh-price-fig">{_figure(symbol, monthly_pence)}'
+                    '<span class="mh-price-per">/mo</span></span>'
+                    '<span class="mh-price-note">billed annually</span></span>'
+                )
+                return annual + monthly
+            # Federation (no committed list price) or Club before the gate: the
+            # honest state is "Pricing TBC" — never a guessed number.
+            purchasable = _billing.plan_purchasable(plan)
+            title = (
+                "The exact price is shown at checkout"
+                if purchasable
+                else "Set STRIPE_PRICE_"
+                + ("CLUB" if plan == _auth.PLAN_CLUB else "FEDERATION")
+                + " to enable"
+            )
+            return f'<div class="mh-price-tbc" title="{title}">Pricing TBC</div>'
+
+        def _feature_li(row, plan: str) -> str:
+            val = row.value_for(plan)
+            if val is False:
+                return (
+                    '<li class="mh-feat mh-feat-no">'
+                    '<span class="mh-feat-mark" aria-hidden="true">&times;</span>'
+                    f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                    '<span class="mh-sr">— not included</span></li>'
+                )
+            value_html = (
+                f'<span class="mh-feat-val">{_h(val)}</span>' if isinstance(val, str) else ""
+            )
+            return (
+                '<li class="mh-feat mh-feat-yes">'
+                '<span class="mh-feat-mark" aria-hidden="true">&check;</span>'
+                f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                f'{value_html}<span class="mh-sr">— included</span></li>'
+            )
+
         cards = ""
         for tier in _billing.TIERS:
             is_current = tier.plan == plan_now and signed_in
-            features = "".join(
-                f'<li style="margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
-                '<span aria-hidden="true" style="color:var(--good);flex:0 0 auto">&check;</span>'
-                f"<span>{_h(f)}</span></li>"
-                for f in tier.features
-            )
-            # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
-            if tier.plan == _auth.PLAN_FREE:
-                price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
-            elif tier.plan == _auth.PLAN_CLUB and list_price is not None:
-                # PC.4 gate met: commit the evidence-derived annual price.
-                amount = list_price["amount_pence"]
-                symbol = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}.get(
-                    list_price["currency"], ""
-                )
-                if amount % 100 == 0:
-                    figure = f"{symbol}{amount // 100}"
-                else:
-                    figure = f"{symbol}{amount / 100:.2f}"
-                price_html = (
-                    f'<div style="font-size:30px;font-weight:800;line-height:1">{figure}'
-                    '<span style="font-size:14px;font-weight:600;color:var(--ink-muted)">'
-                    "/year</span></div>"
-                    '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
-                )
-            else:
-                # PC.4 gate unmet (or no evidence for this tier): the honest
-                # state is "Pricing TBC" — never a guessed number. When the
-                # tier is purchasable via an env-configured Stripe Price, the
-                # exact amount still shows at checkout.
-                purchasable = _billing.plan_purchasable(tier.plan)
-                if purchasable:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="The exact price is shown at checkout">Pricing TBC</div>'
-                    )
-                else:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="Set STRIPE_PRICE_'
-                        + ("CLUB" if tier.plan == _auth.PLAN_CLUB else "FEDERATION")
-                        + ' to enable">Pricing TBC</div>'
-                    )
+            recommended = tier.plan == _auth.PLAN_CLUB
+            features = "".join(_feature_li(row, tier.plan) for row in _billing.feature_rows())
+            price_html = _price_block(tier.plan)
 
-            # CTA
+            # CTA — purchase/upgrade logic (unchanged from the prior page).
             if is_current:
                 cta = (
-                    '<div class="btn secondary" style="width:100%;text-align:center;'
-                    'pointer-events:none;opacity:0.75">Current plan</div>'
+                    '<div class="btn secondary mh-cta" '
+                    'style="pointer-events:none;opacity:0.75">Current plan</div>'
                 )
             elif tier.plan == _auth.PLAN_FREE:
                 cta = (
-                    f'<a class="btn secondary" href="{url_for("signup_page")}" '
-                    'style="width:100%;text-align:center">Get started free</a>'
+                    f'<a class="btn secondary mh-cta" href="{url_for("signup_page")}">'
+                    "Get started free</a>"
                     if not signed_in
-                    else '<div class="dim" style="text-align:center;font-size:13px">Included</div>'
+                    else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
                 if not configured:
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6" '
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6" '
                         'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
                     )
                 elif not signed_in:
                     cta = (
-                        f'<a class="btn" href="{url_for("login_page", next=url_for("pricing_page"))}" '
-                        'style="width:100%;text-align:center">Log in to upgrade</a>'
+                        f'<a class="btn mh-cta" '
+                        f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
+                        "Log in to upgrade</a>"
                     )
                 elif not _billing.plan_purchasable(tier.plan):
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6">Not yet available</div>'
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
                     # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'<a class="btn mh-cta" '
                         f'href="{url_for("billing_confirm", plan=tier.plan)}">'
                         f"Upgrade to {_h(tier.name)}</a>"
                     )
 
-            highlight = (
-                "border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)"
-                if tier.plan == _auth.PLAN_CLUB
-                else "border:1px solid var(--border)"
-            )
+            badge = '<div class="mh-tier-badge">Recommended</div>' if recommended else ""
+            cls = "mh-tier" + (" is-recommended" if recommended else "")
             cards += (
-                f'<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px;{highlight}">'
-                f'<div><div style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;'
-                f'color:var(--ink-muted);margin-bottom:6px">{_h(tier.name)}</div>{price_html}'
-                f'<div class="dim" style="font-size:13px;margin-top:8px">{_h(tier.blurb)}</div></div>'
-                f'<ul style="list-style:none;padding:0;margin:0;font-size:13px;flex:1">{features}</ul>'
-                f"{cta}"
+                f'<div class="{cls}">{badge}'
+                '<div class="mh-tier-head">'
+                f'<div class="mh-tier-name">{_h(tier.name)}</div>'
+                f'<div class="mh-tier-price">{price_html}</div>'
+                f'<div class="mh-tier-blurb">{_h(tier.blurb)}</div>'
+                "</div>"
+                f'<ul class="mh-feat-list">{features}</ul>'
+                f'<div class="mh-tier-cta">{cta}</div>'
                 "</div>"
             )
+
+        # Feature comparison table — same single-source matrix as the cards.
+        def _cell(val) -> str:
+            if val is True:
+                return (
+                    '<span class="mh-cell-yes" aria-hidden="true">&check;</span>'
+                    '<span class="mh-sr">Included</span>'
+                )
+            if val is False:
+                return (
+                    '<span class="mh-cell-no" aria-hidden="true">&times;</span>'
+                    '<span class="mh-sr">Not included</span>'
+                )
+            return f'<span class="mh-cell-val">{_h(val)}</span>'
+
+        head_cells = ""
+        for t in _billing.TIERS:
+            rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+            tag = '<span class="mh-th-rec">Recommended</span>' if t.plan == _auth.PLAN_CLUB else ""
+            head_cells += f'<th scope="col" class="mh-th-plan{rec}">{_h(t.name)}{tag}</th>'
+        ncols = 1 + len(_billing.TIERS)
+        rows_html = ""
+        for group in _billing.FEATURE_MATRIX:
+            rows_html += (
+                f'<tr class="mh-compare-group"><th colspan="{ncols}" scope="colgroup">'
+                f"{_h(group.title)}</th></tr>"
+            )
+            for row in group.rows:
+                cells = ""
+                for t in _billing.TIERS:
+                    rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+                    cells += f'<td class="{rec.strip()}">{_cell(row.value_for(t.plan))}</td>'
+                rows_html += f'<tr><th scope="row">{_h(row.label)}</th>{cells}</tr>'
+        compare_table = (
+            '<div class="mh-compare-wrap"><table class="mh-compare">'
+            f'<thead><tr><th scope="col"></th>{head_cells}</tr></thead>'
+            f"<tbody>{rows_html}</tbody></table></div>"
+        )
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
@@ -26619,20 +26762,33 @@ what you're doing, what they should do.</p>
                 "Billing is not configured on this deployment, so paid plans "
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
-        note_html = (
-            f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
+        note_html = f'<p class="dim mh-price-note-banner">{note}</p>'
+
+        toggle = (
+            '<div class="mh-billing-toggle">'
+            '<div class="mh-segmented" role="group" aria-label="Billing period">'
+            '<button type="button" class="is-active" data-period="annual" '
+            'aria-pressed="true">Annually</button>'
+            '<button type="button" data-period="monthly" '
+            'aria-pressed="false">Monthly</button>'
+            "</div></div>"
         )
 
         body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
+            _PRICING_CSS
+            + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper &mdash; ask us.</p>"
+            "Annual prepay keeps it cheaper.</p>"
             "</section>"
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">'
-            f"{cards}</div>"
+            '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
+            f"{toggle}"
+            f'<div class="mh-tier-grid">{cards}</div>'
             f"{note_html}"
+            '<h2 class="mh-compare-title">Compare every plan</h2>'
+            f"{compare_table}"
+            "</div>" + _PRICING_JS
         )
         return _layout("Pricing", body, active="signin")
 
