@@ -48,6 +48,10 @@ _ARG_FILL = {
     "card_id": "card-alpha-1",
     "swimmer_key": "Alpha Athlete",
     "job_id": "job-x",
+    # UI 1.8 reel review-comment mutate route. A junk id is right: a foreign
+    # org must be refused by _can_access_run before the comment is ever looked
+    # up, so the run-not-found 404 fires regardless of whether the id exists.
+    "comment_id": "no-such-comment",
     # PC.10: the public wall's card route carries a per-org token. An
     # unknown token must 404 before any run data is touched, so sweeping
     # it with a junk token is exactly the guarantee to pin.

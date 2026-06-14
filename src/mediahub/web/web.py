@@ -3614,7 +3614,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
       panel.innerHTML =
         '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
           '<div style="' + vidCol + '">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+            '<video class="mh-motion-video" src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
           '<div style="flex:1;min-width:min(200px,100%)">' +
             '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
@@ -3625,8 +3625,16 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
             '</div>' +
             '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
           '</div>' +
-        '</div>';
+        '</div>' +
+        '<div class="mh-reel-comments" style="margin-top:12px"></div>';
       _loadMotionWhy(panel, motionUrl, fmt);
+      // UI 1.8 - pin timestamp comments to this card's motion clip too. The
+      // run-level comments endpoint sits at the path before '/card/'.
+      var _cmRoot = motionUrl.split('/card/')[0];
+      var _cmMount = panel.querySelector('.mh-reel-comments');
+      if (_cmMount && typeof mhReelComments === 'function') {
+        mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+      }
       });
     })
     .catch(function(err) {
@@ -3688,22 +3696,8 @@ function generateReel(btn, reelUrl, fmt) {
   };
   var success = function(videoUrl) {
     prog.complete(function(){
-    btn.disabled = false; btn.textContent = origLabel;
-    var vidCol = fmt === 'landscape' ? 'flex:0 0 min(340px,100%);max-width:360px' : 'flex:0 0 min(240px,100%);max-width:260px';
-    panel.innerHTML =
-      '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + vidCol + '">' +
-          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-        '</div>' +
-        '<div style="flex:1;min-width:min(240px,100%)">' +
-          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
-          '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Length follows the number of moments.</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-            '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
+      btn.disabled = false; btn.textContent = origLabel;
+      mhRenderReel(panel, reelUrl, fmt, videoUrl);
     });
   };
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {method:'POST'})
@@ -3731,6 +3725,233 @@ function generateReel(btn, reelUrl, fmt) {
       setTimeout(poll, 3000);
     })
     .catch(function(err) { fail('Network error: ' + err); });
+}
+
+// UI 1.8 - render the finished reel panel (video + format chips + download)
+// plus the Frame.io-style timestamp comment surface beneath it. Used by both
+// generateReel's success path and the on-load restore of a cached reel.
+function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
+  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(340px,100%);max-width:360px' : 'flex:0 0 min(240px,100%);max-width:260px';
+  panel.innerHTML =
+    '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="' + vidCol + '">' +
+        '<video class="mh-reel-video" src="' + videoUrl + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+      '</div>' +
+      '<div style="flex:1;min-width:min(240px,100%)">' +
+        '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
+        '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Scrub to a moment and pin a comment for your team.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:14px"></div>';
+  var mount = panel.querySelector('.mh-reel-comments');
+  if (mount) mhReelComments({mount: mount, video: panel.querySelector('video.mh-reel-video'), baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
+// UI 1.8 - the comments persist even when the cached MP4 is gone (a fresh
+// container, an evicted cache). Show the saved notes with a regenerate hint
+// rather than a broken <video>.
+function mhRenderReelCommentsOnly(panel, reelUrl, n) {
+  panel.innerHTML =
+    '<div style="font-size:13px;color:var(--ink);margin-bottom:8px;line-height:1.4">' +
+      'You have <b>' + n + '</b> saved review ' + (n === 1 ? 'comment' : 'comments') + ' on this reel. ' +
+      'Generate the reel above to see ' + (n === 1 ? 'it' : 'them') + ' pinned on the timeline.' +
+    '</div>' +
+    '<div class="mh-reel-comments"></div>';
+  var mount = panel.querySelector('.mh-reel-comments');
+  if (mount) mhReelComments({mount: mount, video: null, baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
+// UI 1.8 - timestamp-anchored review comments (Frame.io-style). Builds a
+// scrubber track with a pin per comment, a "comment at <time>" composer that
+// captures the current playhead, and a list with seek/resolve/delete. All
+// user text goes in via textContent (never innerHTML) so a caption-style XSS
+// can't ride a comment body; every write is a JSON POST (CSRF-exempt).
+function mhReelComments(opts) {
+  var mount = opts.mount, video = opts.video, baseUrl = opts.baseUrl, target = opts.target || 'reel';
+  if (!mount) return;
+  var state = { comments: [] };
+
+  function fmtTime(ms) {
+    var s = Math.max(0, Math.floor((ms || 0) / 1000));
+    var m = Math.floor(s / 60), r = s % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+  function curMs() { return (video && isFinite(video.currentTime)) ? Math.round(video.currentTime * 1000) : 0; }
+  function timeline() {
+    if (video && isFinite(video.duration) && video.duration > 0) return video.duration * 1000;
+    var mx = 0; state.comments.forEach(function(c){ if (c.t_ms > mx) mx = c.t_ms; });
+    return Math.max(mx * 1.08, 1000);
+  }
+  function jget(url) { return fetch(url, {headers:{'Accept':'application/json'}}).then(function(r){ return r.json(); }); }
+  function jpost(url, body) {
+    return fetch(url, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(body || {})})
+      .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){ return {status:r.status, body:null}; }); });
+  }
+  function showErr(m) { errEl.textContent = m; errEl.style.display = ''; setTimeout(function(){ errEl.style.display = 'none'; }, 4000); }
+
+  mount.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">' +
+      '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-muted)">Review comments <span class="mh-rc-count"></span></div>' +
+      '<div style="font-size:11px;color:var(--ink-muted)">Pin feedback to a moment</div>' +
+    '</div>' +
+    '<div class="mh-rc-track" title="Click to seek" style="position:relative;height:26px;border-radius:6px;background:var(--panel);border:1px solid var(--border);margin-bottom:8px;cursor:pointer;overflow:hidden">' +
+      '<div class="mh-rc-played" style="position:absolute;top:0;left:0;bottom:0;width:0;background:rgba(244,213,141,0.16);pointer-events:none"></div>' +
+      '<div class="mh-rc-playhead" style="position:absolute;top:0;bottom:0;left:0;width:2px;background:var(--accent);pointer-events:none"></div>' +
+    '</div>' +
+    '<form class="mh-rc-form" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">' +
+      '<span class="mh-rc-at" title="Pinned at this moment" style="font-variant-numeric:tabular-nums;font-size:12px;background:var(--accent);color:var(--medal-ink);border-radius:4px;padding:3px 8px;font-weight:700">0:00</span>' +
+      '<input class="mh-rc-body" type="text" maxlength="2000" placeholder="Add a comment at this moment…" style="flex:1;min-width:160px;font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--ink)" />' +
+      '<input class="mh-rc-author" type="text" maxlength="120" placeholder="Your name" style="width:118px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--ink)" />' +
+      '<button type="submit" class="btn mh-rc-submit" style="font-size:12px;padding:6px 12px">Pin comment</button>' +
+    '</form>' +
+    '<div class="mh-rc-list" style="display:flex;flex-direction:column;gap:6px"></div>' +
+    '<div class="mh-rc-err" style="display:none;color:var(--bad);font-size:12px;margin-top:6px"></div>';
+
+  var track = mount.querySelector('.mh-rc-track');
+  var played = mount.querySelector('.mh-rc-played');
+  var playhead = mount.querySelector('.mh-rc-playhead');
+  var atChip = mount.querySelector('.mh-rc-at');
+  var form = mount.querySelector('.mh-rc-form');
+  var bodyIn = mount.querySelector('.mh-rc-body');
+  var authorIn = mount.querySelector('.mh-rc-author');
+  var list = mount.querySelector('.mh-rc-list');
+  var countEl = mount.querySelector('.mh-rc-count');
+  var errEl = mount.querySelector('.mh-rc-err');
+
+  try { authorIn.value = localStorage.getItem('mh_reviewer_name') || ''; } catch(e) {}
+  var typing = false;
+  bodyIn.addEventListener('focus', function(){ typing = true; });
+  bodyIn.addEventListener('blur', function(){ typing = false; });
+
+  function seekTo(ms) {
+    if (video && isFinite(video.duration)) { try { video.currentTime = Math.min(video.duration, ms / 1000); video.pause(); } catch(e) {} }
+  }
+  function highlight(id) {
+    var row = list.querySelector('.mh-rc-row[data-id="' + id + '"]');
+    if (!row) return;
+    row.style.outline = '2px solid var(--accent)';
+    row.scrollIntoView({block:'nearest', behavior:'smooth'});
+    setTimeout(function(){ row.style.outline = ''; }, 1500);
+  }
+
+  function renderMarkers() {
+    Array.prototype.slice.call(track.querySelectorAll('.mh-rc-pin')).forEach(function(p){ p.remove(); });
+    var tl = timeline();
+    state.comments.forEach(function(c) {
+      var pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'mh-rc-pin';
+      pin.title = fmtTime(c.t_ms) + ' — ' + c.body;
+      var pct = Math.max(0, Math.min(100, (c.t_ms / tl) * 100));
+      pin.style.cssText = 'position:absolute;top:3px;bottom:3px;width:3px;border:0;padding:0;border-radius:2px;cursor:pointer;transform:translateX(-1px);left:' + pct + '%;background:' + (c.resolved ? 'var(--ink-muted)' : 'var(--medal)');
+      pin.addEventListener('click', function(ev){ ev.stopPropagation(); seekTo(c.t_ms); highlight(c.id); });
+      track.appendChild(pin);
+    });
+  }
+
+  function renderList() {
+    list.textContent = '';
+    countEl.textContent = '· ' + state.comments.length;
+    if (!state.comments.length) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'font-size:12px;color:var(--ink-muted);padding:6px 0';
+      empty.textContent = 'No comments yet — scrub to a moment and pin the first note.';
+      list.appendChild(empty);
+      return;
+    }
+    state.comments.forEach(function(c) {
+      var row = document.createElement('div');
+      row.className = 'mh-rc-row';
+      row.setAttribute('data-id', c.id);
+      row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel)' + (c.resolved ? ';opacity:0.55' : '');
+
+      var tbtn = document.createElement('button');
+      tbtn.type = 'button';
+      tbtn.textContent = fmtTime(c.t_ms);
+      tbtn.title = 'Jump to this moment';
+      tbtn.style.cssText = 'flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;background:var(--medal);color:var(--medal-ink);border:0;border-radius:4px;padding:3px 7px;cursor:pointer';
+      tbtn.addEventListener('click', function(){ seekTo(c.t_ms); });
+
+      var mid = document.createElement('div');
+      mid.style.cssText = 'flex:1;min-width:0';
+      var bodyD = document.createElement('div');
+      bodyD.style.cssText = 'font-size:13px;color:var(--ink);line-height:1.35;word-break:break-word' + (c.resolved ? ';text-decoration:line-through' : '');
+      bodyD.textContent = c.body;
+      var meta = document.createElement('div');
+      meta.style.cssText = 'font-size:11px;color:var(--ink-muted);margin-top:2px';
+      meta.textContent = c.author || 'Reviewer';
+      mid.appendChild(bodyD); mid.appendChild(meta);
+
+      var actions = document.createElement('div');
+      actions.style.cssText = 'flex:0 0 auto;display:flex;gap:4px';
+      var resBtn = document.createElement('button');
+      resBtn.type = 'button';
+      resBtn.className = 'btn secondary';
+      resBtn.textContent = c.resolved ? 'Reopen' : 'Resolve';
+      resBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+      resBtn.addEventListener('click', function(){ mutate(c.id, {action: c.resolved ? 'reopen' : 'resolve'}); });
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn secondary';
+      delBtn.textContent = 'Delete';
+      delBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+      delBtn.addEventListener('click', function(){ if (window.confirm('Delete this comment?')) mutate(c.id, {action:'delete'}); });
+      actions.appendChild(resBtn); actions.appendChild(delBtn);
+
+      row.appendChild(tbtn); row.appendChild(mid); row.appendChild(actions);
+      list.appendChild(row);
+    });
+  }
+
+  function refresh() {
+    jget(baseUrl + '?target=' + encodeURIComponent(target)).then(function(j) {
+      state.comments = (j && j.comments) || [];
+      renderMarkers(); renderList(); syncHead();
+    }).catch(function(){});
+  }
+  function mutate(id, body) {
+    jpost(baseUrl + '/' + encodeURIComponent(id), body).then(function(res) {
+      if (res.status >= 200 && res.status < 300) refresh();
+      else showErr((res.body && (res.body.detail || res.body.error)) || 'could not update comment');
+    }).catch(function(err){ showErr('Network error: ' + err); });
+  }
+
+  form.addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    var text = (bodyIn.value || '').trim();
+    if (!text) { bodyIn.focus(); return; }
+    var author = (authorIn.value || '').trim();
+    try { if (author) localStorage.setItem('mh_reviewer_name', author); } catch(e) {}
+    jpost(baseUrl, {target: target, t_ms: curMs(), body: text, author: author}).then(function(res) {
+      if (res.status >= 200 && res.status < 300) { bodyIn.value = ''; refresh(); }
+      else showErr((res.body && (res.body.detail || res.body.error)) || 'could not add comment');
+    }).catch(function(err){ showErr('Network error: ' + err); });
+  });
+
+  track.addEventListener('click', function(ev) {
+    var rect = track.getBoundingClientRect();
+    if (!rect.width) return;
+    seekTo(timeline() * Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)));
+  });
+
+  function syncHead() {
+    var tl = timeline();
+    var ms = curMs();
+    var pct = tl > 0 ? Math.max(0, Math.min(100, (ms / tl) * 100)) : 0;
+    playhead.style.left = pct + '%';
+    played.style.width = pct + '%';
+    if (!typing) atChip.textContent = fmtTime(ms);
+  }
+  if (video) {
+    video.addEventListener('loadedmetadata', function(){ renderMarkers(); syncHead(); });
+    video.addEventListener('timeupdate', syncHead);
+    video.addEventListener('seeked', syncHead);
+  }
+  refresh();
 }
 
 function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
@@ -29319,6 +29540,28 @@ function mhSetupMode(mode) {{
 {_schedule_modal_html()}
 <script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
 {_card_creative_js()}
+<script>
+// UI 1.8 - on load, if this run already has reel review comments, surface the
+// cached reel (or a comments-only view) so a returning reviewer sees their
+// pinned feedback without re-rendering.
+(function(){{
+  var reelUrl = {json.dumps(_reel_url)};
+  var panel = document.getElementById('reel-panel');
+  if (!panel || typeof mhReelComments !== 'function') return;
+  var fileUrl = reelUrl + '-file?n=3&format=story';
+  fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
+    .then(function(r){{ return r.json(); }})
+    .then(function(j){{
+      var n = (j && j.comments && j.comments.length) || 0;
+      if (!n) return;
+      panel.style.display = '';
+      fetch(fileUrl, {{method:'HEAD'}})
+        .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
+        .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
+    }})
+    .catch(function(){{}});
+}})();
+</script>
 {_schedule_modal_js()}
 """
         return _layout(f"Content builder — {meet_name}", body, active="home")
@@ -33913,6 +34156,120 @@ voice, and queues them for one-click approval.</p>
             if fmt != "story"
             else f"meet_reel_{run_id}.mp4",
         )
+
+    # ---- UI 1.8: timestamp-anchored reel review comments ----------------
+    # Frame.io-style feedback markers pinned to a moment on a generated reel
+    # (or a single story card) in the content-builder review surface. Stored
+    # per run/target in SQLite (workflow.review_comments), replayed as overlays
+    # on the video scrubber. State-changing calls are plain JSON POSTs, which
+    # are CSRF-exempt by content-type (see _csrf_protect).
+    def _reel_comments_run(run_id: str):
+        """Resolve+access-gate a run for the comment routes.
+
+        Returns ``(run_data, None)`` when the caller may touch this run's
+        comments, or ``(None, (response, status))`` to short-circuit. The run
+        must exist on disk — we never pin a marker to a phantom run id.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None:
+            alt = RUNS_DIR / run_id / "run.json"
+            if alt.exists():
+                try:
+                    run_data = json.loads(alt.read_text())
+                except Exception:
+                    run_data = None
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        return run_data, None
+
+    @app.route("/api/runs/<run_id>/reel/comments", methods=["GET", "POST"])
+    def api_reel_comments(run_id: str):
+        """List (GET) or pin (POST) review comments for a run's reel/card.
+
+        GET  ?target=<reel|card:ID>&resolved=0|1  -> {ok, target, comments:[…]}
+        POST {target?, t_ms, body, author?}        -> {ok, comment:{…}}  (201)
+        """
+        _run_data, err = _reel_comments_run(run_id)
+        if err is not None:
+            return err
+        try:
+            from mediahub.workflow import review_comments as _rc
+        except Exception as e:
+            return jsonify({"error": f"comments_unavailable: {e}"}), 503
+
+        if request.method == "GET":
+            target = request.args.get("target")
+            include_resolved = (request.args.get("resolved") or "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            try:
+                rows = _rc.list_comments(run_id, target, include_resolved=include_resolved)
+            except _rc.ReelCommentError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            return jsonify(
+                {
+                    "ok": True,
+                    "target": target or None,
+                    "comments": [c.to_dict() for c in rows],
+                }
+            )
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            comment = _rc.add_comment(
+                run_id,
+                payload.get("target"),
+                payload.get("t_ms"),
+                payload.get("body"),
+                author=payload.get("author"),
+            )
+        except _rc.ReelCommentError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify({"ok": True, "comment": comment.to_dict()}), 201
+
+    @app.route("/api/runs/<run_id>/reel/comments/<comment_id>", methods=["POST"])
+    def api_reel_comment_mutate(run_id: str, comment_id: str):
+        """Resolve / reopen / edit / delete a single review comment.
+
+        Body JSON: ``{action: 'resolve'|'reopen'|'edit'|'delete', body?}``.
+        Mirrors api_workflow_set's action-in-body style so one JSON POST
+        (CSRF-exempt by content-type) covers every mutation. The comment id is
+        scoped to ``run_id`` so it can only be touched under its own run.
+        """
+        _run_data, err = _reel_comments_run(run_id)
+        if err is not None:
+            return err
+        try:
+            from mediahub.workflow import review_comments as _rc
+        except Exception as e:
+            return jsonify({"error": f"comments_unavailable: {e}"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        action = (payload.get("action") or "").strip().lower()
+
+        if action == "delete":
+            if not _rc.delete_comment(comment_id, run_id=run_id):
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "deleted": comment_id})
+
+        if action in {"resolve", "reopen"}:
+            updated = _rc.update_comment(comment_id, resolved=(action == "resolve"), run_id=run_id)
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        if action == "edit":
+            try:
+                updated = _rc.update_comment(comment_id, body=payload.get("body"), run_id=run_id)
+            except _rc.ReelCommentError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
     def api_card_voiceover(run_id: str, card_id: str):
