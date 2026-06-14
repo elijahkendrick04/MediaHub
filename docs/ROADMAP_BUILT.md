@@ -63,6 +63,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **U.7** · Phase 1 (Product polish) — "Focus the facts" caption/explainability highlight (inspired by Pedro Duarte): in captions + the why-this-card review UI, source-grounded entities (athlete/time/event/PB) are sharp + pill-highlighted; filler de-emphasised (supports U.3) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **U.10** · Phase 1 (Product polish) — Framed in-app product demo in hero (inspired by Reflect): short looping screen-capture or interactive preview of generate → review → approve, plus a subtle ambient hero glow · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **U.14** · Phase 1 (Product polish) — Cursor-following hover preview (inspired by Christopher Ireland + SuperHi): hovering an item in Media Library / CREATE list shows a floating cross-dissolve thumbnail near the cursor · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **U.15** · Phase 1 (Product polish) — Before/after reveal slider (inspired by Lovi): drag-to-wipe between a raw results sheet (input) and the finished branded graphic (output) on the landing · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
