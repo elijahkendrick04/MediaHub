@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 200" role="img" aria-label="A feed graphic">
+  <title>Feed graphic (output) — top three, county finals podium</title>
+  <!-- OUTPUT: a 4:5 feed graphic. A podium bar chart drawn from the night's
+       finals — gold for first (medal tint), ink-grey for second, lane-yellow
+       (dimmed) for third — with rank numerals. Names/times/places come from
+       the parsed meet file. Self-contained vector. -->
+  <rect width="144" height="200" fill="#0A0B11"/>
+  <rect width="144" height="4" fill="#D4FF3A"/>
+  <!-- eyebrow + title -->
+  <text x="13" y="26" font-family="monospace" font-size="7" font-weight="700" letter-spacing="1.4" fill="#D4FF3A">COUNTY FINALS</text>
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="#F5F2E8" letter-spacing="-0.5">
+    <text x="13" y="52" font-size="19">TOP THREE</text>
+    <text x="13" y="73" font-size="19">FINALS</text>
+  </g>
+  <!-- podium -->
+  <!-- 2nd — silver/ink -->
+  <rect x="22" y="128" width="28" height="52" rx="2" fill="#B6B2A6"/>
+  <text x="36" y="146" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="13" fill="#0A0B11">2</text>
+  <!-- 1st — gold (tallest) -->
+  <rect x="58" y="102" width="28" height="78" rx="2" fill="#F4D58D"/>
+  <text x="72" y="120" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="13" fill="#2B1F00">1</text>
+  <!-- 3rd — bronze (dimmed lane) -->
+  <rect x="94" y="142" width="28" height="38" rx="2" fill="#D4FF3A" opacity="0.7"/>
+  <text x="108" y="160" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="13" fill="#0A0B11">3</text>
+  <!-- baseline -->
+  <line x1="13" y1="180" x2="131" y2="180" stroke="#F5F2E8" stroke-opacity="0.20" stroke-width="1.2"/>
+  <!-- footer wordmark -->
+  <text x="13" y="193" font-family="monospace" font-size="6.5" letter-spacing="0.8" fill="#B6B2A6">RIVERSIDE SC</text>
+</svg>
