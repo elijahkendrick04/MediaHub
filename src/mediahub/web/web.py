@@ -11435,7 +11435,7 @@ def create_app() -> Flask:
                 "</span>"
             )
 
-        inline_headline_html = (
+        pipeline_html = (
             '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
             '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
             '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
@@ -11990,7 +11990,6 @@ def create_app() -> Flask:
             '<div class="mh-fx mh-spotlight">'
             + hero_html
             + "</div>"
-            + inline_headline_html
             + pipeline_html
             + marquee_html
             + steps_html
