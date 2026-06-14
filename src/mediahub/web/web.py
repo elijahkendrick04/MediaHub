@@ -1110,7 +1110,7 @@ def _worthiness_meter(priority: float) -> str:
         'of how postable this is, used to order the queue. Separate from confidence.">'
         '<span class="mh-worth-label">Worth</span>'
         '<span class="mh-worth-track">'
-        f'<span class="mh-worth-fill" style="width:{pct}%"></span></span>'
+        f'<span class="mh-worth-fill mh-bar-fill" style="width:{pct}%"></span></span>'
         f'<span class="mh-worth-num">{pct}%</span></span>'
     )
 
@@ -3540,10 +3540,10 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="flex:0 0 220px;max-width:240px">' +
+      '<div style="flex:0 0 min(220px,100%);max-width:240px">' +
         '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)" />' +
       '</div>' +
-      '<div style="flex:1;min-width:200px">' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
         (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
         '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
@@ -3610,13 +3610,13 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
       btn.disabled = false; btn.textContent = origLabel;
       var url = URL.createObjectURL(res.blob);
       _motionCache[cardId + ':' + fmt] = url;
-      var vidCol = fmt === 'landscape' ? 'flex:0 0 300px;max-width:320px' : 'flex:0 0 200px;max-width:220px';
+      var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
       panel.innerHTML =
         '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
           '<div style="' + vidCol + '">' +
             '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
-          '<div style="flex:1;min-width:200px">' +
+          '<div style="flex:1;min-width:min(200px,100%)">' +
             '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
             '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered via Remotion. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
@@ -3689,13 +3689,13 @@ function generateReel(btn, reelUrl, fmt) {
   var success = function(videoUrl) {
     prog.complete(function(){
     btn.disabled = false; btn.textContent = origLabel;
-    var vidCol = fmt === 'landscape' ? 'flex:0 0 340px;max-width:360px' : 'flex:0 0 240px;max-width:260px';
+    var vidCol = fmt === 'landscape' ? 'flex:0 0 min(340px,100%);max-width:360px' : 'flex:0 0 min(240px,100%);max-width:260px';
     panel.innerHTML =
       '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
         '<div style="' + vidCol + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
-        '<div style="flex:1;min-width:240px">' +
+        '<div style="flex:1;min-width:min(240px,100%)">' +
           '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
           '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Length follows the number of moments.</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
@@ -3812,13 +3812,13 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {
   var tilesHtml = variants.map(function(vt) {
     var v = vt.visual;
     if (!v) {
-      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
+      return '<div style="flex:1;min-width:min(160px,100%);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
     }
     var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
     var hook = (vt.brief && vt.brief.primary_hook) || '';
     return (
-      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+      '<div class="variant-tile" style="flex:1;min-width:min(160px,100%);background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
         (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
@@ -4088,7 +4088,7 @@ def _render_turn_into_card(run_id: str) -> str:
     return f"""
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-    <div style="flex:1;min-width:240px">
+    <div style="flex:1;min-width:min(240px,100%)">
       <h2 style="margin-bottom:6px">Turn this meet into more</h2>
       <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
         One click re-uses everything this meet already produced &mdash; the
@@ -4246,7 +4246,7 @@ def _sample_pack_cta(
         '<div class="card mh-sample-cta" style="border:1px dashed var(--border);'
         "background:var(--surface);display:flex;gap:16px;align-items:center;"
         'flex-wrap:wrap;justify-content:space-between">'
-        '<div style="flex:1;min-width:240px">'
+        '<div style="flex:1;min-width:min(240px,100%)">'
         f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
         f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
         "</div>"
@@ -5135,6 +5135,7 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 }
 .mh-footer-meta {
   display: inline-flex; align-items: center; gap: var(--sp-3);
+  flex-wrap: wrap;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.18em;
@@ -5153,6 +5154,10 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
     gap: var(--sp-4);
     text-align: center;
   }
+  /* Let the stacked grid tracks shrink to the viewport — the mono meta row's
+     min-content (a non-wrapping link strip) was otherwise blowing the footer
+     past the phone viewport and forcing a horizontal scroll on every page. */
+  .mh-footer-inner > * { min-width: 0; }
   .mh-footer-brand, .mh-footer-meta { justify-content: center; }
 }
 
@@ -6264,12 +6269,11 @@ a.card:hover, .card[data-interactive]:hover {
   .stat-block { gap: 8px; }
   .stat { padding: 10px 12px; min-width: 0; flex: 1; }
   .mh-hero h1 { font-size: clamp(40px, 11vw, 64px); }
-}
-@media (max-width: 480px) {
-  .row { gap: 12px; }
-  .grid-2, .grid-3 { gap: 12px; }
-  .stat-block { gap: 8px; }
-  .stat { padding: 10px 12px; min-width: 0; flex: 1; }
+  /* Tighter hero chrome so the fold isn't dominated by whitespace on a phone. */
+  .mh-hero { padding: 36px 16px 24px; margin-bottom: 24px; }
+  /* Stacked full-bleed CTAs are easier to thumb than centred pills. */
+  .mh-hero-ctas { flex-direction: column; align-items: stretch; }
+  .mh-hero-ctas .btn { width: 100%; justify-content: center; }
 }
 /* Force inputs/selects to never overflow their container, even with inline max-widths */
 input[type=text], input[type=file], textarea, select { max-width: 100%; }
@@ -7002,6 +7006,7 @@ select:focus-visible {
 from mediahub.web.theme_tokens import (  # noqa: E402
     THEME_TOKENS_CSS as _MH_TT_CSS,
     THEME_COMPONENTS_CSS as _MH_TC_CSS,
+    THEME_MOTION_CSS as _MH_MOTION_CSS,
 )
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
 from mediahub.web.pipeline_diagram import (  # noqa: E402
@@ -7020,7 +7025,19 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
 _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
-BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_PL_CSS + _MH_RG_CSS
+# Motion / effect kit + the U.8 pipeline-diagram CSS ride AFTER the components
+# layer (so they can elevate existing component primitives) but BEFORE the
+# guardrails, which must stay the cascade's final layer
+# (test_theme_tokens::test_guardrails_appended_last).
+BASE_CSS = (
+    _MH_TT_CSS
+    + BASE_CSS
+    + _MH_TC_CSS
+    + _MH_AUDIENCE_ICON_CSS
+    + _MH_MOTION_CSS
+    + _MH_PL_CSS
+    + _MH_RG_CSS
+)
 
 
 # U.9 — cycling hero accent word. The content types MediaHub makes, in the
@@ -7894,8 +7911,8 @@ _VISUAL_PANEL_JS = """<script>
     }
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="flex:0 0 200px;max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
-        '<div style="flex:1;min-width:200px">' +
+        '<div style="flex:0 0 min(200px,100%);max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
+        '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + esc(layout || 'auto') + '</div>' +
           (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + esc(why) + '</div>' : '') +
           '<div style="margin-bottom:8px">' + tabs + '</div>' +
@@ -8432,6 +8449,11 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     });
   }
 </script>
+<!-- UI kit — first-party progressive-enhancement behaviours for the motion /
+     effect layer (theme-motion.css). Deferred: runs after parse, in order,
+     before DOMContentLoaded. Self-hosted (no CDN); a load failure leaves every
+     page fully usable (effects are decorative). -->
+<script defer src="{{ url_for('static', filename='js/ui-kit.js') }}"></script>
 </head>
 <body class="{{ 'mh-has-dock' if dock else '' }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
@@ -11476,7 +11498,7 @@ def create_app() -> Flask:
             )
             + '<div class="mh-steps mh-reveal-group">'
             + "".join(
-                f'<div class="mh-step">{icon}'
+                f'<div class="mh-step mh-spotlight-card">{icon}'
                 f'<div class="mh-step-num">{num}</div>'
                 f"<h3>{title}</h3><p>{body}</p>"
                 f'<div class="mh-step-foot">{foot}</div></div>'
@@ -11888,7 +11910,7 @@ def create_app() -> Flask:
         # stripe accent so the page resolves with the same chrome.
         if prof and prof.is_ready():
             final_cta_html = (
-                '<section class="mh-final-cta">'
+                '<section class="mh-final-cta mh-reveal">'
                 "<div>"
                 + _reveal_lines(
                     ["Next weekend's meet,", "<em>ready</em> in a sitting."],
@@ -11906,7 +11928,7 @@ def create_app() -> Flask:
             )
         else:
             final_cta_html = (
-                '<section class="mh-final-cta">'
+                '<section class="mh-final-cta mh-reveal">'
                 "<div>"
                 + _reveal_lines(
                     ["A minute to set up.", "<em>Then</em> every week is easier."],
@@ -11923,6 +11945,37 @@ def create_app() -> Flask:
                 "</section>"
             )
 
+        # --- Sport-agnostic marquee band (Infinite-Moving-Cards) — reinforces
+        # the "swimming first, every sport next" wedge-vs-vision story. Honest
+        # framing: these are sports the engine is built for, not integrations.
+        marquee_html = (
+            '<section class="mh-marquee-band" aria-label="Built for every sport">'
+            '<span class="mh-marquee-band-label mh-gradient-text">One engine &middot; every sport</span>'
+            '<div class="mh-marquee" data-mh-speed="34"><div class="mh-marquee__track">'
+            + "".join(
+                f'<span class="mh-marquee-chip">{s}</span>'
+                for s in [
+                    "Swimming",
+                    "Athletics",
+                    "Rugby",
+                    "Netball",
+                    "Rowing",
+                    "Hockey",
+                    "Cricket",
+                    "Football",
+                    "Triathlon",
+                    "Cycling",
+                    "Basketball",
+                    "Tennis",
+                    "Water polo",
+                    "Sailing",
+                    "Gymnastics",
+                    "Squash",
+                ]
+            )
+            + "</div></div></section>"
+        )
+
         # U.8 — animated how-it-works pipeline diagram. Sits right after the
         # hero as a visual amplification of its "reads X … writes Y" claim,
         # ahead of the numbered four-step explainer.
@@ -11930,9 +11983,12 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html
+            '<div class="mh-fx mh-spotlight">'
+            + hero_html
+            + "</div>"
             + inline_headline_html
             + pipeline_html
+            + marquee_html
             + steps_html
             + before_after_html
             + bento_html
@@ -12559,7 +12615,7 @@ def create_app() -> Flask:
   <h3 style="margin-top:0;font-family:var(--font-mono);font-size:var(--fs-10);letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:var(--sp-3)">Or paste a results link</h3>
   <p class="lede" style="font-size:var(--fs-14);margin-bottom:var(--sp-4)">Works with results sites for any sport &mdash; including modern app-style sites. We&rsquo;ll gather every result on the site.</p>
   <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:stretch">
-    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
+    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:min(260px,100%);padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
     <button id="mh-url-fetch" class="btn" type="button">Fetch results &rarr;</button>
   </div>
   <div id="mh-url-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Fetch progress" style="margin-top:var(--sp-3)">
@@ -12631,11 +12687,13 @@ def create_app() -> Flask:
             )
 
         body = f"""
-<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">
+<div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
+<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
+</div>
 
 <nav class="mh-stepper" aria-label="Upload progress">
   <span class="mh-stepper-item is-active"><span class="num">1</span>Upload</span>
@@ -13538,6 +13596,7 @@ def create_app() -> Flask:
 <div class="card">
   <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
+  <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
   <details style="margin-top:var(--sp-5)">
     <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
@@ -13610,6 +13669,7 @@ def create_app() -> Flask:
     var log = (j && j.log) || [];
     if (logEl && log.length) {{ logEl.textContent = log.join('\\n'); logEl.scrollTop = logEl.scrollHeight; }}
     if (stepEl) stepEl.textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
+    if (window.MH && MH.renderLogSteps) MH.renderLogSteps('mh-steps', log, status);
 
     if (status === 'done') {{
       stopped = true;
@@ -13952,12 +14012,12 @@ def create_app() -> Flask:
         # plain = story / context counts.
         rec_stats_html = "".join(
             [
-                f'<div class="stat medal"><div class="l">Elite</div><div class="v">{n_elite}</div></div>',
-                f'<div class="stat live"><div class="l">Strong</div><div class="v">{n_strong}</div></div>',
-                f'<div class="stat"><div class="l">Story</div><div class="v">{n_story}</div></div>',
-                f'<div class="stat"><div class="l">Total achievements</div><div class="v">{n_total}</div></div>',
-                f'<div class="stat"><div class="l">Swims analysed</div><div class="v">{n_analysed}</div></div>',
-                f'<div class="stat"><div class="l">Cards</div><div class="v">{n_cards}</div></div>',
+                f'<div class="stat medal"><div class="l">Elite</div><div class="v" data-mh-count="{n_elite}">{n_elite}</div></div>',
+                f'<div class="stat live"><div class="l">Strong</div><div class="v" data-mh-count="{n_strong}">{n_strong}</div></div>',
+                f'<div class="stat"><div class="l">Story</div><div class="v" data-mh-count="{n_story}">{n_story}</div></div>',
+                f'<div class="stat"><div class="l">Total achievements</div><div class="v" data-mh-count="{n_total}">{n_total}</div></div>',
+                f'<div class="stat"><div class="l">Swims analysed</div><div class="v" data-mh-count="{n_analysed}">{n_analysed}</div></div>',
+                f'<div class="stat"><div class="l">Cards</div><div class="v" data-mh-count="{n_cards}">{n_cards}</div></div>',
             ]
         )
 
@@ -14295,7 +14355,7 @@ def create_app() -> Flask:
 
             workflow_summary_card = f"""
 <div class="card" style="border-left:3px solid var(--accent);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-  <div style="flex:1;min-width:240px">
+  <div style="flex:1;min-width:min(240px,100%)">
     <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
     <p class="dim" style="margin:0;font-size:13px;max-width:560px">
       Approve the achievements you want to post — anything you skip simply
@@ -14540,7 +14600,7 @@ def create_app() -> Flask:
                 '<div class="card" style="border:1px solid var(--accent);'
                 'background:var(--surface);display:flex;gap:16px;align-items:center;'
                 'flex-wrap:wrap;justify-content:space-between;margin-bottom:var(--sp-5)">'
-                '<div style="flex:1;min-width:240px">'
+                '<div style="flex:1;min-width:min(240px,100%)">'
                 '<div style="font-family:var(--font-mono);font-size:10.5px;'
                 "letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);"
                 'margin-bottom:6px">Sample meet</div>'
@@ -16257,7 +16317,7 @@ Relay team broke club record"></textarea>
       <input type="text" name="run_id" required /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
       <input type="text" name="card_id" required /></label>
-    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:220px">What's wrong?
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:min(220px,100%)">What's wrong?
       <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
     <button class="btn secondary" type="submit">Open correction</button>
   </form>
@@ -18260,7 +18320,7 @@ Relay team broke club record"></textarea>
         for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
             icon = _SETTINGS_ICONS.get(icon_key, "")
             tiles += (
-                f'<a href="{href}" class="mh-template">'
+                f'<a href="{href}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(title)}</h3>'
@@ -18276,7 +18336,7 @@ Relay team broke club record"></textarea>
             '<p class="lede">Pick a heading to manage it. Each card opens its own '
             "page so nothing is buried in one long scroll.</p>"
             "</section>"
-            f'<div class="mh-template-grid">{tiles}</div>'
+            f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
         )
         return _layout("Settings", body, active="settings")
 
@@ -19627,7 +19687,7 @@ window.mhSchedulerDisconnect = function(btn) {
             )
             sport_control_html = (
                 '<label for="mh-plan-sport" style="font-weight:600">Sport</label>'
-                f'<select id="mh-plan-sport" style="min-width:160px">{_sport_opts}</select>'
+                f'<select id="mh-plan-sport" style="min-width:min(160px,100%)">{_sport_opts}</select>'
                 '<span class="dim" style="font-size:12px">your organisation type doesn&rsquo;t '
                 "pin a sport, so pick one here</span>"
             )
@@ -19668,7 +19728,7 @@ window.mhSchedulerDisconnect = function(btn) {
                     else '<span class="tag">Planning only</span>'
                 )
                 items_html += f"""
-<details class="card" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
+<details class="card mh-reveal" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
   <summary style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none">
     <span style="font-family:var(--font-display,inherit);font-size:20px;min-width:34px;color:var(--ink-muted)">#{rank}</span>
     <strong style="flex:1">{_h(item.get("title") or slug)}</strong>
@@ -20625,6 +20685,10 @@ function mhPlanGenerate(btn) {{
                 f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
             )
             effort_html = f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
+            # Pointer-following glow-border (::after — free on .mh-template and
+            # .mh-template-primary) only on live tiles; never on a "Coming soon"
+            # tile, where a glow would falsely imply it's clickable.
+            glow_cls = " mh-glow-border" if (meta.is_implemented and href_ok) else ""
 
             # U.14 cursor-following preview — implemented tiles spawn a floating
             # "output frame" poster (orientation + canonical dimensions + format
@@ -20660,7 +20724,7 @@ function mhPlanGenerate(btn) {{
                 )
 
             tiles_html += (
-                f'<a {action} class="mh-template{disabled_cls}{hp_cls}">'
+                f'<a {action} class="mh-template{glow_cls}{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(meta.title)}</h3>'
@@ -25252,7 +25316,7 @@ what you're doing, what they should do.</p>
             colour = "var(--good)" if met else "var(--warn)"
             badge = "MET" if met else "OPEN"
             return (
-                '<div class="card" style="padding:18px 22px;flex:1;min-width:260px">'
+                '<div class="card" style="padding:18px 22px;flex:1;min-width:min(260px,100%)">'
                 f'<h2 style="margin:0 0 6px;font-size:15px">{title}</h2>'
                 f'<div style="font-size:28px;font-weight:700">{n}<span '
                 f'style="font-size:15px;color:var(--ink-muted)"> / {req}</span> '
@@ -25353,7 +25417,7 @@ what you're doing, what they should do.</p>
             '<div><label style="font-size:11px">Annual price (£)</label><br/>'
             '<input name="pounds" required placeholder="588" style="padding:6px 8px;width:90px"/></div>'
             '<div><label style="font-size:11px">Notes</label><br/>'
-            '<input name="notes" style="padding:6px 8px;min-width:200px"/></div>'
+            '<input name="notes" style="padding:6px 8px;min-width:min(200px,100%)"/></div>'
             '<button class="btn" type="submit">Add quote</button></form></div>'
         )
 
@@ -25487,7 +25551,7 @@ what you're doing, what they should do.</p>
                 f'<input type="hidden" name="lead_id" value="{_h(lead.lead_id)}"/>'
                 f'<select name="status" style="padding:3px 6px;font-size:11px">{sel}</select>'
                 f'<input name="intros" placeholder="2 named intros, comma-sep" '
-                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:170px"/>'
+                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:min(170px,100%)"/>'
                 '<button class="btn secondary" style="padding:3px 8px;font-size:11px">Update</button>'
                 "</form></td></tr>"
             )
@@ -25547,7 +25611,7 @@ what you're doing, what they should do.</p>
             f'<select name="status" style="padding:6px 8px">{ngb_opts}</select></div>'
             '<div><label style="font-size:11px">Notes</label><br/>'
             f'<input name="notes" value="{_h(ngb_state["notes"])}" '
-            'style="padding:6px 8px;min-width:260px"/></div>'
+            'style="padding:6px 8px;min-width:min(260px,100%)"/></div>'
             '<button class="btn secondary" type="submit">Save</button></form></div>'
         )
 
@@ -26378,7 +26442,7 @@ what you're doing, what they should do.</p>
             sign_in_url = url_for("sign_in_post")
             delete_url = url_for("sign_in_delete")
             cards_html += (
-                '<div class="mh-profile-card">'
+                '<div class="mh-profile-card mh-spotlight-card">'
                 f'<div class="logo">{logo_html}</div>'
                 f'<div class="display-name">{_h(p.display_name)}</div>'
                 f'<div class="meta-line">{pill_html}</div>'
@@ -26645,7 +26709,7 @@ what you're doing, what they should do.</p>
                 '<input type="hidden" name="action" value="add"/>'
                 "<div><label>Email</label><br/>"
                 '<input type="email" name="email" required placeholder="coach@club.org" '
-                'style="padding:8px 10px;min-width:260px"/></div>'
+                'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
                 "<div><label>Role</label><br/>"
                 '<select name="role" style="padding:8px 10px">'
                 '<option value="member">Member</option>'
@@ -30508,10 +30572,10 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
     }});
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 320px;max-width:340px' : 'flex:0 0 220px;max-width:240px') + '">' +
+        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 min(320px,100%);max-width:340px' : 'flex:0 0 min(220px,100%);max-width:240px') + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
-        '<div style="flex:1;min-width:200px">' +
+        '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + chips + '</div>' +
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
@@ -30759,7 +30823,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
 <tr class="mh-hp">
-  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" />{_hp_tpl}</td>
+  <td><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td>{_h(ad.get("type", ""))}</td>
   <td>{_h(athlete_names)}</td>
   <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>

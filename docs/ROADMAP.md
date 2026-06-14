@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `e65420967` · Merge pull request #487 from elijahkendrick04/claude/tender-turing-8ngjd8
+**Last updated:** 2026-06-14 · `2f3ee7ceb` · Merge pull request #473: UI uplift — Aceternity + Refero design-system integration
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -124,7 +124,23 @@ deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
 final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
+**UI2 — design-system-uplift follow-on surfaces (current no.1 priority).** The UI
+motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) is built and wired into
+nine screens in PR #473. These items build the *purpose-built surfaces* the remaining
+adopt-listed kit effects still need — rather than force-fitting them — and sit at the very
+top of this list. Each reuses the already-built kit classes and is a discrete, dispatchable
+build. **Parallelism:** 🟢 = independent surface, safe to build/merge in a **separate
+parallel session**; 🟡 = touches a shared file (the `.btn` system or a list filter), so
+sequence it or merge with care.
+
 <!-- ROADMAP:TODO -->
+- **UI2.1** · UI2 (top priority) — **Cutout before/after**: wire the kit's `.mh-compare` slider onto a real original-photo ↔ background-removed *cutout* preview in the media/graphic flow, so a user can drag to see exactly what rembg removed · 🟢 parallel-safe (self-contained surface) · ❌ **NOT STARTED**
+- **UI2.2** · UI2 (top priority) — **Athlete tooltips**: hover Animated-Tooltips on athlete avatars / rosters (review + spotlight surfaces) showing name, club and key stat, via a kit `.mh-tooltip` · 🟢 parallel-safe · ❌ **NOT STARTED**
+- **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) · ❌ **NOT STARTED**
+- **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
+- **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
+- **UI2.6** · UI2 (top priority) — **Vanish search**: properly wire the rotating-placeholder Vanish input (`.mh-vanish`) onto the activity / global search — the overlay-placeholder element + alignment past the search icon, native placeholder removed · 🟢 parallel-safe (self-contained search) · ❌ **NOT STARTED**
+- **UI2.7** · UI2 (top priority) — **Caption type-on reveal**: Text-Generate (`.mh-text-generate`) word-by-word reveal on a *read-only* generated-caption preview only (never the editable caption, which stays plain), so the "AI is writing" moment reads · 🟢 parallel-safe · ❌ **NOT STARTED**
 - **UI 1.2** · Phase 1 (Product polish) — Bento-grid feature section (inspired by Umbrel): replace the uniform capability card rows on the landing with a bento grid of varied-size tiles, each carrying its own mini-visual (sample story card, a stat chip, brand-kit swatches, a 'moments we detect' list, a reel preview); dark/premium aesthetic, reuses existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1500,6 +1516,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `e0783d17f` | Make web UI phone-friendly: kill horizontal scroll on mobile |
 | 2026-06-14 | `f87368501` | U.11 — outputs inside real Instagram platform frames |
 | 2026-06-14 | `dd1c90857` | Read British (YoB) results correctly; flag impossible event/time pairings; surface PB-lookup failure |
 | 2026-06-14 | `19ecc71ae` | U.8 — animated how-it-works pipeline diagram on the landing page |
