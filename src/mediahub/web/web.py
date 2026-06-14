@@ -12524,6 +12524,54 @@ def create_app() -> Flask:
             + "</div></div></section>"
         )
 
+        # --- UI 1.24 — moment-type ticker (editorial section divider). A pure-CSS
+        # marquee naming the *kinds of moments* the engine detects and ranks,
+        # used as the divider between the outputs grid (bento) and the in-feed
+        # frames. Distinct from the sport-agnostic marquee band above (small
+        # mono chips): this is a large display-type band in the SavoirFaire /
+        # SuperHi register. The item list is rendered TWICE in markup so the
+        # -50% track loop is seamless with NO JavaScript — it deliberately does
+        # NOT reuse the `.mh-marquee`/`.mh-marquee__track` classes (whose seam is
+        # JS-cloned by ui-kit.js; reusing them here would double-clone to 4
+        # copies and break the seam). Vocabulary maps 1:1 onto real detectors
+        # (PBs, medals, comebacks, finals, club records, first-time swims,
+        # qualifiers, sub-barrier breaks, relays, multi-PB weekends) — no
+        # invented achievement types; the roadmap's five lead the list.
+        moment_types = (
+            "Personal bests",
+            "Medal finishes",
+            "Comebacks",
+            "Finals",
+            "Club records",
+            "First-time swims",
+            "Qualifying times",
+            "Barrier breaks",
+            "Relay wins",
+            "Multi-PB weekends",
+        )
+
+        def _moment_ticker_run(hidden: bool) -> str:
+            # One pass over the vocabulary. Even items are filled, odd items are
+            # outline ("ghost") — the filled↔outline rhythm of the reference
+            # tickers. The alternation is set here (not via :nth-child) so it
+            # continues cleanly across the seam between the two identical copies.
+            aria = ' aria-hidden="true"' if hidden else ""
+            return "".join(
+                f'<span class="mh-moment-ticker__item'
+                f'{" is-ghost" if i % 2 else ""}"{aria}>{_h(m)}</span>'
+                for i, m in enumerate(moment_types)
+            )
+
+        moment_ticker_html = (
+            '<section class="mh-moment-ticker" '
+            'aria-label="Moments MediaHub detects and ranks">'
+            '<div class="mh-moment-ticker__viewport">'
+            '<div class="mh-moment-ticker__track">'
+            + _moment_ticker_run(hidden=False)
+            + _moment_ticker_run(hidden=True)
+            + "</div></div></section>"
+        )
+
         # U.8 — animated how-it-works pipeline diagram. Sits right after the
         # hero as a visual amplification of its "reads X … writes Y" claim,
         # ahead of the UI 1.3 inline-thumbnail headline and the numbered steps.
@@ -12543,6 +12591,7 @@ def create_app() -> Flask:
             + steps_html
             + before_after_html
             + bento_html
+            + moment_ticker_html
             + frames_html
             + audience_html
             + promise_html
