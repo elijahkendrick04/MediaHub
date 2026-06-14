@@ -10893,6 +10893,45 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # --- UI 1.3 — Inline media thumbnails in a display headline. ---
+        # Samara-style: a large statement sentence with four *real* sample
+        # outputs inlined — the results sheet a club uploads, then the story
+        # card, feed graphic and reel the engine returns. The thumbnails are
+        # first-party SVGs served from /static/samples (no external fetch);
+        # they mirror the same facts/formats as the larger sample row below,
+        # so the band reads as a one-line proof of the whole pipeline.
+        def _inline_thumb(filename: str, kind: str, alt: str) -> str:
+            src = url_for("static", filename="samples/" + filename)
+            return (
+                f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
+                f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
+                f'src="{src}" width="144" height="200" '
+                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+                "</span>"
+            )
+
+        pipeline_html = (
+            '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
+            '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
+            '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
+            "From a results sheet "
+            + _inline_thumb(
+                "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
+            )
+            + " to a story "
+            + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
+            + ", a feed graphic "
+            + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
+            + " and a reel "
+            + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
+            + "."
+            "</h2>"
+            '<p class="mh-pipeline-sub">One upload, four posting-ready formats '
+            "&mdash; every name, time and place grounded in the result you "
+            "uploaded. Nothing is invented; nothing posts without you.</p>"
+            "</section>"
+        )
+
         # --- Four-step explainer — sport newsroom workflow ---
         # Each step now carries an SVG icon and a "time-to" footnote so the
         # block reads as a real product walkthrough, not a paragraph wall.
@@ -11170,6 +11209,7 @@ def create_app() -> Flask:
         return _layout(
             "Home",
             hero_html
+            + pipeline_html
             + steps_html
             + before_after_html
             + sample_html
