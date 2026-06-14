@@ -144,6 +144,59 @@ def _overall_confidence(events: list[InterpretedEvent]) -> float:
     return round(sum(event_confs) / len(event_confs), 4)
 
 
+# Generous upper bound on human swim speed (m/s). World-record pace is ~2.4 m/s
+# over 50m and slower over every longer distance, so a time that implies a
+# FASTER pace than this can only be a wrong time↔event pairing (a 50m time
+# filed under a 100m event, a 400m time under 1500m, etc.).
+_MAX_SWIM_SPEED_MPS = 2.5
+
+
+def _time_to_seconds(t: str) -> Optional[float]:
+    """Canonical 'mm:ss.cc' / 'ss.cc' → seconds, or None for non-times (DQ/DNS)."""
+    try:
+        if ":" in t:
+            mm, rest = t.split(":", 1)
+            return int(mm) * 60 + float(rest)
+        return float(t)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _flag_implausible_swims(events: list[InterpretedEvent]) -> list[dict]:
+    """Flag swims whose time is physically impossible for the event's distance.
+
+    Such a pairing means the row was matched to the wrong event (e.g. a 50m-shaped
+    time shown under a 100m event, or a 400m-shaped time under a 1500m event). We
+    never silently drop it — we drop its confidence and return a needs_review
+    entry so the uncertainty is explicit and it can't surface as a confident
+    card/PB.
+    """
+    flags: list[dict] = []
+    for ev in events:
+        if not ev.distance_m:
+            continue
+        floor_s = ev.distance_m / _MAX_SWIM_SPEED_MPS
+        for s in ev.swims:
+            if not s.time:
+                continue
+            secs = _time_to_seconds(s.time)
+            if secs is None or secs <= 0 or secs >= floor_s:
+                continue
+            s.confidence = min(s.confidence, 0.2)
+            s.field_confidence["time_event_mismatch"] = 0.0
+            flags.append(
+                {
+                    "reason": "implausible-time-for-event",
+                    "detail": (
+                        f"{s.swimmer_name or 'A swimmer'}: {s.time} is impossible for "
+                        f"{ev.distance_m}m (minimum ~{floor_s:.0f}s) — the result was "
+                        "likely paired with the wrong event; flagged for review."
+                    ),
+                }
+            )
+    return flags
+
+
 # ---------------------------------------------------------------------------
 # Native (Hy-Tek / SDIF) fast path
 # ---------------------------------------------------------------------------
@@ -405,6 +458,11 @@ def interpret_document(
 
     # ---- Stage 4: Row extraction ----------------------------------------
     assign_rows_to_events(stream, events, schemas)
+
+    # ---- Stage 4b: physical-plausibility guard --------------------------
+    # Catch results paired with the wrong event (a time impossible for the
+    # distance) and flag them for review instead of presenting them as fact.
+    needs_review.extend(_flag_implausible_swims(events))
 
     # ---- Stage 5: Meet metadata -----------------------------------------
     meta = _extract_meet_metadata(stream.text, ontology)
