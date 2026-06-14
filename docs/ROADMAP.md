@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `f9d4ab94a` · Build UI 1.7 — pinned-panel scrollytelling on the landing how-it-works (#567)
+**Last updated:** 2026-06-14 · `f69f399a4` · Merge pull request #602 from elijahkendrick04/claude/main-merge-review-la8ix2
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1487,9 +1487,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `8f2de7cb7` | Keep heartbeat drain thread alive past a task_done() ValueError |
 | 2026-06-14 | `9001dfb53` | UI 1.7: pinned-panel scrollytelling on the landing how-it-works |
 | 2026-06-14 | `fb24b2247` | chore: fix workflow README end-of-file newline (pre-commit hygiene) |
 | 2026-06-14 | `20d61fa39` | Apply ruff-format after merge reconstruction |
 | 2026-06-14 | `01ed161d6` | Move activity-feed CSS into a page-scoped <style> (avoid shared-file churn) |
-| 2026-06-14 | `00f5b7926` | Apply ruff-format line wrapping to UI 1.9 bulk routes |
 <!-- /ROADMAP:ACTIVITY -->
