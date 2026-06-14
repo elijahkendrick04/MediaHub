@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `b526d8740` · U.13 — Floating mobile action dock for review/approve (#490)
+**Last updated:** 2026-06-14 · `46aff1144` · UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1507,11 +1507,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
 | 2026-06-14 | `edede9341` | Crawl: fetch result files before HTML renders; surface result-file count |
 | 2026-06-14 | `e63ed6b85` | Drop split/continuation rows so only overall times are kept |
 | 2026-06-14 | `1e08619ee` | U.15: before/after reveal slider on the landing page |
 | 2026-06-14 | `4238afc14` | U.12: animated count-up (odometer) stat numerals on the landing hero |
 | 2026-06-14 | `a10f2fc98` | U.14: cursor-following hover preview (Media library + Create) |
-| 2026-06-14 | `b66f13436` | Add first-run sample pack + mobile-aware review (U.4) |
-| 2026-06-14 | `e72159a89` | Add U.13 floating mobile action dock for review/approve |
 <!-- /ROADMAP:ACTIVITY -->
