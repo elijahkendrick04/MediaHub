@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `27b27a00c` · Build UI 1.19 — testimonial/social-proof carousel on the landing (#549)
+**Last updated:** 2026-06-14 · `d23995171` · docs: mark UI2.1 done on the roadmap (#577)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -134,7 +134,6 @@ parallel session**; 🟡 = touches a shared file (the `.btn` system or a list fi
 sequence it or merge with care.
 
 <!-- ROADMAP:TODO -->
-- **UI2.1** · UI2 (top priority) — **Cutout before/after**: wire the kit's `.mh-compare` slider onto a real original-photo ↔ background-removed *cutout* preview in the media/graphic flow, so a user can drag to see exactly what rembg removed · 🟢 parallel-safe (self-contained surface) · ✅ **DONE**
 - **UI2.2** · UI2 (top priority) — **Athlete tooltips**: hover Animated-Tooltips on athlete avatars / rosters (review + spotlight surfaces) showing name, club and key stat, via a kit `.mh-tooltip` · 🟢 parallel-safe · ❌ **NOT STARTED**
 - **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) · ❌ **NOT STARTED**
 - **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
@@ -1505,6 +1504,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `09d0df3c1` | docs: mark UI2.1 done on the roadmap |
 | 2026-06-14 | `6f7ffd995` | Build UI 1.12 — sortable/filterable results data table with sparklines |
 | 2026-06-14 | `59c981934` | Apply ruff-format to the UI 1.19 testimonials block |
 | 2026-06-14 | `d78fd596c` | Build UI 1.28 — global keyboard-shortcuts overlay (?) |
@@ -1513,5 +1513,4 @@ list and the auto table below, not here.
 | 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
 | 2026-06-14 | `b8a8581ed` | Tidy reaction GET query onto one line (ruff-format) |
 | 2026-06-14 | `7a121d84c` | Build UI 1.24 — moment-type marquee/ticker on the landing |
-| 2026-06-14 | `a8a4f8604` | Add Developer/API docs page with tabbed code-example switcher (UI 1.11) |
 <!-- /ROADMAP:ACTIVITY -->
