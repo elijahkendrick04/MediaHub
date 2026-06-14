@@ -14665,7 +14665,53 @@ def create_app() -> Flask:
         for ev in events:
             grouped[_af.bucket_for(ev.ts, now=now)].append(ev)
 
-        out = ['<div class="mh-feed">']
+        # Page-scoped styles, deliberately kept out of the shared theme CSS:
+        # the feed is a self-contained surface, and inlining its rules here
+        # means it never collides with other sessions' edits to that hot,
+        # everyone-appends-to-it stylesheet. No CSP forbids inline <style>.
+        feed_style = """<style>
+.mh-feed { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-4); }
+.mh-feed-group-label { display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-5) 0 var(--sp-1); font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; }
+.mh-feed-group-label:first-child { margin-top: 0; }
+.mh-feed-group-label .label { color: var(--ink-dim); font-weight: 600; }
+.mh-feed-group-label .n { color: var(--ink-faint); }
+.mh-feed-group-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); align-self: center; }
+.mh-feed-item { display: flex; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); box-shadow: var(--shadow-1); transition: border-color var(--dur-fast) var(--ease-out-quick), transform var(--dur-fast) var(--ease-out-quick), box-shadow var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-item:hover { border-color: var(--rule); transform: translateY(-1px); box-shadow: var(--shadow-2, var(--shadow-1)); }
+.mh-feed-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-sm); background: rgba(245, 242, 232, 0.04); border: 1px solid var(--hairline); color: var(--ink-dim); }
+.mh-feed-icon svg { width: 18px; height: 18px; }
+.mh-feed-icon[data-tone="good"] { background: var(--good-bg); border-color: rgba(94,227,154,0.30); color: var(--good); }
+.mh-feed-icon[data-tone="bad"]  { background: var(--bad-bg);  border-color: rgba(255,107,107,0.30); color: var(--bad); }
+.mh-feed-icon[data-tone="info"] { background: var(--info-bg); border-color: rgba(77,163,255,0.30); color: var(--info); }
+.mh-feed-icon[data-tone="warn"] { background: var(--warn-bg); border-color: rgba(255,180,84,0.30); color: var(--warn); }
+.mh-feed-body { flex: 1; min-width: 0; }
+.mh-feed-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.mh-feed-kind { font-family: var(--font-mono); font-size: var(--fs-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+.mh-feed-title { margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.mh-feed-title a { color: inherit; text-decoration: none; }
+.mh-feed-title a:hover { color: var(--lane); text-decoration: underline; text-underline-offset: 2px; }
+.mh-feed-time { margin-left: auto; white-space: nowrap; color: var(--ink-faint); font-size: var(--fs-xs); }
+.mh-feed-summary { margin: var(--sp-2) 0 0; color: var(--ink-dim); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.mh-feed-detail { margin-top: var(--sp-3); }
+.mh-feed-detail > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); list-style: none; user-select: none; transition: color var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-detail > summary:hover { color: var(--ink); }
+.mh-feed-detail > summary::-webkit-details-marker { display: none; }
+.mh-feed-detail > summary::before { content: "\\25b8"; font-size: 9px; transition: transform var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-detail[open] > summary::before { transform: rotate(90deg); }
+.mh-feed-dl { margin: var(--sp-3) 0 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-sm); }
+.mh-feed-dl > div { display: contents; }
+.mh-feed-dl dt { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); padding-top: 2px; }
+.mh-feed-dl dd { margin: 0; color: var(--ink-dim); overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .mh-feed-item { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+  .mh-feed-icon { width: 32px; height: 32px; }
+  .mh-feed-icon svg { width: 16px; height: 16px; }
+  .mh-feed-time { margin-left: 0; width: 100%; order: 3; }
+  .mh-feed-dl { grid-template-columns: 1fr; gap: 0 0; }
+  .mh-feed-dl dt { padding-top: var(--sp-2); }
+}
+</style>"""
+        out = [feed_style, '<div class="mh-feed">']
         for bucket in _af.BUCKET_ORDER:
             items = grouped[bucket]
             if not items:

@@ -4551,169 +4551,124 @@ kbd {
   }
 }
 
-/* ---------------------------------------------------------------------
-   ACTIVITY FEED (UI 1.16) — unified runs / approvals / exports stream
-   ---------------------------------------------------------------------
-   A GitHub-style dashboard feed: each event is a card with a tone-tinted
-   kind glyph, a status tag, a relative timestamp (mh-rel), a one-line
-   summary, and an expandable <details> panel. Date buckets break the
-   stream into Today / Yesterday / … the same way the runs table does. */
-.mh-feed {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  margin-top: var(--sp-4);
+/* =====================================================================
+   UI 1.30 — "WEEKEND AT A GLANCE" SUMMARY PANEL
+   =====================================================================
+   A digest at the head of the /review surface: a fixed-template factual
+   lede, the PB / medal / standout / swims-analysed stat tiles (reusing the
+   shared .stat-block + [data-mh-count] count-up), and the top-ranked
+   "moments" lifted verbatim from the recognition report. No data is
+   computed here — this is purely the look; the panel HTML is built by
+   src/mediahub/web/weekend_glance.py. Entrance reuses the shared .mh-reveal
+   system (opacity/transform, JS-gated, safety-netted, reduced-motion-safe),
+   so nothing here can leave the panel stuck hidden.
+   ===================================================================== */
+.mh-glance { position: relative; overflow: hidden; }
+/* A thin medal-gold spine marks this as the achievement digest, echoing the
+   .stat::before accent without competing with the workflow card's lane edge. */
+.mh-glance::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--medal);
+  box-shadow: 0 0 14px var(--medal-glow);
 }
-.mh-feed-group-label {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
-  margin: var(--sp-5) 0 var(--sp-1);
+.mh-glance-head { margin-bottom: var(--sp-5); padding-left: var(--sp-2); }
+.mh-glance-eyebrow {
+  display: block;
   font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--medal);
+  margin-bottom: var(--sp-2);
 }
-.mh-feed-group-label:first-child { margin-top: 0; }
-.mh-feed-group-label .label { color: var(--ink-dim); font-weight: 600; }
-.mh-feed-group-label .n { color: var(--ink-faint); }
-.mh-feed-group-label::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--hairline);
-  align-self: center;
+.mh-glance-lede {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(20px, 3.2vw, 30px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-wrap: balance;
 }
+.mh-glance-stats { margin-bottom: var(--sp-5); }
 
-.mh-feed-item {
-  display: flex;
-  gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-5);
+/* Top moments — a compact ranked list lifted straight from the report. */
+.mh-glance-moments {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.mh-glance-moment {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
   background: var(--surface);
   border: 1px solid var(--hairline);
+  border-left: 3px solid var(--ink-faint);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-1);
-  transition:
-    border-color var(--dur-fast) var(--ease-out-quick),
-    transform var(--dur-fast) var(--ease-out-quick),
-    box-shadow var(--dur-fast) var(--ease-out-quick);
+  transition: border-color var(--dur-fast, 120ms) var(--ease-out-quick, ease),
+              transform   var(--dur-fast, 120ms) var(--ease-out-quick, ease);
 }
-.mh-feed-item:hover {
-  border-color: var(--rule);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-2, var(--shadow-1));
-}
-
-/* Tone-tinted kind glyph. Defaults to a neutral chip; data-tone keys it
-   to the same palette the status tags use. */
-.mh-feed-icon {
+.mh-glance-moment:hover { border-color: var(--rule); transform: translateX(2px); }
+.mh-glance-moment[data-kind="gold"]   { border-left-color: var(--medal); }
+.mh-glance-moment[data-kind="silver"] { border-left-color: var(--ink-dim); }
+.mh-glance-moment[data-kind="bronze"] { border-left-color: var(--medal-deep); }
+.mh-glance-moment[data-kind="medal"]  { border-left-color: var(--medal); }
+.mh-glance-moment[data-kind="pb"]     { border-left-color: var(--good); }
+.mh-glance-moment[data-kind="record"] { border-left-color: var(--info); }
+.mh-glance-rank {
   flex: none;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  background: rgba(245, 242, 232, 0.04);
-  border: 1px solid var(--hairline);
-  color: var(--ink-dim);
-}
-.mh-feed-icon svg { width: 18px; height: 18px; }
-.mh-feed-icon[data-tone="good"] { background: var(--good-bg); border-color: rgba(94,227,154,0.30); color: var(--good); }
-.mh-feed-icon[data-tone="bad"]  { background: var(--bad-bg);  border-color: rgba(255,107,107,0.30); color: var(--bad); }
-.mh-feed-icon[data-tone="info"] { background: var(--info-bg); border-color: rgba(77,163,255,0.30); color: var(--info); }
-.mh-feed-icon[data-tone="warn"] { background: var(--warn-bg); border-color: rgba(255,180,84,0.30); color: var(--warn); }
-
-.mh-feed-body { flex: 1; min-width: 0; }
-.mh-feed-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
-}
-.mh-feed-kind {
-  font-family: var(--font-mono);
-  font-size: var(--fs-9);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 900;
+  font-variant-numeric: tabular-nums lining-nums;
   color: var(--ink-faint);
+  min-width: 1.1em; text-align: center; line-height: 1;
 }
-.mh-feed-title {
-  margin: 0;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--ink);
-  min-width: 0;
-  overflow-wrap: anywhere;
+.mh-glance-moment-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mh-glance-moment-who {
+  font-family: var(--font-body);
+  font-size: 14px; font-weight: 700; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.mh-feed-title a { color: inherit; text-decoration: none; }
-.mh-feed-title a:hover { color: var(--lane); text-decoration: underline; text-underline-offset: 2px; }
-.mh-feed-time {
-  margin-left: auto;
+.mh-glance-moment-sub {
+  font-size: 12.5px; color: var(--ink-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mh-glance-chip {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 4px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--ink-faint); color: var(--ink-muted);
   white-space: nowrap;
-  color: var(--ink-faint);
-  font-size: var(--fs-xs);
 }
-.mh-feed-summary {
-  margin: var(--sp-2) 0 0;
-  color: var(--ink-dim);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
+.mh-glance-chip--gold,
+.mh-glance-chip--medal  { color: var(--medal);      border-color: var(--medal);      background: var(--medal-glow); }
+.mh-glance-chip--silver { color: var(--ink-dim);    border-color: var(--rule); }
+.mh-glance-chip--bronze { color: var(--medal-deep); border-color: var(--medal-deep); }
+.mh-glance-chip--pb     { color: var(--good);       border-color: var(--good);       background: var(--good-bg); }
+.mh-glance-chip--record { color: var(--info);       border-color: var(--info);       background: var(--info-bg); }
+.mh-glance-jump {
+  display: inline-block; margin-top: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.08em;
+  color: var(--ink-muted); text-decoration: none;
+  border-bottom: 1px dashed var(--rule); padding-bottom: 1px;
+  transition: color var(--dur-fast, 120ms) var(--ease-out-quick, ease),
+              border-color var(--dur-fast, 120ms) var(--ease-out-quick, ease);
+}
+.mh-glance-jump:hover { color: var(--lane); border-bottom-color: var(--lane); }
+
+@media (max-width: 640px) {
+  .mh-glance-moment { flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+  .mh-glance-chip { order: 3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-glance-moment { transition: none; }
+  .mh-glance-moment:hover { transform: none; }
 }
 
-.mh-feed-detail { margin-top: var(--sp-3); }
-.mh-feed-detail > summary {
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  list-style: none;
-  user-select: none;
-  transition: color var(--dur-fast) var(--ease-out-quick);
-}
-.mh-feed-detail > summary:hover { color: var(--ink); }
-.mh-feed-detail > summary::-webkit-details-marker { display: none; }
-.mh-feed-detail > summary::before {
-  content: "▸";
-  font-size: 9px;
-  transition: transform var(--dur-fast) var(--ease-out-quick);
-}
-.mh-feed-detail[open] > summary::before { transform: rotate(90deg); }
-.mh-feed-dl {
-  margin: var(--sp-3) 0 0;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: var(--sp-1) var(--sp-4);
-  font-size: var(--fs-sm);
-}
-.mh-feed-dl > div { display: contents; }
-.mh-feed-dl dt {
-  font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  padding-top: 2px;
-}
-.mh-feed-dl dd {
-  margin: 0;
-  color: var(--ink-dim);
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 560px) {
-  .mh-feed-item { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
-  .mh-feed-icon { width: 32px; height: 32px; }
-  .mh-feed-icon svg { width: 16px; height: 16px; }
-  .mh-feed-time { margin-left: 0; width: 100%; order: 3; }
-  .mh-feed-dl { grid-template-columns: 1fr; gap: 0 0; }
-  .mh-feed-dl dt { padding-top: var(--sp-2); }
-}
 /* =====================================================================
    UI 1.11 — Tabbed code-example switcher + syntax highlighting
    ---------------------------------------------------------------------
