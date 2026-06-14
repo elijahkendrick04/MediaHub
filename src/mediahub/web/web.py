@@ -14902,6 +14902,7 @@ def create_app() -> Flask:
             f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
             "</div>"
             "</section>"
+            f"{_activity_view_toggle('table')}"
             f"{summary_html}"
             f"{cadence_html}"
             f"{failure_callout}"
@@ -14916,6 +14917,373 @@ def create_app() -> Flask:
             f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
+
+    # ---- ACTIVITY FEED — unified runs/approvals/exports stream (UI 1.16) ---
+    def _activity_view_toggle(active_view: str) -> str:
+        """Segmented "Runs table | Feed" switch shared by both Activity views."""
+        table_cls = " is-active" if active_view == "table" else ""
+        feed_cls = " is-active" if active_view == "feed" else ""
+        return (
+            '<nav class="mh-segmented" aria-label="Activity view" '
+            'style="margin-bottom:var(--sp-4)">'
+            f'<a class="{table_cls.strip()}" '
+            f'aria-current="{"page" if active_view == "table" else "false"}" '
+            f'href="{url_for("activity_page")}">Runs table</a>'
+            f'<a class="{feed_cls.strip()}" '
+            f'aria-current="{"page" if active_view == "feed" else "false"}" '
+            f'href="{url_for("activity_feed_page")}">Feed</a>'
+            "</nav>"
+        )
+
+    def _render_activity_feed(events) -> str:
+        """Render a list of ActivityEvent objects as date-bucketed feed cards."""
+        from mediahub.web import activity_feed as _af
+
+        # Per-kind glyphs (stroke icons, matching the rest of the chrome).
+        icons = {
+            _af.KIND_RUN: (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                'aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+            ),
+            _af.KIND_APPROVAL: (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                'aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+            ),
+            _af.KIND_EXPORT: (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                'aria-hidden="true"><path d="M4 13v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"/>'
+                '<polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>'
+            ),
+        }
+        kind_labels = {
+            _af.KIND_RUN: "Run",
+            _af.KIND_APPROVAL: "Review",
+            _af.KIND_EXPORT: "Export",
+        }
+        now = datetime.now(timezone.utc)
+        # Bucket the (already newest-first) events; insertion order is preserved
+        # within each bucket so the stream stays chronological.
+        grouped: dict[str, list] = {b: [] for b in _af.BUCKET_ORDER}
+        for ev in events:
+            grouped[_af.bucket_for(ev.ts, now=now)].append(ev)
+
+        # Page-scoped styles, deliberately kept out of the shared theme CSS:
+        # the feed is a self-contained surface, and inlining its rules here
+        # means it never collides with other sessions' edits to that hot,
+        # everyone-appends-to-it stylesheet. No CSP forbids inline <style>.
+        feed_style = """<style>
+.mh-feed { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-4); }
+.mh-feed-group-label { display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-5) 0 var(--sp-1); font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; }
+.mh-feed-group-label:first-child { margin-top: 0; }
+.mh-feed-group-label .label { color: var(--ink-dim); font-weight: 600; }
+.mh-feed-group-label .n { color: var(--ink-faint); }
+.mh-feed-group-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); align-self: center; }
+.mh-feed-item { display: flex; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); box-shadow: var(--shadow-1); transition: border-color var(--dur-fast) var(--ease-out-quick), transform var(--dur-fast) var(--ease-out-quick), box-shadow var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-item:hover { border-color: var(--rule); transform: translateY(-1px); box-shadow: var(--shadow-2, var(--shadow-1)); }
+.mh-feed-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-sm); background: rgba(245, 242, 232, 0.04); border: 1px solid var(--hairline); color: var(--ink-dim); }
+.mh-feed-icon svg { width: 18px; height: 18px; }
+.mh-feed-icon[data-tone="good"] { background: var(--good-bg); border-color: rgba(94,227,154,0.30); color: var(--good); }
+.mh-feed-icon[data-tone="bad"]  { background: var(--bad-bg);  border-color: rgba(255,107,107,0.30); color: var(--bad); }
+.mh-feed-icon[data-tone="info"] { background: var(--info-bg); border-color: rgba(77,163,255,0.30); color: var(--info); }
+.mh-feed-icon[data-tone="warn"] { background: var(--warn-bg); border-color: rgba(255,180,84,0.30); color: var(--warn); }
+.mh-feed-body { flex: 1; min-width: 0; }
+.mh-feed-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.mh-feed-kind { font-family: var(--font-mono); font-size: var(--fs-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+.mh-feed-title { margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.mh-feed-title a { color: inherit; text-decoration: none; }
+.mh-feed-title a:hover { color: var(--lane); text-decoration: underline; text-underline-offset: 2px; }
+.mh-feed-time { margin-left: auto; white-space: nowrap; color: var(--ink-faint); font-size: var(--fs-xs); }
+.mh-feed-summary { margin: var(--sp-2) 0 0; color: var(--ink-dim); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.mh-feed-detail { margin-top: var(--sp-3); }
+.mh-feed-detail > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); list-style: none; user-select: none; transition: color var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-detail > summary:hover { color: var(--ink); }
+.mh-feed-detail > summary::-webkit-details-marker { display: none; }
+.mh-feed-detail > summary::before { content: "\\25b8"; font-size: 9px; transition: transform var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-detail[open] > summary::before { transform: rotate(90deg); }
+.mh-feed-dl { margin: var(--sp-3) 0 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-sm); }
+.mh-feed-dl > div { display: contents; }
+.mh-feed-dl dt { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); padding-top: 2px; }
+.mh-feed-dl dd { margin: 0; color: var(--ink-dim); overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .mh-feed-item { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+  .mh-feed-icon { width: 32px; height: 32px; }
+  .mh-feed-icon svg { width: 16px; height: 16px; }
+  .mh-feed-time { margin-left: 0; width: 100%; order: 3; }
+  .mh-feed-dl { grid-template-columns: 1fr; gap: 0 0; }
+  .mh-feed-dl dt { padding-top: var(--sp-2); }
+}
+</style>"""
+        out = [feed_style, '<div class="mh-feed">']
+        for bucket in _af.BUCKET_ORDER:
+            items = grouped[bucket]
+            if not items:
+                continue
+            out.append(
+                '<div class="mh-feed-group-label">'
+                f'<span class="label">{_h(_af.BUCKET_LABELS[bucket])}</span>'
+                f'<span class="n">{len(items):02d}</span>'
+                "</div>"
+            )
+            for ev in items:
+                # Title links into the owning run's review when we have one.
+                if ev.run_id:
+                    title_html = (
+                        f'<a href="{url_for("review", run_id=ev.run_id)}">{_h(ev.title)}</a>'
+                    )
+                else:
+                    title_html = _h(ev.title)
+                # Server-side no-JS fallback text; the mh-rel enhancer replaces
+                # it client-side. An em dash covers a missing/unparseable ts so
+                # the slot is never blank or a raw timestamp dump.
+                rel_fallback = _af.humanize_age(ev.ts, now=now) or "&mdash;"
+                detail_html = ""
+                if ev.detail:
+                    rows = "".join(
+                        f"<div><dt>{_h(label)}</dt><dd>{_h(value)}</dd></div>"
+                        for label, value in ev.detail
+                    )
+                    detail_html = (
+                        '<details class="mh-feed-detail">'
+                        "<summary>Details</summary>"
+                        f'<dl class="mh-feed-dl">{rows}</dl>'
+                        "</details>"
+                    )
+                search_hay = f"{ev.title} {ev.summary} {kind_labels.get(ev.kind, '')}".lower()
+                out.append(
+                    f'<article class="mh-feed-item mh-reveal" data-kind="{_h(ev.kind)}" '
+                    f'data-q="{_h(search_hay)}">'
+                    f'<div class="mh-feed-icon" data-tone="{_h(ev.status_tone)}">'
+                    f'{icons.get(ev.kind, "")}</div>'
+                    '<div class="mh-feed-body">'
+                    '<div class="mh-feed-head">'
+                    f'<span class="mh-feed-kind">{_h(kind_labels.get(ev.kind, ev.kind))}</span>'
+                    f'<h3 class="mh-feed-title">{title_html}</h3>'
+                    f'<span class="tag {_h(ev.status_tone)}">{_h(ev.status_label)}</span>'
+                    f'<time class="mh-rel mh-feed-time" datetime="{_h(ev.ts)}">{rel_fallback}</time>'
+                    "</div>"
+                    + (f'<p class="mh-feed-summary">{_h(ev.summary)}</p>' if ev.summary else "")
+                    + detail_html
+                    + "</div>"
+                    "</article>"
+                )
+        out.append("</div>")
+        return "".join(out)
+
+    @app.route("/activity/feed")
+    def activity_feed_page():
+        from mediahub.web import activity_feed as _af
+
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+
+        # ?kind= filter — whitelist to the three lanes (empty = all).
+        kind_q = (request.args.get("kind") or "").strip().lower()
+        if kind_q not in _af.KINDS:
+            kind_q = ""
+
+        # --- Gather the three EXISTING records (no new data source) ---------
+        # 1. Runs for this org (newest first), fail-soft on a bad DB.
+        rows: list = []
+        ach_by_id_feed: dict[str, int] = {}
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 100",
+                    (prof.profile_id,),
+                ).fetchall()
+                # Backfill n_achievements from the run JSON for pre-column rows
+                # (display-only; mirrors the runs-table view, never writes).
+                for r in rows:
+                    if ("n_achievements" not in r.keys()) or (r["n_achievements"] is None):
+                        _d = _load_run(r["id"]) or {}
+                        ach_by_id_feed[r["id"]] = int(
+                            (_d.get("recognition_report") or {}).get("n_achievements", 0) or 0
+                        )
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("activity feed: runs DB unreachable: %s", e)
+            db_failed = True
+
+        # Normalise rows to plain dicts so the (lazily backfilled) achievement
+        # count rides along and the builder stays storage-agnostic.
+        run_dicts: list[dict] = []
+        for r in rows:
+            d = {k: r[k] for k in r.keys()}
+            if d["id"] in ach_by_id_feed:
+                d["n_achievements"] = ach_by_id_feed[d["id"]]
+            run_dicts.append(d)
+
+        # 2. Workflow states (approvals + posted) for the most recent runs only
+        #    — bound the sidecar reads so the page stays cheap.
+        workflow_by_run: dict[str, dict] = {}
+        ws = None
+        try:
+            ws = _get_wf_store()
+        except Exception as e:
+            # Defensive: the approvals/posted lanes go quiet rather than 500,
+            # but log it so a sidecar-dir permission issue isn't invisible.
+            log.warning("activity feed: workflow store unavailable: %s", e)
+            ws = None
+        if ws is not None:
+            for d in run_dicts[:40]:
+                try:
+                    states = ws.load(d["id"]) or {}
+                except Exception:
+                    states = {}
+                if states:
+                    workflow_by_run[d["id"]] = states
+
+        # 3. Publish attempts (the export/publishing lane).
+        try:
+            from mediahub.publishing import posting_log as _plog
+
+            posting_attempts = _plog.recent_attempts(prof.profile_id, limit=40)
+        except Exception:
+            posting_attempts = []
+
+        # --- Build the merged feed (all lanes) for accurate chip counts -----
+        all_events = _af.build_activity_feed(
+            runs=run_dicts,
+            workflow_by_run=workflow_by_run,
+            posting_attempts=posting_attempts,
+            limit=200,
+        )
+        counts = _af.feed_counts(all_events)
+        events = [e for e in all_events if (not kind_q or e.kind == kind_q)][:120]
+
+        # --- Empty state ----------------------------------------------------
+        if not all_events:
+            if db_failed:
+                empty_body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    '<span class="mh-hero-eyebrow">Activity feed</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">activity</em>.</h1>'
+                    '<p class="lede">The runs database wasn\'t readable on this '
+                    "deployment, so the feed is empty even if work was done "
+                    "earlier. Try refreshing &mdash; if it persists, ask your "
+                    "operator to check the data volume.</p>"
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("activity_feed_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                    "</div></section>"
+                )
+                return _layout("Activity feed", empty_body, active="activity")
+            empty_body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Activity feed</span>'
+                f'<h1>Nothing here yet, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">Runs, review decisions, and publishes will stream '
+                "in here as cards &mdash; newest first, each one expandable for the "
+                "detail behind it. Create your first piece to get started.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                "</div></section>"
+            )
+            return _layout("Activity feed", empty_body, active="activity")
+
+        # --- Filter chips (server-side ?kind=) ------------------------------
+        chip_specs = [
+            ("", "All", counts["all"]),
+            (_af.KIND_RUN, "Runs", counts[_af.KIND_RUN]),
+            (_af.KIND_APPROVAL, "Approvals", counts[_af.KIND_APPROVAL]),
+            (_af.KIND_EXPORT, "Exports", counts[_af.KIND_EXPORT]),
+        ]
+        chips = ""
+        for val, label, count in chip_specs:
+            is_active = kind_q == val
+            url_arg = f"?kind={val}" if val else ""
+            chips += (
+                f'<a role="tab" aria-selected="{"true" if is_active else "false"}"'
+                f' class="{"is-active" if is_active else ""}"'
+                f' href="{url_for("activity_feed_page")}{url_arg}">'
+                f'{label}<span class="count">{count}</span></a>'
+            )
+        toolbar_html = (
+            '<div class="mh-toolbar">'
+            '<div class="grow mh-search">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+            '<input id="mh-feed-search" type="search" placeholder="Search the activity feed…" autocomplete="off" aria-label="Search the activity feed" />'
+            "</div>"
+            '<nav class="mh-segmented" role="tablist" aria-label="Filter activity by type">'
+            f"{chips}"
+            "</nav>"
+            "</div>"
+            '<div id="mh-feed-empty" class="mh-empty-inline" style="display:none">'
+            "<b>Nothing matches.</b><br>Try clearing the search box or picking a "
+            "different type.</div>"
+        )
+
+        # Client-side text filter over the rendered cards (progressive
+        # enhancement — the server already applied the ?kind= filter).
+        filter_js = """
+<script>
+(function(){
+  var search = document.getElementById('mh-feed-search');
+  var feed = document.querySelector('.mh-feed');
+  var empty = document.getElementById('mh-feed-empty');
+  if (!search || !feed) return;
+  function apply(){
+    var q = (search.value || '').toLowerCase().trim();
+    var items = feed.querySelectorAll('.mh-feed-item');
+    var visible = 0;
+    items.forEach(function(it){
+      var hay = it.getAttribute('data-q') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      it.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    feed.querySelectorAll('.mh-feed-group-label').forEach(function(g){
+      var sib = g.nextElementSibling, any = false;
+      while (sib && !sib.classList.contains('mh-feed-group-label')) {
+        if (sib.classList.contains('mh-feed-item') && sib.style.display !== 'none') { any = true; break; }
+        sib = sib.nextElementSibling;
+      }
+      g.style.display = any ? '' : 'none';
+    });
+    if (empty) empty.style.display = visible === 0 ? '' : 'none';
+  }
+  search.addEventListener('input', apply);
+})();
+</script>"""
+
+        # All events exist, but the active ?kind= chip filtered them all out:
+        # show an honest in-place notice rather than a blank column.
+        if events:
+            feed_html = _render_activity_feed(events)
+        else:
+            feed_html = (
+                '<div class="mh-empty-inline" style="display:block">'
+                f"<b>No {_h(kind_q)} activity yet.</b><br>"
+                "Switch to <i>All</i> above to see everything that's happened."
+                "</div>"
+            )
+        showing = "" if not kind_q else f" &middot; {_h(kind_q)}"
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Activity feed</span>'
+            "<h1>What&rsquo;s happened</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
+            f"<span>{counts['all']:02d} {'event' if counts['all'] == 1 else 'events'}{showing}</span>"
+            "</div>"
+            "</section>"
+            f"{_activity_view_toggle('feed')}"
+            f"{toolbar_html}"
+            f"{feed_html}"
+            f"{filter_js}"
+        )
+        return _layout("Activity feed", body, active="activity")
 
     # ---- SEASON TIMELINE — meet history as a vertical, scroll-traced view ----
     # UI2.3 — a read-only "season story" lens on the SAME run history the
