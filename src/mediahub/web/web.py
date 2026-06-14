@@ -32388,10 +32388,7 @@ function mhSetupMode(mode) {{
         # Coerce to str before .strip(): a fuzzed/AJAX body may send a non-string
         # (number, list) under "status" — that must be a clean 400, not a 500.
         status_str = str(
-            payload.get("status")
-            or request.form.get("status")
-            or request.form.get("op")
-            or ""
+            payload.get("status") or request.form.get("status") or request.form.get("op") or ""
         ).strip()
         try:
             status = CardStatus(status_str)
@@ -32405,7 +32402,9 @@ function mhSetupMode(mode) {{
         if not ids:
             if wants_json:
                 return (
-                    jsonify({"error": "no_selection", "results": [], "summary": ws.summary(run_id)}),
+                    jsonify(
+                        {"error": "no_selection", "results": [], "summary": ws.summary(run_id)}
+                    ),
                     400,
                 )
             _flash_toast("Select at least one card first.", "info")
@@ -32427,7 +32426,9 @@ function mhSetupMode(mode) {{
                 reason = consent_block_reason_for_card((run_data or {}).get("profile_id", ""), card)
                 if reason:
                     log.info("consent gate blocked bulk approval run=%s card=%s", run_id, cid)
-                    results.append({"id": cid, "ok": False, "error": "consent_blocked", "reason": reason})
+                    results.append(
+                        {"id": cid, "ok": False, "error": "consent_blocked", "reason": reason}
+                    )
                     n_blocked += 1
                     continue
             ws.set_status(run_id, cid, status)
@@ -32509,7 +32510,11 @@ function mhSetupMode(mode) {{
             "exported": len(selected),
             "cards": selected,
         }
-        fname = "mediahub-cards-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export") + ".json"
+        fname = (
+            "mediahub-cards-"
+            + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export")
+            + ".json"
+        )
         return Response(
             json.dumps(export, indent=2, default=str),
             mimetype="application/json",
@@ -34461,7 +34466,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 src = a.path
                 if not src or not Path(src).exists():
                     continue
-                base = re.sub(r"[^A-Za-z0-9_.-]+", "_", (a.filename or Path(src).name or aid)) or aid
+                base = (
+                    re.sub(r"[^A-Za-z0-9_.-]+", "_", (a.filename or Path(src).name or aid)) or aid
+                )
                 name = base
                 i = 1
                 while name in used:
@@ -34480,7 +34487,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _flash_toast("None of the selected photos could be exported.", "error")
             return redirect(url_for("media_library_page"))
         pid = _active_profile_id() or "library"
-        fname = "mediahub-photos-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", pid)[:40] or "library") + ".zip"
+        fname = (
+            "mediahub-photos-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", pid)[:40] or "library") + ".zip"
+        )
         return Response(
             buf.getvalue(),
             mimetype="application/zip",
