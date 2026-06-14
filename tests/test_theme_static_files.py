@@ -266,19 +266,49 @@ class TestLightDark:
             f"(one per tier-2 role token)"
         )
 
-    def test_light_dark_arguments_identical_for_now(self, base_css):
-        """For Stage C, light-dark(<light>, <dark>) ships identical
-        arguments — Stage D introduces real light-mode values.
+    def test_light_dark_arguments_are_valid_primitive_refs(self, base_css):
+        """Stage D (UI 1.23): every light-dark(var(--a), var(--b)) must
+        reference declared primitives (or tier-2 roles) on BOTH sides —
+        no dangling vars. This is the structural successor to the old
+        Stage-C "args must be identical" pin, which UI 1.23 replaces by
+        shipping a real light palette (asserted below).
         """
-        # Find every light-dark(var(--a), var(--b)) and assert a == b.
+        declared = set(re.findall(r"(--mh-[\w-]+)\s*:", base_css))
+        # Primitives live in the fallback/derive files, not base — accept
+        # the documented primitive namespace without requiring a local decl.
         for m in re.finditer(
             r"light-dark\(\s*var\((--[\w-]+)\)\s*,\s*var\((--[\w-]+)\)\s*\)",
             base_css,
         ):
             light, dark = m.group(1), m.group(2)
-            assert light == dark, (
-                f"Stage C requires identical light/dark args; got "
-                f"light={light} != dark={dark}"
+            for ref in (light, dark):
+                ok = ref.startswith("--mh-prim-") or ref in declared
+                assert ok, f"light-dark() references undeclared var {ref}"
+
+    def test_real_light_palette_shipped(self, base_css):
+        """UI 1.23 turns the dark-only Stage C scaffold into a real
+        light theme: the core surface + on-surface role tokens MUST now
+        resolve to DIFFERENT primitives in light vs dark. (The brand /
+        status roles are intentionally allowed to stay identical — the
+        lane-yellow fill is brand identity in both modes.)
+        """
+        must_differ = {
+            "--mh-surface", "--mh-surface-deep", "--mh-surface-variant",
+            "--mh-surface-container", "--mh-surface-container-high",
+            "--mh-on-surface", "--mh-on-surface-variant",
+            "--mh-on-surface-muted", "--mh-on-surface-faint",
+        }
+        for token in must_differ:
+            m = re.search(
+                rf"{re.escape(token)}:\s*light-dark\(\s*var\((--[\w-]+)\)\s*,"
+                rf"\s*var\((--[\w-]+)\)\s*\)",
+                base_css,
+            )
+            assert m, f"{token} is no longer a light-dark(var(), var()) role"
+            light, dark = m.group(1), m.group(2)
+            assert light != dark, (
+                f"{token} still ships identical light/dark args ({light}); "
+                f"UI 1.23 requires a real light value"
             )
 
 

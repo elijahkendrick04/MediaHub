@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `f56a4f1fc` · Merge pull request #536 from elijahkendrick04/claude/blissful-bell-perdn9
+**Last updated:** 2026-06-14 · `194d564b7` · Merge pull request #537: Test U.9 (cycling hero accent word) comprehensively; mark it done
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -134,36 +134,23 @@ parallel session**; 🟡 = touches a shared file (the `.btn` system or a list fi
 sequence it or merge with care.
 
 <!-- ROADMAP:TODO -->
-- **UI2.1** · UI2 (top priority) — **Cutout before/after**: wire the kit's `.mh-compare` slider onto a real original-photo ↔ background-removed *cutout* preview in the media/graphic flow, so a user can drag to see exactly what rembg removed · 🟢 parallel-safe (self-contained surface) · ❌ **NOT STARTED**
 - **UI2.2** · UI2 (top priority) — **Athlete tooltips**: hover Animated-Tooltips on athlete avatars / rosters (review + spotlight surfaces) showing name, club and key stat, via a kit `.mh-tooltip` · 🟢 parallel-safe · ❌ **NOT STARTED**
 - **UI2.3** · UI2 (top priority) — **Season / audit Timeline**: a vertical timeline view (meet-recap history or the audit ledger) using the kit's `.mh-timeline` + scroll-driven `.mh-tracing-beam` · 🟢 parallel-safe (new view) · ❌ **NOT STARTED**
 - **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
 - **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
-- **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.9** · Phase 1 (Product polish) — Multi-select + bulk actions (from Frame.io): checkboxes + select-all + bulk approve/export/delete in the Media Library and review queue; pure HTML form multi-select with progressive JS enhancement · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.11** · Phase 1 (Product polish) — Tabbed code-example switcher (from Resend): language tabs + syntax highlighting + copy button on the Developer/API docs page; pure HTML/CSS tabs, Prism.js or equivalent bundled locally · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.12** · Phase 1 (Product polish) — Results data table (from Wope): sortable/filterable parsed-results view with inline sparklines (athlete progress over time) and coloured delta badges (PB/improvement); server-side sort, vanilla JS sparklines · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.13** · Phase 1 (Product polish) — Annotated UI callouts (from Liveblocks): labelled hotspots + SVG connector lines on a sample card / the review UI ('anatomy of a card') for the landing or onboarding tour; static HTML/SVG, no new lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.14** · Phase 1 (Product polish) — Notifications inbox (from Liveblocks): a bell icon + unread count badge + dropdown listing render-complete, pack-ready, and error events; backed by the existing scheduler/notify layer, polled via lightweight SSE or fetch · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.15** · Phase 1 (Product polish) — Command palette / Cmd-K (from GitHub): fast keyboard navigation + quick actions (jump to Create / Library / Settings, run common actions); vanilla JS, no framework, keyboard-accessible · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.16** · Phase 1 (Product polish) — Dashboard activity feed (from GitHub): recent runs/approvals/exports shown as cards with status badges, relative timestamps, and expandable detail; server-rendered from the existing audit log · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.17** · Phase 1 (Product polish) — Content-cadence heatmap (from GitHub): a calendar activity grid showing generation/posting consistency over the past year; server-rendered SVG from run history, no JS lib required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.18** · Phase 1 (Product polish) — Inspector/properties panel (from Sketch): a lightweight side panel to tweak a generated card before approval — edit caption text, swap brand palette swatch, toggle elements, adjust crop; posted back to existing Flask card-edit routes · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.19** · Phase 1 (Product polish) — Testimonial/social-proof carousel (from Sketch): club/coach quote cards + avatar initials with arrow controls + autoplay on the landing; pure CSS/JS, no carousel lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.21** · Phase 1 (Product polish) — Text-scramble/decode animation (from Locomotive): character-by-character scramble-then-decode reveal for the 'engine is generating…' processing state and optional hero headline reveal; vanilla JS, respects `prefers-reduced-motion` · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.23** · Phase 1 (Product polish) — Light/dark theme toggle (from AuthKit): dark-first with an optional light mode; CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme` default; no new build step · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.25** · Phase 1 (Product polish) — Emoji reactions (from Liveblocks): quick emoji reactions (👍 ❤️ 🔥) on generated cards and in the review queue; stored per card in the existing DB, tallied server-side, updated via fetch without full reload · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.28** · Phase 1 (Product polish) — Keyboard shortcuts overlay (from GitHub): press `?` to reveal a modal of available shortcuts; quick keys to approve/reject/next in the review flow; vanilla JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.30** · Phase 1 (Product polish) — AI 'weekend at a glance' summary panel (from Mixpanel/Fey): an at-a-glance summary card of the meet's key story (top swims, PBs, medals) using MediaHub's existing summarisation pipeline — no external API, no new LLM call beyond what the pack already made · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1512,13 +1499,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-14 | `41171c57d` | Add visual template/archetype gallery (UI 1.10) |
-| 2026-06-14 | `e25ace721` | Build UI2.1 — cut-out before/after compare slider |
-| 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
-| 2026-06-14 | `487758deb` | feat(ui): UI2.6 Vanish search on the activity/global run search |
-| 2026-06-14 | `72cd136a7` | Build UI2.7 — caption type-on "AI is writing" reveal |
-| 2026-06-14 | `5a8a66d72` | Align UI 1.3/U.8 fix with main's #532 (pipeline_html prepend) |
-| 2026-06-14 | `71ec23f6a` | Fix U.8/UI1.3 pipeline_html collision + add application-suite CI gate |
-| 2026-06-14 | `e0783d17f` | Make web UI phone-friendly: kill horizontal scroll on mobile |
-| 2026-06-14 | `f87368501` | U.11 — outputs inside real Instagram platform frames |
+| 2026-06-14 | `b8e3d3fa3` | docs: mark UI 1.28 done on the roadmap |
+| 2026-06-14 | `423d2a521` | Build UI 1.6 — animated results/data charts (Mixpanel-inspired) |
+| 2026-06-14 | `4c5f79818` | Build UI 1.27 — horizontal drag/scroll gallery (Media Library + landing) |
+| 2026-06-14 | `09d0df3c1` | docs: mark UI2.1 done on the roadmap |
+| 2026-06-14 | `6f7ffd995` | Build UI 1.12 — sortable/filterable results data table with sparklines |
 <!-- /ROADMAP:ACTIVITY -->
