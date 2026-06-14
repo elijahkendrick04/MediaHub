@@ -129,6 +129,63 @@ class TestHealthzRecordsHeartbeat:
         assert latest["ok"] is expected_ok
 
 
+class TestHeartbeatDrainResilience:
+    """The heartbeat drain thread is a per-worker daemon: it must NEVER die.
+
+    task_done() can raise ValueError("called too many times") if the queue is
+    join()ed or reset (e.g. the test reload of web.py) between the loop's get()
+    and its task_done(). If that escaped the loop the thread would terminate and
+    the worker would silently stop recording heartbeats for the rest of its
+    life — so the loop must keep draining past a task_done() ValueError.
+    """
+
+    def test_drain_loop_survives_task_done_value_error(self, monkeypatch):
+        import queue as _queue
+        import threading
+        import time
+
+        import mediahub.observability.uptime as upt
+        import mediahub.web.web as wm
+
+        class _FlakyTaskDoneQueue(_queue.Queue):
+            def __init__(self):
+                super().__init__()
+                self._raised_once = False
+
+            def task_done(self):
+                if not self._raised_once:
+                    self._raised_once = True
+                    raise ValueError("task_done() called too many times")
+                return super().task_done()
+
+        flaky = _FlakyTaskDoneQueue()
+        recorded: list[str] = []
+        done = threading.Event()
+
+        def _fake_record(*, ok, source, response_ms, error):
+            recorded.append(source)
+            if len(recorded) >= 2:
+                done.set()
+
+        monkeypatch.setattr(wm, "_HEARTBEAT_QUEUE", flaky)
+        monkeypatch.setattr(upt, "record_heartbeat", _fake_record)
+
+        t = threading.Thread(target=wm._heartbeat_drain_loop, daemon=True)
+        t.start()
+
+        # First item's task_done() raises ValueError; the loop must swallow it
+        # and keep going, so the SECOND item still gets recorded.
+        flaky.put((True, "first", 1.0, None))
+        flaky.put((True, "second", 1.0, None))
+
+        assert done.wait(timeout=5.0), (
+            "drain thread died after task_done() ValueError — "
+            f"only recorded {recorded}"
+        )
+        assert recorded[:2] == ["first", "second"]
+        assert t.is_alive()
+
+
 class TestHealthzPing:
     def test_ping_returns_200_with_pong(self, fresh_app):
         c, _ = fresh_app

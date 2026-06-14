@@ -1782,7 +1782,14 @@ def _heartbeat_drain_loop() -> None:
         except Exception:
             pass
         finally:
-            _HEARTBEAT_QUEUE.task_done()
+            # task_done() must never escape this loop: a stray ValueError
+            # ("called too many times" — possible when the queue is join()ed
+            # or reset concurrently) would otherwise kill this daemon thread,
+            # silently stopping all heartbeat writes for the worker's life.
+            try:
+                _HEARTBEAT_QUEUE.task_done()
+            except ValueError:
+                pass
 
 
 def _ensure_heartbeat_thread() -> None:
