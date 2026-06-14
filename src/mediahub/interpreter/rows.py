@@ -83,18 +83,34 @@ def _normalise_name(raw: str) -> tuple[str | None, float]:
 # name like "100 Club" or "1st City SC" is never truncated).
 _CLUB_YOB_PREFIX = re.compile(r"^\(?\s*(?:19|20)?\d{2}\s*\)?(?=\s|$)")
 
+# Race data that can slip into the club cell when a results page is mostly a
+# split/lap table (e.g. a 1500m event) and an AI extraction has no clean club
+# column: lap/cumulative times ("13:53.80") or distance markers ("1350m").
+# A club name never contains a lap time or a distance token.
+_CLUB_RACE_DATA = re.compile(
+    r"\d{1,3}:\d{2}\.\d{2}"  # lap/cumulative time mm:ss.cc
+    r"|\b\d{1,4}\s*m\b"  # a distance token like '1350m' / '50 m'
+)
+
 
 def _normalise_club(raw: str) -> tuple[str | None, float]:
     s = raw.strip()
     if not s:
         return None, 0.0
+    # Reject race data (split times, distances) that slipped into the club cell.
+    if _CLUB_RACE_DATA.search(s):
+        return None, 0.0
     # Strip a leading year-of-birth token if one slipped into the club cell.
     cleaned = _CLUB_YOB_PREFIX.sub("", s).strip()
-    if cleaned and re.search(r"[A-Za-z]", cleaned):
-        return cleaned, 0.75
-    # Nothing club-like remains (the cell carried only a year-of-birth, e.g.
-    # "(04)") — not a club, so don't surface it in the club picker.
-    return None, 0.0
+    if not cleaned or not re.search(r"[A-Za-z]", cleaned):
+        # Nothing club-like remains (the cell carried only a year-of-birth, e.g.
+        # "(04)") — not a club, so don't surface it in the club picker.
+        return None, 0.0
+    # A leading bracket marker ("[M", "[pull]", "(M") left after the year strip
+    # is a stroke/leg marker, not a club.
+    if cleaned[:1] in "[(":
+        return None, 0.0
+    return cleaned, 0.75
 
 
 _NORMALISERS = {
