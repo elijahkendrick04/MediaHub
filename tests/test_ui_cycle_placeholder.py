@@ -1,12 +1,13 @@
 """tests/test_ui_cycle_placeholder.py — UI 1.1 cycling example-prompt placeholder.
 
 Roadmap **UI 1.1** (Phase 1 product polish, inspired by Cosmos): the CREATE /
-Free-Text "describe a moment" input and the search fields animate their
-placeholder through curated real example prompts ("Try: Tom Davies PB 100m
-free", "Try: top three at county finals") to guide first-time users — pure
-vanilla JS, no new deps, ``prefers-reduced-motion`` respected, with the static
-``placeholder=""`` each field already carries kept as the no-JS / reduced-motion
-fallback.
+Free-Text "describe a moment" input and the ask-the-data / web-research query
+boxes animate their placeholder through curated real example prompts ("Try: Tom
+Davies PB 100m free", "Try: top three at county finals") to guide first-time
+users — pure vanilla JS, no new deps, ``prefers-reduced-motion`` respected, with
+the static ``placeholder=""`` each field already carries kept as the no-JS /
+reduced-motion fallback. (The /activity search migrated to the UI2.6 Vanish
+input — its coverage lives in tests/test_ui_vanish_search.py.)
 
 Two layers, matching tests/test_activity_count_up.py:
 
@@ -204,12 +205,10 @@ class TestWiredSurfaces:
         # Apostrophes must survive the escape→attribute→unescape round-trip.
         assert "Try: Maya's first sub-30 50m fly" in phrases
 
-    def test_activity_search_field(self, app_mod):
-        app, _ = app_mod
-        html = _get(app, "/activity")
-        self._check_field(html, "mh-activity-search", ["Try: county championships"])
-        # The static hint still names what the box searches.
-        assert "run id" in _static_placeholder(html, "mh-activity-search")
+    # NOTE: the /activity search migrated from the UI 1.1 cycle to the UI2.6
+    # Vanish input (.mh-vanish overlay placeholder, native placeholder removed),
+    # so its rotating-placeholder coverage now lives in
+    # tests/test_ui_vanish_search.py rather than here.
 
     def test_free_text_chat_reply(self, app_mod):
         app, wm = app_mod
@@ -237,7 +236,7 @@ class TestAttributeIntegrity:
 
     def test_no_unescaped_markup_or_quotes(self, app_mod):
         app, _ = app_mod
-        for path, fid in (("/free-text", "ft-prompt"), ("/activity", "mh-activity-search")):
+        for path, fid in (("/free-text", "ft-prompt"), ("/web-research", "rq")):
             html = _get(app, path)
             m = re.search(r'id="%s"[^>]*?data-mh-cycle-placeholder="([^"]*)"' % fid, html)
             assert m
@@ -260,7 +259,6 @@ class TestAttributeIntegrity:
         _, wm = app_mod
         for const in (
             wm._CYCLE_PH_MOMENT,
-            wm._CYCLE_PH_SEARCH,
             wm._CYCLE_PH_RESEARCH,
             wm._CYCLE_PH_ASKDATA,
         ):
