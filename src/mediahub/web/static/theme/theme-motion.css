@@ -427,6 +427,71 @@
 }
 .mh-marquee-chip::after { content: "/"; color: var(--mh-primary); opacity: 0.55; }
 
+/* Moment-type ticker — editorial section divider (UI 1.24). A large
+   display-type band naming the moments the engine detects & ranks, used as a
+   divider on the landing between the outputs grid and the in-feed frames.
+   Pure CSS: the markup renders the moment list TWICE, so the -50% track loop
+   is seamless with no JS clone (this deliberately does NOT reuse .mh-marquee,
+   whose seam is cloned by ui-kit.js). Inspired by SavoirFaire / SuperHi. */
+.mh-moment-ticker {
+  border-block: 1px solid var(--mh-outline-variant);
+  background: var(--mh-surface-variant);
+  padding-block: clamp(var(--sp-5), 3.5vw, var(--sp-7));
+  overflow: hidden;
+  user-select: none; -webkit-user-select: none;
+}
+.mh-moment-ticker__viewport {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+.mh-moment-ticker__track {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-7);
+  width: max-content;
+  animation: mh-moment-ticker 42s linear infinite;
+  will-change: transform;
+}
+.mh-moment-ticker:hover .mh-moment-ticker__track { animation-play-state: paused; }
+@keyframes mh-moment-ticker { to { transform: translateX(-50%); } }
+.mh-moment-ticker__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-7);
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.6rem, 4.4vw, 3.1rem);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-muted);
+}
+/* Alternating outline ("ghost") words — the filled↔outline rhythm of the
+   reference tickers. Solid colour first as the fallback for engines without
+   text-stroke / text-fill-color support (they show a calm faint word). */
+.mh-moment-ticker__item.is-ghost {
+  color: var(--mh-on-surface-faint);
+  -webkit-text-stroke: 1px var(--mh-on-surface-faint);
+          text-stroke: 1px var(--mh-on-surface-faint);
+  -webkit-text-fill-color: transparent;
+}
+/* Gold diamond mark after every word — a pure-CSS shape (no glyph / SVG /
+   webfont dependency) so it renders identically on every system and stays
+   seamless across the loop seam. Uses the signature medal-gold accent
+   (--mh-tertiary), the same gold the landing's editorial emphasis carries, so
+   the mark reads as a crisp on-brand pop rather than the navy primary (which
+   is the low-contrast CTA fill on this surface). */
+.mh-moment-ticker__item::after {
+  content: "";
+  flex: none;
+  width: 0.34em;
+  height: 0.34em;
+  background: var(--mh-tertiary);
+  transform: rotate(45deg);
+}
+
 /* Gradient-text — the "single chromatic accent as a gradient on a key word"
    move distilled from Refero (Apple / Mercury / Auros product-gradient idea).
    Solid-colour fallback first, so engines without background-clip:text still
@@ -616,6 +681,7 @@
   .mh-gradient-border::before,
   .mh-moving-border::before,
   .mh-marquee__track,
+  .mh-moment-ticker__track,
   .mh-sparkles .mh-spark,
   .mh-bar-fill,
   .mh-steploader__step[data-state="active"] .mh-steploader__dot {
@@ -625,6 +691,8 @@
   .mh-tilt { transform: none !important; transition: none; }
   .mh-marquee { -webkit-mask-image: none; mask-image: none; overflow-x: auto; }
   .mh-marquee__track { width: auto; }
+  .mh-moment-ticker__viewport { -webkit-mask-image: none; mask-image: none; overflow-x: auto; }
+  .mh-moment-ticker__track { width: auto; }
   .mh-spotlight::before { animation: none; opacity: 1; }
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
   .mh-flip-words > .mh-fw { transition: none; }
