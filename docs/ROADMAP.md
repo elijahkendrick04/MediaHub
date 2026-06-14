@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `64875718a` · Merge pull request #535 from elijahkendrick04/claude/adoring-hopper-ko7brj
+**Last updated:** 2026-06-14 · `d23033b68` · UI1.26 — cursor-anchored progress/info readout (render/upload) (#539)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -160,7 +160,6 @@ sequence it or merge with care.
 - **UI 1.23** · Phase 1 (Product polish) — Light/dark theme toggle (from AuthKit): dark-first with an optional light mode; CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme` default; no new build step · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.25** · Phase 1 (Product polish) — Emoji reactions (from Liveblocks): quick emoji reactions (👍 ❤️ 🔥) on generated cards and in the review queue; stored per card in the existing DB, tallied server-side, updated via fetch without full reload · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.26** · Phase 1 (Product polish) — Cursor-anchored progress/info readout (from UNVEIL/Cosmos): a small percent/status label that follows the cursor during long actions (render/upload); vanilla JS position tracking, disappears on completion · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.28** · Phase 1 (Product polish) — Keyboard shortcuts overlay (from GitHub): press `?` to reveal a modal of available shortcuts; quick keys to approve/reject/next in the review flow; vanilla JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1514,6 +1513,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
 | 2026-06-14 | `72cd136a7` | Build UI2.7 — caption type-on "AI is writing" reveal |
 | 2026-06-14 | `5a8a66d72` | Align UI 1.3/U.8 fix with main's #532 (pipeline_html prepend) |
 | 2026-06-14 | `71ec23f6a` | Fix U.8/UI1.3 pipeline_html collision + add application-suite CI gate |
