@@ -4594,3 +4594,281 @@ kbd {
 }
 .mh-api-params th { color: var(--ink-muted); font-weight: 600; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; }
 .mh-api-params td code { font: 12.5px/1.5 var(--font-mono); color: var(--tok-property); background: none; padding: 0; }
+
+/* =====================================================================
+   UI 1.6 — Animated results/data charts (Mixpanel-inspired)
+   ---------------------------------------------------------------------
+   Two first-party chart types — a vertical bar/podium chart and a
+   cohort/area trend chart — rendered as pure HTML/SVG by web/charts.py
+   (no charting SDK, no canvas, no external fetch). They BUILD ON SCROLL:
+   the markup carries `.mh-chart[data-mh-animate]`, the shared bindReveals
+   IntersectionObserver (in web._layout) adds `.is-in` when the chart
+   enters the viewport, and the bar-grow / line-draw below is a pure CSS
+   transition gated on that class. Value readouts reuse the existing
+   data-mh-count count-up.
+
+   Progressive enhancement, exactly like the U.5 reveal system: the
+   collapsed start-state is `.mh-js`-gated, so a no-JS visitor gets the
+   final, fully-drawn chart with no transition; `prefers-reduced-motion`
+   snaps straight to the final state too. Data is never hidden behind JS.
+   ===================================================================== */
+.mh-chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mh-chart-cap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  line-height: 1.4;
+}
+.mh-chart-empty {
+  padding: 22px 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-dim);
+  border: 1px dashed var(--hairline, rgba(255,255,255,0.12));
+  border-radius: 10px;
+}
+
+/* ---- Bar / podium chart -------------------------------------------- */
+.mh-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(8px, 3vw, 26px);
+  padding-top: 22px;            /* headroom for the value labels above tall bars */
+  border-bottom: 1px solid var(--hairline, rgba(255,255,255,0.12));
+}
+.mh-chart-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+.mh-chart-bar-track {
+  position: relative;
+  width: 100%;
+  max-width: 72px;
+  height: var(--mh-chart-h, 150px);
+  display: flex;
+  align-items: flex-end;
+}
+.mh-chart-bar-fill {
+  width: 100%;
+  height: var(--mh-bar, 0%);
+  min-height: 3px;
+  border-radius: 5px 5px 1px 1px;
+  background: var(--ink-dim);
+  transform-origin: bottom center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+}
+.mh-chart-bar-val {
+  position: absolute;
+  left: 50%;
+  bottom: var(--mh-bar, 0%);
+  transform: translate(-50%, -7px);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+/* x-axis tick row — shared by both chart types; the --bars variant mirrors
+   the bar column model so each tick lands under its bar. */
+.mh-chart-xaxis {
+  display: flex;
+  gap: clamp(8px, 3vw, 26px);
+}
+.mh-chart-xtick {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tone -> fill colour. The podium trio mirrors the existing bento podium
+   (gold = medal, silver = dim ink, bronze = lane dimmed) so the landing
+   reads consistently; the semantic tones reuse the status palette. */
+/* Glows are derived from the fill colour via color-mix so they always track
+   the bar in any theme — the brand --lane / --medal tokens are re-themed per
+   org, but the legacy *-glow literals are not, so deriving keeps them in step
+   (a fixed yellow-green glow on a re-themed navy bar would look wrong). */
+.mh-chart-bar.tone-gold    .mh-chart-bar-fill { background: var(--medal); box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 0 16px color-mix(in oklab, var(--medal) 50%, transparent); }
+.mh-chart-bar.tone-silver  .mh-chart-bar-fill { background: var(--ink-dim); }
+.mh-chart-bar.tone-bronze  .mh-chart-bar-fill { background: var(--lane); opacity: 0.62; }
+.mh-chart-bar.tone-lane    .mh-chart-bar-fill { background: var(--lane); box-shadow: inset 0 1px 0 rgba(0,0,0,0.18), 0 0 16px color-mix(in oklab, var(--lane) 45%, transparent); }
+.mh-chart-bar.tone-info    .mh-chart-bar-fill { background: var(--info); }
+.mh-chart-bar.tone-good    .mh-chart-bar-fill { background: var(--good); }
+.mh-chart-bar.tone-bad     .mh-chart-bar-fill { background: var(--bad); }
+.mh-chart-bar.tone-neutral .mh-chart-bar-fill { background: color-mix(in oklab, var(--ink-dim) 60%, transparent); }
+.mh-chart-bar.tone-gold  .mh-chart-bar-val { color: var(--medal); }
+.mh-chart-bar.tone-lane  .mh-chart-bar-val { color: var(--lane); }
+
+/* Bar build-on-scroll: scaleY from the baseline; the value label fades up
+   once the bar has grown. Only when JS is present AND the chart has not yet
+   been revealed - so no-JS renders the final bar immediately. */
+.mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-fill {
+  transition: transform 820ms var(--ease-out, cubic-bezier(0.16,1,0.3,1));
+  will-change: transform;
+}
+.mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-fill {
+  transform: scaleY(0);
+}
+.mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-val {
+  transition: opacity 420ms var(--ease-out, ease-out) 360ms;
+}
+.mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-val {
+  opacity: 0;
+}
+/* Per-bar grow stagger so the chart reads left-to-right. */
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(1) .mh-chart-bar-fill { transition-delay: 0ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(2) .mh-chart-bar-fill { transition-delay: 90ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(3) .mh-chart-bar-fill { transition-delay: 180ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(4) .mh-chart-bar-fill { transition-delay: 270ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(5) .mh-chart-bar-fill { transition-delay: 360ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(6) .mh-chart-bar-fill { transition-delay: 450ms; }
+
+/* ---- Cohort / area trend chart ------------------------------------- */
+.mh-chart--area { --mh-chart-accent: var(--lane); }
+.mh-chart--area.tone-info { --mh-chart-accent: var(--info); }
+.mh-chart--area.tone-good { --mh-chart-accent: var(--good); }
+.mh-chart--area.tone-gold { --mh-chart-accent: var(--medal); }
+.mh-chart--area.tone-bad  { --mh-chart-accent: var(--bad); }
+.mh-chart-area-wrap { width: 100%; }
+.mh-chart-area-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.mh-chart-grid {
+  stroke: var(--hairline, rgba(255,255,255,0.10));
+  stroke-width: 1;
+}
+.mh-chart-area-stop-0 { stop-color: var(--mh-chart-accent); stop-opacity: 0.34; }
+.mh-chart-area-stop-1 { stop-color: var(--mh-chart-accent); stop-opacity: 0; }
+.mh-chart-area-line {
+  stroke: var(--mh-chart-accent);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px color-mix(in oklab, var(--mh-chart-accent) 45%, transparent));
+}
+.mh-chart-area-dot {
+  fill: var(--bg);
+  stroke: var(--mh-chart-accent);
+  stroke-width: 2;
+}
+
+/* Area build-on-scroll: the line draws (pathLength=1 + dashoffset), the fill
+   fades up beneath it, the dots pop in last, staggered. */
+.mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1150ms var(--ease-out, ease-out);
+}
+.mh-js .mh-chart--area[data-mh-animate].is-in .mh-chart-area-line {
+  stroke-dashoffset: 0;
+}
+.mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-fill {
+  opacity: 0;
+  transition: opacity 760ms var(--ease-out, ease-out) 220ms;
+}
+.mh-js .mh-chart--area[data-mh-animate].is-in .mh-chart-area-fill { opacity: 1; }
+.mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-dot {
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out, ease-out);
+}
+.mh-js .mh-chart--area[data-mh-animate].is-in .mh-chart-area-dot {
+  opacity: 1;
+  transition-delay: calc(760ms + var(--mh-dot-i, 0) * 70ms);
+}
+
+/* Reduced motion - both charts snap to their final, fully-drawn state with
+   no transition (matches the U.5 reveal system's reduced-motion no-op). */
+@media (prefers-reduced-motion: reduce) {
+  .mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-fill,
+  .mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-fill {
+    transform: none;
+    transition: none;
+  }
+  .mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-val,
+  .mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-val {
+    opacity: 1;
+    transition: none;
+  }
+  .mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-line,
+  .mh-js .mh-chart--area[data-mh-animate]:not(.is-in) .mh-chart-area-line {
+    stroke-dashoffset: 0;
+    transition: none;
+  }
+  .mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-fill,
+  .mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-dot,
+  .mh-js .mh-chart--area[data-mh-animate]:not(.is-in) .mh-chart-area-fill,
+  .mh-js .mh-chart--area[data-mh-animate]:not(.is-in) .mh-chart-area-dot {
+    opacity: 1;
+    transition: none;
+  }
+}
+
+/* Tighter chart height on small screens. */
+@media (max-width: 560px) {
+  .mh-chart-bar-track { height: var(--mh-chart-h-sm, 120px); }
+  .mh-chart-bar-val { font-size: 15px; }
+}
+
+/* ---- Landing "sample-outputs" chart cards (UI 1.6) ----------------- */
+/* Two bordered panels side by side, each framing one chart with a small
+   eyebrow + title. Collapses to a single column on narrow viewports. */
+.mh-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(16px, 3vw, 28px);
+  margin-top: 28px;
+}
+.mh-chart-card {
+  background: var(--panel, rgba(255,255,255,0.02));
+  border: 1px solid var(--hairline, rgba(255,255,255,0.10));
+  border-radius: 16px;
+  padding: clamp(18px, 2.4vw, 26px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.mh-chart-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mh-chart-card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--lane);
+}
+.mh-chart-card-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(18px, 2.2vw, 22px);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+@media (max-width: 760px) {
+  .mh-charts-grid { grid-template-columns: 1fr; }
+}
