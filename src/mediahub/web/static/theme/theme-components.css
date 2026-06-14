@@ -3118,6 +3118,22 @@ kbd {
 }
 .mh-toolbar .mh-search input::placeholder { color: var(--ink-faint); }
 
+/* UI2.6 — Vanish search. When the search box is the design-kit Vanish input,
+   its rotating overlay placeholder (.mh-vanish__ph) lines up with the input
+   text past the 36px icon gutter (matching the input's padding-left), borrows
+   the input's type metrics + faint tone for a seamless swap, and ellipsises
+   rather than spilling out of the box. */
+.mh-toolbar .mh-search.mh-vanish { --mh-vanish-pad: 36px; }
+.mh-toolbar .mh-search.mh-vanish .mh-vanish__ph {
+  right: var(--sp-3);
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  color: var(--ink-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Date-group section header inside the table — used when grouping
    runs by Today / Yesterday / Earlier. */
 .mh-date-group-row td {
