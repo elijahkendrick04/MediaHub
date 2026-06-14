@@ -77,6 +77,7 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import charts as _charts
 from . import legal as _legal
 from . import tenancy as _tenancy
 
@@ -1017,6 +1018,26 @@ def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-t
     """
     spans = "".join(f'<span class="mh-line">{ln}</span>' for ln in lines)
     return f'<{tag} class="{cls} mh-reveal-lines">{spans}</{tag}>'
+
+
+def _chart_card(eyebrow: str, title: str, chart_html: str) -> str:
+    """UI 1.6 — wrap a chart in a labelled panel (eyebrow + title) for the
+    landing sample-outputs grid and the in-app Review "Meet at a glance" card.
+
+    ``eyebrow`` and ``title`` are trusted static copy and may carry HTML
+    entities (``&middot;``, ``&amp;``), exactly like ``_reveal_lines`` — there
+    is no user data on this path, so they are not re-escaped. ``chart_html`` is
+    the already-rendered, already-escaped figure from ``web/charts.py``.
+    """
+    return (
+        '<div class="mh-chart-card">'
+        '<div class="mh-chart-card-head">'
+        f'<span class="mh-chart-card-eyebrow">{eyebrow}</span>'
+        f'<h3 class="mh-chart-card-title">{title}</h3>'
+        "</div>"
+        f"{chart_html}"
+        "</div>"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -10324,7 +10345,14 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       function(grp){
         Array.prototype.forEach.call(grp.children, function(ln){ lineItems.push(ln); });
       });
-    var reveals = Array.prototype.slice.call(blockReveals).concat(lineItems);
+    // UI 1.6 — animated results/data charts ride this same observer: each
+    // .mh-chart[data-mh-animate] gets .is-in as it scrolls into view, which
+    // drives the pure-CSS bar-grow / area line-draw and the data-mh-count
+    // value count-up inside it (revealEl already fires counters on reveal).
+    var chartEls = document.querySelectorAll('.mh-chart[data-mh-animate]');
+    var reveals = Array.prototype.slice.call(blockReveals)
+      .concat(lineItems)
+      .concat(Array.prototype.slice.call(chartEls));
     var counters = document.querySelectorAll('[data-mh-count]');
     function revealEl(el) {
       el.classList.add('is-in');
@@ -13533,6 +13561,62 @@ def create_app() -> Flask:
         # render (diagram, then the inline-thumbnail headline, then the steps).
         pipeline_html = _pipeline_diagram_section_html() + pipeline_html
 
+        # --- UI 1.6 · Animated results/data charts (Mixpanel-inspired).
+        # The sample-outputs surface gets two first-party, build-on-scroll
+        # charts drawn by web/charts.py — a podium bar chart and a season
+        # area trend — so a visitor sees the *data intelligence*, not just the
+        # graphics, before they upload. The figures carry honest SAMPLE data
+        # (clearly captioned as such); the same renderers draw real run data on
+        # the in-app Review page. Pure HTML/SVG + CSS custom props, no SDK; the
+        # cards ride the U.5 reveal-group and the bars/line build on scroll.
+        charts_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">The meet, read by the engine</span></div>'
+            + _reveal_lines(
+                [
+                    "Every swim becomes",
+                    'a <em class="editorial">number</em> that moves.',
+                ]
+            )
+            + '<div class="mh-charts-grid mh-reveal-group">'
+            # Podium bar chart — top 3 of a final, by club points (count-up).
+            + _chart_card(
+                "Podium",
+                "100m Freestyle &middot; final",
+                _charts.bar_chart(
+                    [
+                        {"label": "Chen", "value": 9, "tone": "gold"},
+                        {"label": "Thompson", "value": 7, "tone": "silver"},
+                        {"label": "Roberts", "value": 6, "tone": "bronze"},
+                    ],
+                    caption="Sample meet · club points, top three",
+                    chart_id="home-podium",
+                ),
+            )
+            # Cohort/area trend — personal bests detected per month, a season.
+            + _chart_card(
+                "Season trend",
+                "Personal bests per month",
+                _charts.area_chart(
+                    [
+                        {"label": "Sep", "value": 3},
+                        {"label": "Oct", "value": 6},
+                        {"label": "Nov", "value": 5},
+                        {"label": "Dec", "value": 8},
+                        {"label": "Jan", "value": 7},
+                        {"label": "Feb", "value": 11},
+                        {"label": "Mar", "value": 9},
+                        {"label": "Apr", "value": 14},
+                    ],
+                    caption="Sample season · PBs detected per month",
+                    chart_id="home-pbs",
+                ),
+            )
+            + "</div>"
+            "</section>"
+        )
+
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -13545,6 +13629,7 @@ def create_app() -> Flask:
             + bento_html
             + moment_ticker_html
             + frames_html
+            + charts_html
             + audience_html
             + testimonials_html
             + promise_html
@@ -15631,6 +15716,62 @@ def create_app() -> Flask:
         # one source of truth for the card render.
         ranked_achs = rr.get("ranked_achievements") or []
 
+        # --- UI 1.6 · Animated results/data charts from this run's real data.
+        # Two first-party build-on-scroll figures (web/charts.py): a quality-band
+        # bar chart (how many Elite / Strong / Story moments the deterministic
+        # detectors found) and a content-worthiness area curve (the ranker's
+        # priority score across the top ranked achievements, strongest first).
+        # Presentation-only over already-computed engine output — no new
+        # judgement, no AI, nothing invented. Each chart renders only when it has
+        # real data to draw; with neither, the whole card is omitted.
+        _band_bars = []
+        if n_elite:
+            _band_bars.append({"label": "Elite", "value": n_elite, "tone": "gold"})
+        if n_strong:
+            _band_bars.append({"label": "Strong", "value": n_strong, "tone": "lane"})
+        if n_story:
+            _band_bars.append({"label": "Story", "value": n_story, "tone": "info"})
+        _band_chart_html = ""
+        if _band_bars:
+            _band_chart_html = _chart_card(
+                "Detected &amp; ranked",
+                "Moments by quality band",
+                _charts.bar_chart(
+                    _band_bars,
+                    caption="What the detectors found in this meet",
+                    chart_id=f"run-bands-{run_id}",
+                ),
+            )
+        # Content-worthiness curve — the ranker's priority for each of the top
+        # ranked achievements, strongest first (x = rank, implicit; left = best).
+        _worth_pts = [
+            {"label": "", "value": float(ra.get("priority", 0.0) or 0.0)} for ra in ranked_achs[:12]
+        ]
+        _worth_chart_html = ""
+        if len(_worth_pts) >= 2:
+            _worth_chart_html = _chart_card(
+                "Ranked by the engine",
+                "Content-worthiness by rank",
+                _charts.area_chart(
+                    _worth_pts,
+                    caption="Ranker priority · strongest first",
+                    chart_id=f"run-worth-{run_id}",
+                ),
+            )
+        if _band_chart_html or _worth_chart_html:
+            meet_charts_html = (
+                '<div class="card">'
+                '<h2 style="margin-bottom:var(--sp-2)">Meet at a glance</h2>'
+                '<p class="muted" style="margin-bottom:var(--sp-4);font-size:13px">'
+                "Counts and rankings drawn straight from this run — no estimates.</p>"
+                '<div class="mh-charts-grid">'
+                + _band_chart_html
+                + _worth_chart_html
+                + "</div></div>"
+            )
+        else:
+            meet_charts_html = ""
+
         # --- Not generated panel (the "why not" surface).
         # The deterministic detectors traced every swim; for the ones that
         # produced no card we surface the engine's near-miss category in plain
@@ -16293,6 +16434,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <span style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);white-space:nowrap">Run detail &amp; diagnostics</span>
   <span style="flex:1;height:1px;background:var(--hairline)"></span>
 </div>
+
+{meet_charts_html}
 
 <div class="card">
   <h2>Recognition summary</h2>

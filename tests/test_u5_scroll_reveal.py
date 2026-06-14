@@ -163,27 +163,28 @@ class TestRevealLinesHelper:
 class TestHomeSignedOut:
     def test_every_section_headline_is_a_reveal_lines_block(self, app):
         body = _home(app)
-        # steps + before/after + bento + frames + audience + promise +
-        # final-CTA(fresh) = 7 reveal-lines headlines. (The before/after slider
-        # and the U.11 frames carousel both sit on the U.5 pattern, so no plain
-        # section-title survives.)
-        assert body.count("mh-reveal-lines") >= 7
+        # steps + before/after + bento + frames + charts(UI 1.6) + audience +
+        # testimonials(UI 1.19) + promise + final-CTA(fresh) = 9 reveal-lines
+        # headlines. (The before/after slider and the U.11 frames carousel both
+        # sit on the U.5 pattern, so no plain section-title survives.)
+        assert body.count("mh-reveal-lines") >= 9
         # The legacy single-run section title (no reveal-lines) is gone.
         assert '<h2 class="mh-section-title">' not in body
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
     def test_line_spans_two_per_headline(self, app):
-        # Each of the 8 reveal-lines headlines is split into exactly two
-        # editorial lines (steps, before/after, bento, frames, audience,
-        # testimonials [UI 1.19], promise, final-CTA) → 16 line spans.
+        # Each reveal-lines headline is split into exactly two editorial lines
+        # (steps, before/after, bento, frames, charts [UI 1.6], audience,
+        # testimonials [UI 1.19], promise, final-CTA) → 18 line spans.
         body = _home(app)
-        assert body.count('<span class="mh-line">') == 16
+        assert body.count('<span class="mh-line">') == 18
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
         body = _home(app)
-        # The six content-section eyebrows now reveal (were static before):
-        # steps, before/after, bento, frames, audience, testimonials (UI 1.19).
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 6
+        # The content-section eyebrows now reveal (were static before): steps,
+        # before/after, bento, frames, charts (UI 1.6), audience, testimonials
+        # (UI 1.19).
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 7
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body
