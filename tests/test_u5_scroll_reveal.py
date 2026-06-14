@@ -163,16 +163,18 @@ class TestRevealLinesHelper:
 class TestHomeSignedOut:
     def test_every_section_headline_is_a_reveal_lines_block(self, app):
         body = _home(app)
-        # steps + sample + audience + promise + final-CTA(fresh) = 5 headlines.
-        assert body.count("mh-reveal-lines") >= 5
+        # steps + before/after + sample + audience + promise + final-CTA(fresh)
+        # = 6 headlines (the U.15 before/after section's title reveals too).
+        assert body.count("mh-reveal-lines") >= 6
         # The legacy single-run section title (no reveal-lines) is gone.
         assert '<h2 class="mh-section-title">' not in body
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
-    def test_ten_line_spans(self, app):
-        # Each of the 5 headlines is split into exactly two editorial lines.
+    def test_twelve_line_spans(self, app):
+        # Each of the 6 headlines is split into exactly two editorial lines
+        # (the 6th is the U.15 before/after section, which now conforms to U.5).
         body = _home(app)
-        assert body.count('<span class="mh-line">') == 10
+        assert body.count('<span class="mh-line">') == 12
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
         body = _home(app)
