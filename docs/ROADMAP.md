@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `5c1f6227d` · Merge pull request #480: first-party scheduled re-checks docs [skip render]
+**Last updated:** 2026-06-14 · `b526d8740` · U.13 — Floating mobile action dock for review/approve (#490)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -134,7 +134,6 @@ begin until Phases 1–5 are complete (rule 12).
 - **U.8** · Phase 1 (Product polish) — Animated how-it-works pipeline diagram (inspired by AuthKit): glowing nodes + traces on the landing showing reads (club site / socials / brand kit) → writes (captions / graphics / reels); reuses the blueprint grid · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1393,6 +1392,5 @@ list and the auto table below, not here.
 | 2026-06-14 | `4238afc14` | U.12: animated count-up (odometer) stat numerals on the landing hero |
 | 2026-06-14 | `a10f2fc98` | U.14: cursor-following hover preview (Media library + Create) |
 | 2026-06-14 | `b66f13436` | Add first-run sample pack + mobile-aware review (U.4) |
-| 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
-| 2026-06-14 | `30faa034b` | Document first-party scheduled re-checks (no third-party tool) |
+| 2026-06-14 | `e72159a89` | Add U.13 floating mobile action dock for review/approve |
 <!-- /ROADMAP:ACTIVITY -->
