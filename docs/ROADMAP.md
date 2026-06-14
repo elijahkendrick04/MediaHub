@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `3a807f316` · Merge pull request #483 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-14 · `53dd2f185` · Merge pull request #482 from elijahkendrick04/claude/epic-ride-9ykp86
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -135,7 +135,6 @@ begin until Phases 1–5 are complete (rule 12).
 - **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.16** · Phase 1 (Product polish) — Subtle 3D tilt on output cards (inspired by Atlas): premium parallax/tilt-on-hover for the sample output cards · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1396,5 +1395,4 @@ list and the auto table below, not here.
 | 2026-06-14 | `b66f13436` | Add first-run sample pack + mobile-aware review (U.4) |
 | 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
 | 2026-06-14 | `4e538d7b1` | U.10: framed in-app product demo in the landing hero |
-| 2026-06-14 | `b2ef8a46c` | UI 1.1-1.5: design-polish ideas from godly.website review batch 2 — top of Phase U |
 <!-- /ROADMAP:ACTIVITY -->
