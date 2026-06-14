@@ -35,10 +35,14 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 
 | Screen | Effects integrated |
 |---|---|
-| **Home / landing** | Spotlight (hero ambient), Infinite-Moving-Cards (sport-agnostic marquee), Card-Spotlight (sample cards), split-flap Flapboard (PB time), scroll-reveal (final CTA) |
+| **Home / landing** | Spotlight (hero ambient), Infinite-Moving-Cards (sport marquee), Card-Spotlight (sample cards + the 4 step cards), split-flap Flapboard (PB time), gradient-text (marquee label), reveal (final CTA via `.mh-reveal`) |
+| **Upload** | Aurora ambient (entry hero) |
 | **Processing** | Multi-Step Loader (real pipeline log → live step checklist via `MH.renderLogSteps`) |
-| **Review** | Count-up (recognition stats band), bar-fill (achievement priority bars) |
+| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars) |
 | **Make** | Glow-border (live content-type tiles) |
+| **Settings** | Glow-border (category tiles) + reveal-group (tile grid) |
+| **Sign-in** | Card-Spotlight (org profile cards) |
+| **Plan** | reveal (plan items) |
 | **Media library** | Lens (asset thumbnail magnify-to-inspect) |
 
 The kit also ships ready-to-use effects not yet wired to a specific screen (Aurora, Grid/

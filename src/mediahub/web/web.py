@@ -17148,7 +17148,7 @@ window.mhSchedulerDisconnect = function(btn) {
                     else '<span class="tag">Planning only</span>'
                 )
                 items_html += f"""
-<details class="card" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
+<details class="card mh-reveal" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
   <summary style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none">
     <span style="font-family:var(--font-display,inherit);font-size:20px;min-width:34px;color:var(--ink-muted)">#{rank}</span>
     <strong style="flex:1">{_h(item.get("title") or slug)}</strong>
