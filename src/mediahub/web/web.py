@@ -4392,6 +4392,29 @@ def _start_run(
                     notify_pack_ready(run_id)
                 except Exception:
                     pass
+                # In-app notifications inbox (UI 1.14) — always-on, no-config:
+                # record the "pack ready" milestone against the owning org so it
+                # lands in the bell dropdown even with no push channel set up.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
+                except Exception:
+                    pass
+            else:
+                # The pipeline reported a terminal error (rather than raising) —
+                # surface it in the inbox so the operator isn't left guessing.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        profile_id,
+                        "Run couldn't be processed",
+                        str(run.error),
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             import traceback
 
@@ -4401,6 +4424,17 @@ def _start_run(
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
             conn.commit()
             conn.close()
+            try:
+                from mediahub.notify import inbox as _inbox
+
+                _inbox.record_error(
+                    profile_id,
+                    "Run couldn't be processed",
+                    str(e),
+                    run_id=run_id,
+                )
+            except Exception:
+                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -5070,6 +5104,131 @@ header.topnav nav a.live::before {
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
+/* === UI 1.14 — Notifications inbox (bell + unread badge + dropdown) ===
+   Masthead-consistent: mono labels, --chrome rule, --lane accent. The panel
+   is position:fixed and JS-anchored under the bell so the scrollable /
+   hamburger nav can never clip it. */
+.mh-notif {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 6px;
+}
+.mh-notif-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  border-radius: 2px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.mh-notif-btn:hover,
+.mh-notif-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-notif-btn svg { width: 17px; height: 17px; display: block; }
+.mh-notif-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; line-height: 1;
+  color: #0A0B11;
+  background: var(--lane);
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 10px var(--lane-glow);
+  pointer-events: none;
+}
+.mh-notif-badge[hidden] { display: none; }
+.mh-notif-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  width: 360px; max-width: calc(100vw - 24px);
+  max-height: min(70vh, 480px);
+  display: flex; flex-direction: column;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200;
+  overflow: hidden;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-notif-panel[hidden] { display: none; }
+@keyframes mh-notif-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mh-notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--chrome);
+  flex-shrink: 0;
+}
+.mh-notif-h-title {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-notif-readall {
+  background: transparent; border: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  cursor: pointer; padding: 2px 4px;
+  transition: color var(--transition);
+}
+.mh-notif-readall:hover { color: var(--lane); }
+.mh-notif-readall:disabled { opacity: 0.35; cursor: default; }
+.mh-notif-list { overflow-y: auto; flex: 1; }
+.mh-notif-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  background: transparent; border: 0;
+  border-bottom: 1px solid rgba(245,242,232,0.07);
+  cursor: pointer; color: var(--ink); font: inherit;
+  transition: background var(--transition);
+}
+.mh-notif-item:hover { background: rgba(245,242,232,0.04); }
+.mh-notif-item.is-unread { background: rgba(212,255,58,0.05); }
+.mh-notif-item.is-unread:hover { background: rgba(212,255,58,0.09); }
+.mh-notif-dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 5px; background: var(--ink-faint);
+}
+.mh-notif-item[data-level="success"] .mh-notif-dot { background: var(--good); box-shadow: 0 0 8px rgba(94,227,154,0.5); }
+.mh-notif-item[data-level="warning"] .mh-notif-dot { background: var(--warn); }
+.mh-notif-item[data-level="error"]   .mh-notif-dot { background: var(--bad);  box-shadow: 0 0 8px rgba(255,107,107,0.5); }
+.mh-notif-item.is-read .mh-notif-dot { background: var(--ink-faint); box-shadow: none; }
+.mh-notif-text { min-width: 0; flex: 1; }
+.mh-notif-t {
+  display: block;
+  font-size: 13px; font-weight: 600; line-height: 1.3;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.mh-notif-item.is-read .mh-notif-t { color: var(--ink-muted); font-weight: 500; }
+.mh-notif-m {
+  display: block; margin-top: 2px;
+  font-size: 12px; line-height: 1.4;
+  color: var(--ink-muted); overflow-wrap: anywhere;
+}
+.mh-notif-time {
+  display: block; margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.04em;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+.mh-notif-empty {
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 34px 20px 38px; text-align: center;
+}
+.mh-notif-panel.is-empty .mh-notif-empty { display: flex; }
+.mh-notif-panel.is-empty .mh-notif-list { display: none; }
+.mh-notif-empty svg { width: 26px; height: 26px; color: var(--ink-faint); opacity: 0.7; }
+.mh-notif-empty-t { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.mh-notif-empty-s { font-size: 11.5px; color: var(--ink-faint); max-width: 220px; line-height: 1.4; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -8522,6 +8681,44 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       <span id="backend-pill-dot"></span>
       <span id="backend-pill-text">checking&hellip;</span>
     </a>
+    {% if signed_in %}
+    {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
+       render-complete, pack-ready and error events for the active org, backed
+       by the notify-layer inbox store and polled on the same light cadence as
+       the health pill. The dropdown panel is JS-positioned (fixed) so the
+       scrollable / hamburger nav can never clip it. #}
+    <div id="mh-notif" class="mh-notif">
+      <button id="mh-notif-btn" class="mh-notif-btn" type="button"
+              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-controls="mh-notif-panel"
+              data-list-url="{{ url_for('api_notifications') }}"
+              data-readall-url="{{ url_for('api_notifications_read_all') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
+      </button>
+      <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
+           aria-label="Notifications" hidden>
+        <div class="mh-notif-head">
+          <span class="mh-notif-h-title">Notifications</span>
+          <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
+        </div>
+        <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
+        <div id="mh-notif-empty" class="mh-notif-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="mh-notif-empty-t">You're all caught up</span>
+          <span class="mh-notif-empty-s">Render, pack, and error updates show up here.</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% if signed_in and signed_in_name %}
     <a id="active-org-chip"
        href="{{ url_for('organisation_setup') }}"
@@ -8702,6 +8899,156 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       .catch(function(){ paint(false); });
   }
   check(); setInterval(check, 30000);
+})();
+</script>
+<script>
+/* UI 1.14 — Notifications inbox. Polls /api/notifications on the same light
+   cadence as the health pill, paints the unread badge, and renders the bell
+   dropdown. The panel is position:fixed and anchored under the bell in JS so
+   the scrollable / hamburger nav can never clip it. All notification text is
+   written with textContent (never innerHTML), so a caption or error string can
+   never inject markup. Self-contained — no dependency on the MH framework. */
+(function(){
+  var btn = document.getElementById('mh-notif-btn');
+  if (!btn) return;  // signed out — no bell rendered
+  var panel   = document.getElementById('mh-notif-panel');
+  var list    = document.getElementById('mh-notif-list');
+  var badge   = document.getElementById('mh-notif-badge');
+  var readAll = document.getElementById('mh-notif-readall');
+  var LIST_URL    = btn.getAttribute('data-list-url');
+  var READALL_URL = btn.getAttribute('data-readall-url');
+  var POLL_MS = 30000;
+  var open = false;
+  var lastUnread = 0;
+
+  function ago(iso){
+    var t = Date.parse(iso);
+    if (isNaN(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 45)   return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+    try { return new Date(t).toLocaleDateString(); } catch (e) { return ''; }
+  }
+
+  function paintBadge(n){
+    lastUnread = n;
+    if (n > 0){
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.hidden = false;
+      btn.setAttribute('aria-label', 'Notifications (' + n + ' unread)');
+    } else {
+      badge.hidden = true;
+      btn.setAttribute('aria-label', 'Notifications');
+    }
+    if (readAll) readAll.disabled = (n === 0);
+  }
+
+  function el(tag, cls, text){
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render(items){
+    list.textContent = '';
+    if (!items || !items.length){ panel.classList.add('is-empty'); return; }
+    panel.classList.remove('is-empty');
+    items.forEach(function(it){
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mh-notif-item ' + (it.read ? 'is-read' : 'is-unread');
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-level', it.level || 'info');
+      row.setAttribute('data-id', it.id);
+      if (it.link) row.setAttribute('data-link', it.link);
+      row.appendChild(el('span', 'mh-notif-dot'));
+      var body = el('span', 'mh-notif-text');
+      body.appendChild(el('span', 'mh-notif-t', it.title || ''));
+      if (it.body) body.appendChild(el('span', 'mh-notif-m', it.body));
+      body.appendChild(el('span', 'mh-notif-time', ago(it.created_at)));
+      row.appendChild(body);
+      row.addEventListener('click', function(){ onItem(it); });
+      list.appendChild(row);
+    });
+  }
+
+  function poll(){
+    if (document.hidden && !open) return;
+    fetch(LIST_URL, {cache:'no-store', headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok) return;
+        paintBadge(d.unread || 0);
+        if (open) render(d.items || []);
+      })
+      .catch(function(){ /* offline — leave the last good state */ });
+  }
+
+  function safeLink(u){
+    /* Only ever follow an in-app path ("/review/…") — never an absolute /
+       cross-origin ("//host") or javascript: URL, even though links are
+       server-built today. Defence-in-depth: the text flows through a DB. */
+    if (!u || typeof u !== 'string') return '';
+    return (u.charAt(0) === '/' && u.charAt(1) !== '/') ? u : '';
+  }
+
+  function onItem(it){
+    if (!it.read){
+      fetch(LIST_URL + '/' + encodeURIComponent(it.id) + '/read',
+            {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if (d && typeof d.unread === 'number') paintBadge(d.unread); })
+        .catch(function(){});
+    }
+    var dest = safeLink(it.link);
+    if (dest){ window.location.href = dest; return; }
+    poll();
+  }
+
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.hidden = false;
+      position();
+      poll();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.hidden = true;
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
+  if (readAll){
+    readAll.addEventListener('click', function(e){
+      e.stopPropagation();
+      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(){ paintBadge(0); poll(); })
+        .catch(function(){});
+    });
+  }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+
+  poll();
+  setInterval(poll, POLL_MS);
 })();
 </script>
 <script>
@@ -17899,6 +18246,74 @@ Relay team broke club record"></textarea>
                 "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
             }
         )
+
+    # ---- Notifications inbox (UI 1.14) ---------------------------------
+    #
+    # The bell-icon dropdown in the app chrome: render-complete, pack-ready,
+    # and error events for the active organisation, backed by the notify-layer
+    # inbox store (mediahub.notify.inbox). Polled by the header on a light
+    # cadence; org-scoped via _active_profile_id() so one club never sees
+    # another's events. Deep links are built here (in request context) with
+    # url_for, not persisted, so they always match the live routing.
+    def _notification_link(item: dict) -> str:
+        explicit = (item.get("click_url") or "").strip()
+        if explicit:
+            return explicit
+        rid = (item.get("run_id") or "").strip()
+        if not rid:
+            return ""
+        # A finished render lives on the content-pack page; everything else
+        # (pack-ready / error) points at the review page for that run.
+        endpoint = "content_pack" if item.get("kind") == "render_complete" else "review"
+        try:
+            return url_for(endpoint, run_id=rid)
+        except Exception:
+            return ""
+
+    @app.route("/api/notifications", methods=["GET"])
+    def api_notifications():
+        """List the active org's notifications plus its unread count.
+
+        Signed-out (no active org) returns an empty, zero-unread payload so the
+        header poll is harmless on public pages rather than a 403 the client
+        has to special-case.
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "unread": 0, "items": []})
+        unread_only = (request.args.get("unread") or "").strip().lower() in ("1", "true", "yes")
+        try:
+            limit = int(request.args.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        from mediahub.notify import inbox as _inbox
+
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        for it in items:
+            it["link"] = _notification_link(it)
+        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+
+    @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
+    def api_notifications_read(notif_id: str):
+        """Mark one notification read for the active org (tenant-scoped)."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        changed = _inbox.mark_read(pid, notif_id)
+        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+
+    @app.route("/api/notifications/read-all", methods=["POST"])
+    def api_notifications_read_all():
+        """Mark every unread notification read for the active org."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        n = _inbox.mark_all_read(pid)
+        return jsonify({"ok": True, "marked": n, "unread": 0})
 
     # ---- /healthz/usage ------------------------------------------------
     #
@@ -33809,6 +34224,19 @@ voice, and queues them for one-click approval.</p>
                     raise RuntimeError("mp4 missing after render")
                 job["status"] = "done"
                 job["video_url"] = file_url
+                # Render-complete milestone in the in-app inbox (UI 1.14). The
+                # async reel render is the "kick it off and walk away" flow, so
+                # this is the notification a user actually wants when they come
+                # back. Scoped to the org that owns the job; a no-op when signed
+                # out (empty owner_pid).
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel"
+                    )
+                except Exception:
+                    pass
             except _RenderBusy:
                 job["status"] = "error"
                 job["error"] = "renderer_busy"
@@ -33820,6 +34248,17 @@ voice, and queues them for one-click approval.</p>
                 job["status"] = "error"
                 job["error"] = str(_payload.get("detail") or e)
                 job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
             _variant_job_save(job)
 
         threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()
