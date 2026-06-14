@@ -29747,8 +29747,7 @@ function mhSetupMode(mode) {{
                     counts.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
             if reactor and len(reactor) <= 64:
                 for r in conn.execute(
-                    "SELECT card_id, emoji FROM card_reactions "
-                    "WHERE run_id=? AND reactor_id=?",
+                    "SELECT card_id, emoji FROM card_reactions WHERE run_id=? AND reactor_id=?",
                     (run_id, reactor),
                 ).fetchall():
                     if r["emoji"] in REACTION_EMOJI:
