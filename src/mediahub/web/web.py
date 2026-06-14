@@ -4650,8 +4650,11 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
             )
 
         crawl = crawl_results_site(url, progress_cb=_on_progress)
+        _data_exts = (".pdf", ".csv", ".tsv", ".json", ".xlsx", ".xls", ".txt")
+        _result_files = sum(1 for k in crawl.files if k.lower().endswith(_data_exts))
         summary = (
-            f"Fetched {crawl.pages_visited} pages · {crawl.kept} kept · "
+            f"Fetched {crawl.pages_visited} pages · {crawl.kept} kept "
+            f"({_result_files} result file{'' if _result_files == 1 else 's'}) · "
             f"{crawl.total_bytes // 1024} KB"
         )
         if crawl.render_budget_hit:
@@ -11647,16 +11650,18 @@ def create_app() -> Flask:
         meet_name = meta.get("meet_name") or ""
         parse_err = meta.get("parse_error") or ""
 
-        # No clubs detected \u2192 render a polished error state, NOT a broken form.
-        # Differentiate three common causes so the user knows what to fix:
+        # No clubs detected. Only render an error state when the file is
+        # genuinely unusable:
         #   1. file is too small / unreadable (likely a broken download)
-        #   2. file parsed OK but contains no events (probably an entry
-        #      list or meet preview, not a results file)
-        #   3. file parsed and has events but no clubs (rare; format quirk)
-        if not clubs:
+        #   2. file parsed OK but contains no events (entry list / meet preview)
+        # When events DID parse but no club names survived (e.g. a distance-event
+        # splits page that lists only swimmers, times and splits), fall through
+        # to the form \u2014 its club field degrades to a free-text input so the run
+        # is never dead-ended on a format quirk.
+        byte_size = int(meta.get("file_byte_size") or 0)
+        n_events = int(meta.get("n_events") or 0)
+        if not clubs and (byte_size < 2048 or n_events == 0):
             upload_url = url_for("upload")
-            byte_size = int(meta.get("file_byte_size") or 0)
-            n_events = int(meta.get("n_events") or 0)
 
             if byte_size < 2048:
                 headline = "That file doesn't look like a meet results file"
@@ -11669,7 +11674,7 @@ def create_app() -> Flask:
                     "Try downloading the file again from the source and re-uploading. "
                     "A real Hytek PDF or HY3 is usually 100 KB or larger.</p>"
                 )
-            elif n_events == 0:
+            else:
                 headline = "That file looks like a meet preview, not results"
                 explain = (
                     f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
@@ -11678,14 +11683,6 @@ def create_app() -> Flask:
                     "This usually means you uploaded an entry list, a heat sheet, or "
                     "meet conditions document. Wait until the meet finishes and the "
                     "organisers publish the actual results file.</p>"
-                )
-            else:
-                headline = "We couldn't read clubs from that file"
-                explain = (
-                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
-                    f"has {n_events} events but no club information we can filter on. "
-                    "This is rare and usually means the file is from a meet management "
-                    "system MediaHub doesn't yet support.</p>"
                 )
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
@@ -11773,6 +11770,29 @@ def create_app() -> Flask:
             f'<option value="{_h(c)}"{" selected" if c == selected_club else ""}>{_h(c)}</option>'
             for c in clubs
         )
+        # Club field degrades gracefully: when no real club names were detected
+        # (e.g. a distance-event page that lists only swimmers, times and splits),
+        # offer a free-text input so the run is never blocked on a picker with
+        # nothing valid to pick.
+        if clubs:
+            club_field_html = (
+                '<label for="run-config-club">Club to feature</label>'
+                f'<select name="club_filter" id="run-config-club" required>{opts}</select>'
+                '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">'
+                "Only clubs that actually appear in this meet are listed.</p>"
+                f"{club_match_warning_html}"
+            )
+        else:
+            club_field_html = (
+                '<label for="run-config-club">Club to feature</label>'
+                '<input type="text" name="club_filter" id="run-config-club" required '
+                f'value="{_h(selected_club or "")}" autocomplete="off" '
+                'placeholder="e.g. City of Sheffield" />'
+                '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm);color:var(--warn)">'
+                "We couldn&rsquo;t read club names from this file &mdash; some results "
+                "pages list only swimmers, times and splits. Type the club you want to "
+                "feature and we&rsquo;ll match its swimmers.</p>"
+            )
         err_html = f'<p class="tag bad" style="margin-bottom:14px">{_h(error)}</p>' if error else ""
 
         # Pre-fill the brand fields from the active organisation so the
@@ -11879,10 +11899,7 @@ def create_app() -> Flask:
   <form id="mh-cfg-form" method="post" enctype="multipart/form-data" data-loader-text="Setting up your run" data-loader-sub="Saving config and starting the pipeline\u2026">
     <input type="hidden" name="run_id" value="{_h(run_id)}" />
 
-    <label for="run-config-club">Club to feature</label>
-    <select name="club_filter" id="run-config-club" required>{opts}</select>
-    <p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">Only clubs that actually appear in this meet are listed.</p>
-    {club_match_warning_html}
+    {club_field_html}
 
     <fieldset class="mh-fieldset">
       <legend>Brand &mdash; loaded from your organisation</legend>

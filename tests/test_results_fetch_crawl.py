@@ -534,6 +534,44 @@ def test_progress_cb_exception_never_breaks_crawl():
 
 
 # ---------------------------------------------------------------------------
+# Frontier ordering: cheap result files (PDF/CSV/…) before expensive HTML so a
+# budget-limited crawl gets the actual results, not just navigation pages.
+# ---------------------------------------------------------------------------
+
+
+def _pdf(url: str, body: bytes = b"%PDF-1.4 result data") -> ReadResult:
+    page = FetchedPage(
+        content=body, final_url=url, content_type="application/pdf", tier="static", text=""
+    )
+    return ReadResult(url=url, page=page, tier="static", trigger=None)
+
+
+def test_data_files_are_fetched_before_html_pages():
+    base = "https://swim.test/meet/"
+    pages = {
+        base + "index.htm": _static(
+            base + "index.htm",
+            f'<html><body><a href="{base}page.htm">nav</a>'
+            f'<a href="{base}result1.pdf">results</a></body></html>',
+        ),
+        base + "page.htm": _static(base + "page.htm", _EVENT_HTML.format(n=1)),
+        base + "result1.pdf": _pdf(base + "result1.pdf"),
+    }
+    order: list[str] = []
+    reader = _site_reader(pages)
+
+    def _recording(url: str) -> ReadResult:
+        order.append(url)
+        return reader(url)
+
+    crawl_results_site(base + "index.htm", limits=_fast_limits(), fetch_page=_recording)
+    # The entry page is first, then the result PDF is fetched before the HTML
+    # navigation page (which could otherwise trigger an expensive render).
+    assert order[0] == base + "index.htm"
+    assert order.index(base + "result1.pdf") < order.index(base + "page.htm")
+
+
+# ---------------------------------------------------------------------------
 # shape_gate unit checks (sport-agnostic, structure + tokens)
 # ---------------------------------------------------------------------------
 

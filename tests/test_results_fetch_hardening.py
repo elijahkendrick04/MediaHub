@@ -165,6 +165,33 @@ def test_configure_preselects_fuzzy_club(app_mod):
     assert '<option value="City of Leeds" selected>' not in body
 
 
+def test_configure_offers_free_text_when_no_clubs_detected(app_mod):
+    """A distance-event page can yield zero club names; the club field must
+    fall back to a free-text input so the run is never blocked on an empty
+    required <select> with nothing to pick."""
+    app, wm = app_mod
+    rid = "noclubrun001"
+    rdir = wm.RUNS_DIR / rid
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "input.bin").write_bytes(b"PK\x03\x04dummy")
+    (rdir / "upload_meta.json").write_text(
+        json.dumps(
+            {
+                "clubs": [],  # nothing club-shaped survived the parse
+                "meet_name": "1500m Freestyle Final",
+                "n_events": 1,
+                "file_byte_size": 9999,
+            }
+        )
+    )
+    c = app.test_client()
+    body = c.get(f"/upload/configure?run_id={rid}").get_data(as_text=True)
+    # Free-text input, not an empty dropdown.
+    assert '<input type="text" name="club_filter"' in body
+    assert '<select name="club_filter"' not in body
+    assert "couldn" in body  # the "couldn't read club names" helper note
+
+
 # ---------------------------------------------------------------------------
 # AI-read provenance (Step 8) — read from the mirror's _provenance.json
 # ---------------------------------------------------------------------------
