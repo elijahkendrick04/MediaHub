@@ -1354,6 +1354,92 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
+def _cutout_provider_label() -> str:
+    """Friendly name of the background remover that produces cut-outs.
+
+    Used for explainability on the cut-out before/after preview (UI2.1) so a
+    user knows *what* knocked the background out, not just the result.
+    """
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        name = (getattr(get_bg_remover(), "name", "") or "").lower()
+    except Exception:
+        name = ""
+    if "photoroom" in name:
+        return "Photoroom"
+    if "replicate" in name:
+        return "Replicate"
+    if "rembg" in name or "local" in name or "server" in name:
+        return "the on-server rembg model"
+    return "the configured background remover"
+
+
+def _v8_ensure_cutout(asset) -> "tuple[Optional[Path], str]":
+    """Resolve the background-removed cut-out PNG for a media asset (UI2.1).
+
+    Returns ``(path, status)`` where ``status`` is one of:
+
+      * ``"cached"``      — a persisted cut-out already exists, reused as-is
+      * ``"generated"``   — produced now (and persisted onto the asset)
+      * ``"unavailable"`` — no working background remover on this deployment
+      * ``"failed"``      — a remover ran but produced nothing usable
+      * ``"no_source"``   — the original file is missing
+
+    Honest-error rule (CLAUDE.md): when no real remover is available we return
+    ``"unavailable"`` rather than rembg's pass-through (which copies the whole
+    image with an alpha channel and removes *nothing*). A fake cut-out that
+    looks identical to the original is worse than an honest "not available".
+    The work is delegated to the renderer's own cut-out pipeline so the
+    preview shares the exact same DATA_DIR cache as the graphics engine.
+    """
+    if asset is None:
+        return None, "no_source"
+    # 1. Already have a usable cut-out on disk?
+    cp = getattr(asset, "cutout_path", None)
+    try:
+        if cp and Path(cp).exists() and Path(cp).stat().st_size > 1000:
+            return Path(cp), "cached"
+    except OSError:
+        pass
+    src = Path(getattr(asset, "path", "") or "")
+    if not src.exists():
+        return None, "no_source"
+    # 2. Is a *real* background remover available? Never fake it.
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        remover = get_bg_remover()
+    except Exception:
+        remover = None
+    if remover is None or not remover.is_available():
+        return None, "unavailable"
+    # 3. Generate via the shared renderer cut-out path (same cache the
+    #    graphics engine uses, so a preview warms the render and vice versa).
+    try:
+        from mediahub.graphic_renderer.render import _maybe_cut_out_athlete
+
+        out = Path(
+            _maybe_cut_out_athlete(src, profile_id=getattr(asset, "profile_id", None) or "default")
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("cutout preview: generation failed for %s: %s", getattr(asset, "id", "?"), exc)
+        return None, "failed"
+    try:
+        same = out.resolve() == src.resolve()
+    except OSError:
+        same = str(out) == str(src)
+    if same or not out.exists():
+        return None, "failed"
+    # 4. Persist the link so future loads (and the renderer) skip the work.
+    try:
+        if _v8_get_media_store is not None:
+            _v8_get_media_store().update_fields(getattr(asset, "id", ""), {"cutout_path": str(out)})
+    except Exception:  # pragma: no cover - best-effort persistence
+        pass
+    return out, "generated"
+
+
 _SRC_ROOT = Path(__file__).resolve().parents[1]  # src/mediahub/ &mdash; local dev default
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
@@ -30806,6 +30892,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
+            _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -30832,7 +30919,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td>{_h(ad.get("permission_status", ""))}</td>
   <td><code>{_h(ad.get("id", "")[:12])}</code></td>
-  <td>
+  <td style="white-space:nowrap">
+    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <form method="post" action="{_delete_url}" style="display:inline"
           onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
       <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
@@ -31020,6 +31108,191 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/cutout/<asset_id>")
+    def api_media_library_cutout(asset_id: str):
+        """Serve the background-removed cut-out PNG for one asset (UI2.1).
+
+        Generated on first request and cached/persisted, then profile-scoped
+        exactly like the original-file route. Returns an honest 503 when no
+        background remover is available rather than a fake (pass-through)
+        cut-out, and 404 when there is no source or generation produced
+        nothing usable.
+        """
+        if not _v8_ok:
+            return "", 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return "", 404
+        if not _session_can_access_profile(a.profile_id):
+            return "", 403
+        path, status = _v8_ensure_cutout(a)
+        if path is None:
+            return "", (503 if status == "unavailable" else 404)
+        from flask import send_file
+
+        try:
+            resp = send_file(str(path), mimetype="image/png")
+            # Derived asset — let the browser cache it; it only changes if the
+            # source is re-uploaded (which mints a new asset id).
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
+        except Exception:
+            return "", 404
+
+    @app.route("/media-library/<asset_id>/cutout")
+    def media_library_cutout_page(asset_id: str):
+        """Before/after cut-out preview (UI2.1).
+
+        Drag the `.mh-compare` slider to see *exactly* what background removal
+        knocked out: the original photo on the left, the cut-out (subject on a
+        transparency checkerboard) on the right. Fails honestly — if no real
+        remover is available it shows the original with a plain explanation,
+        never a fake cut-out.
+        """
+        if not _v8_ok:
+            return _recovery_page(
+                "Media library unavailable",
+                "The V8 media engine isn't enabled on this deployment, so cut-out "
+                "previews can't be generated. Ask your operator to enable it.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library &mdash; it may have been deleted, "
+                "or the link might be out of date.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation, so it isn't "
+                "available from your current session.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+
+        ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+        subject = (
+            ", ".join(ad.get("linked_athlete_names") or [])
+            or ad.get("linked_venue")
+            or ad.get("linked_event")
+            or ad.get("filename")
+            or "this photo"
+        )
+        orig_url = url_for("api_media_library_file", asset_id=a.id)
+        cutout_url = url_for("api_media_library_cutout", asset_id=a.id)
+        back_url = url_for("media_library_page")
+
+        # Pixel-perfect alignment: size the slider to the photo's own aspect
+        # ratio so the before/after halves line up. Falls back to a portrait
+        # default when the file can't be measured (e.g. a placeholder blob).
+        aspect = "4 / 5"
+        try:
+            from PIL import Image
+
+            with Image.open(a.path) as _im:
+                _iw, _ih = _im.size
+            if _iw > 0 and _ih > 0:
+                aspect = f"{_iw} / {_ih}"
+        except Exception:
+            pass
+
+        path, status = _v8_ensure_cutout(a)
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Cut-out preview</span>'
+            f"<h1>{_h(subject)}</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(ad.get("type", "photo"))}</span><span class="sep">·</span>'
+            "<span>before &rarr; after background removal</span>"
+            "</div>"
+            "</section>"
+        )
+
+        if path is not None:
+            provider = _cutout_provider_label()
+            compare = (
+                '<div class="card">'
+                '<p class="dim" style="margin-bottom:var(--sp-4)">'
+                "Drag the handle to wipe between the original photo (left) and the "
+                "cut-out (right). The checkerboard is transparency &mdash; that&rsquo;s "
+                "exactly what was removed."
+                "</p>"
+                '<figure class="mh-compare" data-mh-pos="50" '
+                'aria-label="Before and after background removal" '
+                f'style="aspect-ratio:{aspect};max-width:560px;width:100%;margin:0 auto">'
+                f'<img src="{orig_url}" alt="Original photo of {_h(subject)}, background intact" />'
+                '<div class="mh-compare__after mh-compare__after--checker">'
+                f'<img src="{cutout_url}" alt="{_h(subject)} with the background removed" />'
+                "</div>"
+                '<div class="mh-compare__handle"></div>'
+                "</figure>"
+                '<p class="dim" style="margin-top:var(--sp-4);font-size:13px">'
+                f"Cut out by {_h(provider)} on MediaHub&rsquo;s servers &mdash; the same "
+                "background removal composited into your branded graphics."
+                "</p>"
+                "</div>"
+            )
+            body = hero + compare
+        else:
+            # Honest fallback — no fabricated cut-out (CLAUDE.md honest-error rule).
+            if status == "unavailable":
+                detail = (
+                    "Background removal isn&rsquo;t available on this deployment, so "
+                    "there&rsquo;s no cut-out to compare yet. Your operator can enable it "
+                    "(the on-server rembg model, or a Photoroom / Replicate key). The "
+                    "original photo is shown below."
+                )
+            elif status == "no_source":
+                detail = (
+                    "The original file for this photo is missing, so there&rsquo;s "
+                    "nothing to preview. Try re-uploading it to the library."
+                )
+            else:  # failed
+                detail = (
+                    "We couldn&rsquo;t produce a cut-out for this photo. The original is "
+                    "shown below &mdash; a clearer subject-on-background shot usually cuts "
+                    "out cleanly."
+                )
+            note = (
+                '<div class="card">'
+                '<div role="status" class="mh-ai-unavailable" '
+                'style="margin-bottom:var(--sp-4);padding:14px 18px;'
+                "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                'display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap">'
+                f"{_AI_UNAVAILABLE_ICON}"
+                '<span class="strap" style="color:var(--warn)">No cut-out to show</span>'
+                f'<span style="color:var(--ink-dim)">{detail}</span>'
+                "</div>"
+            )
+            if status != "no_source":
+                note += (
+                    f'<img src="{orig_url}" alt="Original photo of {_h(subject)}" '
+                    f'style="max-width:560px;width:100%;border-radius:var(--radius-md);display:block" />'
+                )
+            note += "</div>"
+            body = hero + note
+
+        body += (
+            '<div style="margin-top:var(--sp-5)">'
+            f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
+            "</div>"
+        )
+        return _layout("Cut-out preview", body, active="media")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):
