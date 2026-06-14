@@ -7013,6 +7013,7 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web import code_highlight as _code_hl  # noqa: E402
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -8590,6 +8591,8 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
@@ -10918,6 +10921,9 @@ def create_app() -> Flask:
             # passwordless: one click on /developer grants the operator session.
             "developer_login",
             "developer_login_post",
+            # UI 1.11 — the public Developer/API reference (code-example docs).
+            # A docs page, like the legal pages above: readable before sign-up.
+            "api_docs_page",
             # Phase C operator commercial console (PC.4/PC.6) — operator-only
             # (redirects non-operator sessions to the developer sign-in) and
             # org-independent, so it bypasses the org gate exactly like the
@@ -16228,6 +16234,346 @@ Relay team broke club record"></textarea>
             f'<div class="card">{html}</div>'
         )
         return _layout("Research", body, active="research")
+
+    # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
+    @app.route("/developer/api")
+    def api_docs_page():
+        """Public Developer/API reference.
+
+        Documents the real HTTP + JSON endpoints the app exposes, each with a
+        tabbed cURL / Python / JavaScript code-example switcher. Highlighting is
+        rendered server-side by ``code_highlight.py`` (no Prism, no CDN); the
+        language tabs are pure CSS and the copy button is JS-enhanced (UI 1.11).
+        """
+        return _layout("Developer API", _render_api_docs_body(), active="")
+
+    def _render_api_docs_body() -> str:
+        # Concrete base URL for the examples (the deployment the docs render on).
+        base = (request.host_url or "").rstrip("/") or "https://your-mediahub.example"
+
+        def _sub(text: str) -> str:
+            return text.replace("__BASE__", base)
+
+        def _switcher(slug: str, curl: str, python: str, js: str) -> str:
+            return _code_hl.code_switcher(
+                [
+                    ("cURL", "bash", _sub(curl)),
+                    ("Python", "python", _sub(python)),
+                    ("JavaScript", "javascript", _sub(js)),
+                ],
+                group_id=f"ep-{slug}",
+            )
+
+        def _endpoint(
+            method: str,
+            path: str,
+            anchor: str,
+            summary_html: str,
+            *,
+            params=None,
+            curl: str,
+            python: str,
+            js: str,
+            response: str = "",
+            note_html: str = "",
+        ) -> str:
+            sig = (
+                '<div class="mh-api-sig">'
+                f'<span class="mh-method mh-method-{method.lower()}">{_h(method)}</span>'
+                f"<code>{_h(path)}</code></div>"
+            )
+            params_html = ""
+            if params:
+                rows = "".join(
+                    f"<tr><td><code>{_h(name)}</code></td><td>{_h(req)}</td>"
+                    f"<td>{desc}</td></tr>"
+                    for name, req, desc in params
+                )
+                params_html = (
+                    '<table class="mh-api-params"><thead><tr>'
+                    "<th>Parameter</th><th>Required</th><th>Description</th>"
+                    f"</tr></thead><tbody>{rows}</tbody></table>"
+                )
+            resp_html = (
+                _code_hl.code_block(_sub(response), "json", label="Response")
+                if response
+                else ""
+            )
+            return (
+                f'<section class="card mh-api-endpoint" id="{_h(anchor)}">'
+                f"{sig}"
+                f'<p class="dim">{summary_html}</p>'
+                f"{params_html}"
+                f"{_switcher(anchor, curl, python, js)}"
+                f"{resp_html}"
+                f"{note_html}"
+                "</section>"
+            )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Developer</span>'
+            '<h1>API <em class="editorial">reference</em></h1>'
+            '<p class="lede">Drive MediaHub from your own scripts: poll a run, pull the '
+            "generated cards, export a content pack, or render a reel &mdash; over plain "
+            "HTTP and JSON.</p>"
+            "</section>"
+        )
+
+        intro = (
+            '<section class="card">'
+            "<h2>Overview</h2>"
+            "<p>MediaHub exposes a small HTTP&nbsp;+&nbsp;JSON API &mdash; the same endpoints "
+            "the web app uses to take a run from upload to export. Call them to poll a "
+            "pipeline, pull generated cards, export a content pack, or render a reel.</p>"
+            '<ul class="mh-api-facts">'
+            f"<li><strong>Base URL</strong> &mdash; <code>{_h(base)}</code></li>"
+            "<li><strong>Responses</strong> &mdash; JSON (<code>application/json</code>), except "
+            "media routes, which stream the file (e.g. <code>video/mp4</code>).</li>"
+            "<li><strong>Errors</strong> &mdash; a JSON body with an <code>error</code> key and a "
+            "matching HTTP status (<code>404</code> unknown/forbidden run, <code>202</code> still "
+            "processing).</li>"
+            "</ul>"
+            "</section>"
+        )
+
+        auth = (
+            '<section class="card">'
+            "<h2>Authentication</h2>"
+            "<p>Most endpoints are scoped to your signed-in organisation and authenticate with "
+            "the <strong>session cookie</strong> the app sets when you log in &mdash; send it with "
+            'each request (<code>credentials: "include"</code> in the browser, or a '
+            "<code>Cookie:</code> header from a script). A request for a run that is not yours "
+            "returns <code>404</code> &mdash; never another organisation's data.</p>"
+            "<p><code>/health</code> is the one public endpoint; it needs no session. There is no "
+            "public API-key programme yet &mdash; if you need machine-to-machine access, get in "
+            "touch.</p>"
+            "</section>"
+        )
+
+        quickstart = (
+            '<section class="card" id="quickstart">'
+            "<h2>Quickstart</h2>"
+            '<p class="dim">Poll a run until the recognition&nbsp;+&nbsp;content pipeline '
+            "finishes, then pull the cards it produced.</p>"
+            + _switcher(
+                "quickstart",
+                '# 1. Poll the run until the pipeline finishes…\n'
+                'RUN_ID="run_8f2c1a"\n'
+                'curl -s "__BASE__/api/runs/$RUN_ID/status"\n\n'
+                "# 2. …then pull the generated content cards.\n"
+                'curl -s "__BASE__/api/runs/$RUN_ID/cards"\n',
+                "import time\n"
+                "import requests\n\n"
+                'BASE = "__BASE__"\n'
+                'run_id = "run_8f2c1a"\n\n'
+                "# Poll until the recognition + content pipeline is done.\n"
+                "while True:\n"
+                '    status = requests.get(f"{BASE}/api/runs/{run_id}/status").json()\n'
+                '    if status["status"] in ("done", "error"):\n'
+                "        break\n"
+                "    time.sleep(4)\n\n"
+                'cards = requests.get(f"{BASE}/api/runs/{run_id}/cards").json()\n'
+                'print(f"{len(cards)} cards ready")\n',
+                'const BASE = "__BASE__";\n'
+                'const runId = "run_8f2c1a";\n\n'
+                "// Poll until the pipeline finishes, then fetch the cards.\n"
+                "let status;\n"
+                "do {\n"
+                "  const res = await fetch(`${BASE}/api/runs/${runId}/status`, {\n"
+                '    credentials: "include",\n'
+                "  });\n"
+                "  status = await res.json();\n"
+                '  if (status.status === "running") await new Promise((r) => setTimeout(r, 4000));\n'
+                '} while (status.status !== "done" && status.status !== "error");\n\n'
+                "const cards = await fetch(`${BASE}/api/runs/${runId}/cards`, {\n"
+                '  credentials: "include",\n'
+                "}).then((r) => r.json());\n"
+                "console.log(`${cards.length} cards ready`);\n",
+            )
+            + "</section>"
+        )
+
+        endpoints = [
+            _endpoint(
+                "GET",
+                "/health",
+                "health",
+                "Deployment health and dependency checks. Public &mdash; no session "
+                "required. Returns <code>200</code> when healthy, <code>503</code> when a "
+                "dependency is down.",
+                curl='curl -s "__BASE__/health"\n',
+                python=(
+                    "import requests\n\n"
+                    'health = requests.get("__BASE__/health")\n'
+                    'print(health.status_code, health.json()["ok"])\n'
+                ),
+                js=(
+                    'const res = await fetch("__BASE__/health");\n'
+                    "const health = await res.json();\n"
+                    "console.log(res.status, health.ok);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "ok": true,\n'
+                    '  "checks": {\n'
+                    '    "database": {"ok": true},\n'
+                    '    "data_dir": {"ok": true},\n'
+                    '    "llm_provider": {"ok": true}\n'
+                    "  }\n"
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/status",
+                "run-status",
+                "Poll a run's pipeline status. <code>status</code> is one of "
+                "<code>queued</code>, <code>running</code>, <code>done</code>, "
+                "<code>error</code> or <code>unknown</code>; <code>log</code> streams the "
+                "human-readable progress lines.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/status"\n',
+                python=(
+                    "import requests\n\n"
+                    'status = requests.get("__BASE__/api/runs/run_8f2c1a/status").json()\n'
+                    'print(status["status"], status.get("n_achievements"))\n'
+                ),
+                js=(
+                    'const status = await fetch("__BASE__/api/runs/run_8f2c1a/status", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(status.status, status.n_achievements);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "status": "done",\n'
+                    '  "error": null,\n'
+                    '  "log": [\n'
+                    '    "Parsing results file…",\n'
+                    '    "Detecting achievements…",\n'
+                    '    "Ranking content opportunities…"\n'
+                    "  ],\n"
+                    '  "n_achievements": 12\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/cards",
+                "run-cards",
+                "The generated content cards, ranked by content-worthiness. While the run is "
+                "still processing this returns <code>202</code> with "
+                '<code>{"error": "in_progress", "retry_after": 4}</code> &mdash; retry after '
+                "the given delay.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/cards"\n',
+                python=(
+                    "import requests\n\n"
+                    'cards = requests.get("__BASE__/api/runs/run_8f2c1a/cards").json()\n'
+                    "for card in cards:\n"
+                    '    print(card["post_angle"], round(card["confidence"], 2))\n'
+                ),
+                js=(
+                    'const cards = await fetch("__BASE__/api/runs/run_8f2c1a/cards", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "cards.forEach((c) => console.log(c.post_angle, c.confidence));\n"
+                ),
+                response=(
+                    "[\n"
+                    "  {\n"
+                    '    "id": "ind_0",\n'
+                    '    "post_angle": "personal_best",\n'
+                    '    "confidence": 0.92,\n'
+                    '    "caption": "A new PB for Ava in the 100m Freestyle.",\n'
+                    '    "graphic_text": {\n'
+                    '      "headline_line1": "AVA CARTER",\n'
+                    '      "headline_line2": "100M FREE PB"\n'
+                    "    }\n"
+                    "  }\n"
+                    "]\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/export",
+                "run-export",
+                "The full run document &mdash; parsed results, recognition decisions, ranked "
+                "cards, and the trust report &mdash; as one JSON object. Use it to archive a "
+                "pack or feed a downstream system.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/export" -o pack.json\n',
+                python=(
+                    "import requests\n\n"
+                    'pack = requests.get("__BASE__/api/runs/run_8f2c1a/export").json()\n'
+                    'print(pack["recognition_report"]["n_achievements"], len(pack["cards"]))\n'
+                ),
+                js=(
+                    'const pack = await fetch("__BASE__/api/runs/run_8f2c1a/export", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(pack.cards.length);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "recognition_report": {"n_achievements": 12},\n'
+                    '  "cards": [{"id": "ind_0", "post_angle": "personal_best", "confidence": 0.92}],\n'
+                    '  "trust": {"grounded": true}\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "POST",
+                "/api/runs/{run_id}/reel",
+                "run-reel",
+                "Render the meet reel from the top-ranked cards and stream it back as an MP4 "
+                "(<code>Content-Type: video/mp4</code>). Cache hits return in under 30s; cold "
+                "renders take 30&ndash;90s on the worker.",
+                params=[
+                    (
+                        "format",
+                        "no",
+                        "<code>story</code> (default), <code>portrait</code>, "
+                        "<code>square</code> or <code>landscape</code>.",
+                    ),
+                    (
+                        "n",
+                        "no",
+                        "How many top cards to include &mdash; 1&ndash;5 (default 3).",
+                    ),
+                ],
+                curl=(
+                    'curl -X POST "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3" \\\n'
+                    "  -o reel.mp4\n"
+                ),
+                python=(
+                    "import requests\n\n"
+                    'reel = requests.post(\n'
+                    '    "__BASE__/api/runs/run_8f2c1a/reel",\n'
+                    '    params={"format": "story", "n": 3},\n'
+                    ")\n"
+                    'with open("reel.mp4", "wb") as fh:\n'
+                    "    fh.write(reel.content)\n"
+                ),
+                js=(
+                    'const res = await fetch(\n'
+                    '  "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3",\n'
+                    '  { method: "POST", credentials: "include" },\n'
+                    ");\n"
+                    "const blob = await res.blob(); // video/mp4\n"
+                ),
+                note_html=(
+                    '<p class="dim" style="margin-top:var(--sp-3)">The matching '
+                    "<code>POST /api/runs/{run_id}/card/{card_id}/motion</code> route renders a "
+                    "single story card with the same <code>format</code> options.</p>"
+                ),
+            ),
+        ]
+
+        endpoints_html = (
+            '<h2 style="margin-top:var(--sp-7)">Endpoints</h2>' + "".join(endpoints)
+        )
+
+        return hero + intro + auth + quickstart + endpoints_html
 
     # ---- PRIVACY -------------------------------------------------------
     @app.route("/privacy")

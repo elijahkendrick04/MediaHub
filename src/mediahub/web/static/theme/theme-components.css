@@ -4093,3 +4093,212 @@ kbd {
       color        var(--dur-fast) var(--ease-out-quick);
   }
 }
+
+/* =====================================================================
+   UI 1.11 — Tabbed code-example switcher + syntax highlighting
+   ---------------------------------------------------------------------
+   Inspired by Resend's docs. Highlighting is rendered SERVER-SIDE by
+   src/mediahub/web/code_highlight.py into <span class="mh-tok-*"> tokens
+   (no Prism, no CDN — see CLAUDE.md's self-hosting rule). Language tabs
+   are PURE CSS: one hidden radio per language drives positional
+   :checked ~ rules below, so switching needs no JavaScript. Only the
+   copy button is JS-enhanced (static/js/ui-kit.js); it stays hidden for
+   no-JS visitors (the code is still selectable), revealed via .mh-js.
+   ===================================================================== */
+.mh-code {
+  /* Dark-first token palette — overridable per-instance via these vars. */
+  --tok-comment:  #6b7686;
+  --tok-punct:    #8b94a7;
+  --tok-keyword:  #c4a7f5;
+  --tok-string:   #9ece6a;
+  --tok-number:   #ff9e64;
+  --tok-boolean:  #e0af68;
+  --tok-function: #7aa2f7;
+  --tok-property: #7dcfff;
+  --tok-variable: #f4a3b4;
+  --tok-operator: #89ddff;
+  position: relative;
+  margin: var(--sp-4) 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+/* --- head bar: language tabs / chip + copy button -------------------- */
+.mh-cs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 38px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+.mh-cs-lang {
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-cs-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.mh-cs-tab {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: -1px;            /* sit the underline on the head's border */
+  padding: 9px 12px;
+  font: 500 12.5px/1 var(--font-mono);
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  user-select: none;
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              border-color var(--dur-fast) var(--ease-out-quick);
+}
+.mh-cs-tab:hover { color: var(--ink-dim); }
+
+/* Hidden but focusable radios (the real, keyboard-navigable controls). */
+.mh-cs-radio {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  border: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* --- panels --------------------------------------------------------- */
+.mh-cs-panel {
+  margin: 0;
+  padding: var(--sp-4);
+  overflow-x: auto;
+  font: 13px/1.7 var(--font-mono);
+  color: var(--ink-dim);
+  background: var(--bg-deep);
+  tab-size: 2;
+  -webkit-overflow-scrolling: touch;
+}
+.mh-cs-panel code {
+  font: inherit;
+  color: inherit;
+  background: none;
+  padding: 0;
+  border: 0;
+  white-space: pre;
+}
+
+/* --- pure-CSS tab switching (positional; supports up to 6 languages) - */
+.mh-code-switcher > .mh-cs-panel,
+.mh-code-switcher .mh-cs-panel { display: none; }
+.mh-code-switcher > .mh-cs-radio:nth-of-type(1):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(1),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(2):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(2),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(3):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(3),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(4):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(4),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(5):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(5),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(6):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(6) {
+  display: block;
+}
+/* active tab styling — light the matching label */
+.mh-code-switcher > .mh-cs-radio:nth-of-type(1):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(1),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(2):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(2),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(3):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(3),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(4):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(4),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(5):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(5),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(6):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(6) {
+  color: var(--ink);
+  border-bottom-color: var(--lane);
+}
+/* keyboard focus ring on the active control's visible label */
+.mh-code-switcher > .mh-cs-radio:nth-of-type(1):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(1),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(2):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(2),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(3):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(3),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(4):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(4),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(5):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(5),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(6):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(6) {
+  outline: 2px solid var(--lane);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- copy button (JS-enhanced; hidden until .mh-js upgrades it) ------ */
+.mh-cs-copy {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 10px;
+  font: 500 11.5px/1 var(--font-mono);
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              border-color var(--dur-fast) var(--ease-out-quick),
+              background var(--dur-fast) var(--ease-out-quick);
+}
+.mh-js .mh-cs-copy { display: inline-flex; }
+.mh-cs-copy:hover { color: var(--ink); border-color: var(--chrome); background: var(--surface-2); }
+.mh-cs-copy:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-cs-copy.is-copied { color: var(--good); border-color: var(--good); }
+.mh-cs-copy-icon { flex: none; }
+
+/* --- syntax-highlight token colours --------------------------------- */
+.mh-tok-comment     { color: var(--tok-comment); font-style: italic; }
+.mh-tok-string      { color: var(--tok-string); }
+.mh-tok-number      { color: var(--tok-number); }
+.mh-tok-keyword     { color: var(--tok-keyword); }
+.mh-tok-boolean     { color: var(--tok-boolean); }
+.mh-tok-function    { color: var(--tok-function); }
+.mh-tok-property    { color: var(--tok-property); }
+.mh-tok-variable    { color: var(--tok-variable); }
+.mh-tok-operator    { color: var(--tok-operator); }
+.mh-tok-punctuation { color: var(--tok-punct); }
+
+/* --- Developer/API docs page layout (hosts the UI 1.11 switcher) ----- */
+.mh-api-endpoint { scroll-margin-top: 84px; }
+.mh-api-endpoint + .mh-api-endpoint { margin-top: var(--sp-6); }
+.mh-api-sig {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-2);
+}
+.mh-api-sig code {
+  font: 600 14px/1.4 var(--font-mono);
+  color: var(--ink);
+  background: none;
+  padding: 0;
+  word-break: break-all;
+}
+.mh-method {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+  flex: none;
+}
+.mh-method-get  { color: var(--info); }
+.mh-method-post { color: var(--good); }
+.mh-method-put,
+.mh-method-patch { color: var(--warn); }
+.mh-method-delete { color: var(--bad); }
+.mh-api-params {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--sp-3) 0;
+  font-size: 13.5px;
+}
+.mh-api-params th,
+.mh-api-params td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.mh-api-params th { color: var(--ink-muted); font-weight: 600; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.mh-api-params td code { font: 12.5px/1.5 var(--font-mono); color: var(--tok-property); background: none; padding: 0; }

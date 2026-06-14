@@ -236,6 +236,61 @@
     window.addEventListener("resize", function () { move(active()); }, { passive: true });
   }
 
+  /* --- Copy-to-clipboard for code blocks / switchers (UI 1.11) -------- */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Legacy fallback: an off-screen textarea + execCommand('copy').
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) resolve(); else reject();
+      } catch (e) { reject(e); }
+    });
+  }
+  function bindCopy(btn) {
+    if (!once(btn, "data-mh-copy-init")) return;
+    btn.addEventListener("click", function () {
+      var host = btn.closest(".mh-code");
+      if (!host) return;
+      var panel;
+      if (host.classList.contains("mh-code-switcher")) {
+        // Copy whichever language panel the (pure-CSS) tabs have selected.
+        var radios = host.querySelectorAll(".mh-cs-radio"), idx = 0;
+        for (var i = 0; i < radios.length; i++) { if (radios[i].checked) { idx = i; break; } }
+        panel = host.querySelectorAll(".mh-cs-panel")[idx];
+      } else {
+        panel = host.querySelector(".mh-cs-panel");
+      }
+      if (!panel) return;
+      var codeEl = panel.querySelector("code") || panel;
+      var label = btn.querySelector(".mh-cs-copy-label");
+      copyText(codeEl.textContent || "").then(function () {
+        btn.classList.add("is-copied");
+        btn.setAttribute("aria-label", "Copied to clipboard");
+        if (label) {
+          if (!label.getAttribute("data-mh-label")) label.setAttribute("data-mh-label", label.textContent);
+          label.textContent = "Copied";
+        }
+        window.clearTimeout(btn._mhCopyT);
+        btn._mhCopyT = window.setTimeout(function () {
+          btn.classList.remove("is-copied");
+          btn.setAttribute("aria-label", "Copy code to clipboard");
+          if (label && label.getAttribute("data-mh-label")) label.textContent = label.getAttribute("data-mh-label");
+        }, 1600);
+      }).catch(function () { /* clipboard blocked — code stays selectable */ });
+    });
+  }
+
   /* --- Compare: before/after slider (pointer + keyboard) -------------- */
   function bindCompare(el) {
     if (!once(el, "data-mh-compare-init")) return;
@@ -357,6 +412,7 @@
     each(root, ".mh-highlight, .mh-flapboard", observe);
     each(root, ".mh-flip-words", bindFlipWords);
     each(root, ".mh-tabs", bindTabs);
+    each(root, ".mh-cs-copy", bindCopy);
     each(root, ".mh-compare", bindCompare);
     each(root, ".mh-tracing-beam", bindBeam);
     each(root, ".mh-vanish", bindVanish);
