@@ -363,6 +363,15 @@
   opacity: 0; transform: translateY(-0.4em) rotateX(40deg);
 }
 
+/* Text-scramble / decode (UI 1.21, Locomotive-style). The JS (ui-kit.js)
+   rewrites the element's existing text-node characters through a random glyph
+   alphabet that settles to the final string — markup preserved, no innerHTML.
+   While the characters resolve the element carries .is-scrambling for a faint
+   brand-lit "decoding" cast that eases back to the resting ink as it locks in.
+   No-JS / reduced-motion: the final text is already present, so nothing moves. */
+.mh-scramble { transition: color var(--dur-med) var(--ease-out); }
+.mh-scramble.is-scrambling { color: var(--mh-primary); }
+
 /* Hero-highlight: a marker sweep behind a phrase on reveal. */
 .mh-highlight {
   background-image: linear-gradient(120deg,
@@ -800,6 +809,8 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
   .mh-flip-words > .mh-fw { transition: none; }
   .mh-highlight { transition: none; background-size: 100% 42%; }
+  .mh-scramble { transition: none; }
+  .mh-scramble.is-scrambling { color: inherit; }
   /* The readout is pinned (not pointer-tracking) by the JS under reduced
      motion; drop its fade so it appears/leaves instantly. */
   .mh-cursor-readout { transition: none; }
