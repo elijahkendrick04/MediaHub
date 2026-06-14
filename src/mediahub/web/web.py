@@ -10508,6 +10508,260 @@ def _flash_toast(message: str, kind: str = "success") -> None:
         pass
 
 
+# --------------------------------------------------------------------------- #
+# UI 1.9 — Multi-select + bulk actions (Media library + review queue).
+#
+# "Pure HTML form multi-select with progressive JS enhancement": the bulk
+# endpoints are content-negotiated so the SAME route serves a no-JS HTML form
+# POST (redirect + flash) and a fetch() AJAX call (per-item JSON results). The
+# two helpers below are the shared request-shape glue; the CSS/JS constants are
+# the shared front-end. Each surface keeps its own action semantics (the review
+# queue updates workflow state in place; the library removes deleted rows).
+# --------------------------------------------------------------------------- #
+
+
+def _req_wants_json(req) -> bool:
+    """True when a request should get a JSON response, not an HTML redirect.
+
+    A fetch() bulk call sends a JSON body (or an explicit Accept/X-Requested-With
+    header); a classic ``<form method=post>`` submission sends url-encoded form
+    data with the browser's default ``Accept: text/html`` and gets redirected.
+    """
+    ctype = (req.headers.get("Content-Type", "") or "").split(";")[0].strip()
+    if ctype == "application/json":
+        return True
+    if "application/json" in (req.headers.get("Accept", "") or ""):
+        return True
+    return req.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _bulk_ids_from_request(req, *keys: str) -> list[str]:
+    """Collect a de-duplicated, order-preserving id list from a bulk request.
+
+    Accepts either a JSON body (``{"ids": [...]}`` under any of ``keys``) or a
+    classic multi-select form (repeated ``<input name=ids>`` fields), so the
+    progressive-enhancement fetch() and the no-JS form POST share one route.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value) -> None:
+        if value is None:
+            return
+        s = str(value).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    body = req.get_json(silent=True) if getattr(req, "is_json", False) else None
+    if isinstance(body, dict):
+        for k in keys:
+            v = body.get(k)
+            if isinstance(v, (list, tuple)):
+                for item in v:
+                    _add(item)
+            elif v is not None:
+                _add(v)
+    # Form fields (no-JS path). getlist() returns [] when the field is absent.
+    try:
+        for k in keys:
+            for item in req.form.getlist(k):
+                _add(item)
+    except Exception:  # noqa: BLE001 — a malformed body must never 500 the route
+        pass
+    return out
+
+
+# Shared styling for the UI 1.9 bulk-action bar + selection checkboxes. Injected
+# inline per surface (CSP allows `style-src 'unsafe-inline'`); kept self-contained
+# so neither surface has to touch the shared BASE_CSS cascade. The bar is hidden
+# only when JS is present AND nothing is selected (`html.mh-js .is-empty`), so a
+# no-JS visitor always sees the controls.
+_BULK_ACTIONS_CSS = """
+.mh-bulkbar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);
+  background:var(--panel);border:1px solid var(--chrome);border-radius:10px;
+  position:sticky;top:8px;z-index:6}
+html.mh-js .mh-bulkbar.is-empty{display:none}
+.mh-bulkbar-all{display:inline-flex;align-items:center;gap:8px;font-size:13px;
+  color:var(--ink-dim);cursor:pointer;user-select:none}
+.mh-bulkbar-count{font-size:13px;font-weight:600;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.mh-bulkbar-actions{display:inline-flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.mh-bulkbar .btn{font-size:12px;padding:5px 12px;min-height:0}
+.mh-row-check,.mh-check-all{width:18px;height:18px;accent-color:var(--lane);
+  cursor:pointer;margin:0;vertical-align:middle}
+.mh-row-check-wrap{display:inline-flex;align-items:flex-start;padding-top:2px;
+  cursor:pointer}
+td.mh-bulk-cell,th.mh-bulk-cell{width:34px;text-align:center;vertical-align:middle}
+.ach-row.is-selected{background:rgba(212,255,58,0.05);border-radius:8px}
+@media (max-width:640px){.mh-bulkbar{position:static}
+  .mh-bulkbar-actions{margin-left:0;width:100%}}
+"""
+
+
+# Shared progressive-enhancement JS for every UI 1.9 bulk bar. A plain (non
+# f-string) constant — its braces stay literal when interpolated into a page
+# f-string. It auto-wires any element carrying `data-mh-bulkbar` (value picks the
+# per-surface behaviour) from its data-* config, so no per-page inline config is
+# needed. Destructive/mutating actions go over JSON (CSRF-exempt, per-item
+# results); the Export action is left as a native form submit so the browser
+# downloads the file. Falls back to the no-JS form POST whenever JS is absent.
+_BULK_ACTIONS_JS = r"""
+(function(){
+  function init(bar){
+    var form = document.getElementById(bar.getAttribute('data-form'));
+    if (!form) return;
+    var kind = bar.getAttribute('data-mh-bulkbar') || '';
+    var checkCls = bar.getAttribute('data-check') || 'mh-row-check';
+    var rowSel = bar.getAttribute('data-row') || '';
+    var countEl = document.getElementById(bar.getAttribute('data-count') || '');
+    var allEl = document.getElementById(bar.getAttribute('data-select-all') || '');
+    var toast = function(m, t, ms){ if (window.MH && MH.toast) MH.toast(m, t || 'info', ms); };
+    function boxes(){
+      return Array.prototype.slice.call(form.querySelectorAll('.' + checkCls));
+    }
+    function rowOf(c){ return rowSel ? c.closest(rowSel) : null; }
+    function isVisible(c){ var r = rowOf(c); return r ? r.offsetParent !== null : c.offsetParent !== null; }
+    function visible(){ return boxes().filter(isVisible); }
+    function selected(){ return boxes().filter(function(c){ return c.checked && isVisible(c); }); }
+    function refresh(){
+      var sel = selected();
+      var n = sel.length;
+      if (countEl) countEl.textContent = n + ' selected';
+      bar.classList.toggle('is-empty', n === 0);
+      boxes().forEach(function(c){ var r = rowOf(c); if (r) r.classList.toggle('is-selected', c.checked); });
+      if (allEl){
+        var vis = visible();
+        var on = vis.filter(function(c){ return c.checked; }).length;
+        allEl.checked = vis.length > 0 && on === vis.length;
+        allEl.indeterminate = on > 0 && on < vis.length;
+      }
+    }
+    form.addEventListener('change', function(e){
+      if (e.target && e.target.classList && e.target.classList.contains(checkCls)) refresh();
+    });
+    if (allEl){
+      allEl.addEventListener('change', function(){
+        var on = allEl.checked;
+        visible().forEach(function(c){ c.checked = on; });
+        refresh();
+      });
+    }
+    function applyReviewDom(ids, status){
+      var labelMap = {'queue':'In queue','approved':'Approved','rejected':'Rejected','edited':'Edited'};
+      ids.forEach(function(cid){
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(cid) : cid;
+        document.querySelectorAll('[data-mh-wf-target="' + esc + '"]').forEach(function(el){
+          el.dataset.mhWfState = status;
+          var lbl = el.querySelector('[data-mh-wf-label]');
+          if (lbl) lbl.textContent = labelMap[status] || status;
+        });
+        document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
+          var on = b.getAttribute('data-mh-wf') === status;
+          if (b.classList.contains('mh-wf-approve')){
+            b.classList.toggle('is-on', on);
+            b.classList.toggle('secondary', !on);
+            b.textContent = on ? 'Approved ✓' : 'Approve';
+            if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
+          } else if (on){
+            b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
+          } else {
+            b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
+          }
+        });
+        var row = document.querySelector('.ach-row [name="card_ids"][value="' + (window.CSS && CSS.escape ? CSS.escape(cid) : cid) + '"]');
+        var card = row ? row.closest('.ach-row') : null;
+        if (card) card.dataset.status = status;
+      });
+      if (window.mhRecountReview) window.mhRecountReview();
+      if (window.mhDockSync) window.mhDockSync();
+    }
+    function afterMedia(action, body, ids){
+      if (action === 'delete'){
+        var gone = (body && body.deleted) || ids;
+        gone.forEach(function(id){
+          var box = form.querySelector('.' + checkCls + '[value="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+          var row = box ? box.closest(rowSel || 'tr') : null;
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+        });
+        var left = form.querySelectorAll(rowSel || 'tr.mh-asset-row').length;
+        document.querySelectorAll('[data-mh-asset-count]').forEach(function(el){
+          el.textContent = ('000' + left).slice(-3);
+        });
+        var n = (body && typeof body.n_ok === 'number') ? body.n_ok : gone.length;
+        toast('Deleted ' + n + ' photo' + (n === 1 ? '' : 's') + '.', 'success', 2500);
+        refresh();
+      } else if (action === 'approve'){
+        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : ids.length;
+        var sk = (body && body.n_skipped) || 0;
+        var msg = 'Approved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + '.';
+        if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
+        toast(msg, n2 ? 'success' : 'info', 3000);
+        selected().forEach(function(c){ c.checked = false; });
+        refresh();
+      }
+    }
+    function afterReview(action, body, ids){
+      var status = action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : action);
+      var okIds = (body && body.results ? body.results.filter(function(r){ return r.ok; }).map(function(r){ return r.id; }) : ids);
+      applyReviewDom(okIds, status);
+      var nb = (body && body.n_blocked) || 0;
+      var verb = action === 'approve' ? 'Approved' : 'Rejected';
+      var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
+      if (nb) msg += ' ' + nb + ' blocked by the consent gate.';
+      toast(msg, okIds.length ? 'success' : 'info', 3500);
+      selected().forEach(function(c){ c.checked = false; });
+      refresh();
+    }
+    Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
+      var action = btn.getAttribute('data-mh-bulk');
+      if (action === 'export') return;  // native submit → file download
+      btn.addEventListener('click', function(e){
+        e.preventDefault();
+        var ids = selected().map(function(c){ return c.value; });
+        if (!ids.length){ toast('Select at least one first.', 'info'); return; }
+        var conf = btn.getAttribute('data-confirm');
+        if (conf){
+          conf = conf.replace('{n}', ids.length);
+          if (!window.confirm(conf)) return;
+        }
+        var url = btn.getAttribute('formaction');
+        var payload = {ids: ids};
+        if (btn.value) payload.status = btn.value;
+        var orig = btn.style.opacity;
+        btn.disabled = true; btn.style.opacity = '0.6';
+        fetch((window._API_BASE || '') + url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+          body: JSON.stringify(payload)
+        }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+          .then(function(o){
+            btn.disabled = false; btn.style.opacity = orig;
+            if (!o.ok || !o.body || o.body.ok === false){
+              var m = (o.body && (o.body.reason || o.body.error || o.body.message)) || 'failed';
+              toast('Bulk action failed: ' + m, 'error', 4000);
+              return;
+            }
+            if (kind === 'media') afterMedia(action, o.body, ids);
+            else if (kind === 'review') afterReview(action, o.body, ids);
+          }).catch(function(err){
+            btn.disabled = false; btn.style.opacity = orig;
+            toast('Bulk action failed: ' + ((err && err.message) || err), 'error', 4000);
+          });
+      });
+    });
+    refresh();
+  }
+  function boot(){
+    Array.prototype.slice.call(document.querySelectorAll('[data-mh-bulkbar]')).forEach(init);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+"""
+
+
 # Module-level JS for the palette confirmation form (rendered inside an
 # f-string). Lifted out so we don't have to double every `{` for f-string
 # escaping every time the form is rendered.
@@ -14485,6 +14739,7 @@ def create_app() -> Flask:
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
+    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
@@ -14710,8 +14965,28 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
             style="margin-left:auto;font-size:12px;padding:6px 12px"
             title="Show or hide every card's reasoning at once">Expand all reasoning</button>
   </div>
-  <div id="ach-list">{ach_rows_html_wf}</div>
+  <form id="mh-review-bulk" method="post">
+    <div class="mh-bulkbar is-empty" id="mh-rv-bulkbar" role="group" aria-label="Bulk card actions"
+         data-mh-bulkbar="review" data-form="mh-review-bulk" data-count="mh-rv-count"
+         data-select-all="mh-rv-all" data-check="mh-row-check" data-row=".ach-row">
+      <label class="mh-bulkbar-all"><input type="checkbox" id="mh-rv-all" class="mh-check-all" aria-label="Select all shown cards"> Select all shown</label>
+      <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
+      <div class="mh-bulkbar-actions">
+        <button type="submit" class="btn" data-mh-bulk="approve" name="op" value="approved"
+                formaction="{url_for('api_cards_bulk_status', run_id=run_id)}">Approve</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
+                formaction="{url_for('api_cards_bulk_status', run_id=run_id)}"
+                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="export"
+                formaction="{url_for('api_cards_bulk_export', run_id=run_id)}">Export</button>
+      </div>
+    </div>
+    <div id="ach-list">{ach_rows_html_wf}</div>
+  </form>
 </div>
+
+<style>{_BULK_ACTIONS_CSS}</style>
+<script>{_BULK_ACTIONS_JS}</script>
 
 {_render_near_miss_hint(len(no_ach_traces), _n_close_calls)}
 
@@ -29397,6 +29672,154 @@ function mhSetupMode(mode) {{
 
         return jsonify({"error": "unknown action"}), 400
 
+    @app.route("/api/runs/<run_id>/cards/bulk-status", methods=["POST"])
+    def api_cards_bulk_status(run_id):
+        """UI 1.9 — apply one workflow status to many cards at once.
+
+        Content-negotiated: a fetch() JSON call gets a per-card result list back;
+        a no-JS HTML form POST is redirected to /review with a flash summary.
+        Each card is gated independently, so the consent gate (minors / opted-out
+        athletes) can block a single approval without aborting the whole batch —
+        the same rule the single-card route enforces.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ws = _get_wf_store()
+        if ws is None:
+            return jsonify({"error": "workflow not available"}), 503
+
+        wants_json = _req_wants_json(request)
+        payload = request.get_json(silent=True) or {}
+        status_str = (
+            payload.get("status")
+            or request.form.get("status")
+            or request.form.get("op")
+            or ""
+        ).strip()
+        try:
+            status = CardStatus(status_str)
+        except (ValueError, NameError):
+            if wants_json:
+                return jsonify({"error": f"invalid status: {status_str}"}), 400
+            _flash_toast("Couldn't apply that bulk action — unknown status.", "error")
+            return redirect(url_for("review", run_id=run_id))
+
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if wants_json:
+                return (
+                    jsonify({"error": "no_selection", "results": [], "summary": ws.summary(run_id)}),
+                    400,
+                )
+            _flash_toast("Select at least one card first.", "info")
+            return redirect(url_for("review", run_id=run_id))
+
+        need_consent = status in (CardStatus.APPROVED, CardStatus.POSTED)
+        if need_consent:
+            from mediahub.compliance.gate import (
+                consent_block_reason_for_card,
+                find_card_in_run,
+            )
+        owner_pid = _run_owner_profile_id(run_id) or _active_profile_id() or ""
+        results: list[dict] = []
+        n_ok = 0
+        n_blocked = 0
+        for cid in ids:
+            if need_consent:
+                card = find_card_in_run(run_data or {}, cid)
+                reason = consent_block_reason_for_card((run_data or {}).get("profile_id", ""), card)
+                if reason:
+                    log.info("consent gate blocked bulk approval run=%s card=%s", run_id, cid)
+                    results.append({"id": cid, "ok": False, "error": "consent_blocked", "reason": reason})
+                    n_blocked += 1
+                    continue
+            ws.set_status(run_id, cid, status)
+            if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
+                _action = {
+                    CardStatus.APPROVED: "approved",
+                    CardStatus.REJECTED: "rejected",
+                    CardStatus.QUEUE: "requeued",
+                }[status]
+                _phase_w_after_status_change(owner_pid, run_id, cid, _action)
+            results.append({"id": cid, "ok": True, "status": status.value})
+            n_ok += 1
+        summary = ws.summary(run_id)
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": status.value,
+                    "results": results,
+                    "summary": summary,
+                    "n_ok": n_ok,
+                    "n_blocked": n_blocked,
+                }
+            )
+        verb = {"approved": "Approved", "rejected": "Rejected", "queue": "Re-queued"}.get(
+            status.value, status.value.capitalize()
+        )
+        msg = f"{verb} {n_ok} card{'' if n_ok == 1 else 's'}."
+        if n_blocked:
+            msg += f" {n_blocked} blocked by the consent gate."
+        _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("review", run_id=run_id))
+
+    @app.route("/api/runs/<run_id>/cards/bulk-export", methods=["POST"])
+    def api_cards_bulk_export(run_id):
+        """UI 1.9 — download the selected cards as one JSON file.
+
+        Scoped sibling of the per-run /export (which dumps the whole run): a
+        reviewer ticks the achievements they want and gets just those, with each
+        card's live workflow status folded in. Always a native attachment
+        download, so it works with or without JS.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one card to export.", "info")
+            return redirect(url_for("review", run_id=run_id))
+        wanted = set(ids)
+        rr = (run_data or {}).get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        ws = _get_wf_store()
+        wf_states = ws.load(run_id) if ws else {}
+        selected: list[dict] = []
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if cid in wanted:
+                st = wf_states.get(cid)
+                selected.append(
+                    {
+                        "card_id": cid,
+                        "status": (st.status.value if st else "queue"),
+                        "rank": ra.get("rank"),
+                        "quality_band": ra.get("quality_band"),
+                        "suggested_post_type": ra.get("suggested_post_type"),
+                        "achievement": ach,
+                        "factors": ra.get("factors"),
+                    }
+                )
+        export = {
+            "run_id": run_id,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "profile_id": (run_data or {}).get("profile_id", ""),
+            "requested": len(wanted),
+            "exported": len(selected),
+            "cards": selected,
+        }
+        fname = "mediahub-cards-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export") + ".json"
+        return Response(
+            json.dumps(export, indent=2, default=str),
+            mimetype="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
     # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
     def api_turn_into(run_id):
@@ -30825,7 +31248,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # user-supplied + AI-parsed, so an unescaped name/venue was a
             # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr class="mh-hp">
+<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}">
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
   <td><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td>{_h(ad.get("type", ""))}</td>
   <td>{_h(athlete_names)}</td>
@@ -30833,10 +31257,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td>{_h(ad.get("permission_status", ""))}</td>
   <td><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td>
-    <form method="post" action="{_delete_url}" style="display:inline"
-          onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
-      <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
-    </form>
+    <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
+            style="font-size:11px;padding:3px 9px"
+            onclick="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">Delete</button>
   </td>
 </tr>"""
         body = f"""
@@ -30845,7 +31268,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <h1>Library</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(profile_id)}</span><span class="sep">·</span>
-    <span>{len(assets):03d} {"asset" if len(assets) == 1 else "assets"}</span>
+    <span><span data-mh-asset-count>{len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"}</span>
   </div>
 </section>
 
@@ -30874,24 +31297,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </div>
 
 <div class="card">
-  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {
+  <div class="strap" style="margin-bottom:var(--sp-3)"><span data-mh-asset-count>{len(assets):03d}</span> {
             "asset" if len(assets) == 1 else "assets"
         } in library</div>
-  <table style="width:100%">
-    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
-    <tbody>{
+  <form id="mh-ml-bulk" method="post">
+    <div class="mh-bulkbar is-empty" id="mh-ml-bulkbar" role="group" aria-label="Bulk photo actions"
+         data-mh-bulkbar="media" data-form="mh-ml-bulk" data-count="mh-ml-count"
+         data-select-all="mh-ml-all" data-check="mh-row-check" data-row=".mh-asset-row">
+      <span class="mh-bulkbar-count" id="mh-ml-count">0 selected</span>
+      <div class="mh-bulkbar-actions">
+        <button type="submit" class="btn secondary" data-mh-bulk="approve"
+                formaction="{url_for('api_media_library_bulk_approve')}"
+                data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="export"
+                formaction="{url_for('api_media_library_bulk_export')}">Export ZIP</button>
+        <button type="submit" class="btn danger" data-mh-bulk="delete"
+                formaction="{url_for('api_media_library_bulk_delete')}"
+                data-confirm="Delete {{n}} selected photo(s)? Graphics already rendered keep their copy.">Delete</button>
+      </div>
+    </div>
+    <table style="width:100%">
+      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
+      <tbody>{
             rows_html
             or (
-                '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
                 "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
                 "Uploads above still work; if this persists, ask your operator to check the data volume."
                 "</td></tr>"
                 if store_failed
-                else '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+                else '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
             )
         }</tbody>
-  </table>
+    </table>
+  </form>
 </div>
+
+<style>{_BULK_ACTIONS_CSS}</style>
+<script>{_BULK_ACTIONS_JS}</script>
 """
         return _layout("Media library", body, active="media")
 
@@ -31020,6 +31463,172 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-delete", methods=["POST"])
+    def api_media_library_bulk_delete():
+        """UI 1.9 — delete many library assets at once (record + files on disk).
+
+        Mirrors the single-asset delete, profile-scoped per id so one org can't
+        reach another's photos even if ids leak. Content-negotiated: fetch() gets
+        a per-id result list; a no-JS form POST is redirected with a flash.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            for _p in (a.path, getattr(a, "cutout_path", None)):
+                if not _p:
+                    continue
+                try:
+                    Path(_p).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            store.delete(aid)
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "deleted": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                }
+            )
+        _flash_toast(
+            f"Deleted {n_ok} photo{'' if n_ok == 1 else 's'}.",
+            "success" if n_ok else "info",
+        )
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-approve", methods=["POST"])
+    def api_media_library_bulk_approve():
+        """UI 1.9 — mark many library assets approved at once.
+
+        Sets ``approval_status='approved'`` (the deterministic photo selector
+        weights approved shots highest). Safeguarding: an asset with a hard
+        permission block (``do_not_use`` / ``needs_parental_consent``) or one
+        flagged not ``safe_for_minors`` is SKIPPED, never silently promoted —
+        resolving that block is a deliberate human call, not a bulk one.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        n_skipped = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            if a.permission_status in ("do_not_use", "needs_parental_consent") or not getattr(
+                a, "safe_for_minors", True
+            ):
+                results.append({"id": aid, "ok": False, "error": "safeguarding_block"})
+                n_skipped += 1
+                continue
+            store.update_fields(aid, {"approval_status": "approved"})
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "approved": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                    "n_skipped": n_skipped,
+                }
+            )
+        msg = f"Approved {n_ok} photo{'' if n_ok == 1 else 's'}."
+        if n_skipped:
+            msg += f" {n_skipped} skipped (safeguarding)."
+        _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-export", methods=["POST"])
+    def api_media_library_bulk_export():
+        """UI 1.9 — download the selected library photos as one ZIP.
+
+        Streams the original files (profile-scoped per id; assets from another
+        org or with a missing file are simply skipped). Always a native
+        attachment download, so it works with or without JS.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        import io as _io
+        import zipfile as _zip
+
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one photo to export.", "info")
+            return redirect(url_for("media_library_page"))
+        buf = _io.BytesIO()
+        used: set[str] = set()
+        n = 0
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for aid in ids:
+                a = store.get(aid)
+                if not a or not _session_can_access_profile(a.profile_id):
+                    continue
+                src = a.path
+                if not src or not Path(src).exists():
+                    continue
+                base = re.sub(r"[^A-Za-z0-9_.-]+", "_", (a.filename or Path(src).name or aid)) or aid
+                name = base
+                i = 1
+                while name in used:
+                    stem, dot, ext = base.rpartition(".")
+                    name = f"{stem}_{i}.{ext}" if dot else f"{base}_{i}"
+                    i += 1
+                used.add(name)
+                try:
+                    zf.write(src, arcname=name)
+                    n += 1
+                except Exception:
+                    continue
+        if n == 0:
+            if _req_wants_json(request):
+                return jsonify({"error": "nothing_to_export"}), 404
+            _flash_toast("None of the selected photos could be exported.", "error")
+            return redirect(url_for("media_library_page"))
+        pid = _active_profile_id() or "library"
+        fname = "mediahub-photos-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", pid)[:40] or "library") + ".zip"
+        return Response(
+            buf.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):
