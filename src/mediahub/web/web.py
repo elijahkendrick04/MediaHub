@@ -550,6 +550,219 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
     return exp
 
 
+# --------------------------------------------------------------------------- #
+# U.7 — "Focus the facts" caption / explainability highlight.
+#
+# In captions and the "Why this card?" review UI, the source-grounded entities
+# (athlete / event / time / PB-medal-record) are pill-highlighted and sharp; the
+# connective filler around them recedes. This is *server-side span injection* —
+# no client JS — so it works the moment the HTML lands (and inside the lazily
+# fetched why-card body).
+#
+# Critically it is SOURCE-GROUNDED, not a regex guess: every highlighted phrase
+# is built from the structured achievement the deterministic engine already
+# produced (`swimmer_name`, `event`, the result time, and the detected
+# achievement `type`). We never light up a number that "looks like a time" or a
+# word that "looks like a medal" — only text that matches a fact on the card.
+# So the highlight can't drift from the data, and it reinforces the moat (the
+# intelligence layer) rather than faking it. Inspired by Pedro Duarte (ped.ro);
+# supports U.3.
+# --------------------------------------------------------------------------- #
+
+# Swim-stroke long↔short forms, so a canonical "100m Freestyle" also lights up a
+# caption that wrote "100m Free" / "100 Free". Deterministic string expansion of
+# the *real* event label — not a new parser, not an AI surface.
+_STROKE_SHORT_FORMS: dict[str, tuple[str, ...]] = {
+    "freestyle": ("free",),
+    "backstroke": ("back",),
+    "breaststroke": ("breast",),
+    "butterfly": ("fly",),
+    "individual medley": ("im", "medley"),
+}
+
+
+def _event_variants(event: str) -> list[str]:
+    """Grounded display variants of one event label for fact-matching.
+
+    Returns the full label, the course-tag-stripped base ("100m Freestyle (LC)"
+    → "100m Freestyle"), the stroke short-forms ("100m Free"), and the
+    distance-without-``m`` forms ("100 Free") — all derived from the real event
+    string, so every variant is still source-grounded. Distance alone ("100") is
+    deliberately never emitted: a bare number would match stray figures.
+    """
+    ev = " ".join(str(event or "").split())
+    if not ev:
+        return []
+    out: list[str] = [ev]
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", ev).strip()  # drop a trailing "(LC)" etc.
+    if base and base not in out:
+        out.append(base)
+
+    # Stroke short-forms, applied to the lowercased base (matching is
+    # case-insensitive; output casing is taken from the matched text, not these).
+    low = base.lower()
+    stroked = [low]
+    for long_form, shorts in _STROKE_SHORT_FORMS.items():
+        if long_form in low:
+            for short in shorts:
+                stroked.append(low.replace(long_form, short))
+
+    # Distance "100m" → "100" companion of each stroked form.
+    expanded = list(stroked)
+    for form in stroked:
+        no_m = re.sub(r"(?<=\d)m\b", "", form)
+        if no_m != form:
+            expanded.append(no_m)
+
+    for form in expanded:
+        form = form.strip()
+        # Only keep forms that still carry a stroke word — a bare distance
+        # ("100") is not grounded enough to highlight safely.
+        if form and form not in out and not form.replace(" ", "").isdigit():
+            out.append(form)
+    return out
+
+
+def _card_facts(achievement: Optional[dict]) -> list[tuple[str, str]]:
+    """Source-grounded ``(phrase, kind)`` pairs for "focus the facts" highlighting.
+
+    Every phrase is derived from the structured achievement — never guessed.
+    ``kind`` is one of ``athlete`` / ``event`` / ``time`` / ``pb`` (the last
+    covers PB **and** medal/record markers, gated by the detected achievement
+    ``type`` so e.g. "gold" is only ever lit on an actual medal).
+    """
+    if not isinstance(achievement, dict):
+        return []
+    phrases: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(phrase: str, kind: str) -> None:
+        p = " ".join(str(phrase or "").split())
+        if len(p) < 2:  # never light up a stray single character
+            return
+        key = (p.lower(), kind)
+        if key in seen:
+            return
+        seen.add(key)
+        phrases.append((p, kind))
+
+    # Athlete — full name, plus the first name (captions usually go first-name).
+    name = " ".join(str(achievement.get("swimmer_name") or "").split())
+    if name:
+        add(name, "athlete")
+        parts = name.split()
+        if len(parts) > 1:
+            add(parts[0], "athlete")
+
+    # Event — the label and its grounded short-forms.
+    for variant in _event_variants(achievement.get("event") or ""):
+        add(variant, "event")
+
+    # Time — the result string(s); exact and highly distinctive.
+    raw_facts = achievement.get("raw_facts")
+    time_sources = [achievement.get("time"), achievement.get("time_str"), achievement.get("result")]
+    if isinstance(raw_facts, dict):
+        time_sources += [
+            raw_facts.get("time"),
+            raw_facts.get("time_str"),
+            raw_facts.get("result"),
+            raw_facts.get("final_time"),
+        ]
+    for t in time_sources:
+        add(str(t or "").strip(), "time")
+
+    # PB / medal / record markers — gated by the engine's AUTHORITATIVE detected
+    # type / post_angle (not the free-text angle_hint, which can mention "first"
+    # or "gold" metaphorically), so we never light up "gold" or "record" on a
+    # card the detector didn't actually flag as one.
+    type_blob = " ".join(str(achievement.get(k) or "") for k in ("type", "post_angle")).lower()
+    is_pb = bool(achievement.get("pb") or achievement.get("is_pb")) or any(
+        tok in type_blob for tok in ("pb", "personal_best", "best_time", "lifetime")
+    )
+    markers: list[str] = []
+    if is_pb:
+        markers += ["personal best", "lifetime best", "new best", "PB"]
+    if any(tok in type_blob for tok in ("medal", "podium", "gold", "silver", "bronze")):
+        markers += ["medal", "podium"]
+        for metal in ("gold", "silver", "bronze"):
+            if metal in type_blob:
+                markers.append(metal)
+    if "record" in type_blob:
+        markers += [
+            "club record",
+            "county record",
+            "regional record",
+            "national record",
+            "meet record",
+            "record",
+        ]
+    if "first" in type_blob:
+        markers.append("first")
+    for m in markers:
+        add(m, "pb")
+
+    return phrases
+
+
+# Fact kinds are a fixed internal vocabulary — never user text — so they are safe
+# to interpolate straight into a class name.
+_FOCUS_KINDS = {"athlete", "event", "time", "pb"}
+
+
+def _focus_facts_html(
+    text: str,
+    achievement: Optional[dict] = None,
+    *,
+    phrases: Optional[list[tuple[str, str]]] = None,
+) -> str:
+    """Server-side span injection for U.7.
+
+    Wrap every source-grounded fact found in ``text`` in a ``<span class="mh-fact
+    mh-fact--KIND">`` pill and de-emphasise the rest, returning safe HTML. Every
+    segment is HTML-escaped via ``_h`` — only the highlight ``<span>`` tags are
+    markup — so this is XSS-safe even on attacker-controlled caption text.
+
+    When nothing matches (or there are no facts) the text is returned plainly
+    escaped, with **no** de-emphasis wrapper, so non-grounded copy still reads at
+    full strength rather than being greyed out for nothing.
+    """
+    s = str(text or "")
+    if not s.strip():
+        return str(_h(s))
+    if phrases is None:
+        phrases = _card_facts(achievement or {})
+    if not phrases:
+        return str(_h(s))
+
+    # Longest phrases first so "100m Freestyle" beats "Freestyle" and
+    # "Emma Davies" beats "Emma" when both could match at the same spot.
+    ordered = sorted(phrases, key=lambda pk: len(pk[0]), reverse=True)
+    kind_of: dict[str, str] = {}
+    for phrase, kind in ordered:
+        kind_of.setdefault(phrase.lower(), kind if kind in _FOCUS_KINDS else "event")
+    alternation = "|".join(re.escape(p) for p, _ in ordered)
+    # Boundary = not flanked by an alphanumeric. Handles "PB", "Emma" and times
+    # like "58.21" / "1:02.34" (whose internal "." / ":" are non-alphanumeric).
+    pattern = re.compile(r"(?<![A-Za-z0-9])(" + alternation + r")(?![A-Za-z0-9])", re.IGNORECASE)
+
+    chunks: list[str] = []
+    pos = 0
+    matched_any = False
+    for m in pattern.finditer(s):
+        if m.start() > pos:
+            chunks.append(str(_h(s[pos : m.start()])))
+        hit = m.group(1)
+        kind = kind_of.get(hit.lower(), "event")
+        chunks.append(f'<span class="mh-fact mh-fact--{kind}">{_h(hit)}</span>')
+        pos = m.end()
+        matched_any = True
+    if not matched_any:
+        return str(_h(s))
+    if pos < len(s):
+        chunks.append(str(_h(s[pos:])))
+    return '<span class="mh-focus">' + "".join(chunks) + "</span>"
+
+
 def _render_why_inner(
     exp: dict,
     *,
@@ -566,13 +779,19 @@ def _render_why_inner(
     stays grounded: headline / bullets come from the ranker + LLM, source
     lines are quoted verbatim from the achievement's evidence.
     """
-    headline = _h(exp.get("headline", ""))
+    # U.7 — light up the source-grounded facts (athlete / event / time / PB) in
+    # the LLM's reasoning. Phrases are derived once from this card's achievement
+    # so the headline and every bullet highlight the same grounded entities; if
+    # there's no achievement in scope, _focus_facts_html falls back to plain
+    # escaped text.
+    _facts = _card_facts((ra or {}).get("achievement") if isinstance(ra, dict) else None)
+    headline = _focus_facts_html(exp.get("headline", ""), phrases=_facts)
     bullets = exp.get("bullets") or []
     source_lines = exp.get("source_lines") or []
 
     bullets_html = ""
     for b in bullets:
-        bullets_html += f'<li style="margin-bottom:3px">{_h(b)}</li>'
+        bullets_html += f'<li style="margin-bottom:3px">{_focus_facts_html(b, phrases=_facts)}</li>'
     if not bullets_html:
         bullets_html = ""
 
@@ -5536,6 +5755,42 @@ a.card:hover, .card[data-interactive]:hover {
 .mh-nearmiss-hint .mh-nm-pip {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--warn); flex: none;
+}
+
+/* ---- U.7 — "focus the facts" caption / explainability highlight ---------- */
+/* Source-grounded entities (athlete / event / time / PB-medal-record) are
+   pill-highlighted and sharp; the connective filler around them recedes to
+   --ink-muted so the facts read first. The spans are injected server-side by
+   _focus_facts_html() and only ever wrap text the structured achievement
+   grounds — never a guess. Inspired by Pedro Duarte (ped.ro); supports U.3. */
+.mh-focus { color: var(--ink-muted); }
+.mh-fact {
+  color: var(--ink);
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(245, 242, 232, 0.06);   /* faint --ink wash */
+  /* clone the pill across wrapped lines and keep the line box tight */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* Athlete — the person: the brightest neutral pill (the hero of the card). */
+.mh-fact--athlete { background: rgba(245, 242, 232, 0.08); }
+/* Event — the race: a quieter neutral pill. */
+.mh-fact--event { background: rgba(245, 242, 232, 0.045); }
+/* Time — the data: monospace + tabular figures with a faint gold edge. */
+.mh-fact--time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background: rgba(212, 255, 58, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, 0.18);
+}
+/* PB / medal / record — the achievement itself: the brand gold-green, loudest. */
+.mh-fact--pb {
+  color: var(--lane);
+  font-weight: 700;
+  background: rgba(212, 255, 58, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, 0.30);
 }
 
 .mh-card-actions {
@@ -30510,11 +30765,22 @@ ever appear; queued, edited and rejected cards never do.</p>
                 explanation = _build_card_explanation(c["ra"]) or {}
             except Exception:
                 explanation = {}
+            # U.7 — the same source-grounded "focus the facts" highlight the
+            # logged-in review uses, on the public preview: the athlete, event,
+            # time and PB/medal markers light up in both the caption and the
+            # reasoning so the demo reads as the intelligence layer it is.
+            _demo_facts = _card_facts(ach)
             why_bits = ""
             if explanation.get("headline"):
-                why_bits += f"<p style='margin:6px 0'><b>{_h(explanation['headline'])}</b></p>"
+                why_bits += (
+                    f"<p style='margin:6px 0'><b>"
+                    f"{_focus_facts_html(explanation['headline'], phrases=_demo_facts)}</b></p>"
+                )
             for b in (explanation.get("bullets") or [])[:3]:
-                why_bits += f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; {_h(b)}</p>'
+                why_bits += (
+                    f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; '
+                    f"{_focus_facts_html(b, phrases=_demo_facts)}</p>"
+                )
             if explanation.get("ai_error"):
                 why_bits += (
                     f'<p class="dim" style="font-size:12px">AI explainer unavailable: '
@@ -30522,7 +30788,8 @@ ever appear; queued, edited and rejected cards never do.</p>
                 )
             img_url = url_for("try_demo_card_png", run_id=run_id, card_id=c["card_id"])
             caption_html = (
-                f'<p style="font-size:14px;white-space:pre-wrap">{_h(caption)}</p>'
+                f'<p style="font-size:14px;white-space:pre-wrap">'
+                f"{_focus_facts_html(caption, phrases=_demo_facts)}</p>"
                 if caption
                 else ""
             )
