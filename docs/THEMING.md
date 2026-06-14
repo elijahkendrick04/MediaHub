@@ -115,6 +115,43 @@ The 25+ Material 3 role tokens you actually consume:
 | `--mh-elevation-2` | Card drop | composite shadow |
 | `--mh-elevation-3` | Modal drop | composite shadow |
 
+### Light & dark mode (Stage D — UI 1.23)
+
+MediaHub is **dark-first** but ships a real **light** palette. Every
+surface / text / outline role above is declared
+`light-dark(<light>, <dark>)` in `theme-base.css`, so the *same* token
+resolves to a warm-paper value in light and the pit-wall value in dark.
+The light branch is the inverse of the dark ramp — page = paper-cream
+(`neutral-50`), cards = white (`neutral-0`), text = deep ink
+(`neutral-900..500`) — and clears WCAG AA on both the page and white
+cards (`tests/test_theme_toggle.py` pins the contrast). The dark branch
+is byte-identical to Stage C, so **dark mode does not move a pixel**.
+
+Three rules make this work without per-component effort:
+
+1. **`color-scheme` drives everything.** `light-dark()` resolves against
+   the element's used `color-scheme`. The default
+   (`responsive_guardrails.py`) is `color-scheme: dark light` —
+   dark-first, but a visitor whose OS prefers light gets the light
+   branch automatically. No selector, no media query, no JS needed for
+   the colour swap.
+2. **The in-app toggle just sets `color-scheme`.** The masthead control
+   (Light · System · Dark) writes the choice to `localStorage['mh-theme']`
+   and, for an explicit pick, forces an inline `color-scheme` onto
+   `<html>` (which beats the stylesheet). A `<head>` boot script applies
+   the saved choice **before first paint** (no flash). "System" clears
+   the override and follows the OS.
+3. **Lane-yellow is a fill, not text, in light.** Yellow-on-paper is
+   illegible, so links (`--mh-link`) and the focus ring (`--mh-focus`)
+   darken to the olive end of the brand ramp in the light branch, while
+   button *fills* stay lane-yellow (with dark `--mh-on-primary` text)
+   in both modes. The medal/tertiary accent steps to a richer gold so
+   it holds its weight on white.
+
+When you add chrome that hardcodes a dark colour (a scrim, a tint), wrap
+it in `light-dark(<light>, <dark>)` so it flips too — keep the dark
+branch byte-identical to avoid drifting dark mode.
+
 ### Tier 3 — Component tokens
 
 Deliberately deferred per Nathan Curtis's *"introduce only when
