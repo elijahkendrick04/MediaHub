@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `5130608f3` · Build UI 1.14 — notifications inbox (bell + unread badge + dropdown) (#554)
+**Last updated:** 2026-06-14 · `c376e7805` · Merge pull request #559 from elijahkendrick04/claude/loving-shannon-1k013k
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -155,7 +155,6 @@ sequence it or merge with care.
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.21** · Phase 1 (Product polish) — Text-scramble/decode animation (from Locomotive): character-by-character scramble-then-decode reveal for the 'engine is generating…' processing state and optional hero headline reveal; vanilla JS, respects `prefers-reduced-motion` · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.23** · Phase 1 (Product polish) — Light/dark theme toggle (from AuthKit): dark-first with an optional light mode; CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme` default; no new build step · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.28** · Phase 1 (Product polish) — Keyboard shortcuts overlay (from GitHub): press `?` to reveal a modal of available shortcuts; quick keys to approve/reject/next in the review flow; vanilla JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1510,6 +1509,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `d78fd596c` | Build UI 1.28 — global keyboard-shortcuts overlay (?) |
+| 2026-06-14 | `e5a2f3843` | Build UI 1.23 — light/dark theme toggle |
 | 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
 | 2026-06-14 | `b8a8581ed` | Tidy reaction GET query onto one line (ruff-format) |
 | 2026-06-14 | `7a121d84c` | Build UI 1.24 — moment-type marquee/ticker on the landing |
@@ -1520,5 +1521,4 @@ list and the auto table below, not here.
 | 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
 | 2026-06-14 | `487758deb` | feat(ui): UI2.6 Vanish search on the activity/global run search |
 | 2026-06-14 | `72cd136a7` | Build UI2.7 — caption type-on "AI is writing" reveal |
-| 2026-06-14 | `5a8a66d72` | Align UI 1.3/U.8 fix with main's #532 (pipeline_html prepend) |
 <!-- /ROADMAP:ACTIVITY -->
