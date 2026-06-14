@@ -2251,6 +2251,9 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   .card, .stat, .mh-template, .mh-audience, .mh-bento-tile, .mh-phone {
     border: 1px solid CanvasText;
   }
+  /* The FAQ +/- marker is a coloured CSS glyph; pin it to the system
+     foreground so it stays legible against the forced Canvas. */
+  .mh-faq-icon::before, .mh-faq-icon::after { background: CanvasText; }
 }
 
 /* Reusable visually-hidden helper (a clone of the guardrails .mh-sr-only
@@ -4069,6 +4072,168 @@ kbd {
   color: var(--ink-dim);
   font-size: var(--fs-sm);
   margin-top: 2px;
+}
+
+/* =====================================================================
+   UI 1.22 — FAQ ACCORDION
+   ---------------------------------------------------------------------
+   Expandable Q&A on the landing, built from native <details>/<summary>
+   — NO JavaScript. Each row reveals with a pure-CSS grid-template-rows
+   transition (0fr -> 1fr) and a + marker that collapses to a minus on
+   open; both are reduced-motion gated below. Because the markup is a
+   native disclosure widget, the panel stays fully keyboard- and
+   screen-reader-operable with JS disabled. Inspired by Limitless AI and
+   status pages.
+   ===================================================================== */
+.mh-faq {
+  max-width: 56rem;
+}
+.mh-faq-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 var(--sp-5);
+}
+.mh-faq-title em.editorial {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: 'opsz' 72;
+  color: var(--medal);
+  text-transform: none;
+}
+.mh-faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.mh-faq-item {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 200ms var(--ease-in-out),
+              background 200ms var(--ease-in-out);
+}
+.mh-faq-item:hover {
+  border-color: var(--chrome);
+}
+.mh-faq-item[open] {
+  border-color: var(--chrome);
+  background: var(--surface-2);
+}
+/* The clickable question row. The native disclosure triangle is removed
+   (both list-style and the WebKit marker) in favour of the +/- glyph. */
+.mh-faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(16px, 2vw, 19px);
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  color: var(--ink);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.mh-faq-q::-webkit-details-marker { display: none; }
+.mh-faq-q::marker { content: ''; }
+/* Use the brand-cascade focus token (engineered for a 3:1 ring on any
+   seed) and inset it so the ring is not clipped by the item's overflow. */
+.mh-faq-q:focus-visible {
+  outline: 2px solid var(--mh-focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+.mh-faq-q-text { flex: 1 1 auto; }
+/* +/- marker — two CSS bars; the vertical one collapses on open so the
+   plus reads as a minus. Pure CSS, transform-only (GPU-cheap). Painted in
+   neutral ink, NOT --lane: MediaHub is multi-tenant and a club's brand
+   seed can be a dark colour that would vanish as a thin glyph on the dark
+   panel, so the affordance must not depend on the accent's lightness. */
+.mh-faq-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+}
+.mh-faq-icon::before,
+.mh-faq-icon::after {
+  content: '';
+  position: absolute;
+  background: var(--ink-dim);
+  border-radius: 1px;
+  transition: transform 320ms var(--ease-in-out),
+              opacity 200ms var(--ease-in-out),
+              background 200ms var(--ease-in-out);
+}
+.mh-faq-icon::before {           /* horizontal bar */
+  top: 50%; left: 0; right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+}
+.mh-faq-icon::after {            /* vertical bar */
+  left: 50%; top: 0; bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+}
+/* Brighten the marker to full ink on hover / when open (the text already
+   sits at full ink, so the row's feedback is the marker + the border). */
+.mh-faq-item:hover .mh-faq-icon::before,
+.mh-faq-item:hover .mh-faq-icon::after,
+.mh-faq-item[open] .mh-faq-icon::before {
+  background: var(--ink);
+}
+.mh-faq-item[open] .mh-faq-icon::after {
+  transform: translateX(-50%) scaleY(0);
+  opacity: 0;
+}
+/* The answer panel. grid-template-rows 0fr -> 1fr is the canonical
+   CSS-only way to animate a <details> open to its natural height; the
+   inner wrapper clips the overflow while the row collapses. */
+.mh-faq-a {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms var(--ease-in-out);
+}
+.mh-faq-item[open] .mh-faq-a {
+  grid-template-rows: 1fr;
+}
+.mh-faq-a-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.mh-faq-a-inner p {
+  margin: 0;
+  padding: 0 var(--sp-5) var(--sp-5);
+  max-width: 60ch;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+@media (max-width: 720px) {
+  .mh-faq-q { padding: var(--sp-3) var(--sp-4); }
+  .mh-faq-a-inner p { padding: 0 var(--sp-4) var(--sp-4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Toggle is instant — native <details> still shows/hides the panel, so
+     no content is ever trapped; only the easing is dropped. */
+  .mh-faq-item,
+  .mh-faq-q,
+  .mh-faq-a,
+  .mh-faq-icon::before,
+  .mh-faq-icon::after {
+    transition: none;
+  }
 }
 
 /* FINAL-CTA STRIP — sits just before the footer. Picks up the masthead's

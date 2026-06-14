@@ -997,7 +997,9 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     return btn, panel
 
 
-def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title") -> str:
+def _reveal_lines(
+    lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title", el_id: str = ""
+) -> str:
     """U.5 — render an editorial heading as stacked lines that reveal
     one-by-one on scroll (inspired by Opal, op.al).
 
@@ -1015,9 +1017,14 @@ def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-t
     reduced-motion visitors see every line immediately (the ``.mh-js`` /
     ``prefers-reduced-motion`` gate in the CSS), so this is pure progressive
     enhancement — content is never hidden without JavaScript able to reveal it.
+
+    ``el_id`` (optional) stamps an ``id`` on the heading element so a section
+    can name itself via ``aria-labelledby`` (e.g. the UI 1.22 FAQ region);
+    when omitted the output is byte-identical to the original helper.
     """
     spans = "".join(f'<span class="mh-line">{ln}</span>' for ln in lines)
-    return f'<{tag} class="{cls} mh-reveal-lines">{spans}</{tag}>'
+    id_attr = f' id="{el_id}"' if el_id else ""
+    return f'<{tag}{id_attr} class="{cls} mh-reveal-lines">{spans}</{tag}>'
 
 
 def _drag_hint(label: str = "Drag to explore") -> str:
@@ -13958,6 +13965,92 @@ def create_app() -> Flask:
         # render (diagram, then the inline-thumbnail headline, then the steps).
         pipeline_html = _pipeline_diagram_section_html() + pipeline_html
 
+        # --- UI 1.22 — FAQ accordion (Limitless / status-page inspired). ---
+        # Expandable Q&A that answers the objections a club raises before it
+        # trusts the engine. Built from native <details>/<summary> — NO
+        # JavaScript — so every row is keyboard- and screen-reader-operable
+        # even with JS disabled; the open/close motion is a pure CSS
+        # grid-template-rows transition with a +/- marker (reduced-motion
+        # gated in the stylesheet). Answers are static, trusted product copy,
+        # but routed through _h() so the pattern stays escape-safe. Sits after
+        # the "what we don't do" promise panel and before the final CTA.
+        faq_items = [
+            (
+                "Does anything post to our socials automatically?",
+                "No. MediaHub is an intelligence layer, not an auto-poster. "
+                "Every caption, graphic and reel stops at a review queue you "
+                "control — nothing leaves this deployment without an explicit "
+                "approval click.",
+            ),
+            (
+                "Will it ever invent a time or a result?",
+                "Never. Every claim on a card is grounded in the result line "
+                "you uploaded. If the file does not contain a time, the caption "
+                "does not claim one; ambiguous rows are flagged for your review "
+                "rather than guessed.",
+            ),
+            (
+                "What files can we upload?",
+                "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
+                "exported result files (HY3, SDIF, SportSystems), plus entry "
+                "lists and heat sheets. The engine parses the file into "
+                "structured results before it writes a single word.",
+            ),
+            (
+                "How does it learn our club brand?",
+                "It reads your club website, social profiles and brand "
+                "guidelines once, then locks your palette, fonts, logo and tone "
+                "onto every card. Set up once, reuse forever — and your data is "
+                "never used to re-train a shared model.",
+            ),
+            (
+                "What can it produce from one upload?",
+                "Posting-ready story cards, feed graphics, athlete spotlights, "
+                "meet recaps and branded motion reels — every name, time and "
+                "place sized for the formats your club actually posts.",
+            ),
+            (
+                "Which sports does it work for?",
+                "Swimming is the first wedge, but the engine is sport-agnostic "
+                "by design: athletics, rugby, netball, rowing and more run "
+                "through the same ingest, detect, rank, brand and generate "
+                "pipeline.",
+            ),
+            (
+                "Is our athlete data kept private?",
+                "Yes. Athlete and result data stays on the deployment you "
+                "control and is never sold; content featuring minors never "
+                "auto-publishes. You can audit exactly what is stored on the "
+                "privacy page.",
+            ),
+        ]
+        faq_rows = "".join(
+            (
+                '<details class="mh-faq-item">'
+                '<summary class="mh-faq-q">'
+                f'<span class="mh-faq-q-text">{_h(q)}</span>'
+                '<span class="mh-faq-icon" aria-hidden="true"></span>'
+                "</summary>"
+                '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
+                f"<p>{_h(a)}</p>"
+                "</div></div>"
+                "</details>"
+            )
+            for q, a in faq_items
+        )
+        faq_html = (
+            '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">Common questions</span></div>'
+            + _reveal_lines(
+                ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
+                cls="mh-faq-title",
+                el_id="mh-faq-h",
+            )
+            + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
+            + "</section>"
+        )
+
         # --- UI 1.6 · Animated results/data charts (Mixpanel-inspired).
         # The sample-outputs surface gets two first-party, build-on-scroll
         # charts drawn by web/charts.py — a podium bar chart and a season
@@ -14031,6 +14124,7 @@ def create_app() -> Flask:
             + audience_html
             + testimonials_html
             + promise_html
+            + faq_html
             + final_cta_html,
             active="home",
         )
