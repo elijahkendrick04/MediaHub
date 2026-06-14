@@ -7013,6 +7013,10 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web.anatomy_callout import (  # noqa: E402
+    ANATOMY_CALLOUT_CSS as _MH_AN_CSS,
+    anatomy_callout_section_html as _anatomy_callout_section_html,
+)
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -7025,10 +7029,10 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
 _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
-# Motion / effect kit + the U.8 pipeline-diagram CSS ride AFTER the components
-# layer (so they can elevate existing component primitives) but BEFORE the
-# guardrails, which must stay the cascade's final layer
-# (test_theme_tokens::test_guardrails_appended_last).
+# Motion / effect kit + the U.8 pipeline-diagram CSS + the UI 1.13 anatomy
+# callouts CSS ride AFTER the components layer (so they can elevate existing
+# component primitives) but BEFORE the guardrails, which must stay the
+# cascade's final layer (test_theme_tokens::test_guardrails_appended_last).
 BASE_CSS = (
     _MH_TT_CSS
     + BASE_CSS
@@ -7036,6 +7040,7 @@ BASE_CSS = (
     + _MH_AUDIENCE_ICON_CSS
     + _MH_MOTION_CSS
     + _MH_PL_CSS
+    + _MH_AN_CSS
     + _MH_RG_CSS
 )
 
@@ -11985,6 +11990,12 @@ def create_app() -> Flask:
         # render (diagram, then the inline-thumbnail headline, then the steps).
         pipeline_html = _pipeline_diagram_section_html() + pipeline_html
 
+        # UI 1.13 — "anatomy of a card" annotated callouts. Sits right after the
+        # bento overview ("what the engine does"): the bento shows the spread of
+        # output types, then this zooms into a single card and labels every part
+        # of it (logo, moment, time, PB delta, confidence, caption, format).
+        anatomy_html = _anatomy_callout_section_html()
+
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -11995,6 +12006,7 @@ def create_app() -> Flask:
             + steps_html
             + before_after_html
             + bento_html
+            + anatomy_html
             + frames_html
             + audience_html
             + promise_html
