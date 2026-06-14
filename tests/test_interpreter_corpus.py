@@ -230,3 +230,21 @@ def test_year_of_birth_does_not_become_the_club():
     res2 = interpret_document(csv_merged, hint="csv")
     clubs2 = {s.club for e in res2.events for s in e.swims}
     assert clubs2 == {"City of Sheffield", "Loughborough"}, clubs2
+
+
+def test_split_rows_do_not_become_phantom_results():
+    """On a distance event the page lists cumulative splits under each swimmer.
+    Those split rows (a time but no competitor name) must not become nameless
+    'results' — only the overall time per swimmer is kept."""
+    csv = (
+        b"placing,competitor,affiliation,mark\n"
+        b"1,Tom DAVIES,City of Sheffield,15:23.45\n"
+        b",,1350m,13:53.80\n"  # a split/continuation row — no name
+        b"2,Sam JONES,Loughborough,15:40.10\n"
+        b",,1350m,14:08.03\n"
+    )
+    res = interpret_document(csv, hint="csv")
+    swims = [s for e in res.events for s in e.swims]
+    assert all(s.swimmer_name for s in swims), "a nameless split row leaked in as a result"
+    assert {s.swimmer_name for s in swims} == {"Tom DAVIES", "Sam JONES"}
+    assert {s.time for s in swims} == {"15:23.45", "15:40.10"}  # overall times only
