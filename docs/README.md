@@ -20,3 +20,7 @@ explain the project in plain English.
   [`AUTOTEST_BENCHMARK_AND_GAPS.md`](autotest/AUTOTEST_BENCHMARK_AND_GAPS.md),
   [`IMPLEMENTATION_PROMPT.md`](autotest/IMPLEMENTATION_PROMPT.md),
   [`AUTOTEST_CHANGES.md`](autotest/AUTOTEST_CHANGES.md).
+- **Scheduled / automated re-checks (no third-party tool):** how a Claude Code
+  session re-checks a PR while it's alive (the in-session Monitor) and across
+  sessions (Anthropic Routines) — first-party only, no extra service, no cost —
+  [`SEND_LATER.md`](SEND_LATER.md).

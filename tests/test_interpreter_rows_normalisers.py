@@ -229,3 +229,21 @@ class TestNormaliseClub:
         # Names that merely start with digits must not be truncated.
         v, _ = _normalise_club(raw)
         assert v == raw
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "1350m 13:53.80",  # distance + lap time (1500m splits page)
+            "1350m",  # distance marker alone
+            "13:53.80",  # lap/cumulative time alone
+            "50 m",  # spaced distance token
+            "[M",  # bracketed leg/stroke marker
+            "[pull]",
+            "(M",
+        ],
+    )
+    def test_race_data_is_not_a_club(self, raw: str) -> None:
+        # Split times / distances / leg markers from a splits-heavy page must
+        # never surface as clubs (the picker was filling with '1350m 13:53.80').
+        v, _ = _normalise_club(raw)
+        assert v is None
