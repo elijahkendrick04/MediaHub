@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `80998a951` · Merge pull request #498 — U.8 animated how-it-works pipeline diagram
+**Last updated:** 2026-06-14 · `b5080bcae` · Merge pull request #525 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1501,10 +1501,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `dd1c90857` | Read British (YoB) results correctly; flag impossible event/time pairings; surface PB-lookup failure |
 | 2026-06-14 | `19ecc71ae` | U.8 — animated how-it-works pipeline diagram on the landing page |
 | 2026-06-14 | `28c3b2868` | Fix unreadable <select> dropdown options (light-on-light when open) |
 | 2026-06-14 | `a40346cad` | Fix U.5/U.15 conflict: make the before/after slider a reveal-lines section |
 | 2026-06-14 | `10be7fbce` | Add UI 1.3 — inline media thumbnails in a display headline |
-| 2026-06-14 | `651a466fd` | UI 1.1: cycling example-prompt placeholder |
-| 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
 <!-- /ROADMAP:ACTIVITY -->
