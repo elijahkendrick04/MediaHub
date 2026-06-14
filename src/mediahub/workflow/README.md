@@ -17,4 +17,3 @@ says yes.
 - `review_comments.py` — Frame.io-style feedback notes a reviewer pins to a
   moment on a generated reel (or story card). Saved per run with the time,
   the note and who left it, so the markers show up on the video scrubber.
-
