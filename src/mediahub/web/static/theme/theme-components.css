@@ -69,8 +69,12 @@
      copy gets a lifted variant: same hue, raised lightness. The base
      palette's lane-yellow stays lane-yellow because it's already
      bright. */
-  --mh-link: color-mix(in oklab, var(--mh-primary) 70%, var(--mh-on-surface) 30%);
-  --mh-link-hover: var(--mh-primary);
+  --mh-link: light-dark(
+    color-mix(in oklab, var(--mh-primary) 30%, var(--mh-on-surface) 70%),
+    color-mix(in oklab, var(--mh-primary) 70%, var(--mh-on-surface) 30%));
+  --mh-link-hover: light-dark(
+    color-mix(in oklab, var(--mh-primary) 45%, var(--mh-on-surface) 55%),
+    var(--mh-primary));
 }
 
 /* ---------------------------------------------------------------------
@@ -2247,6 +2251,9 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   .card, .stat, .mh-template, .mh-audience, .mh-bento-tile, .mh-phone {
     border: 1px solid CanvasText;
   }
+  /* The FAQ +/- marker is a coloured CSS glyph; pin it to the system
+     foreground so it stays legible against the forced Canvas. */
+  .mh-faq-icon::before, .mh-faq-icon::after { background: CanvasText; }
 }
 
 /* Reusable visually-hidden helper (a clone of the guardrails .mh-sr-only
@@ -3053,6 +3060,78 @@ kbd {
   color: var(--ink-dim);
 }
 
+/* UI 1.28 — global keyboard-shortcuts overlay (GitHub-style). One '?'-triggered
+   dialog shared by every page (#mh-shortcuts-overlay); the old page-local review
+   variant was folded into it. This is a FUNCTIONAL surface — it must still open
+   under reduced motion — so only the entrance animation is suppressed there. The
+   panel can grow taller than a phone, hence the scroll. */
+.mh-kbd-overlay-panel { position: relative; max-height: calc(100vh - 64px); max-width: 460px; overflow-y: auto; }
+.mh-kbd-overlay-panel section[hidden] { display: none; }
+.mh-kbd-overlay-panel section:first-of-type h4 { margin-top: 0; }
+.mh-kbd-overlay-panel h4 {
+  margin: var(--sp-5) 0 var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/* Two-key sequences render as `g then h`; the joiner is a quiet mono word. */
+.mh-kbd-table .mh-kbd-then {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  color: var(--ink-faint);
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+/* Navigation rows are real links — the overlay doubles as a jump menu and works
+   with no JS at all (click a row to navigate). */
+.mh-kbd-table a.desc {
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  margin: -2px -6px;
+  transition: background var(--dur-fast, 120ms) var(--ease-out-quick),
+              color var(--dur-fast, 120ms) var(--ease-out-quick);
+}
+.mh-kbd-table a.desc:hover,
+.mh-kbd-table a.desc:focus-visible {
+  color: var(--ink);
+  background: rgba(212, 255, 58, 0.06);
+  outline: none;
+}
+.mh-kbd-overlay-close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: background var(--dur-fast, 120ms) var(--ease-out-quick),
+              color var(--dur-fast, 120ms) var(--ease-out-quick);
+}
+.mh-kbd-overlay-close:hover,
+.mh-kbd-overlay-close:focus-visible { color: var(--ink); background: rgba(245, 242, 232, 0.05); outline: none; }
+.mh-kbd-overlay-foot {
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-kbd-overlay,
+  .mh-kbd-overlay-panel { animation: none; }
+}
+
 /* Confidence meter — small inline bar shown next to confidence labels. */
 .mh-conf-meter {
   display: inline-flex;
@@ -3713,6 +3792,206 @@ kbd {
   margin: 0;
 }
 
+/* =====================================================================
+   UI 1.19 — TESTIMONIAL / SOCIAL-PROOF CAROUSEL
+   ---------------------------------------------------------------------
+   Club/coach quote cards with avatar initials, arrow controls and a
+   gentle autoplay on the landing. Pure CSS/JS — no carousel library.
+   The viewport is a native scroll-snap row, fully usable with no JS
+   (swipe / scroll / focus + arrow keys); MH.bindTestimonials enhances it
+   with arrows, dots, autoplay and a live-region announcement, revealing
+   the JS-only controls via `.is-ready` so no-JS visitors never meet a
+   dead button. Card surface + lane→medal top accent mirror the audience
+   cards above for one cohesive landing language. Inspired by Sketch.
+   ===================================================================== */
+.mh-testi {
+  position: relative;
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.mh-testi-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.mh-testi-viewport {
+  position: relative;            /* offsetParent for the JS centring maths */
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: var(--sp-4);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;         /* Firefox — the dots are the affordance */
+  padding: var(--sp-2) 2px var(--sp-4);
+}
+.mh-testi-viewport::-webkit-scrollbar { display: none; }  /* WebKit/Blink */
+.mh-testi-viewport:focus-visible {
+  outline: 2px solid var(--mh-focus);
+  outline-offset: 3px;
+  border-radius: var(--radius-md);
+}
+
+.mh-testi-card {
+  scroll-snap-align: center;
+  flex: 0 0 100%;                /* one card per view on narrow screens */
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.mh-testi-card::before {        /* lane→medal top accent, like .mh-audience */
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--lane) 0%, var(--medal) 100%);
+  opacity: 0.55;
+}
+.mh-testi-quote {
+  position: relative;
+  margin: 0;
+  padding-top: var(--sp-5);
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  line-height: 1.5;
+  color: var(--ink);
+}
+.mh-testi-quote::before {       /* oversized editorial quotation mark */
+  content: '\201C';
+  position: absolute;
+  top: -0.16em; left: -0.04em;
+  font-family: var(--font-serif);
+  font-size: 3.2em;
+  line-height: 1;
+  color: var(--lane);
+  opacity: 0.28;
+  pointer-events: none;
+}
+.mh-testi-by {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: auto;             /* attribution pins to the card foot */
+}
+.mh-testi-avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: var(--radius-pill);
+  background: var(--lane-glow);  /* soft lane wash behind the initials */
+  border: 1px solid var(--rule);
+  color: var(--lane);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--fs-md);
+  letter-spacing: 0.02em;
+}
+.mh-testi-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mh-testi-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-testi-org {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+.mh-testi-org .sep { margin: 0 5px; color: var(--ink-faint); }
+
+/* Arrow controls + dots are JS-only affordances: hidden until the binder
+   adds .is-ready, so a no-JS visitor sees just the swipeable card row. */
+.mh-testi-arrow { display: none; }
+.mh-testi-dots { display: none; }
+.mh-testi.is-ready .mh-testi-arrow {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: color var(--dur-med) var(--ease-out-quick),
+              border-color var(--dur-med) var(--ease-out-quick),
+              transform var(--dur-fast) var(--ease-out-quick);
+}
+.mh-testi.is-ready .mh-testi-arrow:hover {
+  color: var(--lane);
+  border-color: var(--lane);
+}
+.mh-testi.is-ready .mh-testi-arrow:active { transform: scale(0.94); }
+.mh-testi-arrow svg { width: 18px; height: 18px; }
+
+.mh-testi.is-ready .mh-testi-dots {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.mh-testi-dot {
+  width: 8px; height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--rule);
+  cursor: pointer;
+  transition: width var(--dur-med) var(--ease-out-quick),
+              background var(--dur-med) var(--ease-out-quick);
+}
+.mh-testi-dot:hover { background: var(--ink-muted); }
+.mh-testi-dot.is-active { width: 22px; background: var(--lane); }
+
+.mh-testi-note {
+  max-width: 540px;
+  margin: var(--sp-3) auto 0;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* Wider screens: cap the card width for readable line-length and let the
+   neighbouring cards peek, so it visibly reads as a carousel. */
+@media (min-width: 720px) {
+  .mh-testi-card { flex-basis: min(620px, 82%); }
+}
+
+/* Narrow / touch: lean on the native swipe; the flanking arrows fold away
+   (the dots stay as the position affordance). */
+@media (max-width: 560px) {
+  .mh-testi.is-ready .mh-testi-arrow { display: none; }
+}
+
+/* Reduced motion: kill smooth scrolling (the autoplay JS is also gated off),
+   but the carousel stays fully navigable via swipe, arrows and dots — content
+   is never hidden or trapped. */
+@media (prefers-reduced-motion: reduce) {
+  .mh-testi-viewport { scroll-behavior: auto; }
+}
+
 /* "WHAT WE DON'T DO" — trust panel. Pit-wall-deep background, lane-yellow
    left-edge stripe, paired ✓/✗ rows. Reads as a written promise. */
 .mh-promise {
@@ -3793,6 +4072,168 @@ kbd {
   color: var(--ink-dim);
   font-size: var(--fs-sm);
   margin-top: 2px;
+}
+
+/* =====================================================================
+   UI 1.22 — FAQ ACCORDION
+   ---------------------------------------------------------------------
+   Expandable Q&A on the landing, built from native <details>/<summary>
+   — NO JavaScript. Each row reveals with a pure-CSS grid-template-rows
+   transition (0fr -> 1fr) and a + marker that collapses to a minus on
+   open; both are reduced-motion gated below. Because the markup is a
+   native disclosure widget, the panel stays fully keyboard- and
+   screen-reader-operable with JS disabled. Inspired by Limitless AI and
+   status pages.
+   ===================================================================== */
+.mh-faq {
+  max-width: 56rem;
+}
+.mh-faq-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 var(--sp-5);
+}
+.mh-faq-title em.editorial {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: 'opsz' 72;
+  color: var(--medal);
+  text-transform: none;
+}
+.mh-faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.mh-faq-item {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 200ms var(--ease-in-out),
+              background 200ms var(--ease-in-out);
+}
+.mh-faq-item:hover {
+  border-color: var(--chrome);
+}
+.mh-faq-item[open] {
+  border-color: var(--chrome);
+  background: var(--surface-2);
+}
+/* The clickable question row. The native disclosure triangle is removed
+   (both list-style and the WebKit marker) in favour of the +/- glyph. */
+.mh-faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(16px, 2vw, 19px);
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  color: var(--ink);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.mh-faq-q::-webkit-details-marker { display: none; }
+.mh-faq-q::marker { content: ''; }
+/* Use the brand-cascade focus token (engineered for a 3:1 ring on any
+   seed) and inset it so the ring is not clipped by the item's overflow. */
+.mh-faq-q:focus-visible {
+  outline: 2px solid var(--mh-focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+.mh-faq-q-text { flex: 1 1 auto; }
+/* +/- marker — two CSS bars; the vertical one collapses on open so the
+   plus reads as a minus. Pure CSS, transform-only (GPU-cheap). Painted in
+   neutral ink, NOT --lane: MediaHub is multi-tenant and a club's brand
+   seed can be a dark colour that would vanish as a thin glyph on the dark
+   panel, so the affordance must not depend on the accent's lightness. */
+.mh-faq-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+}
+.mh-faq-icon::before,
+.mh-faq-icon::after {
+  content: '';
+  position: absolute;
+  background: var(--ink-dim);
+  border-radius: 1px;
+  transition: transform 320ms var(--ease-in-out),
+              opacity 200ms var(--ease-in-out),
+              background 200ms var(--ease-in-out);
+}
+.mh-faq-icon::before {           /* horizontal bar */
+  top: 50%; left: 0; right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+}
+.mh-faq-icon::after {            /* vertical bar */
+  left: 50%; top: 0; bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+}
+/* Brighten the marker to full ink on hover / when open (the text already
+   sits at full ink, so the row's feedback is the marker + the border). */
+.mh-faq-item:hover .mh-faq-icon::before,
+.mh-faq-item:hover .mh-faq-icon::after,
+.mh-faq-item[open] .mh-faq-icon::before {
+  background: var(--ink);
+}
+.mh-faq-item[open] .mh-faq-icon::after {
+  transform: translateX(-50%) scaleY(0);
+  opacity: 0;
+}
+/* The answer panel. grid-template-rows 0fr -> 1fr is the canonical
+   CSS-only way to animate a <details> open to its natural height; the
+   inner wrapper clips the overflow while the row collapses. */
+.mh-faq-a {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms var(--ease-in-out);
+}
+.mh-faq-item[open] .mh-faq-a {
+  grid-template-rows: 1fr;
+}
+.mh-faq-a-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.mh-faq-a-inner p {
+  margin: 0;
+  padding: 0 var(--sp-5) var(--sp-5);
+  max-width: 60ch;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+@media (max-width: 720px) {
+  .mh-faq-q { padding: var(--sp-3) var(--sp-4); }
+  .mh-faq-a-inner p { padding: 0 var(--sp-4) var(--sp-4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Toggle is instant — native <details> still shows/hides the panel, so
+     no content is ever trapped; only the easing is dropped. */
+  .mh-faq-item,
+  .mh-faq-q,
+  .mh-faq-a,
+  .mh-faq-icon::before,
+  .mh-faq-icon::after {
+    transition: none;
+  }
 }
 
 /* FINAL-CTA STRIP — sits just before the footer. Picks up the masthead's
@@ -4272,4 +4713,490 @@ kbd {
   .mh-feed-time { margin-left: 0; width: 100%; order: 3; }
   .mh-feed-dl { grid-template-columns: 1fr; gap: 0 0; }
   .mh-feed-dl dt { padding-top: var(--sp-2); }
+}
+/* =====================================================================
+   UI 1.11 — Tabbed code-example switcher + syntax highlighting
+   ---------------------------------------------------------------------
+   Inspired by Resend's docs. Highlighting is rendered SERVER-SIDE by
+   src/mediahub/web/code_highlight.py into <span class="mh-tok-*"> tokens
+   (no Prism, no CDN — see CLAUDE.md's self-hosting rule). Language tabs
+   are PURE CSS: one hidden radio per language drives positional
+   :checked ~ rules below, so switching needs no JavaScript. Only the
+   copy button is JS-enhanced (static/js/ui-kit.js); it stays hidden for
+   no-JS visitors (the code is still selectable), revealed via .mh-js.
+   ===================================================================== */
+.mh-code {
+  /* Dark-first token palette — overridable per-instance via these vars. */
+  --tok-comment:  #6b7686;
+  --tok-punct:    #8b94a7;
+  --tok-keyword:  #c4a7f5;
+  --tok-string:   #9ece6a;
+  --tok-number:   #ff9e64;
+  --tok-boolean:  #e0af68;
+  --tok-function: #7aa2f7;
+  --tok-property: #7dcfff;
+  --tok-variable: #f4a3b4;
+  --tok-operator: #89ddff;
+  position: relative;
+  margin: var(--sp-4) 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+/* --- head bar: language tabs / chip + copy button -------------------- */
+.mh-cs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 38px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+.mh-cs-lang {
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-cs-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.mh-cs-tab {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: -1px;            /* sit the underline on the head's border */
+  padding: 9px 12px;
+  font: 500 12.5px/1 var(--font-mono);
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  user-select: none;
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              border-color var(--dur-fast) var(--ease-out-quick);
+}
+.mh-cs-tab:hover { color: var(--ink-dim); }
+
+/* Hidden but focusable radios (the real, keyboard-navigable controls). */
+.mh-cs-radio {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  border: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* --- panels --------------------------------------------------------- */
+.mh-cs-panel {
+  margin: 0;
+  padding: var(--sp-4);
+  overflow-x: auto;
+  font: 13px/1.7 var(--font-mono);
+  color: var(--ink-dim);
+  background: var(--bg-deep);
+  tab-size: 2;
+  -webkit-overflow-scrolling: touch;
+}
+.mh-cs-panel code {
+  font: inherit;
+  color: inherit;
+  background: none;
+  padding: 0;
+  border: 0;
+  white-space: pre;
+}
+
+/* --- pure-CSS tab switching (positional; supports up to 6 languages) - */
+.mh-code-switcher > .mh-cs-panel,
+.mh-code-switcher .mh-cs-panel { display: none; }
+.mh-code-switcher > .mh-cs-radio:nth-of-type(1):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(1),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(2):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(2),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(3):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(3),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(4):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(4),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(5):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(5),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(6):checked ~ .mh-cs-body > .mh-cs-panel:nth-of-type(6) {
+  display: block;
+}
+/* active tab styling — light the matching label */
+.mh-code-switcher > .mh-cs-radio:nth-of-type(1):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(1),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(2):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(2),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(3):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(3),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(4):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(4),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(5):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(5),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(6):checked ~ .mh-cs-head .mh-cs-tab:nth-of-type(6) {
+  color: var(--ink);
+  border-bottom-color: var(--lane);
+}
+/* keyboard focus ring on the active control's visible label */
+.mh-code-switcher > .mh-cs-radio:nth-of-type(1):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(1),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(2):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(2),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(3):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(3),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(4):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(4),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(5):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(5),
+.mh-code-switcher > .mh-cs-radio:nth-of-type(6):focus-visible ~ .mh-cs-head .mh-cs-tab:nth-of-type(6) {
+  outline: 2px solid var(--lane);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- copy button (JS-enhanced; hidden until .mh-js upgrades it) ------ */
+.mh-cs-copy {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 10px;
+  font: 500 11.5px/1 var(--font-mono);
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              border-color var(--dur-fast) var(--ease-out-quick),
+              background var(--dur-fast) var(--ease-out-quick);
+}
+.mh-js .mh-cs-copy { display: inline-flex; }
+.mh-cs-copy:hover { color: var(--ink); border-color: var(--chrome); background: var(--surface-2); }
+.mh-cs-copy:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-cs-copy.is-copied { color: var(--good); border-color: var(--good); }
+.mh-cs-copy-icon { flex: none; }
+
+/* --- syntax-highlight token colours --------------------------------- */
+.mh-tok-comment     { color: var(--tok-comment); font-style: italic; }
+.mh-tok-string      { color: var(--tok-string); }
+.mh-tok-number      { color: var(--tok-number); }
+.mh-tok-keyword     { color: var(--tok-keyword); }
+.mh-tok-boolean     { color: var(--tok-boolean); }
+.mh-tok-function    { color: var(--tok-function); }
+.mh-tok-property    { color: var(--tok-property); }
+.mh-tok-variable    { color: var(--tok-variable); }
+.mh-tok-operator    { color: var(--tok-operator); }
+.mh-tok-punctuation { color: var(--tok-punct); }
+
+/* --- Developer/API docs page layout (hosts the UI 1.11 switcher) ----- */
+.mh-api-endpoint { scroll-margin-top: 84px; }
+.mh-api-endpoint + .mh-api-endpoint { margin-top: var(--sp-6); }
+.mh-api-sig {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-2);
+}
+.mh-api-sig code {
+  font: 600 14px/1.4 var(--font-mono);
+  color: var(--ink);
+  background: none;
+  padding: 0;
+  word-break: break-all;
+}
+.mh-method {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+  flex: none;
+}
+.mh-method-get  { color: var(--info); }
+.mh-method-post { color: var(--good); }
+.mh-method-put,
+.mh-method-patch { color: var(--warn); }
+.mh-method-delete { color: var(--bad); }
+.mh-api-params {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--sp-3) 0;
+  font-size: 13.5px;
+}
+.mh-api-params th,
+.mh-api-params td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.mh-api-params th { color: var(--ink-muted); font-weight: 600; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.mh-api-params td code { font: 12.5px/1.5 var(--font-mono); color: var(--tok-property); background: none; padding: 0; }
+
+/* =====================================================================
+   UI 1.6 — Animated results/data charts (Mixpanel-inspired)
+   ---------------------------------------------------------------------
+   Two first-party chart types — a vertical bar/podium chart and a
+   cohort/area trend chart — rendered as pure HTML/SVG by web/charts.py
+   (no charting SDK, no canvas, no external fetch). They BUILD ON SCROLL:
+   the markup carries `.mh-chart[data-mh-animate]`, the shared bindReveals
+   IntersectionObserver (in web._layout) adds `.is-in` when the chart
+   enters the viewport, and the bar-grow / line-draw below is a pure CSS
+   transition gated on that class. Value readouts reuse the existing
+   data-mh-count count-up.
+
+   Progressive enhancement, exactly like the U.5 reveal system: the
+   collapsed start-state is `.mh-js`-gated, so a no-JS visitor gets the
+   final, fully-drawn chart with no transition; `prefers-reduced-motion`
+   snaps straight to the final state too. Data is never hidden behind JS.
+   ===================================================================== */
+.mh-chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mh-chart-cap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  line-height: 1.4;
+}
+.mh-chart-empty {
+  padding: 22px 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-dim);
+  border: 1px dashed var(--hairline, rgba(255,255,255,0.12));
+  border-radius: 10px;
+}
+
+/* ---- Bar / podium chart -------------------------------------------- */
+.mh-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(8px, 3vw, 26px);
+  padding-top: 22px;            /* headroom for the value labels above tall bars */
+  border-bottom: 1px solid var(--hairline, rgba(255,255,255,0.12));
+}
+.mh-chart-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+.mh-chart-bar-track {
+  position: relative;
+  width: 100%;
+  max-width: 72px;
+  height: var(--mh-chart-h, 150px);
+  display: flex;
+  align-items: flex-end;
+}
+.mh-chart-bar-fill {
+  width: 100%;
+  height: var(--mh-bar, 0%);
+  min-height: 3px;
+  border-radius: 5px 5px 1px 1px;
+  background: var(--ink-dim);
+  transform-origin: bottom center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+}
+.mh-chart-bar-val {
+  position: absolute;
+  left: 50%;
+  bottom: var(--mh-bar, 0%);
+  transform: translate(-50%, -7px);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+/* x-axis tick row — shared by both chart types; the --bars variant mirrors
+   the bar column model so each tick lands under its bar. */
+.mh-chart-xaxis {
+  display: flex;
+  gap: clamp(8px, 3vw, 26px);
+}
+.mh-chart-xtick {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tone -> fill colour. The podium trio mirrors the existing bento podium
+   (gold = medal, silver = dim ink, bronze = lane dimmed) so the landing
+   reads consistently; the semantic tones reuse the status palette. */
+/* Glows are derived from the fill colour via color-mix so they always track
+   the bar in any theme — the brand --lane / --medal tokens are re-themed per
+   org, but the legacy *-glow literals are not, so deriving keeps them in step
+   (a fixed yellow-green glow on a re-themed navy bar would look wrong). */
+.mh-chart-bar.tone-gold    .mh-chart-bar-fill { background: var(--medal); box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 0 16px color-mix(in oklab, var(--medal) 50%, transparent); }
+.mh-chart-bar.tone-silver  .mh-chart-bar-fill { background: var(--ink-dim); }
+.mh-chart-bar.tone-bronze  .mh-chart-bar-fill { background: var(--lane); opacity: 0.62; }
+.mh-chart-bar.tone-lane    .mh-chart-bar-fill { background: var(--lane); box-shadow: inset 0 1px 0 rgba(0,0,0,0.18), 0 0 16px color-mix(in oklab, var(--lane) 45%, transparent); }
+.mh-chart-bar.tone-info    .mh-chart-bar-fill { background: var(--info); }
+.mh-chart-bar.tone-good    .mh-chart-bar-fill { background: var(--good); }
+.mh-chart-bar.tone-bad     .mh-chart-bar-fill { background: var(--bad); }
+.mh-chart-bar.tone-neutral .mh-chart-bar-fill { background: color-mix(in oklab, var(--ink-dim) 60%, transparent); }
+.mh-chart-bar.tone-gold  .mh-chart-bar-val { color: var(--medal); }
+.mh-chart-bar.tone-lane  .mh-chart-bar-val { color: var(--lane); }
+
+/* Bar build-on-scroll: scaleY from the baseline; the value label fades up
+   once the bar has grown. Only when JS is present AND the chart has not yet
+   been revealed - so no-JS renders the final bar immediately. */
+.mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-fill {
+  transition: transform 820ms var(--ease-out, cubic-bezier(0.16,1,0.3,1));
+  will-change: transform;
+}
+.mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-fill {
+  transform: scaleY(0);
+}
+.mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-val {
+  transition: opacity 420ms var(--ease-out, ease-out) 360ms;
+}
+.mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-val {
+  opacity: 0;
+}
+/* Per-bar grow stagger so the chart reads left-to-right. */
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(1) .mh-chart-bar-fill { transition-delay: 0ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(2) .mh-chart-bar-fill { transition-delay: 90ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(3) .mh-chart-bar-fill { transition-delay: 180ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(4) .mh-chart-bar-fill { transition-delay: 270ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(5) .mh-chart-bar-fill { transition-delay: 360ms; }
+.mh-chart--bars.is-in .mh-chart-bar:nth-child(6) .mh-chart-bar-fill { transition-delay: 450ms; }
+
+/* ---- Cohort / area trend chart ------------------------------------- */
+.mh-chart--area { --mh-chart-accent: var(--lane); }
+.mh-chart--area.tone-info { --mh-chart-accent: var(--info); }
+.mh-chart--area.tone-good { --mh-chart-accent: var(--good); }
+.mh-chart--area.tone-gold { --mh-chart-accent: var(--medal); }
+.mh-chart--area.tone-bad  { --mh-chart-accent: var(--bad); }
+.mh-chart-area-wrap { width: 100%; }
+.mh-chart-area-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.mh-chart-grid {
+  stroke: var(--hairline, rgba(255,255,255,0.10));
+  stroke-width: 1;
+}
+.mh-chart-area-stop-0 { stop-color: var(--mh-chart-accent); stop-opacity: 0.34; }
+.mh-chart-area-stop-1 { stop-color: var(--mh-chart-accent); stop-opacity: 0; }
+.mh-chart-area-line {
+  stroke: var(--mh-chart-accent);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px color-mix(in oklab, var(--mh-chart-accent) 45%, transparent));
+}
+.mh-chart-area-dot {
+  fill: var(--bg);
+  stroke: var(--mh-chart-accent);
+  stroke-width: 2;
+}
+
+/* Area build-on-scroll: the line draws (pathLength=1 + dashoffset), the fill
+   fades up beneath it, the dots pop in last, staggered. */
+.mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1150ms var(--ease-out, ease-out);
+}
+.mh-js .mh-chart--area[data-mh-animate].is-in .mh-chart-area-line {
+  stroke-dashoffset: 0;
+}
+.mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-fill {
+  opacity: 0;
+  transition: opacity 760ms var(--ease-out, ease-out) 220ms;
+}
+.mh-js .mh-chart--area[data-mh-animate].is-in .mh-chart-area-fill { opacity: 1; }
+.mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-dot {
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out, ease-out);
+}
+.mh-js .mh-chart--area[data-mh-animate].is-in .mh-chart-area-dot {
+  opacity: 1;
+  transition-delay: calc(760ms + var(--mh-dot-i, 0) * 70ms);
+}
+
+/* Reduced motion - both charts snap to their final, fully-drawn state with
+   no transition (matches the U.5 reveal system's reduced-motion no-op). */
+@media (prefers-reduced-motion: reduce) {
+  .mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-fill,
+  .mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-fill {
+    transform: none;
+    transition: none;
+  }
+  .mh-js .mh-chart--bars[data-mh-animate] .mh-chart-bar-val,
+  .mh-js .mh-chart--bars[data-mh-animate]:not(.is-in) .mh-chart-bar-val {
+    opacity: 1;
+    transition: none;
+  }
+  .mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-line,
+  .mh-js .mh-chart--area[data-mh-animate]:not(.is-in) .mh-chart-area-line {
+    stroke-dashoffset: 0;
+    transition: none;
+  }
+  .mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-fill,
+  .mh-js .mh-chart--area[data-mh-animate] .mh-chart-area-dot,
+  .mh-js .mh-chart--area[data-mh-animate]:not(.is-in) .mh-chart-area-fill,
+  .mh-js .mh-chart--area[data-mh-animate]:not(.is-in) .mh-chart-area-dot {
+    opacity: 1;
+    transition: none;
+  }
+}
+
+/* Tighter chart height on small screens. */
+@media (max-width: 560px) {
+  .mh-chart-bar-track { height: var(--mh-chart-h-sm, 120px); }
+  .mh-chart-bar-val { font-size: 15px; }
+}
+
+/* ---- Landing "sample-outputs" chart cards (UI 1.6) ----------------- */
+/* Two bordered panels side by side, each framing one chart with a small
+   eyebrow + title. Collapses to a single column on narrow viewports. */
+.mh-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(16px, 3vw, 28px);
+  margin-top: 28px;
+}
+.mh-chart-card {
+  background: var(--panel, rgba(255,255,255,0.02));
+  border: 1px solid var(--hairline, rgba(255,255,255,0.10));
+  border-radius: 16px;
+  padding: clamp(18px, 2.4vw, 26px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.mh-chart-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mh-chart-card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--lane);
+}
+.mh-chart-card-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(18px, 2.2vw, 22px);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+@media (max-width: 760px) {
+  .mh-charts-grid { grid-template-columns: 1fr; }
 }

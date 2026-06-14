@@ -120,7 +120,13 @@ RESPONSIVE_GUARDRAILS_CSS = r"""
   html { scrollbar-gutter: stable; }
 }
 @supports (color-scheme: dark) {
-  :root { color-scheme: dark; }
+  /* Dark-first, but OS-aware (UI 1.23). `dark light` means: a visitor
+     with no OS colour preference resolves to dark (the reference
+     design); a visitor whose OS is set to light gets the light branch
+     of every light-dark() token. The in-app theme toggle overrides
+     this by writing an explicit `color-scheme` onto <html> from
+     localStorage, which (being an inline style) beats this rule. */
+  :root { color-scheme: dark light; }
 }
 @supports (interpolate-size: allow-keywords) {
   :root { interpolate-size: allow-keywords; }
@@ -230,12 +236,15 @@ img, video { block-size: auto; }
   }
 }
 
-/* Light-mode preference. MediaHub is dark-first by design; this only
-   raises ink contrast slightly so the same dark palette stays legible
-   for users on bright displays. Brand colours are unchanged. */
+/* OS colour-scheme preference (UI 1.23). MediaHub is dark-first by
+   design but now ships a real light palette: a visitor whose OS is set
+   to light gets it; a visitor on dark (or with no preference, via the
+   `dark light` default above) stays on the pit-wall dark. These only
+   shape the default, no-JS "System" experience — the in-app toggle
+   forces a mode regardless of OS by writing color-scheme onto <html>. */
 @media (prefers-color-scheme: light) {
   :root {
-    color-scheme: dark light;
+    color-scheme: light;
   }
 }
 @media (prefers-color-scheme: dark) {

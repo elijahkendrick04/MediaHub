@@ -71,6 +71,33 @@ def ready_client(tmp_path, monkeypatch):
         yield c
 
 
+@pytest.fixture
+def orgs_present_client(tmp_path, monkeypatch):
+    """A deployment that already has an organisation, viewed *signed out* (no
+    active profile in the session). The landing still shows the
+    prospective-customer hero — so the rotator and its script must ship here
+    too, not only on a brand-new deployment with zero organisations.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    runs = tmp_path / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(webmod, "DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(webmod, "RUNS_DIR", runs, raising=False)
+    save_profile(
+        ClubProfile(
+            profile_id="wycombe",
+            display_name="Wycombe District SC",
+            brand_voice_summary="Friendly competitive club.",
+            brand_capture_status="ok_heuristic",
+        )
+    )
+    app = webmod.app
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        # No session_transaction → the visitor is signed out.
+        yield c
+
+
 def _home(client) -> str:
     resp = client.get("/")
     assert resp.status_code == 200, f"/ → {resp.status_code}"
@@ -251,3 +278,40 @@ def test_ready_org_display_name_is_escaped(ready_client, tmp_path):
     body = _home(ready_client)
     assert "<script>alert(1)</script>" not in body
     assert "&lt;script&gt;" in body
+
+
+# =========================================================================== #
+# Scope: the rotator follows the *signed-out* state, not the *zero-org* state
+# =========================================================================== #
+def test_signed_out_hero_cycles_even_when_an_org_exists(orgs_present_client):
+    """The rotator is scoped to the prospective-customer (signed-out) hero, not
+    to a brand-new zero-org deployment. Once a club exists but nobody is signed
+    in, the landing still shows that hero — so the cycle and its script ship.
+    """
+    body = _home(orgs_present_client)
+    h1 = _hero_h1(body)
+    # The prospective-customer hero, not the returning-user "Ready to file." one.
+    assert "Results in." in h1
+    assert "<em class=\"editorial\">Ready</em>" not in h1
+    # "Sign in" leads the actions only on the n_orgs > 0 signed-out branch — it
+    # proves this is the with-orgs path, distinct from the zero-org fixture.
+    assert "Sign in" in body
+    # …and the full rotator + its one script still ship.
+    assert "data-mh-word-cycle" in h1
+    for word in webmod._HERO_CONTENT_WORDS:
+        assert f">{word}</span>" in h1
+    assert body.count(webmod._HERO_WORD_CYCLE_JS) == 1
+
+
+# =========================================================================== #
+# The crossfade's behavioural contract: cadence + wrap-around
+# =========================================================================== #
+def test_script_cadence_and_wrap_are_pinned():
+    """The crossfade cadence (a calm 2.6s dwell, not a frantic flicker) and the
+    wrap-around — advancing modulo the word count so it loops back to the first
+    word rather than running off the end — are part of the behavioural contract.
+    """
+    js = webmod._HERO_WORD_CYCLE_JS
+    assert "setInterval(step, 2600)" in js, "2.6s dwell between words"
+    # i = (i + 1) % items.length → advance one, wrapping to the first word.
+    assert "(i + 1) % items.length" in js
