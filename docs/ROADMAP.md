@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `7a208e17c` · UI 1.1: cycling example-prompt placeholder (#511)
+**Last updated:** 2026-06-14 · `095c43181` · Merge pull request #507 — UI 1.4 tactile spring-physics micro-interactions
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -127,7 +127,6 @@ begin until Phases 1–5 are complete (rule 12).
 <!-- ROADMAP:TODO -->
 - **UI 1.2** · Phase 1 (Product polish) — Bento-grid feature section (inspired by Umbrel): replace the uniform capability card rows on the landing with a bento grid of varied-size tiles, each carrying its own mini-visual (sample story card, a stat chip, brand-kit swatches, a 'moments we detect' list, a reel preview); dark/premium aesthetic, reuses existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.3** · Phase 1 (Product polish) — Inline media thumbnails in a display headline (inspired by Samara): embed small inline output thumbnails inside a large hero headline sentence — 'From a results sheet [img] to a story [img], a feed graphic [img] and a reel [img]' — the images are real sample outputs served from the static directory · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.4** · Phase 1 (Product polish) — Tactile spring-physics micro-interactions (inspired by Family): a restrained spring-physics layer on primary buttons, card-selection, and toggles — subtle magnetic hover + bouncy press; vanilla JS CSS-custom-property animation, `prefers-reduced-motion` respected, understated to preserve the editorial tone · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1507,9 +1506,8 @@ list and the auto table below, not here.
 |---|---|---|
 | 2026-06-14 | `651a466fd` | UI 1.1: cycling example-prompt placeholder |
 | 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
+| 2026-06-14 | `7410b64b9` | Add UI 1.4 tactile spring-physics micro-interactions |
 | 2026-06-14 | `edede9341` | Crawl: fetch result files before HTML renders; surface result-file count |
 | 2026-06-14 | `389a1d203` | UI 1.5 — live local-time + system-status HUD readout |
 | 2026-06-14 | `e63ed6b85` | Drop split/continuation rows so only overall times are kept |
-| 2026-06-14 | `1e08619ee` | U.15: before/after reveal slider on the landing page |
-| 2026-06-14 | `4238afc14` | U.12: animated count-up (odometer) stat numerals on the landing hero |
 <!-- /ROADMAP:ACTIVITY -->
