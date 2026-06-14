@@ -1516,6 +1516,59 @@ def _research_console_enabled() -> bool:
     }
 
 
+# UI 1.1 — Cycling example-prompt placeholders (inspired by Cosmos). Each
+# describe-a-moment / search field carries a pipe-delimited list of real example
+# prompts in a data-mh-cycle-placeholder attribute; bindCyclePlaceholders() in
+# _layout types them through the field's own placeholder (a typewriter cycle:
+# type → hold → erase → next), guiding first-time users with zero extra chrome.
+# Pure vanilla JS, no deps, prefers-reduced-motion respected. The static
+# placeholder="" each field already carries stays as the no-JS / reduced-motion
+# fallback, so nothing is lost when the script or motion is unavailable.
+_CYCLE_PH_MOMENT = (
+    "Try: Tom Davies PB 100m free",
+    "Try: top three at county finals",
+    "Try: thank-you to our sponsor Riverside Physio",
+    "Try: Maya's first sub-30 50m fly",
+    "Try: relay squad breaks the club record",
+    "Try: medal haul from the regional gala",
+)
+_CYCLE_PH_SEARCH = (
+    "Try: county championships",
+    "Try: spring gala 2026",
+    "Try: regionals.hy3",
+    "Try: run id 7f3c9a",
+)
+_CYCLE_PH_RESEARCH = (
+    "Try: 2024 county championship headline results",
+    "Try: who set the regional 100m free record this season",
+    "Try: latest Swim England qualifying times",
+)
+_CYCLE_PH_ASKDATA = (
+    "Try: when did Alice Lee last PB the 100m free",
+    "Try: our medal count at the spring gala",
+    "Try: which swimmers broke 30s in the 50m fly",
+)
+
+
+def _cycle_ph_attr(phrases) -> str:
+    """Render the ``data-mh-cycle-placeholder`` attribute for one field.
+
+    The phrases are joined with `` | `` (the JS splits on the pipe, trimming
+    whitespace) and HTML-escaped so the value is safe inside a double-quoted
+    attribute. Returns the whole ``data-mh-cycle-placeholder="…"`` token so call
+    sites just drop it into the tag.
+    """
+    return f'data-mh-cycle-placeholder="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the lists are static, so there's no reason to
+# rebuild the escaped attribute on every request.
+_CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
+_CYCLE_PH_ATTR_SEARCH = _cycle_ph_attr(_CYCLE_PH_SEARCH)
+_CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
+_CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+
 # Console page body (Capability 3c). A plain string — NOT an f-string — so the
 # JS braces stay literal; the route swaps __SUBMIT_URL__ for the real endpoint.
 # Results are rendered with textContent / createElement only (never innerHTML),
@@ -1531,7 +1584,7 @@ _WEB_RESEARCH_CONSOLE_BODY = """
     its bound it says so and asserts nothing &mdash; partial results are discarded.
   </p>
   <form id="rform" data-no-loader="1" style="margin-top:16px">
-    <textarea id="rq" name="question" rows="3" maxlength="500" required
+    <textarea id="rq" name="question" rows="3" maxlength="500" required __CYCLE_PH__
       placeholder="e.g. What were the headline results at the 2024 county championships for the City Aquatics club?"
       style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -1649,7 +1702,7 @@ _CLUB_QA_CONSOLE_BODY = """
     search, no guessing: if your data doesn't hold the answer, it says so.
   </p>
   <form id="qaform" data-no-loader="1" style="margin-top:16px">
-    <textarea id="qaq" name="question" rows="3" maxlength="400" required
+    <textarea id="qaq" name="question" rows="3" maxlength="400" required __CYCLE_PH__
       placeholder="e.g. When did Alice Lee last swim a PB in the 100m Freestyle?"
       style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -8574,6 +8627,81 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       btn.textContent = origLabel;
     });
   });
+
+  // === UI 1.1 — Cycling example-prompt placeholder (inspired by Cosmos) ===
+  // Any field tagged [data-mh-cycle-placeholder="phrase | phrase | …"] types
+  // its example prompts through the placeholder (typewriter cycle: type → hold
+  // → erase → next), guiding first-time users with zero extra chrome. The
+  // static placeholder="" stays as the no-JS / reduced-motion fallback. Pauses
+  // on focus, while the field already holds a value, and when the tab is
+  // hidden; skipped entirely under prefers-reduced-motion. One timer per field,
+  // so state stays fully resumable. Vanilla JS, no deps.
+  function bindCyclePlaceholders() {
+    if (prefersReduced) return; // reduced motion -> keep the static placeholder
+    var CARET = String.fromCharCode(0x2502); // thin typewriter caret
+    var HOLD_TICKS = 7; // ~7 x 285ms = ~2s rest on a fully-typed phrase
+    document.querySelectorAll('[data-mh-cycle-placeholder]').forEach(function(el){
+      if (el.dataset.mhCycleBound === '1') return;
+      el.dataset.mhCycleBound = '1';
+      var phrases = (el.getAttribute('data-mh-cycle-placeholder') || '')
+        .split('|')
+        .map(function(s){ return s.trim(); })
+        .filter(function(s){ return s.length > 0; });
+      if (!phrases.length) return;
+      var staticPh = el.getAttribute('placeholder') || '';
+      var idx = 0, pos = 0, mode = 'typing', caretOn = true, holdTicks = 0;
+      var running = false, timer = null;
+
+      function render(){
+        el.setAttribute('placeholder', phrases[idx].slice(0, pos) + (caretOn ? CARET : ''));
+      }
+      function schedule(ms){ timer = setTimeout(tick, ms); }
+      function tick(){
+        if (!running) return;
+        if (!document.contains(el)) { stop(false); return; } // detached -> give up
+        if (mode === 'typing') {
+          if (pos < phrases[idx].length) {
+            pos++; caretOn = true; render(); schedule(42 + Math.random() * 26);
+          } else {
+            mode = 'holding'; holdTicks = 0; caretOn = true; render(); schedule(420);
+          }
+        } else if (mode === 'holding') {
+          holdTicks++; caretOn = (holdTicks % 2 === 0); render();
+          if (holdTicks >= HOLD_TICKS) { mode = 'erasing'; caretOn = true; render(); schedule(280); }
+          else schedule(285);
+        } else { // erasing
+          if (pos > 0) { pos--; caretOn = true; render(); schedule(24 + Math.random() * 14); }
+          else { idx = (idx + 1) % phrases.length; mode = 'typing'; caretOn = true; schedule(360); }
+        }
+      }
+      function start(){
+        if (running) return;
+        if (el.value) return;                       // user is typing -> leave them be
+        if (document.activeElement === el) return;  // focused -> don't move it behind the cursor
+        if (document.hidden) return;                // background tab -> save CPU
+        running = true; tick();
+      }
+      function stop(restoreStatic){
+        running = false;
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (restoreStatic) {
+          idx = 0; pos = 0; mode = 'typing'; holdTicks = 0; caretOn = false;
+          el.setAttribute('placeholder', staticPh);
+        }
+      }
+      el.addEventListener('focus', function(){ stop(true); });
+      el.addEventListener('blur', function(){ if (!el.value) start(); });
+      el.addEventListener('input', function(){ if (el.value) stop(true); else start(); });
+      document.addEventListener('visibilitychange', function(){
+        if (document.hidden) stop(false);
+        else if (!el.value && document.activeElement !== el) start();
+      });
+      start();
+    });
+  }
+  if (document.readyState !== 'loading') bindCyclePlaceholders();
+  else document.addEventListener('DOMContentLoaded', bindCyclePlaceholders);
+  MH.bindCyclePlaceholders = bindCyclePlaceholders;
 })();
 </script>
 <script>
@@ -10272,7 +10400,7 @@ def create_app() -> Flask:
             '<div class="mh-toolbar">'
             '<div class="grow mh-search">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            '<input id="mh-activity-search" type="search" placeholder="Search meet name, file or run id…" autocomplete="off" />'
+            f'<input id="mh-activity-search" type="search" {_CYCLE_PH_ATTR_SEARCH} placeholder="Search meet name, file or run id…" autocomplete="off" />'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
@@ -19800,7 +19928,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             quick_url
         }" enctype="multipart/form-data" data-loader-text="Building your graphic">
     <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
-    <textarea id="ft-prompt" name="prompt" rows="4" required
+    <textarea id="ft-prompt" name="prompt" rows="4" required {_CYCLE_PH_ATTR_MOMENT}
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
@@ -20123,7 +20251,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <form id="chat-form" method="post" action="{send_url}" style="margin-top:var(--sp-5)" data-loader-text="Thinking…">
   <label class="req" for="chat-reply">Your reply</label>
   <textarea id="chat-reply" name="message" placeholder="Tell the assistant what you want to post about…"
-            style="min-height:110px" required></textarea>
+            {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
     <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
@@ -27238,7 +27366,7 @@ function mhSetupMode(mode) {{
             return _layout("Web research", off, active="research"), 404
         body = _WEB_RESEARCH_CONSOLE_BODY.replace(
             "__SUBMIT_URL__", url_for("api_web_research_submit")
-        )
+        ).replace("__CYCLE_PH__", _CYCLE_PH_ATTR_RESEARCH)
         return _layout("Web research", body, active="research")
 
     @app.route("/api/web-research", methods=["POST"])
@@ -27323,7 +27451,9 @@ function mhSetupMode(mode) {{
     @app.route("/club-qa")
     def club_qa_console():
         """Render the "Ask the data" console — Q&A over the org's own runs."""
-        body = _CLUB_QA_CONSOLE_BODY.replace("__SUBMIT_URL__", url_for("api_club_qa_submit"))
+        body = _CLUB_QA_CONSOLE_BODY.replace(
+            "__SUBMIT_URL__", url_for("api_club_qa_submit")
+        ).replace("__CYCLE_PH__", _CYCLE_PH_ATTR_ASKDATA)
         return _layout("Ask the data", body, active="settings")
 
     @app.route("/api/club-qa", methods=["POST"])
