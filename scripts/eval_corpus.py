@@ -5,10 +5,8 @@ Output: samples/learning_corpus/EVAL_REPORT.csv with per-document metrics, and a
 summary printed to stdout.
 """
 import csv
-import json
 import sys
 import time
-import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
