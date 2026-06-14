@@ -12119,9 +12119,7 @@ def create_app() -> Flask:
             '<section class="mh-section">'
             '<div class="mh-section-eyebrow-strip mh-reveal">'
             '<span class="label">In their words</span></div>'
-            + _reveal_lines(
-                ["The weekend it", 'hands <em class="editorial">back</em>.']
-            )
+            + _reveal_lines(["The weekend it", 'hands <em class="editorial">back</em>.'])
             + '<div class="mh-testi mh-reveal" data-mh-testi '
             'data-mh-testi-interval="6500" role="group" '
             'aria-roledescription="carousel" '
@@ -12149,8 +12147,7 @@ def create_app() -> Flask:
             + '<p class="mh-testi-note">Illustrative — these voice the '
             "volunteers, coaches and committee members MediaHub is built for. "
             "We are pre-launch, so they are representative of the workflow, "
-            "not paid endorsements.</p>"
-            + "</section>"
+            "not paid endorsements.</p>" + "</section>"
         )
 
         # --- Promise / what we don't do. Lane-yellow left-stripe trust
