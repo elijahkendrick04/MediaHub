@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `e87046b26` · Build UI 1.12 — sortable/filterable results data table with sparklines (#564)
+**Last updated:** 2026-06-14 · `b6c37f759` · Build UI 1.21 — text-scramble/decode animation (#542)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -152,7 +152,6 @@ sequence it or merge with care.
 - **UI 1.18** · Phase 1 (Product polish) — Inspector/properties panel (from Sketch): a lightweight side panel to tweak a generated card before approval — edit caption text, swap brand palette swatch, toggle elements, adjust crop; posted back to existing Flask card-edit routes · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.19** · Phase 1 (Product polish) — Testimonial/social-proof carousel (from Sketch): club/coach quote cards + avatar initials with arrow controls + autoplay on the landing; pure CSS/JS, no carousel lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.21** · Phase 1 (Product polish) — Text-scramble/decode animation (from Locomotive): character-by-character scramble-then-decode reveal for the 'engine is generating…' processing state and optional hero headline reveal; vanilla JS, respects `prefers-reduced-motion` · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1517,6 +1516,5 @@ list and the auto table below, not here.
 | 2026-06-14 | `8261b091a` | Build UI 1.14 — notifications inbox (bell + unread badge + dropdown) |
 | 2026-06-14 | `c921af047` | Build UI 1.25 — emoji reactions on cards & the review queue |
 | 2026-06-14 | `41171c57d` | Add visual template/archetype gallery (UI 1.10) |
-| 2026-06-14 | `e25ace721` | Build UI2.1 — cut-out before/after compare slider |
-| 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
+| 2026-06-14 | `0b9141f55` | Build UI 1.21 — text-scramble/decode animation |
 <!-- /ROADMAP:ACTIVITY -->
