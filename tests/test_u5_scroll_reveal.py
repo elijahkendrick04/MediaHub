@@ -173,17 +173,17 @@ class TestHomeSignedOut:
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
     def test_line_spans_two_per_headline(self, app):
-        # Each of the 7 reveal-lines headlines is split into exactly two
+        # Each of the 8 reveal-lines headlines is split into exactly two
         # editorial lines (steps, before/after, bento, frames, audience,
-        # promise, final-CTA) → 14 line spans.
+        # testimonials [UI 1.19], promise, final-CTA) → 16 line spans.
         body = _home(app)
-        assert body.count('<span class="mh-line">') == 14
+        assert body.count('<span class="mh-line">') == 16
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
         body = _home(app)
-        # The five content-section eyebrows now reveal (were static before):
-        # steps, before/after, bento, frames, audience.
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 5
+        # The six content-section eyebrows now reveal (were static before):
+        # steps, before/after, bento, frames, audience, testimonials (UI 1.19).
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 6
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body

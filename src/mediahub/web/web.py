@@ -9739,6 +9739,127 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   else document.addEventListener('DOMContentLoaded', bindBeforeAfter);
   MH.bindBeforeAfter = bindBeforeAfter;
 
+  // === Testimonial / social-proof carousel (UI 1.19) ===
+  // Club/coach quote cards advanced by arrow controls, position dots and a
+  // gentle autoplay. The viewport is a native CSS scroll-snap row that works
+  // on its own with no JS (swipe / scroll / focus + arrow keys), so content is
+  // never trapped behind script. This initialiser progressively enhances it:
+  // it reveals the JS-only controls (`is-ready`, so no-JS visitors never see
+  // dead buttons), re-centres the active card on each control, keeps the dots
+  // in sync with manual swipes via an IntersectionObserver, announces the slide
+  // through a polite live region, and runs autoplay ONLY when motion is allowed
+  // — paused on hover/focus and while the tab is hidden, never started under
+  // prefers-reduced-motion. No carousel library. Inspired by Sketch.
+  function bindTestimonials() {
+    document.querySelectorAll('[data-mh-testi]').forEach(function(root){
+      if (root.getAttribute('data-mh-testi-bound')) return;
+      root.setAttribute('data-mh-testi-bound', '1');
+      var viewport = root.querySelector('.mh-testi-viewport');
+      var cards = Array.prototype.slice.call(root.querySelectorAll('.mh-testi-card'));
+      var dots = Array.prototype.slice.call(root.querySelectorAll('.mh-testi-dot'));
+      var prevBtn = root.querySelector('[data-mh-testi-prev]');
+      var nextBtn = root.querySelector('[data-mh-testi-next]');
+      var status = root.querySelector('[data-mh-testi-status]');
+      var n = cards.length;
+      if (!viewport || n === 0) return;
+      // Reveal the JS-only controls now that they are wired (arrows + dots are
+      // CSS-hidden until this class lands).
+      root.classList.add('is-ready');
+
+      var idx = 0;
+      var interval = parseInt(root.getAttribute('data-mh-testi-interval') || '6500', 10);
+      if (!(interval > 0)) interval = 6500;
+
+      function setActive(i) {
+        idx = i;
+        for (var d = 0; d < dots.length; d++) {
+          var on = d === i;
+          dots[d].classList.toggle('is-active', on);
+          if (on) dots[d].setAttribute('aria-current', 'true');
+          else dots[d].removeAttribute('aria-current');
+        }
+        if (status) status.textContent = 'Testimonial ' + (i + 1) + ' of ' + n;
+      }
+
+      function scrollToCard(i, smooth) {
+        var card = cards[i];
+        if (!card) return;
+        // Centre the card in the viewport (matches scroll-snap-align: center),
+        // clamped to the scrollable range.
+        var target = card.offsetLeft - (viewport.clientWidth - card.offsetWidth) / 2;
+        var max = viewport.scrollWidth - viewport.clientWidth;
+        target = Math.max(0, Math.min(target, max));
+        var behavior = (smooth && !prefersReduced) ? 'smooth' : 'auto';
+        if (viewport.scrollTo) viewport.scrollTo({left: target, behavior: behavior});
+        else viewport.scrollLeft = target;
+      }
+
+      function go(i, smooth) {
+        i = (i % n + n) % n;
+        setActive(i);
+        scrollToCard(i, smooth);
+      }
+
+      // --- Autoplay (motion-allowed only) ---
+      var timer = null;
+      function stop() { if (timer) { clearInterval(timer); timer = null; } }
+      function play() {
+        stop();
+        if (prefersReduced || n <= 1) return;
+        timer = setInterval(function(){
+          var next = idx + 1;
+          if (next >= n) go(0, false);     // instant rewind, not a long pan
+          else go(next, true);
+        }, interval);
+      }
+      function restart() { stop(); play(); }
+
+      // --- Controls ---
+      if (prevBtn) prevBtn.addEventListener('click', function(){ go(idx - 1, true); restart(); });
+      if (nextBtn) nextBtn.addEventListener('click', function(){ go(idx + 1, true); restart(); });
+      dots.forEach(function(dot, di){
+        dot.addEventListener('click', function(){ go(di, true); restart(); });
+      });
+      viewport.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowLeft') { e.preventDefault(); go(idx - 1, true); restart(); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); go(idx + 1, true); restart(); }
+      });
+
+      // Keep the dots honest when the visitor swipes/scrolls the viewport
+      // directly: whichever card is most visible becomes active.
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function(entries){
+          var best = null;
+          entries.forEach(function(en){
+            if (en.isIntersecting && (!best || en.intersectionRatio > best.intersectionRatio)) {
+              best = en;
+            }
+          });
+          if (best) {
+            var i = cards.indexOf(best.target);
+            if (i >= 0 && i !== idx) setActive(i);
+          }
+        }, {root: viewport, threshold: [0.5, 0.75, 1]});
+        cards.forEach(function(c){ io.observe(c); });
+      }
+
+      // Pause while the visitor is reading, or the tab is backgrounded.
+      root.addEventListener('mouseenter', stop);
+      root.addEventListener('mouseleave', play);
+      root.addEventListener('focusin', stop);
+      root.addEventListener('focusout', play);
+      document.addEventListener('visibilitychange', function(){
+        if (document.hidden) stop(); else play();
+      });
+
+      setActive(0);
+      play();
+    });
+  }
+  if (document.readyState !== 'loading') bindTestimonials();
+  else document.addEventListener('DOMContentLoaded', bindTestimonials);
+  MH.bindTestimonials = bindTestimonials;
+
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
   // data-mh-card-id triggers a POST to /api/workflow and optimistically
@@ -11881,6 +12002,157 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # --- UI 1.19 · Testimonial / social-proof carousel ------------------
+        # Club/coach quote cards with avatar initials, flanked by arrow
+        # controls and advanced on a gentle autoplay. Pure CSS/JS, no carousel
+        # library: the viewport is a native scroll-snap row that works on its
+        # own (swipe / scroll / keyboard), progressively enhanced by
+        # `bindTestimonials` with arrows, position dots, a polite live-region
+        # slide announcement, and autoplay that pauses on hover/focus and when
+        # the tab is hidden — and never starts under prefers-reduced-motion.
+        # Inspired by Sketch (sketch.com).
+        #
+        # HONESTY (this is why the copy is framed the way it is): MediaHub is
+        # pre-launch with no paying clubs yet, and the landing already promises
+        # "we don't invent results". So these are presented as *illustrative* —
+        # the voices of the volunteer / coach / committee roles the engine is
+        # built for, on the same fictional sample clubs ("Riverside SC") used
+        # elsewhere on this page — never passed off as real customer
+        # endorsements. The avatar shows the (sample) club's initials, the
+        # attribution is the role, and the note under the carousel says so
+        # plainly. Swap in real, attributed quotes post-launch.
+        _testimonials = [
+            {
+                "quote": "Sunday used to mean three hours rebuilding the same "
+                "graphics by hand. Now I drop the results file in, read the "
+                "drafts over coffee, and approve the ones that are right — the "
+                "committee sees content the same weekend.",
+                "initials": "RS",
+                "role": "Club secretary",
+                "org": "Riverside SC",
+                "sport": "Swimming",
+            },
+            {
+                "quote": "It surfaces the swims that matter — the lifetime "
+                "bests, the near-misses on a qualifying time — before I've "
+                "finished my notes. I still decide what gets posted; it just "
+                "stops me missing the moment.",
+                "initials": "KA",
+                "role": "Head coach",
+                "org": "Kingsmead Aquatics",
+                "sport": "Swimming",
+            },
+            {
+                "quote": "Every post lands in our colours and our voice without "
+                "me touching a template. As a volunteer with a dissertation to "
+                "write, getting the weekend back is the whole point.",
+                "initials": "US",
+                "role": "Social secretary",
+                "org": "University Swim Society",
+                "sport": "University",
+            },
+            {
+                "quote": "The bit I trusted least about 'AI' — making things up "
+                "— is the bit it refuses to do. If the time isn't in the file, "
+                "the caption doesn't claim one. That is why I will put my name "
+                "to what it drafts.",
+                "initials": "HR",
+                "role": "Comms volunteer",
+                "org": "Harbourside Rowing",
+                "sport": "Rowing",
+            },
+            {
+                "quote": "One results sheet in, a weekend of stories, feed "
+                "posts and a reel out — all waiting for a yes. Nothing goes "
+                "live until someone clicks approve, which is exactly how our "
+                "club wants it.",
+                "initials": "PN",
+                "role": "Team manager",
+                "org": "Parkside Netball",
+                "sport": "Netball",
+            },
+        ]
+        _n_testi = len(_testimonials)
+        # These are static, developer-authored literals (no user input on this
+        # path), so they are inlined raw exactly like the bento / audience /
+        # promise copy above — no _h() escaping. Any future caller feeding
+        # dynamic text here MUST switch to _h().
+        _testi_cards = ""
+        for _i, _t in enumerate(_testimonials):
+            _testi_cards += (
+                '<figure class="mh-testi-card" role="group" '
+                'aria-roledescription="slide" '
+                f'aria-label="Testimonial {_i + 1} of {_n_testi}">'
+                f'<blockquote class="mh-testi-quote">{_t["quote"]}</blockquote>'
+                '<figcaption class="mh-testi-by">'
+                '<span class="mh-testi-avatar" aria-hidden="true">'
+                f'{_t["initials"]}</span>'
+                '<span class="mh-testi-id">'
+                f'<b class="mh-testi-name">{_t["role"]}</b>'
+                f'<span class="mh-testi-org">{_t["org"]}'
+                '<span class="sep">·</span>'
+                f'{_t["sport"]}</span>'
+                "</span>"
+                "</figcaption>"
+                "</figure>"
+            )
+        _testi_dots = ""
+        for _i in range(_n_testi):
+            _active = " is-active" if _i == 0 else ""
+            _cur = ' aria-current="true"' if _i == 0 else ""
+            _testi_dots += (
+                f'<button type="button" class="mh-testi-dot{_active}" '
+                f'data-mh-testi-to="{_i}" '
+                f'aria-label="Show testimonial {_i + 1}"{_cur}></button>'
+            )
+        _arrow_prev_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>'
+        )
+        _arrow_next_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>'
+        )
+        testimonials_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">In their words</span></div>'
+            + _reveal_lines(
+                ["The weekend it", 'hands <em class="editorial">back</em>.']
+            )
+            + '<div class="mh-testi mh-reveal" data-mh-testi '
+            'data-mh-testi-interval="6500" role="group" '
+            'aria-roledescription="carousel" '
+            'aria-label="What clubs and coaches say (illustrative)">'
+            + '<div class="mh-testi-rail">'
+            + '<button type="button" class="mh-testi-arrow prev" '
+            'data-mh-testi-prev aria-label="Previous testimonial">'
+            + _arrow_prev_svg
+            + "</button>"
+            + '<div class="mh-testi-viewport" tabindex="0">'
+            + _testi_cards
+            + "</div>"
+            + '<button type="button" class="mh-testi-arrow next" '
+            'data-mh-testi-next aria-label="Next testimonial">'
+            + _arrow_next_svg
+            + "</button>"
+            + "</div>"  # .mh-testi-rail
+            + '<div class="mh-testi-dots" role="group" '
+            'aria-label="Choose a testimonial">'
+            + _testi_dots
+            + "</div>"
+            + '<p class="mh-sr-only" data-mh-testi-status aria-live="polite">'
+            f"Testimonial 1 of {_n_testi}</p>"
+            + "</div>"  # .mh-testi
+            + '<p class="mh-testi-note">Illustrative — these voice the '
+            "volunteers, coaches and committee members MediaHub is built for. "
+            "We are pre-launch, so they are representative of the workflow, "
+            "not paid endorsements.</p>"
+            + "</section>"
+        )
+
         # --- Promise / what we don't do. Lane-yellow left-stripe trust
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
@@ -12005,6 +12277,7 @@ def create_app() -> Flask:
             + bento_html
             + frames_html
             + audience_html
+            + testimonials_html
             + promise_html
             + final_cta_html,
             active="home",

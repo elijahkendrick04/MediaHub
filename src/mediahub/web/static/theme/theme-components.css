@@ -3697,6 +3697,206 @@ kbd {
   margin: 0;
 }
 
+/* =====================================================================
+   UI 1.19 — TESTIMONIAL / SOCIAL-PROOF CAROUSEL
+   ---------------------------------------------------------------------
+   Club/coach quote cards with avatar initials, arrow controls and a
+   gentle autoplay on the landing. Pure CSS/JS — no carousel library.
+   The viewport is a native scroll-snap row, fully usable with no JS
+   (swipe / scroll / focus + arrow keys); MH.bindTestimonials enhances it
+   with arrows, dots, autoplay and a live-region announcement, revealing
+   the JS-only controls via `.is-ready` so no-JS visitors never meet a
+   dead button. Card surface + lane→medal top accent mirror the audience
+   cards above for one cohesive landing language. Inspired by Sketch.
+   ===================================================================== */
+.mh-testi {
+  position: relative;
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.mh-testi-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.mh-testi-viewport {
+  position: relative;            /* offsetParent for the JS centring maths */
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: var(--sp-4);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;         /* Firefox — the dots are the affordance */
+  padding: var(--sp-2) 2px var(--sp-4);
+}
+.mh-testi-viewport::-webkit-scrollbar { display: none; }  /* WebKit/Blink */
+.mh-testi-viewport:focus-visible {
+  outline: 2px solid var(--mh-focus);
+  outline-offset: 3px;
+  border-radius: var(--radius-md);
+}
+
+.mh-testi-card {
+  scroll-snap-align: center;
+  flex: 0 0 100%;                /* one card per view on narrow screens */
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.mh-testi-card::before {        /* lane→medal top accent, like .mh-audience */
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--lane) 0%, var(--medal) 100%);
+  opacity: 0.55;
+}
+.mh-testi-quote {
+  position: relative;
+  margin: 0;
+  padding-top: var(--sp-5);
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  line-height: 1.5;
+  color: var(--ink);
+}
+.mh-testi-quote::before {       /* oversized editorial quotation mark */
+  content: '\201C';
+  position: absolute;
+  top: -0.16em; left: -0.04em;
+  font-family: var(--font-serif);
+  font-size: 3.2em;
+  line-height: 1;
+  color: var(--lane);
+  opacity: 0.28;
+  pointer-events: none;
+}
+.mh-testi-by {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: auto;             /* attribution pins to the card foot */
+}
+.mh-testi-avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: var(--radius-pill);
+  background: var(--lane-glow);  /* soft lane wash behind the initials */
+  border: 1px solid var(--rule);
+  color: var(--lane);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--fs-md);
+  letter-spacing: 0.02em;
+}
+.mh-testi-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mh-testi-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-testi-org {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+}
+.mh-testi-org .sep { margin: 0 5px; color: var(--ink-faint); }
+
+/* Arrow controls + dots are JS-only affordances: hidden until the binder
+   adds .is-ready, so a no-JS visitor sees just the swipeable card row. */
+.mh-testi-arrow { display: none; }
+.mh-testi-dots { display: none; }
+.mh-testi.is-ready .mh-testi-arrow {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: color var(--dur-med) var(--ease-out-quick),
+              border-color var(--dur-med) var(--ease-out-quick),
+              transform var(--dur-fast) var(--ease-out-quick);
+}
+.mh-testi.is-ready .mh-testi-arrow:hover {
+  color: var(--lane);
+  border-color: var(--lane);
+}
+.mh-testi.is-ready .mh-testi-arrow:active { transform: scale(0.94); }
+.mh-testi-arrow svg { width: 18px; height: 18px; }
+
+.mh-testi.is-ready .mh-testi-dots {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.mh-testi-dot {
+  width: 8px; height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--rule);
+  cursor: pointer;
+  transition: width var(--dur-med) var(--ease-out-quick),
+              background var(--dur-med) var(--ease-out-quick);
+}
+.mh-testi-dot:hover { background: var(--ink-muted); }
+.mh-testi-dot.is-active { width: 22px; background: var(--lane); }
+
+.mh-testi-note {
+  max-width: 540px;
+  margin: var(--sp-3) auto 0;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* Wider screens: cap the card width for readable line-length and let the
+   neighbouring cards peek, so it visibly reads as a carousel. */
+@media (min-width: 720px) {
+  .mh-testi-card { flex-basis: min(620px, 82%); }
+}
+
+/* Narrow / touch: lean on the native swipe; the flanking arrows fold away
+   (the dots stay as the position affordance). */
+@media (max-width: 560px) {
+  .mh-testi.is-ready .mh-testi-arrow { display: none; }
+}
+
+/* Reduced motion: kill smooth scrolling (the autoplay JS is also gated off),
+   but the carousel stays fully navigable via swipe, arrows and dots — content
+   is never hidden or trapped. */
+@media (prefers-reduced-motion: reduce) {
+  .mh-testi-viewport { scroll-behavior: auto; }
+}
+
 /* "WHAT WE DON'T DO" — trust panel. Pit-wall-deep background, lane-yellow
    left-edge stripe, paired ✓/✗ rows. Reads as a written promise. */
 .mh-promise {
