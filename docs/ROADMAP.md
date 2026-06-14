@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `53dd2f185` · Merge pull request #482 from elijahkendrick04/claude/epic-ride-9ykp86
+**Last updated:** 2026-06-14 · `5c1f6227d` · Merge pull request #480: first-party scheduled re-checks docs [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1394,5 +1394,5 @@ list and the auto table below, not here.
 | 2026-06-14 | `a10f2fc98` | U.14: cursor-following hover preview (Media library + Create) |
 | 2026-06-14 | `b66f13436` | Add first-run sample pack + mobile-aware review (U.4) |
 | 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
-| 2026-06-14 | `4e538d7b1` | U.10: framed in-app product demo in the landing hero |
+| 2026-06-14 | `30faa034b` | Document first-party scheduled re-checks (no third-party tool) |
 <!-- /ROADMAP:ACTIVITY -->
