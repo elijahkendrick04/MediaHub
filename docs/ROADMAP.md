@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `c889f7dd7` · Merge pull request #565: Build UI 1.30 — "Weekend at a glance" summary panel
+**Last updated:** 2026-06-14 · `e0bb44377` · Build UI 1.8 — timestamp-anchored reel review comments (#560)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -137,15 +137,12 @@ sequence it or merge with care.
 - **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
 - **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.13** · Phase 1 (Product polish) — Annotated UI callouts (from Liveblocks): labelled hotspots + SVG connector lines on a sample card / the review UI ('anatomy of a card') for the landing or onboarding tour; static HTML/SVG, no new lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.15** · Phase 1 (Product polish) — Command palette / Cmd-K (from GitHub): fast keyboard navigation + quick actions (jump to Create / Library / Settings, run common actions); vanilla JS, no framework, keyboard-accessible · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.16** · Phase 1 (Product polish) — Dashboard activity feed (from GitHub): recent runs/approvals/exports shown as cards with status badges, relative timestamps, and expandable detail; server-rendered from the existing audit log · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.18** · Phase 1 (Product polish) — Inspector/properties panel (from Sketch): a lightweight side panel to tweak a generated card before approval — edit caption text, swap brand palette swatch, toggle elements, adjust crop; posted back to existing Flask card-edit routes · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1494,9 +1491,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `fb24b2247` | chore: fix workflow README end-of-file newline (pre-commit hygiene) |
+| 2026-06-14 | `20d61fa39` | Apply ruff-format after merge reconstruction |
+| 2026-06-14 | `01ed161d6` | Move activity-feed CSS into a page-scoped <style> (avoid shared-file churn) |
 | 2026-06-14 | `00f5b7926` | Apply ruff-format line wrapping to UI 1.9 bulk routes |
 | 2026-06-14 | `5cafe2886` | Harden bulk-status against non-string status (contract sweep) |
 | 2026-06-14 | `b8e3d3fa3` | docs: mark UI 1.28 done on the roadmap |
-| 2026-06-14 | `423d2a521` | Build UI 1.6 — animated results/data charts (Mixpanel-inspired) |
-| 2026-06-14 | `4c5f79818` | Build UI 1.27 — horizontal drag/scroll gallery (Media Library + landing) |
 <!-- /ROADMAP:ACTIVITY -->
