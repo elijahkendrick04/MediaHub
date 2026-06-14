@@ -61,6 +61,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **U.3** · Phase 1 (Product polish) — Explainability + confidence surfaces: "why this card / why not" and confidence displays made clear and trustworthy in the review UI *(completed 2026-06-13)*
 - ✅ **U.5** · Phase 1 (Product polish) — Scroll-driven progressive reveal (inspired by Opal): landing sections reveal line-by-line on scroll; dark editorial theme throughout · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **U.7** · Phase 1 (Product polish) — "Focus the facts" caption/explainability highlight (inspired by Pedro Duarte): in captions + the why-this-card review UI, source-grounded entities (athlete/time/event/PB) are sharp + pill-highlighted; filler de-emphasised (supports U.3) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **U.10** · Phase 1 (Product polish) — Framed in-app product demo in hero (inspired by Reflect): short looping screen-capture or interactive preview of generate → review → approve, plus a subtle ambient hero glow · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)

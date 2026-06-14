@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `70b285fc7` · Merge pull request #489 from elijahkendrick04/claude/pensive-ptolemy-c0l83i
+**Last updated:** 2026-06-14 · `d06610e9c` · Merge pull request #486 from elijahkendrick04/claude/great-bardeen-g7zsk5
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -133,7 +133,6 @@ begin until Phases 1–5 are complete (rule 12).
 - **U.6** · Phase 1 (Product polish) — Branded render/generation loading state (inspired by Lusion): large editorial %-counter + minimal progress bar for real render waits; reuses the giant-numeral motif (supports U.2) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.8** · Phase 1 (Product polish) — Animated how-it-works pipeline diagram (inspired by AuthKit): glowing nodes + traces on the landing showing reads (club site / socials / brand kit) → writes (captions / graphics / reels); reuses the blueprint grid · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.10** · Phase 1 (Product polish) — Framed in-app product demo in hero (inspired by Reflect): short looping screen-capture or interactive preview of generate → review → approve, plus a subtle ambient hero glow · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.12** · Phase 1 (Product polish) — Animated count-up stat numerals (inspired by Max Yinger): odometer count-up for Organisations / Total runs etc. triggers on load + scroll-into-view · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1394,6 +1393,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
+| 2026-06-14 | `4e538d7b1` | U.10: framed in-app product demo in the landing hero |
 | 2026-06-14 | `b2ef8a46c` | UI 1.1-1.5: design-polish ideas from godly.website review batch 2 — top of Phase U |
 | 2026-06-14 | `fd88c0534` | Add scroll-driven line-by-line landing reveal (U.5) |
 | 2026-06-13 | `d82f5b630` | U.5-U.16: design-polish ideas from godly.website review — top of Phase U |
@@ -1401,5 +1401,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `9d9ec1512` | Make explainability & confidence read as intelligence (U.3) |
 | 2026-06-13 | `f444419a9` | Add live progress bar to results-from-a-link fetch |
 | 2026-06-13 | `c32f7da7e` | Fix 'Permission denied: /app/src/mediahub/data' aborting results parse |
-| 2026-06-13 | `36da3aa97` | Make results-from-a-link fetches content-negotiate (fix '<!DOCTYPE' JSON error) |
 <!-- /ROADMAP:ACTIVITY -->
