@@ -248,3 +248,62 @@ def test_split_rows_do_not_become_phantom_results():
     assert all(s.swimmer_name for s in swims), "a nameless split row leaked in as a result"
     assert {s.swimmer_name for s in swims} == {"Tom DAVIES", "Sam JONES"}
     assert {s.time for s in swims} == {"15:23.45", "15:40.10"}  # overall times only
+
+
+def test_british_paren_yob_format_parses_with_correct_event_pairing():
+    """British results print "Place Name (YoB) Club Time" with the year of birth
+    parenthesised between the name and the club. Previously no row pattern matched
+    it, so these lines were dropped and the run fell back to unreliable AI reads
+    (wrong events/times). The deterministic parser must now read them and pair
+    each swimmer with the right event and overall time."""
+    txt = (
+        "Aquatics GB Championships 2026\n\n"
+        "Event 12 Mens 100m Breaststroke\n"
+        "Place Name              YoB Club              Time\n"
+        "1     Maxwell Anderson  (04) City of Sheffield 1:03.34\n"
+        "2     Mari Gibson       (05) Loughborough      1:04.10\n\n"
+        "Event 18 Mens 1500m Freestyle\n"
+        "Place Name              YoB Club              Time\n"
+        "1     Vinnie Owen       (06) Bath             15:10.79\n"
+        "2     Max Geysen-Holley (06) Stockport        15:13.55\n"
+    )
+    res = interpret_document(txt.encode(), hint="txt")
+    by_event = {(e.distance_m, e.stroke): e for e in res.events}
+    assert (100, "Breaststroke") in by_event, [(e.distance_m, e.stroke) for e in res.events]
+    assert (1500, "Freestyle") in by_event
+
+    breast = by_event[(100, "Breaststroke")]
+    names_times = {(s.swimmer_name, s.time, s.yob, s.club) for s in breast.swims}
+    # Maxwell Anderson is on 100m Breaststroke (not Backstroke), with his real time.
+    assert ("Maxwell Anderson", "1:03.34", 2004, "City of Sheffield") in names_times
+
+    free = by_event[(1500, "Freestyle")]
+    free_times = {s.time for s in free.swims}
+    assert free_times == {"15:10.79", "15:13.55"}  # 1500m times, not 400m splits
+
+
+def test_implausible_time_for_event_is_flagged_not_trusted():
+    """A time physically impossible for the event's distance (a wrong event/time
+    pairing) is flagged for review and de-confidenced — never shown as fact —
+    while realistic times in the same event stay trusted."""
+    txt = (
+        "Event 1 Womens 100m Breaststroke\n"
+        "1 Mari Gibson (05) Loughborough 33.64\n"  # 33.64 = a 50m time, impossible for 100m
+        "2 Real Swimmer (06) Bath 1:08.20\n"  # realistic 100m breaststroke
+        "\n"
+        "Event 2 Mens 1500m Freestyle\n"
+        "1 Vinnie Owen (06) Bath 4:10.79\n"  # 4:10 = a 400m time, impossible for 1500m
+        "2 Proper Distance (05) Leeds 15:30.10\n"  # realistic 1500m
+    )
+    res = interpret_document(txt.encode(), hint="txt")
+    flagged = [n for n in res.needs_review if n.get("reason") == "implausible-time-for-event"]
+    flagged_detail = " ".join(n["detail"] for n in flagged)
+    assert "Mari Gibson" in flagged_detail
+    assert "Vinnie Owen" in flagged_detail
+    by_name = {s.swimmer_name: s for e in res.events for s in e.swims}
+    assert by_name["Mari Gibson"].confidence <= 0.2
+    assert by_name["Vinnie Owen"].confidence <= 0.2
+    # Realistic times are NOT flagged and keep normal confidence.
+    assert "Real Swimmer" not in flagged_detail
+    assert by_name["Real Swimmer"].confidence > 0.5
+    assert by_name["Proper Distance"].confidence > 0.5

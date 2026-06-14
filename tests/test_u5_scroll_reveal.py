@@ -163,21 +163,26 @@ class TestRevealLinesHelper:
 class TestHomeSignedOut:
     def test_every_section_headline_is_a_reveal_lines_block(self, app):
         body = _home(app)
-        # steps + sample + audience + promise + final-CTA(fresh) = 5 headlines.
+        # steps + before/after + sample + audience + promise + final-CTA(fresh)
+        # = 6 reveal-lines headlines. (The before/after slider's headline was
+        # reconciled onto the U.5 pattern so no plain section-title survives.)
         assert body.count("mh-reveal-lines") >= 5
         # The legacy single-run section title (no reveal-lines) is gone.
         assert '<h2 class="mh-section-title">' not in body
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
-    def test_ten_line_spans(self, app):
-        # Each of the 5 headlines is split into exactly two editorial lines.
+    def test_line_spans_two_per_headline(self, app):
+        # Each of the 6 reveal-lines headlines is split into exactly two
+        # editorial lines (the 5 original sections + the before/after slider,
+        # which was reconciled onto the same pattern) → 12 line spans.
         body = _home(app)
-        assert body.count('<span class="mh-line">') == 10
+        assert body.count('<span class="mh-line">') == 12
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
         body = _home(app)
-        # The three content-section eyebrows now reveal (were static before).
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 3
+        # The content-section eyebrows now reveal (were static before): the
+        # three original content sections + the before/after slider = 4.
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 4
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body
@@ -186,7 +191,10 @@ class TestHomeSignedOut:
         body = _home(app)
         # The card/step rows + the promise list stagger via .mh-reveal-group.
         assert "mh-steps mh-reveal-group" in body
-        assert "mh-sample-row mh-reveal-group" in body
+        # U.11 replaced the flat sample row with the platform-frame carousel,
+        # which reveals as one block (the stacked phones run their own CSS
+        # autoplay loop rather than staggering as a reveal-group).
+        assert "mh-frames mh-reveal" in body
         assert "mh-audience-row mh-reveal-group" in body
         assert "mh-promise-list mh-reveal-group" in body
         # The promise section is no longer one big block reveal.
@@ -197,8 +205,8 @@ class TestHomeSignedOut:
         # The marketing copy survived the split into lines …
         for frag in (
             "From the results sheet to",
-            "A weekend reads like",
-            "ready to approve.",
+            "Your results, the way your",
+            "see them.",
             "Built for the people who",
             "Human in the loop,",
             "A minute to set up.",
@@ -207,7 +215,7 @@ class TestHomeSignedOut:
         # … and the gold editorial accents still ride inside their lines.
         for em in (
             '<em class="editorial">posting-ready</em>',
-            '<em class="editorial">three drafts</em>',
+            '<em class="editorial">followers</em>',
             '<em class="editorial">post the results</em>',
             "<em>by design</em>",
             "<em>Then</em>",

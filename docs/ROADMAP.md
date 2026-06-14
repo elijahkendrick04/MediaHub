@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `7a208e17c` · UI 1.1: cycling example-prompt placeholder (#511)
+**Last updated:** 2026-06-14 · `e65420967` · Merge pull request #487 from elijahkendrick04/claude/tender-turing-8ngjd8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,8 +142,6 @@ sequence it or merge with care.
 - **UI2.6** · UI2 (top priority) — **Vanish search**: properly wire the rotating-placeholder Vanish input (`.mh-vanish`) onto the activity / global search — the overlay-placeholder element + alignment past the search icon, native placeholder removed · 🟢 parallel-safe (self-contained search) · ❌ **NOT STARTED**
 - **UI2.7** · UI2 (top priority) — **Caption type-on reveal**: Text-Generate (`.mh-text-generate`) word-by-word reveal on a *read-only* generated-caption preview only (never the editable caption, which stays plain), so the "AI is writing" moment reads · 🟢 parallel-safe · ❌ **NOT STARTED**
 - **UI 1.2** · Phase 1 (Product polish) — Bento-grid feature section (inspired by Umbrel): replace the uniform capability card rows on the landing with a bento grid of varied-size tiles, each carrying its own mini-visual (sample story card, a stat chip, brand-kit swatches, a 'moments we detect' list, a reel preview); dark/premium aesthetic, reuses existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.3** · Phase 1 (Product polish) — Inline media thumbnails in a display headline (inspired by Samara): embed small inline output thumbnails inside a large hero headline sentence — 'From a results sheet [img] to a story [img], a feed graphic [img] and a reel [img]' — the images are real sample outputs served from the static directory · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.4** · Phase 1 (Product polish) — Tactile spring-physics micro-interactions (inspired by Family): a restrained spring-physics layer on primary buttons, card-selection, and toggles — subtle magnetic hover + bouncy press; vanilla JS CSS-custom-property animation, `prefers-reduced-motion` respected, understated to preserve the editorial tone · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -169,10 +167,7 @@ sequence it or merge with care.
 - **UI 1.28** · Phase 1 (Product polish) — Keyboard shortcuts overlay (from GitHub): press `?` to reveal a modal of available shortcuts; quick keys to approve/reject/next in the review flow; vanilla JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.30** · Phase 1 (Product polish) — AI 'weekend at a glance' summary panel (from Mixpanel/Fey): an at-a-glance summary card of the meet's key story (top swims, PBs, medals) using MediaHub's existing summarisation pipeline — no external API, no new LLM call beyond what the pack already made · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.6** · Phase 1 (Product polish) — Branded render/generation loading state (inspired by Lusion): large editorial %-counter + minimal progress bar for real render waits; reuses the giant-numeral motif (supports U.2) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.8** · Phase 1 (Product polish) — Animated how-it-works pipeline diagram (inspired by AuthKit): glowing nodes + traces on the landing showing reads (club site / socials / brand kit) → writes (captions / graphics / reels); reuses the blueprint grid · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1521,11 +1516,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-14 | `651a466fd` | UI 1.1: cycling example-prompt placeholder |
-| 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
-| 2026-06-14 | `edede9341` | Crawl: fetch result files before HTML renders; surface result-file count |
-| 2026-06-14 | `389a1d203` | UI 1.5 — live local-time + system-status HUD readout |
-| 2026-06-14 | `e63ed6b85` | Drop split/continuation rows so only overall times are kept |
-| 2026-06-14 | `1e08619ee` | U.15: before/after reveal slider on the landing page |
-| 2026-06-14 | `4238afc14` | U.12: animated count-up (odometer) stat numerals on the landing hero |
+| 2026-06-14 | `f87368501` | U.11 — outputs inside real Instagram platform frames |
+| 2026-06-14 | `dd1c90857` | Read British (YoB) results correctly; flag impossible event/time pairings; surface PB-lookup failure |
+| 2026-06-14 | `19ecc71ae` | U.8 — animated how-it-works pipeline diagram on the landing page |
+| 2026-06-14 | `28c3b2868` | Fix unreadable <select> dropdown options (light-on-light when open) |
+| 2026-06-14 | `a40346cad` | Fix U.5/U.15 conflict: make the before/after slider a reveal-lines section |
+| 2026-06-14 | `10be7fbce` | Add UI 1.3 — inline media thumbnails in a display headline |
 <!-- /ROADMAP:ACTIVITY -->

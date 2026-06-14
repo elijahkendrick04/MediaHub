@@ -1,15 +1,21 @@
-"""tests/test_u16_card_tilt.py — U.16 subtle 3D tilt on the sample output cards.
+"""tests/test_u16_card_tilt.py — U.16 subtle 3D tilt on the audience cards.
 
 Roadmap U.16 (Phase 1, product polish): a premium parallax/tilt-on-hover for the
-landing-page sample output cards, inspired by atlascard.com — CSS perspective +
-JS pointer-tracking, respecting ``prefers-reduced-motion``. Presentation-only:
+landing-page cards, inspired by atlascard.com — CSS perspective + JS
+pointer-tracking, respecting ``prefers-reduced-motion``. Presentation-only:
 the deterministic engine, the AI surfaces and the explainability logic are all
 untouched.
+
+U.16 originally rode the flat ``.mh-sample`` output cards; U.11 replaced that row
+with the Instagram platform-frame carousel, so the tilt was re-homed onto the
+audience "Made for" cards via the reusable ``[data-mh-tilt]`` hook. The sheen
+lives on ``::after`` because the audience card already uses ``::before`` for its
+lane→medal top accent.
 
 The effect is split deliberately so it can never get "stuck":
   * the tilt + lift transform is written by JS as an *inline* style, so it wins
     over the reveal-group's own ``transform`` without a specificity fight;
-  * CSS owns the cursor-tracked sheen (``.mh-sample::before``), the lifted
+  * CSS owns the cursor-tracked sheen (``[data-mh-tilt]::after``), the lifted
     stacking order, and the reduced-motion / no-hover no-op;
   * the JS never binds under ``prefers-reduced-motion`` or on touch / no-hover
     pointers, so those visitors keep the flat, static card.
@@ -17,7 +23,7 @@ The effect is split deliberately so it can never get "stuck":
 Four layers of assertion:
   1. CSS contract (``theme-components.css``).
   2. JS contract (``web.py`` source — the ``MH.bindCardTilt`` binder).
-  3. Rendered home page (the three sample cards + the tilt CSS/JS ship inline).
+  3. Rendered home page (the audience cards carry the hook + tilt CSS/JS inline).
   4. Browser behaviour (Playwright + the pinned Chromium build; skips when
      absent) — the tilt really tracks the pointer and settles, and never
      engages under ``prefers-reduced-motion``.
@@ -116,7 +122,7 @@ def _home(client) -> str:
 # =========================================================================== #
 class TestTiltCss:
     def test_sheen_pseudo_element_exists(self, components_css):
-        assert ".mh-sample::before" in components_css
+        assert "[data-mh-tilt]::after" in components_css
 
     def test_sheen_follows_pointer_via_custom_props(self, components_css):
         # The sheen centre rides --mh-gx/--mh-gy (set inline by the binder).
@@ -124,29 +130,29 @@ class TestTiltCss:
         assert "var(--mh-gy" in components_css
 
     def test_sheen_is_inert_and_hidden_at_rest(self, components_css):
-        # Pull the ::before block out and check it's non-interactive + invisible
+        # Pull the ::after block out and check it's non-interactive + invisible
         # until the card is being tilted.
         block = re.search(
-            r"\.mh-sample::before\s*\{(.*?)\}", components_css, re.DOTALL
+            r"\[data-mh-tilt\]::after\s*\{(.*?)\}", components_css, re.DOTALL
         )
-        assert block, "no .mh-sample::before rule"
+        assert block, "no [data-mh-tilt]::after rule"
         body = block.group(1)
         assert "pointer-events: none" in body      # never eats clicks
         assert "opacity: 0" in body                 # hidden at rest
         assert "transition: opacity" in body        # fades, not pops
 
     def test_sheen_lights_only_while_tilting(self, components_css):
-        assert ".mh-sample.is-tilting::before" in components_css
+        assert "[data-mh-tilt].is-tilting::after" in components_css
         m = re.search(
-            r"\.mh-sample\.is-tilting::before\s*\{([^}]*)\}", components_css
+            r"\[data-mh-tilt\]\.is-tilting::after\s*\{([^}]*)\}", components_css
         )
         assert m and "opacity: 1" in m.group(1)
 
     def test_tilting_card_lifts_stacking_and_hints_compositor(self, components_css):
         m = re.search(
-            r"\.mh-sample\.is-tilting\s*\{([^}]*)\}", components_css
+            r"\[data-mh-tilt\]\.is-tilting\s*\{([^}]*)\}", components_css
         )
-        assert m, "no .mh-sample.is-tilting rule"
+        assert m, "no [data-mh-tilt].is-tilting rule"
         body = m.group(1)
         assert "z-index" in body                    # rises above its neighbours
         assert "will-change: transform" in body     # promoted while active
@@ -155,20 +161,22 @@ class TestTiltCss:
         # There must be a reduced-motion block that disables the sheen entirely.
         assert "prefers-reduced-motion: reduce" in components_css
         blocks = re.findall(
-            r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?\.mh-sample.*?)\}\s*\}",
+            r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?\[data-mh-tilt\].*?)\}\s*\}",
             components_css,
             re.DOTALL,
         )
         joined = "\n".join(blocks)
-        assert ".mh-sample::before" in joined and "display: none" in joined, (
-            "reduced-motion must hide .mh-sample::before"
+        assert "[data-mh-tilt]::after" in joined and "display: none" in joined, (
+            "reduced-motion must hide [data-mh-tilt]::after"
         )
 
-    def test_corner_mark_stays_above_the_sheen(self, components_css):
-        # The lane corner-mark (::after) must sit above the sheen (::before) so
-        # the brand accent stays crisp; both are inside the same card.
-        after = re.search(r"\.mh-sample::after\s*\{([^}]*)\}", components_css)
-        assert after and "z-index: 3" in after.group(1)
+    def test_tilt_is_scoped_to_the_reusable_hook(self, components_css):
+        # U.11 retired the flat .mh-sample cards; the tilt + sheen now ride the
+        # reusable [data-mh-tilt] hook (the audience cards opt in) rather than a
+        # hardcoded component class, and no .mh-sample rule survives.
+        assert "[data-mh-tilt]::after" in components_css
+        assert "[data-mh-tilt].is-tilting" in components_css
+        assert ".mh-sample" not in components_css
 
     def test_components_css_braces_balanced(self, components_css):
         assert components_css.count("{") == components_css.count("}")
@@ -196,8 +204,11 @@ class TestTiltJs:
         # Touch never tilts even if a hybrid device slips past the media gate.
         assert "pointerType === 'touch'" in tilt_js
 
-    def test_targets_sample_cards_and_generic_opt_in(self, tilt_js):
-        assert ".mh-sample, [data-mh-tilt]" in tilt_js
+    def test_targets_the_reusable_tilt_hook(self, tilt_js):
+        # The binder drives every [data-mh-tilt] opt-in (the audience cards);
+        # the retired .mh-sample selector is gone.
+        assert "querySelectorAll('[data-mh-tilt]')" in tilt_js
+        assert ".mh-sample" not in tilt_js
 
     def test_uses_css_perspective_tilt(self, tilt_js):
         assert "perspective(900px)" in tilt_js
@@ -233,17 +244,17 @@ class TestTiltJs:
 # Layer 3 — rendered home page ships the cards + the inline CSS/JS
 # =========================================================================== #
 class TestHomePageWiring:
-    def test_three_sample_cards_render(self, client):
+    def test_audience_cards_carry_the_tilt_hook(self, client):
+        # U.11 retired the flat sample cards; the three audience "Made for"
+        # cards now opt into the tilt via [data-mh-tilt].
         body = _home(client)
-        assert "mh-sample story" in body
-        assert "mh-sample feed" in body
-        assert "mh-sample reel" in body
+        assert body.count('class="mh-audience" data-mh-tilt') == 3
 
     def test_tilt_css_is_inlined(self, client):
         body = _home(client)
         # The component CSS rides BASE_CSS into the inline <style> block.
-        assert ".mh-sample::before" in body
-        assert ".mh-sample.is-tilting" in body
+        assert "[data-mh-tilt]::after" in body
+        assert "[data-mh-tilt].is-tilting" in body
         assert "radial-gradient(circle at var(--mh-gx" in body
 
     def test_tilt_js_is_inlined(self, client):
@@ -269,10 +280,10 @@ class TestTiltBrowserBehaviour:
     pointer, settles to rest, and stands down under prefers-reduced-motion."""
 
     # JS injected once per page: dispatches mouse-type pointer events at a
-    # fractional position inside the first sample card and exposes helpers.
+    # fractional position inside the first tilt card and exposes helpers.
     _SETUP = """() => {
-      var card = document.querySelector('.mh-sample');
-      if (!card) return {error: 'no .mh-sample'};
+      var card = document.querySelector('[data-mh-tilt]');
+      if (!card) return {error: 'no [data-mh-tilt]'};
       window.__card = card;
       window.__move = function(fx, fy) {
         var r = card.getBoundingClientRect();
@@ -327,7 +338,7 @@ class TestTiltBrowserBehaviour:
                 tilting: c.classList.contains('is-tilting'),
                 gx: c.style.getPropertyValue('--mh-gx'),
                 gy: c.style.getPropertyValue('--mh-gy'),
-                sheen: getComputedStyle(c, '::before').display
+                sheen: getComputedStyle(c, '::after').display
               };
             }""")
             assert state["tilting"] is True
@@ -393,7 +404,7 @@ class TestTiltBrowserBehaviour:
               return {
                 transform: c.style.transform,
                 tilting: c.classList.contains('is-tilting'),
-                sheen: getComputedStyle(c, '::before').display
+                sheen: getComputedStyle(c, '::after').display
               };
             }""")
             assert out["transform"] == "", out      # no inline tilt at all
