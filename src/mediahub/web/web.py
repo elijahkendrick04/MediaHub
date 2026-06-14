@@ -9745,35 +9745,169 @@ def create_app() -> Flask:
             + "</div></section>"
         )
 
-        # --- Sample output preview — three mock cards showing the three
-        # default output formats. Pure visual; non-interactive. Helps a
-        # first-time visitor see what they're getting before they upload.
-        sample_html = (
+        # --- U.11 · Outputs inside real platform frames ---------------------
+        # The three default output formats shown inside credible Instagram
+        # device mockups (story / feed / reel), advanced by a pure-CSS
+        # autoplay carousel — three stacked layers cross-slide on a seamless
+        # 18s loop, no JS framework. Inspired by AndAgain. The device chrome
+        # is decorative (aria-hidden); each phone is a role="img" carrying an
+        # accessible label naming the output it frames. The facts are the same
+        # honest sample the old flat cards carried. The carousel pauses on
+        # hover/focus and, under prefers-reduced-motion, unfolds into a static
+        # row (CSS in theme-components.css) so every format stays visible.
+        ig_name = "Riverside SC"
+        ig_handle = "riverside.sc"
+        # Compact iOS-style status cluster (signal / wifi / battery), drawn once.
+        ig_sys = (
+            '<svg class="mh-ig-sys" viewBox="0 0 44 12" fill="currentColor" aria-hidden="true">'
+            '<rect x="0" y="6" width="2.4" height="6" rx="1"/><rect x="3.6" y="4" width="2.4" height="8" rx="1"/>'
+            '<rect x="7.2" y="2" width="2.4" height="10" rx="1"/><rect x="10.8" y="0" width="2.4" height="12" rx="1"/>'
+            '<path d="M18 4a7 7 0 0 1 9 0M20 6.4a3.6 3.6 0 0 1 5 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'
+            '<circle cx="22.5" cy="9" r="1.05"/>'
+            '<rect x="32.5" y="2" width="9" height="8" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.1"/>'
+            '<rect x="33.8" y="3.4" width="5.6" height="5.2" rx="1"/><rect x="42" y="4.4" width="1.3" height="3.2" rx="0.6"/>'
+            "</svg>"
+        )
+        ig_status = (
+            '<div class="mh-ig-status" aria-hidden="true"><span class="t">9:41</span>'
+            + ig_sys
+            + "</div>"
+        )
+        # Minimal Instagram action glyphs (stroke = currentColor), sized in CSS.
+        _sv = (
+            '<svg class="mh-ig-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        )
+        ic_heart = (
+            _sv
+            + '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 1 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/></svg>'
+        )
+        ic_comment = (
+            _sv
+            + '<path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>'
+        )
+        ic_share = (
+            _sv
+            + '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'
+        )
+        ic_bookmark = _sv + '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
+        ic_more = (
+            '<svg class="mh-ig-ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+            '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>'
+        )
+        ic_music = (
+            _sv
+            + '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'
+        )
+        ic_close = (
+            _sv + '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>'
+        )
+        ig_av = '<span class="mh-ig-avatar" aria-hidden="true"><i>R</i></span>'
+        ig_av_plain = '<span class="mh-ig-avatar plain" aria-hidden="true"><i>R</i></span>'
+
+        # The branded MediaHub output that sits inside each platform's media area.
+        story_canvas = (
+            '<div class="mh-ig-canvas story">'
+            '<span class="mh-ig-kicker">Personal best · 100m freestyle</span>'
+            '<div class="mh-ig-headline">Tom<br>Davies</div>'
+            '<div class="mh-ig-stat"><b>52.41</b><span class="mh-ig-delta">−0.74s</span></div>'
+            f'<span class="mh-ig-wm">{ig_name}</span>'
+            '<span class="mh-ig-corner" aria-hidden="true"></span>'
+            "</div>"
+        )
+        feed_canvas = (
+            '<div class="mh-ig-canvas feed">'
+            '<span class="mh-ig-kicker">Finals night · top three</span>'
+            '<div class="mh-ig-bars" aria-hidden="true"><span class="bronze" style="height:54%"></span>'
+            '<span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
+            '<div class="mh-ig-headline sm">Top three<br><em>finals</em></div>'
+            f'<span class="mh-ig-wm">{ig_name}</span>'
+            '<span class="mh-ig-corner" aria-hidden="true"></span>'
+            "</div>"
+        )
+        reel_canvas = (
+            '<div class="mh-ig-canvas reel">'
+            '<span class="mh-ig-kicker">Match-day · 15s reel</span>'
+            '<div class="mh-ig-headline">Match-day<br><em>highlights</em></div>'
+            '<div class="mh-ig-timeline" aria-hidden="true"><span class="lit"></span><span class="lit"></span>'
+            '<span class="lit"></span><span></span><span></span></div>'
+            '<span class="mh-ig-play" aria-hidden="true">&#9654;</span>'
+            "</div>"
+        )
+
+        story_phone = (
+            '<article class="mh-phone story" role="img" '
+            'aria-label="Sample Instagram Story — Tom Davies, 100m freestyle personal best 52.41">'
+            '<div class="mh-phone-screen">'
+            + ig_status
+            + '<div class="mh-ig-progress" aria-hidden="true"><span class="on"></span><span></span><span></span></div>'
+            + '<div class="mh-ig-head story" aria-hidden="true">'
+            + ig_av
+            + f'<span class="mh-ig-name">{ig_name}<i>2h</i></span>'
+            + ic_close
+            + "</div>"
+            + story_canvas
+            + '<div class="mh-ig-compose" aria-hidden="true"><span class="mh-ig-reply">Send message</span>'
+            + ic_heart
+            + ic_share
+            + "</div>"
+            + "</div></article>"
+        )
+        feed_phone = (
+            '<article class="mh-phone feed" role="img" '
+            'aria-label="Sample Instagram feed post — Riverside SC podium graphic, top three finals">'
+            '<div class="mh-phone-screen">'
+            + ig_status
+            + '<div class="mh-ig-head feed" aria-hidden="true">'
+            + ig_av_plain
+            + f'<span class="mh-ig-name">{ig_handle}<i>Finals night</i></span>'
+            + ic_more
+            + "</div>"
+            + feed_canvas
+            + '<div class="mh-ig-actions" aria-hidden="true"><span class="grp">'
+            + ic_heart
+            + ic_comment
+            + ic_share
+            + "</span>"
+            + ic_bookmark
+            + "</div>"
+            + '<div class="mh-ig-likes" aria-hidden="true">128 likes</div>'
+            + f'<div class="mh-ig-cap" aria-hidden="true"><b>{ig_handle}</b> Three finals, three lifetime bests. Splits in the comments.</div>'
+            + "</div></article>"
+        )
+        reel_phone = (
+            '<article class="mh-phone reel" role="img" '
+            'aria-label="Sample Instagram Reel — Riverside SC match-day highlights">'
+            '<div class="mh-phone-screen">'
+            + ig_status
+            + '<span class="mh-ig-reels-label" aria-hidden="true">Reels</span>'
+            + reel_canvas
+            + '<div class="mh-ig-rail" aria-hidden="true">'
+            + f"<span>{ic_heart}<i>342</i></span><span>{ic_comment}<i>18</i></span>"
+            + f'<span>{ic_share}</span><span>{ic_more}</span><span class="mh-ig-disc"></span></div>'
+            + '<div class="mh-ig-reel-meta" aria-hidden="true">'
+            + f'<span class="mh-ig-name"><b>{ig_handle}</b> · <em>Follow</em></span>'
+            + '<span class="mh-ig-reel-cap">Match-day, your colours. Reel ready before full time.</span>'
+            + f'<span class="mh-ig-audio">{ic_music} Original audio · {ig_name}</span></div>'
+            + "</div></article>"
+        )
+        frames_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
-            '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
-            '<div class="mh-sample-row mh-reveal-group">'
-            '<div class="mh-sample story">'
-            '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
-            '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
-            '<div class="mh-sample-time">52.41<span class="mh-sample-delta">−0.74s</span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">A clean, vertical story graphic with the swimmer’s name, event and split — branded with your club’s palette.</p>'
-            '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
-            "</div>"
-            '<div class="mh-sample feed">'
-            '<span class="mh-sample-eyebrow">Feed graphic · 1080×1350</span>'
-            '<div class="mh-sample-title">Top three <em>finals</em></div>'
-            '<div class="mh-sample-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Podium-bar chart of the night’s finals — names, times and lanes from your meet file, dropped into your colour palette.</p>'
-            '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
-            "</div>"
-            '<div class="mh-sample reel">'
-            '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
-            '<div class="mh-sample-title">Match-day <em>highlights</em></div>'
-            '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Top three cards stitched together with crossfades, your wordmark, and the day’s headline — rendered server-side.</p>'
-            '<div class="mh-sample-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> 1080×1920</div>'
-            "</div>"
+            '<div class="mh-section-eyebrow-strip"><span class="label">In the feed</span></div>'
+            '<h2 class="mh-section-title">Your results, the way your '
+            '<em class="editorial">followers</em> see them.</h2>'
+            '<div class="mh-frames mh-reveal">'
+            '<div class="mh-frames-stage" role="group" '
+            'aria-label="Sample outputs shown inside Instagram story, feed and reel formats">'
+            '<span class="mh-frames-glow" aria-hidden="true"></span>'
+            + story_phone
+            + feed_phone
+            + reel_phone
+            + "</div>"
+            + '<div class="mh-frames-dots" aria-hidden="true">'
+            '<span class="d1"></span><span class="d2"></span><span class="d3"></span></div>'
+            '<p class="mh-frames-cap">Story, feed and reel &mdash; one approved pack, dropped into '
+            "the formats your club actually posts.</p>"
             "</div>"
             "</section>"
         )
@@ -9875,7 +10009,7 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
+            hero_html + steps_html + frames_html + audience_html + promise_html + final_cta_html,
             active="home",
         )
 
