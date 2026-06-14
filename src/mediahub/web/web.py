@@ -776,6 +776,29 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     return btn, panel
 
 
+def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title") -> str:
+    """U.5 — render an editorial heading as stacked lines that reveal
+    one-by-one on scroll (inspired by Opal, op.al).
+
+    Each entry in ``lines`` becomes a ``.mh-line`` span inside a
+    ``.mh-reveal-lines`` heading. The Phase-10 IntersectionObserver
+    (``bindReveals`` in the layout) observes every line *individually* and adds
+    ``.is-in`` as it scrolls up through the viewport, so a section's headline
+    surfaces line after line instead of all at once; a small per-line CSS delay
+    keeps the cascade gentle when the lines cross the trigger together.
+
+    ``lines`` are pre-built, trusted HTML fragments — the static landing copy
+    here, including its ``<em class="editorial">`` accents. There is no user
+    data on this path, so the helper does not re-escape; any caller that ever
+    feeds it dynamic text MUST pass already-escaped fragments. No-JS and
+    reduced-motion visitors see every line immediately (the ``.mh-js`` /
+    ``prefers-reduced-motion`` gate in the CSS), so this is pure progressive
+    enhancement — content is never hidden without JavaScript able to reveal it.
+    """
+    spans = "".join(f'<span class="mh-line">{ln}</span>' for ln in lines)
+    return f'<{tag} class="{cls} mh-reveal-lines">{spans}</{tag}>'
+
+
 # --------------------------------------------------------------------------- #
 # U.3 — Explainability & confidence surfaces.
 #
@@ -8424,7 +8447,18 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     requestAnimationFrame(tick);
   }
   function bindReveals() {
-    var reveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    var blockReveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    // U.5 — line-by-line reveal: observe each direct child of a
+    // .mh-reveal-lines block on its OWN, so the lines surface one after
+    // another as they each scroll up through the viewport (Opal-style),
+    // rather than all together the moment a single container crosses.
+    var lineItems = [];
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.mh-reveal-lines'),
+      function(grp){
+        Array.prototype.forEach.call(grp.children, function(ln){ lineItems.push(ln); });
+      });
+    var reveals = Array.prototype.slice.call(blockReveals).concat(lineItems);
     var counters = document.querySelectorAll('[data-mh-count]');
     function revealEl(el) {
       el.classList.add('is-in');
@@ -8451,7 +8485,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       io.observe(el);
     });
     counters.forEach(function(el){
-      if (!el.closest('.mh-reveal, .mh-reveal-group')) {
+      if (!el.closest('.mh-reveal, .mh-reveal-group, .mh-reveal-lines')) {
         var r = el.getBoundingClientRect();
         if (r.top < (window.innerHeight || 0) * 0.95) animateCount(el);
         else io.observe(el);
@@ -9732,9 +9766,11 @@ def create_app() -> Flask:
         ]
         steps_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">The workflow</span></div>'
-            '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
-            '<div class="mh-steps mh-reveal-group">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">The workflow</span></div>'
+            + _reveal_lines(
+                ["From the results sheet to", '<em class="editorial">posting-ready</em>']
+            )
+            + '<div class="mh-steps mh-reveal-group">'
             + "".join(
                 f'<div class="mh-step">{icon}'
                 f'<div class="mh-step-num">{num}</div>'
@@ -9750,9 +9786,14 @@ def create_app() -> Flask:
         # first-time visitor see what they're getting before they upload.
         sample_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
-            '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
-            '<div class="mh-sample-row mh-reveal-group">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What lands in your queue</span></div>'
+            + _reveal_lines(
+                [
+                    'A weekend reads like <em class="editorial">three drafts</em>,',
+                    "ready to approve.",
+                ]
+            )
+            + '<div class="mh-sample-row mh-reveal-group">'
             '<div class="mh-sample story">'
             '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
             '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
@@ -9783,9 +9824,14 @@ def create_app() -> Flask:
         # tenants; this is the "who it's for" reassurance block.
         audience_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">Made for</span></div>'
-            '<h2 class="mh-section-title">Built for the people who already <em class="editorial">post the results</em>.</h2>'
-            '<div class="mh-audience-row mh-reveal-group">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
+            + _reveal_lines(
+                [
+                    "Built for the people who",
+                    'already <em class="editorial">post the results</em>.',
+                ]
+            )
+            + '<div class="mh-audience-row mh-reveal-group">'
             '<div class="mh-audience">'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
             '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
@@ -9812,14 +9858,17 @@ def create_app() -> Flask:
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
         promise_html = (
-            '<section class="mh-section mh-reveal">'
+            '<section class="mh-section">'
             '<div class="mh-promise">'
-            '<h2 class="mh-promise-title">Human in the loop, <em>by design</em>.</h2>'
-            '<p class="mh-promise-lede">'
+            + _reveal_lines(
+                ["Human in the loop,", "<em>by design</em>."],
+                cls="mh-promise-title",
+            )
+            + '<p class="mh-promise-lede mh-reveal">'
             "MediaHub is an intelligence layer, not an auto-poster. Every "
             "piece of content stops at a review queue you control."
             "</p>"
-            '<ul class="mh-promise-list">'
+            '<ul class="mh-promise-list mh-reveal-group">'
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
             "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
@@ -9844,9 +9893,11 @@ def create_app() -> Flask:
             final_cta_html = (
                 '<section class="mh-final-cta">'
                 "<div>"
-                f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
-                "<em>ready</em> in a sitting.</h2>"
-                '<p class="mh-final-cta-sub">Drop the results file. We\'ll '
+                + _reveal_lines(
+                    ["Next weekend's meet,", "<em>ready</em> in a sitting."],
+                    cls="mh-final-cta-headline",
+                )
+                + '<p class="mh-final-cta-sub mh-reveal">Drop the results file. We\'ll '
                 "rank the moments and write the captions; you spend the "
                 "evening approving instead of opening Photoshop.</p>"
                 "</div>"
@@ -9860,9 +9911,11 @@ def create_app() -> Flask:
             final_cta_html = (
                 '<section class="mh-final-cta">'
                 "<div>"
-                '<h2 class="mh-final-cta-headline">A minute to set up. '
-                "<em>Then</em> every week is easier.</h2>"
-                '<p class="mh-final-cta-sub">Tell us your club\'s name and '
+                + _reveal_lines(
+                    ["A minute to set up.", "<em>Then</em> every week is easier."],
+                    cls="mh-final-cta-headline",
+                )
+                + '<p class="mh-final-cta-sub mh-reveal">Tell us your club\'s name and '
                 "website. We'll read your brand, palette and voice, and have "
                 "on-brand drafts ready the next time you upload a results file.</p>"
                 "</div>"

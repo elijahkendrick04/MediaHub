@@ -1162,7 +1162,8 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
    PHASE 10 — MOTION SYSTEM
    =====================================================================
    Scroll-triggered reveals + number counters. Opt-in via .mh-reveal /
-   [data-mh-count]; an IntersectionObserver in _layout adds .is-in.
+   .mh-reveal-group / .mh-reveal-lines / [data-mh-count]; an
+   IntersectionObserver in _layout adds .is-in.
    Everything is a no-op under prefers-reduced-motion.
    ===================================================================== */
 
@@ -1196,8 +1197,42 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 .mh-reveal-group.is-in > *:nth-child(5) { transition-delay: 280ms; }
 .mh-reveal-group.is-in > *:nth-child(6) { transition-delay: 340ms; }
 
+/* U.5 — Opal-style line-by-line reveal. Every line inside a .mh-reveal-lines
+   block is observed on its OWN by the Phase-10 IntersectionObserver (see
+   bindReveals in _layout), so the lines surface one after another as they each
+   scroll up through the viewport — a genuine scroll-driven cascade, not the
+   single one-shot stagger of .mh-reveal-group. The rise is em-relative so it
+   scales with the big editorial type, and a small per-line delay keeps the
+   cascade gentle when tightly-stacked lines (e.g. a two-line headline) cross
+   the trigger together. */
+/* Lines always stack as block-level lines — this is layout, not animation, so
+   it is NOT .mh-js-gated: a no-JS visitor must still get the line breaks rather
+   than the spans running together (the declared lines carry no joining space). */
+.mh-reveal-lines > * { display: block; }
+/* The hidden / animated-in state IS .mh-js-gated, so no-JS and reduced-motion
+   visitors see the lines stacked AND fully visible. */
+.mh-js .mh-reveal-lines > * {
+  opacity: 0;
+  transform: translateY(0.5em);
+  transition: opacity 600ms var(--ease-out, ease-out),
+              transform 600ms var(--ease-out, ease-out);
+  will-change: opacity, transform;
+}
+.mh-js .mh-reveal-lines > .is-in { opacity: 1; transform: translateY(0); }
+.mh-reveal-lines > .is-in:nth-child(2) { transition-delay: 90ms; }
+.mh-reveal-lines > .is-in:nth-child(3) { transition-delay: 180ms; }
+.mh-reveal-lines > .is-in:nth-child(4) { transition-delay: 270ms; }
+
+/* The single-run section titles clamp to a tight 22ch measure; once we declare
+   the line breaks ourselves that clamp would force a *second*, unwanted wrap on
+   top of them, so drop it for reveal-lines headings — the 1200px content column
+   still bounds the width. */
+.mh-section-title.mh-reveal-lines { max-width: none; }
+
 @media (prefers-reduced-motion: reduce) {
-  .mh-js .mh-reveal, .mh-js .mh-reveal-group > * {
+  .mh-js .mh-reveal,
+  .mh-js .mh-reveal-group > *,
+  .mh-js .mh-reveal-lines > * {
     opacity: 1 !important;
     transform: none !important;
     transition: none !important;
