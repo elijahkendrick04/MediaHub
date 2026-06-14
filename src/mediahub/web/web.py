@@ -1774,12 +1774,6 @@ _CYCLE_PH_MOMENT = (
     "Try: relay squad breaks the club record",
     "Try: medal haul from the regional gala",
 )
-_CYCLE_PH_SEARCH = (
-    "Try: county championships",
-    "Try: spring gala 2026",
-    "Try: regionals.hy3",
-    "Try: run id 7f3c9a",
-)
 _CYCLE_PH_RESEARCH = (
     "Try: 2024 county championship headline results",
     "Try: who set the regional 100m free record this season",
@@ -1806,9 +1800,43 @@ def _cycle_ph_attr(phrases) -> str:
 # Precomputed once at import — the lists are static, so there's no reason to
 # rebuild the escaped attribute on every request.
 _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
-_CYCLE_PH_ATTR_SEARCH = _cycle_ph_attr(_CYCLE_PH_SEARCH)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+
+# UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
+# Vanish input (.mh-vanish): a rotating overlay-placeholder element
+# (.mh-vanish__ph) that swap-fades through real example queries, instead of the
+# UI 1.1 typewriter-through-the-native-placeholder cycle. The native placeholder
+# is emptied (the overlay carries the hint), so the input keeps an explicit
+# aria-label as its accessible name. bindVanish() in ui-kit.js reads this
+# pipe-delimited list from data-mh-placeholders and rotates it (paused while the
+# field holds text, no rotation under prefers-reduced-motion). The first phrase
+# is also baked into the overlay element server-side so the hint reads with no
+# JS, and a :placeholder-shown CSS rule hides the overlay the instant the box
+# holds text even if .is-typing never gets toggled (no-JS / pre-init safety).
+_VANISH_PH_SEARCH = (
+    "Search meet name, file or run id…",
+    "Search county championships…",
+    "Search spring gala 2026…",
+    "Find a file like regionals.hy3…",
+    "Jump to a run id like 7f3c9a…",
+)
+
+
+def _vanish_ph_attr(phrases) -> str:
+    """Render the ``data-mh-placeholders`` attribute for a Vanish input.
+
+    Phrases are joined with `` | `` (``bindVanish()`` in ``ui-kit.js`` splits on
+    the pipe and trims) and HTML-escaped so the value is safe inside a
+    double-quoted attribute. Returns the whole ``data-mh-placeholders="…"`` token
+    so call sites just drop it onto the ``.mh-vanish`` container.
+    """
+    return f'data-mh-placeholders="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the list is static.
+_VANISH_PH_ATTR_SEARCH = _vanish_ph_attr(_VANISH_PH_SEARCH)
 
 
 # Console page body (Capability 3c). A plain string — NOT an f-string — so the
@@ -12414,9 +12442,10 @@ def create_app() -> Flask:
             )
         toolbar_html = (
             '<div class="mh-toolbar">'
-            '<div class="grow mh-search">'
+            f'<div class="grow mh-search mh-vanish" {_VANISH_PH_ATTR_SEARCH}>'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            f'<input id="mh-activity-search" type="search" {_CYCLE_PH_ATTR_SEARCH} placeholder="Search meet name, file or run id…" autocomplete="off" />'
+            '<input id="mh-activity-search" type="search" placeholder="" autocomplete="off" aria-label="Search runs by meet name, file or run id" />'
+            f'<span class="mh-vanish__ph" aria-hidden="true">{_h(_VANISH_PH_SEARCH[0])}</span>'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
