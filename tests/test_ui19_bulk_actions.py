@@ -352,6 +352,18 @@ class TestReviewBulkStatus:
         )
         assert r.status_code == 400
 
+    def test_non_string_status_is_400_not_500(self, env):
+        """A fuzzed/AJAX body with a non-string status must 400, never 500
+        (the contract sweep sends arbitrary JSON types)."""
+        c, tp, wm = env["client"], env["tmp_path"], env["wm"]
+        run_id = _seed_run(tp, wm, "org-test", ["s0"])
+        for bad in (123, ["approved"], {"x": 1}):
+            r = c.post(
+                f"/api/runs/{run_id}/cards/bulk-status",
+                json={"ids": ["s0"], "status": bad},
+            )
+            assert r.status_code == 400, f"status={bad!r} gave {r.status_code}"
+
     def test_empty_selection_400(self, env):
         c, tp, wm = env["client"], env["tmp_path"], env["wm"]
         run_id = _seed_run(tp, wm, "org-test", ["s0"])

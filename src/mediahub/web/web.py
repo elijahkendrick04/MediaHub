@@ -30060,8 +30060,12 @@ function mhSetupMode(mode) {{
             return jsonify({"error": "workflow not available"}), 503
 
         wants_json = _req_wants_json(request)
-        payload = request.get_json(silent=True) or {}
-        status_str = (
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            payload = {}
+        # Coerce to str before .strip(): a fuzzed/AJAX body may send a non-string
+        # (number, list) under "status" — that must be a clean 400, not a 500.
+        status_str = str(
             payload.get("status")
             or request.form.get("status")
             or request.form.get("op")
