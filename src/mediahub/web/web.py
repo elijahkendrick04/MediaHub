@@ -9319,7 +9319,7 @@ def create_app() -> Flask:
             '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
             '<div class="mh-steps mh-reveal-group">'
             + "".join(
-                f'<div class="mh-step">{icon}'
+                f'<div class="mh-step mh-spotlight-card">{icon}'
                 f'<div class="mh-step-num">{num}</div>'
                 f"<h3>{title}</h3><p>{body}</p>"
                 f'<div class="mh-step-foot">{foot}</div></div>'
