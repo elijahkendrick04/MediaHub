@@ -125,6 +125,11 @@ final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
+- **UI 1.1** · Phase 1 (Product polish) — Cycling example-prompt placeholder (inspired by Cosmos): in the CREATE / Free-Text 'describe a moment' input and any search field, animate the placeholder through real example prompts ('Try: Tom Davies PB 100m free', 'Try: top three at county finals') to guide first-time users; pure CSS/JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.2** · Phase 1 (Product polish) — Bento-grid feature section (inspired by Umbrel): replace the uniform capability card rows on the landing with a bento grid of varied-size tiles, each carrying its own mini-visual (sample story card, a stat chip, brand-kit swatches, a 'moments we detect' list, a reel preview); dark/premium aesthetic, reuses existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.3** · Phase 1 (Product polish) — Inline media thumbnails in a display headline (inspired by Samara): embed small inline output thumbnails inside a large hero headline sentence — 'From a results sheet [img] to a story [img], a feed graphic [img] and a reel [img]' — the images are real sample outputs served from the static directory · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.4** · Phase 1 (Product polish) — Tactile spring-physics micro-interactions (inspired by Family): a restrained spring-physics layer on primary buttons, card-selection, and toggles — subtle magnetic hover + bouncy press; vanilla JS CSS-custom-property animation, `prefers-reduced-motion` respected, understated to preserve the editorial tone · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.5** · Phase 1 (Product polish) — Live local-time + system-status HUD readout (inspired by AndAgain, Dul Zorigoo, Metalab): a small mono header/footer strip showing live local time + a deployment/system status line, extending the existing ONLINE indicator, in the blueprint/HUD aesthetic; low-priority polish · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.5** · Phase 1 (Product polish) — Scroll-driven progressive reveal (inspired by Opal): landing sections reveal line-by-line on scroll; dark editorial theme throughout · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.6** · Phase 1 (Product polish) — Branded render/generation loading state (inspired by Lusion): large editorial %-counter + minimal progress bar for real render waits; reuses the giant-numeral motif (supports U.2) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.7** · Phase 1 (Product polish) — "Focus the facts" caption/explainability highlight (inspired by Pedro Duarte): in captions + the why-this-card review UI, source-grounded entities (athlete/time/event/PB) are sharp + pill-highlighted; filler de-emphasised (supports U.3) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -779,6 +784,31 @@ designed and every recognition decision explained.
 - **U.16 — Subtle 3D tilt on output cards.** Premium parallax/tilt-on-hover for
   sample output cards; uses CSS perspective + JS pointer-tracking; respects
   `prefers-reduced-motion`. *Inspired by Atlas (atlascard.com).*
+- **UI 1.1 — Cycling example-prompt placeholder.** In the CREATE / Free-Text
+  input and any search field, the placeholder animates through curated real
+  examples ('Try: Tom Davies PB 100m free', 'Try: top three at county finals'),
+  guiding first-time users with zero extra UI. Pure CSS/JS, no new deps.
+  *Inspired by Cosmos (cosmos.so). Supports U.4.*
+- **UI 1.2 — Bento-grid feature section.** The uniform capability card rows on
+  the landing are replaced by a bento grid of varied-size tiles — each carries
+  its own mini-visual (a sample story card, a stat chip, brand-kit swatches, a
+  'moments we detect' list, a reel preview). Dark/premium, all on existing CSS
+  variables. *Inspired by Umbrel (umbrel.com).*
+- **UI 1.3 — Inline media thumbnails in a display headline.** Small real output
+  thumbnails are embedded inline within a large hero sentence: 'From a results
+  sheet [img] to a story [img], a feed graphic [img] and a reel [img].' Images
+  served from the static directory — no external fetch. *Inspired by Samara
+  (samara.com).*
+- **UI 1.4 — Tactile spring-physics micro-interactions.** A restrained
+  spring-physics layer on primary buttons, card-selection, and toggles: subtle
+  magnetic hover + bouncy press. Vanilla JS driving CSS custom-property
+  animation; `prefers-reduced-motion` respected; understated to preserve the
+  editorial tone. *Inspired by Family (family.co).*
+- **UI 1.5 — Live local-time + system-status HUD readout.** A small mono
+  header/footer strip shows live local time and a deployment/system status line,
+  extending the existing ONLINE indicator in the blueprint/HUD aesthetic.
+  Low-priority polish; no new backend surface. *Inspired by AndAgain
+  (andagain.uk), Dul Zorigoo (dzrgo.com), Metalab (metalab.com).*
 
 **Building blocks.** All shipped: the primary flow, the design-spec director +
 12-archetype catalog, the Adaptive Theming Engine, magic-link mobile approvals,
