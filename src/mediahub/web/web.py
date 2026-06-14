@@ -15740,7 +15740,7 @@ Relay team broke club record"></textarea>
         for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
             icon = _SETTINGS_ICONS.get(icon_key, "")
             tiles += (
-                f'<a href="{href}" class="mh-template">'
+                f'<a href="{href}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(title)}</h3>'
@@ -15756,7 +15756,7 @@ Relay team broke club record"></textarea>
             '<p class="lede">Pick a heading to manage it. Each card opens its own '
             "page so nothing is buried in one long scroll.</p>"
             "</section>"
-            f'<div class="mh-template-grid">{tiles}</div>'
+            f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
         )
         return _layout("Settings", body, active="settings")
 
@@ -23798,7 +23798,7 @@ what you're doing, what they should do.</p>
             sign_in_url = url_for("sign_in_post")
             delete_url = url_for("sign_in_delete")
             cards_html += (
-                '<div class="mh-profile-card">'
+                '<div class="mh-profile-card mh-spotlight-card">'
                 f'<div class="logo">{logo_html}</div>'
                 f'<div class="display-name">{_h(p.display_name)}</div>'
                 f'<div class="meta-line">{pill_html}</div>'
