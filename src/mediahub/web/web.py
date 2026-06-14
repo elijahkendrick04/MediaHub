@@ -25956,9 +25956,7 @@ what you're doing, what they should do.</p>
         for tier in _billing.TIERS:
             is_current = tier.plan == plan_now and signed_in
             is_rec = tier.plan == _auth.PLAN_CLUB
-            features = "".join(
-                _card_feature_li(row, tier.plan) for row in _billing.card_rows()
-            )
+            features = "".join(_card_feature_li(row, tier.plan) for row in _billing.card_rows())
             # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
             if tier.plan == _auth.PLAN_FREE:
                 price_html = '<div class="mh-price"><span class="mh-price-fig">Free</span></div>'
@@ -26021,9 +26019,7 @@ what you're doing, what they should do.</p>
                         f"Upgrade to {_h(tier.name)}</a>"
                     )
 
-            rec_badge = (
-                '<span class="mh-rec-badge">Recommended</span>' if is_rec else ""
-            )
+            rec_badge = '<span class="mh-rec-badge">Recommended</span>' if is_rec else ""
             cards += (
                 f'<div class="card mh-plan-card{" is-rec" if is_rec else ""}">'
                 f"{rec_badge}"
@@ -26119,8 +26115,7 @@ what you're doing, what they should do.</p>
             + '<div class="mh-plan-grid" id="mh-plan-grid" data-mh-period="annual">'
             f"{cards}</div>"
             f"{note_html}"
-            f"{compare_html}"
-            + toggle_js
+            f"{compare_html}" + toggle_js
         )
         return _layout("Pricing", body, active="pricing")
 
