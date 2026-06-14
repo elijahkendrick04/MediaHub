@@ -88,6 +88,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **UI 1.19** · Phase 1 (Product polish) — Testimonial/social-proof carousel (from Sketch): club/coach quote cards + avatar initials with arrow controls + autoplay on the landing; pure CSS/JS, no carousel lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **UI2.1** · UI2 (top priority) — **Cutout before/after**: wire the kit's `.mh-compare` slider onto a real original-photo ↔ background-removed *cutout* preview in the media/graphic flow, so a user can drag to see exactly what rembg removed · 🟢 parallel-safe (self-contained surface) *(completed 2026-06-14)*
 - ✅ **UI 1.17** · Phase 1 (Product polish) — Content-cadence heatmap (from GitHub): a calendar activity grid showing generation/posting consistency over the past year; server-rendered SVG from run history, no JS lib required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
