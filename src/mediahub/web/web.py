@@ -10965,11 +10965,15 @@ def create_app() -> Flask:
             " 6  Bauer, Jonas      13  HAR   56.10"
         )
         before_after_html = (
-            '<section class="mh-section mh-reveal">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">The transformation</span></div>'
-            '<h2 class="mh-section-title">A raw results file in. '
-            '<em class="editorial">A posting-ready graphic</em> out. Drag to reveal.</h2>'
-            '<figure class="mh-ba" data-mh-ba '
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">The transformation</span></div>'
+            + _reveal_lines(
+                [
+                    "A raw results file in.",
+                    '<em class="editorial">A posting-ready graphic</em> out. Drag to reveal.',
+                ]
+            )
+            + '<figure class="mh-ba" data-mh-ba '
             'aria-label="Before and after: the raw results file a club uploads, '
             "wiped across to reveal the finished branded graphic MediaHub returns "
             '&mdash; same swimmer, same time.">'
