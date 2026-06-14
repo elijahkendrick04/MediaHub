@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `915e87af5` · Merge pull request #484 from elijahkendrick04/claude/inspiring-hamilton-i9oz94
+**Last updated:** 2026-06-14 · `3a807f316` · Merge pull request #483 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1388,6 +1388,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `edede9341` | Crawl: fetch result files before HTML renders; surface result-file count |
+| 2026-06-14 | `e63ed6b85` | Drop split/continuation rows so only overall times are kept |
 | 2026-06-14 | `1e08619ee` | U.15: before/after reveal slider on the landing page |
 | 2026-06-14 | `4238afc14` | U.12: animated count-up (odometer) stat numerals on the landing hero |
 | 2026-06-14 | `a10f2fc98` | U.14: cursor-following hover preview (Media library + Create) |
@@ -1395,5 +1397,4 @@ list and the auto table below, not here.
 | 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
 | 2026-06-14 | `4e538d7b1` | U.10: framed in-app product demo in the landing hero |
 | 2026-06-14 | `b2ef8a46c` | UI 1.1-1.5: design-polish ideas from godly.website review batch 2 — top of Phase U |
-| 2026-06-14 | `fd88c0534` | Add scroll-driven line-by-line landing reveal (U.5) |
 <!-- /ROADMAP:ACTIVITY -->
