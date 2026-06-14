@@ -2547,7 +2547,7 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     return f"""
 <div style="text-align:center;padding:64px 24px">
   <div class="mh-spinner" style="margin:0 auto 24px"></div>
-  <h1 style="margin-bottom:10px">Still processing your run</h1>
+  <h1 class="mh-scramble" style="margin-bottom:10px">Still processing your run</h1>
   <p class="dim" style="max-width:480px;margin:0 auto 24px">
     The pipeline is reading the file, finding your athletes, and drafting
     captions. This usually takes 20&ndash;60 seconds. We&rsquo;ll auto-refresh
@@ -12693,7 +12693,7 @@ def create_app() -> Flask:
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
-  <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
+  <h1 class="mh-scramble">Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
@@ -13592,12 +13592,12 @@ def create_app() -> Flask:
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Pipeline running</span>
-  <h1>Processing run</h1>
+  <h1 class="mh-scramble">Processing run</h1>
   <p class="lede">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds. This page will redirect you to the review queue the moment it's ready.</p>
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
+  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage" class="mh-scramble">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
@@ -13633,6 +13633,15 @@ def create_app() -> Flask:
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
+
+  // UI 1.21 — decode each new "engine is generating…" stage label in. The
+  // helper falls back to a plain text swap if the UI kit hasn't loaded, and
+  // scrambleTo itself no-ops when the label is unchanged between polls.
+  function setStage(txt) {{
+    if (!stage) return;
+    if (window.MH && MH.scrambleTo) MH.scrambleTo(stage, txt);
+    else stage.textContent = txt;
+  }}
 
   function fillBar(colour) {{
     if (!bar) return;
@@ -13705,7 +13714,7 @@ def create_app() -> Flask:
       return;
     }}
     // queued / running — keep the indeterminate bar moving.
-    if (stage) stage.textContent = log[log.length - 1] || 'Starting…';
+    setStage(log[log.length - 1] || 'Starting…');
     if (bar) bar.classList.add('indeterminate');
     if (waited > SOFT_CAP_MS && lede) {{
       lede.textContent = "Still working — large meets and personal-best lookups can take a few minutes. This page redirects automatically the moment it's ready.";
