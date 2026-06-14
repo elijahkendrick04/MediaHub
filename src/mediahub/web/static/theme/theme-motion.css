@@ -38,6 +38,10 @@
 }
 @property --mh-x { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
 @property --mh-y { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
+/* Animated-tooltip parallax: the pointer tilt the JS layer writes onto the
+   hovered avatar. Registered so an unset value is a clean 0, not `unset`. */
+@property --mh-tip-rot { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
+@property --mh-tip-x { syntax: "<length>"; inherits: true; initial-value: 0px; }
 
 :root {
   /* Motion-kit knobs — one place to retune feel across every effect. */
@@ -785,7 +789,123 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
 }
 
 /* =====================================================================
-   13. DRAG-SCROLL GALLERY  (Fey / Sketch — click-and-drag horizontal
+   13. ANIMATED TOOLTIP  (athlete avatars / rosters — review · spotlight)
+   A hover/focus card that springs up over an avatar with the athlete's
+   name, club and a key stat. The JS layer writes --mh-tip-rot / --mh-tip-x
+   from the pointer for the signature parallax tilt; with no JS the card
+   still reveals on hover/focus, just without the tilt. Fails safe — the
+   avatar (and the grounded facts beside it) stay fully usable with the
+   effect absent (no-JS, reduced-motion, old engine).
+   ===================================================================== */
+
+/* A stack of avatars that overlap like the Aceternity roster; the active
+   chip lifts above its neighbours. Drop on a flex wrapper of .mh-tooltip. */
+.mh-tooltip-row { display: inline-flex; align-items: center; padding-left: 6px; }
+.mh-tooltip-row > .mh-tooltip { margin-left: -6px; }
+
+.mh-tooltip { position: relative; display: inline-flex; vertical-align: middle; }
+
+.mh-tooltip__avatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--mh-tip-size, 34px);
+  height: var(--mh-tip-size, 34px);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;                       /* clip a photo to the circle */
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: calc(var(--mh-tip-size, 34px) * 0.36);
+  line-height: 1;
+  color: var(--mh-on-surface);
+  background: var(--mh-surface-container);
+  border: 1px solid var(--mh-outline);
+  box-shadow: 0 0 0 2px var(--mh-surface-deep);
+  cursor: default;
+  transition: transform var(--dur-med) var(--ease-out),
+              border-color var(--dur-med) var(--ease-out-quick);
+}
+.mh-tooltip__avatar img { width: 100%; height: 100%; object-fit: cover; }
+.mh-tooltip__avatar:focus-visible {
+  outline: 2px solid var(--mh-primary);
+  outline-offset: 2px;
+}
+
+/* Lift the active chip (and float it above overlapping siblings). */
+.mh-tooltip:hover, .mh-tooltip:focus-within { z-index: 5; }
+.mh-tooltip:hover .mh-tooltip__avatar,
+.mh-tooltip:focus-within .mh-tooltip__avatar {
+  transform: translateY(-2px) scale(1.06);
+  border-color: color-mix(in oklch, var(--mh-primary) 60%, var(--mh-outline));
+}
+
+/* The floating card — hidden (and slightly down/shrunk) at rest, springs up
+   on hover/focus. The pointer parallax rides as a second translateX + rotate
+   on top of the −50% horizontal centring. */
+.mh-tooltip__pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 60;
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 12px 9px;
+  border-radius: var(--radius-md);
+  background: var(--mh-surface-deep);
+  border: 1px solid var(--mh-outline);
+  box-shadow: var(--mh-elevation-2);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: bottom center;
+  transform: translateX(-50%) translateX(var(--mh-tip-x, 0px))
+             translateY(7px) scale(0.9) rotate(var(--mh-tip-rot, 0deg));
+  transition: opacity var(--dur-fast) var(--ease-out-quick),
+              transform var(--dur-med) var(--ease-spring);
+}
+.mh-tooltip:hover .mh-tooltip__pop,
+.mh-tooltip:focus-within .mh-tooltip__pop {
+  opacity: 1;
+  transform: translateX(-50%) translateX(var(--mh-tip-x, 0px))
+             translateY(0) scale(1) rotate(var(--mh-tip-rot, 0deg));
+}
+/* Caret pointing down at the avatar. */
+.mh-tooltip__pop::after {
+  content: "";
+  position: absolute;
+  top: 100%; left: 50%;
+  width: 8px; height: 8px;
+  margin: -5px 0 0 -4px;
+  background: var(--mh-surface-deep);
+  border-right: 1px solid var(--mh-outline);
+  border-bottom: 1px solid var(--mh-outline);
+  transform: rotate(45deg);
+}
+.mh-tooltip__name {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--mh-on-surface);
+}
+.mh-tooltip__meta {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-muted);
+  white-space: nowrap;
+}
+.mh-tooltip__stat { color: var(--mh-primary); }
+.mh-tooltip__sep { opacity: 0.5; }
+
+/* =====================================================================
+   14. DRAG-SCROLL GALLERY  (Fey / Sketch — click-and-drag horizontal
    carousel; Media Library filmstrip + landing sample-output showcase)
    ---------------------------------------------------------------------
    The substrate is a plain `overflow-x: auto` scroll-snap row, so the
@@ -955,6 +1075,17 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
   .mh-flip-words > .mh-fw { transition: none; }
   .mh-highlight { transition: none; background-size: 100% 42%; }
+  /* Tooltip: keep the reveal (opacity only), drop the chip-lift + parallax
+     tilt + spring so nothing moves. JS already skips the tilt under reduce. */
+  .mh-tooltip__avatar,
+  .mh-tooltip:hover .mh-tooltip__avatar,
+  .mh-tooltip:focus-within .mh-tooltip__avatar { transform: none; transition: none; }
+  .mh-tooltip__pop {
+    transform: translateX(-50%);
+    transition: opacity var(--dur-fast) var(--ease-out-quick);
+  }
+  .mh-tooltip:hover .mh-tooltip__pop,
+  .mh-tooltip:focus-within .mh-tooltip__pop { transform: translateX(-50%); }
   .mh-scramble { transition: none; }
   .mh-scramble.is-scrambling { color: inherit; }
   /* The readout is pinned (not pointer-tracking) by the JS under reduced

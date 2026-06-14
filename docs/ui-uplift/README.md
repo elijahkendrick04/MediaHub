@@ -38,12 +38,13 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 | **Home / landing** | Spotlight (hero ambient), Infinite-Moving-Cards (sport marquee), Card-Spotlight (sample cards + the 4 step cards), split-flap Flapboard (PB time), gradient-text (marquee label), reveal (final CTA via `.mh-reveal`) |
 | **Upload** | Aurora ambient (entry hero) |
 | **Processing** | Multi-Step Loader (real pipeline log → live step checklist via `MH.renderLogSteps`) |
-| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars) |
+| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars), Animated-Tooltip (athlete avatar on every card → name · club · meet haul, via `.mh-tooltip`) |
 | **Make** | Glow-border (live content-type tiles) |
 | **Settings** | Glow-border (category tiles) + reveal-group (tile grid) |
 | **Sign-in** | Card-Spotlight (org profile cards) |
 | **Plan** | reveal (plan items) |
 | **Media library** | Lens (asset thumbnail magnify-to-inspect) |
+| **Athlete spotlight** | Animated-Tooltip (`.mh-tooltip`) — decorative avatars on the swimmer roster, a keyboard-reachable hero avatar carrying name · club · band haul |
 
 The kit also ships ready-to-use effects not yet wired to a specific screen (Aurora, Grid/
 Dot/Scales/Grain backgrounds, gradient-border, 3D tilt, Glare, hover-group, Moving-Border,
@@ -157,7 +158,7 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Component | Verdict | Note |
 |---|---|---|
 | Animated Modal | ADOPT | reuses existing `.mh-modal` (already animated) |
-| Animated Tooltip | ADOPT | for athlete-avatar tooltips |
+| Animated Tooltip | ADOPT | `.mh-tooltip` — athlete-avatar tooltips on the review queue + spotlight surfaces (UI2.2) |
 | Link Preview | PARTIAL | |
 | Images Slider | PARTIAL | |
 | Carousel / Apple Cards Carousel | PARTIAL | content-pack preview |

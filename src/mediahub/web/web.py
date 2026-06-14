@@ -62,6 +62,10 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from .humanise import humanise as _humanise
+from .weekend_glance import (
+    build_weekend_glance as _build_weekend_glance,
+    render_weekend_glance_html as _render_weekend_glance_html,
+)
 from . import results_table as _rt
 from .club_profile import (
     ClubProfile,
@@ -1163,6 +1167,74 @@ def _worthiness_meter(priority: float) -> str:
         '<span class="mh-worth-track">'
         f'<span class="mh-worth-fill mh-bar-fill" style="width:{pct}%"></span></span>'
         f'<span class="mh-worth-num">{pct}%</span></span>'
+    )
+
+
+def _avatar_initials(name: str) -> str:
+    """One- or two-letter initials for an athlete avatar chip.
+
+    First+last initial for a full name, the first two letters for a single
+    token, ``?`` for an empty name. Mirrors the sign-in card initials.
+    """
+    parts = [p for p in (name or "").strip().split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _athlete_avatar(
+    name: str,
+    *,
+    club: str = "",
+    stat: str = "",
+    focusable: bool = False,
+    size: int = 34,
+) -> str:
+    """An athlete avatar chip carrying a hover/focus Animated-Tooltip (the kit
+    ``.mh-tooltip``) that shows the athlete's name, club and a key stat.
+
+    Used on the review queue and the athlete-spotlight surfaces (UI2.2). The
+    tooltip is a decorative progressive enhancement: the chip is fully usable
+    with the effect absent (no-JS / reduced-motion), and every value shown is a
+    real, grounded fact already in the recognition report — never fabricated.
+
+    ``focusable=True`` makes the chip keyboard-reachable and exposes the same
+    name/club/stat to assistive tech via ``aria-label`` (use for standalone
+    placements). ``focusable=False`` keeps it decorative + ``aria-hidden`` (use
+    when the chip sits inside another link/control, or the same facts are
+    already visible as text beside it).
+    """
+    nm = (name or "").strip()
+    club = (club or "").strip()
+    stat = (stat or "").strip()
+    initials = _h(_avatar_initials(nm))
+
+    # Meta line: "Club · stat", dropping either empty half cleanly.
+    meta_inner = ""
+    if club:
+        meta_inner += f'<span class="mh-tooltip__club">{_h(club)}</span>'
+    if club and stat:
+        meta_inner += '<span class="mh-tooltip__sep" aria-hidden="true"> · </span>'
+    if stat:
+        meta_inner += f'<span class="mh-tooltip__stat">{_h(stat)}</span>'
+    meta_html = f'<span class="mh-tooltip__meta">{meta_inner}</span>' if meta_inner else ""
+
+    if focusable:
+        # Standalone, keyboard-reachable: AT gets the whole summary from the
+        # avatar's aria-label; the visual pop is a decorative duplicate.
+        aria = _h(" · ".join(p for p in (nm, club, stat) if p) or (nm or "Athlete"))
+        avatar_attrs = f'tabindex="0" role="img" aria-label="{aria}"'
+    else:
+        avatar_attrs = 'aria-hidden="true"'
+
+    return (
+        f'<span class="mh-tooltip" style="--mh-tip-size:{int(size)}px">'
+        f'<span class="mh-tooltip__avatar" {avatar_attrs}>{initials}</span>'
+        f'<span class="mh-tooltip__pop" role="tooltip" aria-hidden="true">'
+        f'<span class="mh-tooltip__name">{_h(nm)}</span>{meta_html}'
+        f"</span></span>"
     )
 
 
@@ -9277,6 +9349,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     {# Pricing is a top-bar item only for signed-out visitors (prospects).
@@ -14625,6 +14698,207 @@ def create_app() -> Flask:
         )
         return _layout("Activity", body, active="activity")
 
+    # ---- SEASON TIMELINE — meet history as a vertical, scroll-traced view ----
+    # UI2.3 — a read-only "season story" lens on the SAME run history the
+    # Activity log lists, rendered with the kit's `.mh-timeline` node list and
+    # the scroll-driven `.mh-tracing-beam` (ui-kit.js writes `--mh-progress`
+    # as you scroll; the rail fills top->bottom). Distinct from /activity (an
+    # ops table with search / delete / schedule columns): this is the
+    # celebratory, chronological view a club shares round the committee. Both
+    # read the same `runs` rows, scoped to the active org (multi-tenant).
+    @app.route("/season")
+    def season_timeline_page():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+
+        # Fail-soft, org-scoped DB read (WHERE profile_id = ? is the tenant
+        # isolation boundary). A missing / locked data.db must not 500 the
+        # page — fall through to a recovery hero instead.
+        rows = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_achievements, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 200",
+                    (prof.profile_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("season: runs DB unreachable: %s", e)
+            db_failed = True
+
+        eyebrow = '<span class="mh-hero-eyebrow">Season timeline</span>'
+
+        # ---- Empty / recovery states -----------------------------------
+        if not rows:
+            if db_failed:
+                body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    f"{eyebrow}"
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">season</em>.</h1>'
+                    '<p class="lede">The runs database wasn&rsquo;t readable on this '
+                    "deployment, so the timeline is empty even if meets were processed "
+                    "earlier. Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume.</p>"
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("season_timeline_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    "</div></section>"
+                )
+                return _layout("Season timeline", body, active="season")
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                f"{eyebrow}"
+                f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">Process your first meet and it lands on this timeline '
+                "&mdash; every meet a node on the season, with the swims matched and the "
+                "moments detected, and a beam that traces the season as you scroll.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Open activity</a>'
+                "</div></section>"
+            )
+            return _layout("Season timeline", body, active="season")
+
+        # ---- Build the timeline ----------------------------------------
+        from datetime import datetime as _dt
+
+        def _parse(iso):
+            if not iso:
+                return None
+            try:
+                return _dt.fromisoformat(str(iso).replace("Z", "").replace("T", " ")[:19])
+            except Exception:
+                return None
+
+        n_meets = len(rows)
+        total_swims = 0
+        total_moments = 0
+        cur_month = None
+        items_html = ""
+        for r in rows:
+            dt = _parse(r["created_at"])
+            month_label = dt.strftime("%B %Y") if dt else "Undated"
+            if month_label != cur_month:
+                cur_month = month_label
+                items_html += (
+                    '<div class="mh-timeline__head">'
+                    f'<span class="mh-tl-month">{_h(month_label)}</span></div>'
+                )
+
+            if dt:
+                day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
+                iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                full_title = dt.strftime("%A %d %B %Y, %H:%M UTC")
+            else:
+                day_html, iso_attr, full_title = "&mdash;", "", "Date unknown"
+
+            status = r["status"] or ""
+            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                status, ""
+            )
+            swims = int(r["our_swims"] or 0)
+            moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
+            total_swims += swims
+            total_moments += moments
+            title = r["meet_name"] or r["file_name"] or r["id"]
+            review_href = url_for("review", run_id=r["id"])
+
+            stat_bits = [f"{swims:,} {'swim' if swims == 1 else 'swims'} matched"]
+            if moments:
+                stat_bits.append(f"{moments:,} {'moment' if moments == 1 else 'moments'} detected")
+            stats_html = '<span class="sep">&middot;</span>'.join(
+                f"<span>{_h(b)}</span>" for b in stat_bits
+            )
+
+            item = (
+                '<div class="mh-timeline__item">'
+                '<article class="card mh-tl-card">'
+                '<div class="mh-tl-top">'
+                f'<time class="mh-tl-date" datetime="{_h(iso_attr)}" title="{_h(full_title)}">{day_html}</time>'
+                f'<span class="tag {badge}">{_h(status)}</span>'
+                "</div>"
+                f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
+                f'<div class="strap mh-tl-stats">{stats_html}</div>'
+            )
+            if status == "error" and r["error"]:
+                err = str(r["error"])
+                err = err[:400] + ("…" if len(err) > 400 else "")
+                item += (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--bad)">'
+                    "Why did this run fail?</summary>"
+                    '<pre style="margin:8px 0 0;padding:10px 12px;background:rgba(0,0,0,0.25);'
+                    'border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-word">'
+                    f"{_h(err)}</pre></details>"
+                )
+            item += "</article></div>"
+            items_html += item
+
+        # Page-scoped presentation. Kept inline (not in the shared kit CSS) so
+        # the feature is self-contained and parallel-safe; tokens keep it on
+        # brand. The rail-offset centres the 2px beam on the 9px timeline node
+        # dots (dots sit 5px in from the timeline's left edge -> centre ~9px).
+        season_css = (
+            "<style>"
+            ".mh-season-tl{max-width:760px}"
+            ".mh-season-tl .mh-tracing-beam__rail{left:8px}"
+            ".mh-season-tl .mh-timeline__head{margin:var(--sp-5) 0 var(--sp-3)}"
+            ".mh-season-tl .mh-timeline__head:first-child{margin-top:0}"
+            ".mh-season-tl .mh-tl-month{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)}"
+            ".mh-season-tl .mh-tl-card{padding:var(--sp-4) var(--sp-5)}"
+            ".mh-season-tl .mh-tl-top{display:flex;align-items:center;justify-content:space-between;"
+            "gap:var(--sp-3);margin-bottom:6px}"
+            ".mh-season-tl .mh-tl-date{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "color:var(--ink-muted);letter-spacing:.04em;white-space:nowrap}"
+            ".mh-season-tl .mh-tl-title{margin:0 0 8px;font-size:var(--fs-lg);line-height:1.2}"
+            ".mh-season-tl .mh-tl-title a{color:var(--ink);text-decoration:none}"
+            ".mh-season-tl .mh-tl-title a:hover{color:var(--mh-primary)}"
+            ".mh-season-tl .mh-tl-stats{font-size:var(--fs-sm)}"
+            "</style>"
+        )
+
+        # Season totals — count up on scroll-in via the shared motion system.
+        summary_html = (
+            '<div class="mh-activity-summary mh-reveal">'
+            f'<div class="stat live"><div class="l">Meets</div>'
+            f'<div class="v" data-mh-count="{n_meets}">{n_meets:,}</div></div>'
+            f'<div class="stat"><div class="l">Swims matched</div>'
+            f'<div class="v" data-mh-count="{total_swims}">{total_swims:,}</div></div>'
+            f'<div class="stat medal"><div class="l">Moments detected</div>'
+            f'<div class="v" data-mh-count="{total_moments}">{total_moments:,}</div></div>'
+            "</div>"
+        )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            f"{eyebrow}"
+            f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
+            '<span class="sep">&middot;</span>'
+            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            "</div></section>"
+        )
+
+        timeline_html = (
+            '<div class="mh-tracing-beam mh-season-tl">'
+            '<span class="mh-tracing-beam__rail" aria-hidden="true"></span>'
+            '<div class="mh-timeline">'
+            f"{items_html}"
+            "</div></div>"
+        )
+
+        body = season_css + hero + summary_html + timeline_html
+        return _layout("Season timeline", body, active="season")
+
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
     def upload():
@@ -16195,6 +16469,18 @@ def create_app() -> Flask:
             ]
         )
 
+        # --- UI 1.30 "Weekend at a glance" digest (deterministic; no new LLM
+        # call — surfaces the recognition report the pipeline already produced).
+        # Fail-soft: a summary panel must never 500 the review page, so any
+        # surprise in the run shape collapses to no panel rather than an error.
+        try:
+            weekend_glance_html = _render_weekend_glance_html(_build_weekend_glance(data))
+        except Exception:
+            # The builder is written to be total, but a summary panel must never
+            # be the thing that 500s the review page — degrade to no panel.
+            log.exception("weekend-glance: render failed for run %s", run_id)
+            weekend_glance_html = ""
+
         # --- Meet context card
         mctx = rr.get("meet_context") or {}
         ctx_sources = mctx.get("research_sources") or []
@@ -16530,6 +16816,35 @@ def create_app() -> Flask:
         bands_set = ["elite", "strong", "story", "nice", "not_worthy"]
         post_types_set = sorted(set(ra.get("suggested_post_type", "") for ra in ranked_achs))
 
+        # UI2.2: per-swimmer aggregate for the athlete-avatar tooltip — how many
+        # ranked moments this swimmer earned in *this* meet and their best band.
+        # Every figure is read straight from the recognition report (grounded,
+        # never fabricated); hovering any of a swimmer's rows surfaces their haul.
+        _BAND_RANK = {"elite": 4, "strong": 3, "story": 2, "nice": 1, "not_worthy": 0}
+        _sw_agg: dict[str, dict] = {}
+        for _ra in ranked_achs:
+            _aa = _ra.get("achievement", {}) or {}
+            _key = _aa.get("swimmer_name", "") or _aa.get("swimmer_id", "")
+            if not _key:
+                continue
+            _band = _ra.get("quality_band") or "nice"
+            _rec = _sw_agg.setdefault(_key, {"count": 0, "band": "nice"})
+            _rec["count"] += 1
+            if _BAND_RANK.get(_band, 0) > _BAND_RANK.get(_rec["band"], 0):
+                _rec["band"] = _band
+        _run_club = (data.get("profile_display") or data.get("club_filter") or "").strip()
+
+        def _athlete_stat(swimmer_name: str) -> str:
+            agg = _sw_agg.get(swimmer_name) or {}
+            n = agg.get("count", 0)
+            if not n:
+                return ""
+            s = f'{n} moment{"s" if n != 1 else ""}'
+            best = agg.get("band") or ""
+            if best:
+                s += f" · best {best}"
+            return s
+
         def opts(items, label):
             o = f'<option value="">All {label}</option>'
             for item in items:
@@ -16712,6 +17027,18 @@ def create_app() -> Flask:
                 ra, card_uuid=f"wf-{card_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
 
+            # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
+            # Decorative here — the row already shows the name/event/band as
+            # text — so the chip stays aria-hidden and out of the tab order.
+            _sw_key = a.get("swimmer_name", "") or a.get("swimmer_id", "")
+            _row_avatar = _athlete_avatar(
+                a.get("swimmer_name", ""),
+                club=_run_club,
+                stat=_athlete_stat(_sw_key),
+                focusable=False,
+                size=30,
+            )
+
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -16725,7 +17052,10 @@ def create_app() -> Flask:
         <span class="tag" style="font-size:10px">{post_type}</span>
         {_worthiness_meter(prio)}
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        {_row_avatar}
+        <div style="font-size:13px;font-weight:600">{swimmer} &middot; {event}</div>
+      </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
       <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
@@ -16924,6 +17254,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 {warn_html}
 
 {_render_explainability_key()}
+
+{weekend_glance_html}
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
@@ -24254,16 +24586,35 @@ function mhPlanGenerate(btn) {{
                     swimmers = []
                 if swimmers:
                     _review_url = url_for("review", run_id=run_id_param)
+                    # UI2.2: the run's club for the athlete-avatar tooltips.
+                    _sp_club = (
+                        run_data.get("profile_display") or run_data.get("club_filter") or ""
+                    ).strip()
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
                     for sw in swimmers:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
+                        _n_ach = sw["n_achievements"]
+                        _ach_label = f'{_n_ach} achievement{"s" if _n_ach != 1 else ""}'
+                        # Decorative chip (it lives inside the card link, so it
+                        # stays aria-hidden / out of the tab order); the link's
+                        # own text carries the same name + count for AT.
+                        _sw_avatar = _athlete_avatar(
+                            sw["swimmer_name"],
+                            club=_sp_club,
+                            stat=_ach_label,
+                            focusable=False,
+                            size=38,
+                        )
                         swimmers_html += f"""
-<a href="{sp_url}" style="display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
-  <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
-  <div style="font-size:12px;color:var(--ink-dim)">{sw["n_achievements"]} achievement{"s" if sw["n_achievements"] != 1 else ""}</div>
+<a href="{sp_url}" style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
+  {_sw_avatar}
+  <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+    <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
+    <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
+  </div>
 </a>"""
                     swimmers_html += "</div></div>"
                 else:
@@ -24462,10 +24813,32 @@ function mhPlanGenerate(btn) {{
             for t, m in _SP_TONE_META.items()
         )
 
+        # UI2.2: the hero athlete avatar + tooltip. Standalone, so it's
+        # keyboard-reachable (focusable) and exposes the same grounded summary
+        # to assistive tech via aria-label. Club + haul come from the run and
+        # the spotlight pack's band counts — all real figures, never invented.
+        _hero_club = (run_data.get("profile_display") or run_data.get("club_filter") or "").strip()
+        _hero_n = pack["n_achievements"]
+        _hero_stat = f'{_hero_n} moment{"s" if _hero_n != 1 else ""}'
+        if pack["n_elite"]:
+            _hero_stat = f'{pack["n_elite"]} elite · {_hero_stat}'
+        elif pack["n_strong"]:
+            _hero_stat = f'{pack["n_strong"]} strong · {_hero_stat}'
+        _hero_avatar = _athlete_avatar(
+            pack["swimmer_name"],
+            club=_hero_club,
+            stat=_hero_stat,
+            focusable=True,
+            size=52,
+        )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
-  <h1>{_h(pack["swimmer_name"])}</h1>
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    {_hero_avatar}
+    <h1 style="margin:0">{_h(pack["swimmer_name"])}</h1>
+  </div>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(pack["meet_name"])}</span><span class="sep">/</span>
     <a href="{_back_url}" style="color:var(--ink-muted);text-decoration:none">&larr; Swimmer list</a><span class="sep">/</span>
