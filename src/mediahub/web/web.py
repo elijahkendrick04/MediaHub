@@ -11901,8 +11901,12 @@ def create_app() -> Flask:
 
         # U.8 — animated how-it-works pipeline diagram. Sits right after the
         # hero as a visual amplification of its "reads X … writes Y" claim,
-        # ahead of the numbered four-step explainer.
-        pipeline_html = _pipeline_diagram_section_html()
+        # ahead of the UI 1.3 inline-thumbnail headline and the numbered steps.
+        # PREPEND, don't overwrite: `pipeline_html` already holds the UI 1.3
+        # inline-thumbnail display headline built above. U.8 originally assigned
+        # over it, which silently dropped UI 1.3 from the live page — both now
+        # render (diagram, then the inline-thumbnail headline, then the steps).
+        pipeline_html = _pipeline_diagram_section_html() + pipeline_html
 
         return _layout(
             "Home",
