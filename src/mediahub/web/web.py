@@ -550,6 +550,219 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
     return exp
 
 
+# --------------------------------------------------------------------------- #
+# U.7 — "Focus the facts" caption / explainability highlight.
+#
+# In captions and the "Why this card?" review UI, the source-grounded entities
+# (athlete / event / time / PB-medal-record) are pill-highlighted and sharp; the
+# connective filler around them recedes. This is *server-side span injection* —
+# no client JS — so it works the moment the HTML lands (and inside the lazily
+# fetched why-card body).
+#
+# Critically it is SOURCE-GROUNDED, not a regex guess: every highlighted phrase
+# is built from the structured achievement the deterministic engine already
+# produced (`swimmer_name`, `event`, the result time, and the detected
+# achievement `type`). We never light up a number that "looks like a time" or a
+# word that "looks like a medal" — only text that matches a fact on the card.
+# So the highlight can't drift from the data, and it reinforces the moat (the
+# intelligence layer) rather than faking it. Inspired by Pedro Duarte (ped.ro);
+# supports U.3.
+# --------------------------------------------------------------------------- #
+
+# Swim-stroke long↔short forms, so a canonical "100m Freestyle" also lights up a
+# caption that wrote "100m Free" / "100 Free". Deterministic string expansion of
+# the *real* event label — not a new parser, not an AI surface.
+_STROKE_SHORT_FORMS: dict[str, tuple[str, ...]] = {
+    "freestyle": ("free",),
+    "backstroke": ("back",),
+    "breaststroke": ("breast",),
+    "butterfly": ("fly",),
+    "individual medley": ("im", "medley"),
+}
+
+
+def _event_variants(event: str) -> list[str]:
+    """Grounded display variants of one event label for fact-matching.
+
+    Returns the full label, the course-tag-stripped base ("100m Freestyle (LC)"
+    → "100m Freestyle"), the stroke short-forms ("100m Free"), and the
+    distance-without-``m`` forms ("100 Free") — all derived from the real event
+    string, so every variant is still source-grounded. Distance alone ("100") is
+    deliberately never emitted: a bare number would match stray figures.
+    """
+    ev = " ".join(str(event or "").split())
+    if not ev:
+        return []
+    out: list[str] = [ev]
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", ev).strip()  # drop a trailing "(LC)" etc.
+    if base and base not in out:
+        out.append(base)
+
+    # Stroke short-forms, applied to the lowercased base (matching is
+    # case-insensitive; output casing is taken from the matched text, not these).
+    low = base.lower()
+    stroked = [low]
+    for long_form, shorts in _STROKE_SHORT_FORMS.items():
+        if long_form in low:
+            for short in shorts:
+                stroked.append(low.replace(long_form, short))
+
+    # Distance "100m" → "100" companion of each stroked form.
+    expanded = list(stroked)
+    for form in stroked:
+        no_m = re.sub(r"(?<=\d)m\b", "", form)
+        if no_m != form:
+            expanded.append(no_m)
+
+    for form in expanded:
+        form = form.strip()
+        # Only keep forms that still carry a stroke word — a bare distance
+        # ("100") is not grounded enough to highlight safely.
+        if form and form not in out and not form.replace(" ", "").isdigit():
+            out.append(form)
+    return out
+
+
+def _card_facts(achievement: Optional[dict]) -> list[tuple[str, str]]:
+    """Source-grounded ``(phrase, kind)`` pairs for "focus the facts" highlighting.
+
+    Every phrase is derived from the structured achievement — never guessed.
+    ``kind`` is one of ``athlete`` / ``event`` / ``time`` / ``pb`` (the last
+    covers PB **and** medal/record markers, gated by the detected achievement
+    ``type`` so e.g. "gold" is only ever lit on an actual medal).
+    """
+    if not isinstance(achievement, dict):
+        return []
+    phrases: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(phrase: str, kind: str) -> None:
+        p = " ".join(str(phrase or "").split())
+        if len(p) < 2:  # never light up a stray single character
+            return
+        key = (p.lower(), kind)
+        if key in seen:
+            return
+        seen.add(key)
+        phrases.append((p, kind))
+
+    # Athlete — full name, plus the first name (captions usually go first-name).
+    name = " ".join(str(achievement.get("swimmer_name") or "").split())
+    if name:
+        add(name, "athlete")
+        parts = name.split()
+        if len(parts) > 1:
+            add(parts[0], "athlete")
+
+    # Event — the label and its grounded short-forms.
+    for variant in _event_variants(achievement.get("event") or ""):
+        add(variant, "event")
+
+    # Time — the result string(s); exact and highly distinctive.
+    raw_facts = achievement.get("raw_facts")
+    time_sources = [achievement.get("time"), achievement.get("time_str"), achievement.get("result")]
+    if isinstance(raw_facts, dict):
+        time_sources += [
+            raw_facts.get("time"),
+            raw_facts.get("time_str"),
+            raw_facts.get("result"),
+            raw_facts.get("final_time"),
+        ]
+    for t in time_sources:
+        add(str(t or "").strip(), "time")
+
+    # PB / medal / record markers — gated by the engine's AUTHORITATIVE detected
+    # type / post_angle (not the free-text angle_hint, which can mention "first"
+    # or "gold" metaphorically), so we never light up "gold" or "record" on a
+    # card the detector didn't actually flag as one.
+    type_blob = " ".join(str(achievement.get(k) or "") for k in ("type", "post_angle")).lower()
+    is_pb = bool(achievement.get("pb") or achievement.get("is_pb")) or any(
+        tok in type_blob for tok in ("pb", "personal_best", "best_time", "lifetime")
+    )
+    markers: list[str] = []
+    if is_pb:
+        markers += ["personal best", "lifetime best", "new best", "PB"]
+    if any(tok in type_blob for tok in ("medal", "podium", "gold", "silver", "bronze")):
+        markers += ["medal", "podium"]
+        for metal in ("gold", "silver", "bronze"):
+            if metal in type_blob:
+                markers.append(metal)
+    if "record" in type_blob:
+        markers += [
+            "club record",
+            "county record",
+            "regional record",
+            "national record",
+            "meet record",
+            "record",
+        ]
+    if "first" in type_blob:
+        markers.append("first")
+    for m in markers:
+        add(m, "pb")
+
+    return phrases
+
+
+# Fact kinds are a fixed internal vocabulary — never user text — so they are safe
+# to interpolate straight into a class name.
+_FOCUS_KINDS = {"athlete", "event", "time", "pb"}
+
+
+def _focus_facts_html(
+    text: str,
+    achievement: Optional[dict] = None,
+    *,
+    phrases: Optional[list[tuple[str, str]]] = None,
+) -> str:
+    """Server-side span injection for U.7.
+
+    Wrap every source-grounded fact found in ``text`` in a ``<span class="mh-fact
+    mh-fact--KIND">`` pill and de-emphasise the rest, returning safe HTML. Every
+    segment is HTML-escaped via ``_h`` — only the highlight ``<span>`` tags are
+    markup — so this is XSS-safe even on attacker-controlled caption text.
+
+    When nothing matches (or there are no facts) the text is returned plainly
+    escaped, with **no** de-emphasis wrapper, so non-grounded copy still reads at
+    full strength rather than being greyed out for nothing.
+    """
+    s = str(text or "")
+    if not s.strip():
+        return str(_h(s))
+    if phrases is None:
+        phrases = _card_facts(achievement or {})
+    if not phrases:
+        return str(_h(s))
+
+    # Longest phrases first so "100m Freestyle" beats "Freestyle" and
+    # "Emma Davies" beats "Emma" when both could match at the same spot.
+    ordered = sorted(phrases, key=lambda pk: len(pk[0]), reverse=True)
+    kind_of: dict[str, str] = {}
+    for phrase, kind in ordered:
+        kind_of.setdefault(phrase.lower(), kind if kind in _FOCUS_KINDS else "event")
+    alternation = "|".join(re.escape(p) for p, _ in ordered)
+    # Boundary = not flanked by an alphanumeric. Handles "PB", "Emma" and times
+    # like "58.21" / "1:02.34" (whose internal "." / ":" are non-alphanumeric).
+    pattern = re.compile(r"(?<![A-Za-z0-9])(" + alternation + r")(?![A-Za-z0-9])", re.IGNORECASE)
+
+    chunks: list[str] = []
+    pos = 0
+    matched_any = False
+    for m in pattern.finditer(s):
+        if m.start() > pos:
+            chunks.append(str(_h(s[pos : m.start()])))
+        hit = m.group(1)
+        kind = kind_of.get(hit.lower(), "event")
+        chunks.append(f'<span class="mh-fact mh-fact--{kind}">{_h(hit)}</span>')
+        pos = m.end()
+        matched_any = True
+    if not matched_any:
+        return str(_h(s))
+    if pos < len(s):
+        chunks.append(str(_h(s[pos:])))
+    return '<span class="mh-focus">' + "".join(chunks) + "</span>"
+
+
 def _render_why_inner(
     exp: dict,
     *,
@@ -566,13 +779,19 @@ def _render_why_inner(
     stays grounded: headline / bullets come from the ranker + LLM, source
     lines are quoted verbatim from the achievement's evidence.
     """
-    headline = _h(exp.get("headline", ""))
+    # U.7 — light up the source-grounded facts (athlete / event / time / PB) in
+    # the LLM's reasoning. Phrases are derived once from this card's achievement
+    # so the headline and every bullet highlight the same grounded entities; if
+    # there's no achievement in scope, _focus_facts_html falls back to plain
+    # escaped text.
+    _facts = _card_facts((ra or {}).get("achievement") if isinstance(ra, dict) else None)
+    headline = _focus_facts_html(exp.get("headline", ""), phrases=_facts)
     bullets = exp.get("bullets") or []
     source_lines = exp.get("source_lines") or []
 
     bullets_html = ""
     for b in bullets:
-        bullets_html += f'<li style="margin-bottom:3px">{_h(b)}</li>'
+        bullets_html += f'<li style="margin-bottom:3px">{_focus_facts_html(b, phrases=_facts)}</li>'
     if not bullets_html:
         bullets_html = ""
 
@@ -774,6 +993,29 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
         f'border-radius:6px;font-size:12px;color:var(--ink);line-height:1.45"></div>'
     )
     return btn, panel
+
+
+def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title") -> str:
+    """U.5 — render an editorial heading as stacked lines that reveal
+    one-by-one on scroll (inspired by Opal, op.al).
+
+    Each entry in ``lines`` becomes a ``.mh-line`` span inside a
+    ``.mh-reveal-lines`` heading. The Phase-10 IntersectionObserver
+    (``bindReveals`` in the layout) observes every line *individually* and adds
+    ``.is-in`` as it scrolls up through the viewport, so a section's headline
+    surfaces line after line instead of all at once; a small per-line CSS delay
+    keeps the cascade gentle when the lines cross the trigger together.
+
+    ``lines`` are pre-built, trusted HTML fragments — the static landing copy
+    here, including its ``<em class="editorial">`` accents. There is no user
+    data on this path, so the helper does not re-escape; any caller that ever
+    feeds it dynamic text MUST pass already-escaped fragments. No-JS and
+    reduced-motion visitors see every line immediately (the ``.mh-js`` /
+    ``prefers-reduced-motion`` gate in the CSS), so this is pure progressive
+    enhancement — content is never hidden without JavaScript able to reveal it.
+    """
+    spans = "".join(f'<span class="mh-line">{ln}</span>' for ln in lines)
+    return f'<{tag} class="{cls} mh-reveal-lines">{spans}</{tag}>'
 
 
 # --------------------------------------------------------------------------- #
@@ -5515,6 +5757,42 @@ a.card:hover, .card[data-interactive]:hover {
   background: var(--warn); flex: none;
 }
 
+/* ---- U.7 — "focus the facts" caption / explainability highlight ---------- */
+/* Source-grounded entities (athlete / event / time / PB-medal-record) are
+   pill-highlighted and sharp; the connective filler around them recedes to
+   --ink-muted so the facts read first. The spans are injected server-side by
+   _focus_facts_html() and only ever wrap text the structured achievement
+   grounds — never a guess. Inspired by Pedro Duarte (ped.ro); supports U.3. */
+.mh-focus { color: var(--ink-muted); }
+.mh-fact {
+  color: var(--ink);
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(245, 242, 232, 0.06);   /* faint --ink wash */
+  /* clone the pill across wrapped lines and keep the line box tight */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* Athlete — the person: the brightest neutral pill (the hero of the card). */
+.mh-fact--athlete { background: rgba(245, 242, 232, 0.08); }
+/* Event — the race: a quieter neutral pill. */
+.mh-fact--event { background: rgba(245, 242, 232, 0.045); }
+/* Time — the data: monospace + tabular figures with a faint gold edge. */
+.mh-fact--time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background: rgba(212, 255, 58, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, 0.18);
+}
+/* PB / medal / record — the achievement itself: the brand gold-green, loudest. */
+.mh-fact--pb {
+  color: var(--lane);
+  font-weight: 700;
+  background: rgba(212, 255, 58, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, 0.30);
+}
+
 .mh-card-actions {
   margin-top: var(--sp-4); display: flex; gap: var(--sp-2); flex-wrap: wrap;
   padding-top: var(--sp-4); border-top: 1px solid var(--hairline);
@@ -8447,7 +8725,18 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     requestAnimationFrame(tick);
   }
   function bindReveals() {
-    var reveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    var blockReveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    // U.5 — line-by-line reveal: observe each direct child of a
+    // .mh-reveal-lines block on its OWN, so the lines surface one after
+    // another as they each scroll up through the viewport (Opal-style),
+    // rather than all together the moment a single container crosses.
+    var lineItems = [];
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.mh-reveal-lines'),
+      function(grp){
+        Array.prototype.forEach.call(grp.children, function(ln){ lineItems.push(ln); });
+      });
+    var reveals = Array.prototype.slice.call(blockReveals).concat(lineItems);
     var counters = document.querySelectorAll('[data-mh-count]');
     function revealEl(el) {
       el.classList.add('is-in');
@@ -8474,7 +8763,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       io.observe(el);
     });
     counters.forEach(function(el){
-      if (!el.closest('.mh-reveal, .mh-reveal-group')) {
+      if (!el.closest('.mh-reveal, .mh-reveal-group, .mh-reveal-lines')) {
         var r = el.getBoundingClientRect();
         if (r.top < (window.innerHeight || 0) * 0.95) animateCount(el);
         else io.observe(el);
@@ -8488,6 +8777,146 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   if (document.readyState !== 'loading') bindReveals();
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
+
+  // === Before/after reveal slider (U.15) ===
+  // Drag-to-wipe between the raw upload and the finished branded graphic.
+  // Pointer-drag anywhere on the figure, plus a keyboard-operable role=slider
+  // handle. A one-time "tell" sweep on first scroll-into-view hints that it is
+  // draggable; everything is a no-op under prefers-reduced-motion. No library.
+  function bindBeforeAfter() {
+    document.querySelectorAll('[data-mh-ba]').forEach(function(fig) {
+      if (fig.getAttribute('data-mh-ba-bound')) return;
+      fig.setAttribute('data-mh-ba-bound', '1');
+      var handle = fig.querySelector('.mh-ba-handle');
+      var timers = [];
+      function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+      function clampPct(v) { return Math.max(0, Math.min(100, v)); }
+      function describe(p) {
+        var r = Math.round(p);
+        if (r <= 1) return 'Showing the finished branded graphic';
+        if (r >= 99) return 'Showing the raw results file';
+        return r + '% raw file, ' + (100 - r) + '% finished graphic';
+      }
+      function setPos(p) {
+        p = clampPct(p);
+        fig.style.setProperty('--mh-ba-pos', p + '%');
+        if (handle) {
+          handle.setAttribute('aria-valuenow', String(Math.round(p)));
+          handle.setAttribute('aria-valuetext', describe(p));
+        }
+      }
+      function posFromX(clientX) {
+        var r = fig.getBoundingClientRect();
+        if (!r.width) return 50;
+        return (clientX - r.left) / r.width * 100;
+      }
+      var dragging = false;
+      function startDrag(clientX, pointerId) {
+        dragging = true;
+        clearTimers();
+        fig.classList.add('is-dragging');
+        fig.classList.remove('mh-ba--animate'); // 1:1 tracking, no transition lag
+        if (pointerId != null && fig.setPointerCapture) {
+          try { fig.setPointerCapture(pointerId); } catch (e) {}
+        }
+        // Move keyboard focus to the handle so arrow keys work after a grab.
+        if (handle) { try { handle.focus({preventScroll: true}); } catch (e) { try { handle.focus(); } catch (e2) {} } }
+        setPos(posFromX(clientX));
+      }
+      function moveDrag(clientX) { if (dragging) setPos(posFromX(clientX)); }
+      function endDrag(pointerId) {
+        if (!dragging) return;
+        dragging = false;
+        fig.classList.remove('is-dragging');
+        if (pointerId != null && fig.releasePointerCapture) {
+          try { fig.releasePointerCapture(pointerId); } catch (e) {}
+        }
+      }
+      if (window.PointerEvent) {
+        fig.addEventListener('pointerdown', function(e) {
+          if (e.button != null && e.button !== 0) return; // primary button only
+          startDrag(e.clientX, e.pointerId);
+          e.preventDefault();
+        });
+        fig.addEventListener('pointermove', function(e) {
+          if (dragging) { moveDrag(e.clientX); e.preventDefault(); }
+        });
+        fig.addEventListener('pointerup', function(e) { endDrag(e.pointerId); });
+        fig.addEventListener('pointercancel', function(e) { endDrag(e.pointerId); });
+      } else {
+        // Legacy mouse + touch fallback (no Pointer Events).
+        fig.addEventListener('mousedown', function(e) { startDrag(e.clientX, null); e.preventDefault(); });
+        document.addEventListener('mousemove', function(e) { moveDrag(e.clientX); });
+        document.addEventListener('mouseup', function() { endDrag(null); });
+        fig.addEventListener('touchstart', function(e) {
+          if (e.touches && e.touches[0]) startDrag(e.touches[0].clientX, null);
+        }, {passive: true});
+        fig.addEventListener('touchmove', function(e) {
+          if (e.touches && e.touches[0]) moveDrag(e.touches[0].clientX);
+        }, {passive: true});
+        fig.addEventListener('touchend', function() { endDrag(null); });
+      }
+      // Keyboard — the handle exposes role=slider.
+      if (handle) {
+        handle.addEventListener('keydown', function(e) {
+          var cur = parseFloat(handle.getAttribute('aria-valuenow'));
+          if (isNaN(cur)) cur = 50;
+          var step = e.shiftKey ? 10 : 2;
+          var next = cur;
+          switch (e.key) {
+            case 'ArrowLeft': case 'ArrowDown': next = cur - step; break;
+            case 'ArrowRight': case 'ArrowUp': next = cur + step; break;
+            case 'Home': next = 0; break;
+            case 'End': next = 100; break;
+            case 'PageDown': next = cur - 10; break;
+            case 'PageUp': next = cur + 10; break;
+            default: return;
+          }
+          e.preventDefault();
+          clearTimers();
+          // Arrow steps ride the eased transition for a readable nudge unless
+          // the user prefers reduced motion.
+          if (!prefersReduced) fig.classList.add('mh-ba--animate');
+          setPos(next);
+        });
+        // Swallow the synthetic click so a grab-and-release doesn't double-fire.
+        handle.addEventListener('click', function(e) { e.preventDefault(); });
+      }
+      // Initial position (default 50; overridable via data-mh-ba-start).
+      var startPos = parseFloat(fig.getAttribute('data-mh-ba-start'));
+      setPos(isNaN(startPos) ? 50 : startPos);
+      // Intro "tell": one gentle sweep when first scrolled into view so the
+      // control reads as draggable. Motion-allowed only; cancelled the moment
+      // the user grabs it.
+      if (!prefersReduced) {
+        var hinted = false;
+        function hint() {
+          if (hinted || dragging) return;
+          hinted = true;
+          fig.classList.add('mh-ba--animate');
+          // Lead toward the payoff — sweep left first to reveal the branded
+          // card, then right past centre to show the raw file, then settle.
+          setPos(34);
+          timers.push(setTimeout(function() { setPos(64); }, 560));
+          timers.push(setTimeout(function() { setPos(50); }, 1120));
+          timers.push(setTimeout(function() { fig.classList.remove('mh-ba--animate'); }, 1680));
+        }
+        if ('IntersectionObserver' in window) {
+          var io2 = new IntersectionObserver(function(entries) {
+            entries.forEach(function(en) {
+              if (en.isIntersecting) { hint(); io2.unobserve(en.target); }
+            });
+          }, {threshold: 0.45});
+          io2.observe(fig);
+        } else {
+          hint();
+        }
+      }
+    });
+  }
+  if (document.readyState !== 'loading') bindBeforeAfter();
+  else document.addEventListener('DOMContentLoaded', bindBeforeAfter);
+  MH.bindBeforeAfter = bindBeforeAfter;
 
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
@@ -8757,6 +9186,118 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     }
   }
   document.addEventListener('click', onClick);
+})();
+</script>
+<script>
+/* === U.14 — Cursor-following hover preview (Christopher Ireland + SuperHi) ===
+   Any element tagged .mh-hp that carries a child <template class="mh-hp-tpl">
+   spawns a floating frame that trails the pointer and cross-dissolves to the
+   next item's preview as you sweep the list (Media library photos; Create
+   output-frame posters). Pure JS + CSS, no dependency.
+
+   Accessibility / cost: the follower is decorative (aria-hidden, no pointer
+   events) and every datum is already in the row/tile, so this only runs where
+   it's an enhancement — fine pointer, hover-capable, motion allowed. Touch,
+   reduced-motion and keyboard users get the page unchanged, and the <template>
+   keeps each preview image inert until the first hover (no eager network). */
+(function(){
+  var mql = window.matchMedia;
+  if (!mql) return;
+  var fine = mql('(hover: hover) and (pointer: fine)').matches;
+  var reduced = mql('(prefers-reduced-motion: reduce)').matches;
+  if (!fine || reduced) return;
+
+  var wrap = null, frame = null, layers = [], host = null;
+  var tx = 0, ty = 0, cx = 0, cy = 0, raf = null, visible = false;
+
+  function build(){
+    wrap = document.createElement('div');
+    wrap.className = 'mh-hover-preview';
+    wrap.setAttribute('aria-hidden', 'true');
+    frame = document.createElement('div');
+    frame.className = 'mh-hp-frame';
+    for (var i = 0; i < 2; i++){
+      var l = document.createElement('div');
+      l.className = 'mh-hp-layer';
+      frame.appendChild(l);
+      layers.push(l);
+    }
+    layers[0].classList.add('is-front');
+    wrap.appendChild(frame);
+    document.body.appendChild(wrap);
+  }
+
+  function tick(){
+    // Lerp current → target so the frame trails the cursor (the SuperHi feel).
+    cx += (tx - cx) * 0.22;
+    cy += (ty - cy) * 0.22;
+    wrap.style.transform = 'translate3d(' + cx.toFixed(1) + 'px,' + cy.toFixed(1) + 'px,0)';
+    raf = visible ? requestAnimationFrame(tick) : null;
+  }
+
+  function position(px, py){
+    var w = wrap.offsetWidth || 240, h = wrap.offsetHeight || 320;
+    var pad = 12, off = 22;
+    var x = px + off;
+    if (x + w + pad > window.innerWidth) x = px - w - off;   // flip to the left
+    if (x < pad) x = pad;
+    var y = py - h * 0.5;                                     // vertically centred on the cursor
+    if (y + h + pad > window.innerHeight) y = window.innerHeight - h - pad;
+    if (y < pad) y = pad;
+    tx = x; ty = y;
+  }
+
+  function show(){
+    if (visible) return;
+    visible = true;
+    cx = tx; cy = ty;            // appear at the cursor, then trail on the next move
+    wrap.style.transform = 'translate3d(' + cx.toFixed(1) + 'px,' + cy.toFixed(1) + 'px,0)';
+    wrap.classList.add('is-visible');
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  function hide(){
+    if (!visible && !host) return;
+    visible = false; host = null;
+    if (wrap) wrap.classList.remove('is-visible');
+  }
+
+  function setContent(h){
+    var tpl = h.querySelector('template.mh-hp-tpl');
+    if (!tpl || !tpl.content) return false;
+    // Derive front/back from the DOM (not a counter) so overlapping swaps —
+    // possible when image decodes resolve out of order under fast hovering —
+    // can never desync which layer is actually shown.
+    var fr = frame.querySelector('.mh-hp-layer.is-front');
+    var back = (layers[0] === fr) ? layers[1] : layers[0];
+    back.innerHTML = '';
+    back.appendChild(tpl.content.cloneNode(true));
+    var swap = function(){
+      back.classList.add('is-front');
+      if (fr) fr.classList.remove('is-front');
+    };
+    var img = back.querySelector('img');
+    // Decode the photo before the dissolve so the new layer never fades in
+    // blank; a broken/unreachable src still swaps (catch) so visibility holds.
+    if (img && !img.complete && img.decode) img.decode().then(swap).catch(swap);
+    else requestAnimationFrame(swap);
+    return true;
+  }
+
+  function onOver(e){
+    var t = e.target;
+    var h = (t && t.closest) ? t.closest('.mh-hp') : null;
+    if (!h){ if (host) hide(); return; }
+    if (h === host) return;                  // same item — don't re-dissolve
+    if (!wrap) build();
+    if (setContent(h)){ host = h; position(e.clientX, e.clientY); show(); }
+  }
+  function onMove(e){ if (visible) position(e.clientX, e.clientY); }
+
+  document.addEventListener('pointerover', onOver, {passive: true});
+  document.addEventListener('pointermove', onMove, {passive: true});
+  document.addEventListener('pointerdown', hide, {passive: true});
+  window.addEventListener('scroll', hide, {passive: true});
+  window.addEventListener('blur', hide);
 })();
 </script>
 {% if flash_toast %}
@@ -9109,6 +9650,110 @@ _PALETTE_PICKER_JS = """
   });
 })();
 """
+
+
+def _hero_product_demo() -> str:
+    """U.10 — the framed, looping in-app product demo for the landing hero.
+
+    A browser-framed mockup that loops the core flow
+    **generate → review → approve**, with a subtle ambient glow behind the
+    frame (inspired by Reflect, reflect.app). It is first-party HTML + CSS
+    only — there is no screen-capture asset to host and no JS framework:
+
+      * the loop is three cross-fading CSS-keyframe scenes (the
+        ``.mh-demo-phase`` tracks in theme-components.css), reused to light
+        the chrome-step dots so the indicator stays perfectly in sync;
+      * it pauses on hover / focus via a pure-CSS ``animation-play-state``
+        toggle, so a visitor can dwell on any scene;
+      * under ``prefers-reduced-motion`` it freezes on the single "Review"
+        scene — no movement at all.
+
+    The block is decorative: the same workflow is conveyed as real text by
+    the four-step explainer further down the page, so the whole demo is
+    ``aria-hidden`` to keep the screen-reader narrative clean. Every value
+    here is static (no user input), so no escaping is required.
+    """
+    check = (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+    )
+    return (
+        '<div class="mh-hero-demo" aria-hidden="true">'
+        '<div class="mh-demo-glow"></div>'
+        '<div class="mh-demo-frame">'
+        # --- browser chrome ---
+        '<div class="mh-demo-bar">'
+        '<span class="mh-demo-dots"><i></i><i></i><i></i></span>'
+        '<span class="mh-demo-tab"><span class="mh-demo-tab-logo"></span>MediaHub</span>'
+        '<span class="mh-demo-flag">live demo</span>'
+        "</div>"
+        # --- screen / cross-fading stage ---
+        '<div class="mh-demo-screen"><div class="mh-demo-stage">'
+        # Scene 1 — Generate (engine reads the file, ranks the moments)
+        '<div class="mh-demo-phase p1">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">01 · Generate</span>'
+        '<span class="mh-demo-file">spring-open.hy3</span>'
+        "</div>"
+        '<div class="mh-demo-finds">'
+        '<div class="mh-demo-find"><span class="badge pb">PB</span>'
+        '<span class="who">Tom Davies · 100m Free</span><b>52.41</b></div>'
+        '<div class="mh-demo-find"><span class="badge gold">1st</span>'
+        '<span class="who">Women&rsquo;s 4&times;100 Relay</span><b>4:12.8</b></div>'
+        '<div class="mh-demo-find"><span class="badge new">NEW</span>'
+        '<span class="who">Aoife N. · first sub-1:00</span><b>59.74</b></div>'
+        "</div>"
+        '<div class="mh-demo-meter"><span class="bar"><i></i></span>'
+        '<span class="lab">42 swims read · 3 moments ranked</span></div>'
+        "</div>"
+        # Scene 2 — Review (branded card + caption draft + confidence) — the
+        # richest single frame, so it is the reduced-motion resting state.
+        '<div class="mh-demo-phase p2 is-rest">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">02 · Review</span>'
+        '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
+        "</div>"
+        '<div class="mh-demo-card">'
+        '<div class="mh-demo-thumb">'
+        '<span class="ev">100M FREE</span>'
+        '<span class="tm">52.41</span>'
+        '<span class="nm">T. Davies</span>'
+        "</div>"
+        '<div class="mh-demo-cardbody">'
+        '<span class="mh-demo-eyebrow">Story card · caption draft</span>'
+        '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark> '
+        "&mdash; <mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
+        "<mark>0.74s</mark> off his old mark.</p>"
+        '<div class="mh-demo-acts"><span>Edit</span>'
+        '<span class="ghost">Reject</span><span class="go">Approve</span></div>'
+        "</div>"
+        "</div>"
+        "</div>"
+        # Scene 3 — Approve (the human gate — nothing leaves without it)
+        '<div class="mh-demo-phase p3">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">03 · Approve</span>'
+        '<span class="mh-demo-state go">Approved</span>'
+        "</div>"
+        '<div class="mh-demo-approve">'
+        f'<span class="mh-demo-check">{check}</span>'
+        '<div class="txt"><b>Approved by you</b>'
+        "<span>Tom Davies — PB 100m Free · ready to export</span></div>"
+        "</div>"
+        '<div class="mh-demo-meter"><span class="lab">'
+        "Nothing leaves the queue without your approval.</span></div>"
+        "</div>"
+        "</div></div>"  # /stage /screen
+        # --- step indicator (dots lit by the same p1/p2/p3 tracks) ---
+        '<div class="mh-demo-steps">'
+        '<span class="mh-demo-step s1"><span class="dot"><i class="on"></i></span>Generate</span>'
+        '<span class="mh-demo-step s2"><span class="dot"><i class="on"></i></span>Review</span>'
+        '<span class="mh-demo-step s3"><span class="dot"><i class="on"></i></span>Approve</span>'
+        "</div>"
+        "</div>"  # /frame
+        "</div>"  # /hero-demo
+    )
 
 
 # ---------------------------------------------------------------------
@@ -9829,6 +10474,12 @@ def create_app() -> Flask:
                 "</p>"
             )
 
+        # U.10 — framed, looping product demo as the hero's closing
+        # centerpiece. A first-visit affordance like the "Just looking?"
+        # line above, so it is shown only to fresh / signed-out visitors;
+        # a pinned org gets the utilitarian "Ready to file" hero instead.
+        demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
+
         hero_html = (
             f'<section class="mh-hero" data-lane="{lane_no}">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
@@ -9837,6 +10488,7 @@ def create_app() -> Flask:
             f'<div class="mh-hero-actions">{hero_actions}</div>'
             f"{demo_line_html}"
             f"{meta_html}"
+            f"{demo_html}"
             "</section>"
         )
 
@@ -9875,9 +10527,11 @@ def create_app() -> Flask:
         ]
         steps_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">The workflow</span></div>'
-            '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
-            '<div class="mh-steps mh-reveal-group">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">The workflow</span></div>'
+            + _reveal_lines(
+                ["From the results sheet to", '<em class="editorial">posting-ready</em>']
+            )
+            + '<div class="mh-steps mh-reveal-group">'
             + "".join(
                 f'<div class="mh-step">{icon}'
                 f'<div class="mh-step-num">{num}</div>'
@@ -9888,14 +10542,98 @@ def create_app() -> Flask:
             + "</div></section>"
         )
 
+        # --- U.15 — before/after reveal slider. Drag-to-wipe between the raw
+        # results file a club uploads (BEFORE) and the finished branded graphic
+        # MediaHub ships back (AFTER). The two panes carry the SAME swimmer and
+        # time as the story sample below (Tom Davies, 52.41, PB −0.74s) so the
+        # page reads as one coherent worked example: ugly file in, on-brand card
+        # out. Decorative mockups (aria-hidden); the figure's aria-label and the
+        # slider's live aria-valuetext carry the meaning to assistive tech. The
+        # behaviour is wired by MH.bindBeforeAfter in _layout (vanilla JS, no
+        # library); with JS off or reduced-motion on it degrades to a still
+        # split image that is still fully legible.
+        before_sheet = (
+            "Event 12  Boys 13-14  100 LC Metre Free\n"
+            "=======================================\n"
+            "Pl  Name              Age Tm   Finals\n"
+            " 1  Davies, Tom       14  RIV   52.41\n"
+            " 2  Okafor, Daniel    13  RIV   54.02\n"
+            " 3  Mehta, Arun       14  RIV   54.77\n"
+            " 4  Novak, Petr       13  OTT   55.31\n"
+            " 5  Lindqvist, Ed     14  OTT   55.88\n"
+            " 6  Bauer, Jonas      13  HAR   56.10"
+        )
+        before_after_html = (
+            '<section class="mh-section mh-reveal">'
+            '<div class="mh-section-eyebrow-strip"><span class="label">The transformation</span></div>'
+            '<h2 class="mh-section-title">A raw results file in. '
+            '<em class="editorial">A posting-ready graphic</em> out. Drag to reveal.</h2>'
+            '<figure class="mh-ba" data-mh-ba '
+            'aria-label="Before and after: the raw results file a club uploads, '
+            "wiped across to reveal the finished branded graphic MediaHub returns "
+            '&mdash; same swimmer, same time.">'
+            # AFTER pane (underneath) — the finished branded story card.
+            '<div class="mh-ba-pane mh-ba-after">'
+            '<span class="mh-ba-tag mh-ba-tag-after">After &middot; branded graphic</span>'
+            '<div class="mh-ba-card" aria-hidden="true">'
+            '<div class="mh-ba-card-top">'
+            '<span class="mh-ba-card-club">Riverside SC</span>'
+            '<span class="mh-ba-card-meet">Spring Open</span>'
+            "</div>"
+            '<div class="mh-ba-card-mid">'
+            '<div class="mh-ba-card-name">Tom Davies</div>'
+            '<div class="mh-ba-card-pb"><em>Personal best</em></div>'
+            '<div class="mh-ba-card-time">52.41<span class="mh-ba-card-delta">&minus;0.74s</span></div>'
+            "</div>"
+            '<div class="mh-ba-card-foot">'
+            '<span>100m Free</span><span class="dot">/</span>'
+            '<span>Boys 13-14</span><span class="dot">/</span><span>1st</span>'
+            "</div>"
+            "</div>"
+            "</div>"
+            # BEFORE pane (on top, clipped) — the raw meet-manager export.
+            '<div class="mh-ba-pane mh-ba-before">'
+            '<span class="mh-ba-tag mh-ba-tag-before">Before &middot; raw upload</span>'
+            '<div class="mh-ba-sheet" aria-hidden="true">'
+            '<div class="mh-ba-sheet-head">HY-TEK&rsquo;s Meet Manager &middot; results.hy3</div>'
+            f'<pre class="mh-ba-sheet-body">{_h(before_sheet)}</pre>'
+            "</div>"
+            "</div>"
+            # Divider + grab handle (role=slider, keyboard-operable).
+            '<button class="mh-ba-handle" type="button" role="slider" '
+            'aria-label="Reveal amount: drag, or use the arrow keys" '
+            'aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" '
+            'aria-valuenow="50" aria-valuetext="50% raw file, 50% finished graphic">'
+            '<span class="mh-ba-grip" aria-hidden="true">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+            'stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 4 12 9 18"/>'
+            '<polyline points="15 6 20 12 15 18"/></svg>'
+            "</span>"
+            "</button>"
+            "</figure>"
+            '<p class="mh-ba-hint">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<polyline points="9 6 4 12 9 18"/><polyline points="15 6 20 12 15 18"/></svg>'
+            "Drag the handle &mdash; or focus it and use &larr; &rarr; &mdash; to wipe "
+            "between your upload and what MediaHub hands back."
+            "</p>"
+            "</section>"
+        )
+
         # --- Sample output preview — three mock cards showing the three
         # default output formats. Pure visual; non-interactive. Helps a
         # first-time visitor see what they're getting before they upload.
         sample_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
-            '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
-            '<div class="mh-sample-row mh-reveal-group">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What lands in your queue</span></div>'
+            + _reveal_lines(
+                [
+                    'A weekend reads like <em class="editorial">three drafts</em>,',
+                    "ready to approve.",
+                ]
+            )
+            + '<div class="mh-sample-row mh-reveal-group">'
             '<div class="mh-sample story">'
             '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
             '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
@@ -9926,9 +10664,14 @@ def create_app() -> Flask:
         # tenants; this is the "who it's for" reassurance block.
         audience_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">Made for</span></div>'
-            '<h2 class="mh-section-title">Built for the people who already <em class="editorial">post the results</em>.</h2>'
-            '<div class="mh-audience-row mh-reveal-group">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
+            + _reveal_lines(
+                [
+                    "Built for the people who",
+                    'already <em class="editorial">post the results</em>.',
+                ]
+            )
+            + '<div class="mh-audience-row mh-reveal-group">'
             '<div class="mh-audience">'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
             '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
@@ -9955,14 +10698,17 @@ def create_app() -> Flask:
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
         promise_html = (
-            '<section class="mh-section mh-reveal">'
+            '<section class="mh-section">'
             '<div class="mh-promise">'
-            '<h2 class="mh-promise-title">Human in the loop, <em>by design</em>.</h2>'
-            '<p class="mh-promise-lede">'
+            + _reveal_lines(
+                ["Human in the loop,", "<em>by design</em>."],
+                cls="mh-promise-title",
+            )
+            + '<p class="mh-promise-lede mh-reveal">'
             "MediaHub is an intelligence layer, not an auto-poster. Every "
             "piece of content stops at a review queue you control."
             "</p>"
-            '<ul class="mh-promise-list">'
+            '<ul class="mh-promise-list mh-reveal-group">'
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
             "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
@@ -9987,9 +10733,11 @@ def create_app() -> Flask:
             final_cta_html = (
                 '<section class="mh-final-cta">'
                 "<div>"
-                f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
-                "<em>ready</em> in a sitting.</h2>"
-                '<p class="mh-final-cta-sub">Drop the results file. We\'ll '
+                + _reveal_lines(
+                    ["Next weekend's meet,", "<em>ready</em> in a sitting."],
+                    cls="mh-final-cta-headline",
+                )
+                + '<p class="mh-final-cta-sub mh-reveal">Drop the results file. We\'ll '
                 "rank the moments and write the captions; you spend the "
                 "evening approving instead of opening Photoshop.</p>"
                 "</div>"
@@ -10003,9 +10751,11 @@ def create_app() -> Flask:
             final_cta_html = (
                 '<section class="mh-final-cta">'
                 "<div>"
-                '<h2 class="mh-final-cta-headline">A minute to set up. '
-                "<em>Then</em> every week is easier.</h2>"
-                '<p class="mh-final-cta-sub">Tell us your club\'s name and '
+                + _reveal_lines(
+                    ["A minute to set up.", "<em>Then</em> every week is easier."],
+                    cls="mh-final-cta-headline",
+                )
+                + '<p class="mh-final-cta-sub mh-reveal">Tell us your club\'s name and '
                 "website. We'll read your brand, palette and voice, and have "
                 "on-brand drafts ready the next time you upload a results file.</p>"
                 "</div>"
@@ -10018,7 +10768,13 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
+            hero_html
+            + steps_html
+            + before_after_html
+            + sample_html
+            + audience_html
+            + promise_html
+            + final_cta_html,
             active="home",
         )
 
@@ -18577,8 +19333,41 @@ function mhPlanGenerate(btn) {{
             )
             effort_html = f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
 
+            # U.14 cursor-following preview — implemented tiles spawn a floating
+            # "output frame" poster (orientation + canonical dimensions + format
+            # chips) the static tile can't show. Honest: only real tile data,
+            # clearly a stylised frame (same family as the home samples), no
+            # fabricated content. Coming-soon tiles get no preview.
+            _is_live = bool(meta.is_implemented and href_ok)
+            hp_cls = " mh-hp" if _is_live else ""
+            hp_tpl = ""
+            if _is_live:
+                _f_low = [f.lower() for f in formats]
+                if "reel" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Motion reel", "1080×1920"
+                elif "story" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Story card", "1080×1920"
+                elif "graphic" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Feed graphic", "1080×1350"
+                else:
+                    _hp_eyebrow, _hp_dims = "Caption", "Ready to post"
+                _hp_fmt_chips = "".join(
+                    f'<span class="mh-hp-poster-fmt">{_h(f)}</span>' for f in formats
+                )
+                hp_tpl = (
+                    '<template class="mh-hp-tpl"><div class="mh-hp-poster">'
+                    '<div class="mh-hp-poster-top">'
+                    f'<span class="mh-hp-poster-eyebrow">{_h(_hp_eyebrow)}</span>'
+                    f'<span class="mh-hp-poster-mark">{meta.icon_svg}</span>'
+                    "</div>"
+                    f'<div class="mh-hp-poster-title">{_h(meta.title)}</div>'
+                    f'<div class="mh-hp-poster-dims">{_h(_hp_dims)}</div>'
+                    f'<div class="mh-hp-poster-formats">{_hp_fmt_chips}</div>'
+                    "</div></template>"
+                )
+
             tiles_html += (
-                f'<a {action} class="mh-template{disabled_cls}">'
+                f'<a {action} class="mh-template{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(meta.title)}</h3>'
@@ -18587,6 +19376,7 @@ function mhPlanGenerate(btn) {{
                 f"<p>{_h(meta.description)}</p>"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
+                f"{hp_tpl}"
                 "</a>"
             )
 
@@ -28622,14 +29412,32 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
+            # U.14 cursor-following preview: the row shows a 60px chip, so the
+            # floating frame carries the full photo at a useful size plus a
+            # caption (type + athlete/venue). Escaped — parsed metadata is
+            # never trusted into markup. <template> keeps the image inert
+            # until the first hover, so listing 200 assets costs no extra
+            # network up front.
+            _hp_type = (str(ad.get("type", "") or "photo")).replace("_", " ")
+            _hp_subject = athlete_names or (ad.get("linked_venue") or ad.get("linked_event") or "")
+            _hp_subject_html = f"<span>{_h(_hp_subject)}</span>" if _hp_subject else ""
+            _hp_tpl = (
+                '<template class="mh-hp-tpl">'
+                f'<img class="mh-hp-img" src="{_file_url}" alt="" />'
+                f'<span class="mh-hp-cap"><b>{_h(_hp_type)}</b>{_hp_subject_html}</span>'
+                "</template>"
+            )
+            # HTML-escape every parsed-metadata cell: descriptions/links are
+            # user-supplied + AI-parsed, so an unescaped name/venue was a
+            # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr>
-  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
-  <td>{ad.get("type", "")}</td>
-  <td>{athlete_names}</td>
-  <td>{ad.get("linked_venue") or ad.get("linked_event") or ""}</td>
-  <td>{ad.get("permission_status", "")}</td>
-  <td><code>{ad.get("id", "")[:12]}</code></td>
+<tr class="mh-hp">
+  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" />{_hp_tpl}</td>
+  <td>{_h(ad.get("type", ""))}</td>
+  <td>{_h(athlete_names)}</td>
+  <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
+  <td>{_h(ad.get("permission_status", ""))}</td>
+  <td><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td>
     <form method="post" action="{_delete_url}" style="display:inline"
           onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
@@ -30610,11 +31418,22 @@ ever appear; queued, edited and rejected cards never do.</p>
                 explanation = _build_card_explanation(c["ra"]) or {}
             except Exception:
                 explanation = {}
+            # U.7 — the same source-grounded "focus the facts" highlight the
+            # logged-in review uses, on the public preview: the athlete, event,
+            # time and PB/medal markers light up in both the caption and the
+            # reasoning so the demo reads as the intelligence layer it is.
+            _demo_facts = _card_facts(ach)
             why_bits = ""
             if explanation.get("headline"):
-                why_bits += f"<p style='margin:6px 0'><b>{_h(explanation['headline'])}</b></p>"
+                why_bits += (
+                    f"<p style='margin:6px 0'><b>"
+                    f"{_focus_facts_html(explanation['headline'], phrases=_demo_facts)}</b></p>"
+                )
             for b in (explanation.get("bullets") or [])[:3]:
-                why_bits += f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; {_h(b)}</p>'
+                why_bits += (
+                    f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; '
+                    f"{_focus_facts_html(b, phrases=_demo_facts)}</p>"
+                )
             if explanation.get("ai_error"):
                 why_bits += (
                     f'<p class="dim" style="font-size:12px">AI explainer unavailable: '
@@ -30622,7 +31441,8 @@ ever appear; queued, edited and rejected cards never do.</p>
                 )
             img_url = url_for("try_demo_card_png", run_id=run_id, card_id=c["card_id"])
             caption_html = (
-                f'<p style="font-size:14px;white-space:pre-wrap">{_h(caption)}</p>'
+                f'<p style="font-size:14px;white-space:pre-wrap">'
+                f"{_focus_facts_html(caption, phrases=_demo_facts)}</p>"
                 if caption
                 else ""
             )
