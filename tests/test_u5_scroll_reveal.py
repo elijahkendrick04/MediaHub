@@ -193,8 +193,10 @@ class TestHomeSignedOut:
 
     def test_rows_keep_their_group_stagger(self, app):
         body = _home(app)
-        # The card/step rows + the promise list stagger via .mh-reveal-group.
-        assert "mh-steps mh-reveal-group" in body
+        # The card rows + the promise list stagger via .mh-reveal-group. (The
+        # workflow steps moved to the UI 1.7 pinned-panel scrollytelling, whose
+        # steps reveal via pure-CSS scroll-driven animation, not reveal-group.)
+        assert "mh-scrolly-grid" in body
         assert "mh-bento mh-reveal-group" in body
         # U.11's platform-frame carousel reveals as one block (the stacked
         # phones run their own CSS autoplay loop, not a reveal-group stagger).

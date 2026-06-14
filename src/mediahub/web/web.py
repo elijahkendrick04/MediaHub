@@ -7841,81 +7841,6 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   letter-spacing: -0.01em;
 }
 
-/* === Numbered step cards (How it works) — bento-grid, varied weight === */
-.mh-steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0;
-  margin-bottom: var(--sp-9);
-  border: 1px solid var(--hairline);
-  border-radius: 0;
-  background: var(--surface);
-}
-.mh-step {
-  background: transparent;
-  border: 0;
-  border-right: 1px solid var(--hairline);
-  border-bottom: 1px solid var(--hairline);
-  border-radius: 0;
-  padding: var(--sp-6) var(--sp-6) var(--sp-7);
-  position: relative;
-  transition: background var(--transition);
-  overflow: hidden;
-}
-@media (min-width: 760px) {
-  /* No bottom border on the last row, no right border on the last column */
-  .mh-step:nth-child(n+1):nth-last-child(-n+4):nth-child(4n+1) ~ .mh-step:last-child,
-  .mh-step:last-child { border-right: 0; }
-  .mh-step { border-bottom: 0; }
-}
-.mh-step::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0;
-  height: 1px;
-  background: var(--lane);
-  opacity: 0;
-  transition: opacity var(--transition);
-}
-.mh-step:hover {
-  background: light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025));
-  border-color: var(--hairline);
-}
-.mh-step:hover::before { opacity: 1; }
-.mh-step-num {
-  font-family: var(--font-display);
-  font-weight: 900;
-  font-size: 64px;
-  line-height: 0.8;
-  letter-spacing: -0.04em;
-  color: var(--ink-faint);
-  display: block;
-  margin-bottom: var(--sp-4);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1, 'ss01' 1;
-  transition: color var(--transition);
-}
-.mh-step:hover .mh-step-num { color: var(--lane); }
-.mh-step-num::after {
-  content: '';
-  display: block;
-  width: 24px; height: 1px;
-  background: var(--lane);
-  border-radius: 0;
-  margin-top: var(--sp-3);
-  opacity: 0.7;
-}
-.mh-step h3 {
-  font-family: var(--font-display);
-  font-size: 18px; font-weight: 800; color: var(--ink);
-  letter-spacing: 0.01em; margin: 0 0 var(--sp-2);
-  text-transform: uppercase;
-}
-.mh-step p {
-  font-size: 14px; color: var(--ink-dim);
-  line-height: 1.5; margin: 0;
-  max-width: 36ch;
-}
-
 /* === Hero (rebuilt home page) — sport-editorial cover === */
 /* HERO — broadsheet masthead. No gradient text, no glass, no purple.
    Type carries the weight. Lane-yellow earns its keep on the CTA only.
@@ -8773,6 +8698,10 @@ from mediahub.web.cadence_heatmap import (  # noqa: E402
     window_start as _cadence_window_start,
 )
 from mediahub.web import code_highlight as _code_hl  # noqa: E402
+from mediahub.web.scrollytelling import (  # noqa: E402
+    SCROLLYTELLING_CSS as _MH_SCROLLY_CSS,
+    scrollytelling_grid_html as _scrollytelling_grid_html,
+)
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -8786,10 +8715,10 @@ _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
 # Motion / effect kit + the U.8 pipeline-diagram CSS + the UI 1.13 anatomy
-# callouts CSS + the UI 1.17 cadence-heatmap CSS ride AFTER the components
-# layer (so they can elevate existing component primitives) but BEFORE the
-# guardrails, which must stay the cascade's final layer
-# (test_theme_tokens::test_guardrails_appended_last).
+# callouts CSS + the UI 1.17 cadence-heatmap CSS + the UI 1.7 pinned-panel
+# scrollytelling CSS ride AFTER the components layer (so they can elevate
+# existing component primitives) but BEFORE the guardrails, which must stay the
+# cascade's final layer (test_theme_tokens::test_guardrails_appended_last).
 BASE_CSS = (
     _MH_TT_CSS
     + BASE_CSS
@@ -8799,6 +8728,7 @@ BASE_CSS = (
     + _MH_PL_CSS
     + _MH_AN_CSS
     + _MH_CAD_CSS
+    + _MH_SCROLLY_CSS
     + _MH_RG_CSS
 )
 
@@ -14748,54 +14678,26 @@ def create_app() -> Flask:
             "</section>"
         )
 
-        # --- Four-step explainer — sport newsroom workflow ---
-        # Each step now carries an SVG icon and a "time-to" footnote so the
-        # block reads as a real product walkthrough, not a paragraph wall.
-        step_specs = [
-            (
-                "01",
-                "Add an input",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-                "Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.",
-                "~ 30s",
-            ),
-            (
-                "02",
-                "We find the moments",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v3M11 14v.01"/></svg>',
-                "The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.",
-                "~ 45s",
-            ),
-            (
-                "03",
-                "On-brand drafts appear",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19l7-7-3-3-7 7v3z"/><path d="M14 6l3 3"/><path d="M5 21h14"/></svg>',
-                "Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.",
-                "~ 60s",
-            ),
-            (
-                "04",
-                "Approve. Then post.",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
-                "You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.",
-                "Human in the loop",
-            ),
-        ]
+        # --- UI 1.7 — Pinned-panel scrollytelling (the workflow) ---
+        # The four-step newsroom workflow (results → moments → drafts → approve)
+        # presented Linear-style: the narrative steps scroll down the left rail
+        # while a sticky visual panel on the right pins and swaps its content per
+        # step. Pure CSS scroll-driven (view-timeline + timeline-scope); the
+        # steps + their paired visual mocks live in scrollytelling.py. The
+        # section chrome (eyebrow + the U.5 line-reveal heading) stays here so it
+        # joins the established scroll-reveal system; the heading keeps the
+        # "From the results sheet to …" copy the rest of the page references.
         steps_html = (
-            '<section class="mh-section" id="mh-ch-workflow">'
+            '<section class="mh-section mh-scrolly" id="mh-ch-workflow">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">The workflow</span></div>'
             + _reveal_lines(
                 ["From the results sheet to", '<em class="editorial">posting-ready</em>']
             )
-            + '<div class="mh-steps mh-reveal-group">'
-            + "".join(
-                f'<div class="mh-step mh-spotlight-card">{icon}'
-                f'<div class="mh-step-num">{num}</div>'
-                f"<h3>{title}</h3><p>{body}</p>"
-                f'<div class="mh-step-foot">{foot}</div></div>'
-                for num, title, icon, body, foot in step_specs
-            )
-            + "</div></section>"
+            + '<p class="mh-scrolly-lede">Four steps, every one explainable and yours '
+            "to approve. Scroll the workflow &mdash; the panel keeps pace, stage by "
+            "stage, from the file you upload to the post you sign off.</p>"
+            + _scrollytelling_grid_html()
+            + "</section>"
         )
 
         # --- U.15 — before/after reveal slider. Drag-to-wipe between the raw
