@@ -320,9 +320,10 @@
    4. TEXT EFFECTS  (Text-Generate · Flip-Words · Hero-Highlight · Flapboard)
    ===================================================================== */
 
-/* Words fade/rise in one-by-one when the block scrolls into view. The JS
-   wraps each word in <span class="mh-word" style="--i:N"> and flips
-   .is-in; with no JS the text is simply visible. */
+/* Words fade/rise in one-by-one when the block reveals (on scroll, or on a
+   fresh AI caption arriving — see the UI2.7 caption type-on). The JS wraps each
+   word in <span class="mh-word" style="--i:N"> and flips .is-in; with no JS the
+   text is simply visible. */
 .mh-js .mh-text-generate .mh-word {
   display: inline-block;
   opacity: 0;
@@ -330,7 +331,10 @@
   transform: translateY(0.18em);
 }
 .mh-js .mh-text-generate.is-in .mh-word {
-  animation: mh-word-in 560ms var(--ease-out) backwards;
+  /* `both`, not `backwards`: the keyframe is `to`-only, so `backwards` alone
+     would drop each word back to the hidden base style the instant its run
+     ends — the reveal must SETTLE visible, so we keep the final frame. */
+  animation: mh-word-in 560ms var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 55ms);
 }
 @keyframes mh-word-in {

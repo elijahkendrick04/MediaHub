@@ -3110,6 +3110,54 @@ function switchToneLive(btn, captionUrl, cardId) {
   _fetchCaption(captionUrl, newTone, panel, cacheKey, isAiTone, cardId);
 }
 
+// UI2.7 &mdash; "AI is writing" type-on reveal for the READ-ONLY generated-caption
+// preview only. Reuses the kit's .mh-text-generate / .mh-word effect, but with a
+// caption-aware tokeniser that PRESERVES whitespace + newlines (the kit's own
+// splitWords collapses whitespace runs, which would flatten a caption's line /
+// hashtag structure). The editable .caption-textarea is never animated &mdash; it
+// always receives plain text. Fails safe: reduced-motion, animate=false, empty
+// text, or any error all render the caption plainly and fully readable.
+function _revealCaption(host, text, animate) {
+  if (!host) { return; }
+  var reduce = false;
+  try {
+    reduce = window.matchMedia &&
+             window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (e) { reduce = false; }
+  if (!animate || reduce || !text) {
+    host.classList.remove('mh-text-generate', 'is-in');
+    host.textContent = text || '';
+    return;
+  }
+  try {
+    host.textContent = '';
+    // Split into word runs (\\S+) and whitespace runs (\\s+); keep the whitespace
+    // as text nodes so white-space:pre-wrap keeps the caption's exact layout.
+    var tokens = text.match(/\\S+|\\s+/g) || [];
+    var wi = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      if (/\\S/.test(tokens[i])) {
+        var w = document.createElement('span');
+        w.className = 'mh-word';
+        w.style.setProperty('--i', wi++);
+        w.textContent = tokens[i];   // textContent => no XSS, no escaping needed
+        host.appendChild(w);
+      } else {
+        host.appendChild(document.createTextNode(tokens[i]));
+      }
+    }
+    host.classList.add('mh-text-generate');
+    // Commit the .mh-word start-state to layout before .is-in turns the
+    // animation on, so the browser plays the stagger instead of coalescing it.
+    void host.offsetWidth;
+    host.classList.add('is-in');
+  } catch (e) {
+    // The effect must never cost the user their caption.
+    host.classList.remove('mh-text-generate', 'is-in');
+    host.textContent = text;
+  }
+}
+
 function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
   var captionDiv = panel.querySelector('.caption-text');
   var textarea = panel.querySelector('.caption-textarea');
@@ -3154,7 +3202,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-      function _renderActive(idx) {
+      function _renderActive(idx, animate) {
         var active = variants[idx] || text;
         if (captionDiv) {
           var pickerHtml = '';
@@ -3165,14 +3213,20 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
+          // Read-only preview: an empty body span we then fill &mdash; plainly, or
+          // with the UI2.7 type-on reveal on a fresh AI write. (Never the textarea.)
+          captionDiv.innerHTML = pickerHtml + '<span class="mh-caption-body" style="white-space:pre-wrap" dir="auto"></span>' + fallbackNote;
+          _revealCaption(captionDiv.querySelector('.mh-caption-body'), active, animate);
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
-            btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
+            // Switching variants is browsing, not a fresh write &mdash; render plainly.
+            btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0, false); });
           });
         }
-        if (textarea) { textarea.value = active; }
+        if (textarea) { textarea.value = active; }  // editable caption stays plain
       }
-      _renderActive(0);
+      // Animate the type-on only for the genuine "AI is writing" moment: a fresh
+      // live AI generation (j.live === true). Deterministic voices omit `live`.
+      _renderActive(0, j.live === true);
       // W.13 (generalised): bilingual workspaces get the side-by-side
       // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
       // so both are approved in one pass. Label + text direction come from
