@@ -2113,6 +2113,22 @@ def _init_db():
             progress_log TEXT,       -- JSON array, streamed for cross-worker polls
             heartbeat_at TEXT        -- ISO ts, advanced while the pipeline runs
         );
+        -- UI 1.25 — emoji reactions on generated cards + the review queue.
+        -- One row per (card, emoji, anonymous reactor): the per-card tally is
+        -- COUNT(*) grouped by emoji, so a reactor counts once per emoji and a
+        -- second tap toggles their row off. The composite PK is the only index
+        -- needed — its (run_id, card_id) leftmost prefix covers both the
+        -- per-card tally and the per-run "my reactions" lookup. `emoji` is
+        -- constrained to a server-side allowlist before any INSERT, so no
+        -- arbitrary user string ever lands here.
+        CREATE TABLE IF NOT EXISTS card_reactions (
+            run_id     TEXT NOT NULL,
+            card_id    TEXT NOT NULL,
+            emoji      TEXT NOT NULL,
+            reactor_id TEXT NOT NULL,
+            created_at TEXT,
+            PRIMARY KEY (run_id, card_id, emoji, reactor_id)
+        );
     """)
     # Additive migration for DBs created before progress_log / heartbeat_at /
     # n_achievements. Old rows keep NULL n_achievements until they are listed
@@ -2537,6 +2553,73 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     )
 
 
+# UI 1.25 — Emoji reactions. A FIXED, server-controlled allowlist: these three
+# are the only values that can ever be written to `card_reactions` or rendered
+# into a reaction strip. Keeping the set closed means no user-supplied string
+# reaches the DB or the HTML, so the feature carries no stored-XSS / data-bloat
+# surface. The order here is the left-to-right render order of the buttons.
+REACTION_EMOJI: tuple[str, ...] = ("👍", "❤️", "🔥")
+
+
+def _reaction_counts_for_run(run_id: str) -> dict[str, dict[str, int]]:
+    """Server-side reaction tally for a whole run: ``{card_id: {emoji: count}}``.
+
+    One indexed query (the ``card_reactions`` PK covers ``WHERE run_id=?``), so a
+    150-card review page tallies every reaction without a per-card round-trip.
+    Best-effort: any DB error yields an empty map and the strips render at zero
+    rather than 500-ing the page. Only allowlisted emoji are surfaced.
+    """
+    out: dict[str, dict[str, int]] = {}
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT card_id, emoji, COUNT(*) AS n FROM card_reactions "
+            "WHERE run_id=? GROUP BY card_id, emoji",
+            (run_id,),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            if r["emoji"] in REACTION_EMOJI:
+                out.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
+    except Exception:
+        pass
+    return out
+
+
+def _render_reactions(
+    run_id: str, card_id: str, run_counts: dict[str, dict[str, int]] | None = None
+) -> str:
+    """Render the per-card emoji reaction strip (UI 1.25).
+
+    The counts are tallied server-side and baked into the markup so the strip is
+    correct on first paint and survives with JS disabled; the global reaction
+    script in ``_layout`` then enhances it (toggle via fetch, no page reload, and
+    a load-time highlight of *this* client's reactions). ``run_counts`` is the
+    whole-run tally from :func:`_reaction_counts_for_run`, looked up per card so
+    the page makes a single DB query rather than one per card. Every emoji comes
+    from the fixed :data:`REACTION_EMOJI` allowlist — nothing user-supplied is
+    rendered here.
+    """
+    counts = (run_counts or {}).get(card_id, {}) if run_counts else {}
+    btns = []
+    for emoji in REACTION_EMOJI:
+        n = int(counts.get(emoji, 0) or 0)
+        hidden = "" if n else " hidden"
+        btns.append(
+            f'<button type="button" class="mh-react-btn"'
+            f' data-mh-react-emoji="{_h(emoji)}"'
+            f' data-mh-react-run="{_h(run_id)}" data-mh-react-card="{_h(card_id)}"'
+            f' aria-pressed="false" aria-label="React {_h(emoji)}" title="React {_h(emoji)}">'
+            f'<span class="mh-react-emoji" aria-hidden="true">{emoji}</span>'
+            f'<span class="mh-react-count" data-mh-react-count{hidden}>{n}</span>'
+            f"</button>"
+        )
+    return (
+        f'<div class="mh-reactions" data-mh-react-card="{_h(card_id)}"'
+        f' role="group" aria-label="Quick reactions">' + "".join(btns) + "</div>"
+    )
+
+
 def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     """Return a friendly HTML page that auto-refreshes every 4 seconds."""
     try:
@@ -2609,6 +2692,9 @@ def _delete_run(run_id: str) -> bool:
         pass
     conn = _db()
     conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+    # UI 1.25 — cascade the run's emoji reactions so a deleted meet leaves no
+    # orphan tally behind (and a recycled run id can never inherit stale counts).
+    conn.execute("DELETE FROM card_reactions WHERE run_id = ?", (run_id,))
     conn.commit()
     conn.close()
     return existed
@@ -5415,6 +5501,32 @@ p:last-child { margin-bottom: 0; }
 .btn.mh-wf-approve:hover { border-color: var(--good); background: rgba(61,220,151,0.08); box-shadow: none; }
 .btn.mh-wf-approve.is-on { background: var(--good); color: var(--lane-ink); border-color: var(--good); cursor: default; }
 .btn.mh-wf-approve.is-on:hover { background: var(--good); transform: none; box-shadow: none; }
+/* UI 1.25 — emoji reaction chips on generated cards + the review queue.
+   Quiet pills that sit beside the approve strip; the active ("you reacted")
+   state picks up the lane accent so a viewer can spot their own taps, and the
+   count only shows once at least one reaction lands. */
+.mh-reactions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mh-react-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 30px; padding: 4px 10px;
+  background: rgba(245,242,232,0.04);
+  color: var(--ink-dim);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 12px; font-weight: 600; line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition),
+              transform var(--transition), color var(--transition);
+}
+.mh-react-btn:hover { background: rgba(245,242,232,0.07); border-color: var(--chrome); transform: translateY(-1px); }
+.mh-react-btn:active { transform: translateY(0); }
+.mh-react-btn:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-react-btn .mh-react-emoji { font-size: 14px; line-height: 1; }
+.mh-react-btn .mh-react-count { font-variant-numeric: tabular-nums; min-width: 7px; text-align: center; color: var(--ink-dim); }
+.mh-react-btn .mh-react-count[hidden] { display: none; }
+.mh-react-btn.is-on { background: rgba(212,255,58,0.10); border-color: rgba(212,255,58,0.45); color: var(--lane); }
+.mh-react-btn.is-on .mh-react-count { color: var(--lane); }
 .btn.large { padding: 14px 28px; font-size: 14px; }
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
 .btn.mono {
@@ -9842,6 +9954,113 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       btn.textContent = origLabel;
     });
   });
+
+  // === UI 1.25 — Emoji reactions (inspired by Liveblocks) =================
+  // Quick 👍 ❤️ 🔥 reactions on generated cards + the review queue. Counts are
+  // tallied server-side and rendered into the page; this enhances each strip so
+  // a tap toggles the current client's reaction via fetch (no page reload). The
+  // client identity is an anonymous random id kept in localStorage — it only
+  // decides which chips show as "yours"; the server holds the authoritative
+  // tally. Delegated, so it covers cards added after load too.
+  (function(){
+    var LS_KEY = 'mh_reactor_id';
+    function reactorId(){
+      var id = null;
+      try { id = window.localStorage.getItem(LS_KEY); } catch(e){}
+      if (!id) {
+        id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : ('r-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+        try { window.localStorage.setItem(LS_KEY, id); } catch(e){}
+      }
+      return id;
+    }
+    function base(){ return window._API_BASE || ''; }
+    function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : v; }
+
+    function setCount(btn, n){
+      var c = btn.querySelector('[data-mh-react-count]');
+      if (!c) return;
+      c.textContent = n;
+      if (n > 0) c.removeAttribute('hidden'); else c.setAttribute('hidden', '');
+    }
+    function syncCard(cardId, counts, mine){
+      // `counts` is the authoritative per-card tally (toggle response or the
+      // load reconcile), so an emoji absent from it is genuinely zero — default
+      // missing keys to 0 rather than leaving a stale server-rendered count.
+      counts = counts || {};
+      document.querySelectorAll('.mh-react-btn[data-mh-react-card="' + esc(cardId) + '"]').forEach(function(b){
+        var em = b.getAttribute('data-mh-react-emoji');
+        setCount(b, counts[em] || 0);
+        if (mine) {
+          var on = mine.indexOf(em) !== -1;
+          b.classList.toggle('is-on', on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+      });
+    }
+
+    // Load-time reconcile: one fetch per run on the page lights up this
+    // reactor's chips and refreshes counts against the server of record.
+    function loadReactions(){
+      var runs = {};
+      document.querySelectorAll('.mh-react-btn[data-mh-react-run]').forEach(function(b){
+        runs[b.getAttribute('data-mh-react-run')] = true;
+      });
+      var rid = reactorId();
+      Object.keys(runs).forEach(function(runId){
+        var url = base() + '/api/runs/' + encodeURIComponent(runId)
+                + '/reactions?reactor_id=' + encodeURIComponent(rid);
+        fetch(url, {headers: {'Accept': 'application/json'}})
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(j){
+            if (!j || !j.ok) return;
+            var counts = j.counts || {}, mine = j.mine || {};
+            var ids = {};
+            Object.keys(counts).forEach(function(c){ ids[c] = true; });
+            Object.keys(mine).forEach(function(c){ ids[c] = true; });
+            Object.keys(ids).forEach(function(c){ syncCard(c, counts[c] || {}, mine[c] || []); });
+          })
+          .catch(function(){});
+      });
+    }
+
+    document.addEventListener('click', function(e){
+      var btn = e.target.closest('.mh-react-btn');
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      var runId = btn.getAttribute('data-mh-react-run');
+      var cardId = btn.getAttribute('data-mh-react-card');
+      var emoji = btn.getAttribute('data-mh-react-emoji');
+      if (!runId || !cardId || !emoji) return;
+      btn.disabled = true;
+      var url = base() + '/api/runs/' + encodeURIComponent(runId)
+              + '/card/' + encodeURIComponent(cardId) + '/reactions';
+      fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({emoji: emoji, reactor_id: reactorId()})
+      }).then(function(r){
+        return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+      }).then(function(o){
+        btn.disabled = false;
+        if (!o.ok || !o.body || o.body.ok === false) {
+          var msg = (o.body && o.body.error) || 'reaction failed';
+          if (window.MH && MH.toast) MH.toast('Reaction failed: ' + msg, 'error', 3000);
+          return;
+        }
+        syncCard(cardId, o.body.counts || {}, o.body.mine || []);
+      }).catch(function(){
+        btn.disabled = false;
+        if (window.MH && MH.toast) MH.toast('Reaction failed', 'error', 3000);
+      });
+    });
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadReactions);
+    } else {
+      loadReactions();
+    }
+  })();
 
   // === UI 1.1 — Cycling example-prompt placeholder (inspired by Cosmos) ===
   // Any field tagged [data-mh-cycle-placeholder="phrase | phrase | …"] types
@@ -14434,6 +14653,9 @@ def create_app() -> Flask:
         # workflow status pill and the U.3 confidence / worthiness / "why this
         # card" / factor-breakdown surfaces. This is the only card render that
         # reaches the page (`#ach-list`).
+        # UI 1.25 — tally every card's emoji reactions in one indexed query so
+        # the per-card strips render server-side without a round-trip each.
+        _react_counts = _reaction_counts_for_run(run_id)
         ach_rows_html_wf = ""
         for _why_idx, ra in enumerate(ranked_achs):
             a = ra.get("achievement", {})
@@ -14501,6 +14723,8 @@ def create_app() -> Flask:
            all happen later in the Content builder (approved cards only). -->
       <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
+        <span style="flex:1;min-width:8px"></span>
+        {_render_reactions(run_id, card_id_raw, _react_counts)}
       </div>
       <details style="margin-top:10px">
         <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">How the ranking added up &amp; evidence</summary>
@@ -21442,6 +21666,8 @@ function mhPlanGenerate(btn) {{
                 wf_states = ws.load(run_id)
         except Exception:
             wf_states = {}
+        # UI 1.25 — one indexed query for every card's reaction tally.
+        _react_counts = _reaction_counts_for_run(run_id)
 
         # Render achievements with the same approve strip the meet recap
         # uses (_render_wf_actions): outline "Approve" until approved,
@@ -21509,6 +21735,8 @@ function mhPlanGenerate(btn) {{
       {_render_wf_actions(run_id, card_id_raw, wf_status)}
       <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
       {sp_graphic_btn}
+      <span style="flex:1;min-width:8px"></span>
+      {_render_reactions(run_id, card_id_raw, _react_counts)}
       <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
     </div>
     {sp_visual_panel}
@@ -29397,6 +29625,133 @@ function mhSetupMode(mode) {{
 
         return jsonify({"error": "unknown action"}), 400
 
+    # ---- Emoji reactions (UI 1.25) -------------------------------------
+    @app.route("/api/runs/<run_id>/card/<card_id>/reactions", methods=["POST"])
+    def api_card_reaction_toggle(run_id, card_id):
+        """Toggle one emoji reaction on a card for an anonymous reactor.
+
+        Body (JSON): ``{"emoji": "👍|❤️|🔥", "reactor_id": "<anon client id>"}``.
+        A reactor's first tap on an emoji adds their row; a second tap removes
+        it — so the server-side tally counts each reactor once per emoji and the
+        UI reads as a true toggle. Returns the fresh per-card tally plus the set
+        this reactor now holds, so the client can update without a reload::
+
+            {"ok": true, "counts": {"👍": 2, ...}, "mine": ["👍", ...]}
+
+        Tenant-isolated (same guard as the workflow API), so a reaction can't be
+        cast on a run another organisation owns; a genuinely missing run 404s
+        too, so a ghost id never accretes orphan reaction rows.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+
+        payload = request.get_json(silent=True) or {}
+        emoji = payload.get("emoji", "")
+        reactor = str(payload.get("reactor_id") or "").strip()
+        if emoji not in REACTION_EMOJI:
+            return jsonify({"error": "invalid emoji"}), 400
+        if not reactor or len(reactor) > 64:
+            return jsonify({"error": "invalid reactor_id"}), 400
+        # Card ids are short engine identifiers (swim_id / "sp:type:event"); a
+        # value far longer than that is junk, so reject it rather than store it.
+        if not card_id or len(card_id) > 256:
+            return jsonify({"error": "invalid card_id"}), 400
+
+        try:
+            conn = _db()
+            existing = conn.execute(
+                "SELECT 1 FROM card_reactions "
+                "WHERE run_id=? AND card_id=? AND emoji=? AND reactor_id=?",
+                (run_id, card_id, emoji, reactor),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "DELETE FROM card_reactions "
+                    "WHERE run_id=? AND card_id=? AND emoji=? AND reactor_id=?",
+                    (run_id, card_id, emoji, reactor),
+                )
+            else:
+                conn.execute(
+                    "INSERT OR IGNORE INTO card_reactions "
+                    "(run_id, card_id, emoji, reactor_id, created_at) VALUES (?,?,?,?,?)",
+                    (
+                        run_id,
+                        card_id,
+                        emoji,
+                        reactor,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+            conn.commit()
+            counts = {e: 0 for e in REACTION_EMOJI}
+            for r in conn.execute(
+                "SELECT emoji, COUNT(*) AS n FROM card_reactions "
+                "WHERE run_id=? AND card_id=? GROUP BY emoji",
+                (run_id, card_id),
+            ).fetchall():
+                if r["emoji"] in counts:
+                    counts[r["emoji"]] = r["n"]
+            mine = [
+                r["emoji"]
+                for r in conn.execute(
+                    "SELECT emoji FROM card_reactions "
+                    "WHERE run_id=? AND card_id=? AND reactor_id=?",
+                    (run_id, card_id, reactor),
+                ).fetchall()
+                if r["emoji"] in REACTION_EMOJI
+            ]
+            conn.close()
+        except Exception as e:
+            log.warning("reaction toggle failed run=%s card=%s: %s", run_id, card_id, e)
+            return jsonify({"error": "reaction_failed"}), 500
+
+        return jsonify({"ok": True, "counts": counts, "mine": mine})
+
+    @app.route("/api/runs/<run_id>/reactions", methods=["GET"])
+    def api_run_reactions(run_id):
+        """Reaction state for a whole run, for the review/builder page on load.
+
+        Query: ``?reactor_id=<anon client id>`` (optional). Returns the full
+        per-card tally plus, when a ``reactor_id`` is given, the cards/emoji that
+        reactor holds — so one fetch lets the client both reconcile counts and
+        light up the viewer's own reactions::
+
+            {"ok": true,
+             "counts": {"<card_id>": {"👍": 2, ...}, ...},
+             "mine":   {"<card_id>": ["👍", ...], ...}}
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+
+        reactor = str(request.args.get("reactor_id") or "").strip()
+        counts: dict[str, dict[str, int]] = {}
+        mine: dict[str, list[str]] = {}
+        try:
+            conn = _db()
+            for r in conn.execute(
+                "SELECT card_id, emoji, COUNT(*) AS n FROM card_reactions "
+                "WHERE run_id=? GROUP BY card_id, emoji",
+                (run_id,),
+            ).fetchall():
+                if r["emoji"] in REACTION_EMOJI:
+                    counts.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
+            if reactor and len(reactor) <= 64:
+                for r in conn.execute(
+                    "SELECT card_id, emoji FROM card_reactions "
+                    "WHERE run_id=? AND reactor_id=?",
+                    (run_id, reactor),
+                ).fetchall():
+                    if r["emoji"] in REACTION_EMOJI:
+                        mine.setdefault(r["card_id"], []).append(r["emoji"])
+            conn.close()
+        except Exception as e:
+            log.warning("reaction fetch failed run=%s: %s", run_id, e)
+            return jsonify({"error": "reaction_failed"}), 500
+
+        return jsonify({"ok": True, "counts": counts, "mine": mine})
+
     # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
     def api_turn_into(run_id):
@@ -30214,6 +30569,8 @@ function tiRegenerate() {{
                 _wf_states = _ws.load(run_id) or {}
         except Exception:
             _wf_states = {}
+        # UI 1.25 — per-card reaction tallies for this run, in one query.
+        _react_counts = _reaction_counts_for_run(run_id)
 
         try:
             grouped = _build_grouped_pack(run_data, profile_id)
@@ -30362,6 +30719,7 @@ function tiRegenerate() {{
   {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    {_render_reactions(run_id, str(card_id_raw), _react_counts) if card_id_raw else ""}
     <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
     <textarea id="cap-{card_id}-1" style="display:none">{cap_only}</textarea>
