@@ -1354,6 +1354,92 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
+def _cutout_provider_label() -> str:
+    """Friendly name of the background remover that produces cut-outs.
+
+    Used for explainability on the cut-out before/after preview (UI2.1) so a
+    user knows *what* knocked the background out, not just the result.
+    """
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        name = (getattr(get_bg_remover(), "name", "") or "").lower()
+    except Exception:
+        name = ""
+    if "photoroom" in name:
+        return "Photoroom"
+    if "replicate" in name:
+        return "Replicate"
+    if "rembg" in name or "local" in name or "server" in name:
+        return "the on-server rembg model"
+    return "the configured background remover"
+
+
+def _v8_ensure_cutout(asset) -> "tuple[Optional[Path], str]":
+    """Resolve the background-removed cut-out PNG for a media asset (UI2.1).
+
+    Returns ``(path, status)`` where ``status`` is one of:
+
+      * ``"cached"``      — a persisted cut-out already exists, reused as-is
+      * ``"generated"``   — produced now (and persisted onto the asset)
+      * ``"unavailable"`` — no working background remover on this deployment
+      * ``"failed"``      — a remover ran but produced nothing usable
+      * ``"no_source"``   — the original file is missing
+
+    Honest-error rule (CLAUDE.md): when no real remover is available we return
+    ``"unavailable"`` rather than rembg's pass-through (which copies the whole
+    image with an alpha channel and removes *nothing*). A fake cut-out that
+    looks identical to the original is worse than an honest "not available".
+    The work is delegated to the renderer's own cut-out pipeline so the
+    preview shares the exact same DATA_DIR cache as the graphics engine.
+    """
+    if asset is None:
+        return None, "no_source"
+    # 1. Already have a usable cut-out on disk?
+    cp = getattr(asset, "cutout_path", None)
+    try:
+        if cp and Path(cp).exists() and Path(cp).stat().st_size > 1000:
+            return Path(cp), "cached"
+    except OSError:
+        pass
+    src = Path(getattr(asset, "path", "") or "")
+    if not src.exists():
+        return None, "no_source"
+    # 2. Is a *real* background remover available? Never fake it.
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        remover = get_bg_remover()
+    except Exception:
+        remover = None
+    if remover is None or not remover.is_available():
+        return None, "unavailable"
+    # 3. Generate via the shared renderer cut-out path (same cache the
+    #    graphics engine uses, so a preview warms the render and vice versa).
+    try:
+        from mediahub.graphic_renderer.render import _maybe_cut_out_athlete
+
+        out = Path(
+            _maybe_cut_out_athlete(src, profile_id=getattr(asset, "profile_id", None) or "default")
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("cutout preview: generation failed for %s: %s", getattr(asset, "id", "?"), exc)
+        return None, "failed"
+    try:
+        same = out.resolve() == src.resolve()
+    except OSError:
+        same = str(out) == str(src)
+    if same or not out.exists():
+        return None, "failed"
+    # 4. Persist the link so future loads (and the renderer) skip the work.
+    try:
+        if _v8_get_media_store is not None:
+            _v8_get_media_store().update_fields(getattr(asset, "id", ""), {"cutout_path": str(out)})
+    except Exception:  # pragma: no cover - best-effort persistence
+        pass
+    return out, "generated"
+
+
 _SRC_ROOT = Path(__file__).resolve().parents[1]  # src/mediahub/ &mdash; local dev default
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
@@ -1774,12 +1860,6 @@ _CYCLE_PH_MOMENT = (
     "Try: relay squad breaks the club record",
     "Try: medal haul from the regional gala",
 )
-_CYCLE_PH_SEARCH = (
-    "Try: county championships",
-    "Try: spring gala 2026",
-    "Try: regionals.hy3",
-    "Try: run id 7f3c9a",
-)
 _CYCLE_PH_RESEARCH = (
     "Try: 2024 county championship headline results",
     "Try: who set the regional 100m free record this season",
@@ -1806,9 +1886,43 @@ def _cycle_ph_attr(phrases) -> str:
 # Precomputed once at import — the lists are static, so there's no reason to
 # rebuild the escaped attribute on every request.
 _CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
-_CYCLE_PH_ATTR_SEARCH = _cycle_ph_attr(_CYCLE_PH_SEARCH)
 _CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
 _CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+
+# UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
+# Vanish input (.mh-vanish): a rotating overlay-placeholder element
+# (.mh-vanish__ph) that swap-fades through real example queries, instead of the
+# UI 1.1 typewriter-through-the-native-placeholder cycle. The native placeholder
+# is emptied (the overlay carries the hint), so the input keeps an explicit
+# aria-label as its accessible name. bindVanish() in ui-kit.js reads this
+# pipe-delimited list from data-mh-placeholders and rotates it (paused while the
+# field holds text, no rotation under prefers-reduced-motion). The first phrase
+# is also baked into the overlay element server-side so the hint reads with no
+# JS, and a :placeholder-shown CSS rule hides the overlay the instant the box
+# holds text even if .is-typing never gets toggled (no-JS / pre-init safety).
+_VANISH_PH_SEARCH = (
+    "Search meet name, file or run id…",
+    "Search county championships…",
+    "Search spring gala 2026…",
+    "Find a file like regionals.hy3…",
+    "Jump to a run id like 7f3c9a…",
+)
+
+
+def _vanish_ph_attr(phrases) -> str:
+    """Render the ``data-mh-placeholders`` attribute for a Vanish input.
+
+    Phrases are joined with `` | `` (``bindVanish()`` in ``ui-kit.js`` splits on
+    the pipe and trims) and HTML-escaped so the value is safe inside a
+    double-quoted attribute. Returns the whole ``data-mh-placeholders="…"`` token
+    so call sites just drop it onto the ``.mh-vanish`` container.
+    """
+    return f'data-mh-placeholders="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the list is static.
+_VANISH_PH_ATTR_SEARCH = _vanish_ph_attr(_VANISH_PH_SEARCH)
 
 
 # Console page body (Capability 3c). A plain string — NOT an f-string — so the
@@ -3154,7 +3268,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-      function _renderActive(idx) {
+      function _renderActive(idx, reveal) {
         var active = variants[idx] || text;
         if (captionDiv) {
           var pickerHtml = '';
@@ -3165,14 +3279,22 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.innerHTML = pickerHtml + '<span class="mh-cap-body" style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
             btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
           });
+          // UI2.7 — word-by-word "AI is writing" reveal, on the *read-only*
+          // caption preview only and only on a fresh generation (reveal=true);
+          // variant-pill swaps re-render plainly. The editable textarea below
+          // is set with the plain value and never typed on.
+          if (reveal && window.MH && typeof MH.typeOn === 'function') {
+            var capBody = captionDiv.querySelector('.mh-cap-body');
+            if (capBody) MH.typeOn(capBody);
+          }
         }
         if (textarea) { textarea.value = active; }
       }
-      _renderActive(0);
+      _renderActive(0, true);
       // W.13 (generalised): bilingual workspaces get the side-by-side
       // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
       // so both are approved in one pass. Label + text direction come from
@@ -6891,6 +7013,199 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   letter-spacing: 0;
 }
 
+/* === UI 1.10 — Template / archetype gallery ============================== */
+.mh-arch-note {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim); line-height: 1.55;
+  max-width: 64ch; margin: 0 0 var(--sp-5);
+}
+/* Filter chips — server-nav links, JS-upgraded to instant client filtering. */
+.mh-arch-filters {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+}
+.mh-arch-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition),
+              background var(--transition);
+}
+.mh-arch-chip:hover { color: var(--ink); border-color: var(--rule); text-decoration: none; }
+.mh-arch-chip:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-arch-chip.is-active {
+  color: var(--lane-ink, #0A0B11);
+  background: var(--lane);
+  border-color: var(--lane);
+}
+.mh-arch-chip-n {
+  font-size: 10px; opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.mh-arch-chip.is-active .mh-arch-chip-n { opacity: 0.85; }
+/* Visually-hidden text (count read-out for screen readers). */
+.mh-arch-sr {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* Card grid */
+.mh-arch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-7);
+}
+.mh-arch-card {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-card:hover { border-color: var(--rule); background: var(--surface-2); }
+.mh-arch-card.is-hidden { display: none; }
+.mh-arch-thumb {
+  padding: var(--sp-4) var(--sp-4) 0;
+}
+.mh-arch-svg {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.mh-arch-body {
+  display: flex; flex-direction: column;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.mh-arch-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 4px;
+}
+.mh-arch-title {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 800; color: var(--ink);
+  letter-spacing: 0.01em; margin: 0;
+  text-transform: uppercase;
+}
+.mh-arch-tag {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.mh-arch-tag[data-cat="photo"] { color: #7fd4ff; border-color: rgba(127,212,255,0.32); }
+.mh-arch-tag[data-cat="data"] { color: var(--lane); border-color: rgba(212,255,58,0.32); }
+.mh-arch-tag[data-cat="editorial"] { color: #f6a5d0; border-color: rgba(246,165,208,0.32); }
+.mh-arch-slug {
+  font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--ink-muted, var(--ink-dim));
+  opacity: 0.7;
+  margin-bottom: var(--sp-2);
+  word-break: break-all;
+}
+.mh-arch-summary {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim);
+  line-height: 1.5; margin: 0 0 var(--sp-2);
+}
+.mh-arch-when {
+  font-family: var(--font-body);
+  font-size: 12.5px; color: var(--ink-dim);
+  line-height: 1.5; margin: auto 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hairline);
+}
+.mh-arch-when-label {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--lane);
+  margin-right: 6px;
+}
+.mh-arch-empty {
+  font-family: var(--font-body);
+  font-size: 14px; color: var(--ink-dim);
+  padding: var(--sp-6); text-align: center;
+  border: 1px dashed var(--rule); border-radius: var(--radius);
+  margin-bottom: var(--sp-7);
+}
+/* Bottom CTA strip back into the Create flow. */
+.mh-arch-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.mh-arch-cta-text { display: flex; flex-direction: column; gap: 4px; }
+.mh-arch-cta-text strong {
+  font-family: var(--font-display); font-size: 16px; color: var(--ink);
+  text-transform: uppercase; letter-spacing: 0.01em;
+}
+.mh-arch-cta-text span { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
+/* Link from the Create page into the gallery. */
+.mh-arch-gallery-link {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-gallery-link:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; }
+.mh-arch-gallery-link .mh-agl-text { display: flex; flex-direction: column; gap: 2px; }
+.mh-arch-gallery-link .mh-agl-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 800;
+  color: var(--ink); text-transform: uppercase; letter-spacing: 0.02em;
+}
+.mh-arch-gallery-link .mh-agl-sub { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-dim); }
+.mh-arch-gallery-link .mh-agl-cta {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--lane);
+  white-space: nowrap;
+}
+/* Schematic preview parts — scoped to .mh-arch-svg so the short class names
+   never leak. gd = brand ground, sf = surface/secondary zone, ac = accent,
+   ik/ik2 = muted/stronger type bars, ph = photo placeholder, ln = hairline,
+   acln = accent seam, paper/dk/dkln = light editorial ground + dark ink on it,
+   onac = ink on the accent panel, ln-f = ruled cell outline. */
+.mh-arch-svg .gd { fill: var(--surface-3); }
+.mh-arch-svg .sf { fill: var(--bg); }
+.mh-arch-svg .ac { fill: var(--lane); }
+.mh-arch-svg .ik { fill: rgba(245,242,232,0.30); }
+.mh-arch-svg .ik2 { fill: rgba(245,242,232,0.58); }
+.mh-arch-svg .ph { fill: rgba(245,242,232,0.10); }
+.mh-arch-svg .onac { fill: rgba(10,11,17,0.78); }
+.mh-arch-svg .ln { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .acln { fill: none; stroke: var(--lane); stroke-width: 2; }
+.mh-arch-svg .ln-f { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .paper { fill: rgba(245,242,232,0.92); }
+.mh-arch-svg .dk { fill: rgba(10,11,17,0.55); }
+.mh-arch-svg .dkln { fill: none; stroke: rgba(10,11,17,0.40); stroke-width: 1; }
+@media (max-width: 560px) {
+  .mh-arch-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
 /* === Provider badge on home — broadcast pill === */
 .mh-provider-badge {
   display: inline-flex; align-items: center; gap: 10px;
@@ -7771,6 +8086,11 @@ def _theme_seed_style_block() -> str:
 # via `setProgress` and the bar tracks the actual work. The number is monotonic
 # and never claims "done" before the artefact exists.
 #
+# UI1.26 — every renderProgress wait also spawns a cursor-anchored mirror via
+# MH.cursorReadout (ui-kit.js): a small "NN% · phase" chip that follows the
+# pointer during the wait and disappears on complete()/stop(). It is opt-out
+# (opts.cursor === false) and degrades safely if ui-kit.js hasn't loaded yet.
+#
 # Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
 # kept as a module constant so tests can exercise the controller directly.
 _RENDER_PROGRESS_JS = """
@@ -7803,6 +8123,13 @@ _RENDER_PROGRESS_JS = """
     var fillEl= container.querySelector('.mh-render-prog-fill');
     var labEl = container.querySelector('.mh-render-prog-label');
     var subEl = container.querySelector('.mh-render-prog-sub');
+    // UI1.26 — a cursor-anchored mirror of this readout: a small "NN% · phase"
+    // chip that follows the pointer through the wait and vanishes on completion.
+    // MH.cursorReadout ships in the deferred ui-kit.js and is always loaded by
+    // the time a user triggers a render; opt out with opts.cursor === false.
+    var cursor = (opts.cursor !== false && MH.cursorReadout)
+      ? MH.cursorReadout({ label: opts.label || 'Rendering', accent: accent, percent: 0 })
+      : null;
     var raf = window.requestAnimationFrame || function(cb){ return setTimeout(function(){ cb(Date.now()); }, 32); };
     var start = Date.now();
     var cur = 0, floor = 0, lastShown = -1;
@@ -7811,12 +8138,12 @@ _RENDER_PROGRESS_JS = """
       if (v < cur) v = cur;   // monotonic — never tick backwards on a stale frame
       cur = v;
       var shown = Math.floor(v);
-      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); }
+      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); if (cursor) cursor.set(shown); }
       fillEl.style.width = v.toFixed(1) + '%';
       if (root) root.setAttribute('aria-valuenow', String(Math.round(v)));
     }
     function setText(label, sub){
-      if (label != null) labEl.textContent = label;
+      if (label != null) { labEl.textContent = label; if (cursor) cursor.status(label); }
       if (sub != null) subEl.textContent = sub;
     }
     setText(opts.label || 'Rendering', opts.sub || '');
@@ -7828,6 +8155,7 @@ _RENDER_PROGRESS_JS = """
         paint(finishFrom + (100 - finishFrom) * t);
         if (t >= 1){
           stopped = true; paint(100);
+          if (cursor) cursor.done();
           if (finishCb) setTimeout(finishCb, 170);
           return;
         }
@@ -7848,7 +8176,7 @@ _RENDER_PROGRESS_JS = """
         if (stopped || finishing){ if (cb) cb(); return; }
         finishing = true; finishFrom = cur; finishStart = Date.now(); finishCb = cb || null;
       },
-      stop: function(){ stopped = true; }
+      stop: function(){ stopped = true; if (cursor) cursor.done(); }
     };
   };
 })();
@@ -8492,6 +8820,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
@@ -12393,9 +12722,10 @@ def create_app() -> Flask:
             )
         toolbar_html = (
             '<div class="mh-toolbar">'
-            '<div class="grow mh-search">'
+            f'<div class="grow mh-search mh-vanish" {_VANISH_PH_ATTR_SEARCH}>'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            f'<input id="mh-activity-search" type="search" {_CYCLE_PH_ATTR_SEARCH} placeholder="Search meet name, file or run id…" autocomplete="off" />'
+            '<input id="mh-activity-search" type="search" placeholder="" autocomplete="off" aria-label="Search runs by meet name, file or run id" />'
+            f'<span class="mh-vanish__ph" aria-hidden="true">{_h(_VANISH_PH_SEARCH[0])}</span>'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
@@ -12641,6 +12971,9 @@ def create_app() -> Flask:
   function show(el, msg){ el.textContent = msg; el.hidden = false; }
   function hide(el){ el.hidden = true; }
   var lastPct = 0;
+  // UI1.26 — cursor-anchored readout for the (long) site-fetch ingest. Created
+  // when the fetch starts, fed the real percent each poll, removed on done/error.
+  var cursor = null;
   function setPct(p){
     if (typeof p !== 'number' || isNaN(p)) return;
     // Monotonic: never let the bar jump backwards on a stale poll.
@@ -12648,12 +12981,14 @@ def create_app() -> Flask:
     lastPct = p;
     if (barWrap) { barWrap.hidden = false; barWrap.setAttribute('aria-valuenow', String(p)); }
     if (barFill) barFill.style.width = p + '%';
+    if (cursor) cursor.set(p);
   }
   function go(){
     var url = (input.value || '').trim();
     hide(errEl);
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
+    cursor = (window.MH && MH.cursorReadout) ? MH.cursorReadout({ label: 'Fetching results', percent: 3 }) : null;
     lastPct = 0; setPct(3);
     var fd = new FormData(); fd.append('url', url);
     fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__', 'Accept': 'application/json' }, body: fd })
@@ -12663,16 +12998,17 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, e.message); });
+      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, e.message); });
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
         if (typeof j.percent === 'number') setPct(j.percent);
-        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, j.error || 'The fetch failed.'); return; }
+        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
+        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, j.error || 'The fetch failed.'); return; }
         show(statusEl, j.progress || 'Reading the site\\u2026');
+        if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
       }).catch(function(){ setTimeout(tick, 2500); });
     };
@@ -20625,6 +20961,26 @@ function mhPlanGenerate(btn) {{
     # V7 NEW ROUTES
     # ====================================================================
 
+    # ---- /templates &mdash; the visual template/archetype gallery (UI 1.10) ---
+    @app.route("/templates")
+    def template_gallery():
+        # Browse-only gallery of the content archetypes the design director
+        # draws from, shown *before* creating a pack. Renders existing data
+        # only (the live archetype catalog + each archetype's authored notes)
+        # with deterministic schematic previews + category filters — no new
+        # API, no external service, and no way to force an archetype (the
+        # engine still picks per moment). All logic lives in the Flask-free
+        # ``template_gallery`` helper so it unit-tests without a request.
+        from mediahub.web import template_gallery as _gallery
+
+        active = _gallery.valid_category(request.args.get("category"))
+        body = _gallery.render_gallery_body(
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            active_category=active,
+        )
+        return _layout("Templates", body, active="templates")
+
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
     def make_page():
@@ -20889,6 +21245,19 @@ function mhPlanGenerate(btn) {{
                     button_label="Generate a sample pack →",
                 )
 
+        # Browse-the-templates entry point — lets a user see the card styles
+        # the engine can produce *before* picking a starting point (UI 1.10).
+        gallery_link_html = (
+            f'<a class="mh-arch-gallery-link" href="{_h(url_for("template_gallery"))}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">Browse the template gallery</span>'
+            '<span class="mh-agl-sub">See the 12 card styles your packs are '
+            "composed from — the engine picks the right one per moment.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">View templates &rarr;</span>'
+            "</a>"
+        )
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
@@ -20898,6 +21267,7 @@ function mhPlanGenerate(btn) {{
             f"{_free_tier_banner_html()}"
             f"{brand_strip_html}"
             f"{first_run_cta}"
+            f"{gallery_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
@@ -30815,6 +31185,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
+            _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -30841,7 +31212,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td>{_h(ad.get("permission_status", ""))}</td>
   <td><code>{_h(ad.get("id", "")[:12])}</code></td>
-  <td>
+  <td style="white-space:nowrap">
+    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <form method="post" action="{_delete_url}" style="display:inline"
           onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
       <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
@@ -31029,6 +31401,191 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/cutout/<asset_id>")
+    def api_media_library_cutout(asset_id: str):
+        """Serve the background-removed cut-out PNG for one asset (UI2.1).
+
+        Generated on first request and cached/persisted, then profile-scoped
+        exactly like the original-file route. Returns an honest 503 when no
+        background remover is available rather than a fake (pass-through)
+        cut-out, and 404 when there is no source or generation produced
+        nothing usable.
+        """
+        if not _v8_ok:
+            return "", 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return "", 404
+        if not _session_can_access_profile(a.profile_id):
+            return "", 403
+        path, status = _v8_ensure_cutout(a)
+        if path is None:
+            return "", (503 if status == "unavailable" else 404)
+        from flask import send_file
+
+        try:
+            resp = send_file(str(path), mimetype="image/png")
+            # Derived asset — let the browser cache it; it only changes if the
+            # source is re-uploaded (which mints a new asset id).
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
+        except Exception:
+            return "", 404
+
+    @app.route("/media-library/<asset_id>/cutout")
+    def media_library_cutout_page(asset_id: str):
+        """Before/after cut-out preview (UI2.1).
+
+        Drag the `.mh-compare` slider to see *exactly* what background removal
+        knocked out: the original photo on the left, the cut-out (subject on a
+        transparency checkerboard) on the right. Fails honestly — if no real
+        remover is available it shows the original with a plain explanation,
+        never a fake cut-out.
+        """
+        if not _v8_ok:
+            return _recovery_page(
+                "Media library unavailable",
+                "The V8 media engine isn't enabled on this deployment, so cut-out "
+                "previews can't be generated. Ask your operator to enable it.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library &mdash; it may have been deleted, "
+                "or the link might be out of date.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation, so it isn't "
+                "available from your current session.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+
+        ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+        subject = (
+            ", ".join(ad.get("linked_athlete_names") or [])
+            or ad.get("linked_venue")
+            or ad.get("linked_event")
+            or ad.get("filename")
+            or "this photo"
+        )
+        orig_url = url_for("api_media_library_file", asset_id=a.id)
+        cutout_url = url_for("api_media_library_cutout", asset_id=a.id)
+        back_url = url_for("media_library_page")
+
+        # Pixel-perfect alignment: size the slider to the photo's own aspect
+        # ratio so the before/after halves line up. Falls back to a portrait
+        # default when the file can't be measured (e.g. a placeholder blob).
+        aspect = "4 / 5"
+        try:
+            from PIL import Image
+
+            with Image.open(a.path) as _im:
+                _iw, _ih = _im.size
+            if _iw > 0 and _ih > 0:
+                aspect = f"{_iw} / {_ih}"
+        except Exception:
+            pass
+
+        path, status = _v8_ensure_cutout(a)
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Cut-out preview</span>'
+            f"<h1>{_h(subject)}</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(ad.get("type", "photo"))}</span><span class="sep">·</span>'
+            "<span>before &rarr; after background removal</span>"
+            "</div>"
+            "</section>"
+        )
+
+        if path is not None:
+            provider = _cutout_provider_label()
+            compare = (
+                '<div class="card">'
+                '<p class="dim" style="margin-bottom:var(--sp-4)">'
+                "Drag the handle to wipe between the original photo (left) and the "
+                "cut-out (right). The checkerboard is transparency &mdash; that&rsquo;s "
+                "exactly what was removed."
+                "</p>"
+                '<figure class="mh-compare" data-mh-pos="50" '
+                'aria-label="Before and after background removal" '
+                f'style="aspect-ratio:{aspect};max-width:560px;width:100%;margin:0 auto">'
+                f'<img src="{orig_url}" alt="Original photo of {_h(subject)}, background intact" />'
+                '<div class="mh-compare__after mh-compare__after--checker">'
+                f'<img src="{cutout_url}" alt="{_h(subject)} with the background removed" />'
+                "</div>"
+                '<div class="mh-compare__handle"></div>'
+                "</figure>"
+                '<p class="dim" style="margin-top:var(--sp-4);font-size:13px">'
+                f"Cut out by {_h(provider)} on MediaHub&rsquo;s servers &mdash; the same "
+                "background removal composited into your branded graphics."
+                "</p>"
+                "</div>"
+            )
+            body = hero + compare
+        else:
+            # Honest fallback — no fabricated cut-out (CLAUDE.md honest-error rule).
+            if status == "unavailable":
+                detail = (
+                    "Background removal isn&rsquo;t available on this deployment, so "
+                    "there&rsquo;s no cut-out to compare yet. Your operator can enable it "
+                    "(the on-server rembg model, or a Photoroom / Replicate key). The "
+                    "original photo is shown below."
+                )
+            elif status == "no_source":
+                detail = (
+                    "The original file for this photo is missing, so there&rsquo;s "
+                    "nothing to preview. Try re-uploading it to the library."
+                )
+            else:  # failed
+                detail = (
+                    "We couldn&rsquo;t produce a cut-out for this photo. The original is "
+                    "shown below &mdash; a clearer subject-on-background shot usually cuts "
+                    "out cleanly."
+                )
+            note = (
+                '<div class="card">'
+                '<div role="status" class="mh-ai-unavailable" '
+                'style="margin-bottom:var(--sp-4);padding:14px 18px;'
+                "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                'display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap">'
+                f"{_AI_UNAVAILABLE_ICON}"
+                '<span class="strap" style="color:var(--warn)">No cut-out to show</span>'
+                f'<span style="color:var(--ink-dim)">{detail}</span>'
+                "</div>"
+            )
+            if status != "no_source":
+                note += (
+                    f'<img src="{orig_url}" alt="Original photo of {_h(subject)}" '
+                    f'style="max-width:560px;width:100%;border-radius:var(--radius-md);display:block" />'
+                )
+            note += "</div>"
+            body = hero + note
+
+        body += (
+            '<div style="margin-top:var(--sp-5)">'
+            f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
+            "</div>"
+        )
+        return _layout("Cut-out preview", body, active="media")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):

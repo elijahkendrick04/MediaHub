@@ -322,7 +322,15 @@
 
 /* Words fade/rise in one-by-one when the block scrolls into view. The JS
    wraps each word in <span class="mh-word" style="--i:N"> and flips
-   .is-in; with no JS the text is simply visible. */
+   .is-in; with no JS the text is simply visible.
+
+   Two triggers share this one effect:
+     • scroll headings   — ui-kit.js splitWords()+observe(): reveals on view;
+     • caption type-on    — ui-kit.js MH.typeOn(): fires immediately (already
+       in view) on a *read-only* generated-caption preview, for the "AI is
+       writing" moment (roadmap UI2.7). The editable caption is never typed —
+       it stays plain. typeOn sets --mh-stagger so a long caption's reveal
+       stays time-bounded; headings leave it unset and keep the 55ms default. */
 .mh-js .mh-text-generate .mh-word {
   display: inline-block;
   opacity: 0;
@@ -330,8 +338,11 @@
   transform: translateY(0.18em);
 }
 .mh-js .mh-text-generate.is-in .mh-word {
-  animation: mh-word-in 560ms var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 55ms);
+  /* `both`: hold the from-state through the per-word delay (so later words stay
+     hidden until their turn) AND retain the to-state after (so the revealed
+     word stays visible — `backwards` alone would snap it back to opacity:0). */
+  animation: mh-word-in 560ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * var(--mh-stagger, 55ms));
 }
 @keyframes mh-word-in {
   to { opacity: 1; filter: blur(0); transform: translateY(0); }
@@ -503,6 +514,21 @@
   border: 2px solid var(--mh-primary);
   box-shadow: var(--mh-elevation-2);
 }
+/* Transparency backdrop for the "after" half when it carries a cut-out PNG
+   with an alpha channel (UI2.1): wherever the background was knocked out, the
+   universal checkerboard shows through, so a user sees *exactly* what rembg
+   removed. Token-driven (re-skins with the brand) and fully static — no
+   motion, so it is reduced-motion- and no-JS-safe. */
+.mh-compare__after--checker {
+  background-color: var(--mh-surface);
+  background-image:
+    linear-gradient(45deg, var(--mh-outline-variant) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--mh-outline-variant) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--mh-outline-variant) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--mh-outline-variant) 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+}
 
 /* =====================================================================
    9. LENS  (magnify on hover — inspect a card / asset detail)
@@ -615,6 +641,83 @@
 }
 .mh-vanish.is-typing .mh-vanish__ph { opacity: 0; transform: translateY(-50%) translateX(6px); }
 .mh-vanish__ph.is-swapping { opacity: 0; transform: translateY(calc(-50% + 6px)); }
+/* No-JS / pre-init safety: once the field holds text its (empty) native
+   placeholder stops showing, so :placeholder-shown drops and the overlay hides
+   even if bindVanish() never toggled .is-typing (kit JS absent or not yet run).
+   The overlay element still carries the first hint server-side, so the
+   placeholder reads with no JS. Needs .mh-vanish__ph to follow the field. */
+.mh-vanish input:not(:placeholder-shown) ~ .mh-vanish__ph,
+.mh-vanish textarea:not(:placeholder-shown) ~ .mh-vanish__ph {
+  opacity: 0; transform: translateY(-50%) translateX(6px);
+}
+
+/* =====================================================================
+   13. CURSOR READOUT  (cursor-anchored progress / status, UI1.26)
+   ---------------------------------------------------------------------
+   A small "NN% · status" chip that the JS layer (MH.cursorReadout) spawns
+   during a long render/upload and removes on completion. It is fixed-
+   position and its live position is a JS-written `transform` that tracks
+   the pointer, so ONLY opacity is transitioned here — transitioning the
+   transform would make the chip lag the cursor. pointer-events:none means
+   it can never intercept a click. Under reduced motion the JS pins it to a
+   corner (see the consolidated reduced-motion block at the end of the
+   file) rather than chasing the pointer.
+   ===================================================================== */
+.mh-cursor-readout {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 9990;                 /* above content; below the loader (9999) + toast (10000) */
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  max-width: 60vw;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(18, 24, 38, 0.94));
+  border: 1px solid var(--rule, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  pointer-events: none;          /* never blocks a click underneath */
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-9999px, -9999px);  /* parked until JS positions it */
+  will-change: transform;
+  transition: opacity var(--dur-med, 200ms) var(--ease-out-quick, ease);
+}
+.mh-cursor-readout.is-in { opacity: 1; }
+.mh-cursor-readout.is-out { opacity: 0; }
+.mh-cursor-readout__pct {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--lane);
+}
+.mh-cursor-readout[data-accent="medal"] .mh-cursor-readout__pct { color: var(--medal); }
+.mh-cursor-readout__label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-faint, var(--ink-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mh-cursor-readout__label:empty { display: none; }
+/* Pinned fallback (reduced motion, or a keyboard-triggered action where the
+   pointer never moves): sit in a fixed corner instead of tracking. */
+.mh-cursor-readout.is-pinned {
+  transform: none !important;
+  top: auto; left: auto;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+body.mh-has-dock .mh-cursor-readout.is-pinned {
+  bottom: calc(104px + env(safe-area-inset-bottom, 0px));  /* clear the mobile dock */
+}
 
 /* =====================================================================
    REDUCED MOTION — stop dead. State changes keep their (instant) end
@@ -640,4 +743,7 @@
   .mh-highlight { transition: none; background-size: 100% 42%; }
   .mh-scramble { transition: none; }
   .mh-scramble.is-scrambling { color: inherit; }
+  /* The readout is pinned (not pointer-tracking) by the JS under reduced
+     motion; drop its fade so it appears/leaves instantly. */
+  .mh-cursor-readout { transition: none; }
 }
