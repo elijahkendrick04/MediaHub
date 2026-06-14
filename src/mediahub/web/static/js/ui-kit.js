@@ -11,6 +11,7 @@
      scroll progress  -> write --mh-progress (0–1)
      tabs             -> write --mh-ind-x / --mh-ind-w on the .mh-tabs
      compare          -> write --mh-pos (%)
+     tooltip          -> write --mh-tip-rot / --mh-tip-x (pointer parallax)
 
    Principles: every feature is wrapped so one failure can't break the page;
    continuous / pointer-driven motion is skipped under prefers-reduced-motion;
@@ -262,6 +263,32 @@
     }
   }
 
+  /* --- Animated tooltip: parallax tilt on the hovered athlete avatar --- */
+  function bindTooltip(el) {
+    if (!once(el, "data-mh-tip-init")) return;
+    if (REDUCE) return; // the CSS still reveals on hover/focus; just no tilt
+    var avatar = el.querySelector(".mh-tooltip__avatar") || el;
+    var raf = 0, rot = 0, tx = 0;
+    function apply() {
+      raf = 0;
+      el.style.setProperty("--mh-tip-rot", rot.toFixed(1) + "deg");
+      el.style.setProperty("--mh-tip-x", tx.toFixed(1) + "px");
+    }
+    avatar.addEventListener("pointermove", function (ev) {
+      var r = avatar.getBoundingClientRect();
+      if (!r.width) return;
+      var f = (ev.clientX - r.left) / r.width - 0.5; // -0.5 … 0.5
+      rot = clamp(f * 24, -12, 12);
+      tx = clamp(f * 16, -8, 8);
+      if (!raf) raf = requestAnimationFrame(apply);
+    }, { passive: true });
+    avatar.addEventListener("pointerleave", function () {
+      rot = 0; tx = 0;
+      el.style.setProperty("--mh-tip-rot", "0deg");
+      el.style.setProperty("--mh-tip-x", "0px");
+    });
+  }
+
   /* --- Scroll progress (tracing beam) --------------------------------- */
   var beams = [];
   function bindBeam(el) {
@@ -358,6 +385,7 @@
     each(root, ".mh-flip-words", bindFlipWords);
     each(root, ".mh-tabs", bindTabs);
     each(root, ".mh-compare", bindCompare);
+    each(root, ".mh-tooltip", bindTooltip);
     each(root, ".mh-tracing-beam", bindBeam);
     each(root, ".mh-vanish", bindVanish);
     if (beams.length) updateBeams();

@@ -1115,6 +1115,74 @@ def _worthiness_meter(priority: float) -> str:
     )
 
 
+def _avatar_initials(name: str) -> str:
+    """One- or two-letter initials for an athlete avatar chip.
+
+    First+last initial for a full name, the first two letters for a single
+    token, ``?`` for an empty name. Mirrors the sign-in card initials.
+    """
+    parts = [p for p in (name or "").strip().split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _athlete_avatar(
+    name: str,
+    *,
+    club: str = "",
+    stat: str = "",
+    focusable: bool = False,
+    size: int = 34,
+) -> str:
+    """An athlete avatar chip carrying a hover/focus Animated-Tooltip (the kit
+    ``.mh-tooltip``) that shows the athlete's name, club and a key stat.
+
+    Used on the review queue and the athlete-spotlight surfaces (UI2.2). The
+    tooltip is a decorative progressive enhancement: the chip is fully usable
+    with the effect absent (no-JS / reduced-motion), and every value shown is a
+    real, grounded fact already in the recognition report — never fabricated.
+
+    ``focusable=True`` makes the chip keyboard-reachable and exposes the same
+    name/club/stat to assistive tech via ``aria-label`` (use for standalone
+    placements). ``focusable=False`` keeps it decorative + ``aria-hidden`` (use
+    when the chip sits inside another link/control, or the same facts are
+    already visible as text beside it).
+    """
+    nm = (name or "").strip()
+    club = (club or "").strip()
+    stat = (stat or "").strip()
+    initials = _h(_avatar_initials(nm))
+
+    # Meta line: "Club · stat", dropping either empty half cleanly.
+    meta_inner = ""
+    if club:
+        meta_inner += f'<span class="mh-tooltip__club">{_h(club)}</span>'
+    if club and stat:
+        meta_inner += '<span class="mh-tooltip__sep" aria-hidden="true"> · </span>'
+    if stat:
+        meta_inner += f'<span class="mh-tooltip__stat">{_h(stat)}</span>'
+    meta_html = f'<span class="mh-tooltip__meta">{meta_inner}</span>' if meta_inner else ""
+
+    if focusable:
+        # Standalone, keyboard-reachable: AT gets the whole summary from the
+        # avatar's aria-label; the visual pop is a decorative duplicate.
+        aria = _h(" · ".join(p for p in (nm, club, stat) if p) or (nm or "Athlete"))
+        avatar_attrs = f'tabindex="0" role="img" aria-label="{aria}"'
+    else:
+        avatar_attrs = 'aria-hidden="true"'
+
+    return (
+        f'<span class="mh-tooltip" style="--mh-tip-size:{int(size)}px">'
+        f'<span class="mh-tooltip__avatar" {avatar_attrs}>{initials}</span>'
+        f'<span class="mh-tooltip__pop" role="tooltip" aria-hidden="true">'
+        f'<span class="mh-tooltip__name">{_h(nm)}</span>{meta_html}'
+        f"</span></span>"
+    )
+
+
 def _factor_to_dict(f: Any) -> dict:
     """A ranker factor may arrive as a ``RankFactor`` dataclass or a plain dict
     (persisted run JSON). Normalise to a dict; non-factors become ``{}``."""
@@ -14303,6 +14371,35 @@ def create_app() -> Flask:
         bands_set = ["elite", "strong", "story", "nice", "not_worthy"]
         post_types_set = sorted(set(ra.get("suggested_post_type", "") for ra in ranked_achs))
 
+        # UI2.2: per-swimmer aggregate for the athlete-avatar tooltip — how many
+        # ranked moments this swimmer earned in *this* meet and their best band.
+        # Every figure is read straight from the recognition report (grounded,
+        # never fabricated); hovering any of a swimmer's rows surfaces their haul.
+        _BAND_RANK = {"elite": 4, "strong": 3, "story": 2, "nice": 1, "not_worthy": 0}
+        _sw_agg: dict[str, dict] = {}
+        for _ra in ranked_achs:
+            _aa = _ra.get("achievement", {}) or {}
+            _key = _aa.get("swimmer_name", "") or _aa.get("swimmer_id", "")
+            if not _key:
+                continue
+            _band = _ra.get("quality_band") or "nice"
+            _rec = _sw_agg.setdefault(_key, {"count": 0, "band": "nice"})
+            _rec["count"] += 1
+            if _BAND_RANK.get(_band, 0) > _BAND_RANK.get(_rec["band"], 0):
+                _rec["band"] = _band
+        _run_club = (data.get("profile_display") or data.get("club_filter") or "").strip()
+
+        def _athlete_stat(swimmer_name: str) -> str:
+            agg = _sw_agg.get(swimmer_name) or {}
+            n = agg.get("count", 0)
+            if not n:
+                return ""
+            s = f'{n} moment{"s" if n != 1 else ""}'
+            best = agg.get("band") or ""
+            if best:
+                s += f" · best {best}"
+            return s
+
         def opts(items, label):
             o = f'<option value="">All {label}</option>'
             for item in items:
@@ -14482,6 +14579,18 @@ def create_app() -> Flask:
                 ra, card_uuid=f"wf-{card_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
 
+            # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
+            # Decorative here — the row already shows the name/event/band as
+            # text — so the chip stays aria-hidden and out of the tab order.
+            _sw_key = a.get("swimmer_name", "") or a.get("swimmer_id", "")
+            _row_avatar = _athlete_avatar(
+                a.get("swimmer_name", ""),
+                club=_run_club,
+                stat=_athlete_stat(_sw_key),
+                focusable=False,
+                size=30,
+            )
+
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -14494,7 +14603,10 @@ def create_app() -> Flask:
         <span class="tag" style="font-size:10px">{post_type}</span>
         {_worthiness_meter(prio)}
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        {_row_avatar}
+        <div style="font-size:13px;font-weight:600">{swimmer} &middot; {event}</div>
+      </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
       <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
@@ -21340,16 +21452,35 @@ function mhPlanGenerate(btn) {{
                     swimmers = []
                 if swimmers:
                     _review_url = url_for("review", run_id=run_id_param)
+                    # UI2.2: the run's club for the athlete-avatar tooltips.
+                    _sp_club = (
+                        run_data.get("profile_display") or run_data.get("club_filter") or ""
+                    ).strip()
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
                     for sw in swimmers:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
+                        _n_ach = sw["n_achievements"]
+                        _ach_label = f'{_n_ach} achievement{"s" if _n_ach != 1 else ""}'
+                        # Decorative chip (it lives inside the card link, so it
+                        # stays aria-hidden / out of the tab order); the link's
+                        # own text carries the same name + count for AT.
+                        _sw_avatar = _athlete_avatar(
+                            sw["swimmer_name"],
+                            club=_sp_club,
+                            stat=_ach_label,
+                            focusable=False,
+                            size=38,
+                        )
                         swimmers_html += f"""
-<a href="{sp_url}" style="display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
-  <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
-  <div style="font-size:12px;color:var(--ink-dim)">{sw["n_achievements"]} achievement{"s" if sw["n_achievements"] != 1 else ""}</div>
+<a href="{sp_url}" style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
+  {_sw_avatar}
+  <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+    <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
+    <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
+  </div>
 </a>"""
                     swimmers_html += "</div></div>"
                 else:
@@ -21544,10 +21675,32 @@ function mhPlanGenerate(btn) {{
             for t, m in _SP_TONE_META.items()
         )
 
+        # UI2.2: the hero athlete avatar + tooltip. Standalone, so it's
+        # keyboard-reachable (focusable) and exposes the same grounded summary
+        # to assistive tech via aria-label. Club + haul come from the run and
+        # the spotlight pack's band counts — all real figures, never invented.
+        _hero_club = (run_data.get("profile_display") or run_data.get("club_filter") or "").strip()
+        _hero_n = pack["n_achievements"]
+        _hero_stat = f'{_hero_n} moment{"s" if _hero_n != 1 else ""}'
+        if pack["n_elite"]:
+            _hero_stat = f'{pack["n_elite"]} elite · {_hero_stat}'
+        elif pack["n_strong"]:
+            _hero_stat = f'{pack["n_strong"]} strong · {_hero_stat}'
+        _hero_avatar = _athlete_avatar(
+            pack["swimmer_name"],
+            club=_hero_club,
+            stat=_hero_stat,
+            focusable=True,
+            size=52,
+        )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
-  <h1>{_h(pack["swimmer_name"])}</h1>
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    {_hero_avatar}
+    <h1 style="margin:0">{_h(pack["swimmer_name"])}</h1>
+  </div>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(pack["meet_name"])}</span><span class="sep">/</span>
     <a href="{_back_url}" style="color:var(--ink-muted);text-decoration:none">&larr; Swimmer list</a><span class="sep">/</span>
