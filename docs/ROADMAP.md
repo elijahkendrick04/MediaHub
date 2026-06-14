@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `d06d95fee` · Merge pull request #496 from elijahkendrick04/claude/zen-planck-mdrr1r
+**Last updated:** 2026-06-14 · `c506ac5c6` · U.15 — Before/after reveal slider on the landing page (#499)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -136,7 +136,6 @@ begin until Phases 1–5 are complete (rule 12).
 - **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.12** · Phase 1 (Product polish) — Animated count-up stat numerals (inspired by Max Yinger): odometer count-up for Organisations / Total runs etc. triggers on load + scroll-into-view · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.15** · Phase 1 (Product polish) — Before/after reveal slider (inspired by Lovi): drag-to-wipe between a raw results sheet (input) and the finished branded graphic (output) on the landing · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.16** · Phase 1 (Product polish) — Subtle 3D tilt on output cards (inspired by Atlas): premium parallax/tilt-on-hover for the sample output cards · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
@@ -1391,6 +1390,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `1e08619ee` | U.15: before/after reveal slider on the landing page |
 | 2026-06-14 | `a10f2fc98` | U.14: cursor-following hover preview (Media library + Create) |
 | 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
 | 2026-06-14 | `4e538d7b1` | U.10: framed in-app product demo in the landing hero |
@@ -1399,5 +1399,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `d82f5b630` | U.5-U.16: design-polish ideas from godly.website review — top of Phase U |
 | 2026-06-13 | `1bfbe9d6a` | Fix year-of-birth leaking into the club field (club picker showed '(04)') |
 | 2026-06-13 | `9d9ec1512` | Make explainability & confidence read as intelligence (U.3) |
-| 2026-06-13 | `f444419a9` | Add live progress bar to results-from-a-link fetch |
 <!-- /ROADMAP:ACTIVITY -->
