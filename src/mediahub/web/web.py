@@ -11253,6 +11253,22 @@ def create_app() -> Flask:
             _budget_note = (
                 ' <span class="tag warn">budget exceeded</span>' if _budget_exceeded else ""
             )
+            # When EVERY lookup failed (none completed, none found history), the
+            # cause is almost always that the deployment can't reach a web-search
+            # backend to find ranking history — make that actionable instead of
+            # leaving the operator staring at "Lookups failed: N".
+            _pb_lookup_diag = ""
+            if _n_swimmers > 0 and _n_fetch_fail >= _n_swimmers and _n_no_history == 0:
+                _pb_lookup_diag = (
+                    '<div class="divider"></div>'
+                    '<p class="dim" style="color:var(--warn);font-size:13px;line-height:1.5">'
+                    "&#x26A0; <strong>Every PB lookup failed.</strong> The engine couldn&rsquo;t "
+                    "reach a web-search backend to find swimmers&rsquo; ranking history, so no PB "
+                    "could be confirmed (they show as &ldquo;possible &mdash; unconfirmed&rdquo;). "
+                    "On a hosted server the default DuckDuckGo path is usually blocked from the "
+                    "server&rsquo;s IP &mdash; set <code>MEDIAHUB_SEARCH_ENDPOINT</code> to a "
+                    "reachable SearXNG instance to enable PB confirmation.</p>"
+                )
             pb_audit_html = f"""
 <div class="card">
   <h2>PB Audit</h2>
@@ -11272,6 +11288,7 @@ def create_app() -> Flask:
     <div class="stat"><div class="l">Fetch time</div><div class="v">{_fetch_secs:.1f}s{_budget_note}</div></div>
     <div class="stat"><div class="l">Cache hits/misses</div><div class="v">{_cache_hits}/{_cache_misses}</div></div>
   </div>
+  {_pb_lookup_diag}
   {_needs_verif_html}
   <div class="divider"></div>
   <a class="btn secondary" href="{_audit_url}">Show all per-swimmer audits &#x25BE;</a>
