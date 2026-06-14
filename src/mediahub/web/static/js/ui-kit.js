@@ -138,6 +138,58 @@
     }
   }
 
+  /* --- Text-generate (immediate): the "AI is writing" caption type-on ---
+     Reveals an element's text word-by-word *right now* — for a read-only
+     generated-caption preview that's already on screen (roadmap UI2.7), not a
+     scroll heading. Differs from splitWords() in two ways that matter for a
+     caption: it fires immediately (no IntersectionObserver), and it PRESERVES
+     the original whitespace/newlines (splitWords collapses them, which would
+     flatten a multi-line caption rendered under white-space:pre-wrap).
+     The caption's editable textarea is never passed here — it stays plain.
+     Re-building via textContent/createTextNode keeps it XSS-safe; CSS handles
+     prefers-reduced-motion (words just appear, no animation). Fails safe: any
+     error leaves the original text visible. Returns the element. */
+  MH.typeOn = function (el) {
+    if (!el) return el;
+    // Already typed (e.g. a re-init pass) — just ensure it's revealed.
+    if (el.getAttribute("data-mh-typed") === "1") { el.classList.add("is-in"); return el; }
+    try {
+      var text = el.textContent;
+      el.setAttribute("data-mh-typed", "1");
+      el.setAttribute("data-mh-split", "1"); // keep splitWords() off this node
+      el.classList.add("mh-text-generate");
+      if (!text || !text.trim()) { el.classList.add("is-in"); return el; }
+      // Tokenise into words + whitespace runs; wrap words, keep spaces verbatim.
+      var parts = text.split(/(\s+)/), wi = 0;
+      el.textContent = "";
+      for (var i = 0; i < parts.length; i++) {
+        var part = parts[i];
+        if (!part) continue;
+        if (/^\s+$/.test(part)) {
+          el.appendChild(document.createTextNode(part));
+        } else {
+          var span = document.createElement("span");
+          span.className = "mh-word";
+          span.style.setProperty("--i", wi++);
+          span.textContent = part;
+          el.appendChild(span);
+        }
+      }
+      // Keep the whole reveal time-bounded regardless of caption length:
+      // ~1.5s of stagger spread across the words, clamped to a readable 18–55ms.
+      var stagger = wi > 1 ? clamp(Math.round(1500 / wi), 18, 55) : 55;
+      el.style.setProperty("--mh-stagger", stagger + "ms");
+      // The element is already on screen, so trigger the stagger immediately
+      // (next frame, so the hidden initial state paints first). Under reduced
+      // motion the CSS shows every word at once — adding .is-in is still safe.
+      if (REDUCE) { el.classList.add("is-in"); return el; }
+      requestAnimationFrame(function () { el.classList.add("is-in"); });
+    } catch (e) {
+      el.classList.add("is-in"); // fail safe — never hide the caption
+    }
+    return el;
+  };
+
   /* --- Flapboard: split-flap settle to a target string ---------------- */
   var FLAP_GLYPHS = "0123456789:.";
   function runFlap(el) {
