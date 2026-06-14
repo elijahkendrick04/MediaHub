@@ -9745,34 +9745,71 @@ def create_app() -> Flask:
             + "</div></section>"
         )
 
-        # --- Sample output preview — three mock cards showing the three
-        # default output formats. Pure visual; non-interactive. Helps a
-        # first-time visitor see what they're getting before they upload.
-        sample_html = (
+        # --- Bento feature grid (UI 1.2) — replaces the old uniform
+        # three-card sample row. Varied-size tiles, each with its own
+        # mini-visual (story card, reel timeline, detected-&-ranked stat,
+        # brand-kit swatches, the moments-we-detect list, a feed graphic),
+        # so a first-time visitor sees the breadth of the engine before
+        # they upload. Pure visual; non-interactive. Inspired by Umbrel.
+        bento_html = (
             '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
-            '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
-            '<div class="mh-sample-row mh-reveal-group">'
-            '<div class="mh-sample story">'
-            '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
-            '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
-            '<div class="mh-sample-time">52.41<span class="mh-sample-delta">−0.74s</span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">A clean, vertical story graphic with the swimmer’s name, event and split — branded with your club’s palette.</p>'
-            '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
+            '<div class="mh-section-eyebrow-strip"><span class="label">What the engine does</span></div>'
+            '<h2 class="mh-section-title">A results sheet in. A <em class="editorial">weekend</em> of content out.</h2>'
+            '<div class="mh-bento mh-reveal-group">'
+            # Tile 1 — story card showpiece (2×2)
+            '<div class="mh-bento-tile feature is-medal">'
+            '<span class="mh-bento-eyebrow">Story card · 1080×1920</span>'
+            '<div class="mh-bento-title">Tom Davies —<br><em>PB</em> 100m free.</div>'
+            '<div class="mh-bento-time">52.41<span class="mh-bento-delta">−0.74s</span></div>'
+            '<p class="mh-bento-note">A clean vertical story graphic — name, event and split, set in your club’s palette and type, rendered server-side and ready to post to Stories.</p>'
+            '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
             "</div>"
-            '<div class="mh-sample feed">'
-            '<span class="mh-sample-eyebrow">Feed graphic · 1080×1350</span>'
-            '<div class="mh-sample-title">Top three <em>finals</em></div>'
-            '<div class="mh-sample-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Podium-bar chart of the night’s finals — names, times and lanes from your meet file, dropped into your colour palette.</p>'
-            '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
+            # Tile 2 — motion reel (2×1)
+            '<div class="mh-bento-tile wide">'
+            '<span class="mh-bento-eyebrow">Motion reel · 15s MP4</span>'
+            '<div class="mh-bento-title">Meet-day <em>highlights</em></div>'
+            '<div class="mh-bento-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
+            '<div class="mh-bento-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> Branded outro</div>'
             "</div>"
-            '<div class="mh-sample reel">'
-            '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
-            '<div class="mh-sample-title">Match-day <em>highlights</em></div>'
-            '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Top three cards stitched together with crossfades, your wordmark, and the day’s headline — rendered server-side.</p>'
-            '<div class="mh-sample-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> 1080×1920</div>'
+            # Tile 3 — detected & ranked stat (1×1)
+            '<div class="mh-bento-tile is-medal">'
+            '<span class="mh-bento-eyebrow">Detected &amp; ranked</span>'
+            '<div class="mh-bento-stat">12</div>'
+            '<p class="mh-bento-note">moments found in the sample meet, scored by content-worthiness.</p>'
+            '<div class="mh-bento-chips"><span class="hot">5 PBs</span><span>3 medals</span></div>'
+            "</div>"
+            # Tile 4 — brand-kit swatches (1×1)
+            '<div class="mh-bento-tile">'
+            '<span class="mh-bento-eyebrow">Your brand, applied</span>'
+            '<div class="mh-bento-brand">'
+            '<span class="mh-bento-logo">SC</span>'
+            '<span class="mh-bento-swatches">'
+            '<span style="background:var(--lane)"></span>'
+            '<span style="background:var(--medal)"></span>'
+            '<span style="background:var(--info)"></span>'
+            '<span style="background:var(--ink)"></span>'
+            "</span>"
+            "</div>"
+            '<p class="mh-bento-note">Palette, fonts and logo read from your site — then locked onto every card.</p>'
+            "</div>"
+            # Tile 5 — moments we detect (2×1)
+            '<div class="mh-bento-tile wide">'
+            '<span class="mh-bento-eyebrow">Moments we detect</span>'
+            '<ul class="mh-bento-moments">'
+            '<li class="m-pb">Personal bests</li>'
+            '<li class="m-pb">Medal finishes</li>'
+            '<li class="m-key">Club records</li>'
+            '<li class="m-key">First-time swims</li>'
+            '<li class="m-std">Qualifying times</li>'
+            '<li class="m-std">Comeback swims</li>'
+            "</ul>"
+            "</div>"
+            # Tile 6 — feed graphic (2×1)
+            '<div class="mh-bento-tile wide">'
+            '<span class="mh-bento-eyebrow">Feed graphic · 1080×1350</span>'
+            '<div class="mh-bento-title">Top three <em>finals</em></div>'
+            '<div class="mh-bento-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
+            '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
             "</div>"
             "</div>"
             "</section>"
@@ -9875,7 +9912,7 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
+            hero_html + steps_html + bento_html + audience_html + promise_html + final_cta_html,
             active="home",
         )
 
