@@ -62,6 +62,7 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from .humanise import humanise as _humanise
+from . import results_table as _rt
 from .club_profile import (
     ClubProfile,
     list_profiles,
@@ -15063,6 +15064,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn secondary" href="{url_for("run_results_table", run_id=run_id)}">Browse all results &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
   </div>
   <details style="margin-top:var(--sp-4)">
@@ -15388,6 +15390,294 @@ function copyWhyCard(btn, taId) {{
             else None
         )
         return _layout("Recognition", body, active="home", dock=_review_dock)
+
+    @app.route("/runs/<run_id>/results")
+    def run_results_table(run_id):
+        """UI 1.12 — Wope-style sortable/filterable parsed-results table.
+
+        A flat, scannable grid of every individual swim in the run, each with a
+        per-athlete progress sparkline and a PB/improvement delta badge. Sort
+        and filter are server-side (this route re-renders from query params); the
+        sparklines are drawn client-side on ``<canvas>`` from an embedded series
+        payload, so the page stays fully usable without JavaScript.
+        """
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
+        if not data:
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                eyebrow="Results table",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+
+        meet = data.get("meet") or {}
+        _review_url = url_for("review", run_id=run_id)
+
+        # Cross-meet history per athlete — read-only registry lookups (resolve by
+        # name, then that athlete's full swim log). Best-effort: a missing/empty
+        # registry just means no prior history yet (the current swim still shows
+        # as the latest point and the badge reads "first on record").
+        pid = _active_profile_id() or (data.get("profile_id") or "")
+        history: dict[str, list[dict]] = {}
+        if pid:
+            try:
+                from mediahub.athletes import athlete_swims as _ath_swims
+                from mediahub.athletes import resolve as _ath_resolve
+
+                swimmers = meet.get("swimmers") or {}
+                for res in meet.get("results") or []:
+                    sk = res.get("swimmer_key") or ""
+                    if not sk or sk in history:
+                        continue
+                    sw = swimmers.get(sk) or {}
+                    name = (
+                        f"{(sw.get('first_name') or '').strip()} "
+                        f"{(sw.get('last_name') or '').strip()}"
+                    ).strip()
+                    rec = _ath_resolve(pid, name) if name else None
+                    history[sk] = _ath_swims(pid, rec.athlete_id) if rec else []
+            except Exception:
+                history = {}
+
+        rows = _rt.build_rows(meet, history, run_id)
+
+        # Empty run (no individual results at all) — honest empty state.
+        if not rows:
+            empty_body = (
+                '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Results table</span>'
+                "<h1>No parsed results on this run</h1>"
+                '<p class="lede">This run has no individual swim results to tabulate &mdash; '
+                "it may have parsed only relays, or failed before extracting results.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{_review_url}">Back to review &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("upload")}">Upload another file</a>'
+                "</div></section>"
+            )
+            return _layout("Results table", empty_body, active="create")
+
+        # ---- server-side sort + filter from query params ----
+        sort, order = _rt.normalise_sort(request.args.get("sort"), request.args.get("order"))
+        f_event = (request.args.get("event") or "").strip()
+        f_q = (request.args.get("q") or "").strip()
+        f_pb = (request.args.get("pb") or "") in ("1", "on", "true")
+        filtered = _rt.filter_rows(rows, event=f_event, query=f_q, pb_only=f_pb)
+        visible = _rt.sort_rows(filtered, sort, order)
+
+        # ---- summary stats (over ALL rows, not the filtered view) ----
+        n_swims = len(rows)
+        n_athletes = len({r.swimmer_key for r in rows if r.swimmer_key})
+        n_pb = sum(1 for r in rows if r.delta.kind == "pb")
+        n_impr = sum(1 for r in rows if r.delta.kind == "improvement")
+
+        # ---- sortable column headers (server-side; toggle asc/desc) ----
+        def _sort_href(col: str) -> str:
+            new_order = "desc" if (sort == col and order == "asc") else "asc"
+            return url_for(
+                "run_results_table",
+                run_id=run_id,
+                sort=col,
+                order=new_order,
+                event=f_event or None,
+                q=f_q or None,
+                pb="1" if f_pb else None,
+            )
+
+        def _th(col: str, label: str) -> str:
+            arrow = ""
+            aria = ""
+            if sort == col:
+                arrow = (
+                    ' <span aria-hidden="true">▲</span>'
+                    if order == "asc"
+                    else ' <span aria-hidden="true">▼</span>'
+                )
+                aria = ' aria-sort="ascending"' if order == "asc" else ' aria-sort="descending"'
+            return (
+                f'<th{aria}><a href="{_sort_href(col)}" '
+                'style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">'
+                f"{label}{arrow}</a></th>"
+            )
+
+        # ---- rows + sparkline payload ----
+        _DELTA_TAG = {
+            "pb": "medal",
+            "improvement": "good",
+            "matched": "info",
+            "first": "",
+            "slower": "bad",
+            "none": "",
+        }
+        spark_payload: dict[str, dict] = {}
+        body_rows = ""
+        for i, r in enumerate(visible):
+            if r.delta.kind == "none" or not r.delta.label:
+                delta_html = '<span class="muted" style="font-size:12px">—</span>'
+            else:
+                cls = _DELTA_TAG.get(r.delta.kind, "")
+                delta_html = f'<span class="tag {cls}" title="{_h(r.delta.title)}">{_h(r.delta.label)}</span>'
+
+            if len(r.series_cs) >= 2:
+                sid = f"s{i}"
+                spark_payload[sid] = _rt.sparkline_series(r)
+                _trend = (
+                    f" ({r.delta.label})"
+                    if r.delta.kind in ("pb", "improvement", "matched")
+                    else ""
+                )
+                aria = _h(f"Progress over {len(r.series_cs)} swims, latest {r.time_str}{_trend}")
+                spark_html = (
+                    f'<canvas class="mh-spark" data-spark="{sid}" role="img" '
+                    f'aria-label="{aria}" width="104" height="28" '
+                    'style="width:104px;height:28px;display:block"></canvas>'
+                )
+            elif len(r.series_cs) == 1:
+                spark_html = '<span class="muted" style="font-size:11px" title="No earlier swim on record yet">1 swim</span>'
+            else:
+                spark_html = '<span class="muted" style="font-size:12px">—</span>'
+
+            gender_html = (
+                f' <span class="muted" style="font-size:11px">{_h(r.gender)}</span>'
+                if r.gender
+                else ""
+            )
+            if r.is_dq:
+                time_cell = f'<span class="tag bad" title="{_h(r.status.upper())}">{_h(r.status.upper() or "DQ")}</span>'
+            else:
+                time_cell = _h(r.time_str)
+            body_rows += (
+                "<tr>"
+                f'<td class="mono" style="color:var(--ink-dim)">{r.place if r.place is not None else "—"}</td>'
+                f"<td><strong>{_h(r.swimmer_name)}</strong></td>"
+                f"<td>{_h(r.event_label)}{gender_html}</td>"
+                f'<td class="muted">{_h(r.age_band or "—")}</td>'
+                f'<td class="mono" style="white-space:nowrap">{time_cell}</td>'
+                f"<td>{delta_html}</td>"
+                f"<td>{spark_html}</td>"
+                "</tr>"
+            )
+
+        # ---- event filter dropdown ----
+        ev_opts = '<option value="">All events</option>'
+        for ek, elabel in _rt.event_options(rows):
+            sel = " selected" if ek == f_event else ""
+            ev_opts += f'<option value="{_h(ek)}"{sel}>{_h(elabel)}</option>'
+
+        any_filter = bool(f_event or f_q or f_pb)
+        clear_link = (
+            f'<a class="btn ghost" style="font-size:13px" '
+            f'href="{url_for("run_results_table", run_id=run_id, sort=sort, order=order)}">Clear filters</a>'
+            if any_filter
+            else ""
+        )
+        count_line = f"Showing <strong>{len(visible)}</strong> of {n_swims} swims" + (
+            " (filtered)" if any_filter else ""
+        )
+        no_match_row = (
+            '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">'
+            "No swims match these filters.</td></tr>"
+        )
+        spark_json = json.dumps(spark_payload)
+
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Results table</span>
+  <h1>{_h(meet.get("name") or "(unknown meet)")}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(meet.get("start_date") or "?")} – {_h(meet.get("end_date") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("course") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("venue") or "venue unknown")}</span>
+  </div>
+  <div class="mh-hero-actions" style="margin-top:var(--sp-4)">
+    <a class="mh-cta-secondary" href="{_review_url}">&larr; Back to review</a>
+  </div>
+</section>
+
+<div class="stat-block" style="margin-bottom:var(--sp-5)">
+  <div class="stat"><div class="l">Swims</div><div class="v">{n_swims}</div></div>
+  <div class="stat"><div class="l">Athletes</div><div class="v">{n_athletes}</div></div>
+  <div class="stat"><div class="l">Personal bests</div><div class="v" style="color:var(--medal)">{n_pb}</div></div>
+  <div class="stat"><div class="l">Improvements</div><div class="v" style="color:var(--good)">{n_impr}</div></div>
+</div>
+
+<div class="card">
+  <form method="get" class="filters-bar" data-no-loader="1" style="margin-bottom:0">
+    <input type="hidden" name="sort" value="{_h(sort)}">
+    <input type="hidden" name="order" value="{_h(order)}">
+    <input type="search" name="q" value="{_h(f_q)}" placeholder="Search swimmer…"
+           style="min-width:180px" aria-label="Search swimmer name">
+    <select name="event" aria-label="Filter by event">{ev_opts}</select>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-dim)">
+      <input type="checkbox" name="pb" value="1"{" checked" if f_pb else ""} style="width:auto">
+      PBs &amp; improvements only
+    </label>
+    <button class="btn secondary" type="submit" style="font-size:13px">Apply</button>
+    {clear_link}
+    <span class="muted" style="font-size:12px;align-self:center;margin-left:auto">{count_line}</span>
+  </form>
+</div>
+
+<div class="card" style="margin-top:var(--sp-4)">
+  <table class="mh-table">
+    <thead><tr>
+      {_th("place", "#")}
+      {_th("name", "Swimmer")}
+      {_th("event", "Event")}
+      {_th("age", "Age")}
+      {_th("time", "Time")}
+      {_th("delta", "Δ vs PB")}
+      <th>Progress</th>
+    </tr></thead>
+    <tbody>{body_rows or no_match_row}</tbody>
+  </table>
+  <p class="muted" style="font-size:11px;margin:12px 2px 0">
+    Sparkline shows this athlete's time for the event over time &mdash; higher is faster.
+    Delta badges compare each swim to the athlete's prior best <em>on record</em>.
+  </p>
+</div>
+
+<script>
+(function(){{
+  var DATA = {spark_json};
+  function cssColor(name, fb){{
+    try {{
+      var el=document.createElement('span');
+      el.style.cssText='color:var('+name+');position:absolute;visibility:hidden';
+      document.body.appendChild(el);
+      var c=getComputedStyle(el).color; document.body.removeChild(el);
+      return c||fb;
+    }} catch(e){{ return fb; }}
+  }}
+  var ACCENT=cssColor('--lane','#D4FF3A'), MEDAL=cssColor('--medal','#F4D58D');
+  function draw(cv){{
+    var s=DATA[cv.getAttribute('data-spark')];
+    if(!s||!s.t||s.t.length<2) return;
+    var dpr=window.devicePixelRatio||1;
+    var w=cv.clientWidth||104, h=cv.clientHeight||28, pad=3;
+    cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+    var ctx=cv.getContext('2d'); if(!ctx) return;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var t=s.t, n=t.length, mn=Math.min.apply(null,t), mx=Math.max.apply(null,t), span=(mx-mn)||1;
+    function X(i){{ return pad + (w-2*pad)*(n===1?0.5:i/(n-1)); }}
+    function Y(v){{ return pad + (h-2*pad)*((v-mn)/span); }}
+    ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.strokeStyle=ACCENT;
+    ctx.beginPath();
+    for(var i=0;i<n;i++){{ var px=X(i), py=Y(t[i]); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }}
+    ctx.stroke();
+    var ci=(s.cur>=0&&s.cur<n)?s.cur:n-1;
+    ctx.fillStyle=(s.kind==='pb'||s.kind==='matched')?MEDAL:ACCENT;
+    ctx.beginPath(); ctx.arc(X(ci),Y(t[ci]),2.4,0,6.2832); ctx.fill();
+  }}
+  function drawAll(){{ var c=document.querySelectorAll('canvas.mh-spark'); for(var i=0;i<c.length;i++) draw(c[i]); }}
+  drawAll();
+  var rt; window.addEventListener('resize', function(){{ clearTimeout(rt); rt=setTimeout(drawAll,150); }});
+}})();
+</script>
+"""
+        return _layout(f"Results — {meet.get('name') or run_id}", body, active="create")
 
     # ---- V5 API ROUTES -------------------------------------------------
     @app.route("/api/runs/<run_id>/recognition")
