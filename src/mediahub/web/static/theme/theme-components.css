@@ -814,6 +814,41 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   border-right: 2px solid var(--lane);
   border-bottom: 2px solid var(--lane);
   opacity: 0.7;
+  z-index: 3;
+}
+
+/* U.16 — Atlas-style 3D tilt-on-hover (atlascard.com). The tilt + lift
+   transform is set by JS (MH.bindCardTilt) as an inline style so it wins
+   over the reveal-group's own transform without a specificity fight; CSS
+   owns the cursor-tracked sheen (::before), the lifted stacking order, and
+   the reduced-motion / no-hover no-op. The sheen centre rides the pointer
+   via --mh-gx/--mh-gy, which the JS sets on the card. */
+.mh-sample::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at var(--mh-gx, 50%) var(--mh-gy, 50%),
+              rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 45%);
+  opacity: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  transition: opacity var(--dur-med) var(--ease-out-quick);
+  z-index: 2;
+}
+.mh-sample.is-tilting {
+  z-index: 2;
+  border-color: var(--rule);
+  will-change: transform;
+}
+.mh-sample.is-tilting::before { opacity: 1; }
+
+/* The tilt + sheen are an enhancement only: the JS never binds under
+   prefers-reduced-motion or on touch / no-hover pointers, so those users
+   keep the flat, static card. This rule is the CSS belt-and-braces. */
+@media (prefers-reduced-motion: reduce) {
+  .mh-sample::before { display: none; }
+  .mh-sample.is-tilting { will-change: auto; }
 }
 .mh-sample-eyebrow {
   display: inline-flex; align-items: center; gap: 6px;
