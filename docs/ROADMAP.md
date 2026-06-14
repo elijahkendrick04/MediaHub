@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `ce6c445ca` · Merge pull request #497: U.6 branded render/generation loading state
+**Last updated:** 2026-06-14 · `09b8ffe50` · Merge pull request #518 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1503,9 +1503,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `28c3b2868` | Fix unreadable <select> dropdown options (light-on-light when open) |
 | 2026-06-14 | `651a466fd` | UI 1.1: cycling example-prompt placeholder |
 | 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
 | 2026-06-14 | `7410b64b9` | Add UI 1.4 tactile spring-physics micro-interactions |
 | 2026-06-14 | `edede9341` | Crawl: fetch result files before HTML renders; surface result-file count |
-| 2026-06-14 | `389a1d203` | UI 1.5 — live local-time + system-status HUD readout |
 <!-- /ROADMAP:ACTIVITY -->
