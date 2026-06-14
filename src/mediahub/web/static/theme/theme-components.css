@@ -1146,6 +1146,133 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   .mh-footer { margin-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
 }
 
+/* =====================================================================
+   U.13 — FLOATING MOBILE ACTION DOCK
+   =====================================================================
+   A bottom-centre, thumb-reachable capsule (Create / Library / Approve)
+   shown on the review/approve flow on mobile only. The page opts in with
+   the body.mh-has-dock class, which also hides the generic bottom-tab bar
+   so the two never stack. Hidden on desktop. The "Approve" pill is the
+   primary action; it drives the queue via the per-card workflow buttons
+   (see the dock script in _layout). Inspired by Duties (duties.xyz).
+   ===================================================================== */
+
+.mh-action-dock { display: none; }
+
+@media (max-width: 720px) {
+  /* The contextual dock stands in for the generic bottom-tab bar here. */
+  .mh-has-dock .mh-bottomnav { display: none; }
+
+  .mh-action-dock {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    position: fixed;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    transform: translateX(-50%);
+    z-index: 96;            /* above content + the (hidden) bottomnav(95), below modals(1000) */
+    max-width: calc(100vw - 24px);
+    padding: 6px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in oklab, var(--bg-deep) 86%, transparent);
+    backdrop-filter: blur(16px) saturate(1.25);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    border: 1px solid var(--chrome);
+    box-shadow: var(--shadow-3), 0 1px 0 rgba(255,255,255,0.04) inset;
+    animation: mh-dock-in var(--dur-slow) var(--ease-spring) both;
+  }
+
+  .mh-action-dock a,
+  .mh-action-dock button {
+    -webkit-appearance: none;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--ink-dim);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-width: 58px;
+    min-height: 52px;
+    padding: 6px 10px;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease-out-quick),
+                background var(--dur-fast) var(--ease-out-quick),
+                transform var(--dur-fast) var(--ease-spring);
+  }
+  .mh-action-dock a svg,
+  .mh-action-dock button svg { width: 20px; height: 20px; }
+  .mh-action-dock a:hover { color: var(--ink); background: rgba(245,242,232,0.05); }
+  .mh-action-dock a:active,
+  .mh-action-dock button:active { transform: scale(0.93); }
+
+  /* Primary — the lane-yellow "Approve" pill. */
+  .mh-action-dock .mh-dock-primary {
+    flex-direction: row;
+    gap: 7px;
+    padding: 6px 18px;
+    color: var(--lane-ink);
+    background: var(--lane);
+    font-weight: 700;
+    box-shadow: 0 0 18px var(--lane-glow);
+  }
+  .mh-action-dock .mh-dock-primary:hover { background: var(--lane-h); color: var(--lane-ink); }
+  .mh-action-dock .mh-dock-primary svg { width: 18px; height: 18px; }
+  .mh-action-dock .mh-dock-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: rgba(10, 11, 17, 0.22);
+    color: var(--lane-ink);
+    font-size: 10px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Queue empty: the pill becomes "Open builder" — drop the count chip. */
+  .mh-action-dock.is-done .mh-dock-count { display: none; }
+
+  /* The queued card the dock's Approve will act on next. */
+  .ach-row { scroll-margin-bottom: 96px; }
+  .ach-row.mh-dock-target { background: rgba(212, 255, 58, 0.05); }
+  .ach-row.mh-dock-target::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 0 0 1.5px var(--lane), 0 0 14px var(--lane-glow);
+    opacity: 0.7;
+    pointer-events: none;
+  }
+
+  /* Keep content + footer clear of the floating capsule. */
+  body.mh-has-dock { padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+  .mh-has-dock .mh-footer { margin-bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@keyframes mh-dock-in {
+  from { opacity: 0; transform: translate(-50%, 16px) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mh-action-dock { animation: none; }
+  .mh-action-dock a:active,
+  .mh-action-dock button:active { transform: none; }
+}
+
 /* Touch-target floor (WCAG 2.5.8 / EAA): on coarse pointers, give the
    small mono nav + footer links and tag-sized buttons a 44px hit area
    without changing their visual size (padding via min-height + inline
