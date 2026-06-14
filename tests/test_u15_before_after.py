@@ -89,7 +89,9 @@ def test_slider_appears_after_steps_and_before_bento(client):
     i_steps = body.index("From the results sheet to")     # steps section title
     i_slider = body.index("data-mh-ba")
     i_bento = body.index("A results sheet in.")            # bento section title
-    assert i_steps < i_slider < i_bento
+    i_frames = body.index("Your results, the way your")    # U.11 frames carousel title
+    # Order: hero → steps → slider → bento → frames carousel.
+    assert i_steps < i_slider < i_bento < i_frames
 
 
 # =========================================================================== #

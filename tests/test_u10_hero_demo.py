@@ -204,6 +204,7 @@ def test_home_still_renders_the_rest_of_the_landing(app):
     for hook in (
         "mh-steps",
         "mh-bento",
+        "mh-frames",
         "mh-audience-row",
         "mh-promise",
         "mh-final-cta",
