@@ -57,9 +57,9 @@ class GlanceMoment:
 
     swimmer: str
     event: str
-    sub: str          # the already-generated headline (de-duplicated of a leading name)
-    kind: str         # gold | silver | bronze | medal | pb | record | moment
-    kind_label: str   # human label for ``kind``
+    sub: str  # the already-generated headline (de-duplicated of a leading name)
+    kind: str  # gold | silver | bronze | medal | pb | record | moment
+    kind_label: str  # human label for ``kind``
     rank: int
 
 
@@ -71,21 +71,22 @@ class WeekendGlance:
     the recognition report — nothing here is freshly generated.
     """
 
-    meet_name: str            # "" when the pipeline had no real name
-    n_analysed: int           # swims the engine looked at
-    n_achievements: int       # standout moments detected
+    meet_name: str  # "" when the pipeline had no real name
+    n_analysed: int  # swims the engine looked at
+    n_achievements: int  # standout moments detected
     n_pbs: int
     n_medals: int
     n_golds: int
     n_silvers: int
     n_bronzes: int
-    lede_stats: str           # fixed-template factual sentence (no meet name, no user text)
+    lede_stats: str  # fixed-template factual sentence (no meet name, no user text)
     top_moments: tuple[GlanceMoment, ...]
 
 
 # --------------------------------------------------------------------------- #
 # Classification (deterministic — mirrors the detector's own type taxonomy)
 # --------------------------------------------------------------------------- #
+
 
 def _is_pb(type_l: str, angle_l: str) -> bool:
     """True for a personal-best achievement.
@@ -130,7 +131,7 @@ def _dedup_headline(headline: str, swimmer: str) -> str:
     h = (headline or "").strip()
     s = (swimmer or "").strip()
     if s and h.lower().startswith(s.lower()):
-        rest = h[len(s):].lstrip(" ,:;—-–").strip()
+        rest = h[len(s) :].lstrip(" ,:;—-–").strip()
         if rest:
             return rest[0].upper() + rest[1:]
     return h
@@ -152,6 +153,7 @@ def _plural(n: int, word: str) -> str:
 # --------------------------------------------------------------------------- #
 # Build
 # --------------------------------------------------------------------------- #
+
 
 def build_weekend_glance(run_data: dict, *, top_n: int = 3) -> Optional[WeekendGlance]:
     """Assemble the digest from a run's recognition report.
@@ -269,6 +271,7 @@ def _safe_int(v) -> int:
 # Render
 # --------------------------------------------------------------------------- #
 
+
 def render_weekend_glance_html(glance: Optional[WeekendGlance]) -> str:
     """Render the digest to an escaped HTML panel, or ``""`` when there is
     nothing to show. All dynamic text (meet name, swimmer, headline, event) is
@@ -321,9 +324,7 @@ def render_weekend_glance_html(glance: Optional[WeekendGlance]) -> str:
             f'<span class="mh-glance-chip mh-glance-chip--{_h(m.kind)}">{_h(m.kind_label)}</span>'
             f"</li>"
         )
-    moments_block = (
-        f'<ol class="mh-glance-moments">{moments_html}</ol>' if moments_html else ""
-    )
+    moments_block = f'<ol class="mh-glance-moments">{moments_html}</ol>' if moments_html else ""
 
     return f"""
 <section class="card mh-glance mh-reveal" aria-labelledby="mh-glance-h">
