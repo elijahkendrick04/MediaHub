@@ -11,6 +11,7 @@ Synthetic fixtures that exercise the V7.5 interpreter's hardened paths:
 These tests use ``source_path`` so the interpreter can follow on-disk siblings,
 and they only assert structural shapes — never any swim vocabulary literal.
 """
+
 from __future__ import annotations
 
 import io
@@ -57,13 +58,9 @@ def test_frameset_with_sibling_event_pages(tmp_path: Path):
         sib = tmp_path / f"RG{n}.HTM"
         sib.write_text(_EVENT_PAGE_TEMPLATE.format(n=n))
 
-    result = interpret_document(
-        shell.read_bytes(), hint="html", source_path=shell
-    )
+    result = interpret_document(shell.read_bytes(), hint="html", source_path=shell)
     total_swims = sum(len(e.swims) for e in result.events)
-    assert total_swims >= 9, (
-        f"frameset+sibling aggregation produced only {total_swims} swims"
-    )
+    assert total_swims >= 9, f"frameset+sibling aggregation produced only {total_swims} swims"
     # At least one event should have been induced from the headers
     assert len(result.events) >= 1
 
@@ -71,6 +68,7 @@ def test_frameset_with_sibling_event_pages(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # 2. Multi-line row PDF (Hytek split-time pattern)
 # ---------------------------------------------------------------------------
+
 
 def _build_multiline_pdf_bytes() -> bytes:
     """Build a tiny PDF where each result row spans two visual lines.
@@ -134,6 +132,7 @@ def test_multiline_row_pdf_extraction(tmp_path: Path):
 # 3. Header-less PDF (pure data, no column-header line)
 # ---------------------------------------------------------------------------
 
+
 def _build_headerless_pdf_bytes() -> bytes:
     try:
         from reportlab.pdfgen import canvas
@@ -169,9 +168,7 @@ def test_headerless_pdf_extraction(tmp_path: Path):
 
     result = interpret_document(pdf_bytes, hint="pdf", source_path=pdf_path)
     total_swims = sum(len(e.swims) for e in result.events)
-    assert total_swims >= 5, (
-        f"header-less PDF extraction yielded {total_swims}; expected \u22655"
-    )
+    assert total_swims >= 5, f"header-less PDF extraction yielded {total_swims}; expected \u22655"
     flat = [s for e in result.events for s in e.swims]
     # Names and times should be populated for each row
     assert all(s.swimmer_name for s in flat)
@@ -182,17 +179,14 @@ def test_headerless_pdf_extraction(tmp_path: Path):
 # 4. Sibling-PDF aggregation when HTML body is empty
 # ---------------------------------------------------------------------------
 
+
 def test_thin_html_with_sibling_pdf(tmp_path: Path):
     """A landing-page HTML with no useful content should follow sibling PDFs."""
     pdf_bytes = _build_headerless_pdf_bytes()
     (tmp_path / "results_s1.pdf").write_bytes(pdf_bytes)
     shell = tmp_path / "results.html"
-    shell.write_text(
-        "<html><body><h1>See PDF below</h1></body></html>"
-    )
-    result = interpret_document(
-        shell.read_bytes(), hint="html", source_path=shell
-    )
+    shell.write_text("<html><body><h1>See PDF below</h1></body></html>")
+    result = interpret_document(shell.read_bytes(), hint="html", source_path=shell)
     total_swims = sum(len(e.swims) for e in result.events)
     assert total_swims >= 5, (
         f"thin-html + sibling PDF yielded {total_swims} swims; expected \u22655"
@@ -203,9 +197,54 @@ def test_thin_html_with_sibling_pdf(tmp_path: Path):
 # 5. Source-path None should still work (bytes-only callers)
 # ---------------------------------------------------------------------------
 
+
 def test_bytes_only_caller_still_extracts():
     """Callers without source_path must still get useful output for plain HTML."""
     body = _EVENT_PAGE_TEMPLATE.format(n=1).encode()
     result = interpret_document(body, hint="html")
     total_swims = sum(len(e.swims) for e in result.events)
     assert total_swims >= 4
+
+
+# ---------------------------------------------------------------------------
+# 6. Year-of-birth must never leak into the club field (British "Name (YoB)
+#    Club" format read by AI into a single club-mapped column).
+# ---------------------------------------------------------------------------
+
+
+def test_year_of_birth_does_not_become_the_club():
+    """A YoB that slips into the club cell must not surface as a club — the
+    club picker was filling with '(04)', '(05)', … instead of club names."""
+    # Bare (YoB) in the only club-mapped column → no fake club.
+    csv_bare = b"placing,competitor,team,mark\n1,Tom DAVIES,(04),50.12\n2,Sam JONES,(05),50.98\n"
+    res = interpret_document(csv_bare, hint="csv")
+    clubs = {s.club for e in res.events for s in e.swims}
+    assert clubs == {None}, f"YoB leaked into club: {clubs}"
+
+    # (YoB) prefixed onto the real club → the real club is recovered.
+    csv_merged = (
+        b"placing,competitor,affiliation,mark\n"
+        b"1,Tom DAVIES,(04) City of Sheffield,50.12\n"
+        b"2,Sam JONES,(05) Loughborough,50.98\n"
+    )
+    res2 = interpret_document(csv_merged, hint="csv")
+    clubs2 = {s.club for e in res2.events for s in e.swims}
+    assert clubs2 == {"City of Sheffield", "Loughborough"}, clubs2
+
+
+def test_split_rows_do_not_become_phantom_results():
+    """On a distance event the page lists cumulative splits under each swimmer.
+    Those split rows (a time but no competitor name) must not become nameless
+    'results' — only the overall time per swimmer is kept."""
+    csv = (
+        b"placing,competitor,affiliation,mark\n"
+        b"1,Tom DAVIES,City of Sheffield,15:23.45\n"
+        b",,1350m,13:53.80\n"  # a split/continuation row — no name
+        b"2,Sam JONES,Loughborough,15:40.10\n"
+        b",,1350m,14:08.03\n"
+    )
+    res = interpret_document(csv, hint="csv")
+    swims = [s for e in res.events for s in e.swims]
+    assert all(s.swimmer_name for s in swims), "a nameless split row leaked in as a result"
+    assert {s.swimmer_name for s in swims} == {"Tom DAVIES", "Sam JONES"}
+    assert {s.time for s in swims} == {"15:23.45", "15:40.10"}  # overall times only

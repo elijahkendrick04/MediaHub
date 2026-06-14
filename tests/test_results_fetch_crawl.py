@@ -85,8 +85,7 @@ def test_frameset_harvests_event_pages():
         ),
         base + "menu.htm": _static(
             base + "menu.htm",
-            '<html><body><a href="event1.htm">E1</a> '
-            '<a href="event2.htm">E2</a></body></html>',
+            '<html><body><a href="event1.htm">E1</a> <a href="event2.htm">E2</a></body></html>',
         ),
         base + "event1.htm": _static(base + "event1.htm", _EVENT_HTML.format(n=1)),
         base + "event2.htm": _static(base + "event2.htm", _EVENT_HTML.format(n=2)),
@@ -169,7 +168,7 @@ def test_offscope_and_offhost_links_are_not_followed():
     pages = {
         base + "index.htm": _static(
             base + "index.htm",
-            '<html><body>'
+            "<html><body>"
             '<a href="heat1.htm">in scope</a>'
             '<a href="/admin/secret.htm">off prefix, non-result</a>'
             '<a href="https://evil.test/x.htm">off host</a>'
@@ -255,8 +254,7 @@ def test_robots_disallow_blocks_pages():
     pages = {
         base + "index.htm": _static(
             base + "index.htm",
-            '<html><body><a href="private/secret.htm">x</a>'
-            '<a href="heat1.htm">y</a></body></html>',
+            '<html><body><a href="private/secret.htm">x</a><a href="heat1.htm">y</a></body></html>',
         ),
         base + "private/secret.htm": _static(base + "private/secret.htm", _EVENT_HTML.format(n=5)),
         base + "heat1.htm": _static(base + "heat1.htm", _EVENT_HTML.format(n=1)),
@@ -495,6 +493,85 @@ def test_entry_diagnostics_recorded_for_no_results_outcome():
 
 
 # ---------------------------------------------------------------------------
+# Live progress callback (drives the upload page's progress bar)
+# ---------------------------------------------------------------------------
+
+
+def test_progress_cb_fires_per_page():
+    base = "https://swim.test/meet/"
+    pages = {
+        base + "index.htm": _static(
+            base + "index.htm",
+            f'<html><body><a href="{base}e1.htm">1</a><a href="{base}e2.htm">2</a></body></html>',
+        ),
+        base + "e1.htm": _static(base + "e1.htm", _EVENT_HTML.format(n=1)),
+        base + "e2.htm": _static(base + "e2.htm", _EVENT_HTML.format(n=2)),
+    }
+    seen: list[tuple[int, int, int]] = []
+    result = crawl_results_site(
+        base + "index.htm",
+        limits=_fast_limits(),
+        fetch_page=_site_reader(pages),
+        progress_cb=lambda p, k, b: seen.append((p, k, b)),
+    )
+    # One callback per fetched page, and the page counter is monotonic.
+    assert len(seen) == result.pages_visited >= 3
+    assert [p for p, _, _ in seen] == sorted(p for p, _, _ in seen)
+
+
+def test_progress_cb_exception_never_breaks_crawl():
+    base = "https://swim.test/meet/"
+    pages = {base + "index.htm": _static(base + "index.htm", _EVENT_HTML.format(n=1))}
+
+    def _boom(*a):
+        raise RuntimeError("callback blew up")
+
+    # A misbehaving callback must not abort the crawl.
+    result = crawl_results_site(
+        base + "index.htm", limits=_fast_limits(), fetch_page=_site_reader(pages), progress_cb=_boom
+    )
+    assert result.pages_visited >= 1
+
+
+# ---------------------------------------------------------------------------
+# Frontier ordering: cheap result files (PDF/CSV/…) before expensive HTML so a
+# budget-limited crawl gets the actual results, not just navigation pages.
+# ---------------------------------------------------------------------------
+
+
+def _pdf(url: str, body: bytes = b"%PDF-1.4 result data") -> ReadResult:
+    page = FetchedPage(
+        content=body, final_url=url, content_type="application/pdf", tier="static", text=""
+    )
+    return ReadResult(url=url, page=page, tier="static", trigger=None)
+
+
+def test_data_files_are_fetched_before_html_pages():
+    base = "https://swim.test/meet/"
+    pages = {
+        base + "index.htm": _static(
+            base + "index.htm",
+            f'<html><body><a href="{base}page.htm">nav</a>'
+            f'<a href="{base}result1.pdf">results</a></body></html>',
+        ),
+        base + "page.htm": _static(base + "page.htm", _EVENT_HTML.format(n=1)),
+        base + "result1.pdf": _pdf(base + "result1.pdf"),
+    }
+    order: list[str] = []
+    reader = _site_reader(pages)
+
+    def _recording(url: str) -> ReadResult:
+        order.append(url)
+        return reader(url)
+
+    crawl_results_site(base + "index.htm", limits=_fast_limits(), fetch_page=_recording)
+    # The entry page is first, then the result PDF is fetched before the HTML
+    # navigation page (which could otherwise trigger an expensive render).
+    assert order[0] == base + "index.htm"
+    assert order.index(base + "result1.pdf") < order.index(base + "page.htm")
+
+
+# ---------------------------------------------------------------------------
 # shape_gate unit checks (sport-agnostic, structure + tokens)
 # ---------------------------------------------------------------------------
 
@@ -503,7 +580,10 @@ def test_shape_gate_requires_structure_and_tokens():
     html_results = _EVENT_HTML.format(n=1).encode()
     assert shape_gate(html_results, "text/html") is True
     # a prose page with a stray number → no structure / not enough tokens
-    assert shape_gate(b"<html><body><p>About the club, est 1999.</p></body></html>", "text/html") is False
+    assert (
+        shape_gate(b"<html><body><p>About the club, est 1999.</p></body></html>", "text/html")
+        is False
+    )
     # JSON array of objects with score tokens
     js = b'[{"a":"3 - 1"},{"a":"2 - 0"},{"a":"1 - 4"},{"a":"5 - 2"}]'
     assert shape_gate(js, "application/json") is True

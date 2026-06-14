@@ -48,6 +48,17 @@ from .rendered import RenderedBackend, RenderedPage, Scope, in_scope, scope_for
 
 log = logging.getLogger(__name__)
 
+# Cheap, high-value result data files: a static fetch, never a headless render.
+# Prioritised in the crawl frontier so a large meet's actual results land before
+# the render budget is spent on the JS app's navigation pages.
+_DATA_FILE_EXTS = (".pdf", ".csv", ".tsv", ".json", ".xlsx", ".xls", ".zip", ".txt")
+
+
+def _is_data_file(url: str) -> bool:
+    path = urlparse(url).path.lower()
+    return path.endswith(_DATA_FILE_EXTS)
+
+
 __all__ = [
     "CrawlLimits",
     "CrawlResult",
@@ -386,12 +397,17 @@ def crawl_results_site(
     limits: Optional[CrawlLimits] = None,
     fetch_page: Optional[Callable[[str], ReadResult]] = None,
     robots_txt: Optional[str] = None,
+    progress_cb: Optional[Callable[[int, int, int], None]] = None,
 ) -> CrawlResult:
     """Walk the results site at ``entry_url`` and return a kept-file mirror.
 
     ``fetch_page`` and ``robots_txt`` are injection seams for tests; in
     production a shared static + rendered backend pair drives one browser across
     the whole crawl, and robots.txt is fetched (SSRF-safely) from the host root.
+
+    ``progress_cb(pages_visited, kept, total_bytes)`` is an optional best-effort
+    hook fired once per fetched page so a caller can surface live progress; it
+    must never affect the crawl, so any exception it raises is swallowed.
     """
     limits = limits or CrawlLimits.from_env()
     scope: Scope = scope_for(entry_url)
@@ -457,6 +473,12 @@ def crawl_results_site(
             result.pages_visited += 1
             if own_rendered is not None and own_rendered.budget_hit:
                 result.render_budget_hit = True
+
+            if progress_cb is not None:
+                try:
+                    progress_cb(result.pages_visited, result.kept, result.total_bytes)
+                except Exception:  # noqa: BLE001 — progress is best-effort, never fatal
+                    pass
 
             page = read.page
             if page is None:
@@ -532,8 +554,19 @@ def crawl_results_site(
                             continue
                         offprefix_allowed.add(link)
                         follow.append(link)
+                # Frontier ordering: fetch cheap, high-value DATA files (PDF /
+                # CSV / JSON / spreadsheets) BEFORE expensive HTML pages. HTML
+                # may escalate to a headless render (~25-31s each) and burn the
+                # render budget; a results PDF is a fast static fetch. On a large
+                # meet this means the actual results land within budget instead
+                # of the budget being spent rendering navigation pages (the
+                # "only 3/4 of the results came through" failure).
                 for link in follow:
-                    if link not in visited:
+                    if link in visited:
+                        continue
+                    if _is_data_file(link):
+                        frontier.insert(0, (link, depth + 1))
+                    else:
                         frontier.append((link, depth + 1))
     finally:
         if own_rendered is not None:
