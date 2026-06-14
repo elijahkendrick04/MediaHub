@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `e65420967` · Merge pull request #487 from elijahkendrick04/claude/tender-turing-8ngjd8
+**Last updated:** 2026-06-14 · `e1c252961` · Make web UI phone-friendly: kill horizontal scroll on mobile (#529)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1500,6 +1500,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `e0783d17f` | Make web UI phone-friendly: kill horizontal scroll on mobile |
 | 2026-06-14 | `f87368501` | U.11 — outputs inside real Instagram platform frames |
 | 2026-06-14 | `dd1c90857` | Read British (YoB) results correctly; flag impossible event/time pairings; surface PB-lookup failure |
 | 2026-06-14 | `19ecc71ae` | U.8 — animated how-it-works pipeline diagram on the landing page |
