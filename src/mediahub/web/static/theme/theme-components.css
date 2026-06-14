@@ -3053,6 +3053,78 @@ kbd {
   color: var(--ink-dim);
 }
 
+/* UI 1.28 — global keyboard-shortcuts overlay (GitHub-style). One '?'-triggered
+   dialog shared by every page (#mh-shortcuts-overlay); the old page-local review
+   variant was folded into it. This is a FUNCTIONAL surface — it must still open
+   under reduced motion — so only the entrance animation is suppressed there. The
+   panel can grow taller than a phone, hence the scroll. */
+.mh-kbd-overlay-panel { position: relative; max-height: calc(100vh - 64px); max-width: 460px; overflow-y: auto; }
+.mh-kbd-overlay-panel section[hidden] { display: none; }
+.mh-kbd-overlay-panel section:first-of-type h4 { margin-top: 0; }
+.mh-kbd-overlay-panel h4 {
+  margin: var(--sp-5) 0 var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/* Two-key sequences render as `g then h`; the joiner is a quiet mono word. */
+.mh-kbd-table .mh-kbd-then {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  color: var(--ink-faint);
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+/* Navigation rows are real links — the overlay doubles as a jump menu and works
+   with no JS at all (click a row to navigate). */
+.mh-kbd-table a.desc {
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  margin: -2px -6px;
+  transition: background var(--dur-fast, 120ms) var(--ease-out-quick),
+              color var(--dur-fast, 120ms) var(--ease-out-quick);
+}
+.mh-kbd-table a.desc:hover,
+.mh-kbd-table a.desc:focus-visible {
+  color: var(--ink);
+  background: rgba(212, 255, 58, 0.06);
+  outline: none;
+}
+.mh-kbd-overlay-close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: background var(--dur-fast, 120ms) var(--ease-out-quick),
+              color var(--dur-fast, 120ms) var(--ease-out-quick);
+}
+.mh-kbd-overlay-close:hover,
+.mh-kbd-overlay-close:focus-visible { color: var(--ink); background: rgba(245, 242, 232, 0.05); outline: none; }
+.mh-kbd-overlay-foot {
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-kbd-overlay,
+  .mh-kbd-overlay-panel { animation: none; }
+}
+
 /* Confidence meter — small inline bar shown next to confidence labels. */
 .mh-conf-meter {
   display: inline-flex;

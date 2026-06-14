@@ -8976,6 +8976,57 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     Settings
   </a>
 </nav>
+{# UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style). Press ? on any
+   page to open it; lists the navigation + general shortcuts, and reveals the
+   review-flow quick keys when a review surface is on the page. Vanilla JS
+   (bindShortcuts) reuses MH.openModal for the focus-trap. Navigation rows are
+   real url_for() links, so the keyboard map is read straight back off the DOM —
+   one source of truth, and the rows still work as a click menu with no JS. #}
+<div class="mh-kbd-overlay" id="mh-shortcuts-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="mh-shortcuts-title" aria-hidden="true">
+  <div class="mh-kbd-overlay-panel" role="document">
+    <button type="button" class="mh-kbd-overlay-close" data-mh-modal-close
+            aria-label="Close keyboard shortcuts">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+    </button>
+    <h3 id="mh-shortcuts-title">Keyboard shortcuts</h3>
+    <section data-mh-shortcuts-group="nav">
+      <h4>Navigation</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>h</kbd></span>
+        <a class="desc" data-mh-go="h" href="{{ url_for('home') }}">Go to Home</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>p</kbd></span>
+        <a class="desc" data-mh-go="p" href="{{ url_for('plan_page') }}">Go to Plan</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>c</kbd></span>
+        <a class="desc" data-mh-go="c" href="{{ url_for('make_page') }}">Go to Create</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>m</kbd></span>
+        <a class="desc" data-mh-go="m" href="{{ url_for('media_library_page') }}">Go to Media library</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>a</kbd></span>
+        <a class="desc" data-mh-go="a" href="{{ url_for('activity_page') }}">Go to Activity</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>s</kbd></span>
+        <a class="desc" data-mh-go="s" href="{{ url_for('settings_page') }}">Go to Settings</a>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="review" hidden>
+      <h4>Review &amp; approve</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>j</kbd></span><span class="desc">Focus next card</span>
+        <span class="keys"><kbd>k</kbd></span><span class="desc">Focus previous card</span>
+        <span class="keys"><kbd>a</kbd></span><span class="desc">Approve the focused card</span>
+        <span class="keys"><kbd>u</kbd></span><span class="desc">Send the focused card back to the queue</span>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="general">
+      <h4>General</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>?</kbd></span><span class="desc">Open or close this help</span>
+        <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close this help</span>
+      </div>
+    </section>
+    <div class="mh-kbd-overlay-foot">Shortcuts pause while you're typing in a field.</div>
+  </div>
+</div>
 {% if dock %}
 <!-- U.13 — Floating mobile action dock. A bottom-centre thumb-reachable
      capsule for the review/approve flow on mobile (Create / Library /
@@ -10246,6 +10297,133 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   if (document.readyState !== 'loading') bindCyclePlaceholders();
   else document.addEventListener('DOMContentLoaded', bindCyclePlaceholders);
   MH.bindCyclePlaceholders = bindCyclePlaceholders;
+
+  // === UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style) =============
+  // Press '?' on any page to open #mh-shortcuts-overlay. 'g' then a key jumps to
+  // a primary destination — the rows are server-rendered url_for() links, so the
+  // navigation map is read straight back off the DOM (one source of truth). On a
+  // review surface (.ach-row present) j/k move the focus ring and a/u approve or
+  // re-queue the focused card. This is a FUNCTIONAL surface, so — unlike the
+  // decorative motion layers — it must NOT early-return under reduced motion;
+  // only the CSS entrance animation is suppressed there (and the focus-ring
+  // scroll falls back to an instant jump). Reuses MH.openModal for the
+  // focus-trap + Esc/Tab/backdrop close when it is available.
+  function bindShortcuts() {
+    var overlay = document.getElementById('mh-shortcuts-overlay');
+    if (!overlay || overlay.dataset.mhShortcuts === '1') return;
+    overlay.dataset.mhShortcuts = '1';
+
+    // Build the go-to map from the server-rendered links (url_for is the source).
+    var navMap = {};
+    overlay.querySelectorAll('[data-mh-go]').forEach(function(a){
+      var k = (a.getAttribute('data-mh-go') || '').toLowerCase();
+      var href = a.getAttribute('href');
+      if (k && href) navMap[k] = href;
+    });
+
+    // Reveal the review group + arm its keys only when a review surface is here.
+    var reviewActive = !!document.querySelector('.ach-row');
+    var reviewGroup = overlay.querySelector('[data-mh-shortcuts-group="review"]');
+    if (reviewActive && reviewGroup) reviewGroup.hidden = false;
+
+    function isTyping(e) {
+      var t = e.target;
+      if (!t) return false;
+      var tag = (t.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    }
+
+    // ----- open / close (reuse the house focus-trap when present) -----
+    var closeFn = null;
+    function isOpen() { return overlay.classList.contains('is-open'); }
+    function openOverlay() {
+      if (isOpen()) return;
+      if (window.MH && typeof MH.openModal === 'function') {
+        closeFn = MH.openModal(overlay, { onClose: function(){ closeFn = null; } });
+      } else {
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+      }
+    }
+    function closeOverlay() {
+      if (!isOpen()) return;
+      if (closeFn) { var fn = closeFn; closeFn = null; fn(); return; }
+      overlay.classList.remove('is-open');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    function toggleOverlay() { if (isOpen()) closeOverlay(); else openOverlay(); }
+    // Backdrop + close-button wiring for the no-MH.openModal fallback only
+    // (when openModal owns the modal it already wires these).
+    overlay.addEventListener('click', function(e){ if (e.target === overlay && !closeFn) closeOverlay(); });
+    overlay.querySelectorAll('[data-mh-modal-close]').forEach(function(b){
+      b.addEventListener('click', function(){ if (!closeFn) closeOverlay(); });
+    });
+
+    // ----- review focus ring + approve / re-queue -----
+    function cards() {
+      return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
+        .filter(function(el){ return el.offsetParent !== null; });
+    }
+    var focusIdx = -1;
+    function setFocus(idx) {
+      var list = cards();
+      if (!list.length) return;
+      if (idx < 0) idx = 0;
+      if (idx >= list.length) idx = list.length - 1;
+      list.forEach(function(c){ c.classList.remove('mh-kbd-focus'); });
+      var el = list[idx];
+      el.classList.add('mh-kbd-focus');
+      el.scrollIntoView({ block: 'center', behavior: prefersReduced ? 'auto' : 'smooth' });
+      focusIdx = idx;
+    }
+    function clickWf(state) {
+      var list = cards();
+      if (focusIdx < 0 || focusIdx >= list.length) return;
+      var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
+      if (btn) btn.click();
+    }
+
+    // ----- the one global key handler -----
+    var gPending = false, gTimer = null;
+    function clearG() { gPending = false; if (gTimer) { clearTimeout(gTimer); gTimer = null; } }
+
+    document.addEventListener('keydown', function(e){
+      if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // While the help is open only '?'/Esc act (Esc is owned by MH.openModal).
+      if (isOpen()) {
+        if (e.key === '?') { e.preventDefault(); closeOverlay(); }
+        return;
+      }
+
+      // 'g' then <key> — GitHub-style go-to navigation.
+      if (gPending) {
+        var dest = navMap[(e.key || '').toLowerCase()];
+        clearG();
+        if (dest) { e.preventDefault(); window.location.href = dest; return; }
+        // not a nav key -> fall through, let the key act normally below
+      }
+
+      if (e.key === '?') { e.preventDefault(); openOverlay(); return; }
+      if (e.key === 'g' || e.key === 'G') { gPending = true; gTimer = setTimeout(clearG, 1200); return; }
+
+      if (reviewActive) {
+        switch (e.key) {
+          case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
+          case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
+          case 'a': case 'A': if (focusIdx >= 0) { e.preventDefault(); clickWf('approved'); } break;
+          case 'u': case 'U': if (focusIdx >= 0) { e.preventDefault(); clickWf('queue'); } break;
+        }
+      }
+    });
+
+    MH.openShortcuts = openOverlay;
+    MH.closeShortcuts = closeOverlay;
+    MH.toggleShortcuts = toggleOverlay;
+  }
+  if (document.readyState !== 'loading') bindShortcuts();
+  else document.addEventListener('DOMContentLoaded', bindShortcuts);
+  MH.bindShortcuts = bindShortcuts;
 })();
 </script>
 {% if dock %}
@@ -15260,80 +15438,12 @@ function copyWhyCard(btn, taId) {{
 
 </script>
 
-<!-- Phase 6 — keyboard navigation + bulk approve + help overlay -->
-<div class="mh-kbd-overlay" id="mh-kbd-overlay" role="dialog" aria-modal="true" aria-labelledby="mh-kbd-title" aria-hidden="true">
-  <div class="mh-kbd-overlay-panel">
-    <h3 id="mh-kbd-title">Keyboard shortcuts</h3>
-    <div class="mh-kbd-table">
-      <span class="keys"><kbd>J</kbd></span><span class="desc">Focus next card</span>
-      <span class="keys"><kbd>K</kbd></span><span class="desc">Focus previous card</span>
-      <span class="keys"><kbd>A</kbd></span><span class="desc">Approve the focused card</span>
-      <span class="keys"><kbd>U</kbd></span><span class="desc">Send focused card back to queue</span>
-      <span class="keys"><kbd>?</kbd></span><span class="desc">Toggle this help</span>
-      <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close help</span>
-    </div>
-    <div style="margin-top:var(--sp-5);text-align:right">
-      <button type="button" class="btn secondary" data-mh-kbd-close>Got it</button>
-    </div>
-  </div>
-</div>
-
+<!-- Phase 6 — bulk approve + expand-all reasoning. (Keyboard navigation and the
+     '?' help overlay are now provided globally by the UI 1.28 shortcuts engine
+     in _layout, which detects this review surface via its .ach-row cards — so
+     the review page no longer ships its own '?' handler or modal.) -->
 <script>
 (function(){{
-  // ----- Keyboard navigation across .ach-row cards -----
-  function cards() {{
-    return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
-      .filter(function(el){{ return el.offsetParent !== null; }});
-  }}
-  var focusIdx = -1;
-  function setFocus(idx) {{
-    var list = cards();
-    if (!list.length) return;
-    if (idx < 0) idx = 0;
-    if (idx >= list.length) idx = list.length - 1;
-    list.forEach(function(c){{ c.classList.remove('mh-kbd-focus'); }});
-    var el = list[idx];
-    el.classList.add('mh-kbd-focus');
-    el.scrollIntoView({{block: 'center', behavior: 'smooth'}});
-    focusIdx = idx;
-  }}
-  function clickWf(state) {{
-    var list = cards();
-    if (focusIdx < 0 || focusIdx >= list.length) return;
-    var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
-    if (btn) btn.click();
-  }}
-  function isTyping(e) {{
-    var t = e.target;
-    if (!t) return false;
-    var tag = (t.tagName || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
-  }}
-  var overlay = document.getElementById('mh-kbd-overlay');
-  function toggleHelp(force) {{
-    if (!overlay) return;
-    var open = force !== undefined ? force : !overlay.classList.contains('is-open');
-    overlay.classList.toggle('is-open', open);
-    overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
-  }}
-  if (overlay) {{
-    overlay.addEventListener('click', function(e){{ if (e.target === overlay) toggleHelp(false); }});
-    overlay.querySelectorAll('[data-mh-kbd-close]').forEach(function(b){{
-      b.addEventListener('click', function(){{ toggleHelp(false); }});
-    }});
-  }}
-  document.addEventListener('keydown', function(e){{
-    if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-    switch (e.key) {{
-      case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
-      case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
-      case 'a': case 'A': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('approved'); }} break;
-      case 'u': case 'U': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('queue'); }} break;
-      case '?': e.preventDefault(); toggleHelp(); break;
-      case 'Escape': toggleHelp(false); break;
-    }}
-  }});
-
   // ----- Bulk approve -----
   var bulkBtn = document.getElementById('mh-bulk-approve');
   if (bulkBtn) {{
