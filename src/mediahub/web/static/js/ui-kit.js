@@ -465,6 +465,64 @@
     }
   }
 
+  /* --- Drag-scroll gallery: click-and-drag a horizontal overflow row ----
+     Native wheel / trackpad / touch / focused-arrow scrolling already work
+     (the row is a plain overflow-x container). This layer adds mouse / pen
+     click-drag panning and an HONEST grab cursor — `.is-grabbable` is set
+     only while the row actually overflows. A drag (past a small threshold)
+     pans freely with snap off, and its trailing click is swallowed so the
+     pan never also activates whatever sat under the pointer. */
+  function bindDragScroll(el) {
+    if (!once(el, "data-mh-drag-init")) return;
+    var hint = el.parentNode ? el.parentNode.querySelector(".mh-ds-hint") : null;
+    var hintDismissed = false, rafSync = 0;
+    function overflowing() { return (el.scrollWidth - el.clientWidth) > 2; }
+    function syncGrab() {
+      var over = overflowing();
+      el.classList.toggle("is-grabbable", over);
+      if (hint && !hintDismissed) hint.hidden = !over;
+    }
+    syncGrab();
+    window.addEventListener("resize", function () {
+      if (!rafSync) rafSync = requestAnimationFrame(function () { rafSync = 0; syncGrab(); });
+    }, { passive: true });
+
+    var down = false, moved = false, startX = 0, startScroll = 0, pid = null;
+    el.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") return;            // touch = native momentum scroll
+      if (ev.button != null && ev.button !== 0) return;  // primary button only
+      if (!overflowing()) return;                        // nothing to pan
+      down = true; moved = false;
+      startX = ev.clientX; startScroll = el.scrollLeft; pid = ev.pointerId;
+    });
+    el.addEventListener("pointermove", function (ev) {
+      if (!down) return;
+      var dx = ev.clientX - startX;
+      if (!moved) {
+        if (Math.abs(dx) < 4) return;                    // threshold keeps real clicks clickable
+        moved = true;
+        el.classList.add("is-dragging");
+        try { el.setPointerCapture(pid); } catch (e) {}
+        if (hint) { hint.hidden = true; hintDismissed = true; }
+      }
+      el.scrollLeft = startScroll - dx;
+    }, { passive: true });
+    function end() {
+      if (!down) return;
+      down = false;
+      el.classList.remove("is-dragging");
+      try { if (pid != null) el.releasePointerCapture(pid); } catch (e) {}
+      pid = null;
+    }
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    // A real drag is followed by a click — swallow it (capture phase) so the
+    // pan never also activates whatever sits under the pointer.
+    el.addEventListener("click", function (ev) {
+      if (moved) { ev.preventDefault(); ev.stopPropagation(); moved = false; }
+    }, true);
+  }
+
   /* --- Scroll progress (tracing beam) --------------------------------- */
   var beams = [];
   function bindBeam(el) {
@@ -686,6 +744,7 @@
     each(root, ".mh-tabs", bindTabs);
     each(root, ".mh-cs-copy", bindCopy);
     each(root, ".mh-compare", bindCompare);
+    each(root, ".mh-drag-scroll", bindDragScroll);
     each(root, ".mh-tracing-beam", bindBeam);
     each(root, ".mh-vanish", bindVanish);
     if (beams.length) updateBeams();
