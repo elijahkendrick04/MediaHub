@@ -8493,6 +8493,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     {# Pricing is a top-bar item only for signed-out visitors (prospects).
@@ -12468,6 +12469,207 @@ def create_app() -> Flask:
             f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
+
+    # ---- SEASON TIMELINE — meet history as a vertical, scroll-traced view ----
+    # UI2.3 — a read-only "season story" lens on the SAME run history the
+    # Activity log lists, rendered with the kit's `.mh-timeline` node list and
+    # the scroll-driven `.mh-tracing-beam` (ui-kit.js writes `--mh-progress`
+    # as you scroll; the rail fills top->bottom). Distinct from /activity (an
+    # ops table with search / delete / schedule columns): this is the
+    # celebratory, chronological view a club shares round the committee. Both
+    # read the same `runs` rows, scoped to the active org (multi-tenant).
+    @app.route("/season")
+    def season_timeline_page():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+
+        # Fail-soft, org-scoped DB read (WHERE profile_id = ? is the tenant
+        # isolation boundary). A missing / locked data.db must not 500 the
+        # page — fall through to a recovery hero instead.
+        rows = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_achievements, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 200",
+                    (prof.profile_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("season: runs DB unreachable: %s", e)
+            db_failed = True
+
+        eyebrow = '<span class="mh-hero-eyebrow">Season timeline</span>'
+
+        # ---- Empty / recovery states -----------------------------------
+        if not rows:
+            if db_failed:
+                body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    f"{eyebrow}"
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">season</em>.</h1>'
+                    '<p class="lede">The runs database wasn&rsquo;t readable on this '
+                    "deployment, so the timeline is empty even if meets were processed "
+                    "earlier. Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume.</p>"
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("season_timeline_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    "</div></section>"
+                )
+                return _layout("Season timeline", body, active="season")
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                f"{eyebrow}"
+                f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">Process your first meet and it lands on this timeline '
+                "&mdash; every meet a node on the season, with the swims matched and the "
+                "moments detected, and a beam that traces the season as you scroll.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Open activity</a>'
+                "</div></section>"
+            )
+            return _layout("Season timeline", body, active="season")
+
+        # ---- Build the timeline ----------------------------------------
+        from datetime import datetime as _dt
+
+        def _parse(iso):
+            if not iso:
+                return None
+            try:
+                return _dt.fromisoformat(str(iso).replace("Z", "").replace("T", " ")[:19])
+            except Exception:
+                return None
+
+        n_meets = len(rows)
+        total_swims = 0
+        total_moments = 0
+        cur_month = None
+        items_html = ""
+        for r in rows:
+            dt = _parse(r["created_at"])
+            month_label = dt.strftime("%B %Y") if dt else "Undated"
+            if month_label != cur_month:
+                cur_month = month_label
+                items_html += (
+                    '<div class="mh-timeline__head">'
+                    f'<span class="mh-tl-month">{_h(month_label)}</span></div>'
+                )
+
+            if dt:
+                day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
+                iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                full_title = dt.strftime("%A %d %B %Y, %H:%M UTC")
+            else:
+                day_html, iso_attr, full_title = "&mdash;", "", "Date unknown"
+
+            status = r["status"] or ""
+            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                status, ""
+            )
+            swims = int(r["our_swims"] or 0)
+            moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
+            total_swims += swims
+            total_moments += moments
+            title = r["meet_name"] or r["file_name"] or r["id"]
+            review_href = url_for("review", run_id=r["id"])
+
+            stat_bits = [f"{swims:,} {'swim' if swims == 1 else 'swims'} matched"]
+            if moments:
+                stat_bits.append(f"{moments:,} {'moment' if moments == 1 else 'moments'} detected")
+            stats_html = '<span class="sep">&middot;</span>'.join(
+                f"<span>{_h(b)}</span>" for b in stat_bits
+            )
+
+            item = (
+                '<div class="mh-timeline__item">'
+                '<article class="card mh-tl-card">'
+                '<div class="mh-tl-top">'
+                f'<time class="mh-tl-date" datetime="{_h(iso_attr)}" title="{_h(full_title)}">{day_html}</time>'
+                f'<span class="tag {badge}">{_h(status)}</span>'
+                "</div>"
+                f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
+                f'<div class="strap mh-tl-stats">{stats_html}</div>'
+            )
+            if status == "error" and r["error"]:
+                err = str(r["error"])
+                err = err[:400] + ("…" if len(err) > 400 else "")
+                item += (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--bad)">'
+                    "Why did this run fail?</summary>"
+                    '<pre style="margin:8px 0 0;padding:10px 12px;background:rgba(0,0,0,0.25);'
+                    'border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-word">'
+                    f"{_h(err)}</pre></details>"
+                )
+            item += "</article></div>"
+            items_html += item
+
+        # Page-scoped presentation. Kept inline (not in the shared kit CSS) so
+        # the feature is self-contained and parallel-safe; tokens keep it on
+        # brand. The rail-offset centres the 2px beam on the 9px timeline node
+        # dots (dots sit 5px in from the timeline's left edge -> centre ~9px).
+        season_css = (
+            "<style>"
+            ".mh-season-tl{max-width:760px}"
+            ".mh-season-tl .mh-tracing-beam__rail{left:8px}"
+            ".mh-season-tl .mh-timeline__head{margin:var(--sp-5) 0 var(--sp-3)}"
+            ".mh-season-tl .mh-timeline__head:first-child{margin-top:0}"
+            ".mh-season-tl .mh-tl-month{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)}"
+            ".mh-season-tl .mh-tl-card{padding:var(--sp-4) var(--sp-5)}"
+            ".mh-season-tl .mh-tl-top{display:flex;align-items:center;justify-content:space-between;"
+            "gap:var(--sp-3);margin-bottom:6px}"
+            ".mh-season-tl .mh-tl-date{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "color:var(--ink-muted);letter-spacing:.04em;white-space:nowrap}"
+            ".mh-season-tl .mh-tl-title{margin:0 0 8px;font-size:var(--fs-lg);line-height:1.2}"
+            ".mh-season-tl .mh-tl-title a{color:var(--ink);text-decoration:none}"
+            ".mh-season-tl .mh-tl-title a:hover{color:var(--mh-primary)}"
+            ".mh-season-tl .mh-tl-stats{font-size:var(--fs-sm)}"
+            "</style>"
+        )
+
+        # Season totals — count up on scroll-in via the shared motion system.
+        summary_html = (
+            '<div class="mh-activity-summary mh-reveal">'
+            f'<div class="stat live"><div class="l">Meets</div>'
+            f'<div class="v" data-mh-count="{n_meets}">{n_meets:,}</div></div>'
+            f'<div class="stat"><div class="l">Swims matched</div>'
+            f'<div class="v" data-mh-count="{total_swims}">{total_swims:,}</div></div>'
+            f'<div class="stat medal"><div class="l">Moments detected</div>'
+            f'<div class="v" data-mh-count="{total_moments}">{total_moments:,}</div></div>'
+            "</div>"
+        )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            f"{eyebrow}"
+            f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
+            '<span class="sep">&middot;</span>'
+            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            "</div></section>"
+        )
+
+        timeline_html = (
+            '<div class="mh-tracing-beam mh-season-tl">'
+            '<span class="mh-tracing-beam__rail" aria-hidden="true"></span>'
+            '<div class="mh-timeline">'
+            f"{items_html}"
+            "</div></div>"
+        )
+
+        body = season_css + hero + summary_html + timeline_html
+        return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
