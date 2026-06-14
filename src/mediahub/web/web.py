@@ -3540,10 +3540,10 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="flex:0 0 220px;max-width:240px">' +
+      '<div style="flex:0 0 min(220px,100%);max-width:240px">' +
         '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)" />' +
       '</div>' +
-      '<div style="flex:1;min-width:200px">' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
         (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
         '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
@@ -3610,13 +3610,13 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
       btn.disabled = false; btn.textContent = origLabel;
       var url = URL.createObjectURL(res.blob);
       _motionCache[cardId + ':' + fmt] = url;
-      var vidCol = fmt === 'landscape' ? 'flex:0 0 300px;max-width:320px' : 'flex:0 0 200px;max-width:220px';
+      var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
       panel.innerHTML =
         '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
           '<div style="' + vidCol + '">' +
             '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
-          '<div style="flex:1;min-width:200px">' +
+          '<div style="flex:1;min-width:min(200px,100%)">' +
             '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
             '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered via Remotion. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
@@ -3689,13 +3689,13 @@ function generateReel(btn, reelUrl, fmt) {
   var success = function(videoUrl) {
     prog.complete(function(){
     btn.disabled = false; btn.textContent = origLabel;
-    var vidCol = fmt === 'landscape' ? 'flex:0 0 340px;max-width:360px' : 'flex:0 0 240px;max-width:260px';
+    var vidCol = fmt === 'landscape' ? 'flex:0 0 min(340px,100%);max-width:360px' : 'flex:0 0 min(240px,100%);max-width:260px';
     panel.innerHTML =
       '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
         '<div style="' + vidCol + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
-        '<div style="flex:1;min-width:240px">' +
+        '<div style="flex:1;min-width:min(240px,100%)">' +
           '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
           '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Length follows the number of moments.</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
@@ -3812,13 +3812,13 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {
   var tilesHtml = variants.map(function(vt) {
     var v = vt.visual;
     if (!v) {
-      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
+      return '<div style="flex:1;min-width:min(160px,100%);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
     }
     var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
     var hook = (vt.brief && vt.brief.primary_hook) || '';
     return (
-      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+      '<div class="variant-tile" style="flex:1;min-width:min(160px,100%);background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
         (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
@@ -4088,7 +4088,7 @@ def _render_turn_into_card(run_id: str) -> str:
     return f"""
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-    <div style="flex:1;min-width:240px">
+    <div style="flex:1;min-width:min(240px,100%)">
       <h2 style="margin-bottom:6px">Turn this meet into more</h2>
       <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
         One click re-uses everything this meet already produced &mdash; the
@@ -4246,7 +4246,7 @@ def _sample_pack_cta(
         '<div class="card mh-sample-cta" style="border:1px dashed var(--border);'
         "background:var(--surface);display:flex;gap:16px;align-items:center;"
         'flex-wrap:wrap;justify-content:space-between">'
-        '<div style="flex:1;min-width:240px">'
+        '<div style="flex:1;min-width:min(240px,100%)">'
         f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
         f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
         "</div>"
@@ -5135,6 +5135,7 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 }
 .mh-footer-meta {
   display: inline-flex; align-items: center; gap: var(--sp-3);
+  flex-wrap: wrap;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.18em;
@@ -5153,6 +5154,10 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
     gap: var(--sp-4);
     text-align: center;
   }
+  /* Let the stacked grid tracks shrink to the viewport — the mono meta row's
+     min-content (a non-wrapping link strip) was otherwise blowing the footer
+     past the phone viewport and forcing a horizontal scroll on every page. */
+  .mh-footer-inner > * { min-width: 0; }
   .mh-footer-brand, .mh-footer-meta { justify-content: center; }
 }
 
@@ -6264,12 +6269,11 @@ a.card:hover, .card[data-interactive]:hover {
   .stat-block { gap: 8px; }
   .stat { padding: 10px 12px; min-width: 0; flex: 1; }
   .mh-hero h1 { font-size: clamp(40px, 11vw, 64px); }
-}
-@media (max-width: 480px) {
-  .row { gap: 12px; }
-  .grid-2, .grid-3 { gap: 12px; }
-  .stat-block { gap: 8px; }
-  .stat { padding: 10px 12px; min-width: 0; flex: 1; }
+  /* Tighter hero chrome so the fold isn't dominated by whitespace on a phone. */
+  .mh-hero { padding: 36px 16px 24px; margin-bottom: 24px; }
+  /* Stacked full-bleed CTAs are easier to thumb than centred pills. */
+  .mh-hero-ctas { flex-direction: column; align-items: stretch; }
+  .mh-hero-ctas .btn { width: 100%; justify-content: center; }
 }
 /* Force inputs/selects to never overflow their container, even with inline max-widths */
 input[type=text], input[type=file], textarea, select { max-width: 100%; }
@@ -7894,8 +7898,8 @@ _VISUAL_PANEL_JS = """<script>
     }
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="flex:0 0 200px;max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
-        '<div style="flex:1;min-width:200px">' +
+        '<div style="flex:0 0 min(200px,100%);max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
+        '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + esc(layout || 'auto') + '</div>' +
           (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + esc(why) + '</div>' : '') +
           '<div style="margin-bottom:8px">' + tabs + '</div>' +
@@ -12480,7 +12484,7 @@ def create_app() -> Flask:
   <h3 style="margin-top:0;font-family:var(--font-mono);font-size:var(--fs-10);letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:var(--sp-3)">Or paste a results link</h3>
   <p class="lede" style="font-size:var(--fs-14);margin-bottom:var(--sp-4)">Works with results sites for any sport &mdash; including modern app-style sites. We&rsquo;ll gather every result on the site.</p>
   <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:stretch">
-    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
+    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:min(260px,100%);padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
     <button id="mh-url-fetch" class="btn" type="button">Fetch results &rarr;</button>
   </div>
   <div id="mh-url-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Fetch progress" style="margin-top:var(--sp-3)">
@@ -14216,7 +14220,7 @@ def create_app() -> Flask:
 
             workflow_summary_card = f"""
 <div class="card" style="border-left:3px solid var(--accent);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-  <div style="flex:1;min-width:240px">
+  <div style="flex:1;min-width:min(240px,100%)">
     <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
     <p class="dim" style="margin:0;font-size:13px;max-width:560px">
       Approve the achievements you want to post — anything you skip simply
@@ -14461,7 +14465,7 @@ def create_app() -> Flask:
                 '<div class="card" style="border:1px solid var(--accent);'
                 'background:var(--surface);display:flex;gap:16px;align-items:center;'
                 'flex-wrap:wrap;justify-content:space-between;margin-bottom:var(--sp-5)">'
-                '<div style="flex:1;min-width:240px">'
+                '<div style="flex:1;min-width:min(240px,100%)">'
                 '<div style="font-family:var(--font-mono);font-size:10.5px;'
                 "letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);"
                 'margin-bottom:6px">Sample meet</div>'
@@ -16178,7 +16182,7 @@ Relay team broke club record"></textarea>
       <input type="text" name="run_id" required /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
       <input type="text" name="card_id" required /></label>
-    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:220px">What's wrong?
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:min(220px,100%)">What's wrong?
       <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
     <button class="btn secondary" type="submit">Open correction</button>
   </form>
@@ -19548,7 +19552,7 @@ window.mhSchedulerDisconnect = function(btn) {
             )
             sport_control_html = (
                 '<label for="mh-plan-sport" style="font-weight:600">Sport</label>'
-                f'<select id="mh-plan-sport" style="min-width:160px">{_sport_opts}</select>'
+                f'<select id="mh-plan-sport" style="min-width:min(160px,100%)">{_sport_opts}</select>'
                 '<span class="dim" style="font-size:12px">your organisation type doesn&rsquo;t '
                 "pin a sport, so pick one here</span>"
             )
@@ -25173,7 +25177,7 @@ what you're doing, what they should do.</p>
             colour = "var(--good)" if met else "var(--warn)"
             badge = "MET" if met else "OPEN"
             return (
-                '<div class="card" style="padding:18px 22px;flex:1;min-width:260px">'
+                '<div class="card" style="padding:18px 22px;flex:1;min-width:min(260px,100%)">'
                 f'<h2 style="margin:0 0 6px;font-size:15px">{title}</h2>'
                 f'<div style="font-size:28px;font-weight:700">{n}<span '
                 f'style="font-size:15px;color:var(--ink-muted)"> / {req}</span> '
@@ -25274,7 +25278,7 @@ what you're doing, what they should do.</p>
             '<div><label style="font-size:11px">Annual price (£)</label><br/>'
             '<input name="pounds" required placeholder="588" style="padding:6px 8px;width:90px"/></div>'
             '<div><label style="font-size:11px">Notes</label><br/>'
-            '<input name="notes" style="padding:6px 8px;min-width:200px"/></div>'
+            '<input name="notes" style="padding:6px 8px;min-width:min(200px,100%)"/></div>'
             '<button class="btn" type="submit">Add quote</button></form></div>'
         )
 
@@ -25408,7 +25412,7 @@ what you're doing, what they should do.</p>
                 f'<input type="hidden" name="lead_id" value="{_h(lead.lead_id)}"/>'
                 f'<select name="status" style="padding:3px 6px;font-size:11px">{sel}</select>'
                 f'<input name="intros" placeholder="2 named intros, comma-sep" '
-                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:170px"/>'
+                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:min(170px,100%)"/>'
                 '<button class="btn secondary" style="padding:3px 8px;font-size:11px">Update</button>'
                 "</form></td></tr>"
             )
@@ -25468,7 +25472,7 @@ what you're doing, what they should do.</p>
             f'<select name="status" style="padding:6px 8px">{ngb_opts}</select></div>'
             '<div><label style="font-size:11px">Notes</label><br/>'
             f'<input name="notes" value="{_h(ngb_state["notes"])}" '
-            'style="padding:6px 8px;min-width:260px"/></div>'
+            'style="padding:6px 8px;min-width:min(260px,100%)"/></div>'
             '<button class="btn secondary" type="submit">Save</button></form></div>'
         )
 
@@ -26566,7 +26570,7 @@ what you're doing, what they should do.</p>
                 '<input type="hidden" name="action" value="add"/>'
                 "<div><label>Email</label><br/>"
                 '<input type="email" name="email" required placeholder="coach@club.org" '
-                'style="padding:8px 10px;min-width:260px"/></div>'
+                'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
                 "<div><label>Role</label><br/>"
                 '<select name="role" style="padding:8px 10px">'
                 '<option value="member">Member</option>'
@@ -30429,10 +30433,10 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
     }});
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 320px;max-width:340px' : 'flex:0 0 220px;max-width:240px') + '">' +
+        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 min(320px,100%);max-width:340px' : 'flex:0 0 min(220px,100%);max-width:240px') + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
-        '<div style="flex:1;min-width:200px">' +
+        '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + chips + '</div>' +
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
