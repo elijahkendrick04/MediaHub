@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `09b8ffe50` · Merge pull request #518 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-14 · `3cd9cb287` · Merge pull request #508 from elijahkendrick04/claude/keen-goodall-ryqytb
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -126,7 +126,6 @@ begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
 - **UI 1.2** · Phase 1 (Product polish) — Bento-grid feature section (inspired by Umbrel): replace the uniform capability card rows on the landing with a bento grid of varied-size tiles, each carrying its own mini-visual (sample story card, a stat chip, brand-kit swatches, a 'moments we detect' list, a reel preview); dark/premium aesthetic, reuses existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.3** · Phase 1 (Product polish) — Inline media thumbnails in a display headline (inspired by Samara): embed small inline output thumbnails inside a large hero headline sentence — 'From a results sheet [img] to a story [img], a feed graphic [img] and a reel [img]' — the images are real sample outputs served from the static directory · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.6** · Phase 1 (Product polish) — Animated results/data charts (from Mixpanel): podium/results bar + cohort/area charts that build on scroll, for the landing sample-outputs section and in-app parsed-results view; vanilla JS + CSS custom properties, no charting SDK required · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.7** · Phase 1 (Product polish) — Pinned-panel scrollytelling (from Linear): a sticky visual panel that swaps content per workflow step (results → moments → drafts → approve) as the narrative scrolls past on the landing how-it-works section; pure CSS scroll-driven, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1504,6 +1503,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-14 | `28c3b2868` | Fix unreadable <select> dropdown options (light-on-light when open) |
+| 2026-06-14 | `10be7fbce` | Add UI 1.3 — inline media thumbnails in a display headline |
 | 2026-06-14 | `651a466fd` | UI 1.1: cycling example-prompt placeholder |
 | 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
 | 2026-06-14 | `7410b64b9` | Add UI 1.4 tactile spring-physics micro-interactions |
