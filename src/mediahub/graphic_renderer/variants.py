@@ -37,8 +37,14 @@ def render_all_formats(
     venue_attribution: str = "",
     skip_cutout: bool = False,
     watermark_text: str = "",
+    photo_pos_override: str = "",
 ) -> list[RenderResult]:
-    """Render the visual at multiple format sizes. Returns one ``RenderResult`` per format."""
+    """Render the visual at multiple format sizes. Returns one ``RenderResult`` per format.
+
+    ``photo_pos_override`` (UI 1.18): an explicit CSS ``object-position`` from
+    the inspector crop control, applied to every format. Empty keeps the
+    deterministic saliency focus.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,6 +81,7 @@ def render_all_formats(
             venue_attribution=venue_attribution,
             skip_cutout=skip_cutout,
             watermark_text=watermark_text,
+            photo_pos_override=photo_pos_override,
         )
 
     out: list[RenderResult] = []

@@ -1590,6 +1590,98 @@ def _get_wf_store() -> Optional["WorkflowStore"]:
     return _wf_store
 
 
+# Per-card inspector overrides (UI 1.18) ride the existing workflow
+# ``edited_captions`` bag under dotted ``insp.*`` keys — no underscore, so the
+# pack builder's ``tone_slot`` caption parser skips them cleanly. This is the
+# whole persistence story: no new store, no schema change.
+_INSPECTOR_EDIT_KEYS = {
+    "insp.accent": "accent",
+    "insp.focus": "photo_pos",
+    "insp.hideSponsor": "hide_sponsor",
+    "insp.noPhoto": "no_photo",
+}
+
+
+def _inspector_overrides_for_card(run_id: str, card_id: str) -> dict:
+    """Read a card's persisted inspector overrides as a render-ready dict.
+
+    Returns ``{accent?, photo_pos?, hide_sponsor?, no_photo?}`` — only the keys
+    the user actually set. Booleans are coerced from their stored string form.
+    Best-effort: any store/parse failure yields an empty dict so a render never
+    breaks on a missing or malformed sidecar.
+    """
+    out: dict = {}
+    try:
+        ws = _get_wf_store()
+        if ws is None:
+            return out
+        state = ws.load(run_id).get(card_id)
+        edits = (getattr(state, "edited_captions", None) or {}) if state else {}
+    except Exception:
+        return out
+    for store_key, render_key in _INSPECTOR_EDIT_KEYS.items():
+        if store_key not in edits:
+            continue
+        val = edits.get(store_key)
+        if render_key in ("hide_sponsor", "no_photo"):
+            out[render_key] = str(val).lower() in ("1", "true", "yes", "on")
+        elif val:
+            out[render_key] = str(val)
+    return out
+
+
+def _brand_swatches(brand_kit) -> list[dict]:
+    """Brand-locked accent swatches for the UI 1.18 inspector palette.
+
+    Only the club's OWN confirmed colours (primary / secondary / accent) are
+    offered — never an arbitrary colour picker — so a per-card tweak can never
+    paint a card off-brand. Returns ``[{role, hex}]`` de-duplicated, each a
+    valid CSS hex; an empty list when the kit has none.
+    """
+    pairs = [
+        ("primary", getattr(brand_kit, "primary_colour", None)),
+        ("secondary", getattr(brand_kit, "secondary_colour", None)),
+        ("accent", getattr(brand_kit, "accent_colour", None)),
+    ]
+    out: list[dict] = []
+    seen: set[str] = set()
+    for role, hexval in pairs:
+        h = str(hexval or "").strip()
+        if not re.fullmatch(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})", h):
+            continue
+        key = h.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"role": role, "hex": h})
+    return out
+
+
+def _inspector_state_attrs(wf_state) -> str:
+    """``data-insp-*`` attributes carrying a card's persisted inspector state.
+
+    Lets the drawer show the saved accent / crop / element toggles / caption the
+    moment it opens — no render round-trip needed. Values are HTML-escaped; only
+    set keys are emitted (an untouched card adds nothing).
+    """
+    edits = (getattr(wf_state, "edited_captions", None) or {}) if wf_state else {}
+    parts: list[str] = []
+    accent = str(edits.get("insp.accent") or "").strip()
+    if re.fullmatch(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})", accent):
+        parts.append(f'data-insp-accent="{_h(accent)}"')
+    focus = str(edits.get("insp.focus") or "").strip()
+    if focus:
+        parts.append(f'data-insp-focus="{_h(focus)}"')
+    if str(edits.get("insp.hideSponsor") or "").lower() in ("1", "true", "yes", "on"):
+        parts.append('data-insp-hide-sponsor="1"')
+    if str(edits.get("insp.noPhoto") or "").lower() in ("1", "true", "yes", "on"):
+        parts.append('data-insp-no-photo="1"')
+    caption = str(edits.get("warm-club_headline") or "").strip()
+    if caption:
+        parts.append(f'data-insp-caption="{_h(caption)}"')
+    return (" " + " ".join(parts)) if parts else ""
+
+
 # ---------------------------------------------------------------------
 # In-process run registry (active progress) + persisted run metadata.
 # ---------------------------------------------------------------------
@@ -4628,6 +4720,387 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
+
+
+# ---------------------------------------------------------------------------
+# UI 1.18 — Inspector / properties panel (Sketch-inspired)
+# ---------------------------------------------------------------------------
+#
+# A lightweight slide-in drawer (ONE shared instance per page) for tweaking a
+# generated card *before* approval: edit the caption, swap the brand-palette
+# accent, toggle elements (photo / sponsor strip), and adjust the crop. Every
+# control posts back to EXISTING routes — create-graphic for the live re-render,
+# live-caption for AI drafts, and the workflow set_edits route for persistence
+# (the same edited_captions bag, under dotted ``insp.*`` keys). No new store.
+
+# 3×3 manual-crop grid → CSS object-position. Mirrors saliency's vocabulary so
+# the override reads the same as the automatic focus it replaces.
+_INSPECTOR_CROP_CELLS = [
+    ("left top", "Top-left"),
+    ("center top", "Top"),
+    ("right top", "Top-right"),
+    ("left center", "Left"),
+    ("center center", "Centre"),
+    ("right center", "Right"),
+    ("left bottom", "Bottom-left"),
+    ("center bottom", "Bottom"),
+    ("right bottom", "Bottom-right"),
+]
+
+
+def _render_inspector_panel(swatches: list[dict]) -> str:
+    """Static markup for the shared inspector drawer + its scrim.
+
+    ``swatches`` are the brand-locked accent options (``[{role, hex}]``) resolved
+    once per page — rendered server-side so the palette shows instantly without a
+    render round-trip. The drawer starts hidden; ``_inspector_js`` wires it up.
+    """
+    swatch_btns = (
+        '<button type="button" class="mh-insp-swatch is-auto" data-accent="" '
+        'aria-pressed="true" title="Automatic — the design director\'s pick">'
+        "Auto</button>"
+    )
+    for sw in swatches or []:
+        hexv = _h(sw.get("hex", ""))
+        role = _h(sw.get("role", ""))
+        swatch_btns += (
+            f'<button type="button" class="mh-insp-swatch" data-accent="{hexv}" '
+            f'aria-pressed="false" title="Brand {role} — {hexv}" '
+            f'style="--sw:{hexv}"><span class="mh-insp-swatch-dot"></span>'
+            f"{role}</button>"
+        )
+
+    crop_btns = (
+        '<button type="button" class="mh-insp-crop is-auto" data-focus="" '
+        'aria-pressed="true" title="Automatic crop (saliency focus)">Auto</button>'
+    )
+    for value, label in _INSPECTOR_CROP_CELLS:
+        crop_btns += (
+            f'<button type="button" class="mh-insp-crop" data-focus="{_h(value)}" '
+            f'aria-pressed="false" title="{_h(label)}" aria-label="Crop: {_h(label)}">'
+            "</button>"
+        )
+
+    return f"""
+<div class="mh-inspector-scrim" id="mh-inspector-scrim" hidden></div>
+<aside class="mh-inspector" id="mh-inspector" role="dialog" aria-modal="true"
+       aria-labelledby="mh-insp-title" aria-hidden="true" hidden>
+  <header class="mh-insp-head">
+    <div>
+      <div class="mh-insp-kicker">Inspector</div>
+      <h3 class="mh-insp-title" id="mh-insp-title">Card</h3>
+    </div>
+    <button type="button" class="mh-insp-close" id="mh-insp-close"
+            aria-label="Close inspector">&times;</button>
+  </header>
+  <div class="mh-insp-body">
+    <div class="mh-insp-preview" id="mh-insp-preview" aria-live="polite">
+      <div class="mh-insp-preview-empty">Apply changes to render a preview.</div>
+    </div>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Caption</div>
+      <textarea id="mh-insp-caption" class="mh-insp-caption" rows="3" dir="auto"
+                maxlength="600" aria-label="Card caption"
+                placeholder="Write a caption, or generate one with AI&hellip;"></textarea>
+      <div class="mh-insp-row">
+        <button type="button" class="btn secondary" id="mh-insp-caption-ai"
+                style="font-size:11px;padding:4px 10px">&#10024; Generate with AI</button>
+        <button type="button" class="btn secondary" id="mh-insp-caption-save"
+                style="font-size:11px;padding:4px 10px">Save caption</button>
+        <span class="mh-insp-mini" id="mh-insp-caption-status"></span>
+      </div>
+    </section>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Brand palette</div>
+      <div class="mh-insp-swatches" id="mh-insp-swatches">{swatch_btns}</div>
+      <div class="mh-insp-mini">Only this club&rsquo;s brand colours &mdash; legibility is checked on render.</div>
+    </section>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Elements</div>
+      <label class="mh-insp-toggle"><input type="checkbox" id="mh-insp-photo" checked>
+        <span>Show athlete photo</span></label>
+      <label class="mh-insp-toggle"><input type="checkbox" id="mh-insp-sponsor" checked>
+        <span>Show sponsor strip</span></label>
+    </section>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Crop &amp; focus</div>
+      <div class="mh-insp-cropgrid" id="mh-insp-cropgrid">{crop_btns}</div>
+    </section>
+  </div>
+  <footer class="mh-insp-foot">
+    <span class="mh-insp-status" id="mh-insp-status" aria-live="polite"></span>
+    <button type="button" class="btn secondary" id="mh-insp-reset"
+            style="font-size:12px;padding:6px 12px">Reset</button>
+    <button type="button" class="btn" id="mh-insp-apply"
+            style="font-size:12px;padding:6px 14px;background:var(--lane);color:var(--lane-ink);border:none">
+      Apply changes</button>
+  </footer>
+</aside>
+"""
+
+
+def _inspector_js() -> str:
+    """Behaviour for the shared inspector drawer (UI 1.18).
+
+    Plain JS (no f-string) so the many braces stay literal. Relies on globals
+    already present on every page via ``_layout``: ``window._API_BASE`` (the
+    workflow POST base) and ``window.MH`` (toast). Reads each card's context +
+    persisted state from the clicked ``[data-mh-inspect]`` button's data-*.
+    """
+    return """
+<script>
+(function(){
+  var drawer = document.getElementById('mh-inspector');
+  var scrim  = document.getElementById('mh-inspector-scrim');
+  if (!drawer || !scrim) return;
+  var ctx = null;            // current card context
+  var pending = {};          // unsaved overrides: accent / photo_pos / hide_sponsor / no_photo
+  var lastFocus = null;      // for focus restoration on close
+
+  var $ = function(id){ return document.getElementById(id); };
+  var apiBase = function(){ return window._API_BASE || ''; };
+  function toast(msg, kind){ if (window.MH && MH.toast) MH.toast(msg, kind || 'info', 3000); }
+  function status(msg){ var s = $('mh-insp-status'); if (s) s.textContent = msg || ''; }
+
+  function setPressed(group, attr, value){
+    var btns = drawer.querySelectorAll(group);
+    btns.forEach(function(b){
+      var on = (b.getAttribute(attr) || '') === (value || '');
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.classList.toggle('is-active', on);
+    });
+  }
+
+  function syncControls(){
+    // Reflect `pending` into the controls.
+    setPressed('.mh-insp-swatch', 'data-accent', pending.accent || '');
+    setPressed('.mh-insp-crop', 'data-focus', pending.photo_pos || '');
+    var photo = $('mh-insp-photo'); if (photo) photo.checked = !pending.no_photo;
+    var spon = $('mh-insp-sponsor'); if (spon) spon.checked = !pending.hide_sponsor;
+  }
+
+  function markDirty(){ status('Unsaved — Apply changes to render & save.'); }
+
+  function openInspector(btn){
+    ctx = {
+      runId: btn.getAttribute('data-run-id'),
+      cardId: btn.getAttribute('data-card-id'),
+      graphicUrl: btn.getAttribute('data-graphic-url'),
+      captionUrl: btn.getAttribute('data-caption-url'),
+      title: btn.getAttribute('data-card-title') || 'Card'
+    };
+    // Seed pending state from the card's persisted inspector data-* attributes.
+    pending = {};
+    var a = btn.getAttribute('data-insp-accent'); if (a) pending.accent = a;
+    var f = btn.getAttribute('data-insp-focus'); if (f) pending.photo_pos = f;
+    if (btn.getAttribute('data-insp-hide-sponsor') === '1') pending.hide_sponsor = true;
+    if (btn.getAttribute('data-insp-no-photo') === '1') pending.no_photo = true;
+    // textContent, NOT innerHTML: getAttribute decodes the server-side HTML
+    // escaping, so innerHTML would re-parse a hostile card title as markup.
+    var titleEl = $('mh-insp-title'); if (titleEl) titleEl.textContent = ctx.title;
+    var capEl = $('mh-insp-caption');
+    if (capEl) capEl.value = btn.getAttribute('data-insp-caption') || '';
+    var capStatus = $('mh-insp-caption-status'); if (capStatus) capStatus.textContent = '';
+    // Reset preview to placeholder each open (a render is on-demand via Apply).
+    var prev = $('mh-insp-preview');
+    if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty">Apply changes to render a preview.</div>';
+    syncControls();
+    status('');
+    lastFocus = btn;
+    drawer.hidden = false; scrim.hidden = false;
+    // rAF so the transition runs from the hidden state.
+    requestAnimationFrame(function(){
+      drawer.classList.add('is-open'); scrim.classList.add('is-open');
+      drawer.setAttribute('aria-hidden', 'false');
+    });
+    var close = $('mh-insp-close'); if (close) close.focus();
+  }
+
+  function closeInspector(){
+    drawer.classList.remove('is-open'); scrim.classList.remove('is-open');
+    drawer.setAttribute('aria-hidden', 'true');
+    var done = function(){ drawer.hidden = true; scrim.hidden = true; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { done(); }
+    else { setTimeout(done, 220); }
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+    ctx = null;
+  }
+
+  // --- Build the override payload for create-graphic from `pending`. ---
+  function overrideBody(){
+    var body = {};
+    body.accent = pending.accent || '';
+    body.focus = pending.photo_pos || '';
+    body.hide_sponsor = !!pending.hide_sponsor;
+    body.no_photo = !!pending.no_photo;
+    return body;
+  }
+
+  // --- Persist current overrides via the existing workflow set_edits route. ---
+  function persistEdits(extra){
+    if (!ctx) return Promise.resolve();
+    var edits = {
+      'insp.accent': pending.accent || '',
+      'insp.focus': pending.photo_pos || '',
+      'insp.hideSponsor': pending.hide_sponsor ? '1' : '',
+      'insp.noPhoto': pending.no_photo ? '1' : ''
+    };
+    if (extra) { for (var k in extra) { if (extra.hasOwnProperty(k)) edits[k] = extra[k]; } }
+    var url = apiBase() + '/api/workflow/' + encodeURIComponent(ctx.runId) +
+              '/' + encodeURIComponent(ctx.cardId);
+    return fetch(url, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'set_edits', edits: edits})
+    }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); });
+  }
+
+  function renderPreview(){
+    if (!ctx) return;
+    var prev = $('mh-insp-preview');
+    if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty mh-insp-loading">Rendering preview&hellip;</div>';
+    status('Rendering &amp; saving&hellip;');
+    var applyBtn = $('mh-insp-apply'); if (applyBtn) applyBtn.disabled = true;
+    // Persist first (so the override sticks even if the user navigates away
+    // mid-render), then render with the explicit overrides for an instant result.
+    persistEdits().then(function(){
+      return fetch(ctx.graphicUrl, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(overrideBody())
+      });
+    }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+      .then(function(o){
+        if (applyBtn) applyBtn.disabled = false;
+        if (!o.ok || !o.body || o.body.error) {
+          var msg = (o.body && (o.body.error || o.body.message)) || 'render failed';
+          status('Could not render: ' + msg);
+          if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty">Could not render this preview.</div>';
+          toast('Inspector render failed: ' + msg, 'error');
+          return;
+        }
+        var vis = (o.body.visuals || [])[0];
+        var src = vis && (vis.png_url || vis.url || vis.file_url);
+        if (!src && vis && vis.id) {
+          src = apiBase() + '/api/visual/' + encodeURIComponent(vis.id) + '/png';
+        }
+        if (src && prev) {
+          var img = new Image();
+          img.alt = 'Preview of the edited card';
+          img.className = 'mh-insp-preview-img';
+          img.onload = function(){ prev.innerHTML = ''; prev.appendChild(img); };
+          img.onerror = function(){ prev.innerHTML = '<div class="mh-insp-preview-empty">Preview rendered, but the image could not load.</div>'; };
+          img.src = src + (src.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+        } else if (prev) {
+          prev.innerHTML = '<div class="mh-insp-preview-empty">Rendered, but no preview image was returned.</div>';
+        }
+        status('Saved.');
+        // Mark the card edited in the pile so the review counts/badge update.
+        markCardEdited();
+      }).catch(function(e){
+        if (applyBtn) applyBtn.disabled = false;
+        status('Could not render.');
+        toast('Inspector error: ' + (e && e.message || e), 'error');
+      });
+  }
+
+  function markCardEdited(){
+    if (!ctx) return;
+    var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
+    try {
+      document.querySelectorAll('.ach-row [data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+        var row = b.closest('.ach-row');
+        if (row && row.dataset.status === 'queue') { row.dataset.status = 'edited'; }
+        // Update the button's persisted data-* so re-opening reflects the save.
+        b.setAttribute('data-insp-accent', pending.accent || '');
+        b.setAttribute('data-insp-focus', pending.photo_pos || '');
+        b.setAttribute('data-insp-hide-sponsor', pending.hide_sponsor ? '1' : '');
+        b.setAttribute('data-insp-no-photo', pending.no_photo ? '1' : '');
+      });
+      if (window.mhRecountReview) window.mhRecountReview();
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // --- Caption: AI draft (existing live-caption route) ---
+  function generateCaption(){
+    if (!ctx) return;
+    var btn = $('mh-insp-caption-ai'); var cs = $('mh-insp-caption-status');
+    if (btn) btn.disabled = true;
+    if (cs) cs.textContent = 'Generating…';
+    var url = ctx.captionUrl + (ctx.captionUrl.indexOf('?') >= 0 ? '&' : '?') + 'tone=ai';
+    fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (btn) btn.disabled = false;
+        if (j && j.caption) {
+          var ta = $('mh-insp-caption'); if (ta) ta.value = j.caption;
+          if (cs) cs.textContent = j.live ? 'AI draft ready' : '';
+        } else {
+          if (cs) cs.textContent = (j && j.message) ? j.message : 'No caption returned';
+        }
+      }).catch(function(){ if (btn) btn.disabled = false; if (cs) cs.textContent = 'Generation failed'; });
+  }
+
+  function saveCaption(){
+    if (!ctx) return;
+    var ta = $('mh-insp-caption'); var cs = $('mh-insp-caption-status');
+    var text = ta ? ta.value : '';
+    // Persist under every standard tone's headline slot so the user's wording
+    // is honoured at pack build regardless of which tone is exported.
+    var extra = {
+      'warm-club_headline': text, 'hype_headline': text, 'data-led_headline': text
+    };
+    if (cs) cs.textContent = 'Saving…';
+    persistEdits(extra).then(function(o){
+      if (cs) cs.textContent = (o && o.ok) ? 'Caption saved' : 'Save failed';
+      if (o && o.ok) {
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
+        document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+          b.setAttribute('data-insp-caption', text);
+        });
+      }
+    }).catch(function(){ if (cs) cs.textContent = 'Save failed'; });
+  }
+
+  // --- Wiring -------------------------------------------------------------
+  document.addEventListener('click', function(e){
+    var openBtn = e.target.closest('[data-mh-inspect]');
+    if (openBtn) { e.preventDefault(); openInspector(openBtn); return; }
+  });
+  $('mh-insp-close').addEventListener('click', closeInspector);
+  scrim.addEventListener('click', closeInspector);
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && drawer.classList.contains('is-open')) closeInspector();
+  });
+
+  drawer.querySelectorAll('.mh-insp-swatch').forEach(function(b){
+    b.addEventListener('click', function(){
+      var v = b.getAttribute('data-accent') || '';
+      pending.accent = v; setPressed('.mh-insp-swatch', 'data-accent', v); markDirty();
+    });
+  });
+  drawer.querySelectorAll('.mh-insp-crop').forEach(function(b){
+    b.addEventListener('click', function(){
+      var v = b.getAttribute('data-focus') || '';
+      pending.photo_pos = v; setPressed('.mh-insp-crop', 'data-focus', v); markDirty();
+    });
+  });
+  var photoEl = $('mh-insp-photo');
+  if (photoEl) photoEl.addEventListener('change', function(){ pending.no_photo = !photoEl.checked; markDirty(); });
+  var sponEl = $('mh-insp-sponsor');
+  if (sponEl) sponEl.addEventListener('change', function(){ pending.hide_sponsor = !sponEl.checked; markDirty(); });
+
+  $('mh-insp-apply').addEventListener('click', renderPreview);
+  $('mh-insp-reset').addEventListener('click', function(){
+    pending = {}; syncControls(); markDirty();
+  });
+  $('mh-insp-caption-ai').addEventListener('click', generateCaption);
+  $('mh-insp-caption-save').addEventListener('click', saveCaption);
+})();
+</script>
+"""
 
 
 def _render_turn_into_card(run_id: str) -> str:
@@ -17261,6 +17734,24 @@ def create_app() -> Flask:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
+        # UI 1.18 — brand-locked swatches for the inspector palette, resolved
+        # once per page from this run's brand kit (the same resolver the
+        # create-graphic route uses). Best-effort: any failure yields an empty
+        # palette section rather than breaking the review page.
+        _review_swatches: list[dict] = []
+        try:
+            _insp_profile_id = (
+                data.get("profile_id") or data.get("club_filter") or ("_run_" + run_id)
+            )
+            _insp_profile_id = re.sub(r"[^a-z0-9_-]", "-", str(_insp_profile_id).lower()).strip(
+                "-"
+            ) or ("_run_" + run_id)
+            _review_swatches = _brand_swatches(
+                _resolve_run_brand_kit(_insp_profile_id, run_id, data)
+            )
+        except Exception:
+            _review_swatches = []
+
         # Workflow filter from query param. Triage states only — a malformed
         # or retired (`posted` / `rejected`) ``?wf=`` value falls back to
         # "show all". Reject was removed from the review flow entirely.
@@ -17848,6 +18339,13 @@ def create_app() -> Flask:
                 ra, card_uuid=f"wf-{card_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
 
+            # UI 1.18 — per-card "Inspect" affordance. Opens the shared
+            # inspector drawer (one instance, injected once below) wired to the
+            # existing create-graphic + live-caption + workflow routes for THIS
+            # card via the data-* attributes. Lightweight: no markup is rendered
+            # per card beyond the button itself.
+            _insp_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
+            _insp_caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
             # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
             # Decorative here — the row already shows the name/event/band as
             # text — so the chip stays aria-hidden and out of the tab order.
@@ -17883,6 +18381,14 @@ def create_app() -> Flask:
            all happen later in the Content builder (approved cards only). -->
       <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
+        <button type="button" class="btn secondary mh-inspect-btn" style="font-size:11px;padding:4px 10px"
+                data-mh-inspect data-run-id="{_h(run_id)}" data-card-id="{_h(card_id_raw)}"
+                data-card-uuid="{_h(card_uuid)}" data-graphic-url="{_h(_insp_graphic_url)}"
+                data-caption-url="{_h(_insp_caption_url)}" data-card-title="{swimmer} &middot; {event}"{_inspector_state_attrs(wf_state)}
+                aria-haspopup="dialog" aria-controls="mh-inspector"
+                title="Tweak this card before approval — caption, palette, elements, crop">
+          &#9881; Inspect
+        </button>
         <span style="flex:1;min-width:8px"></span>
         {_render_reactions(run_id, card_id_raw, _react_counts)}
       </div>
@@ -18381,6 +18887,10 @@ function copyWhyCard(btn, taId) {{
   }}
 }})();
 </script>
+
+<!-- UI 1.18 — Inspector / properties panel (one shared drawer for the page) -->
+{_render_inspector_panel(_review_swatches)}
+{_inspector_js()}
 """
         # U.13: floating mobile action dock for the review/approve flow — only
         # when there's actually a pack to review (cards present or workflow
@@ -36474,6 +36984,50 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             chosen_asset_id = (_req.args.get("asset_id") or "").strip() or None
         if not force_no_photo:
             force_no_photo = (_req.args.get("no_photo") or "").lower() in ("1", "true", "yes")
+
+        # UI 1.18 — inspector overrides (accent swatch / manual crop / sponsor
+        # toggle). Persisted per-card in the workflow store under ``insp.*`` keys
+        # (no new persistence layer — same edited_captions bag as captions), so
+        # a tweak made before approval also re-applies on every later render
+        # (content builder included). An explicit value in *this* request wins
+        # over the stored one; both are honoured deterministically by
+        # ``create_visual_for_item`` (the AI director still picks the design).
+        _persisted_insp = _inspector_overrides_for_card(run_id, card_id)
+        user_overrides = dict(_persisted_insp)
+
+        def _ov(key):
+            v = None
+            try:
+                if _req.is_json and _req.json and _req.json.get(key) is not None:
+                    v = _req.json.get(key)
+            except Exception:
+                v = None
+            if v is None:
+                v = _req.args.get(key)
+            return v
+
+        _req_accent = _ov("accent")
+        if _req_accent is not None:
+            user_overrides["accent"] = str(_req_accent).strip()
+        _req_focus = _ov("focus")
+        if _req_focus is not None:
+            user_overrides["photo_pos"] = str(_req_focus).strip()
+        _req_hide_sponsor = _ov("hide_sponsor")
+        if _req_hide_sponsor is not None:
+            user_overrides["hide_sponsor"] = str(_req_hide_sponsor).lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+        # ``no_photo`` is parsed above. Fold the persisted default in so the
+        # inspector's "Show photo" toggle sticks across renders — but only when
+        # THIS request didn't speak to it (an explicit request value always
+        # wins, true or false).
+        if _ov("no_photo") is None and not force_no_photo and _persisted_insp.get("no_photo"):
+            force_no_photo = True
+            chosen_asset_id = None
+
         forced_hero_asset_id = None
         choice_allowed_families = None
         if force_no_photo:
@@ -36676,6 +37230,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     forced_hero_asset_id=forced_hero_asset_id,
                     sponsor_name=rotated_sponsor_name,
                     sponsor_logo_path=rotated_sponsor_logo_path,
+                    user_overrides=user_overrides,
                 )
         except _RenderBusy:
             return _render_busy_response("graphic")
@@ -36706,6 +37261,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "chosen_asset_id": chosen_asset_id,
                 "no_photo": force_no_photo,
                 "card_athlete": _card_athlete,
+                # UI 1.18 inspector state: the brand-locked swatches it may pick
+                # from, plus the overrides actually in force for this render.
+                "brand_swatches": _brand_swatches(brand_kit),
+                "inspector": user_overrides,
                 **res,
             }
         )

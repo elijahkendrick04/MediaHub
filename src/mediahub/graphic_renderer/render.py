@@ -2389,6 +2389,44 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     }
 
 
+# Allowed manual-crop tokens for the UI 1.18 inspector. A strict allow-list so
+# a user-supplied object-position can never inject CSS into the :root{} block.
+_PHOTO_POS_KEYWORDS = {"left", "right", "top", "bottom", "center"}
+
+
+def _sanitise_photo_pos(value: str) -> str:
+    """Return a safe CSS ``object-position`` from a manual-crop request, or ''.
+
+    Accepts one or two tokens, each either an allow-listed keyword
+    (left/right/top/bottom/center) or a percentage in 0–100 (``"25%"``).
+    Anything else — units, ``url()``, semicolons, braces — yields ``""`` so the
+    caller falls back to the deterministic saliency focus. Defence-in-depth: the
+    value is injected verbatim into a ``:root{…}`` CSS block.
+    """
+    raw = (value or "").strip().lower()
+    if not raw:
+        return ""
+    tokens = raw.split()
+    if not (1 <= len(tokens) <= 2):
+        return ""
+    clean: list[str] = []
+    for tok in tokens:
+        if tok in _PHOTO_POS_KEYWORDS:
+            clean.append(tok)
+            continue
+        if tok.endswith("%"):
+            num = tok[:-1]
+            try:
+                pct = float(num)
+            except ValueError:
+                return ""
+            if 0 <= pct <= 100 and num.replace(".", "", 1).isdigit():
+                clean.append(tok)
+                continue
+        return ""
+    return " ".join(clean)
+
+
 def _v2_photo_position(athlete_path) -> str:
     """CSS ``object-position`` that keeps the saliency focus in frame.
 
@@ -2489,7 +2527,14 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
 
 
 def _fill_v2_archetype(
-    brief, width, height, base_repl, *, athlete_path=None, brand_kit=None
+    brief,
+    width,
+    height,
+    base_repl,
+    *,
+    athlete_path=None,
+    brand_kit=None,
+    photo_pos_override: str = "",
 ) -> dict:
     """Replacements for a ``layouts/v2`` archetype: roles + autofit + saliency.
 
@@ -2497,6 +2542,11 @@ def _fill_v2_archetype(
     adds the result + hero-stat slots the v2 layouts use, and appends one
     ``:root{…}`` block to BASE_CSS carrying the brand role tokens, the
     autofit-computed hero sizes, and the saliency photo position.
+
+    ``photo_pos_override``: when a non-empty CSS ``object-position`` value is
+    given (the UI 1.18 inspector's manual crop, e.g. ``"left top"``), it
+    replaces the deterministic saliency focus for ``--mh-photo-pos`` — an
+    explicit human override on top of the automatic crop, never AI-chosen.
     """
     repl = dict(base_repl)
     layers = brief.text_layers or {}
@@ -2556,7 +2606,9 @@ def _fill_v2_archetype(
         min_px=64,
         max_px=220,
     )
-    root_vars["--mh-photo-pos"] = _v2_photo_position(athlete_path)
+    root_vars["--mh-photo-pos"] = _sanitise_photo_pos(photo_pos_override) or _v2_photo_position(
+        athlete_path
+    )
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
     repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block
@@ -2584,6 +2636,7 @@ def render_brief(
     venue_attribution: str = "",
     skip_cutout: bool = False,
     watermark_text: str = "",
+    photo_pos_override: str = "",
 ) -> RenderResult:
     """Render a CreativeBrief into a single PNG. Returns RenderResult.
 
@@ -2592,6 +2645,9 @@ def render_brief(
     ``watermark_text`` (PC.7): when set, a repeated diagonal text overlay is
     stamped across the finished canvas — used by the public try-before-signup
     demo so preview cards are visibly non-production.
+    ``photo_pos_override`` (UI 1.18): an explicit CSS ``object-position`` from
+    the inspector's manual crop control, used in place of the saliency focus
+    for v2 archetypes. Empty (the default) keeps the automatic crop.
     """
     width, height = size
     output_dir = Path(output_dir)
@@ -2702,6 +2758,7 @@ def render_brief(
             base_repl,
             athlete_path=athlete_path,
             brand_kit=brand_kit,
+            photo_pos_override=photo_pos_override,
         )
     elif family == "meet_preview":
         repl = _fill_meet_preview(
