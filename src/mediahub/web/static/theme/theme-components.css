@@ -4093,3 +4093,121 @@ kbd {
       color        var(--dur-fast) var(--ease-out-quick);
   }
 }
+
+/* =====================================================================
+   UI 1.30 — "WEEKEND AT A GLANCE" SUMMARY PANEL
+   =====================================================================
+   A digest at the head of the /review surface: a fixed-template factual
+   lede, the PB / medal / standout / swims-analysed stat tiles (reusing the
+   shared .stat-block + [data-mh-count] count-up), and the top-ranked
+   "moments" lifted verbatim from the recognition report. No data is
+   computed here — this is purely the look; the panel HTML is built by
+   src/mediahub/web/weekend_glance.py. Entrance reuses the shared .mh-reveal
+   system (opacity/transform, JS-gated, safety-netted, reduced-motion-safe),
+   so nothing here can leave the panel stuck hidden.
+   ===================================================================== */
+.mh-glance { position: relative; overflow: hidden; }
+/* A thin medal-gold spine marks this as the achievement digest, echoing the
+   .stat::before accent without competing with the workflow card's lane edge. */
+.mh-glance::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--medal);
+  box-shadow: 0 0 14px var(--medal-glow);
+}
+.mh-glance-head { margin-bottom: var(--sp-5); padding-left: var(--sp-2); }
+.mh-glance-eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--medal);
+  margin-bottom: var(--sp-2);
+}
+.mh-glance-lede {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(20px, 3.2vw, 30px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.mh-glance-stats { margin-bottom: var(--sp-5); }
+
+/* Top moments — a compact ranked list lifted straight from the report. */
+.mh-glance-moments {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.mh-glance-moment {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--ink-faint);
+  border-radius: var(--radius);
+  transition: border-color var(--dur-fast, 120ms) var(--ease-out-quick, ease),
+              transform   var(--dur-fast, 120ms) var(--ease-out-quick, ease);
+}
+.mh-glance-moment:hover { border-color: var(--rule); transform: translateX(2px); }
+.mh-glance-moment[data-kind="gold"]   { border-left-color: var(--medal); }
+.mh-glance-moment[data-kind="silver"] { border-left-color: var(--ink-dim); }
+.mh-glance-moment[data-kind="bronze"] { border-left-color: var(--medal-deep); }
+.mh-glance-moment[data-kind="medal"]  { border-left-color: var(--medal); }
+.mh-glance-moment[data-kind="pb"]     { border-left-color: var(--good); }
+.mh-glance-moment[data-kind="record"] { border-left-color: var(--info); }
+.mh-glance-rank {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 900;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--ink-faint);
+  min-width: 1.1em; text-align: center; line-height: 1;
+}
+.mh-glance-moment-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mh-glance-moment-who {
+  font-family: var(--font-body);
+  font-size: 14px; font-weight: 700; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mh-glance-moment-sub {
+  font-size: 12.5px; color: var(--ink-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mh-glance-chip {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 4px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--ink-faint); color: var(--ink-muted);
+  white-space: nowrap;
+}
+.mh-glance-chip--gold,
+.mh-glance-chip--medal  { color: var(--medal);      border-color: var(--medal);      background: var(--medal-glow); }
+.mh-glance-chip--silver { color: var(--ink-dim);    border-color: var(--rule); }
+.mh-glance-chip--bronze { color: var(--medal-deep); border-color: var(--medal-deep); }
+.mh-glance-chip--pb     { color: var(--good);       border-color: var(--good);       background: var(--good-bg); }
+.mh-glance-chip--record { color: var(--info);       border-color: var(--info);       background: var(--info-bg); }
+.mh-glance-jump {
+  display: inline-block; margin-top: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.08em;
+  color: var(--ink-muted); text-decoration: none;
+  border-bottom: 1px dashed var(--rule); padding-bottom: 1px;
+  transition: color var(--dur-fast, 120ms) var(--ease-out-quick, ease),
+              border-color var(--dur-fast, 120ms) var(--ease-out-quick, ease);
+}
+.mh-glance-jump:hover { color: var(--lane); border-bottom-color: var(--lane); }
+
+@media (max-width: 640px) {
+  .mh-glance-moment { flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+  .mh-glance-chip { order: 3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-glance-moment { transition: none; }
+  .mh-glance-moment:hover { transform: none; }
+}
