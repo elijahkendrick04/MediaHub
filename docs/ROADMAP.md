@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `e1c252961` · Make web UI phone-friendly: kill horizontal scroll on mobile (#529)
+**Last updated:** 2026-06-14 · `2f3ee7ceb` · Merge pull request #473: UI uplift — Aceternity + Refero design-system integration
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
