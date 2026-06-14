@@ -191,7 +191,10 @@ class TestHomeSignedOut:
         body = _home(app)
         # The card/step rows + the promise list stagger via .mh-reveal-group.
         assert "mh-steps mh-reveal-group" in body
-        assert "mh-sample-row mh-reveal-group" in body
+        # U.11 replaced the flat sample row with the platform-frame carousel,
+        # which reveals as one block (the stacked phones run their own CSS
+        # autoplay loop rather than staggering as a reveal-group).
+        assert "mh-frames mh-reveal" in body
         assert "mh-audience-row mh-reveal-group" in body
         assert "mh-promise-list mh-reveal-group" in body
         # The promise section is no longer one big block reveal.
@@ -202,8 +205,8 @@ class TestHomeSignedOut:
         # The marketing copy survived the split into lines …
         for frag in (
             "From the results sheet to",
-            "A weekend reads like",
-            "ready to approve.",
+            "Your results, the way your",
+            "see them.",
             "Built for the people who",
             "Human in the loop,",
             "A minute to set up.",
@@ -212,7 +215,7 @@ class TestHomeSignedOut:
         # … and the gold editorial accents still ride inside their lines.
         for em in (
             '<em class="editorial">posting-ready</em>',
-            '<em class="editorial">three drafts</em>',
+            '<em class="editorial">followers</em>',
             '<em class="editorial">post the results</em>',
             "<em>by design</em>",
             "<em>Then</em>",
