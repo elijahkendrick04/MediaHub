@@ -203,7 +203,7 @@ def test_home_still_renders_the_rest_of_the_landing(app):
         body = c.get("/").get_data(as_text=True)
     for hook in (
         "mh-steps",
-        "mh-sample-row",
+        "mh-frames",  # U.11 replaced the flat .mh-sample-row with the platform-frame carousel
         "mh-audience-row",
         "mh-promise",
         "mh-final-cta",

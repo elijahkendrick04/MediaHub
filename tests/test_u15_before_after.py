@@ -88,7 +88,8 @@ def test_slider_appears_after_steps_and_before_samples(client):
     body = _home(client)
     i_steps = body.index("From the results sheet to")     # steps section title
     i_slider = body.index("data-mh-ba")
-    i_samples = body.index("A weekend reads like")          # sample section title
+    # U.11 replaced the flat sample section with the platform-frame carousel.
+    i_samples = body.index("Your results, the way your")    # frames section title
     assert i_steps < i_slider < i_samples
 
 
