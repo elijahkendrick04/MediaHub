@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `8892126a5` · Merge pull request #477 from elijahkendrick04/claude/keen-mendel-szs10h
+**Last updated:** 2026-06-14 · `c506ac5c6` · U.15 — Before/after reveal slider on the landing page (#499)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -125,17 +125,17 @@ final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
-- **U.5** · Phase 1 (Product polish) — Scroll-driven progressive reveal (inspired by Opal): landing sections reveal line-by-line on scroll; dark editorial theme throughout · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.1** · Phase 1 (Product polish) — Cycling example-prompt placeholder (inspired by Cosmos): in the CREATE / Free-Text 'describe a moment' input and any search field, animate the placeholder through real example prompts ('Try: Tom Davies PB 100m free', 'Try: top three at county finals') to guide first-time users; pure CSS/JS, no new deps · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.2** · Phase 1 (Product polish) — Bento-grid feature section (inspired by Umbrel): replace the uniform capability card rows on the landing with a bento grid of varied-size tiles, each carrying its own mini-visual (sample story card, a stat chip, brand-kit swatches, a 'moments we detect' list, a reel preview); dark/premium aesthetic, reuses existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.3** · Phase 1 (Product polish) — Inline media thumbnails in a display headline (inspired by Samara): embed small inline output thumbnails inside a large hero headline sentence — 'From a results sheet [img] to a story [img], a feed graphic [img] and a reel [img]' — the images are real sample outputs served from the static directory · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.4** · Phase 1 (Product polish) — Tactile spring-physics micro-interactions (inspired by Family): a restrained spring-physics layer on primary buttons, card-selection, and toggles — subtle magnetic hover + bouncy press; vanilla JS CSS-custom-property animation, `prefers-reduced-motion` respected, understated to preserve the editorial tone · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **UI 1.5** · Phase 1 (Product polish) — Live local-time + system-status HUD readout (inspired by AndAgain, Dul Zorigoo, Metalab): a small mono header/footer strip showing live local time + a deployment/system status line, extending the existing ONLINE indicator, in the blueprint/HUD aesthetic; low-priority polish · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.6** · Phase 1 (Product polish) — Branded render/generation loading state (inspired by Lusion): large editorial %-counter + minimal progress bar for real render waits; reuses the giant-numeral motif (supports U.2) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.7** · Phase 1 (Product polish) — "Focus the facts" caption/explainability highlight (inspired by Pedro Duarte): in captions + the why-this-card review UI, source-grounded entities (athlete/time/event/PB) are sharp + pill-highlighted; filler de-emphasised (supports U.3) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.8** · Phase 1 (Product polish) — Animated how-it-works pipeline diagram (inspired by AuthKit): glowing nodes + traces on the landing showing reads (club site / socials / brand kit) → writes (captions / graphics / reels); reuses the blueprint grid · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.10** · Phase 1 (Product polish) — Framed in-app product demo in hero (inspired by Reflect): short looping screen-capture or interactive preview of generate → review → approve, plus a subtle ambient hero glow · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.12** · Phase 1 (Product polish) — Animated count-up stat numerals (inspired by Max Yinger): odometer count-up for Organisations / Total runs etc. triggers on load + scroll-into-view · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.14** · Phase 1 (Product polish) — Cursor-following hover preview (inspired by Christopher Ireland + SuperHi): hovering an item in Media Library / CREATE list shows a floating cross-dissolve thumbnail near the cursor · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **U.15** · Phase 1 (Product polish) — Before/after reveal slider (inspired by Lovi): drag-to-wipe between a raw results sheet (input) and the finished branded graphic (output) on the landing · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.16** · Phase 1 (Product polish) — Subtle 3D tilt on output cards (inspired by Atlas): premium parallax/tilt-on-hover for the sample output cards · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
@@ -779,6 +779,31 @@ designed and every recognition decision explained.
 - **U.16 — Subtle 3D tilt on output cards.** Premium parallax/tilt-on-hover for
   sample output cards; uses CSS perspective + JS pointer-tracking; respects
   `prefers-reduced-motion`. *Inspired by Atlas (atlascard.com).*
+- **UI 1.1 — Cycling example-prompt placeholder.** In the CREATE / Free-Text
+  input and any search field, the placeholder animates through curated real
+  examples ('Try: Tom Davies PB 100m free', 'Try: top three at county finals'),
+  guiding first-time users with zero extra UI. Pure CSS/JS, no new deps.
+  *Inspired by Cosmos (cosmos.so). Supports U.4.*
+- **UI 1.2 — Bento-grid feature section.** The uniform capability card rows on
+  the landing are replaced by a bento grid of varied-size tiles — each carries
+  its own mini-visual (a sample story card, a stat chip, brand-kit swatches, a
+  'moments we detect' list, a reel preview). Dark/premium, all on existing CSS
+  variables. *Inspired by Umbrel (umbrel.com).*
+- **UI 1.3 — Inline media thumbnails in a display headline.** Small real output
+  thumbnails are embedded inline within a large hero sentence: 'From a results
+  sheet [img] to a story [img], a feed graphic [img] and a reel [img].' Images
+  served from the static directory — no external fetch. *Inspired by Samara
+  (samara.com).*
+- **UI 1.4 — Tactile spring-physics micro-interactions.** A restrained
+  spring-physics layer on primary buttons, card-selection, and toggles: subtle
+  magnetic hover + bouncy press. Vanilla JS driving CSS custom-property
+  animation; `prefers-reduced-motion` respected; understated to preserve the
+  editorial tone. *Inspired by Family (family.co).*
+- **UI 1.5 — Live local-time + system-status HUD readout.** A small mono
+  header/footer strip shows live local time and a deployment/system status line,
+  extending the existing ONLINE indicator in the blueprint/HUD aesthetic.
+  Low-priority polish; no new backend surface. *Inspired by AndAgain
+  (andagain.uk), Dul Zorigoo (dzrgo.com), Metalab (metalab.com).*
 
 **Building blocks.** All shipped: the primary flow, the design-spec director +
 12-archetype catalog, the Adaptive Theming Engine, magic-link mobile approvals,
@@ -1365,13 +1390,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `1e08619ee` | U.15: before/after reveal slider on the landing page |
+| 2026-06-14 | `a10f2fc98` | U.14: cursor-following hover preview (Media library + Create) |
+| 2026-06-14 | `a34bfb081` | U.7 — "Focus the facts" caption/explainability highlight |
+| 2026-06-14 | `4e538d7b1` | U.10: framed in-app product demo in the landing hero |
+| 2026-06-14 | `b2ef8a46c` | UI 1.1-1.5: design-polish ideas from godly.website review batch 2 — top of Phase U |
+| 2026-06-14 | `fd88c0534` | Add scroll-driven line-by-line landing reveal (U.5) |
 | 2026-06-13 | `d82f5b630` | U.5-U.16: design-polish ideas from godly.website review — top of Phase U |
 | 2026-06-13 | `1bfbe9d6a` | Fix year-of-birth leaking into the club field (club picker showed '(04)') |
 | 2026-06-13 | `9d9ec1512` | Make explainability & confidence read as intelligence (U.3) |
-| 2026-06-13 | `f444419a9` | Add live progress bar to results-from-a-link fetch |
-| 2026-06-13 | `c32f7da7e` | Fix 'Permission denied: /app/src/mediahub/data' aborting results parse |
-| 2026-06-13 | `36da3aa97` | Make results-from-a-link fetches content-negotiate (fix '<!DOCTYPE' JSON error) |
-| 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
-| 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
-| 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
 <!-- /ROADMAP:ACTIVITY -->
