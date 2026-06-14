@@ -262,7 +262,7 @@ def _plural(n: int, word: str) -> str:
 
 
 def _join_counts(parts: Sequence[tuple[int, str]]) -> str:
-    """"3 approved · 1 rejected" — omitting any zero-count part."""
+    """ "3 approved · 1 rejected" — omitting any zero-count part."""
     return " · ".join(f"{n} {label}" for n, label in parts if n)
 
 
@@ -272,9 +272,7 @@ def _join_counts(parts: Sequence[tuple[int, str]]) -> str:
 
 
 def _run_title(row: Any) -> str:
-    return str(
-        _get(row, "meet_name") or _get(row, "file_name") or _get(row, "id") or "Run"
-    )
+    return str(_get(row, "meet_name") or _get(row, "file_name") or _get(row, "id") or "Run")
 
 
 def _run_event(row: Any) -> ActivityEvent:
@@ -344,9 +342,7 @@ def _approval_event(run_id: str, meta: Any, summ: dict) -> Optional[ActivityEven
     )
     if not (approved or rejected or edited):
         return None
-    summary = _join_counts(
-        [(approved, "approved"), (rejected, "rejected"), (edited, "edited")]
-    )
+    summary = _join_counts([(approved, "approved"), (rejected, "rejected"), (edited, "edited")])
     if approved:
         label, tone = "approved", TONE_GOOD
     elif rejected:
@@ -362,9 +358,7 @@ def _approval_event(run_id: str, meta: Any, summ: dict) -> Optional[ActivityEven
         detail.append(("Edited", str(edited)))
     if summ.get("review_latest"):
         detail.append(("Last change", str(summ["review_latest"])))
-    title = str(
-        _get(meta, "meet_name") or _get(meta, "file_name") or run_id or "Review"
-    )
+    title = str(_get(meta, "meet_name") or _get(meta, "file_name") or run_id or "Review")
     return ActivityEvent(
         kind=KIND_APPROVAL,
         subkind="review",
@@ -382,9 +376,7 @@ def _posted_export_event(run_id: str, meta: Any, summ: dict) -> Optional[Activit
     posted = summ["counts"]["posted"]
     if not posted:
         return None
-    title = str(
-        _get(meta, "meet_name") or _get(meta, "file_name") or run_id or "Export"
-    )
+    title = str(_get(meta, "meet_name") or _get(meta, "file_name") or run_id or "Export")
     detail = [("Cards posted", str(posted))]
     if summ.get("posted_latest"):
         detail.append(("Marked posted", str(summ["posted_latest"])))
@@ -403,9 +395,7 @@ def _posted_export_event(run_id: str, meta: Any, summ: dict) -> Optional[Activit
 
 def _export_attempt_event(attempt: Any, meta: Any) -> ActivityEvent:
     status = str(_get(attempt, "status", "") or "").strip().lower()
-    channel = str(
-        _get(attempt, "channel_name") or _get(attempt, "channel_id") or "a channel"
-    )
+    channel = str(_get(attempt, "channel_name") or _get(attempt, "channel_id") or "a channel")
     error_kind = str(_get(attempt, "error_kind", "") or "")
     error_msg = str(_get(attempt, "error_message", "") or "")
     excerpt = str(_get(attempt, "caption_excerpt", "") or "")
