@@ -3346,33 +3346,36 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Generating graphic&hellip; this may take 5-15 seconds</div>';
   var cacheKey = cardId + '|' + fmt + '|' + assetId + '|' + (noPhoto ? '1' : '0');
   if (_visualCache[cacheKey]) {
     _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
     btn.disabled = false; btn.textContent = origLabel;
     return;
   }
+  var prog = MH.renderProgress(panel, {label: 'Designing your graphic', sub: 'Usually 5\u201315 seconds', expectedMs: 9000, accent: 'lane'});
   var reqBody = {format: fmt};
   if (assetId) reqBody.asset_id = assetId;
   if (noPhoto) reqBody.no_photo = true;
   fetch(createUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(reqBody)})
     .then(function(r) { return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok || res.body.error) {
         // Prefer user_message (clean operator copy, e.g. the "renderer
         // busy" 429) over the raw error code.
+        prog.stop();
+        btn.disabled = false; btn.textContent = origLabel;
         var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
         return;
       }
       _visualCache[cacheKey] = res.body;
-      _renderVisualPanel(panel, res.body, cardId, createUrl);
+      prog.complete(function(){
+        btn.disabled = false; btn.textContent = origLabel;
+        _renderVisualPanel(panel, res.body, cardId, createUrl);
+      });
     })
     .catch(function(err) {
+      prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
@@ -3582,9 +3585,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering motion\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering ' + fmt + ' motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
+  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds \u2014 repeats are instant', expectedMs: 45000, accent: 'medal'});
   var fetchUrl = motionUrl + (fmt !== 'story' ? (motionUrl.indexOf('?') === -1 ? '?' : '&') + 'format=' + encodeURIComponent(fmt) : '');
   fetch(fetchUrl, {method:'POST'})
     .then(function(r) {
@@ -3594,16 +3595,19 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
       return r.json().then(function(j){ return {ok:false, body:j}; });
     })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok) {
         // Prefer user_message (clean operator-written copy) over detail
         // (raw stack trace). The backend Phase 1.5 mapping translates
         // known infra failures into actionable copy; falls back to detail
         // for anything unexpected.
+        prog.stop();
+        btn.disabled = false; btn.textContent = origLabel;
         var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
         return;
       }
+      prog.complete(function(){
+      btn.disabled = false; btn.textContent = origLabel;
       var url = URL.createObjectURL(res.blob);
       _motionCache[cardId + ':' + fmt] = url;
       var vidCol = fmt === 'landscape' ? 'flex:0 0 300px;max-width:320px' : 'flex:0 0 200px;max-width:220px';
@@ -3623,8 +3627,10 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
           '</div>' +
         '</div>';
       _loadMotionWhy(panel, motionUrl, fmt);
+      });
     })
     .catch(function(err) {
+      prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
@@ -3674,14 +3680,14 @@ function generateReel(btn, reelUrl, fmt) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
+  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
   var fail = function(msg) {
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   };
   var success = function(videoUrl) {
+    prog.complete(function(){
     btn.disabled = false; btn.textContent = origLabel;
     var vidCol = fmt === 'landscape' ? 'flex:0 0 340px;max-width:360px' : 'flex:0 0 240px;max-width:260px';
     panel.innerHTML =
@@ -3698,6 +3704,7 @@ function generateReel(btn, reelUrl, fmt) {
           '</div>' +
         '</div>' +
       '</div>';
+    });
   };
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {method:'POST'})
     .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
@@ -3742,16 +3749,12 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating 3 options\u2026';
-  function _vSpin(msg) {
-    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-      '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-      msg + '</div>';
-  }
+  var prog = MH.renderProgress(panel, {label: 'Designing 3 options', sub: 'Renders run one at a time \u2014 usually 1\u20132 minutes', expectedMs: 90000, accent: 'lane'});
   function _vFail(msg) {
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
   }
-  _vSpin('Designing 3 alternative options\u2026 renders run one at a time, usually 1-2 minutes.');
   fetch(variantsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(regenBody)})
     .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
     .then(function(res){
@@ -3777,19 +3780,22 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
             }
             if (st.body.status === 'running') {
               var total = st.body.total || 3;
-              var current = Math.min((st.body.done || 0) + 1, total);
-              _vSpin('Designing option ' + current + ' of ' + total + '... (' +
-                     (st.body.done || 0) + ' finished)');
+              var done = st.body.done || 0;
+              var current = Math.min(done + 1, total);
+              prog.setPhase('Designing option ' + current + ' of ' + total, done + ' of ' + total + ' finished');
+              prog.setProgress(Math.round((done / total) * 100));
               return;
             }
             clearInterval(timer);
-            btn.disabled = false; btn.textContent = origLabel;
             var variants = (st.body.variants || []).filter(function(v){ return v.visual; });
             if (!variants.length) {
               _vFail('Error: ' + (st.body.error || 'no variants produced'));
               return;
             }
-            _renderVariantPicker(panel, variants, cardId, createUrl);
+            prog.complete(function(){
+              btn.disabled = false; btn.textContent = origLabel;
+              _renderVariantPicker(panel, variants, cardId, createUrl);
+            });
           })
           .catch(function(){ /* transient poll error - keep polling */ });
       }, 2500);
@@ -5791,6 +5797,27 @@ a.card:hover, .card[data-interactive]:hover {
   animation: mh-pulse 2.4s ease-in-out infinite;
 }
 
+/* U.6 — branded render/generation progress (the giant-numeral loading state).
+   Replaces the generic spinner on the long render/generation waits (motion,
+   reels, graphics). The percentage is an honest eased time-estimate for the
+   opaque renders, and a real fraction where the backend reports one; it only
+   reaches 100 when the real result lands (MH.renderProgress.complete). Reuses
+   the .display-num motif for the numeral. */
+.mh-render-prog { padding: 30px 18px 26px; text-align: center; animation: mh-fade-in 0.3s ease-out; }
+.mh-render-prog-num { display: flex; align-items: flex-start; justify-content: center; gap: 4px; }
+.mh-render-prog-pct { font-size: clamp(56px, 15vw, 116px); line-height: 0.82; color: var(--lane); }
+.mh-render-prog-sign { font-family: var(--font-display); font-weight: 900; line-height: 1; font-size: clamp(20px, 5vw, 38px); color: var(--ink-dim); margin-top: 0.3em; }
+.mh-render-prog[data-accent="medal"] .mh-render-prog-pct { color: var(--medal); }
+.mh-render-prog-bar { height: 3px; width: min(280px, 78%); margin: 20px auto 0; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+.mh-render-prog-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--lane); transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
+.mh-render-prog[data-accent="medal"] .mh-render-prog-fill { background: var(--medal); }
+.mh-render-prog-label { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink); margin-top: 18px; }
+.mh-render-prog-sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); margin: 7px auto 0; max-width: 320px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) {
+  .mh-render-prog { animation: none; }
+  .mh-render-prog-fill { transition: none; }
+}
+
 /* Toast */
 #mh-toast-container {
   position: fixed; top: 72px; right: 20px;
@@ -7631,6 +7658,102 @@ def _theme_seed_style_block() -> str:
 
 # Self-contained "Create graphic" panel script for pages OTHER than the meet
 # review page (which has its own richer createGraphic with motion + add-to-pack).
+# U.6 — the branded render/generation loading state (inspired by Lusion). One
+# reusable controller, `MH.renderProgress(container, opts)`, shared by every long
+# render/generation wait (motion, reels, graphics). It paints a large editorial
+# %-numeral (reusing the .display-num motif) over a minimal progress bar.
+#
+# Honesty: the renders are opaque (a blocking request, or a running/done poll),
+# so the percentage is an eased *time estimate* that asymptotes BELOW 100 and
+# only snaps to 100 when the real result lands (`complete()`). Where the backend
+# does report real progress (variant batches: done/total), the caller feeds it
+# via `setProgress` and the bar tracks the actual work. The number is monotonic
+# and never claims "done" before the artefact exists.
+#
+# Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
+# kept as a module constant so tests can exercise the controller directly.
+_RENDER_PROGRESS_JS = """
+(function(){
+  var MH = window.MH = window.MH || {};
+  if (MH.renderProgress) return;
+  var CEIL = 94;  // eased-estimate asymptote — never reaches 100 on its own
+  var CAP  = 97;  // hard ceiling for a real-progress floor while still running
+  function clamp(v, lo, hi){ return v < lo ? lo : (v > hi ? hi : v); }
+  MH.renderProgress = function(container, opts){
+    opts = opts || {};
+    if (!container) return null;
+    var accent = (opts.accent === 'medal') ? 'medal' : 'lane';
+    var expected = Math.max(2000, opts.expectedMs || 45000);
+    var k = expected * 0.5;  // time constant: ~81% of CEIL at `expected`
+    var ariaLabel = (opts.label ? String(opts.label) : 'Render progress').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    container.innerHTML =
+      '<div class="mh-render-prog" data-accent="' + accent + '" role="progressbar" ' +
+        'aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="' + ariaLabel + '">' +
+        '<div class="mh-render-prog-num">' +
+          '<span class="mh-render-prog-pct display-num">0</span>' +
+          '<span class="mh-render-prog-sign">%</span>' +
+        '</div>' +
+        '<div class="mh-render-prog-bar"><span class="mh-render-prog-fill"></span></div>' +
+        '<div class="mh-render-prog-label" aria-live="polite"></div>' +
+        '<div class="mh-render-prog-sub"></div>' +
+      '</div>';
+    var root  = container.querySelector('.mh-render-prog');
+    var numEl = container.querySelector('.mh-render-prog-pct');
+    var fillEl= container.querySelector('.mh-render-prog-fill');
+    var labEl = container.querySelector('.mh-render-prog-label');
+    var subEl = container.querySelector('.mh-render-prog-sub');
+    var raf = window.requestAnimationFrame || function(cb){ return setTimeout(function(){ cb(Date.now()); }, 32); };
+    var start = Date.now();
+    var cur = 0, floor = 0, lastShown = -1;
+    var stopped = false, finishing = false, finishFrom = 0, finishStart = 0, finishCb = null;
+    function paint(v){
+      if (v < cur) v = cur;   // monotonic — never tick backwards on a stale frame
+      cur = v;
+      var shown = Math.floor(v);
+      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); }
+      fillEl.style.width = v.toFixed(1) + '%';
+      if (root) root.setAttribute('aria-valuenow', String(Math.round(v)));
+    }
+    function setText(label, sub){
+      if (label != null) labEl.textContent = label;
+      if (sub != null) subEl.textContent = sub;
+    }
+    setText(opts.label || 'Rendering', opts.sub || '');
+    function frame(){
+      if (stopped) return;
+      var now = Date.now();
+      if (finishing){
+        var t = clamp((now - finishStart) / 460, 0, 1);
+        paint(finishFrom + (100 - finishFrom) * t);
+        if (t >= 1){
+          stopped = true; paint(100);
+          if (finishCb) setTimeout(finishCb, 170);
+          return;
+        }
+      } else {
+        var eased = CEIL * (1 - Math.exp(-(now - start) / k));
+        paint(clamp(Math.max(eased, floor), 0, CAP));
+      }
+      raf(frame);
+    }
+    raf(frame);
+    return {
+      setPhase: function(label, sub){ setText(label, sub); },
+      setProgress: function(pct){
+        if (typeof pct !== 'number' || isNaN(pct)) return;
+        floor = clamp(Math.max(floor, pct), 0, CAP);  // monotonic real floor
+      },
+      complete: function(cb){
+        if (stopped || finishing){ if (cb) cb(); return; }
+        finishing = true; finishFrom = cur; finishStart = Date.now(); finishCb = cb || null;
+      },
+      stop: function(){ stopped = true; }
+    };
+  };
+})();
+"""
+
+
 # Exposes window.mhCreateGraphic(btn, createUrl, cardId, fmt): POSTs to createUrl,
 # then renders the returned visual into <div class="visual-panel" data-card="cardId">.
 # Defined once (guarded), no f-string interpolation — embed verbatim via {_VISUAL_PANEL_JS}.
@@ -7703,7 +7826,7 @@ _VISUAL_PANEL_JS = """<script>
   function mhGen(panel){
     var st = panel._mh; if (!st || !st.url) return;
     panel.style.display = '';
-    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px"><div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>Generating graphic\\u2026 this may take 5-15 seconds</div>';
+    var prog = MH.renderProgress(panel, {label: 'Designing your graphic', sub: 'Usually 5\\u201315 seconds', expectedMs: 9000, accent: 'lane'});
     var body = {format: st.fmt || 'feed_portrait'};
     if (st.assetId) body.asset_id = st.assetId;
     if (st.noPhoto) body.no_photo = true;
@@ -7711,12 +7834,14 @@ _VISUAL_PANEL_JS = """<script>
       .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
       .then(function(res){
         if (!res.ok || res.body.error){
+          prog.stop();
           panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
           return;
         }
-        render(panel, res.body);
+        prog.complete(function(){ render(panel, res.body); });
       })
       .catch(function(err){
+        prog.stop();
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
       });
   }
@@ -8213,6 +8338,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     window._API_BASE = m ? m[1] : '';
   })();
 </script>
+<script>{{ render_progress_js | safe }}</script>
 <script>
   // Register the service worker (installable PWA + offline shell). Best-effort:
   // a failure here never affects the page.
@@ -9824,6 +9950,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
         css=BASE_CSS,
         body=body,
         active=active,
+        render_progress_js=_RENDER_PROGRESS_JS,
         dock=dock,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
@@ -29834,14 +29961,14 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
+  var prog = MH.renderProgress(panel, {{label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'}});
   var fail = function(msg) {{
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   }};
   var success = function(videoUrl) {{
+    prog.complete(function(){{
     btn.disabled = false; btn.textContent = origLabel;
     var chips = '';
     ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
@@ -29864,6 +29991,7 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
         '</div>' +
       '</div>';
+    }});
   }};
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {{method:'POST'}})
     .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
