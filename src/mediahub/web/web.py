@@ -6961,6 +6961,102 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
+/* === UI 1.29 — Sticky chaptered scroll-spy nav (Linear-style) ============ */
+/* A side chapter rail that highlights the section currently in view on long
+   pages — wired by a caller via _layout(chapters=…). Pure CSS sticky
+   positioning; the active state is driven by an IntersectionObserver in
+   MH.bindChapterNav. Desktop-only affordance: hidden below 1240px, and with
+   JS off it stays a plain list of in-page anchors (never a load-bearing
+   control). On a chaptered page the wrap widens into a two-column grid so the
+   rail sits in its own gutter column and the reading column keeps ~its
+   original width. */
+.mh-chapter-nav { display: none; }
+.mh-chapnav-content { min-width: 0; }
+
+/* Offset every chapter anchor so a click — or a no-JS "#id" jump — lands the
+   section clear of the 64px sticky masthead instead of behind it. */
+main.wrap.mh-has-chapnav [id^="mh-ch-"] { scroll-margin-top: 84px; }
+
+@media (min-width: 1240px) {
+  main.wrap.mh-has-chapnav {
+    max-width: 1440px;
+    display: grid;
+    grid-template-columns: 196px minmax(0, 1fr);
+    column-gap: 44px;
+    align-items: start;
+  }
+  .mh-chapter-nav {
+    display: block;
+    position: sticky;
+    top: 88px;
+    align-self: start;
+    max-height: calc(100vh - 112px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px 4px 10px 0;
+  }
+  .mh-chapter-nav::-webkit-scrollbar { width: 6px; }
+  .mh-chapter-nav::-webkit-scrollbar-thumb {
+    background: var(--hairline); border-radius: 999px;
+  }
+}
+
+.mh-chapter-nav-eyebrow {
+  margin: 0 0 12px;
+  padding: 0 0 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+}
+.mh-chapter-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+/* The vertical rule the active marker rides on. */
+.mh-chapter-nav-list::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 1px;
+  background: var(--hairline);
+}
+.mh-chapter-nav-list > li { margin: 0; }
+.mh-chapter-nav a {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0 8px 16px;
+  margin-left: -1px;
+  border-left: 2px solid transparent;
+  color: var(--ink-muted);
+  text-decoration: none;
+  line-height: 1.3;
+  transition: color var(--transition), border-color var(--transition);
+}
+.mh-chapter-nav a:hover { color: var(--ink); }
+.mh-chapter-nav a:focus-visible { outline-offset: -2px; }
+.mh-chapter-num {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  transition: color var(--transition);
+}
+.mh-chapter-label { font-size: 13px; font-weight: 500; }
+.mh-chapter-nav a.is-active {
+  color: var(--ink);
+  border-left-color: var(--lane);
+}
+.mh-chapter-nav a.is-active .mh-chapter-num { color: var(--lane); }
+.mh-chapter-nav a.is-active .mh-chapter-label { font-weight: 600; }
+
 /* Reduced motion — kill all keyframe animation, freeze pulse dots,
    stop the spinner. Round-1 audit had only zero'd duration; this also
    forces iteration count to 1 and explicitly disables looping pulses. */
@@ -8238,7 +8334,13 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     }
 
 
-def _layout(title: str, body: str, active: str = "home", dock: dict | None = None) -> str:
+def _layout(
+    title: str,
+    body: str,
+    active: str = "home",
+    dock: dict | None = None,
+    chapters: list[tuple[str, str]] | None = None,
+) -> str:
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
@@ -8394,6 +8496,30 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
             flash_toast = session.pop("mh_toast", None)
     except Exception:
         flash_toast = None
+
+    # UI 1.29 — sticky chaptered scroll-spy nav. A caller (e.g. the long home
+    # page) passes ``chapters`` as ``[(section_id, label), …]``; we render a
+    # sticky side rail of in-page anchors and the body is wrapped so the rail
+    # can sit in its own grid column on wide viewports. The active chapter is
+    # lit by the IntersectionObserver scroll-spy in MH.bindChapterNav. Without
+    # JS (or on narrow screens) it degrades to a plain anchor list / is hidden,
+    # so it is a pure progressive enhancement — never a load-bearing control.
+    chapter_nav_html = ""
+    if chapters:
+        _ch_items = "".join(
+            (
+                f'<li><a href="#{_h(_cid)}" data-mh-chap>'
+                f'<span class="mh-chapter-num" aria-hidden="true">{_idx:02d}</span>'
+                f'<span class="mh-chapter-label">{_h(_label)}</span></a></li>'
+            )
+            for _idx, (_cid, _label) in enumerate(chapters, 1)
+        )
+        chapter_nav_html = (
+            '<nav class="mh-chapter-nav" aria-label="On this page" data-mh-chapnav>'
+            '<p class="mh-chapter-nav-eyebrow" aria-hidden="true">On this page</p>'
+            f'<ol class="mh-chapter-nav-list">{_ch_items}</ol>'
+            "</nav>"
+        )
 
     return render_template_string(
         """
@@ -8559,8 +8685,8 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     {% endif %}
   </nav>
 </header>
-<main class="wrap" id="mh-main">
-{{ body | safe }}
+<main class="wrap{{ ' mh-has-chapnav' if chapter_nav_html else '' }}" id="mh-main">
+{% if chapter_nav_html %}{{ chapter_nav_html | safe }}<div class="mh-chapnav-content">{{ body | safe }}</div>{% else %}{{ body | safe }}{% endif %}
 </main>
 <footer class="mh-footer">
   <div class="mh-footer-inner">
@@ -9371,6 +9497,93 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   if (document.readyState !== 'loading') bindReveals();
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
+
+  // === UI 1.29 — Sticky chaptered scroll-spy nav ===
+  // Lights the side chapter rail's link for the section currently under the
+  // masthead as the reader scrolls a long page (the home page wires it via
+  // _layout(chapters=…)). The rail markup + sticky CSS are server-rendered;
+  // here we (a) smooth-scroll on click with a header offset (reduced-motion
+  // aware) and (b) drive the active state from an IntersectionObserver. Each
+  // time an observed section crosses the activation line we recompute the
+  // winner authoritatively from geometry, so the highlight stays correct
+  // regardless of section height or scroll direction. Progressive enhancement:
+  // with no rail, no resolvable targets, or no IntersectionObserver the links
+  // remain plain in-page anchors.
+  function bindChapterNav() {
+    var navs = document.querySelectorAll('[data-mh-chapnav]');
+    if (!navs.length) return;
+    var HEADER_OFFSET = 84;          // px cleared above a clicked section
+    Array.prototype.forEach.call(navs, function(nav){
+      var chapters = [];
+      Array.prototype.forEach.call(nav.querySelectorAll('a[data-mh-chap]'), function(a){
+        var id = (a.getAttribute('href') || '').replace(/^#/, '');
+        var sec = id && document.getElementById(id);
+        if (sec) chapters.push({ id: id, link: a, sec: sec });
+      });
+      if (!chapters.length) { nav.setAttribute('hidden', ''); return; }
+      var lastId = chapters[chapters.length - 1].id;
+
+      function activate(id) {
+        chapters.forEach(function(c){
+          var on = c.id === id;
+          c.link.classList.toggle('is-active', on);
+          if (on) c.link.setAttribute('aria-current', 'true');
+          else c.link.removeAttribute('aria-current');
+        });
+      }
+
+      // Smooth-scroll on click (reduced-motion ⇒ instant), focus the section
+      // for keyboard users, and reflect it in the URL hash — without the second
+      // jump a bare "#id" would cause behind the sticky masthead.
+      chapters.forEach(function(c){
+        c.link.addEventListener('click', function(ev){
+          ev.preventDefault();
+          var y = c.sec.getBoundingClientRect().top + window.pageYOffset - HEADER_OFFSET;
+          if (y < 0) y = 0;
+          try { window.scrollTo({ top: y, behavior: prefersReduced ? 'auto' : 'smooth' }); }
+          catch (_e) { window.scrollTo(0, y); }
+          activate(c.id);
+          c.sec.setAttribute('tabindex', '-1');
+          try { c.sec.focus({ preventScroll: true }); } catch (_e2) {}
+          if (window.history && history.replaceState) {
+            history.replaceState(null, '', '#' + c.id);
+          }
+        });
+      });
+
+      if (!('IntersectionObserver' in window)) { activate(chapters[0].id); return; }
+
+      // Scroll-spy: a zero-height "activation line" ~32% down the viewport. The
+      // section straddling that line is current. Because a section keeps
+      // straddling the line until its successor reaches it, this stays correct
+      // through sections of ANY height and in both scroll directions — unlike a
+      // top-band observer, which goes stale inside a section taller than the
+      // band (its top can cross the line without firing an event).
+      var activeId = chapters[0].id;
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){ if (en.isIntersecting) activeId = en.target.id; });
+        activate(activeId);
+      }, { rootMargin: '-32% 0px -68% 0px', threshold: 0 });
+      chapters.forEach(function(c){ io.observe(c.sec); });
+
+      // Tail: the final section usually can't scroll its top up to the line
+      // (the page bottoms out first), so light the last chapter once the footer
+      // — the end of the page — comes into view. Without this the last chapter
+      // would never activate.
+      var footer = document.querySelector('.mh-footer');
+      if (footer) {
+        new IntersectionObserver(function(entries){
+          entries.forEach(function(en){
+            if (en.isIntersecting) { activeId = lastId; activate(lastId); }
+          });
+        }, { threshold: 0 }).observe(footer);
+      }
+      activate(activeId);
+    });
+  }
+  if (document.readyState !== 'loading') bindChapterNav();
+  else document.addEventListener('DOMContentLoaded', bindChapterNav);
+  MH.bindChapterNav = bindChapterNav;
 
   // === Tactile spring-physics micro-interactions (UI 1.4 — inspired by Family) ===
   // A restrained spring layer on primary buttons, selectable cards and toggles:
@@ -10214,6 +10427,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
         active=active,
         render_progress_js=_RENDER_PROGRESS_JS,
         dock=dock,
+        chapter_nav_html=chapter_nav_html,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
         signed_in=bool(signed_in_pid),
@@ -11406,7 +11620,7 @@ def create_app() -> Flask:
         demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
 
         hero_html = (
-            f'<section class="mh-hero" data-lane="{lane_no}">'
+            f'<section class="mh-hero" id="mh-ch-overview" data-lane="{lane_no}">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
             f"<h1>{hero_h1}</h1>"
             f'<p class="lede">{_h(hero_lede)}</p>'
@@ -11491,7 +11705,7 @@ def create_app() -> Flask:
             ),
         ]
         steps_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section" id="mh-ch-workflow">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">The workflow</span></div>'
             + _reveal_lines(
                 ["From the results sheet to", '<em class="editorial">posting-ready</em>']
@@ -11529,7 +11743,7 @@ def create_app() -> Flask:
             " 6  Bauer, Jonas      13  HAR   56.10"
         )
         before_after_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section" id="mh-ch-transformation">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">The transformation</span></div>'
             + _reveal_lines(
                 [
@@ -11599,7 +11813,7 @@ def create_app() -> Flask:
         # U.5 scroll-reveal helper so it surfaces line-by-line like every
         # other landing section. Inspired by Umbrel.
         bento_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section" id="mh-ch-engine">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
             + _reveal_lines(
                 [
@@ -11814,7 +12028,7 @@ def create_app() -> Flask:
             + "</div></article>"
         )
         frames_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section" id="mh-ch-feed">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">In the feed</span></div>'
             + _reveal_lines(
                 [
@@ -11842,7 +12056,7 @@ def create_app() -> Flask:
         # product story doesn't change between fresh visitors and pinned
         # tenants; this is the "who it's for" reassurance block.
         audience_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section" id="mh-ch-audience">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
             + _reveal_lines(
                 [
@@ -11877,7 +12091,7 @@ def create_app() -> Flask:
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
         promise_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section" id="mh-ch-promise">'
             '<div class="mh-promise">'
             + _reveal_lines(
                 ["Human in the loop,", "<em>by design</em>."],
@@ -11910,7 +12124,7 @@ def create_app() -> Flask:
         # stripe accent so the page resolves with the same chrome.
         if prof and prof.is_ready():
             final_cta_html = (
-                '<section class="mh-final-cta mh-reveal">'
+                '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
                 "<div>"
                 + _reveal_lines(
                     ["Next weekend's meet,", "<em>ready</em> in a sitting."],
@@ -11928,7 +12142,7 @@ def create_app() -> Flask:
             )
         else:
             final_cta_html = (
-                '<section class="mh-final-cta mh-reveal">'
+                '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
                 "<div>"
                 + _reveal_lines(
                     ["A minute to set up.", "<em>Then</em> every week is easier."],
@@ -11985,6 +12199,23 @@ def create_app() -> Flask:
         # render (diagram, then the inline-thumbnail headline, then the steps).
         pipeline_html = _pipeline_diagram_section_html() + pipeline_html
 
+        # UI 1.29 — sticky chaptered scroll-spy nav. Each (anchor-id, label)
+        # maps to a section id set above; _layout renders the sticky side rail
+        # and the IntersectionObserver scroll-spy wires the active state. The
+        # rail only appears on wide desktop viewports (where there is gutter
+        # room) and degrades to a plain in-page anchor list without JS.
+        home_chapters = [
+            ("mh-ch-overview", "Overview"),
+            ("mh-ch-how", "How it works"),
+            ("mh-ch-workflow", "The workflow"),
+            ("mh-ch-transformation", "Transformation"),
+            ("mh-ch-engine", "What it does"),
+            ("mh-ch-feed", "In the feed"),
+            ("mh-ch-audience", "Who it's for"),
+            ("mh-ch-promise", "Our promise"),
+            ("mh-ch-start", "Get started"),
+        ]
+
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -12000,6 +12231,7 @@ def create_app() -> Flask:
             + promise_html
             + final_cta_html,
             active="home",
+            chapters=home_chapters,
         )
 
     # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----

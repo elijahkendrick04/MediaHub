@@ -306,7 +306,7 @@ def pipeline_diagram_section_html() -> str:
     test. Carries ``mh-reveal`` so it joins the existing scroll-reveal system.
     """
     return (
-        '<section class="mh-section mh-reveal mh-pl-section" aria-labelledby="mh-pl-title">'
+        '<section class="mh-section mh-reveal mh-pl-section" id="mh-ch-how" aria-labelledby="mh-pl-title">'
         '<div class="mh-section-eyebrow-strip"><span class="label">How it works</span></div>'
         '<h2 class="mh-section-title" id="mh-pl-title">'
         'The whole pipeline, <em class="editorial">at a glance</em>.</h2>'
