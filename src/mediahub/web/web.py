@@ -7771,6 +7771,11 @@ def _theme_seed_style_block() -> str:
 # via `setProgress` and the bar tracks the actual work. The number is monotonic
 # and never claims "done" before the artefact exists.
 #
+# UI1.26 — every renderProgress wait also spawns a cursor-anchored mirror via
+# MH.cursorReadout (ui-kit.js): a small "NN% · phase" chip that follows the
+# pointer during the wait and disappears on complete()/stop(). It is opt-out
+# (opts.cursor === false) and degrades safely if ui-kit.js hasn't loaded yet.
+#
 # Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
 # kept as a module constant so tests can exercise the controller directly.
 _RENDER_PROGRESS_JS = """
@@ -7803,6 +7808,13 @@ _RENDER_PROGRESS_JS = """
     var fillEl= container.querySelector('.mh-render-prog-fill');
     var labEl = container.querySelector('.mh-render-prog-label');
     var subEl = container.querySelector('.mh-render-prog-sub');
+    // UI1.26 — a cursor-anchored mirror of this readout: a small "NN% · phase"
+    // chip that follows the pointer through the wait and vanishes on completion.
+    // MH.cursorReadout ships in the deferred ui-kit.js and is always loaded by
+    // the time a user triggers a render; opt out with opts.cursor === false.
+    var cursor = (opts.cursor !== false && MH.cursorReadout)
+      ? MH.cursorReadout({ label: opts.label || 'Rendering', accent: accent, percent: 0 })
+      : null;
     var raf = window.requestAnimationFrame || function(cb){ return setTimeout(function(){ cb(Date.now()); }, 32); };
     var start = Date.now();
     var cur = 0, floor = 0, lastShown = -1;
@@ -7811,12 +7823,12 @@ _RENDER_PROGRESS_JS = """
       if (v < cur) v = cur;   // monotonic — never tick backwards on a stale frame
       cur = v;
       var shown = Math.floor(v);
-      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); }
+      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); if (cursor) cursor.set(shown); }
       fillEl.style.width = v.toFixed(1) + '%';
       if (root) root.setAttribute('aria-valuenow', String(Math.round(v)));
     }
     function setText(label, sub){
-      if (label != null) labEl.textContent = label;
+      if (label != null) { labEl.textContent = label; if (cursor) cursor.status(label); }
       if (sub != null) subEl.textContent = sub;
     }
     setText(opts.label || 'Rendering', opts.sub || '');
@@ -7828,6 +7840,7 @@ _RENDER_PROGRESS_JS = """
         paint(finishFrom + (100 - finishFrom) * t);
         if (t >= 1){
           stopped = true; paint(100);
+          if (cursor) cursor.done();
           if (finishCb) setTimeout(finishCb, 170);
           return;
         }
@@ -7848,7 +7861,7 @@ _RENDER_PROGRESS_JS = """
         if (stopped || finishing){ if (cb) cb(); return; }
         finishing = true; finishFrom = cur; finishStart = Date.now(); finishCb = cb || null;
       },
-      stop: function(){ stopped = true; }
+      stop: function(){ stopped = true; if (cursor) cursor.done(); }
     };
   };
 })();
@@ -12641,6 +12654,9 @@ def create_app() -> Flask:
   function show(el, msg){ el.textContent = msg; el.hidden = false; }
   function hide(el){ el.hidden = true; }
   var lastPct = 0;
+  // UI1.26 — cursor-anchored readout for the (long) site-fetch ingest. Created
+  // when the fetch starts, fed the real percent each poll, removed on done/error.
+  var cursor = null;
   function setPct(p){
     if (typeof p !== 'number' || isNaN(p)) return;
     // Monotonic: never let the bar jump backwards on a stale poll.
@@ -12648,12 +12664,14 @@ def create_app() -> Flask:
     lastPct = p;
     if (barWrap) { barWrap.hidden = false; barWrap.setAttribute('aria-valuenow', String(p)); }
     if (barFill) barFill.style.width = p + '%';
+    if (cursor) cursor.set(p);
   }
   function go(){
     var url = (input.value || '').trim();
     hide(errEl);
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
+    cursor = (window.MH && MH.cursorReadout) ? MH.cursorReadout({ label: 'Fetching results', percent: 3 }) : null;
     lastPct = 0; setPct(3);
     var fd = new FormData(); fd.append('url', url);
     fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__', 'Accept': 'application/json' }, body: fd })
@@ -12663,16 +12681,17 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, e.message); });
+      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, e.message); });
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
         if (typeof j.percent === 'number') setPct(j.percent);
-        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, j.error || 'The fetch failed.'); return; }
+        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
+        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, j.error || 'The fetch failed.'); return; }
         show(statusEl, j.progress || 'Reading the site\\u2026');
+        if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
       }).catch(function(){ setTimeout(tick, 2500); });
     };
