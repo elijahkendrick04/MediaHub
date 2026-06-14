@@ -748,43 +748,6 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   .mh-hero .mh-hero-meta { animation: none; }
 }
 
-/* STEP CARDS — adds an icon slot above the step number. The base
-   layer's .mh-step survives unchanged; this is purely additive. */
-.mh-step {
-  position: relative;
-  transition: transform var(--dur-med) var(--ease-out-quick),
-              border-color var(--dur-med) var(--ease-out-quick);
-}
-.mh-step:hover { transform: translateY(-2px); border-color: var(--rule); }
-.mh-step .mh-step-icon {
-  width: 28px; height: 28px;
-  color: var(--ink-muted);
-  margin-bottom: var(--sp-3);
-  display: block;
-  opacity: 0.85;
-  transition: color var(--dur-fast) var(--ease-out-quick),
-              transform var(--dur-fast) var(--ease-out-quick);
-}
-.mh-step:hover .mh-step-icon { color: var(--lane); transform: translateY(-1px); }
-.mh-step .mh-step-foot {
-  margin-top: var(--sp-4);
-  padding-top: var(--sp-3);
-  border-top: 1px dashed var(--hairline);
-  font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.mh-step .mh-step-foot::before {
-  content: '';
-  width: 18px; height: 1px;
-  background: var(--lane);
-}
-
 /* BENTO FEATURE GRID (UI 1.2) — replaces the old uniform three-card
    sample-output row on the logged-out home. A varied-weight bento of
    capability tiles, each carrying its own mini-visual: a story card

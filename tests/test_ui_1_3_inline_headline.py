@@ -123,7 +123,10 @@ class TestHomeHeadline:
         body = self._home(client)
         i_hero = body.find('class="mh-hero"')
         i_band = body.find('class="mh-pipeline"')
-        i_steps = body.find('class="mh-steps')
+        # The workflow section is now the UI 1.7 pinned-panel scrollytelling.
+        # Anchor on the HTML class="…" form (the bare name also appears in the
+        # injected <style>, which would order by stylesheet, not DOM, position).
+        i_steps = body.find('class="mh-scrolly-grid"')
         assert -1 < i_hero < i_band < i_steps, (i_hero, i_band, i_steps)
 
     def test_all_four_thumbs_inlined(self, client):
