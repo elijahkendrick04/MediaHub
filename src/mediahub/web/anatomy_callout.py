@@ -51,7 +51,7 @@ _CLUB = "Riverside SC"
 _SWIMMER = "Tom Davies"
 _EVENT = "100m Freestyle"
 _TIME = "52.41"
-_DELTA = "−0.74s"          # U+2212 MINUS SIGN — typographic, not a hyphen
+_DELTA = "−0.74s"  # U+2212 MINUS SIGN — typographic, not a hyphen
 _MOMENT = "Personal best"
 _CONF = 92
 _CAPTION = (
@@ -65,22 +65,63 @@ _SWATCHES = ("a", "b", "c", "d")
 # fx/fy are fractions of the card box, so the pins, the card content and the
 # connector endpoints all track one source of truth if the box is resized.
 _ANATOMY = [
-    (1, 0.150, 0.088, "L", "Your logo and palette, locked on",
-     "Read from your own club site, then pinned to every card."),
-    (2, 0.120, 0.205, "L", "A moment, detected and ranked",
-     "The engine found this swim and scored it worth posting."),
-    (3, 0.300, 0.340, "L", "Names and events, normalised",
-     "Cleaned and matched from your raw results file."),
-    (4, 0.280, 0.720, "L", "A confidence score on every card",
-     "How sure the engine is, before a human ever sees it."),
-    (5, 0.810, 0.085, "R", "Story format",
-     "1080×1920, rendered on our server — ready to post."),
-    (6, 0.430, 0.545, "R", "The headline time",
-     "Read straight from the results sheet, never guessed."),
-    (7, 0.755, 0.545, "R", "A verified personal best",
-     "Checked against this swimmer’s own season history."),
-    (8, 0.545, 0.850, "R", "A caption in your voice",
-     "Written on-brand. Nothing posts without your approval."),
+    (
+        1,
+        0.150,
+        0.088,
+        "L",
+        "Your logo and palette, locked on",
+        "Read from your own club site, then pinned to every card.",
+    ),
+    (
+        2,
+        0.120,
+        0.205,
+        "L",
+        "A moment, detected and ranked",
+        "The engine found this swim and scored it worth posting.",
+    ),
+    (
+        3,
+        0.300,
+        0.340,
+        "L",
+        "Names and events, normalised",
+        "Cleaned and matched from your raw results file.",
+    ),
+    (
+        4,
+        0.280,
+        0.720,
+        "L",
+        "A confidence score on every card",
+        "How sure the engine is, before a human ever sees it.",
+    ),
+    (5, 0.810, 0.085, "R", "Story format", "1080×1920, rendered on our server — ready to post."),
+    (
+        6,
+        0.430,
+        0.545,
+        "R",
+        "The headline time",
+        "Read straight from the results sheet, never guessed.",
+    ),
+    (
+        7,
+        0.755,
+        0.545,
+        "R",
+        "A verified personal best",
+        "Checked against this swimmer’s own season history.",
+    ),
+    (
+        8,
+        0.545,
+        0.850,
+        "R",
+        "A caption in your voice",
+        "Written on-brand. Nothing posts without your approval.",
+    ),
 ]
 
 # Plain-language alternative announced to assistive tech (both SVGs are
@@ -203,19 +244,13 @@ def _card(box) -> str:
 
     # Swimmer name + event.
     nm_x, nm_y = P(0.080, 0.335)
-    parts.append(
-        f'<text class="mh-an-name" x="{nm_x:.1f}" y="{nm_y:.1f}">{_SWIMMER}</text>'
-    )
+    parts.append(f'<text class="mh-an-name" x="{nm_x:.1f}" y="{nm_y:.1f}">{_SWIMMER}</text>')
     ev_x, ev_y = P(0.080, 0.405)
-    parts.append(
-        f'<text class="mh-an-event" x="{ev_x:.1f}" y="{ev_y:.1f}">{_EVENT}</text>'
-    )
+    parts.append(f'<text class="mh-an-event" x="{ev_x:.1f}" y="{ev_y:.1f}">{_EVENT}</text>')
 
     # Headline time (the hero) + PB delta badge.
     tm_x, tm_y = P(0.080, 0.575)
-    parts.append(
-        f'<text class="mh-an-time" x="{tm_x:.1f}" y="{tm_y:.1f}">{_TIME}</text>'
-    )
+    parts.append(f'<text class="mh-an-time" x="{tm_x:.1f}" y="{tm_y:.1f}">{_TIME}</text>')
     dl_x, dl_y = P(0.620, 0.520)
     parts.append(
         f'<rect class="mh-an-delta-bg" x="{dl_x:.1f}" y="{dl_y - 22:.1f}" '
@@ -229,8 +264,7 @@ def _card(box) -> str:
     # Confidence chip + mini bar.
     cf_x, cf_y = P(0.080, 0.705)
     parts.append(
-        f'<text class="mh-an-conf-tx" x="{cf_x:.1f}" y="{cf_y:.1f}">'
-        f'CONFIDENCE {_CONF}%</text>'
+        f'<text class="mh-an-conf-tx" x="{cf_x:.1f}" y="{cf_y:.1f}">' f"CONFIDENCE {_CONF}%</text>"
     )
     bar_x, bar_y, bar_w = cf_x, cf_y + 12, w * 0.40
     parts.append(
@@ -306,9 +340,15 @@ def _svg_horizontal() -> str:
 
     body = (
         _card(box)
-        + '<g class="mh-an-lines">' + "".join(lines) + "</g>"
-        + '<g class="mh-an-pins">' + "".join(pins) + "</g>"
-        + '<g class="mh-an-callouts">' + "".join(callouts) + "</g>"
+        + '<g class="mh-an-lines">'
+        + "".join(lines)
+        + "</g>"
+        + '<g class="mh-an-pins">'
+        + "".join(pins)
+        + "</g>"
+        + '<g class="mh-an-callouts">'
+        + "".join(callouts)
+        + "</g>"
     )
     return _svg_shell("h", W, H, body)
 
