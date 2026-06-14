@@ -5097,6 +5097,69 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   .mh-footer-brand, .mh-footer-meta { justify-content: center; }
 }
 
+/* HUD READOUT — live local time + deployment/system status rail (UI 1.5).
+   A mono blueprint strip at the foot of the masthead that extends the header
+   ONLINE pill: a live local clock on the left, a deployment status line
+   (reachability · build · UTC reference) on the right. Fed by the same
+   /healthz poll the pill already runs plus a client-side clock — no new
+   backend surface. Sits inside .mh-footer so the print rule hides it too. */
+.mh-hud {
+  border-top: 1px solid var(--chrome);
+  background: var(--bg-deep);
+}
+.mh-hud-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 9px var(--sp-7);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-hud-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.mh-hud-group--system { flex-wrap: wrap; justify-content: flex-end; }
+.mh-hud-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.mh-hud-label { color: var(--ink-faint); }
+.mh-hud-val   { color: var(--ink-dim); }
+.mh-hud-clock { font-variant-numeric: tabular-nums; letter-spacing: 0.12em; }
+.mh-hud-tz    { color: var(--ink-faint); }
+.mh-hud-sep   { color: var(--ink-faint); opacity: 0.55; }
+.mh-hud-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-faint);
+  flex-shrink: 0;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+/* Reachability states — toggled on .mh-hud by the shared /healthz poll,
+   mirroring the header pill so the two status indicators never disagree. */
+.mh-hud--online  .mh-hud-dot { background: #5EE39A; box-shadow: 0 0 8px rgba(94,227,154,0.55); }
+.mh-hud--offline .mh-hud-dot { background: #FF6B6B; box-shadow: 0 0 8px rgba(255,107,107,0.55); }
+.mh-hud--offline .mh-hud-status { color: #FF6B6B; }
+@media (max-width: 860px) {
+  .mh-hud-inner {
+    flex-direction: column;
+    gap: 7px;
+    padding: 9px var(--sp-5);
+  }
+  .mh-hud-group--system { justify-content: center; }
+}
+
 /* HEADINGS — clear hierarchy, no ambiguity between h1 and section title */
 h1 {
   font-family: var(--font-display);
@@ -8247,6 +8310,39 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       {{ provider_identity }}
     </div>
   </div>
+  {# UI 1.5 — Live local-time + system-status HUD readout. A mono blueprint
+     strip extending the header ONLINE pill: a live local clock + a deployment
+     status line (reachability · build · UTC), driven by the existing /healthz
+     poll and a client-side clock. No new backend surface. Decorative dot and
+     separators are aria-hidden; the status word carries the meaning, and the
+     clocks are <time> elements that update without a noisy aria-live region. #}
+  <div id="mh-hud" class="mh-hud">
+    <div class="mh-hud-inner">
+      <div class="mh-hud-group">
+        <span class="mh-hud-field">
+          <span class="mh-hud-label">Local</span>
+          <time id="mh-hud-clock" class="mh-hud-val mh-hud-clock">--:--:--</time>
+          <span id="mh-hud-tz" class="mh-hud-tz"></span>
+        </span>
+      </div>
+      <div class="mh-hud-group mh-hud-group--system">
+        <span class="mh-hud-field">
+          <span id="mh-hud-dot" class="mh-hud-dot" aria-hidden="true"></span>
+          <span id="mh-hud-status" class="mh-hud-val mh-hud-status">Connecting</span>
+        </span>
+        <span class="mh-hud-sep" aria-hidden="true">·</span>
+        <span class="mh-hud-field">
+          <span class="mh-hud-label">Build</span>
+          <span id="mh-hud-build" class="mh-hud-val">&mdash;</span>
+        </span>
+        <span class="mh-hud-sep" aria-hidden="true">·</span>
+        <span class="mh-hud-field">
+          <span class="mh-hud-label">UTC</span>
+          <time id="mh-hud-utc" class="mh-hud-val mh-hud-clock">--:--:--</time>
+        </span>
+      </div>
+    </div>
+  </div>
 </footer>
 <nav class="mh-bottomnav" aria-label="Primary (mobile)">
   <a href="{{ url_for('home') }}" class="{{ 'is-active' if active=='home' else '' }}" aria-label="Home">
@@ -8292,31 +8388,70 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
 <script>
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
+  /* Shared reachability poll — drives BOTH the header ONLINE pill and the
+     footer HUD readout (UI 1.5) from one /healthz fetch so the two status
+     indicators can never disagree. No new backend surface. */
+  function paint(online, version){
+    var dot = document.getElementById('backend-pill-dot');
+    var txt = document.getElementById('backend-pill-text');
+    if (dot && txt) {
+      dot.style.background = online ? '#5EE39A' : '#FF6B6B';
+      dot.style.boxShadow  = online ? '0 0 8px rgba(94,227,154,0.55)'
+                                    : '0 0 8px rgba(255,107,107,0.55)';
+      txt.textContent = online ? 'online' : 'offline';
+    }
+    var hud = document.getElementById('mh-hud');
+    if (hud) {
+      hud.classList.toggle('mh-hud--online', online);
+      hud.classList.toggle('mh-hud--offline', !online);
+      var st = document.getElementById('mh-hud-status');
+      if (st) st.textContent = online ? 'Online' : 'Offline';
+      var bd = document.getElementById('mh-hud-build');
+      if (bd && version) bd.textContent = version;
+    }
+  }
   function check(){
-    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
-      var ok = o.s === 200 && o.j && o.j.ok;
-      var dot = document.getElementById('backend-pill-dot');
-      var txt = document.getElementById('backend-pill-text');
-      if(!dot||!txt) return;
-      if (ok) {
-        dot.style.background = '#5EE39A';
-        dot.style.boxShadow  = '0 0 8px rgba(94,227,154,0.55)';
-        txt.textContent = 'online';
-      } else {
-        dot.style.background = '#FF6B6B';
-        dot.style.boxShadow  = '0 0 8px rgba(255,107,107,0.55)';
-        txt.textContent = 'offline';
-      }
-    }).catch(function(){
-      var dot = document.getElementById('backend-pill-dot');
-      var txt = document.getElementById('backend-pill-text');
-      if(!dot||!txt) return;
-      dot.style.background = '#FF6B6B';
-      dot.style.boxShadow  = '0 0 8px rgba(255,107,107,0.55)';
-      txt.textContent='offline';
-    });
+    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}})
+      .then(r=>r.json().then(j=>({s:r.status,j:j})))
+      .then(o=>{ paint(o.s === 200 && o.j && o.j.ok, o.j && o.j.version); })
+      .catch(function(){ paint(false); });
   }
   check(); setInterval(check, 30000);
+})();
+</script>
+<script>
+/* UI 1.5 — live local clock for the HUD readout. Pure client-side: ticks the
+   visitor's local time + a UTC reference every second, with a short timezone
+   label. Independent of the network so the clock keeps running even when
+   /healthz is unreachable. No aria-live, so the per-second updates never spam
+   a screen reader. */
+(function(){
+  var localEl = document.getElementById('mh-hud-clock');
+  var utcEl   = document.getElementById('mh-hud-utc');
+  var tzEl    = document.getElementById('mh-hud-tz');
+  if (!localEl && !utcEl) return;
+  function p(n){ return (n < 10 ? '0' : '') + n; }
+  if (tzEl) {
+    var tz = '';
+    try {
+      var parts = new Intl.DateTimeFormat([], {timeZoneName:'short'}).formatToParts(new Date());
+      for (var i = 0; i < parts.length; i++) { if (parts[i].type === 'timeZoneName') tz = parts[i].value; }
+    } catch (e) { tz = ''; }
+    tzEl.textContent = tz;
+  }
+  function tick(){
+    var d = new Date();
+    var iso = d.toISOString();
+    if (localEl) {
+      localEl.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+      localEl.setAttribute('datetime', iso);
+    }
+    if (utcEl) {
+      utcEl.textContent = p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+      utcEl.setAttribute('datetime', iso);
+    }
+  }
+  tick(); setInterval(tick, 1000);
 })();
 </script>
 <script>
