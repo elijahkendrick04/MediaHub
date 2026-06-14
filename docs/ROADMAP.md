@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `2f3ee7ceb` · Merge pull request #473: UI uplift — Aceternity + Refero design-system integration
+**Last updated:** 2026-06-14 · `e5704bc7c` · Merge pull request #532 from elijahkendrick04/claude/fix-u8-ui13-pipeline-and-ci-gate
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1516,11 +1516,11 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `71ec23f6a` | Fix U.8/UI1.3 pipeline_html collision + add application-suite CI gate |
 | 2026-06-14 | `e0783d17f` | Make web UI phone-friendly: kill horizontal scroll on mobile |
 | 2026-06-14 | `f87368501` | U.11 — outputs inside real Instagram platform frames |
 | 2026-06-14 | `dd1c90857` | Read British (YoB) results correctly; flag impossible event/time pairings; surface PB-lookup failure |
 | 2026-06-14 | `19ecc71ae` | U.8 — animated how-it-works pipeline diagram on the landing page |
 | 2026-06-14 | `28c3b2868` | Fix unreadable <select> dropdown options (light-on-light when open) |
 | 2026-06-14 | `a40346cad` | Fix U.5/U.15 conflict: make the before/after slider a reveal-lines section |
-| 2026-06-14 | `10be7fbce` | Add UI 1.3 — inline media thumbnails in a display headline |
 <!-- /ROADMAP:ACTIVITY -->
