@@ -9140,6 +9140,161 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
 
+  // === Tactile spring-physics micro-interactions (UI 1.4 — inspired by Family) ===
+  // A restrained spring layer on primary buttons, selectable cards and toggles:
+  // a subtle magnetic pull toward the cursor on hover, and a bouncy release on
+  // press. The physics is integrated here in vanilla JS and written out to three
+  // CSS custom properties (--mh-mag-x / --mh-mag-y / --mh-press); the composed
+  // transform lives in theme-components.css so there is one transform owner per
+  // element. Honours prefers-reduced-motion (the shared prefersReduced flag),
+  // needs PointerEvent + requestAnimationFrame, and only does the magnetic part
+  // under a fine (mouse / stylus) pointer where "hover" is meaningful. Anything
+  // unsupported degrades silently to the existing CSS :active feedback.
+  function bindSpring() {
+    if (prefersReduced) return;
+    if (!('PointerEvent' in window) || !('requestAnimationFrame' in window)) return;
+    var finePointer = !window.matchMedia ||
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+    // Underdamped spring constants, tuned restrained: a small, quick overshoot
+    // that settles fast. K = stiffness, ZETA = damping ratio (< 1 so it bounces),
+    // C = the matching damping coefficient.
+    var K = 360, ZETA = 0.62, C = 2 * Math.sqrt(K) * ZETA;
+    var PRESS_DOWN = 0.94;   // scale while held — a gentle dip, never a squash
+    var FOLLOW = 0.32;       // fraction of the cursor offset the pull tracks
+    var POP_KICK = 1.0;      // upward scale velocity for the toggle "pop" (~6%)
+
+    var moving = [];         // controllers currently in motion
+    var raf = 0, lastTs = 0;
+    function frame(ts) {
+      raf = 0;
+      var dt = lastTs ? Math.min(0.034, (ts - lastTs) / 1000) : 0.016;
+      lastTs = ts;
+      var still = [];
+      for (var i = 0; i < moving.length; i++) {
+        if (moving[i].step(dt)) still.push(moving[i]);
+      }
+      moving = still;
+      if (moving.length) raf = requestAnimationFrame(frame);
+      else lastTs = 0;
+    }
+    function wake(ctl) {
+      if (moving.indexOf(ctl) === -1) moving.push(ctl);
+      if (!raf) { lastTs = 0; raf = requestAnimationFrame(frame); }
+    }
+    function clamp(v, m) { return v < -m ? -m : (v > m ? m : v); }
+
+    // One controller per element: three independent springs (press scale, plus
+    // the x / y of the magnetic offset), integrated with a fixed sub-step so the
+    // feel is identical at 60 Hz and 120 Hz.
+    function Ctl(el, mag) {
+      this.el = el; this.mag = mag; this.cap = 5; this.capRead = false;
+      this.cur = { p: 1, x: 0, y: 0 };
+      this.vel = { p: 0, x: 0, y: 0 };
+      this.tgt = { p: 1, x: 0, y: 0 };
+    }
+    Ctl.prototype.step = function(dt) {
+      var SUB = 1 / 240, n = Math.max(1, Math.round(dt / SUB)), h = dt / n;
+      var c = this.cur, v = this.vel, t = this.tgt, axes = ['p', 'x', 'y'];
+      for (var s = 0; s < n; s++) {
+        for (var a = 0; a < 3; a++) {
+          var key = axes[a];
+          var accel = -K * (c[key] - t[key]) - C * v[key];
+          v[key] += accel * h;
+          c[key] += v[key] * h;
+        }
+      }
+      this.el.style.setProperty('--mh-press', c.p.toFixed(4));
+      if (this.mag) {
+        this.el.style.setProperty('--mh-mag-x', c.x.toFixed(2) + 'px');
+        this.el.style.setProperty('--mh-mag-y', c.y.toFixed(2) + 'px');
+      }
+      // Keep ticking while a spring still carries velocity or sits off-target.
+      return Math.abs(v.p) > 0.0008 || Math.abs(c.p - t.p) > 0.0006 ||
+             Math.abs(v.x) > 0.01 || Math.abs(c.x - t.x) > 0.02 ||
+             Math.abs(v.y) > 0.01 || Math.abs(c.y - t.y) > 0.02;
+    };
+
+    function attach(el, mag) {
+      if (el.__mhSpring) return;
+      // [data-mh-spring="press"] opts a wide surface out of the magnetic pull
+      // (a sideways slide reads as a glitch there) — press feedback only.
+      if (el.getAttribute && el.getAttribute('data-mh-spring') === 'press') mag = false;
+      if (!finePointer) mag = false;   // touch has no hover — magnetic is meaningless
+      var ctl = new Ctl(el, mag);
+      el.__mhSpring = ctl;
+      el.classList.add('mh-spring');
+
+      if (mag) {
+        el.addEventListener('pointermove', function(e) {
+          if (e.pointerType === 'touch') return;
+          // Resolve the restrained pull ceiling (the static --mh-mag-pull
+          // token) lazily on first hover — keeps page load free of a
+          // getComputedStyle pass over every bound control.
+          if (!ctl.capRead) {
+            var capRaw = parseFloat(getComputedStyle(el).getPropertyValue('--mh-mag-pull'));
+            if (!isNaN(capRaw)) ctl.cap = capRaw;
+            ctl.capRead = true;
+          }
+          var r = el.getBoundingClientRect();
+          ctl.tgt.x = clamp((e.clientX - (r.left + r.width / 2)) * FOLLOW, ctl.cap);
+          ctl.tgt.y = clamp((e.clientY - (r.top + r.height / 2)) * FOLLOW, ctl.cap);
+          wake(ctl);
+        });
+      }
+      el.addEventListener('pointerleave', function() {
+        ctl.tgt.x = 0; ctl.tgt.y = 0; ctl.tgt.p = 1; wake(ctl);
+      });
+      el.addEventListener('pointerdown', function() {
+        ctl.tgt.p = PRESS_DOWN; wake(ctl);
+      });
+      var release = function() { ctl.tgt.p = 1; wake(ctl); };
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', function() {
+        ctl.tgt.x = 0; ctl.tgt.y = 0; ctl.tgt.p = 1; wake(ctl);
+      });
+      // Keyboard parity: Space / Enter give the same press dip + spring release.
+      el.addEventListener('keydown', function(e) {
+        if ((e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') &&
+            ctl.tgt.p !== PRESS_DOWN) { ctl.tgt.p = PRESS_DOWN; wake(ctl); }
+      });
+      el.addEventListener('keyup', function(e) {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') release();
+      });
+    }
+
+    // Primary buttons, selectable cards and explicit opt-ins → magnetic + press.
+    // (Secondary / ghost / danger / approve / loading buttons keep their lighter
+    // CSS :active scale, so the spring stays reserved for the primary surfaces.)
+    var SEL_FULL = '.btn:not(.secondary):not(.ghost):not(.danger):not(.mh-wf-approve):not(.loading), .mh-template, [data-mh-spring]';
+    document.querySelectorAll(SEL_FULL).forEach(function(el) { attach(el, true); });
+
+    // Toggles — a native checkbox / radio inside a tap-target label. Press, plus
+    // a small "pop" the instant the value flips; no magnetic (these labels can be
+    // wide or inline, where a sideways pull would read as a glitch). :has() is
+    // wrapped so older engines fall back to the explicit .mh-choice labels.
+    var toggleSel = 'label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio])';
+    var toggles;
+    try { toggles = document.querySelectorAll(toggleSel); }
+    catch (e) { toggles = document.querySelectorAll('label.mh-choice'); }
+    toggles.forEach(function(label) {
+      if (label.__mhSpring) return;
+      attach(label, false);
+      var input = label.querySelector('input[type=checkbox], input[type=radio]');
+      if (input) {
+        input.addEventListener('change', function() {
+          var ctl = label.__mhSpring; if (!ctl) return;
+          // Kick the scale velocity upward so it rises past 1 then settles — a
+          // crisp tactile confirmation that the toggle registered.
+          ctl.tgt.p = 1; ctl.vel.p = POP_KICK; wake(ctl);
+        });
+      }
+    });
+  }
+  if (document.readyState !== 'loading') bindSpring();
+  else document.addEventListener('DOMContentLoaded', bindSpring);
+  MH.bindSpring = bindSpring;
+
   // === Atlas-style 3D tilt on the sample output cards (U.16) ===
   // Pointer-tracked perspective tilt + a sheen that follows the cursor,
   // inspired by atlascard.com. The transform is written inline (so it

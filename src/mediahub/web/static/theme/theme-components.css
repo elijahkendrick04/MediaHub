@@ -3527,3 +3527,69 @@ kbd {
 @media (forced-colors: active) {
   .mh-hover-preview { display: none !important; }
 }
+
+/* =====================================================================
+   UI 1.4 — TACTILE SPRING-PHYSICS MICRO-INTERACTIONS
+   (inspired by Family, family.co)
+   ---------------------------------------------------------------------
+   A restrained spring layer on the surfaces a club actually presses:
+   primary buttons, selectable cards, and toggles. Two effects, both kept
+   understated so the editorial tone survives:
+
+     • magnetic hover — the control eases a few px toward the cursor (the
+       pull is capped at --mh-mag-pull) so it feels alive under a fine
+       pointer, replacing the flat 1px :hover lift on these surfaces.
+     • bouncy press   — pressing dips the scale and the release springs
+       back through a small overshoot (real underdamped physics, not a
+       canned keyframe).
+
+   The motion is integrated in vanilla JS (bindSpring() in _layout) which
+   writes three custom properties every animation frame — --mh-mag-x / y
+   (px) and --mh-press (unitless scale). CSS only *composes* them into one
+   transform here, so there is a single transform owner per element and
+   nothing fights the per-frame JS write. transform is therefore
+   deliberately kept OUT of the transition list below; the JS spring — not
+   a CSS transition — is the animation.
+
+   JS adds .mh-spring only when PointerEvent + requestAnimationFrame exist
+   AND the user has not asked for reduced motion, so the whole block is
+   additionally gated on (prefers-reduced-motion: no-preference). Under
+   "reduce" the rule never applies and every surface keeps its existing
+   CSS :hover / :active feedback untouched — no surface loses its press
+   affordance.
+   ===================================================================== */
+.mh-spring {
+  /* Seed the custom properties so the var() composition resolves cleanly
+     on the very first frame, before any JS has written to them. */
+  --mh-press: 1;
+  --mh-mag-x: 0px;
+  --mh-mag-y: 0px;
+  /* The magnetic pull ceiling. Restrained on purpose: a few pixels reads
+     as "tactile", more reads as "toy". The JS clamps to this value. */
+  --mh-mag-pull: 5px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mh-js .mh-spring,
+  .mh-js .mh-spring:hover,
+  .mh-js .mh-spring:active {
+    /* Single transform owner: magnetic translate + press scale. The
+       :hover / :active variants raise specificity to (0,3,0) so this
+       always wins over .btn:hover, .btn:active, .mh-template:hover and
+       the secondary/danger :active scales — JS keeps full ownership of
+       the transform in every interaction state. */
+    transform:
+      translate3d(var(--mh-mag-x, 0px), var(--mh-mag-y, 0px), 0)
+      scale(var(--mh-press, 1));
+    transform-origin: center;
+    will-change: transform;
+    backface-visibility: hidden;
+    /* Colour / shadow / border feedback still animates via CSS; transform
+       is intentionally absent here so the JS spring is never double-driven
+       by a competing CSS transition. */
+    transition:
+      background   var(--dur-fast) var(--ease-out-quick),
+      box-shadow   var(--dur-fast) var(--ease-out-quick),
+      border-color var(--dur-fast) var(--ease-out-quick),
+      color        var(--dur-fast) var(--ease-out-quick);
+  }
+}
