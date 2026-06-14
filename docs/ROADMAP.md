@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `73b96060d` · Merge PR #570: Build UI 1.9 — multi-select + bulk actions (Media library + review queue)
+**Last updated:** 2026-06-14 · `e6b688558` · Merge pull request #562 from elijahkendrick04/claude/trusting-johnson-8swssf
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -146,7 +146,6 @@ sequence it or merge with care.
 - **UI 1.16** · Phase 1 (Product polish) — Dashboard activity feed (from GitHub): recent runs/approvals/exports shown as cards with status badges, relative timestamps, and expandable detail; server-rendered from the existing audit log · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.18** · Phase 1 (Product polish) — Inspector/properties panel (from Sketch): a lightweight side panel to tweak a generated card before approval — edit caption text, swap brand palette swatch, toggle elements, adjust crop; posted back to existing Flask card-edit routes · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.29** · Phase 1 (Product polish) — Sticky chaptered scroll-spy nav (from Linear): a side chapter/section nav that highlights the current section on long pages and the how-it-works guide; pure JS IntersectionObserver, CSS sticky positioning · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.30** · Phase 1 (Product polish) — AI 'weekend at a glance' summary panel (from Mixpanel/Fey): an at-a-glance summary card of the meet's key story (top swims, PBs, medals) using MediaHub's existing summarisation pipeline — no external API, no new LLM call beyond what the pack already made · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)

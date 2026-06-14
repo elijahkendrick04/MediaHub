@@ -93,6 +93,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **UI 1.27** · Phase 1 (Product polish) — Horizontal drag/scroll gallery (from Fey/Sketch): a mouse-draggable horizontal carousel for the Media Library and the landing sample-output showcase; vanilla JS pointer-event drag, CSS `overflow-x: auto` snap · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon *(completed 2026-06-14)*
 - ✅ **UI 1.9** · Phase 1 (Product polish) — Multi-select + bulk actions (from Frame.io): checkboxes + select-all + bulk approve/export/delete in the Media Library and review queue; pure HTML form multi-select with progressive JS enhancement · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **UI 1.22** · Phase 1 (Product polish) — FAQ accordion (from Limitless/Status): expandable Q&A section on the landing; pure HTML `<details>`/`<summary>` with CSS animation, no JS library · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
