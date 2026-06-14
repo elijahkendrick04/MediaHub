@@ -164,26 +164,26 @@ class TestHomeSignedOut:
     def test_every_section_headline_is_a_reveal_lines_block(self, app):
         body = _home(app)
         # steps + before/after + bento + frames + audience + promise +
-        # final-CTA(fresh) = 7 reveal-lines headlines. (The before/after slider
-        # and the U.11 frames carousel both sit on the U.5 pattern, so no plain
-        # section-title survives.)
-        assert body.count("mh-reveal-lines") >= 7
+        # UI 1.22 FAQ + final-CTA(fresh) = 8 reveal-lines headlines. (The
+        # before/after slider and the U.11 frames carousel both sit on the U.5
+        # pattern, so no plain section-title survives.)
+        assert body.count("mh-reveal-lines") >= 8
         # The legacy single-run section title (no reveal-lines) is gone.
         assert '<h2 class="mh-section-title">' not in body
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
     def test_line_spans_two_per_headline(self, app):
-        # Each of the 7 reveal-lines headlines is split into exactly two
+        # Each of the 8 reveal-lines headlines is split into exactly two
         # editorial lines (steps, before/after, bento, frames, audience,
-        # promise, final-CTA) → 14 line spans.
+        # promise, UI 1.22 FAQ, final-CTA) → 16 line spans.
         body = _home(app)
-        assert body.count('<span class="mh-line">') == 14
+        assert body.count('<span class="mh-line">') == 16
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
         body = _home(app)
-        # The five content-section eyebrows now reveal (were static before):
-        # steps, before/after, bento, frames, audience.
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 5
+        # The six content-section eyebrows now reveal (were static before):
+        # steps, before/after, bento, frames, audience, UI 1.22 FAQ.
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 6
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body
