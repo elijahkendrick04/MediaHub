@@ -6316,6 +6316,28 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   display: inline;
   -webkit-text-fill-color: var(--medal);
 }
+/* U.9 — cycling hero accent word. The signed-out hero's content-type noun is
+   the gold serif-italic accent (.editorial, above) and crossfades through what
+   MediaHub makes (stories / reels / graphics / captions). The words stack in a
+   single inline-grid cell so the box auto-sizes to the widest word and the
+   trailing "out." never reflows as the word changes. The crossfade is pure CSS
+   (opacity); a tiny inline script toggles .is-active. With no JavaScript the
+   server-rendered first word stays shown; the global prefers-reduced-motion
+   block below (and the script's matchMedia guard) keep it static when less
+   motion is asked for. */
+.mh-hero h1 .mh-word-cycle {
+  display: inline-grid;
+  justify-items: center;
+  vertical-align: baseline;
+}
+.mh-hero h1 .mh-word-cycle-item {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.mh-hero h1 .mh-word-cycle-item.is-active {
+  opacity: 1;
+}
 /* Lede reads in the body face: the headline's display-caps + serif-italic
    pairing is the one editorial move per hero — a serif lede on top of it
    made four typographic voices compete in the first screenful. */
@@ -6752,6 +6774,59 @@ _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
 BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
+
+
+# U.9 — cycling hero accent word. The content types MediaHub makes, in the
+# order the signed-out landing hero crossfades through them. The first word is
+# the one the server renders active (so it shows with no JavaScript and is the
+# one a screen reader announces); the rest are aria-hidden decorative cycles.
+_HERO_CONTENT_WORDS = ("stories", "reels", "graphics", "captions")
+
+# The script that drives the crossfade. It only toggles `.is-active`; the
+# crossfade itself is the CSS opacity transition on `.mh-word-cycle-item`. It
+# is a no-op when the visitor asks for reduced motion (matchMedia guard) and
+# when there is nothing to cycle, and it pauses while the tab is backgrounded
+# so it isn't running a timer off-screen. Inline is fine: the CSP allows
+# 'unsafe-inline' scripts and the rest of the app already uses inline scripts.
+_HERO_WORD_CYCLE_JS = """<script>
+(function(){
+  var mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (mq && mq.matches) return;
+  var box = document.querySelector('[data-mh-word-cycle]');
+  if (!box) return;
+  var items = box.querySelectorAll('.mh-word-cycle-item');
+  if (items.length < 2) return;
+  var i = 0, timer = null;
+  function step(){
+    items[i].classList.remove('is-active');
+    i = (i + 1) % items.length;
+    items[i].classList.add('is-active');
+  }
+  function start(){ if (timer === null) { timer = window.setInterval(step, 2600); } }
+  function stop(){ if (timer !== null) { window.clearInterval(timer); timer = null; } }
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden) { stop(); } else { start(); }
+  });
+  start();
+})();
+</script>"""
+
+
+def _hero_word_cycle_html() -> str:
+    """The signed-out hero's cycling content-type accent (U.9).
+
+    Returns the ``<span class="mh-word-cycle">`` carrying one
+    ``.editorial`` (gold serif-italic) word per content type. The first word
+    is rendered ``is-active`` so it is the one shown with no JavaScript and the
+    one a screen reader reads; the rest are ``aria-hidden`` decorative cycles.
+    The words are fixed constants — no user input — so no escaping is needed.
+    """
+    spans = []
+    for k, word in enumerate(_HERO_CONTENT_WORDS):
+        cls = "editorial mh-word-cycle-item" + (" is-active" if k == 0 else "")
+        hidden = "" if k == 0 else ' aria-hidden="true"'
+        spans.append(f'<span class="{cls}"{hidden}>{word}</span>')
+    return '<span class="mh-word-cycle" data-mh-word-cycle>' + "".join(spans) + "</span>"
 
 
 def _render_markdown(text: str) -> str:
@@ -9998,6 +10073,10 @@ def create_app() -> Flask:
         # Lane-number watermark sits behind the headline. The org name stays
         # in default ink (no .grad span) so the only lane-yellow on the page
         # is the live dot + the CTA. Editorial italic does the emphasis work.
+        # U.9 — only the signed-out hero cycles its content-type accent word;
+        # the returning-user "Ready to file." greeting stays static, so the
+        # cycling script ships only when the rotator is actually on the page.
+        word_cycle_js = ""
         if prof and prof.is_ready():
             # Returning user with a pinned org.
             hero_h1 = f'{_h(prof.display_name)}.<br><em class="editorial">Ready</em> to file.'
@@ -10018,7 +10097,10 @@ def create_app() -> Flask:
             lane_no = "04"
         else:
             # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            hero_h1 = 'Results in.<br><em class="editorial">On-brand</em> stories out.'
+            # U.9 — the content-type noun is now the gold serif-italic accent
+            # and crossfades through stories / reels / graphics / captions.
+            hero_h1 = "Results in.<br>On-brand " + _hero_word_cycle_html() + " out."
+            word_cycle_js = _HERO_WORD_CYCLE_JS
             hero_lede = (
                 "MediaHub reads your club website, social profiles, and brand "
                 "guidelines, then writes captions, builds graphics, and renders "
@@ -10095,6 +10177,7 @@ def create_app() -> Flask:
             f"{meta_html}"
             f"{demo_html}"
             "</section>"
+            f"{word_cycle_js}"
         )
 
         # --- Four-step explainer — sport newsroom workflow ---
