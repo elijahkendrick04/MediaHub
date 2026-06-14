@@ -50,8 +50,19 @@ DEFAULT_WEEKS = 53
 # Abbreviations indexed by ``date.weekday()`` (Monday-first) and by month number.
 _DOW_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _MONTH_ABBR = (
-    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
 )
 
 # Weekday rows that get a left-margin label (Mon / Wed / Fri — the GitHub set).
@@ -308,9 +319,7 @@ def render_svg(
     # Month labels along the top.
     for col_idx, label in grid.month_labels:
         x = pad_left + col_idx * step
-        parts.append(
-            f'<text class="mh-cad-mon" x="{x}" y="{pad_top - 6}">{label}</text>'
-        )
+        parts.append(f'<text class="mh-cad-mon" x="{x}" y="{pad_top - 6}">{label}</text>')
 
     # Weekday labels down the left (Mon / Wed / Fri).
     for d in range(7):
@@ -393,8 +402,7 @@ def cadence_panel_html(
         (f"{grid.longest_streak:,}", "day streak"),
     ]
     metrics_html = "".join(
-        f'<span class="mh-cad-metric"><b>{value}</b> {label}</span>'
-        for value, label in metrics
+        f'<span class="mh-cad-metric"><b>{value}</b> {label}</span>' for value, label in metrics
     )
 
     if total == 0:
