@@ -5868,6 +5868,155 @@ a.card:hover, .card[data-interactive]:hover {
   border-radius: 50%; animation: mh-spin 0.6s linear infinite;
 }
 
+/* ============================================================================
+   COMMAND PALETTE / Cmd-K (UI 1.15) — fast keyboard navigation + quick actions.
+   A modal "search or jump to…" overlay opened with ⌘K / Ctrl-K (or "/" when not
+   typing). Vanilla JS, no framework. The command list is server-rendered with
+   url_for() so it is authoritative and gated by sign-in / feature flags; the
+   client only filters and navigates. ARIA combobox-over-listbox pattern with
+   aria-activedescendant, a focus trap, and prefers-reduced-motion respected.
+   ============================================================================ */
+/* Nav affordance — a compact "search box" pill that advertises the shortcut.
+   Hidden until JS is up (progressive enhancement): a no-JS user never sees a
+   dead button, and every nav link still works without it. */
+.mh-cmdk-trigger { display: none; }
+.mh-js .mh-cmdk-trigger {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 7px 9px 7px 12px;
+  background: var(--surface); border: 1px solid var(--chrome);
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted); cursor: pointer;
+  font-family: var(--font-body); font-size: 13px; line-height: 1;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.mh-js .mh-cmdk-trigger:hover { border-color: var(--border-h); color: var(--ink); background: var(--surface-2); }
+.mh-js .mh-cmdk-trigger:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-cmdk-trigger-icon { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+.mh-cmdk-trigger-label { white-space: nowrap; }
+.mh-cmdk-trigger-kbd {
+  display: inline-flex; align-items: center; gap: 1px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  background: var(--surface-3); border: 1px solid var(--chrome);
+  border-radius: var(--radius-sm); padding: 2px 6px;
+}
+@media (max-width: 1080px) { .mh-cmdk-trigger-label { display: none; } }
+
+/* Overlay + panel */
+body.mh-cmdk-open { overflow: hidden; }
+.mh-cmdk {
+  position: fixed; inset: 0; z-index: 10050;
+  display: none; align-items: flex-start; justify-content: center;
+  padding: clamp(48px, 14vh, 160px) 18px 18px;
+  background: rgba(6,7,12,0.66);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+}
+.mh-cmdk.is-open { display: flex; animation: mh-fade-in 0.16s ease-out; }
+.mh-cmdk-panel {
+  width: 100%; max-width: 580px;
+  max-height: min(62vh, 560px);
+  display: flex; flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3), 0 0 0 1px rgba(0,0,0,0.4);
+  overflow: hidden;
+  animation: mh-cmdk-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes mh-cmdk-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+/* Search row */
+.mh-cmdk-search {
+  display: flex; align-items: center; gap: 12px;
+  padding: 15px 18px; border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+.mh-cmdk-search-icon { width: 19px; height: 19px; color: var(--ink-faint); flex-shrink: 0; }
+.mh-cmdk-input {
+  flex: 1; min-width: 0;
+  background: transparent; border: 0; outline: 0; padding: 0;
+  color: var(--ink); font-family: var(--font-body);
+  font-size: 17px; line-height: 1.3;
+}
+.mh-cmdk-input::placeholder { color: var(--ink-faint); }
+.mh-cmdk-search-esc {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-faint);
+  border: 1px solid var(--chrome); border-radius: var(--radius-sm);
+  padding: 3px 7px; flex-shrink: 0;
+}
+/* Results list */
+.mh-cmdk-results { overflow-y: auto; padding: 7px; flex: 1; scroll-padding: 8px 0; }
+.mh-cmdk-group-label {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
+  padding: 11px 12px 6px;
+}
+.mh-cmdk-group-label.is-hidden { display: none; }
+.mh-cmdk-item {
+  display: flex; align-items: center; gap: 13px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  cursor: pointer; color: var(--ink-dim);
+  border-left: 2px solid transparent;
+  scroll-margin: 8px 0;
+}
+.mh-cmdk-item.is-hidden { display: none; }
+.mh-cmdk-item-icon {
+  width: 18px; height: 18px; flex-shrink: 0; color: var(--ink-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.mh-cmdk-item-icon svg { width: 18px; height: 18px; }
+.mh-cmdk-item-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.mh-cmdk-item-label { color: var(--ink); font-size: 14px; white-space: nowrap; }
+.mh-cmdk-item-hint {
+  color: var(--ink-faint); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mh-cmdk-item-go {
+  font-family: var(--font-mono); font-size: 13px; color: var(--lane);
+  opacity: 0; flex-shrink: 0;
+}
+/* Active row — highlighted by keyboard nav or hover. The accent left-bar +
+   raised surface read clearly without relying on colour alone (the ↵ glyph
+   and the brightened icon reinforce it). */
+.mh-cmdk-item.is-active {
+  background: var(--surface-3); border-left-color: var(--lane);
+  color: var(--ink);
+}
+.mh-cmdk-item.is-active .mh-cmdk-item-icon { color: var(--lane); }
+.mh-cmdk-item.is-active .mh-cmdk-item-go { opacity: 1; }
+.mh-cmdk-empty {
+  padding: 30px 18px; text-align: center; color: var(--ink-faint);
+  font-size: 13px; font-family: var(--font-mono); letter-spacing: 0.04em;
+}
+.mh-cmdk-empty.is-hidden { display: none; }
+/* Footer legend */
+.mh-cmdk-foot {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 9px 16px; border-top: 1px solid var(--hairline);
+  background: var(--bg-deep); flex-shrink: 0;
+}
+.mh-cmdk-foot-hint {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.mh-cmdk-foot-hint kbd {
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim);
+  background: var(--surface-3); border: 1px solid var(--chrome);
+  border-radius: var(--radius-sm); padding: 1px 5px; min-width: 16px; text-align: center;
+}
+@media (max-width: 560px) {
+  .mh-cmdk { padding-top: 64px; }
+  .mh-cmdk-foot { gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-cmdk.is-open { animation: none; }
+  .mh-cmdk-panel { animation: none; }
+}
+
 /* Content card (AI-generated content output) — published-article aesthetic */
 .mh-content-card {
   background: var(--surface);
@@ -8238,6 +8387,218 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     }
 
 
+# Command palette (UI 1.15) — line-art icons (18×18 stroked SVGs, currentColor)
+# for each destination/action. Stroke style mirrors the nav/empty-state marks.
+_CMDK_ICONS = {
+    "home": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg>',
+    "create": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',
+    "plan": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>',
+    "library": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>',
+    "activity": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 7 4-16 2 9h6"/></svg>',
+    "search": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    "brand": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
+    "settings": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+    "pricing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+    "switch": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+    "signout": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+    "signin": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>',
+    "billing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>',
+}
+
+
+def _command_palette_groups(
+    *,
+    signed_in: bool,
+    research_enabled: bool,
+    account_email: str,
+    dev_operator: bool,
+) -> list[dict]:
+    """Build the Cmd-K command palette entries for the current auth state.
+
+    Every destination is resolved through ``url_for()`` (never a hardcoded
+    path) and gated exactly like the nav: signed-in orgs get the app surfaces;
+    signed-out visitors get the public ones. The list is server-rendered so it
+    is authoritative and testable — the client only filters and navigates, it
+    never invents a route. Returns a list of ``{label, items: [...]}`` groups;
+    each item is ``{id, label, hint, href, keywords, icon}``.
+    """
+
+    def _item(cmd_id: str, label: str, endpoint: str, hint: str, keywords: str, icon: str) -> dict:
+        return {
+            "id": cmd_id,
+            "label": label,
+            "hint": hint,
+            "href": url_for(endpoint),
+            "keywords": keywords,
+            "icon": _CMDK_ICONS.get(icon, ""),
+        }
+
+    navigate: list[dict] = [
+        _item("home", "Home", "home", "Dashboard", "home dashboard start overview", "home"),
+    ]
+    account: list[dict] = []
+
+    if signed_in:
+        navigate += [
+            _item(
+                "create",
+                "Create content",
+                "make_page",
+                "Start a new content pack",
+                "create make new pack generate content build",
+                "create",
+            ),
+            _item(
+                "plan",
+                "Plan",
+                "plan_page",
+                "Schedule & cadence",
+                "plan schedule calendar cadence posting",
+                "plan",
+            ),
+            _item(
+                "library",
+                "Media library",
+                "media_library_page",
+                "Photos & brand assets",
+                "media library photos assets images logos",
+                "library",
+            ),
+            _item(
+                "activity",
+                "Activity",
+                "activity_page",
+                "Run history & audit log",
+                "activity runs history audit log recent exports approvals",
+                "activity",
+            ),
+        ]
+        if research_enabled:
+            navigate.append(
+                _item(
+                    "research",
+                    "Research",
+                    "web_research_console",
+                    "Web research console",
+                    "research web search investigate",
+                    "search",
+                )
+            )
+        navigate += [
+            _item(
+                "brand",
+                "Brand & organisation",
+                "organisation_setup",
+                "Logos, colours, tone",
+                "brand organisation org logo colours palette tone setup identity club",
+                "brand",
+            ),
+            _item(
+                "settings",
+                "Settings",
+                "settings_page",
+                "Preferences & plan",
+                "settings preferences config options account",
+                "settings",
+            ),
+        ]
+    else:
+        navigate.append(
+            _item(
+                "pricing",
+                "Pricing",
+                "pricing_page",
+                "Plans & pricing",
+                "pricing plans cost price tiers",
+                "pricing",
+            )
+        )
+
+    navigate.append(
+        _item(
+            "status",
+            "System status",
+            "status_page",
+            "Service health",
+            "status health system incidents reachability operational",
+            "status",
+        )
+    )
+
+    # Account / session actions.
+    if signed_in:
+        account.append(
+            _item(
+                "switch-org",
+                "Switch organisation",
+                "sign_in_page",
+                "Change the active club",
+                "switch change organisation org club account profile",
+                "switch",
+            )
+        )
+        account.append(
+            _item(
+                "sign-out",
+                "Sign out of organisation",
+                "sign_out",
+                "End this org session",
+                "sign out logout leave organisation session",
+                "signout",
+            )
+        )
+    else:
+        account.append(
+            _item(
+                "sign-in",
+                "Sign in",
+                "sign_in_page",
+                "Choose an organisation",
+                "sign in login organisation org choose",
+                "signin",
+            )
+        )
+
+    if account_email:
+        account.append(
+            _item(
+                "billing",
+                "Billing",
+                "billing_page",
+                account_email,
+                "billing account payment invoice subscription plan",
+                "billing",
+            )
+        )
+        account.append(
+            _item(
+                "log-out",
+                "Log out of account",
+                "logout",
+                "End the account session",
+                "log out account session sign",
+                "signout",
+            )
+        )
+    elif not signed_in:
+        account.append(
+            _item(
+                "log-in",
+                "Log in",
+                "login_page",
+                "Account sign-in",
+                "log in account email",
+                "signin",
+            )
+        )
+
+    groups: list[dict] = [{"label": "Navigate", "items": navigate}]
+    if account:
+        groups.append({"label": "Account", "items": account})
+    return groups
+
+
 def _layout(title: str, body: str, active: str = "home", dock: dict | None = None) -> str:
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
@@ -8466,6 +8827,50 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   </div>
 </div>
 <div id="mh-toast-container" role="region" aria-label="Notifications" aria-live="polite" aria-atomic="false"></div>
+{# UI 1.15 — Command palette (Cmd-K). Modal "search or jump to…" overlay for
+   fast keyboard navigation + quick actions. Hidden until opened (display:none),
+   so a no-JS visitor never sees it and every nav link still works. The command
+   list is server-rendered with url_for() and gated by sign-in / feature flags;
+   the inline script below only filters and navigates. ARIA combobox over a
+   listbox, aria-activedescendant tracks the highlighted row, focus is trapped
+   and restored, and prefers-reduced-motion is respected. #}
+<div class="mh-cmdk" id="mh-cmdk" role="dialog" aria-modal="true" aria-label="Command palette" aria-hidden="true">
+  <div class="mh-cmdk-panel">
+    <div class="mh-cmdk-search">
+      <svg class="mh-cmdk-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="mh-cmdk-input" class="mh-cmdk-input" type="text" autocomplete="off"
+             autocorrect="off" autocapitalize="off" spellcheck="false"
+             placeholder="Search or jump to&hellip;"
+             role="combobox" aria-expanded="true" aria-controls="mh-cmdk-results"
+             aria-autocomplete="list" aria-label="Search commands" />
+      <span class="mh-cmdk-search-esc" aria-hidden="true">Esc</span>
+    </div>
+    <div class="mh-cmdk-results" id="mh-cmdk-results" role="listbox" aria-label="Commands">
+      {% for group in cmdk_groups %}
+      <div class="mh-cmdk-group-label" role="presentation" data-cmdk-group="{{ group.label }}">{{ group.label }}</div>
+      {% for item in group['items'] %}
+      <div class="mh-cmdk-item" role="option" id="mh-cmdk-opt-{{ item.id }}"
+           data-cmdk-item data-href="{{ item.href }}"
+           data-haystack="{{ (item.label ~ ' ' ~ item.hint ~ ' ' ~ item.keywords) | lower }}"
+           aria-selected="false">
+        <span class="mh-cmdk-item-icon" aria-hidden="true">{{ item.icon | safe }}</span>
+        <span class="mh-cmdk-item-text">
+          <span class="mh-cmdk-item-label">{{ item.label }}</span>
+          <span class="mh-cmdk-item-hint">{{ item.hint }}</span>
+        </span>
+        <span class="mh-cmdk-item-go" aria-hidden="true">&#8629;</span>
+      </div>
+      {% endfor %}
+      {% endfor %}
+      <div class="mh-cmdk-empty is-hidden" id="mh-cmdk-empty" role="presentation">No matches &mdash; try another search.</div>
+    </div>
+    <div class="mh-cmdk-foot">
+      <span class="mh-cmdk-foot-hint"><kbd>&#8593;</kbd><kbd>&#8595;</kbd> Navigate</span>
+      <span class="mh-cmdk-foot-hint"><kbd>&#8629;</kbd> Open</span>
+      <span class="mh-cmdk-foot-hint"><kbd>Esc</kbd> Close</span>
+    </div>
+  </div>
+</div>
 <header class="topnav">
   <a href="{{ url_for('home') }}" class="brand" aria-label="MediaHub — home">
     <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
@@ -8489,6 +8894,15 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
   </button>
   <nav id="mh-primary-nav">
+    {# UI 1.15 — Command-palette trigger. A "search or jump to…" pill that
+       advertises ⌘K / Ctrl-K. Hidden until JS is up (.mh-js); opens the
+       palette below. The shortcut works globally even without this button. #}
+    <button type="button" class="mh-cmdk-trigger" data-cmdk-open
+            aria-label="Open the command palette" aria-haspopup="dialog" aria-controls="mh-cmdk">
+      <svg class="mh-cmdk-trigger-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <span class="mh-cmdk-trigger-label">Search or jump to&hellip;</span>
+      <kbd class="mh-cmdk-trigger-kbd" data-cmdk-kbd aria-hidden="true">&#8984;K</kbd>
+    </button>
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
@@ -8737,6 +9151,174 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     }
   }
   tick(); setInterval(tick, 1000);
+})();
+</script>
+<script>
+/* UI 1.15 — Command palette (Cmd-K). Fast keyboard navigation + quick actions,
+   pure vanilla JS (no framework). Opens on the trigger pill, ⌘K / Ctrl-K, or
+   "/" when not already typing; filters the server-rendered command list; ↑/↓
+   (or Tab) move the highlight, ↵ opens it, Esc closes. Focus is trapped in the
+   input while open and restored to the opener on close; aria-activedescendant
+   tracks the highlighted row for screen readers. */
+(function(){
+  var root    = document.getElementById('mh-cmdk');
+  var input   = document.getElementById('mh-cmdk-input');
+  var results = document.getElementById('mh-cmdk-results');
+  var empty   = document.getElementById('mh-cmdk-empty');
+  if (!root || !input || !results) return;
+
+  var items  = Array.prototype.slice.call(results.querySelectorAll('[data-cmdk-item]'));
+  var groups = Array.prototype.slice.call(results.querySelectorAll('[data-cmdk-group]'));
+  var lastFocus = null;   // element to restore focus to on close
+  var activeId  = '';     // id of the currently highlighted option
+
+  // Show the right modifier glyph for the platform (⌘ on Mac, Ctrl elsewhere).
+  var plat = (navigator.platform || navigator.userAgent || '');
+  if (!/Mac|iPhone|iPad|iPod/i.test(plat)) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-cmdk-kbd]'), function(k){
+      k.textContent = 'Ctrl K';
+    });
+  }
+
+  function visibleItems(){
+    return items.filter(function(el){ return !el.classList.contains('is-hidden'); });
+  }
+
+  function setActive(el){
+    items.forEach(function(it){
+      var on = it === el;
+      it.classList.toggle('is-active', on);
+      it.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (el){
+      activeId = el.id;
+      input.setAttribute('aria-activedescendant', el.id);
+      if (el.scrollIntoView) el.scrollIntoView({block: 'nearest'});
+    } else {
+      activeId = '';
+      input.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  function moveActive(delta){
+    var vis = visibleItems();
+    if (!vis.length){ setActive(null); return; }
+    var idx = -1;
+    for (var i = 0; i < vis.length; i++){ if (vis[i].id === activeId){ idx = i; break; } }
+    idx = idx + delta;
+    if (idx < 0) idx = vis.length - 1;     // wrap to bottom
+    if (idx >= vis.length) idx = 0;        // wrap to top
+    setActive(vis[idx]);
+  }
+
+  function filter(){
+    var q = (input.value || '').trim().toLowerCase();
+    var tokens = q ? q.split(/\s+/) : [];
+    items.forEach(function(it){
+      var hay = it.getAttribute('data-haystack') || '';
+      var show = true;
+      for (var i = 0; i < tokens.length; i++){
+        if (hay.indexOf(tokens[i]) === -1){ show = false; break; }
+      }
+      it.classList.toggle('is-hidden', !show);
+    });
+    // Hide a group heading when none of its rows survive the filter.
+    groups.forEach(function(g){
+      var any = false, n = g.nextElementSibling;
+      while (n && n.hasAttribute && n.hasAttribute('data-cmdk-item')){
+        if (!n.classList.contains('is-hidden')){ any = true; break; }
+        n = n.nextElementSibling;
+      }
+      g.classList.toggle('is-hidden', !any);
+    });
+    var vis = visibleItems();
+    if (empty) empty.classList.toggle('is-hidden', vis.length !== 0);
+    setActive(vis.length ? vis[0] : null);   // re-anchor to the first visible row
+  }
+
+  function isOpen(){ return root.classList.contains('is-open'); }
+
+  function open(){
+    if (isOpen()) return;
+    lastFocus = document.activeElement;
+    root.classList.add('is-open');
+    root.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('mh-cmdk-open');
+    input.value = '';
+    filter();                // reset to the full list, highlight the first row
+    input.focus();
+  }
+
+  function close(){
+    if (!isOpen()) return;
+    root.classList.remove('is-open');
+    root.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('mh-cmdk-open');
+    setActive(null);
+    if (lastFocus && lastFocus.focus){ try { lastFocus.focus(); } catch(e){} }
+    lastFocus = null;
+  }
+
+  function toggle(){ if (isOpen()) close(); else open(); }
+
+  function activate(el){
+    if (!el) return;
+    var href = el.getAttribute('data-href');
+    if (href){ window.location.href = href; }
+  }
+
+  // Tiny API so other UI can drive it programmatically.
+  window.MH = window.MH || {};
+  window.MH.openCommandPalette  = open;
+  window.MH.closeCommandPalette = close;
+
+  // Trigger pill(s).
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cmdk-open]'), function(btn){
+    btn.addEventListener('click', function(e){ e.preventDefault(); open(); });
+  });
+
+  // Row interactions — click opens, pointer hover highlights.
+  items.forEach(function(it){
+    it.addEventListener('click', function(){ activate(it); });
+    it.addEventListener('mousemove', function(){ if (!it.classList.contains('is-active')) setActive(it); });
+  });
+
+  // Click on the backdrop (outside the panel) closes.
+  root.addEventListener('mousedown', function(e){ if (e.target === root) close(); });
+
+  // Typing filters the list.
+  input.addEventListener('input', filter);
+
+  // Keys while the palette is open (focus lives in the input).
+  input.addEventListener('keydown', function(e){
+    var vis;
+    switch (e.key){
+      case 'ArrowDown': e.preventDefault(); moveActive(1); break;
+      case 'ArrowUp':   e.preventDefault(); moveActive(-1); break;
+      case 'Home':      e.preventDefault(); vis = visibleItems(); if (vis.length) setActive(vis[0]); break;
+      case 'End':       e.preventDefault(); vis = visibleItems(); if (vis.length) setActive(vis[vis.length - 1]); break;
+      case 'Tab':       e.preventDefault(); moveActive(e.shiftKey ? -1 : 1); break; // trap focus + navigate
+      case 'Enter':     e.preventDefault(); activate(activeId ? document.getElementById(activeId) : null); break;
+      case 'Escape':    e.preventDefault(); close(); break;
+    }
+  });
+
+  // Global openers. ⌘K / Ctrl-K toggles from anywhere; "/" opens when the user
+  // is not already typing. Capture phase so we beat page-level keydown handlers
+  // (e.g. the review board's j/k navigation), which ignore modifier keys.
+  function typingTarget(t){
+    if (!t) return false;
+    var tag = (t.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+  }
+  document.addEventListener('keydown', function(e){
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')){
+      e.preventDefault(); toggle(); return;
+    }
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !isOpen() && !typingTarget(e.target)){
+      e.preventDefault(); open(); return;
+    }
+  }, true);
 })();
 </script>
 <script>
@@ -10219,6 +10801,12 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
+        cmdk_groups=_command_palette_groups(
+            signed_in=bool(signed_in_pid),
+            research_enabled=_research_console_enabled(),
+            account_email=account_email,
+            dev_operator=dev_operator,
+        ),
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
