@@ -8906,6 +8906,118 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   document.addEventListener('click', onClick);
 })();
 </script>
+<script>
+/* === U.14 — Cursor-following hover preview (Christopher Ireland + SuperHi) ===
+   Any element tagged .mh-hp that carries a child <template class="mh-hp-tpl">
+   spawns a floating frame that trails the pointer and cross-dissolves to the
+   next item's preview as you sweep the list (Media library photos; Create
+   output-frame posters). Pure JS + CSS, no dependency.
+
+   Accessibility / cost: the follower is decorative (aria-hidden, no pointer
+   events) and every datum is already in the row/tile, so this only runs where
+   it's an enhancement — fine pointer, hover-capable, motion allowed. Touch,
+   reduced-motion and keyboard users get the page unchanged, and the <template>
+   keeps each preview image inert until the first hover (no eager network). */
+(function(){
+  var mql = window.matchMedia;
+  if (!mql) return;
+  var fine = mql('(hover: hover) and (pointer: fine)').matches;
+  var reduced = mql('(prefers-reduced-motion: reduce)').matches;
+  if (!fine || reduced) return;
+
+  var wrap = null, frame = null, layers = [], host = null;
+  var tx = 0, ty = 0, cx = 0, cy = 0, raf = null, visible = false;
+
+  function build(){
+    wrap = document.createElement('div');
+    wrap.className = 'mh-hover-preview';
+    wrap.setAttribute('aria-hidden', 'true');
+    frame = document.createElement('div');
+    frame.className = 'mh-hp-frame';
+    for (var i = 0; i < 2; i++){
+      var l = document.createElement('div');
+      l.className = 'mh-hp-layer';
+      frame.appendChild(l);
+      layers.push(l);
+    }
+    layers[0].classList.add('is-front');
+    wrap.appendChild(frame);
+    document.body.appendChild(wrap);
+  }
+
+  function tick(){
+    // Lerp current → target so the frame trails the cursor (the SuperHi feel).
+    cx += (tx - cx) * 0.22;
+    cy += (ty - cy) * 0.22;
+    wrap.style.transform = 'translate3d(' + cx.toFixed(1) + 'px,' + cy.toFixed(1) + 'px,0)';
+    raf = visible ? requestAnimationFrame(tick) : null;
+  }
+
+  function position(px, py){
+    var w = wrap.offsetWidth || 240, h = wrap.offsetHeight || 320;
+    var pad = 12, off = 22;
+    var x = px + off;
+    if (x + w + pad > window.innerWidth) x = px - w - off;   // flip to the left
+    if (x < pad) x = pad;
+    var y = py - h * 0.5;                                     // vertically centred on the cursor
+    if (y + h + pad > window.innerHeight) y = window.innerHeight - h - pad;
+    if (y < pad) y = pad;
+    tx = x; ty = y;
+  }
+
+  function show(){
+    if (visible) return;
+    visible = true;
+    cx = tx; cy = ty;            // appear at the cursor, then trail on the next move
+    wrap.style.transform = 'translate3d(' + cx.toFixed(1) + 'px,' + cy.toFixed(1) + 'px,0)';
+    wrap.classList.add('is-visible');
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  function hide(){
+    if (!visible && !host) return;
+    visible = false; host = null;
+    if (wrap) wrap.classList.remove('is-visible');
+  }
+
+  function setContent(h){
+    var tpl = h.querySelector('template.mh-hp-tpl');
+    if (!tpl || !tpl.content) return false;
+    // Derive front/back from the DOM (not a counter) so overlapping swaps —
+    // possible when image decodes resolve out of order under fast hovering —
+    // can never desync which layer is actually shown.
+    var fr = frame.querySelector('.mh-hp-layer.is-front');
+    var back = (layers[0] === fr) ? layers[1] : layers[0];
+    back.innerHTML = '';
+    back.appendChild(tpl.content.cloneNode(true));
+    var swap = function(){
+      back.classList.add('is-front');
+      if (fr) fr.classList.remove('is-front');
+    };
+    var img = back.querySelector('img');
+    // Decode the photo before the dissolve so the new layer never fades in
+    // blank; a broken/unreachable src still swaps (catch) so visibility holds.
+    if (img && !img.complete && img.decode) img.decode().then(swap).catch(swap);
+    else requestAnimationFrame(swap);
+    return true;
+  }
+
+  function onOver(e){
+    var t = e.target;
+    var h = (t && t.closest) ? t.closest('.mh-hp') : null;
+    if (!h){ if (host) hide(); return; }
+    if (h === host) return;                  // same item — don't re-dissolve
+    if (!wrap) build();
+    if (setContent(h)){ host = h; position(e.clientX, e.clientY); show(); }
+  }
+  function onMove(e){ if (visible) position(e.clientX, e.clientY); }
+
+  document.addEventListener('pointerover', onOver, {passive: true});
+  document.addEventListener('pointermove', onMove, {passive: true});
+  document.addEventListener('pointerdown', hide, {passive: true});
+  window.addEventListener('scroll', hide, {passive: true});
+  window.addEventListener('blur', hide);
+})();
+</script>
 {% if flash_toast %}
 <script>
 /* One-shot success/error toast queued server-side by _flash_toast and popped
@@ -18843,8 +18955,41 @@ function mhPlanGenerate(btn) {{
             )
             effort_html = f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
 
+            # U.14 cursor-following preview — implemented tiles spawn a floating
+            # "output frame" poster (orientation + canonical dimensions + format
+            # chips) the static tile can't show. Honest: only real tile data,
+            # clearly a stylised frame (same family as the home samples), no
+            # fabricated content. Coming-soon tiles get no preview.
+            _is_live = bool(meta.is_implemented and href_ok)
+            hp_cls = " mh-hp" if _is_live else ""
+            hp_tpl = ""
+            if _is_live:
+                _f_low = [f.lower() for f in formats]
+                if "reel" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Motion reel", "1080×1920"
+                elif "story" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Story card", "1080×1920"
+                elif "graphic" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Feed graphic", "1080×1350"
+                else:
+                    _hp_eyebrow, _hp_dims = "Caption", "Ready to post"
+                _hp_fmt_chips = "".join(
+                    f'<span class="mh-hp-poster-fmt">{_h(f)}</span>' for f in formats
+                )
+                hp_tpl = (
+                    '<template class="mh-hp-tpl"><div class="mh-hp-poster">'
+                    '<div class="mh-hp-poster-top">'
+                    f'<span class="mh-hp-poster-eyebrow">{_h(_hp_eyebrow)}</span>'
+                    f'<span class="mh-hp-poster-mark">{meta.icon_svg}</span>'
+                    "</div>"
+                    f'<div class="mh-hp-poster-title">{_h(meta.title)}</div>'
+                    f'<div class="mh-hp-poster-dims">{_h(_hp_dims)}</div>'
+                    f'<div class="mh-hp-poster-formats">{_hp_fmt_chips}</div>'
+                    "</div></template>"
+                )
+
             tiles_html += (
-                f'<a {action} class="mh-template{disabled_cls}">'
+                f'<a {action} class="mh-template{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(meta.title)}</h3>'
@@ -18853,6 +18998,7 @@ function mhPlanGenerate(btn) {{
                 f"<p>{_h(meta.description)}</p>"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
+                f"{hp_tpl}"
                 "</a>"
             )
 
@@ -28888,14 +29034,32 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
+            # U.14 cursor-following preview: the row shows a 60px chip, so the
+            # floating frame carries the full photo at a useful size plus a
+            # caption (type + athlete/venue). Escaped — parsed metadata is
+            # never trusted into markup. <template> keeps the image inert
+            # until the first hover, so listing 200 assets costs no extra
+            # network up front.
+            _hp_type = (str(ad.get("type", "") or "photo")).replace("_", " ")
+            _hp_subject = athlete_names or (ad.get("linked_venue") or ad.get("linked_event") or "")
+            _hp_subject_html = f"<span>{_h(_hp_subject)}</span>" if _hp_subject else ""
+            _hp_tpl = (
+                '<template class="mh-hp-tpl">'
+                f'<img class="mh-hp-img" src="{_file_url}" alt="" />'
+                f'<span class="mh-hp-cap"><b>{_h(_hp_type)}</b>{_hp_subject_html}</span>'
+                "</template>"
+            )
+            # HTML-escape every parsed-metadata cell: descriptions/links are
+            # user-supplied + AI-parsed, so an unescaped name/venue was a
+            # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr>
-  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
-  <td>{ad.get("type", "")}</td>
-  <td>{athlete_names}</td>
-  <td>{ad.get("linked_venue") or ad.get("linked_event") or ""}</td>
-  <td>{ad.get("permission_status", "")}</td>
-  <td><code>{ad.get("id", "")[:12]}</code></td>
+<tr class="mh-hp">
+  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" />{_hp_tpl}</td>
+  <td>{_h(ad.get("type", ""))}</td>
+  <td>{_h(athlete_names)}</td>
+  <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
+  <td>{_h(ad.get("permission_status", ""))}</td>
+  <td><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td>
     <form method="post" action="{_delete_url}" style="display:inline"
           onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
