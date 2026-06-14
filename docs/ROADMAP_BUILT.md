@@ -81,6 +81,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **UI2.6** · UI2 (top priority) — **Vanish search**: properly wire the rotating-placeholder Vanish input (`.mh-vanish`) onto the activity / global search — the overlay-placeholder element + alignment past the search icon, native placeholder removed · 🟢 parallel-safe (self-contained search) *(completed 2026-06-14)*
 - ✅ **UI 1.25** · Phase 1 (Product polish) — Emoji reactions (from Liveblocks): quick emoji reactions (👍 ❤️ 🔥) on generated cards and in the review queue; stored per card in the existing DB, tallied server-side, updated via fetch without full reload · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **UI 1.14** · Phase 1 (Product polish) — Notifications inbox (from Liveblocks): a bell icon + unread count badge + dropdown listing render-complete, pack-ready, and error events; backed by the existing scheduler/notify layer, polled via lightweight SSE or fetch · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **UI 1.23** · Phase 1 (Product polish) — Light/dark theme toggle (from AuthKit): dark-first with an optional light mode; CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme` default; no new build step · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
