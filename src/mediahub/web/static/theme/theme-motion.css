@@ -606,6 +606,15 @@
 }
 .mh-vanish.is-typing .mh-vanish__ph { opacity: 0; transform: translateY(-50%) translateX(6px); }
 .mh-vanish__ph.is-swapping { opacity: 0; transform: translateY(calc(-50% + 6px)); }
+/* No-JS / pre-init safety: once the field holds text its (empty) native
+   placeholder stops showing, so :placeholder-shown drops and the overlay hides
+   even if bindVanish() never toggled .is-typing (kit JS absent or not yet run).
+   The overlay element still carries the first hint server-side, so the
+   placeholder reads with no JS. Needs .mh-vanish__ph to follow the field. */
+.mh-vanish input:not(:placeholder-shown) ~ .mh-vanish__ph,
+.mh-vanish textarea:not(:placeholder-shown) ~ .mh-vanish__ph {
+  opacity: 0; transform: translateY(-50%) translateX(6px);
+}
 
 /* =====================================================================
    REDUCED MOTION — stop dead. State changes keep their (instant) end
