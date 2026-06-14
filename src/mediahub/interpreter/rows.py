@@ -153,8 +153,11 @@ def _extract_swim_from_cells(
             field_vals[schema.col_type] = raw
             field_conf[schema.col_type] = schema.confidence * 0.5
 
-    # Must have at least a name or a time to be a meaningful swim row
-    if "name" not in field_vals and "time" not in field_vals:
+    # A competition result must identify a competitor. A row with a time but no
+    # name is a split/continuation line (cumulative lap times listed under a
+    # swimmer on a distance event), not a result — dropping it keeps overall
+    # times only and prevents phantom, nameless "results" from the splits table.
+    if "name" not in field_vals:
         return None
 
     # Overall per-swim confidence: mean of field confidences
