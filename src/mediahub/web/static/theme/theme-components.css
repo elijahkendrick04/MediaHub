@@ -1204,6 +1204,35 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   }
 }
 
+/* U.12 — odometer stat numerals (inspired by Max Yinger).
+   Server renders the padded value as the element's text (works with JS off and
+   for assistive tech via role="img" + aria-label); animateOdometer() then adds
+   .mh-odo--live and swaps in per-digit reels that roll on load / scroll-into-
+   view through the same observer + reduced-motion gate as [data-mh-count].
+   Each column keeps a hidden in-flow spacer glyph so the absolutely-positioned
+   reel sits on the surrounding text baseline regardless of font. The reduced-
+   motion cohort gets the digits placed (no roll) by the JS, so no extra CSS
+   gate is needed here. */
+.mh-odo--live { white-space: nowrap; line-height: 1; }
+/* line-height:1 collapses the column box to exactly one digit (1em) so the
+   clip exposes a single cell — without it the column inherits the meta line's
+   taller line-height and a sliver of the neighbouring digit bleeds through. */
+.mh-odo-col { position: relative; display: inline-block; line-height: 1; vertical-align: baseline; }
+.mh-odo-spacer { visibility: hidden; }
+.mh-odo-clip {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  overflow: hidden;
+}
+.mh-odo-strip {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+.mh-odo-d { display: block; height: 1em; line-height: 1; text-align: center; }
+
 /* =====================================================================
    PHASE 9 — COMPONENT LIBRARY
    =====================================================================
