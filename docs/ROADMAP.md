@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `f69f399a4` · Merge pull request #602 from elijahkendrick04/claude/main-merge-review-la8ix2
+**Last updated:** 2026-06-15 · `d2d765202` · Merge pull request #604 from elijahkendrick04/claude/main-merge-review-la8ix2
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1487,6 +1487,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `522aab03f` | Remove unused imports in scripts/ (ruff F401) |
 | 2026-06-14 | `8f2de7cb7` | Keep heartbeat drain thread alive past a task_done() ValueError |
 | 2026-06-14 | `9001dfb53` | UI 1.7: pinned-panel scrollytelling on the landing how-it-works |
 | 2026-06-14 | `fb24b2247` | chore: fix workflow README end-of-file newline (pre-commit hygiene) |
