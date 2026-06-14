@@ -164,14 +164,17 @@ class TestHomeSignedOut:
     def test_every_section_headline_is_a_reveal_lines_block(self, app):
         body = _home(app)
         # steps + before/after + bento + audience + promise + final-CTA(fresh)
-        # = 6 headlines.
-        assert body.count("mh-reveal-lines") >= 6
+        # = 6 reveal-lines headlines. (The before/after slider's headline was
+        # reconciled onto the U.5 pattern so no plain section-title survives.)
+        assert body.count("mh-reveal-lines") >= 5
         # The legacy single-run section title (no reveal-lines) is gone.
         assert '<h2 class="mh-section-title">' not in body
         assert '<h2 class="mh-section-title mh-reveal-lines">' in body
 
-    def test_ten_line_spans(self, app):
-        # Each of the 6 headlines is split into exactly two editorial lines.
+    def test_line_spans_two_per_headline(self, app):
+        # Each of the 6 reveal-lines headlines is split into exactly two
+        # editorial lines (steps, before/after, bento, audience, promise,
+        # final-CTA) → 12 line spans.
         body = _home(app)
         assert body.count('<span class="mh-line">') == 12
 

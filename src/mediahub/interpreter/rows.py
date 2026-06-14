@@ -188,8 +188,11 @@ def _extract_swim_from_cells(
 _PLACE = r"(?P<place>=?\*?\d{1,3}\.?|---|DQ|DNS|DNF|NS)"
 # Name: words including letters, hyphens, apostrophes, periods, commas; min 3 chars
 _NAME = r"(?P<name>[A-Za-z][A-Za-z'\-\.\, ]{2,}?[A-Za-z\.\)])"
-# Age / YOB: 1-4 digits; we'll discriminate later
-_AGE = r"(?P<age>\d{1,4})"
+# Age / YOB: 1-4 digits, optionally parenthesised. British results print the
+# year of birth in parentheses between the name and the club
+# ("Tom DAVIES (04) City of Sheffield 50.12"); without the optional parens none
+# of the row patterns matched that format and every such line was dropped.
+_AGE = r"(?P<age>\(?\d{1,4}\)?)"
 # Club: any printable run
 _CLUB = r"(?P<club>[A-Za-z][A-Za-z0-9'\-\.\,\& /]{1,}?)"
 # Time: mm:ss.cc or ss.cc; optional X-prefix; or DQ/DNS/DNF/NS
@@ -228,7 +231,11 @@ def _structural_swim_from_match(m: re.Match, raw: str) -> InterpretedSwim | None
     gd = m.groupdict()
     raw_place = gd.get("place")
     raw_name = (gd.get("name") or "").strip()
+    # The age/YOB may arrive parenthesised (British "Name (04) Club") — unwrap
+    # before the digit checks below so "(04)" is read as the year 2004.
     raw_age = gd.get("age")
+    if raw_age:
+        raw_age = raw_age.strip("()")
     raw_club = (gd.get("club") or "").strip()
     raw_time = (gd.get("time") or "").strip()
 

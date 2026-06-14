@@ -1758,6 +1758,59 @@ def _research_console_enabled() -> bool:
     }
 
 
+# UI 1.1 — Cycling example-prompt placeholders (inspired by Cosmos). Each
+# describe-a-moment / search field carries a pipe-delimited list of real example
+# prompts in a data-mh-cycle-placeholder attribute; bindCyclePlaceholders() in
+# _layout types them through the field's own placeholder (a typewriter cycle:
+# type → hold → erase → next), guiding first-time users with zero extra chrome.
+# Pure vanilla JS, no deps, prefers-reduced-motion respected. The static
+# placeholder="" each field already carries stays as the no-JS / reduced-motion
+# fallback, so nothing is lost when the script or motion is unavailable.
+_CYCLE_PH_MOMENT = (
+    "Try: Tom Davies PB 100m free",
+    "Try: top three at county finals",
+    "Try: thank-you to our sponsor Riverside Physio",
+    "Try: Maya's first sub-30 50m fly",
+    "Try: relay squad breaks the club record",
+    "Try: medal haul from the regional gala",
+)
+_CYCLE_PH_SEARCH = (
+    "Try: county championships",
+    "Try: spring gala 2026",
+    "Try: regionals.hy3",
+    "Try: run id 7f3c9a",
+)
+_CYCLE_PH_RESEARCH = (
+    "Try: 2024 county championship headline results",
+    "Try: who set the regional 100m free record this season",
+    "Try: latest Swim England qualifying times",
+)
+_CYCLE_PH_ASKDATA = (
+    "Try: when did Alice Lee last PB the 100m free",
+    "Try: our medal count at the spring gala",
+    "Try: which swimmers broke 30s in the 50m fly",
+)
+
+
+def _cycle_ph_attr(phrases) -> str:
+    """Render the ``data-mh-cycle-placeholder`` attribute for one field.
+
+    The phrases are joined with `` | `` (the JS splits on the pipe, trimming
+    whitespace) and HTML-escaped so the value is safe inside a double-quoted
+    attribute. Returns the whole ``data-mh-cycle-placeholder="…"`` token so call
+    sites just drop it into the tag.
+    """
+    return f'data-mh-cycle-placeholder="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the lists are static, so there's no reason to
+# rebuild the escaped attribute on every request.
+_CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
+_CYCLE_PH_ATTR_SEARCH = _cycle_ph_attr(_CYCLE_PH_SEARCH)
+_CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
+_CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+
 # Console page body (Capability 3c). A plain string — NOT an f-string — so the
 # JS braces stay literal; the route swaps __SUBMIT_URL__ for the real endpoint.
 # Results are rendered with textContent / createElement only (never innerHTML),
@@ -1773,7 +1826,7 @@ _WEB_RESEARCH_CONSOLE_BODY = """
     its bound it says so and asserts nothing &mdash; partial results are discarded.
   </p>
   <form id="rform" data-no-loader="1" style="margin-top:16px">
-    <textarea id="rq" name="question" rows="3" maxlength="500" required
+    <textarea id="rq" name="question" rows="3" maxlength="500" required __CYCLE_PH__
       placeholder="e.g. What were the headline results at the 2024 county championships for the City Aquatics club?"
       style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -1891,7 +1944,7 @@ _CLUB_QA_CONSOLE_BODY = """
     search, no guessing: if your data doesn't hold the answer, it says so.
   </p>
   <form id="qaform" data-no-loader="1" style="margin-top:16px">
-    <textarea id="qaq" name="question" rows="3" maxlength="400" required
+    <textarea id="qaq" name="question" rows="3" maxlength="400" required __CYCLE_PH__
       placeholder="e.g. When did Alice Lee last swim a PB in the 100m Freestyle?"
       style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -3293,33 +3346,36 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Generating graphic&hellip; this may take 5-15 seconds</div>';
   var cacheKey = cardId + '|' + fmt + '|' + assetId + '|' + (noPhoto ? '1' : '0');
   if (_visualCache[cacheKey]) {
     _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
     btn.disabled = false; btn.textContent = origLabel;
     return;
   }
+  var prog = MH.renderProgress(panel, {label: 'Designing your graphic', sub: 'Usually 5\u201315 seconds', expectedMs: 9000, accent: 'lane'});
   var reqBody = {format: fmt};
   if (assetId) reqBody.asset_id = assetId;
   if (noPhoto) reqBody.no_photo = true;
   fetch(createUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(reqBody)})
     .then(function(r) { return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok || res.body.error) {
         // Prefer user_message (clean operator copy, e.g. the "renderer
         // busy" 429) over the raw error code.
+        prog.stop();
+        btn.disabled = false; btn.textContent = origLabel;
         var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
         return;
       }
       _visualCache[cacheKey] = res.body;
-      _renderVisualPanel(panel, res.body, cardId, createUrl);
+      prog.complete(function(){
+        btn.disabled = false; btn.textContent = origLabel;
+        _renderVisualPanel(panel, res.body, cardId, createUrl);
+      });
     })
     .catch(function(err) {
+      prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
@@ -3529,9 +3585,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering motion\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering ' + fmt + ' motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
+  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds \u2014 repeats are instant', expectedMs: 45000, accent: 'medal'});
   var fetchUrl = motionUrl + (fmt !== 'story' ? (motionUrl.indexOf('?') === -1 ? '?' : '&') + 'format=' + encodeURIComponent(fmt) : '');
   fetch(fetchUrl, {method:'POST'})
     .then(function(r) {
@@ -3541,16 +3595,19 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
       return r.json().then(function(j){ return {ok:false, body:j}; });
     })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok) {
         // Prefer user_message (clean operator-written copy) over detail
         // (raw stack trace). The backend Phase 1.5 mapping translates
         // known infra failures into actionable copy; falls back to detail
         // for anything unexpected.
+        prog.stop();
+        btn.disabled = false; btn.textContent = origLabel;
         var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
         return;
       }
+      prog.complete(function(){
+      btn.disabled = false; btn.textContent = origLabel;
       var url = URL.createObjectURL(res.blob);
       _motionCache[cardId + ':' + fmt] = url;
       var vidCol = fmt === 'landscape' ? 'flex:0 0 300px;max-width:320px' : 'flex:0 0 200px;max-width:220px';
@@ -3570,8 +3627,10 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
           '</div>' +
         '</div>';
       _loadMotionWhy(panel, motionUrl, fmt);
+      });
     })
     .catch(function(err) {
+      prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
@@ -3621,14 +3680,14 @@ function generateReel(btn, reelUrl, fmt) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
+  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
   var fail = function(msg) {
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   };
   var success = function(videoUrl) {
+    prog.complete(function(){
     btn.disabled = false; btn.textContent = origLabel;
     var vidCol = fmt === 'landscape' ? 'flex:0 0 340px;max-width:360px' : 'flex:0 0 240px;max-width:260px';
     panel.innerHTML =
@@ -3645,6 +3704,7 @@ function generateReel(btn, reelUrl, fmt) {
           '</div>' +
         '</div>' +
       '</div>';
+    });
   };
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {method:'POST'})
     .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
@@ -3689,16 +3749,12 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating 3 options\u2026';
-  function _vSpin(msg) {
-    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-      '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-      msg + '</div>';
-  }
+  var prog = MH.renderProgress(panel, {label: 'Designing 3 options', sub: 'Renders run one at a time \u2014 usually 1\u20132 minutes', expectedMs: 90000, accent: 'lane'});
   function _vFail(msg) {
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
   }
-  _vSpin('Designing 3 alternative options\u2026 renders run one at a time, usually 1-2 minutes.');
   fetch(variantsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(regenBody)})
     .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
     .then(function(res){
@@ -3724,19 +3780,22 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
             }
             if (st.body.status === 'running') {
               var total = st.body.total || 3;
-              var current = Math.min((st.body.done || 0) + 1, total);
-              _vSpin('Designing option ' + current + ' of ' + total + '... (' +
-                     (st.body.done || 0) + ' finished)');
+              var done = st.body.done || 0;
+              var current = Math.min(done + 1, total);
+              prog.setPhase('Designing option ' + current + ' of ' + total, done + ' of ' + total + ' finished');
+              prog.setProgress(Math.round((done / total) * 100));
               return;
             }
             clearInterval(timer);
-            btn.disabled = false; btn.textContent = origLabel;
             var variants = (st.body.variants || []).filter(function(v){ return v.visual; });
             if (!variants.length) {
               _vFail('Error: ' + (st.body.error || 'no variants produced'));
               return;
             }
-            _renderVariantPicker(panel, variants, cardId, createUrl);
+            prog.complete(function(){
+              btn.disabled = false; btn.textContent = origLabel;
+              _renderVariantPicker(panel, variants, cardId, createUrl);
+            });
           })
           .catch(function(){ /* transient poll error - keep polling */ });
       }, 2500);
@@ -5493,6 +5552,11 @@ input[type=checkbox], input[type=radio] {
 }
 textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
 select { cursor: pointer; }
+/* Open <select> dropdown legibility: the native option popup renders on a
+   light OS background, but options inherit the theme's light --ink colour →
+   light-on-light (the unreadable grey text). Pin a readable dark-on-cream pair
+   on the options themselves so every dropdown list stays clear when open. */
+select option { background-color: #f5f2e8; color: #14160f; }
 
 /* Custom-styled file input — replaces ugly native OS button */
 input[type=file] { padding: 7px 10px; cursor: pointer; }
@@ -5736,6 +5800,27 @@ a.card:hover, .card[data-interactive]:hover {
   color: var(--ink-dim);
   max-width: 360px; text-align: center;
   animation: mh-pulse 2.4s ease-in-out infinite;
+}
+
+/* U.6 — branded render/generation progress (the giant-numeral loading state).
+   Replaces the generic spinner on the long render/generation waits (motion,
+   reels, graphics). The percentage is an honest eased time-estimate for the
+   opaque renders, and a real fraction where the backend reports one; it only
+   reaches 100 when the real result lands (MH.renderProgress.complete). Reuses
+   the .display-num motif for the numeral. */
+.mh-render-prog { padding: 30px 18px 26px; text-align: center; animation: mh-fade-in 0.3s ease-out; }
+.mh-render-prog-num { display: flex; align-items: flex-start; justify-content: center; gap: 4px; }
+.mh-render-prog-pct { font-size: clamp(56px, 15vw, 116px); line-height: 0.82; color: var(--lane); }
+.mh-render-prog-sign { font-family: var(--font-display); font-weight: 900; line-height: 1; font-size: clamp(20px, 5vw, 38px); color: var(--ink-dim); margin-top: 0.3em; }
+.mh-render-prog[data-accent="medal"] .mh-render-prog-pct { color: var(--medal); }
+.mh-render-prog-bar { height: 3px; width: min(280px, 78%); margin: 20px auto 0; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+.mh-render-prog-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--lane); transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
+.mh-render-prog[data-accent="medal"] .mh-render-prog-fill { background: var(--medal); }
+.mh-render-prog-label { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink); margin-top: 18px; }
+.mh-render-prog-sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); margin: 7px auto 0; max-width: 320px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) {
+  .mh-render-prog { animation: none; }
+  .mh-render-prog-fill { transition: none; }
 }
 
 /* Toast */
@@ -6474,6 +6559,28 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   display: inline;
   -webkit-text-fill-color: var(--medal);
 }
+/* U.9 — cycling hero accent word. The signed-out hero's content-type noun is
+   the gold serif-italic accent (.editorial, above) and crossfades through what
+   MediaHub makes (stories / reels / graphics / captions). The words stack in a
+   single inline-grid cell so the box auto-sizes to the widest word and the
+   trailing "out." never reflows as the word changes. The crossfade is pure CSS
+   (opacity); a tiny inline script toggles .is-active. With no JavaScript the
+   server-rendered first word stays shown; the global prefers-reduced-motion
+   block below (and the script's matchMedia guard) keep it static when less
+   motion is asked for. */
+.mh-hero h1 .mh-word-cycle {
+  display: inline-grid;
+  justify-items: center;
+  vertical-align: baseline;
+}
+.mh-hero h1 .mh-word-cycle-item {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.mh-hero h1 .mh-word-cycle-item.is-active {
+  opacity: 1;
+}
 /* Lede reads in the body face: the headline's display-caps + serif-italic
    pairing is the one editorial move per hero — a serif lede on top of it
    made four typographic voices compete in the first screenful. */
@@ -6897,6 +7004,10 @@ from mediahub.web.theme_tokens import (  # noqa: E402
     THEME_COMPONENTS_CSS as _MH_TC_CSS,
 )
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
+from mediahub.web.pipeline_diagram import (  # noqa: E402
+    PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
+    pipeline_diagram_section_html as _pipeline_diagram_section_html,
+)
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -6909,7 +7020,60 @@ from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_
 _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
-BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
+BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_PL_CSS + _MH_RG_CSS
+
+
+# U.9 — cycling hero accent word. The content types MediaHub makes, in the
+# order the signed-out landing hero crossfades through them. The first word is
+# the one the server renders active (so it shows with no JavaScript and is the
+# one a screen reader announces); the rest are aria-hidden decorative cycles.
+_HERO_CONTENT_WORDS = ("stories", "reels", "graphics", "captions")
+
+# The script that drives the crossfade. It only toggles `.is-active`; the
+# crossfade itself is the CSS opacity transition on `.mh-word-cycle-item`. It
+# is a no-op when the visitor asks for reduced motion (matchMedia guard) and
+# when there is nothing to cycle, and it pauses while the tab is backgrounded
+# so it isn't running a timer off-screen. Inline is fine: the CSP allows
+# 'unsafe-inline' scripts and the rest of the app already uses inline scripts.
+_HERO_WORD_CYCLE_JS = """<script>
+(function(){
+  var mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (mq && mq.matches) return;
+  var box = document.querySelector('[data-mh-word-cycle]');
+  if (!box) return;
+  var items = box.querySelectorAll('.mh-word-cycle-item');
+  if (items.length < 2) return;
+  var i = 0, timer = null;
+  function step(){
+    items[i].classList.remove('is-active');
+    i = (i + 1) % items.length;
+    items[i].classList.add('is-active');
+  }
+  function start(){ if (timer === null) { timer = window.setInterval(step, 2600); } }
+  function stop(){ if (timer !== null) { window.clearInterval(timer); timer = null; } }
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden) { stop(); } else { start(); }
+  });
+  start();
+})();
+</script>"""
+
+
+def _hero_word_cycle_html() -> str:
+    """The signed-out hero's cycling content-type accent (U.9).
+
+    Returns the ``<span class="mh-word-cycle">`` carrying one
+    ``.editorial`` (gold serif-italic) word per content type. The first word
+    is rendered ``is-active`` so it is the one shown with no JavaScript and the
+    one a screen reader reads; the rest are ``aria-hidden`` decorative cycles.
+    The words are fixed constants — no user input — so no escaping is needed.
+    """
+    spans = []
+    for k, word in enumerate(_HERO_CONTENT_WORDS):
+        cls = "editorial mh-word-cycle-item" + (" is-active" if k == 0 else "")
+        hidden = "" if k == 0 else ' aria-hidden="true"'
+        spans.append(f'<span class="{cls}"{hidden}>{word}</span>')
+    return '<span class="mh-word-cycle" data-mh-word-cycle>' + "".join(spans) + "</span>"
 
 
 def _render_markdown(text: str) -> str:
@@ -7578,6 +7742,102 @@ def _theme_seed_style_block() -> str:
 
 # Self-contained "Create graphic" panel script for pages OTHER than the meet
 # review page (which has its own richer createGraphic with motion + add-to-pack).
+# U.6 — the branded render/generation loading state (inspired by Lusion). One
+# reusable controller, `MH.renderProgress(container, opts)`, shared by every long
+# render/generation wait (motion, reels, graphics). It paints a large editorial
+# %-numeral (reusing the .display-num motif) over a minimal progress bar.
+#
+# Honesty: the renders are opaque (a blocking request, or a running/done poll),
+# so the percentage is an eased *time estimate* that asymptotes BELOW 100 and
+# only snaps to 100 when the real result lands (`complete()`). Where the backend
+# does report real progress (variant batches: done/total), the caller feeds it
+# via `setProgress` and the bar tracks the actual work. The number is monotonic
+# and never claims "done" before the artefact exists.
+#
+# Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
+# kept as a module constant so tests can exercise the controller directly.
+_RENDER_PROGRESS_JS = """
+(function(){
+  var MH = window.MH = window.MH || {};
+  if (MH.renderProgress) return;
+  var CEIL = 94;  // eased-estimate asymptote — never reaches 100 on its own
+  var CAP  = 97;  // hard ceiling for a real-progress floor while still running
+  function clamp(v, lo, hi){ return v < lo ? lo : (v > hi ? hi : v); }
+  MH.renderProgress = function(container, opts){
+    opts = opts || {};
+    if (!container) return null;
+    var accent = (opts.accent === 'medal') ? 'medal' : 'lane';
+    var expected = Math.max(2000, opts.expectedMs || 45000);
+    var k = expected * 0.5;  // time constant: ~81% of CEIL at `expected`
+    var ariaLabel = (opts.label ? String(opts.label) : 'Render progress').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    container.innerHTML =
+      '<div class="mh-render-prog" data-accent="' + accent + '" role="progressbar" ' +
+        'aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="' + ariaLabel + '">' +
+        '<div class="mh-render-prog-num">' +
+          '<span class="mh-render-prog-pct display-num">0</span>' +
+          '<span class="mh-render-prog-sign">%</span>' +
+        '</div>' +
+        '<div class="mh-render-prog-bar"><span class="mh-render-prog-fill"></span></div>' +
+        '<div class="mh-render-prog-label" aria-live="polite"></div>' +
+        '<div class="mh-render-prog-sub"></div>' +
+      '</div>';
+    var root  = container.querySelector('.mh-render-prog');
+    var numEl = container.querySelector('.mh-render-prog-pct');
+    var fillEl= container.querySelector('.mh-render-prog-fill');
+    var labEl = container.querySelector('.mh-render-prog-label');
+    var subEl = container.querySelector('.mh-render-prog-sub');
+    var raf = window.requestAnimationFrame || function(cb){ return setTimeout(function(){ cb(Date.now()); }, 32); };
+    var start = Date.now();
+    var cur = 0, floor = 0, lastShown = -1;
+    var stopped = false, finishing = false, finishFrom = 0, finishStart = 0, finishCb = null;
+    function paint(v){
+      if (v < cur) v = cur;   // monotonic — never tick backwards on a stale frame
+      cur = v;
+      var shown = Math.floor(v);
+      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); }
+      fillEl.style.width = v.toFixed(1) + '%';
+      if (root) root.setAttribute('aria-valuenow', String(Math.round(v)));
+    }
+    function setText(label, sub){
+      if (label != null) labEl.textContent = label;
+      if (sub != null) subEl.textContent = sub;
+    }
+    setText(opts.label || 'Rendering', opts.sub || '');
+    function frame(){
+      if (stopped) return;
+      var now = Date.now();
+      if (finishing){
+        var t = clamp((now - finishStart) / 460, 0, 1);
+        paint(finishFrom + (100 - finishFrom) * t);
+        if (t >= 1){
+          stopped = true; paint(100);
+          if (finishCb) setTimeout(finishCb, 170);
+          return;
+        }
+      } else {
+        var eased = CEIL * (1 - Math.exp(-(now - start) / k));
+        paint(clamp(Math.max(eased, floor), 0, CAP));
+      }
+      raf(frame);
+    }
+    raf(frame);
+    return {
+      setPhase: function(label, sub){ setText(label, sub); },
+      setProgress: function(pct){
+        if (typeof pct !== 'number' || isNaN(pct)) return;
+        floor = clamp(Math.max(floor, pct), 0, CAP);  // monotonic real floor
+      },
+      complete: function(cb){
+        if (stopped || finishing){ if (cb) cb(); return; }
+        finishing = true; finishFrom = cur; finishStart = Date.now(); finishCb = cb || null;
+      },
+      stop: function(){ stopped = true; }
+    };
+  };
+})();
+"""
+
+
 # Exposes window.mhCreateGraphic(btn, createUrl, cardId, fmt): POSTs to createUrl,
 # then renders the returned visual into <div class="visual-panel" data-card="cardId">.
 # Defined once (guarded), no f-string interpolation — embed verbatim via {_VISUAL_PANEL_JS}.
@@ -7650,7 +7910,7 @@ _VISUAL_PANEL_JS = """<script>
   function mhGen(panel){
     var st = panel._mh; if (!st || !st.url) return;
     panel.style.display = '';
-    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px"><div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>Generating graphic\\u2026 this may take 5-15 seconds</div>';
+    var prog = MH.renderProgress(panel, {label: 'Designing your graphic', sub: 'Usually 5\\u201315 seconds', expectedMs: 9000, accent: 'lane'});
     var body = {format: st.fmt || 'feed_portrait'};
     if (st.assetId) body.asset_id = st.assetId;
     if (st.noPhoto) body.no_photo = true;
@@ -7658,12 +7918,14 @@ _VISUAL_PANEL_JS = """<script>
       .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
       .then(function(res){
         if (!res.ok || res.body.error){
+          prog.stop();
           panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
           return;
         }
-        render(panel, res.body);
+        prog.complete(function(){ render(panel, res.body); });
       })
       .catch(function(err){
+        prog.stop();
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
       });
   }
@@ -8160,6 +8422,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     window._API_BASE = m ? m[1] : '';
   })();
 </script>
+<script>{{ render_progress_js | safe }}</script>
 <script>
   // Register the service worker (installable PWA + offline shell). Best-effort:
   // a failure here never affects the page.
@@ -9087,6 +9350,161 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
 
+  // === Tactile spring-physics micro-interactions (UI 1.4 — inspired by Family) ===
+  // A restrained spring layer on primary buttons, selectable cards and toggles:
+  // a subtle magnetic pull toward the cursor on hover, and a bouncy release on
+  // press. The physics is integrated here in vanilla JS and written out to three
+  // CSS custom properties (--mh-mag-x / --mh-mag-y / --mh-press); the composed
+  // transform lives in theme-components.css so there is one transform owner per
+  // element. Honours prefers-reduced-motion (the shared prefersReduced flag),
+  // needs PointerEvent + requestAnimationFrame, and only does the magnetic part
+  // under a fine (mouse / stylus) pointer where "hover" is meaningful. Anything
+  // unsupported degrades silently to the existing CSS :active feedback.
+  function bindSpring() {
+    if (prefersReduced) return;
+    if (!('PointerEvent' in window) || !('requestAnimationFrame' in window)) return;
+    var finePointer = !window.matchMedia ||
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+    // Underdamped spring constants, tuned restrained: a small, quick overshoot
+    // that settles fast. K = stiffness, ZETA = damping ratio (< 1 so it bounces),
+    // C = the matching damping coefficient.
+    var K = 360, ZETA = 0.62, C = 2 * Math.sqrt(K) * ZETA;
+    var PRESS_DOWN = 0.94;   // scale while held — a gentle dip, never a squash
+    var FOLLOW = 0.32;       // fraction of the cursor offset the pull tracks
+    var POP_KICK = 1.0;      // upward scale velocity for the toggle "pop" (~6%)
+
+    var moving = [];         // controllers currently in motion
+    var raf = 0, lastTs = 0;
+    function frame(ts) {
+      raf = 0;
+      var dt = lastTs ? Math.min(0.034, (ts - lastTs) / 1000) : 0.016;
+      lastTs = ts;
+      var still = [];
+      for (var i = 0; i < moving.length; i++) {
+        if (moving[i].step(dt)) still.push(moving[i]);
+      }
+      moving = still;
+      if (moving.length) raf = requestAnimationFrame(frame);
+      else lastTs = 0;
+    }
+    function wake(ctl) {
+      if (moving.indexOf(ctl) === -1) moving.push(ctl);
+      if (!raf) { lastTs = 0; raf = requestAnimationFrame(frame); }
+    }
+    function clamp(v, m) { return v < -m ? -m : (v > m ? m : v); }
+
+    // One controller per element: three independent springs (press scale, plus
+    // the x / y of the magnetic offset), integrated with a fixed sub-step so the
+    // feel is identical at 60 Hz and 120 Hz.
+    function Ctl(el, mag) {
+      this.el = el; this.mag = mag; this.cap = 5; this.capRead = false;
+      this.cur = { p: 1, x: 0, y: 0 };
+      this.vel = { p: 0, x: 0, y: 0 };
+      this.tgt = { p: 1, x: 0, y: 0 };
+    }
+    Ctl.prototype.step = function(dt) {
+      var SUB = 1 / 240, n = Math.max(1, Math.round(dt / SUB)), h = dt / n;
+      var c = this.cur, v = this.vel, t = this.tgt, axes = ['p', 'x', 'y'];
+      for (var s = 0; s < n; s++) {
+        for (var a = 0; a < 3; a++) {
+          var key = axes[a];
+          var accel = -K * (c[key] - t[key]) - C * v[key];
+          v[key] += accel * h;
+          c[key] += v[key] * h;
+        }
+      }
+      this.el.style.setProperty('--mh-press', c.p.toFixed(4));
+      if (this.mag) {
+        this.el.style.setProperty('--mh-mag-x', c.x.toFixed(2) + 'px');
+        this.el.style.setProperty('--mh-mag-y', c.y.toFixed(2) + 'px');
+      }
+      // Keep ticking while a spring still carries velocity or sits off-target.
+      return Math.abs(v.p) > 0.0008 || Math.abs(c.p - t.p) > 0.0006 ||
+             Math.abs(v.x) > 0.01 || Math.abs(c.x - t.x) > 0.02 ||
+             Math.abs(v.y) > 0.01 || Math.abs(c.y - t.y) > 0.02;
+    };
+
+    function attach(el, mag) {
+      if (el.__mhSpring) return;
+      // [data-mh-spring="press"] opts a wide surface out of the magnetic pull
+      // (a sideways slide reads as a glitch there) — press feedback only.
+      if (el.getAttribute && el.getAttribute('data-mh-spring') === 'press') mag = false;
+      if (!finePointer) mag = false;   // touch has no hover — magnetic is meaningless
+      var ctl = new Ctl(el, mag);
+      el.__mhSpring = ctl;
+      el.classList.add('mh-spring');
+
+      if (mag) {
+        el.addEventListener('pointermove', function(e) {
+          if (e.pointerType === 'touch') return;
+          // Resolve the restrained pull ceiling (the static --mh-mag-pull
+          // token) lazily on first hover — keeps page load free of a
+          // getComputedStyle pass over every bound control.
+          if (!ctl.capRead) {
+            var capRaw = parseFloat(getComputedStyle(el).getPropertyValue('--mh-mag-pull'));
+            if (!isNaN(capRaw)) ctl.cap = capRaw;
+            ctl.capRead = true;
+          }
+          var r = el.getBoundingClientRect();
+          ctl.tgt.x = clamp((e.clientX - (r.left + r.width / 2)) * FOLLOW, ctl.cap);
+          ctl.tgt.y = clamp((e.clientY - (r.top + r.height / 2)) * FOLLOW, ctl.cap);
+          wake(ctl);
+        });
+      }
+      el.addEventListener('pointerleave', function() {
+        ctl.tgt.x = 0; ctl.tgt.y = 0; ctl.tgt.p = 1; wake(ctl);
+      });
+      el.addEventListener('pointerdown', function() {
+        ctl.tgt.p = PRESS_DOWN; wake(ctl);
+      });
+      var release = function() { ctl.tgt.p = 1; wake(ctl); };
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', function() {
+        ctl.tgt.x = 0; ctl.tgt.y = 0; ctl.tgt.p = 1; wake(ctl);
+      });
+      // Keyboard parity: Space / Enter give the same press dip + spring release.
+      el.addEventListener('keydown', function(e) {
+        if ((e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') &&
+            ctl.tgt.p !== PRESS_DOWN) { ctl.tgt.p = PRESS_DOWN; wake(ctl); }
+      });
+      el.addEventListener('keyup', function(e) {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') release();
+      });
+    }
+
+    // Primary buttons, selectable cards and explicit opt-ins → magnetic + press.
+    // (Secondary / ghost / danger / approve / loading buttons keep their lighter
+    // CSS :active scale, so the spring stays reserved for the primary surfaces.)
+    var SEL_FULL = '.btn:not(.secondary):not(.ghost):not(.danger):not(.mh-wf-approve):not(.loading), .mh-template, [data-mh-spring]';
+    document.querySelectorAll(SEL_FULL).forEach(function(el) { attach(el, true); });
+
+    // Toggles — a native checkbox / radio inside a tap-target label. Press, plus
+    // a small "pop" the instant the value flips; no magnetic (these labels can be
+    // wide or inline, where a sideways pull would read as a glitch). :has() is
+    // wrapped so older engines fall back to the explicit .mh-choice labels.
+    var toggleSel = 'label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio])';
+    var toggles;
+    try { toggles = document.querySelectorAll(toggleSel); }
+    catch (e) { toggles = document.querySelectorAll('label.mh-choice'); }
+    toggles.forEach(function(label) {
+      if (label.__mhSpring) return;
+      attach(label, false);
+      var input = label.querySelector('input[type=checkbox], input[type=radio]');
+      if (input) {
+        input.addEventListener('change', function() {
+          var ctl = label.__mhSpring; if (!ctl) return;
+          // Kick the scale velocity upward so it rises past 1 then settles — a
+          // crisp tactile confirmation that the toggle registered.
+          ctl.tgt.p = 1; ctl.vel.p = POP_KICK; wake(ctl);
+        });
+      }
+    });
+  }
+  if (document.readyState !== 'loading') bindSpring();
+  else document.addEventListener('DOMContentLoaded', bindSpring);
+  MH.bindSpring = bindSpring;
+
   // === Atlas-style 3D tilt on the bento output tiles (U.16) ===
   // Pointer-tracked perspective tilt + a sheen that follows the cursor,
   // inspired by atlascard.com. The transform is written inline (so it
@@ -9401,6 +9819,81 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       btn.textContent = origLabel;
     });
   });
+
+  // === UI 1.1 — Cycling example-prompt placeholder (inspired by Cosmos) ===
+  // Any field tagged [data-mh-cycle-placeholder="phrase | phrase | …"] types
+  // its example prompts through the placeholder (typewriter cycle: type → hold
+  // → erase → next), guiding first-time users with zero extra chrome. The
+  // static placeholder="" stays as the no-JS / reduced-motion fallback. Pauses
+  // on focus, while the field already holds a value, and when the tab is
+  // hidden; skipped entirely under prefers-reduced-motion. One timer per field,
+  // so state stays fully resumable. Vanilla JS, no deps.
+  function bindCyclePlaceholders() {
+    if (prefersReduced) return; // reduced motion -> keep the static placeholder
+    var CARET = String.fromCharCode(0x2502); // thin typewriter caret
+    var HOLD_TICKS = 7; // ~7 x 285ms = ~2s rest on a fully-typed phrase
+    document.querySelectorAll('[data-mh-cycle-placeholder]').forEach(function(el){
+      if (el.dataset.mhCycleBound === '1') return;
+      el.dataset.mhCycleBound = '1';
+      var phrases = (el.getAttribute('data-mh-cycle-placeholder') || '')
+        .split('|')
+        .map(function(s){ return s.trim(); })
+        .filter(function(s){ return s.length > 0; });
+      if (!phrases.length) return;
+      var staticPh = el.getAttribute('placeholder') || '';
+      var idx = 0, pos = 0, mode = 'typing', caretOn = true, holdTicks = 0;
+      var running = false, timer = null;
+
+      function render(){
+        el.setAttribute('placeholder', phrases[idx].slice(0, pos) + (caretOn ? CARET : ''));
+      }
+      function schedule(ms){ timer = setTimeout(tick, ms); }
+      function tick(){
+        if (!running) return;
+        if (!document.contains(el)) { stop(false); return; } // detached -> give up
+        if (mode === 'typing') {
+          if (pos < phrases[idx].length) {
+            pos++; caretOn = true; render(); schedule(42 + Math.random() * 26);
+          } else {
+            mode = 'holding'; holdTicks = 0; caretOn = true; render(); schedule(420);
+          }
+        } else if (mode === 'holding') {
+          holdTicks++; caretOn = (holdTicks % 2 === 0); render();
+          if (holdTicks >= HOLD_TICKS) { mode = 'erasing'; caretOn = true; render(); schedule(280); }
+          else schedule(285);
+        } else { // erasing
+          if (pos > 0) { pos--; caretOn = true; render(); schedule(24 + Math.random() * 14); }
+          else { idx = (idx + 1) % phrases.length; mode = 'typing'; caretOn = true; schedule(360); }
+        }
+      }
+      function start(){
+        if (running) return;
+        if (el.value) return;                       // user is typing -> leave them be
+        if (document.activeElement === el) return;  // focused -> don't move it behind the cursor
+        if (document.hidden) return;                // background tab -> save CPU
+        running = true; tick();
+      }
+      function stop(restoreStatic){
+        running = false;
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (restoreStatic) {
+          idx = 0; pos = 0; mode = 'typing'; holdTicks = 0; caretOn = false;
+          el.setAttribute('placeholder', staticPh);
+        }
+      }
+      el.addEventListener('focus', function(){ stop(true); });
+      el.addEventListener('blur', function(){ if (!el.value) start(); });
+      el.addEventListener('input', function(){ if (el.value) stop(true); else start(); });
+      document.addEventListener('visibilitychange', function(){
+        if (document.hidden) stop(false);
+        else if (!el.value && document.activeElement !== el) start();
+      });
+      start();
+    });
+  }
+  if (document.readyState !== 'loading') bindCyclePlaceholders();
+  else document.addEventListener('DOMContentLoaded', bindCyclePlaceholders);
+  MH.bindCyclePlaceholders = bindCyclePlaceholders;
 })();
 </script>
 {% if dock %}
@@ -9696,6 +10189,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
         css=BASE_CSS,
         body=body,
         active=active,
+        render_progress_js=_RENDER_PROGRESS_JS,
         dock=dock,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
@@ -10777,6 +11271,10 @@ def create_app() -> Flask:
         # Lane-number watermark sits behind the headline. The org name stays
         # in default ink (no .grad span) so the only lane-yellow on the page
         # is the live dot + the CTA. Editorial italic does the emphasis work.
+        # U.9 — only the signed-out hero cycles its content-type accent word;
+        # the returning-user "Ready to file." greeting stays static, so the
+        # cycling script ships only when the rotator is actually on the page.
+        word_cycle_js = ""
         if prof and prof.is_ready():
             # Returning user with a pinned org.
             hero_h1 = f'{_h(prof.display_name)}.<br><em class="editorial">Ready</em> to file.'
@@ -10797,7 +11295,10 @@ def create_app() -> Flask:
             lane_no = "04"
         else:
             # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            hero_h1 = 'Results in.<br><em class="editorial">On-brand</em> stories out.'
+            # U.9 — the content-type noun is now the gold serif-italic accent
+            # and crossfades through stories / reels / graphics / captions.
+            hero_h1 = "Results in.<br>On-brand " + _hero_word_cycle_html() + " out."
+            word_cycle_js = _HERO_WORD_CYCLE_JS
             hero_lede = (
                 "MediaHub reads your club website, social profiles, and brand "
                 "guidelines, then writes captions, builds graphics, and renders "
@@ -10890,6 +11391,46 @@ def create_app() -> Flask:
             f"{demo_line_html}"
             f"{meta_html}"
             f"{demo_html}"
+            "</section>"
+            f"{word_cycle_js}"
+        )
+
+        # --- UI 1.3 — Inline media thumbnails in a display headline. ---
+        # Samara-style: a large statement sentence with four *real* sample
+        # outputs inlined — the results sheet a club uploads, then the story
+        # card, feed graphic and reel the engine returns. The thumbnails are
+        # first-party SVGs served from /static/samples (no external fetch);
+        # they mirror the same facts/formats as the larger sample row below,
+        # so the band reads as a one-line proof of the whole pipeline.
+        def _inline_thumb(filename: str, kind: str, alt: str) -> str:
+            src = url_for("static", filename="samples/" + filename)
+            return (
+                f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
+                f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
+                f'src="{src}" width="144" height="200" '
+                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+                "</span>"
+            )
+
+        inline_headline_html = (
+            '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
+            '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
+            '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
+            "From a results sheet "
+            + _inline_thumb(
+                "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
+            )
+            + " to a story "
+            + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
+            + ", a feed graphic "
+            + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
+            + " and a reel "
+            + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
+            + "."
+            "</h2>"
+            '<p class="mh-pipeline-sub">One upload, four posting-ready formats '
+            "&mdash; every name, time and place grounded in the result you "
+            "uploaded. Nothing is invented; nothing posts without you.</p>"
             "</section>"
         )
 
@@ -11213,9 +11754,16 @@ def create_app() -> Flask:
                 "</section>"
             )
 
+        # U.8 — animated how-it-works pipeline diagram. Sits right after the
+        # hero as a visual amplification of its "reads X … writes Y" claim,
+        # ahead of the numbered four-step explainer.
+        pipeline_html = _pipeline_diagram_section_html()
+
         return _layout(
             "Home",
             hero_html
+            + inline_headline_html
+            + pipeline_html
             + steps_html
             + before_after_html
             + bento_html
@@ -11618,7 +12166,7 @@ def create_app() -> Flask:
             '<div class="mh-toolbar">'
             '<div class="grow mh-search">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            '<input id="mh-activity-search" type="search" placeholder="Search meet name, file or run id…" autocomplete="off" />'
+            f'<input id="mh-activity-search" type="search" {_CYCLE_PH_ATTR_SEARCH} placeholder="Search meet name, file or run id…" autocomplete="off" />'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
@@ -13426,6 +13974,22 @@ def create_app() -> Flask:
             _budget_note = (
                 ' <span class="tag warn">budget exceeded</span>' if _budget_exceeded else ""
             )
+            # When EVERY lookup failed (none completed, none found history), the
+            # cause is almost always that the deployment can't reach a web-search
+            # backend to find ranking history — make that actionable instead of
+            # leaving the operator staring at "Lookups failed: N".
+            _pb_lookup_diag = ""
+            if _n_swimmers > 0 and _n_fetch_fail >= _n_swimmers and _n_no_history == 0:
+                _pb_lookup_diag = (
+                    '<div class="divider"></div>'
+                    '<p class="dim" style="color:var(--warn);font-size:13px;line-height:1.5">'
+                    "&#x26A0; <strong>Every PB lookup failed.</strong> The engine couldn&rsquo;t "
+                    "reach a web-search backend to find swimmers&rsquo; ranking history, so no PB "
+                    "could be confirmed (they show as &ldquo;possible &mdash; unconfirmed&rdquo;). "
+                    "On a hosted server the default DuckDuckGo path is usually blocked from the "
+                    "server&rsquo;s IP &mdash; set <code>MEDIAHUB_SEARCH_ENDPOINT</code> to a "
+                    "reachable SearXNG instance to enable PB confirmation.</p>"
+                )
             pb_audit_html = f"""
 <div class="card">
   <h2>PB Audit</h2>
@@ -13445,6 +14009,7 @@ def create_app() -> Flask:
     <div class="stat"><div class="l">Fetch time</div><div class="v">{_fetch_secs:.1f}s{_budget_note}</div></div>
     <div class="stat"><div class="l">Cache hits/misses</div><div class="v">{_cache_hits}/{_cache_misses}</div></div>
   </div>
+  {_pb_lookup_diag}
   {_needs_verif_html}
   <div class="divider"></div>
   <a class="btn secondary" href="{_audit_url}">Show all per-swimmer audits &#x25BE;</a>
@@ -21331,7 +21896,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             quick_url
         }" enctype="multipart/form-data" data-loader-text="Building your graphic">
     <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
-    <textarea id="ft-prompt" name="prompt" rows="4" required
+    <textarea id="ft-prompt" name="prompt" rows="4" required {_CYCLE_PH_ATTR_MOMENT}
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
       style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
@@ -21654,7 +22219,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <form id="chat-form" method="post" action="{send_url}" style="margin-top:var(--sp-5)" data-loader-text="Thinking…">
   <label class="req" for="chat-reply">Your reply</label>
   <textarea id="chat-reply" name="message" placeholder="Tell the assistant what you want to post about…"
-            style="min-height:110px" required></textarea>
+            {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
     <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
@@ -28770,7 +29335,7 @@ function mhSetupMode(mode) {{
             return _layout("Web research", off, active="research"), 404
         body = _WEB_RESEARCH_CONSOLE_BODY.replace(
             "__SUBMIT_URL__", url_for("api_web_research_submit")
-        )
+        ).replace("__CYCLE_PH__", _CYCLE_PH_ATTR_RESEARCH)
         return _layout("Web research", body, active="research")
 
     @app.route("/api/web-research", methods=["POST"])
@@ -28855,7 +29420,9 @@ function mhSetupMode(mode) {{
     @app.route("/club-qa")
     def club_qa_console():
         """Render the "Ask the data" console — Q&A over the org's own runs."""
-        body = _CLUB_QA_CONSOLE_BODY.replace("__SUBMIT_URL__", url_for("api_club_qa_submit"))
+        body = _CLUB_QA_CONSOLE_BODY.replace(
+            "__SUBMIT_URL__", url_for("api_club_qa_submit")
+        ).replace("__CYCLE_PH__", _CYCLE_PH_ATTR_ASKDATA)
         return _layout("Ask the data", body, active="settings")
 
     @app.route("/api/club-qa", methods=["POST"])
@@ -29750,14 +30317,14 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
+  var prog = MH.renderProgress(panel, {{label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'}});
   var fail = function(msg) {{
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   }};
   var success = function(videoUrl) {{
+    prog.complete(function(){{
     btn.disabled = false; btn.textContent = origLabel;
     var chips = '';
     ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
@@ -29780,6 +30347,7 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
         '</div>' +
       '</div>';
+    }});
   }};
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {{method:'POST'}})
     .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
