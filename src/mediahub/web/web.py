@@ -16295,9 +16295,7 @@ Relay team broke club record"></textarea>
                     f"</tr></thead><tbody>{rows}</tbody></table>"
                 )
             resp_html = (
-                _code_hl.code_block(_sub(response), "json", label="Response")
-                if response
-                else ""
+                _code_hl.code_block(_sub(response), "json", label="Response") if response else ""
             )
             return (
                 f'<section class="card mh-api-endpoint" id="{_h(anchor)}">'
@@ -16359,7 +16357,7 @@ Relay team broke club record"></textarea>
             "finishes, then pull the cards it produced.</p>"
             + _switcher(
                 "quickstart",
-                '# 1. Poll the run until the pipeline finishes…\n'
+                "# 1. Poll the run until the pipeline finishes…\n"
                 'RUN_ID="run_8f2c1a"\n'
                 'curl -s "__BASE__/api/runs/$RUN_ID/status"\n\n'
                 "# 2. …then pull the generated content cards.\n"
@@ -16547,7 +16545,7 @@ Relay team broke club record"></textarea>
                 ),
                 python=(
                     "import requests\n\n"
-                    'reel = requests.post(\n'
+                    "reel = requests.post(\n"
                     '    "__BASE__/api/runs/run_8f2c1a/reel",\n'
                     '    params={"format": "story", "n": 3},\n'
                     ")\n"
@@ -16555,7 +16553,7 @@ Relay team broke club record"></textarea>
                     "    fh.write(reel.content)\n"
                 ),
                 js=(
-                    'const res = await fetch(\n'
+                    "const res = await fetch(\n"
                     '  "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3",\n'
                     '  { method: "POST", credentials: "include" },\n'
                     ");\n"
@@ -16569,9 +16567,7 @@ Relay team broke club record"></textarea>
             ),
         ]
 
-        endpoints_html = (
-            '<h2 style="margin-top:var(--sp-7)">Endpoints</h2>' + "".join(endpoints)
-        )
+        endpoints_html = '<h2 style="margin-top:var(--sp-7)">Endpoints</h2>' + "".join(endpoints)
 
         return hero + intro + auth + quickstart + endpoints_html
 

@@ -302,9 +302,7 @@ def code_switcher(
     for i, (tab_label, lang, code) in enumerate(samples):
         rid = f"{gid}-{i}"
         checked = " checked" if i == 0 else ""
-        radios.append(
-            f'<input class="mh-cs-radio" type="radio" name="{gid}" id="{rid}"{checked}>'
-        )
+        radios.append(f'<input class="mh-cs-radio" type="radio" name="{gid}" id="{rid}"{checked}>')
         tabs.append(f'<label class="mh-cs-tab" for="{rid}">{_esc(tab_label)}</label>')
         canonical = normalize_lang(lang)
         panels.append(
