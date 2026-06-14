@@ -608,6 +608,148 @@
 .mh-vanish__ph.is-swapping { opacity: 0; transform: translateY(calc(-50% + 6px)); }
 
 /* =====================================================================
+   13. DRAG-SCROLL GALLERY  (Fey / Sketch — click-and-drag horizontal
+   carousel; Media Library filmstrip + landing sample-output showcase)
+   ---------------------------------------------------------------------
+   The substrate is a plain `overflow-x: auto` scroll-snap row, so the
+   gallery is fully usable with NO JS (wheel / trackpad / touch / keyboard
+   scroll) and on old engines. ui-kit.js `bindDragScroll` layers mouse
+   click-and-drag panning on top: it adds `.is-grabbable` only when the row
+   actually overflows (so the grab cursor never lies), `.is-dragging` while
+   a drag is live (snap off for a free pan; descendants inert so a drag
+   never selects text or fires a click), and it swallows the trailing click
+   after a real drag. Touch keeps native momentum scroll; pen / mouse get
+   the drag. No carousel library. Colour comes from tokens, so a re-skin
+   re-skins the gallery for free.
+   ===================================================================== */
+.mh-drag-scroll {
+  display: flex;
+  gap: var(--sp-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;          /* iOS momentum */
+  overscroll-behavior-x: contain;             /* don't bounce the page */
+  padding-block: var(--sp-2) var(--sp-4);     /* room for hover-lift + scrollbar */
+  /* Soft edge fade so cards dissolve into the rails (mirrors the marquee
+     mask). Only applied when the row overflows — a short, fully-visible
+     row keeps clean square edges (see :not(.is-grabbable) below). */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: var(--mh-outline) transparent;
+}
+.mh-drag-scroll:not(.is-grabbable) {
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+.mh-drag-scroll::-webkit-scrollbar { height: 8px; }
+.mh-drag-scroll::-webkit-scrollbar-track { background: transparent; }
+.mh-drag-scroll::-webkit-scrollbar-thumb {
+  background: var(--mh-outline-variant);
+  border-radius: var(--radius-pill);
+}
+.mh-drag-scroll:hover::-webkit-scrollbar-thumb { background: var(--mh-outline); }
+
+/* JS marks an overflowing row grabbable — only then is the grab cursor
+   honest (there is somewhere to drag to). */
+.mh-drag-scroll.is-grabbable { cursor: grab; }
+.mh-drag-scroll.is-dragging {
+  cursor: grabbing;
+  scroll-snap-type: none;       /* free pan; snap re-engages on release */
+  scroll-behavior: auto;        /* no smooth animation fighting the drag */
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* While dragging, every descendant is inert: the pan never selects text,
+   triggers a hover state, or fires a link / button click. */
+.mh-drag-scroll.is-dragging * { pointer-events: none; }
+
+/* Each child is a snap stop that never shrinks. */
+.mh-drag-scroll > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+/* ---- Gallery card — the visual unit you drag through ------------------ */
+.mh-ds-card {
+  display: flex;
+  flex-direction: column;
+  width: var(--mh-ds-card-w, 232px);
+  overflow: hidden;
+  border: 1px solid var(--mh-outline-variant);
+  border-radius: var(--radius-lg);
+  background: var(--mh-surface);
+  transition: border-color var(--dur-med) var(--ease-out-quick),
+              transform var(--dur-med) var(--ease-out),
+              box-shadow var(--dur-med) var(--ease-out-quick);
+}
+/* Hover-lift only when not mid-drag, so panning past cards doesn't make the
+   whole row twitch under the pointer. */
+.mh-drag-scroll:not(.is-dragging) .mh-ds-card:hover {
+  border-color: color-mix(in oklch, var(--mh-primary) 45%, var(--mh-outline));
+  transform: translateY(-3px);
+  box-shadow: var(--mh-elevation-2);
+}
+.mh-ds-card-media {
+  position: relative;
+  display: block;
+  aspect-ratio: var(--mh-ds-aspect, 3 / 4);
+  background: var(--mh-surface-deep);
+  overflow: hidden;
+}
+.mh-ds-card-media img,
+.mh-ds-card-media svg {
+  display: block;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  /* the image is part of the drag surface, never its own drag ghost */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+/* Landing sample-output cards: the artwork is a designed 18:25 graphic, so
+   match the media box to it (cover == contain, no crop) and widen the card. */
+.mh-ds-card--output { --mh-ds-aspect: 18 / 25; --mh-ds-card-w: 248px; }
+.mh-ds-card-cap {
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.mh-ds-card-cap .eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mh-primary);
+}
+.mh-ds-card-cap .title {
+  font-weight: 600;
+  color: var(--mh-on-surface);
+  overflow-wrap: anywhere;
+}
+.mh-ds-card-cap .sub {
+  font-size: var(--fs-sm);
+  color: var(--mh-on-surface-muted);
+  overflow-wrap: anywhere;
+}
+
+/* "Drag to explore" affordance — JS shows it only on an overflowing row and
+   hides it after the first drag. It is pure hint: the gallery operates
+   without it (and without JS). `[hidden]` must win over the flex display. */
+.mh-ds-hint {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-faint);
+}
+.mh-ds-hint[hidden] { display: none; }
+.mh-ds-hint__grip { display: inline-flex; color: var(--mh-primary); }
+.mh-ds-hint__grip svg { display: block; }
+
+/* =====================================================================
    REDUCED MOTION — stop dead. State changes keep their (instant) end
    state; continuous / large / pointer-driven motion is disabled.
    ===================================================================== */
@@ -625,6 +767,10 @@
   .mh-tilt { transform: none !important; transition: none; }
   .mh-marquee { -webkit-mask-image: none; mask-image: none; overflow-x: auto; }
   .mh-marquee__track { width: auto; }
+  /* Drag-scroll stays usable (direct manipulation), but the smooth-scroll
+     animation and the hover-lift are stilled. */
+  .mh-drag-scroll { scroll-behavior: auto; }
+  .mh-drag-scroll:not(.is-dragging) .mh-ds-card:hover { transform: none; }
   .mh-spotlight::before { animation: none; opacity: 1; }
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
   .mh-flip-words > .mh-fw { transition: none; }

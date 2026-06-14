@@ -1018,6 +1018,28 @@ def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-t
     return f'<{tag} class="{cls} mh-reveal-lines">{spans}</{tag}>'
 
 
+def _drag_hint(label: str = "Drag to explore") -> str:
+    """UI 1.27 — the "drag to explore" affordance shown beside a
+    ``.mh-drag-scroll`` gallery (Media Library filmstrip + landing
+    sample-output showcase).
+
+    It ships ``hidden``; ui-kit.js ``bindDragScroll`` reveals it only while
+    the row actually overflows (and hides it again after the first drag), so
+    the hint never promises a drag the row can't deliver. It is a pure cue:
+    the gallery scrolls with wheel / trackpad / touch / focused-arrow keys
+    even with no JS and no hint. The grip glyph is a static, first-party
+    inline SVG (no icon font, no CDN).
+    """
+    return (
+        '<p class="mh-ds-hint" hidden style="margin-top:var(--sp-3)">'
+        '<span class="mh-ds-hint__grip" aria-hidden="true">'
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+        'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+        'stroke-linejoin="round"><path d="m9 6-4 4 4 4M15 6l4 4-4 4"/></svg>'
+        f"</span> {_h(label)}</p>"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # U.3 — Explainability & confidence surfaces.
 #
@@ -11838,6 +11860,74 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # --- UI 1.27 — sample-output drag gallery. A mouse-draggable
+        # horizontal carousel of the real first-party sample SVGs (the same
+        # four outputs the UI 1.3 inline headline names), full size, captioned.
+        # Substrate is a plain overflow-x scroll-snap row, so it scrolls with
+        # wheel / trackpad / touch / focused-arrow keys even with no JS;
+        # ui-kit.js bindDragScroll adds click-drag panning + the grab cursor.
+        def _output_card(filename: str, eyebrow: str, title: str, sub: str, alt: str) -> str:
+            src = url_for("static", filename="samples/" + filename)
+            return (
+                '<figure class="mh-ds-card mh-ds-card--output">'
+                '<div class="mh-ds-card-media">'
+                f'<img src="{src}" width="144" height="200" '
+                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+                "</div>"
+                '<figcaption class="mh-ds-card-cap">'
+                f'<span class="eyebrow">{_h(eyebrow)}</span>'
+                f'<span class="title">{_h(title)}</span>'
+                f'<span class="sub">{_h(sub)}</span>'
+                "</figcaption>"
+                "</figure>"
+            )
+
+        gallery_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Sample outputs</span></div>'
+            + _reveal_lines(
+                [
+                    "Drag through what one",
+                    'results sheet <em class="editorial">becomes.</em>',
+                ]
+            )
+            + '<div class="mh-ds-gallery-wrap mh-reveal">'
+            + '<div class="mh-drag-scroll" tabindex="0" role="group" '
+            'aria-label="Sample MediaHub outputs — drag or scroll to browse">'
+            + _output_card(
+                "results-sheet.svg",
+                "Source",
+                "Results sheet",
+                "Event 14 · 100m freestyle",
+                "Event 14, 100m freestyle finishing times",
+            )
+            + _output_card(
+                "story-card.svg",
+                "Story · 9:16",
+                "Personal best",
+                "Tom Davies · 52.41 · −0.74s",
+                "Tom Davies, personal best, 52.41",
+            )
+            + _output_card(
+                "feed-graphic.svg",
+                "Feed · 4:5",
+                "Podium graphic",
+                "Top three · county finals",
+                "Top three, county finals podium",
+            )
+            + _output_card(
+                "reel.svg",
+                "Reel · 15s",
+                "Match-day reel",
+                "Riverside SC · branded cut",
+                "Match-day highlights, 15-second cut",
+            )
+            + "</div>"
+            + _drag_hint("Drag to explore")
+            + "</div>"
+            "</section>"
+        )
+
         # --- Made for — three audience cards. Shown to everyone since the
         # product story doesn't change between fresh visitors and pinned
         # tenants; this is the "who it's for" reassurance block.
@@ -11995,6 +12085,7 @@ def create_app() -> Flask:
             + steps_html
             + before_after_html
             + bento_html
+            + gallery_html
             + frames_html
             + audience_html
             + promise_html
@@ -30801,6 +30892,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
             store_failed = True
         rows_html = ""
+        gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
@@ -30820,6 +30912,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<img class="mh-hp-img" src="{_file_url}" alt="" />'
                 f'<span class="mh-hp-cap"><b>{_h(_hp_type)}</b>{_hp_subject_html}</span>'
                 "</template>"
+            )
+            # UI 1.27 — one filmstrip card per asset for the drag-scroll
+            # gallery above the table. Same escaped, parsed-metadata caption
+            # as the row; the photo loads lazily so a 200-asset strip costs
+            # nothing up front beyond what's on screen.
+            gallery_items += (
+                '<figure class="mh-ds-card">'
+                '<div class="mh-ds-card-media">'
+                f'<img src="{_file_url}" loading="lazy" decoding="async" alt="" />'
+                "</div>"
+                '<figcaption class="mh-ds-card-cap">'
+                f'<span class="eyebrow">{_h(_hp_type)}</span>'
+                + (f'<span class="sub">{_h(_hp_subject)}</span>' if _hp_subject else "")
+                + "</figcaption>"
+                "</figure>"
             )
             # HTML-escape every parsed-metadata cell: descriptions/links are
             # user-supplied + AI-parsed, so an unescaped name/venue was a
@@ -30872,7 +30979,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
   </form>
 </div>
-
+{
+            (
+                '<div class="card">'
+                '<div class="strap" style="margin-bottom:var(--sp-3)">Browse &middot; drag to scroll</div>'
+                '<div class="mh-ds-gallery-wrap">'
+                '<div class="mh-drag-scroll" tabindex="0" role="group" '
+                'aria-label="Media library photos — drag or scroll to browse">'
+                + gallery_items
+                + "</div>"
+                + _drag_hint("Drag to explore")
+                + "</div></div>"
+            )
+            if gallery_items
+            else ""
+        }
 <div class="card">
   <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {
             "asset" if len(assets) == 1 else "assets"
