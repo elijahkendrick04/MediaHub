@@ -8466,6 +8466,146 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
 
+  // === Before/after reveal slider (U.15) ===
+  // Drag-to-wipe between the raw upload and the finished branded graphic.
+  // Pointer-drag anywhere on the figure, plus a keyboard-operable role=slider
+  // handle. A one-time "tell" sweep on first scroll-into-view hints that it is
+  // draggable; everything is a no-op under prefers-reduced-motion. No library.
+  function bindBeforeAfter() {
+    document.querySelectorAll('[data-mh-ba]').forEach(function(fig) {
+      if (fig.getAttribute('data-mh-ba-bound')) return;
+      fig.setAttribute('data-mh-ba-bound', '1');
+      var handle = fig.querySelector('.mh-ba-handle');
+      var timers = [];
+      function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+      function clampPct(v) { return Math.max(0, Math.min(100, v)); }
+      function describe(p) {
+        var r = Math.round(p);
+        if (r <= 1) return 'Showing the finished branded graphic';
+        if (r >= 99) return 'Showing the raw results file';
+        return r + '% raw file, ' + (100 - r) + '% finished graphic';
+      }
+      function setPos(p) {
+        p = clampPct(p);
+        fig.style.setProperty('--mh-ba-pos', p + '%');
+        if (handle) {
+          handle.setAttribute('aria-valuenow', String(Math.round(p)));
+          handle.setAttribute('aria-valuetext', describe(p));
+        }
+      }
+      function posFromX(clientX) {
+        var r = fig.getBoundingClientRect();
+        if (!r.width) return 50;
+        return (clientX - r.left) / r.width * 100;
+      }
+      var dragging = false;
+      function startDrag(clientX, pointerId) {
+        dragging = true;
+        clearTimers();
+        fig.classList.add('is-dragging');
+        fig.classList.remove('mh-ba--animate'); // 1:1 tracking, no transition lag
+        if (pointerId != null && fig.setPointerCapture) {
+          try { fig.setPointerCapture(pointerId); } catch (e) {}
+        }
+        // Move keyboard focus to the handle so arrow keys work after a grab.
+        if (handle) { try { handle.focus({preventScroll: true}); } catch (e) { try { handle.focus(); } catch (e2) {} } }
+        setPos(posFromX(clientX));
+      }
+      function moveDrag(clientX) { if (dragging) setPos(posFromX(clientX)); }
+      function endDrag(pointerId) {
+        if (!dragging) return;
+        dragging = false;
+        fig.classList.remove('is-dragging');
+        if (pointerId != null && fig.releasePointerCapture) {
+          try { fig.releasePointerCapture(pointerId); } catch (e) {}
+        }
+      }
+      if (window.PointerEvent) {
+        fig.addEventListener('pointerdown', function(e) {
+          if (e.button != null && e.button !== 0) return; // primary button only
+          startDrag(e.clientX, e.pointerId);
+          e.preventDefault();
+        });
+        fig.addEventListener('pointermove', function(e) {
+          if (dragging) { moveDrag(e.clientX); e.preventDefault(); }
+        });
+        fig.addEventListener('pointerup', function(e) { endDrag(e.pointerId); });
+        fig.addEventListener('pointercancel', function(e) { endDrag(e.pointerId); });
+      } else {
+        // Legacy mouse + touch fallback (no Pointer Events).
+        fig.addEventListener('mousedown', function(e) { startDrag(e.clientX, null); e.preventDefault(); });
+        document.addEventListener('mousemove', function(e) { moveDrag(e.clientX); });
+        document.addEventListener('mouseup', function() { endDrag(null); });
+        fig.addEventListener('touchstart', function(e) {
+          if (e.touches && e.touches[0]) startDrag(e.touches[0].clientX, null);
+        }, {passive: true});
+        fig.addEventListener('touchmove', function(e) {
+          if (e.touches && e.touches[0]) moveDrag(e.touches[0].clientX);
+        }, {passive: true});
+        fig.addEventListener('touchend', function() { endDrag(null); });
+      }
+      // Keyboard — the handle exposes role=slider.
+      if (handle) {
+        handle.addEventListener('keydown', function(e) {
+          var cur = parseFloat(handle.getAttribute('aria-valuenow'));
+          if (isNaN(cur)) cur = 50;
+          var step = e.shiftKey ? 10 : 2;
+          var next = cur;
+          switch (e.key) {
+            case 'ArrowLeft': case 'ArrowDown': next = cur - step; break;
+            case 'ArrowRight': case 'ArrowUp': next = cur + step; break;
+            case 'Home': next = 0; break;
+            case 'End': next = 100; break;
+            case 'PageDown': next = cur - 10; break;
+            case 'PageUp': next = cur + 10; break;
+            default: return;
+          }
+          e.preventDefault();
+          clearTimers();
+          // Arrow steps ride the eased transition for a readable nudge unless
+          // the user prefers reduced motion.
+          if (!prefersReduced) fig.classList.add('mh-ba--animate');
+          setPos(next);
+        });
+        // Swallow the synthetic click so a grab-and-release doesn't double-fire.
+        handle.addEventListener('click', function(e) { e.preventDefault(); });
+      }
+      // Initial position (default 50; overridable via data-mh-ba-start).
+      var startPos = parseFloat(fig.getAttribute('data-mh-ba-start'));
+      setPos(isNaN(startPos) ? 50 : startPos);
+      // Intro "tell": one gentle sweep when first scrolled into view so the
+      // control reads as draggable. Motion-allowed only; cancelled the moment
+      // the user grabs it.
+      if (!prefersReduced) {
+        var hinted = false;
+        function hint() {
+          if (hinted || dragging) return;
+          hinted = true;
+          fig.classList.add('mh-ba--animate');
+          // Lead toward the payoff — sweep left first to reveal the branded
+          // card, then right past centre to show the raw file, then settle.
+          setPos(34);
+          timers.push(setTimeout(function() { setPos(64); }, 560));
+          timers.push(setTimeout(function() { setPos(50); }, 1120));
+          timers.push(setTimeout(function() { fig.classList.remove('mh-ba--animate'); }, 1680));
+        }
+        if ('IntersectionObserver' in window) {
+          var io2 = new IntersectionObserver(function(entries) {
+            entries.forEach(function(en) {
+              if (en.isIntersecting) { hint(); io2.unobserve(en.target); }
+            });
+          }, {threshold: 0.45});
+          io2.observe(fig);
+        } else {
+          hint();
+        }
+      }
+    });
+  }
+  if (document.readyState !== 'loading') bindBeforeAfter();
+  else document.addEventListener('DOMContentLoaded', bindBeforeAfter);
+  MH.bindBeforeAfter = bindBeforeAfter;
+
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
   // data-mh-card-id triggers a POST to /api/workflow and optimistically
@@ -9745,6 +9885,85 @@ def create_app() -> Flask:
             + "</div></section>"
         )
 
+        # --- U.15 — before/after reveal slider. Drag-to-wipe between the raw
+        # results file a club uploads (BEFORE) and the finished branded graphic
+        # MediaHub ships back (AFTER). The two panes carry the SAME swimmer and
+        # time as the story sample below (Tom Davies, 52.41, PB −0.74s) so the
+        # page reads as one coherent worked example: ugly file in, on-brand card
+        # out. Decorative mockups (aria-hidden); the figure's aria-label and the
+        # slider's live aria-valuetext carry the meaning to assistive tech. The
+        # behaviour is wired by MH.bindBeforeAfter in _layout (vanilla JS, no
+        # library); with JS off or reduced-motion on it degrades to a still
+        # split image that is still fully legible.
+        before_sheet = (
+            "Event 12  Boys 13-14  100 LC Metre Free\n"
+            "=======================================\n"
+            "Pl  Name              Age Tm   Finals\n"
+            " 1  Davies, Tom       14  RIV   52.41\n"
+            " 2  Okafor, Daniel    13  RIV   54.02\n"
+            " 3  Mehta, Arun       14  RIV   54.77\n"
+            " 4  Novak, Petr       13  OTT   55.31\n"
+            " 5  Lindqvist, Ed     14  OTT   55.88\n"
+            " 6  Bauer, Jonas      13  HAR   56.10"
+        )
+        before_after_html = (
+            '<section class="mh-section mh-reveal">'
+            '<div class="mh-section-eyebrow-strip"><span class="label">The transformation</span></div>'
+            '<h2 class="mh-section-title">A raw results file in. '
+            '<em class="editorial">A posting-ready graphic</em> out. Drag to reveal.</h2>'
+            '<figure class="mh-ba" data-mh-ba '
+            'aria-label="Before and after: the raw results file a club uploads, '
+            "wiped across to reveal the finished branded graphic MediaHub returns "
+            '&mdash; same swimmer, same time.">'
+            # AFTER pane (underneath) — the finished branded story card.
+            '<div class="mh-ba-pane mh-ba-after">'
+            '<span class="mh-ba-tag mh-ba-tag-after">After &middot; branded graphic</span>'
+            '<div class="mh-ba-card" aria-hidden="true">'
+            '<div class="mh-ba-card-top">'
+            '<span class="mh-ba-card-club">Riverside SC</span>'
+            '<span class="mh-ba-card-meet">Spring Open</span>'
+            "</div>"
+            '<div class="mh-ba-card-mid">'
+            '<div class="mh-ba-card-name">Tom Davies</div>'
+            '<div class="mh-ba-card-pb"><em>Personal best</em></div>'
+            '<div class="mh-ba-card-time">52.41<span class="mh-ba-card-delta">&minus;0.74s</span></div>'
+            "</div>"
+            '<div class="mh-ba-card-foot">'
+            '<span>100m Free</span><span class="dot">/</span>'
+            '<span>Boys 13-14</span><span class="dot">/</span><span>1st</span>'
+            "</div>"
+            "</div>"
+            "</div>"
+            # BEFORE pane (on top, clipped) — the raw meet-manager export.
+            '<div class="mh-ba-pane mh-ba-before">'
+            '<span class="mh-ba-tag mh-ba-tag-before">Before &middot; raw upload</span>'
+            '<div class="mh-ba-sheet" aria-hidden="true">'
+            '<div class="mh-ba-sheet-head">HY-TEK&rsquo;s Meet Manager &middot; results.hy3</div>'
+            f'<pre class="mh-ba-sheet-body">{_h(before_sheet)}</pre>'
+            "</div>"
+            "</div>"
+            # Divider + grab handle (role=slider, keyboard-operable).
+            '<button class="mh-ba-handle" type="button" role="slider" '
+            'aria-label="Reveal amount: drag, or use the arrow keys" '
+            'aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" '
+            'aria-valuenow="50" aria-valuetext="50% raw file, 50% finished graphic">'
+            '<span class="mh-ba-grip" aria-hidden="true">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+            'stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 4 12 9 18"/>'
+            '<polyline points="15 6 20 12 15 18"/></svg>'
+            "</span>"
+            "</button>"
+            "</figure>"
+            '<p class="mh-ba-hint">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<polyline points="9 6 4 12 9 18"/><polyline points="15 6 20 12 15 18"/></svg>'
+            "Drag the handle &mdash; or focus it and use &larr; &rarr; &mdash; to wipe "
+            "between your upload and what MediaHub hands back."
+            "</p>"
+            "</section>"
+        )
+
         # --- Sample output preview — three mock cards showing the three
         # default output formats. Pure visual; non-interactive. Helps a
         # first-time visitor see what they're getting before they upload.
@@ -9875,7 +10094,13 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
+            hero_html
+            + steps_html
+            + before_after_html
+            + sample_html
+            + audience_html
+            + promise_html
+            + final_cta_html,
             active="home",
         )
 
