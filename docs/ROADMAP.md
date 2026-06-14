@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `3cd9cb287` · Merge pull request #508 from elijahkendrick04/claude/keen-goodall-ryqytb
+**Last updated:** 2026-06-14 · `e24dc2d3a` · Merge pull request #517 from elijahkendrick04/claude/u5-u15-reveal-reconcile
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1503,9 +1503,9 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-14 | `28c3b2868` | Fix unreadable <select> dropdown options (light-on-light when open) |
+| 2026-06-14 | `a40346cad` | Fix U.5/U.15 conflict: make the before/after slider a reveal-lines section |
 | 2026-06-14 | `10be7fbce` | Add UI 1.3 — inline media thumbnails in a display headline |
 | 2026-06-14 | `651a466fd` | UI 1.1: cycling example-prompt placeholder |
 | 2026-06-14 | `aaa7ccfe4` | UI 1.6-1.30: design-polish ideas from godly.website review batch 3 — top of Phase U |
 | 2026-06-14 | `7410b64b9` | Add UI 1.4 tactile spring-physics micro-interactions |
-| 2026-06-14 | `edede9341` | Crawl: fetch result files before HTML renders; surface result-file count |
 <!-- /ROADMAP:ACTIVITY -->
