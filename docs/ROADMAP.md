@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `c376e7805` · Merge pull request #559 from elijahkendrick04/claude/loving-shannon-1k013k
+**Last updated:** 2026-06-14 · `e87046b26` · Build UI 1.12 — sortable/filterable results data table with sparklines (#564)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -145,7 +145,6 @@ sequence it or merge with care.
 - **UI 1.9** · Phase 1 (Product polish) — Multi-select + bulk actions (from Frame.io): checkboxes + select-all + bulk approve/export/delete in the Media Library and review queue; pure HTML form multi-select with progressive JS enhancement · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.11** · Phase 1 (Product polish) — Tabbed code-example switcher (from Resend): language tabs + syntax highlighting + copy button on the Developer/API docs page; pure HTML/CSS tabs, Prism.js or equivalent bundled locally · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.12** · Phase 1 (Product polish) — Results data table (from Wope): sortable/filterable parsed-results view with inline sparklines (athlete progress over time) and coloured delta badges (PB/improvement); server-side sort, vanilla JS sparklines · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.13** · Phase 1 (Product polish) — Annotated UI callouts (from Liveblocks): labelled hotspots + SVG connector lines on a sample card / the review UI ('anatomy of a card') for the landing or onboarding tour; static HTML/SVG, no new lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.15** · Phase 1 (Product polish) — Command palette / Cmd-K (from GitHub): fast keyboard navigation + quick actions (jump to Create / Library / Settings, run common actions); vanilla JS, no framework, keyboard-accessible · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.16** · Phase 1 (Product polish) — Dashboard activity feed (from GitHub): recent runs/approvals/exports shown as cards with status badges, relative timestamps, and expandable detail; server-rendered from the existing audit log · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1509,6 +1508,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `6f7ffd995` | Build UI 1.12 — sortable/filterable results data table with sparklines |
 | 2026-06-14 | `d78fd596c` | Build UI 1.28 — global keyboard-shortcuts overlay (?) |
 | 2026-06-14 | `e5a2f3843` | Build UI 1.23 — light/dark theme toggle |
 | 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
@@ -1519,6 +1519,4 @@ list and the auto table below, not here.
 | 2026-06-14 | `41171c57d` | Add visual template/archetype gallery (UI 1.10) |
 | 2026-06-14 | `e25ace721` | Build UI2.1 — cut-out before/after compare slider |
 | 2026-06-14 | `7ea71852c` | UI1.26 — cursor-anchored progress/info readout (render/upload) |
-| 2026-06-14 | `487758deb` | feat(ui): UI2.6 Vanish search on the activity/global run search |
-| 2026-06-14 | `72cd136a7` | Build UI2.7 — caption type-on "AI is writing" reveal |
 <!-- /ROADMAP:ACTIVITY -->
