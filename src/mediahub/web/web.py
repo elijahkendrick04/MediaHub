@@ -7004,6 +7004,10 @@ from mediahub.web.theme_tokens import (  # noqa: E402
     THEME_COMPONENTS_CSS as _MH_TC_CSS,
 )
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
+from mediahub.web.pipeline_diagram import (  # noqa: E402
+    PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
+    pipeline_diagram_section_html as _pipeline_diagram_section_html,
+)
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -7016,7 +7020,7 @@ from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_
 _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
-BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
+BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_PL_CSS + _MH_RG_CSS
 
 
 # U.9 — cycling hero accent word. The content types MediaHub makes, in the
@@ -11707,6 +11711,11 @@ def create_app() -> Flask:
                 "</div>"
                 "</section>"
             )
+
+        # U.8 — animated how-it-works pipeline diagram. Sits right after the
+        # hero as a visual amplification of its "reads X … writes Y" claim,
+        # ahead of the numbered four-step explainer.
+        pipeline_html = _pipeline_diagram_section_html()
 
         return _layout(
             "Home",
