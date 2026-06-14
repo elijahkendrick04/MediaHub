@@ -8968,6 +8968,110 @@ _PALETTE_PICKER_JS = """
 """
 
 
+def _hero_product_demo() -> str:
+    """U.10 — the framed, looping in-app product demo for the landing hero.
+
+    A browser-framed mockup that loops the core flow
+    **generate → review → approve**, with a subtle ambient glow behind the
+    frame (inspired by Reflect, reflect.app). It is first-party HTML + CSS
+    only — there is no screen-capture asset to host and no JS framework:
+
+      * the loop is three cross-fading CSS-keyframe scenes (the
+        ``.mh-demo-phase`` tracks in theme-components.css), reused to light
+        the chrome-step dots so the indicator stays perfectly in sync;
+      * it pauses on hover / focus via a pure-CSS ``animation-play-state``
+        toggle, so a visitor can dwell on any scene;
+      * under ``prefers-reduced-motion`` it freezes on the single "Review"
+        scene — no movement at all.
+
+    The block is decorative: the same workflow is conveyed as real text by
+    the four-step explainer further down the page, so the whole demo is
+    ``aria-hidden`` to keep the screen-reader narrative clean. Every value
+    here is static (no user input), so no escaping is required.
+    """
+    check = (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+    )
+    return (
+        '<div class="mh-hero-demo" aria-hidden="true">'
+        '<div class="mh-demo-glow"></div>'
+        '<div class="mh-demo-frame">'
+        # --- browser chrome ---
+        '<div class="mh-demo-bar">'
+        '<span class="mh-demo-dots"><i></i><i></i><i></i></span>'
+        '<span class="mh-demo-tab"><span class="mh-demo-tab-logo"></span>MediaHub</span>'
+        '<span class="mh-demo-flag">live demo</span>'
+        "</div>"
+        # --- screen / cross-fading stage ---
+        '<div class="mh-demo-screen"><div class="mh-demo-stage">'
+        # Scene 1 — Generate (engine reads the file, ranks the moments)
+        '<div class="mh-demo-phase p1">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">01 · Generate</span>'
+        '<span class="mh-demo-file">spring-open.hy3</span>'
+        "</div>"
+        '<div class="mh-demo-finds">'
+        '<div class="mh-demo-find"><span class="badge pb">PB</span>'
+        '<span class="who">Tom Davies · 100m Free</span><b>52.41</b></div>'
+        '<div class="mh-demo-find"><span class="badge gold">1st</span>'
+        '<span class="who">Women&rsquo;s 4&times;100 Relay</span><b>4:12.8</b></div>'
+        '<div class="mh-demo-find"><span class="badge new">NEW</span>'
+        '<span class="who">Aoife N. · first sub-1:00</span><b>59.74</b></div>'
+        "</div>"
+        '<div class="mh-demo-meter"><span class="bar"><i></i></span>'
+        '<span class="lab">42 swims read · 3 moments ranked</span></div>'
+        "</div>"
+        # Scene 2 — Review (branded card + caption draft + confidence) — the
+        # richest single frame, so it is the reduced-motion resting state.
+        '<div class="mh-demo-phase p2 is-rest">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">02 · Review</span>'
+        '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
+        "</div>"
+        '<div class="mh-demo-card">'
+        '<div class="mh-demo-thumb">'
+        '<span class="ev">100M FREE</span>'
+        '<span class="tm">52.41</span>'
+        '<span class="nm">T. Davies</span>'
+        "</div>"
+        '<div class="mh-demo-cardbody">'
+        '<span class="mh-demo-eyebrow">Story card · caption draft</span>'
+        '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark> '
+        "&mdash; <mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
+        "<mark>0.74s</mark> off his old mark.</p>"
+        '<div class="mh-demo-acts"><span>Edit</span>'
+        '<span class="ghost">Reject</span><span class="go">Approve</span></div>'
+        "</div>"
+        "</div>"
+        "</div>"
+        # Scene 3 — Approve (the human gate — nothing leaves without it)
+        '<div class="mh-demo-phase p3">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">03 · Approve</span>'
+        '<span class="mh-demo-state go">Approved</span>'
+        "</div>"
+        '<div class="mh-demo-approve">'
+        f'<span class="mh-demo-check">{check}</span>'
+        '<div class="txt"><b>Approved by you</b>'
+        "<span>Tom Davies — PB 100m Free · ready to export</span></div>"
+        "</div>"
+        '<div class="mh-demo-meter"><span class="lab">'
+        "Nothing leaves the queue without your approval.</span></div>"
+        "</div>"
+        "</div></div>"  # /stage /screen
+        # --- step indicator (dots lit by the same p1/p2/p3 tracks) ---
+        '<div class="mh-demo-steps">'
+        '<span class="mh-demo-step s1"><span class="dot"><i class="on"></i></span>Generate</span>'
+        '<span class="mh-demo-step s2"><span class="dot"><i class="on"></i></span>Review</span>'
+        '<span class="mh-demo-step s3"><span class="dot"><i class="on"></i></span>Approve</span>'
+        "</div>"
+        "</div>"  # /frame
+        "</div>"  # /hero-demo
+    )
+
+
 # ---------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------
@@ -9686,6 +9790,12 @@ def create_app() -> Flask:
                 "</p>"
             )
 
+        # U.10 — framed, looping product demo as the hero's closing
+        # centerpiece. A first-visit affordance like the "Just looking?"
+        # line above, so it is shown only to fresh / signed-out visitors;
+        # a pinned org gets the utilitarian "Ready to file" hero instead.
+        demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
+
         hero_html = (
             f'<section class="mh-hero" data-lane="{lane_no}">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
@@ -9694,6 +9804,7 @@ def create_app() -> Flask:
             f'<div class="mh-hero-actions">{hero_actions}</div>'
             f"{demo_line_html}"
             f"{meta_html}"
+            f"{demo_html}"
             "</section>"
         )
 
