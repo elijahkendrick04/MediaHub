@@ -9425,7 +9425,7 @@ def create_app() -> Flask:
         # stripe accent so the page resolves with the same chrome.
         if prof and prof.is_ready():
             final_cta_html = (
-                '<section class="mh-final-cta mh-inview">'
+                '<section class="mh-final-cta mh-reveal">'
                 "<div>"
                 f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
                 "<em>ready</em> in a sitting.</h2>"
@@ -9441,7 +9441,7 @@ def create_app() -> Flask:
             )
         else:
             final_cta_html = (
-                '<section class="mh-final-cta mh-inview">'
+                '<section class="mh-final-cta mh-reveal">'
                 "<div>"
                 '<h2 class="mh-final-cta-headline">A minute to set up. '
                 "<em>Then</em> every week is easier.</h2>"
@@ -11425,12 +11425,12 @@ def create_app() -> Flask:
         # plain = story / context counts.
         rec_stats_html = "".join(
             [
-                f'<div class="stat medal"><div class="l">Elite</div><div class="v mh-countup" data-mh-to="{n_elite}">{n_elite}</div></div>',
-                f'<div class="stat live"><div class="l">Strong</div><div class="v mh-countup" data-mh-to="{n_strong}">{n_strong}</div></div>',
-                f'<div class="stat"><div class="l">Story</div><div class="v mh-countup" data-mh-to="{n_story}">{n_story}</div></div>',
-                f'<div class="stat"><div class="l">Total achievements</div><div class="v mh-countup" data-mh-to="{n_total}">{n_total}</div></div>',
-                f'<div class="stat"><div class="l">Swims analysed</div><div class="v mh-countup" data-mh-to="{n_analysed}">{n_analysed}</div></div>',
-                f'<div class="stat"><div class="l">Cards</div><div class="v mh-countup" data-mh-to="{n_cards}">{n_cards}</div></div>',
+                f'<div class="stat medal"><div class="l">Elite</div><div class="v" data-mh-count="{n_elite}">{n_elite}</div></div>',
+                f'<div class="stat live"><div class="l">Strong</div><div class="v" data-mh-count="{n_strong}">{n_strong}</div></div>',
+                f'<div class="stat"><div class="l">Story</div><div class="v" data-mh-count="{n_story}">{n_story}</div></div>',
+                f'<div class="stat"><div class="l">Total achievements</div><div class="v" data-mh-count="{n_total}">{n_total}</div></div>',
+                f'<div class="stat"><div class="l">Swims analysed</div><div class="v" data-mh-count="{n_analysed}">{n_analysed}</div></div>',
+                f'<div class="stat"><div class="l">Cards</div><div class="v" data-mh-count="{n_cards}">{n_cards}</div></div>',
             ]
         )
 

@@ -45,8 +45,6 @@
   --mh-tilt-max: 7deg;                   /* clamp 3D tilt so cards never wobble */
   --mh-beam-speed: 6s;                   /* rotating border / moving border */
   --mh-marquee-speed: 38s;               /* default logo/testimonial marquee */
-  --mh-reveal-rise: 14px;                /* scroll-reveal travel */
-  --mh-reveal-dur: 640ms;
 }
 
 /* =====================================================================
@@ -324,14 +322,14 @@
 
 /* Words fade/rise in one-by-one when the block scrolls into view. The JS
    wraps each word in <span class="mh-word" style="--i:N"> and flips
-   .is-inview; with no JS the text is simply visible. */
+   .is-in; with no JS the text is simply visible. */
 .mh-js .mh-text-generate .mh-word {
   display: inline-block;
   opacity: 0;
   filter: blur(4px);
   transform: translateY(0.18em);
 }
-.mh-js .mh-text-generate.is-inview .mh-word {
+.mh-js .mh-text-generate.is-in .mh-word {
   animation: mh-word-in 560ms var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * 55ms);
 }
@@ -365,8 +363,8 @@
   padding: 0 0.08em;
   transition: background-size var(--dur-slow) var(--ease-out);
 }
-.mh-inview.mh-highlight.is-inview,
-.is-inview .mh-highlight { background-size: 100% 42%; }
+.mh-highlight.is-in,
+.is-in .mh-highlight { background-size: 100% 42%; }
 
 /* Flapboard / scoreboard digits — split-flap aesthetic for times & stats */
 .mh-flapboard { display: inline-flex; gap: 2px; font-family: var(--font-mono); }
@@ -445,16 +443,12 @@
 }
 
 /* =====================================================================
-   6. SCROLL REVEAL  (Sticky-Scroll feel — entrance on first view)
+   6. SCROLL REVEAL — uses MediaHub's existing Phase-10 system.
+   Add `.mh-reveal` (or `.mh-reveal-group`); the inline bindReveals()
+   observer adds `.is-in` and animates any nested `[data-mh-count]`. The
+   kit's text-generate / flapboard / highlight effects hook the same
+   `.is-in` flip via ui-kit.js, so there's one reveal convention, not two.
    ===================================================================== */
-.mh-js .mh-inview {
-  opacity: 0;
-  transform: translateY(var(--mh-reveal-rise));
-  transition: opacity var(--mh-reveal-dur) var(--ease-out),
-              transform var(--mh-reveal-dur) var(--ease-out);
-}
-.mh-js .mh-inview.is-inview { opacity: 1; transform: none; }
-.mh-js .mh-inview[data-mh-delay] { transition-delay: calc(var(--mh-delay, 0) * 1ms); }
 
 /* =====================================================================
    7. TABS  (animated sliding indicator — review panels / settings)
@@ -633,7 +627,6 @@
   .mh-marquee__track { width: auto; }
   .mh-spotlight::before { animation: none; opacity: 1; }
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
-  .mh-js .mh-inview { opacity: 1; transform: none; transition: none; }
   .mh-flip-words > .mh-fw { transition: none; }
   .mh-highlight { transition: none; background-size: 100% 42%; }
 }

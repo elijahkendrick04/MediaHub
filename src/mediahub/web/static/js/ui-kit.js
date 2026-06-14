@@ -7,7 +7,7 @@
    Contract with theme-motion.css:
      pointer effects  -> write --mh-x / --mh-y (0–100%) on the element
      tilt             -> write --mh-rx / --mh-ry (deg)
-     reveal / text    -> toggle .is-inview
+     reveal / text    -> toggle .is-in (shared Phase-10 reveal class)
      scroll progress  -> write --mh-progress (0–1)
      tabs             -> write --mh-ind-x / --mh-ind-w on the .mh-tabs
      compare          -> write --mh-pos (%)
@@ -138,26 +138,6 @@
     }
   }
 
-  /* --- Count-up numbers ----------------------------------------------- */
-  function runCountup(el) {
-    if (!once(el, "data-mh-count-run")) return;
-    var to = parseFloat(el.getAttribute("data-mh-to"));
-    if (isNaN(to)) { return; }
-    var dur = parseFloat(el.getAttribute("data-mh-dur")) || 1100;
-    var dec = parseInt(el.getAttribute("data-mh-decimals") || "0", 10);
-    var pre = el.getAttribute("data-mh-prefix") || "";
-    var suf = el.getAttribute("data-mh-suffix") || "";
-    if (REDUCE) { el.textContent = pre + to.toFixed(dec) + suf; return; }
-    var start = performance.now();
-    function frame(now) {
-      var t = clamp((now - start) / dur, 0, 1);
-      var eased = 1 - Math.pow(1 - t, 3);
-      el.textContent = pre + (to * eased).toFixed(dec) + suf;
-      if (t < 1) requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-  }
-
   /* --- Flapboard: split-flap settle to a target string ---------------- */
   var FLAP_GLYPHS = "0123456789:.";
   function runFlap(el) {
@@ -202,8 +182,7 @@
     io.observe(el);
   }
   function fire(el) {
-    el.classList.add("is-inview");
-    if (el.classList.contains("mh-countup")) runCountup(el);
+    el.classList.add("is-in"); // align to the existing Phase-10 reveal convention
     if (el.classList.contains("mh-flapboard")) runFlap(el);
   }
 
@@ -375,7 +354,7 @@
     each(root, ".mh-tilt", bindTilt);
     each(root, ".mh-marquee", bindMarquee);
     each(root, ".mh-text-generate", function (el) { splitWords(el); observe(el); });
-    each(root, ".mh-inview, .mh-highlight, .mh-countup, .mh-flapboard", observe);
+    each(root, ".mh-highlight, .mh-flapboard", observe);
     each(root, ".mh-flip-words", bindFlipWords);
     each(root, ".mh-tabs", bindTabs);
     each(root, ".mh-compare", bindCompare);

@@ -108,7 +108,7 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Component | Verdict | Note |
 |---|---|---|
 | Parallax Scroll | PARTIAL | |
-| Sticky Scroll Reveal | ADOPT | `.mh-inview` reveal family |
+| Sticky Scroll Reveal | ADOPT | reuses the existing `.mh-reveal` system (`.is-in`) |
 | Macbook Scroll | SKIP | device mockup, off-brand |
 | Container Scroll | PARTIAL | |
 | Hero Parallax | PARTIAL | |
@@ -191,6 +191,18 @@ across the distinct families (curated-breadth).
 | **Auros** | deep-teal precision | abyssal trading terminal; tonal elevation, no shadows; aurora-gradient ghost borders |
 | **Active Theory** | experimental void | observatory; mono micro-labels; serif body; one rationed accent |
 | **Air** | light / airy | serene cloud UI; action-blue accent; frosted glass |
+| **Gsap** | dark / neon-brutalist | extreme display type (224px, 0.90 line-height, −0.020em); colour-as-information |
+| **Sequel** | dark / cinematic gallery | binary radius discipline (10px cards / 9999px pills); weight-300 body |
+| **dope.security** | dark / glass | one rationed violet accent (#af50ff); zero card box-shadows; −0.07em @ 80px |
+| **ORYZO AI** | dark / warm-black | accent as hairline signal, never a fill (#dc5000, 1px only); display line-height 0.90 |
+| **Integrated Biosciences** | dark + light bands | hierarchy from size + tightening on a single 400 weight (−0.03em@158px); mono counters |
+| **Superpower** | light | inverse tracking hierarchy (−0.025em display → −0.005em body) |
+| **Structured** | mixed | dramatic display tracking; compressed display line-height 0.84 ("carved") |
+| **Dylanbrouwer** | mixed | IBM Plex Mono metadata register; display line-height 0.74 |
+| **monopo saigon** | mixed | tight display line-height 0.70–0.76; colour reserved for imagery, never UI |
+| **Adaline / Monad / Seed / Dia Browser / Portal / Ditto** | light | SKIP — light themes, off-brand for dark-first |
+
+> **Reachability note:** Refero's public index is hard-capped at ~20 entries (client-rendered, no pagination), so the **~22 distinct styles** sampled here are essentially *the full set the site exposes* — the advertised "2,000+" isn't browsable. The curated-breadth ~40-60 target isn't reachable without external deep-links; this audit covers what Refero surfaces.
 
 ### Convergent principles → MediaHub alignment
 | Principle (shared across the dark systems) | MediaHub status |
@@ -202,6 +214,9 @@ across the distinct families (curated-breadth).
 | **Tonal / hairline-first depth, not heavy shadows** | **Aligned** — `.card` uses a 1px hairline + the near-flat `--shadow-1`; tonal surface ramp (`--mh-surface` → `-variant` → `-container` → `-container-high`) |
 | **Gradient backdrops are theatrical / full-bleed, never UI chrome** | **Added by this PR** — `.mh-aurora` / `.mh-spotlight` hero backdrops; `.mh-glow-border` hairline glow |
 | **Mono uppercase micro-labels for chrome** (Active Theory, Linear) | **Already pervasive** — mono eyebrows / straps throughout |
+| **No box-shadows — tonal + 1px-hairline depth** (dope.security, ORYZO, IB, Mercury, Apple, Auros) | **Aligned** — `.card` uses a hairline + the near-flat `--shadow-1`, not drop shadows |
+| **Accent as hairline signal, never a fill** (ORYZO AI) | **Validated** — lane-yellow is the single accent; hairlines (`--mh-outline`) carry separation |
+| **Sub-1.0 display line-height** (Gsap 0.90, ORYZO 0.90, Structured 0.84, monopo 0.70) | **Already done** — `h1 { line-height: 0.95 }` on the condensed display face |
 
 **Finding:** MediaHub's design system already matches the elite dark-precision systems on
 every load-bearing axis. The Refero pass is **validation**, plus the gradient-backdrop /
