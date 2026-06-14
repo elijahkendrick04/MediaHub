@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `b6c37f759` · Build UI 1.21 — text-scramble/decode animation (#542)
+**Last updated:** 2026-06-14 · `ccded16d6` · Developer/API docs page with tabbed code-example switcher (UI 1.11) (#556)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -144,7 +144,6 @@ sequence it or merge with care.
 - **UI 1.8** · Phase 1 (Product polish) — Timestamp-anchored reel review comments (from Frame.io): pin feedback markers to a moment on a generated reel in the review surface; markers stored per run/card, shown as overlays on the video scrubber; Flask+SQLite backed · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.9** · Phase 1 (Product polish) — Multi-select + bulk actions (from Frame.io): checkboxes + select-all + bulk approve/export/delete in the Media Library and review queue; pure HTML form multi-select with progressive JS enhancement · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.11** · Phase 1 (Product polish) — Tabbed code-example switcher (from Resend): language tabs + syntax highlighting + copy button on the Developer/API docs page; pure HTML/CSS tabs, Prism.js or equivalent bundled locally · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.13** · Phase 1 (Product polish) — Annotated UI callouts (from Liveblocks): labelled hotspots + SVG connector lines on a sample card / the review UI ('anatomy of a card') for the landing or onboarding tour; static HTML/SVG, no new lib · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.15** · Phase 1 (Product polish) — Command palette / Cmd-K (from GitHub): fast keyboard navigation + quick actions (jump to Create / Library / Settings, run common actions); vanilla JS, no framework, keyboard-accessible · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.16** · Phase 1 (Product polish) — Dashboard activity feed (from GitHub): recent runs/approvals/exports shown as cards with status badges, relative timestamps, and expandable detail; server-rendered from the existing audit log · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1509,12 +1508,12 @@ list and the auto table below, not here.
 |---|---|---|
 | 2026-06-14 | `6f7ffd995` | Build UI 1.12 — sortable/filterable results data table with sparklines |
 | 2026-06-14 | `d78fd596c` | Build UI 1.28 — global keyboard-shortcuts overlay (?) |
+| 2026-06-14 | `a9fdf0a5a` | Apply ruff-format to the UI 1.11 additions |
 | 2026-06-14 | `e5a2f3843` | Build UI 1.23 — light/dark theme toggle |
 | 2026-06-14 | `80d2c9b5b` | Build UI 1.20 — polished pricing page (tiers, toggle, comparison table) |
 | 2026-06-14 | `b8a8581ed` | Tidy reaction GET query onto one line (ruff-format) |
 | 2026-06-14 | `7a121d84c` | Build UI 1.24 — moment-type marquee/ticker on the landing |
+| 2026-06-14 | `a8a4f8604` | Add Developer/API docs page with tabbed code-example switcher (UI 1.11) |
 | 2026-06-14 | `8261b091a` | Build UI 1.14 — notifications inbox (bell + unread badge + dropdown) |
 | 2026-06-14 | `c921af047` | Build UI 1.25 — emoji reactions on cards & the review queue |
-| 2026-06-14 | `41171c57d` | Add visual template/archetype gallery (UI 1.10) |
-| 2026-06-14 | `0b9141f55` | Build UI 1.21 — text-scramble/decode animation |
 <!-- /ROADMAP:ACTIVITY -->
