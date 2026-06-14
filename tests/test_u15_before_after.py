@@ -82,15 +82,16 @@ def test_section_has_drag_to_reveal_framing(client):
     assert "to wipe" in body
 
 
-def test_slider_appears_after_steps_and_before_samples(client):
+def test_slider_appears_after_steps_and_before_bento(client):
     """Narrative order: hero → workflow steps → the literal transformation →
-    the sample outputs. The slider is the worked proof between them."""
+    the bento of outputs. The slider is the worked proof between them."""
     body = _home(client)
     i_steps = body.index("From the results sheet to")     # steps section title
     i_slider = body.index("data-mh-ba")
-    # U.11 replaced the flat sample section with the platform-frame carousel.
-    i_samples = body.index("Your results, the way your")    # frames section title
-    assert i_steps < i_slider < i_samples
+    i_bento = body.index("A results sheet in.")            # bento section title
+    i_frames = body.index("Your results, the way your")    # U.11 frames carousel title
+    # Order: hero → steps → slider → bento → frames carousel.
+    assert i_steps < i_slider < i_bento < i_frames
 
 
 # =========================================================================== #

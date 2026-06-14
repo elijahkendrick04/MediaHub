@@ -177,8 +177,8 @@ def test_helper_markup_is_balanced():
 
 
 def test_helper_reuses_the_sample_examples_for_cohesion():
-    """The demo reuses the same showcase athlete/time as the 'what lands in
-    your queue' sample row, so the landing page tells one coherent story."""
+    """The demo reuses the same showcase athlete/time as the bento story
+    tile, so the landing page tells one coherent story."""
     html = _demo_html()
     assert "Tom Davies" in html
     assert "52.41" in html
@@ -203,7 +203,8 @@ def test_home_still_renders_the_rest_of_the_landing(app):
         body = c.get("/").get_data(as_text=True)
     for hook in (
         "mh-steps",
-        "mh-frames",  # U.11 replaced the flat .mh-sample-row with the platform-frame carousel
+        "mh-bento",
+        "mh-frames",
         "mh-audience-row",
         "mh-promise",
         "mh-final-cta",

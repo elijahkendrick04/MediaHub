@@ -9527,15 +9527,15 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
   else document.addEventListener('DOMContentLoaded', bindSpring);
   MH.bindSpring = bindSpring;
 
-  // === Atlas-style 3D tilt on the sample output cards (U.16) ===
+  // === Atlas-style 3D tilt on the bento output tiles (U.16) ===
   // Pointer-tracked perspective tilt + a sheen that follows the cursor,
   // inspired by atlascard.com. The transform is written inline (so it
   // beats the reveal-group's own transform without a specificity fight);
   // CSS owns the sheen fade + the lifted stacking order. Gated to fine,
   // hover-capable pointers and suppressed entirely under
   // prefers-reduced-motion — touch and the reduced-motion cohort keep the
-  // static card. Targets the reusable [data-mh-tilt] opt-in — the audience
-  // "Made for" cards carry it (U.11 retired the flat sample cards this rode).
+  // static card. Targets .mh-bento-tile plus the reusable [data-mh-tilt]
+  // opt-in (the audience "Made for" cards carry it too).
   var TILT_REST =
     'perspective(900px) rotateX(0deg) rotateY(0deg) translate3d(0,0,0) scale(1)';
   function bindCardTilt() {
@@ -9544,7 +9544,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
       window.matchMedia('(hover: hover) and (pointer: fine)').matches;
     if (!fine) return;
     var MAX = 7;  // degrees — subtle and premium, never gimmicky
-    document.querySelectorAll('[data-mh-tilt]').forEach(function(card){
+    document.querySelectorAll('.mh-bento-tile, [data-mh-tilt]').forEach(function(card){
       var raf = 0, pending = null;
       function apply(){
         raf = 0;
@@ -11590,6 +11590,83 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # --- Bento feature grid (UI 1.2) — replaces the old uniform
+        # three-card sample row. Varied-size tiles, each with its own
+        # mini-visual (story card, reel timeline, detected-&-ranked stat,
+        # brand-kit swatches, the moments-we-detect list, a feed graphic),
+        # so a first-time visitor sees the breadth of the engine before
+        # they upload. Pure visual; non-interactive. The heading reuses the
+        # U.5 scroll-reveal helper so it surfaces line-by-line like every
+        # other landing section. Inspired by Umbrel.
+        bento_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
+            + _reveal_lines(
+                [
+                    "A results sheet in.",
+                    'A <em class="editorial">weekend</em> of content out.',
+                ]
+            )
+            + '<div class="mh-bento mh-reveal-group">'
+            # Tile 1 — story card showpiece (2×2)
+            '<div class="mh-bento-tile feature is-medal">'
+            '<span class="mh-bento-eyebrow">Story card · 1080×1920</span>'
+            '<div class="mh-bento-title">Tom Davies —<br><em>PB</em> 100m free.</div>'
+            '<div class="mh-bento-time">52.41<span class="mh-bento-delta">−0.74s</span></div>'
+            '<p class="mh-bento-note">A clean vertical story graphic — name, event and split, set in your club’s palette and type, rendered server-side and ready to post to Stories.</p>'
+            '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
+            "</div>"
+            # Tile 2 — motion reel (2×1)
+            '<div class="mh-bento-tile wide">'
+            '<span class="mh-bento-eyebrow">Motion reel · 15s MP4</span>'
+            '<div class="mh-bento-title">Meet-day <em>highlights</em></div>'
+            '<div class="mh-bento-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
+            '<div class="mh-bento-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> Branded outro</div>'
+            "</div>"
+            # Tile 3 — detected & ranked stat (1×1)
+            '<div class="mh-bento-tile is-medal">'
+            '<span class="mh-bento-eyebrow">Detected &amp; ranked</span>'
+            '<div class="mh-bento-stat">12</div>'
+            '<p class="mh-bento-note">moments found in the sample meet, scored by content-worthiness.</p>'
+            '<div class="mh-bento-chips"><span class="hot">5 PBs</span><span>3 medals</span></div>'
+            "</div>"
+            # Tile 4 — brand-kit swatches (1×1)
+            '<div class="mh-bento-tile">'
+            '<span class="mh-bento-eyebrow">Your brand, applied</span>'
+            '<div class="mh-bento-brand">'
+            '<span class="mh-bento-logo">SC</span>'
+            '<span class="mh-bento-swatches">'
+            '<span style="background:var(--lane)"></span>'
+            '<span style="background:var(--medal)"></span>'
+            '<span style="background:var(--info)"></span>'
+            '<span style="background:var(--ink)"></span>'
+            "</span>"
+            "</div>"
+            '<p class="mh-bento-note">Palette, fonts and logo read from your site — then locked onto every card.</p>'
+            "</div>"
+            # Tile 5 — moments we detect (2×1)
+            '<div class="mh-bento-tile wide">'
+            '<span class="mh-bento-eyebrow">Moments we detect</span>'
+            '<ul class="mh-bento-moments">'
+            '<li class="m-pb">Personal bests</li>'
+            '<li class="m-pb">Medal finishes</li>'
+            '<li class="m-key">Club records</li>'
+            '<li class="m-key">First-time swims</li>'
+            '<li class="m-std">Qualifying times</li>'
+            '<li class="m-std">Comeback swims</li>'
+            "</ul>"
+            "</div>"
+            # Tile 6 — feed graphic (2×1)
+            '<div class="mh-bento-tile wide">'
+            '<span class="mh-bento-eyebrow">Feed graphic · 1080×1350</span>'
+            '<div class="mh-bento-title">Top three <em>finals</em></div>'
+            '<div class="mh-bento-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
+            '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
+            "</div>"
+            "</div>"
+            "</section>"
+        )
+
         # --- U.11 · Outputs inside real platform frames ---------------------
         # The three default output formats shown inside credible Instagram
         # device mockups (story / feed / reel), advanced by a pure-CSS
@@ -11917,6 +11994,7 @@ def create_app() -> Flask:
             + marquee_html
             + steps_html
             + before_after_html
+            + bento_html
             + frames_html
             + audience_html
             + promise_html
