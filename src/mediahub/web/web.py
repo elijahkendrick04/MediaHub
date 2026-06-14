@@ -6927,6 +6927,199 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   letter-spacing: 0;
 }
 
+/* === UI 1.10 — Template / archetype gallery ============================== */
+.mh-arch-note {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim); line-height: 1.55;
+  max-width: 64ch; margin: 0 0 var(--sp-5);
+}
+/* Filter chips — server-nav links, JS-upgraded to instant client filtering. */
+.mh-arch-filters {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+}
+.mh-arch-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition),
+              background var(--transition);
+}
+.mh-arch-chip:hover { color: var(--ink); border-color: var(--rule); text-decoration: none; }
+.mh-arch-chip:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-arch-chip.is-active {
+  color: var(--lane-ink, #0A0B11);
+  background: var(--lane);
+  border-color: var(--lane);
+}
+.mh-arch-chip-n {
+  font-size: 10px; opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.mh-arch-chip.is-active .mh-arch-chip-n { opacity: 0.85; }
+/* Visually-hidden text (count read-out for screen readers). */
+.mh-arch-sr {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* Card grid */
+.mh-arch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-7);
+}
+.mh-arch-card {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-card:hover { border-color: var(--rule); background: var(--surface-2); }
+.mh-arch-card.is-hidden { display: none; }
+.mh-arch-thumb {
+  padding: var(--sp-4) var(--sp-4) 0;
+}
+.mh-arch-svg {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.mh-arch-body {
+  display: flex; flex-direction: column;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.mh-arch-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 4px;
+}
+.mh-arch-title {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 800; color: var(--ink);
+  letter-spacing: 0.01em; margin: 0;
+  text-transform: uppercase;
+}
+.mh-arch-tag {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.mh-arch-tag[data-cat="photo"] { color: #7fd4ff; border-color: rgba(127,212,255,0.32); }
+.mh-arch-tag[data-cat="data"] { color: var(--lane); border-color: rgba(212,255,58,0.32); }
+.mh-arch-tag[data-cat="editorial"] { color: #f6a5d0; border-color: rgba(246,165,208,0.32); }
+.mh-arch-slug {
+  font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--ink-muted, var(--ink-dim));
+  opacity: 0.7;
+  margin-bottom: var(--sp-2);
+  word-break: break-all;
+}
+.mh-arch-summary {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim);
+  line-height: 1.5; margin: 0 0 var(--sp-2);
+}
+.mh-arch-when {
+  font-family: var(--font-body);
+  font-size: 12.5px; color: var(--ink-dim);
+  line-height: 1.5; margin: auto 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hairline);
+}
+.mh-arch-when-label {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--lane);
+  margin-right: 6px;
+}
+.mh-arch-empty {
+  font-family: var(--font-body);
+  font-size: 14px; color: var(--ink-dim);
+  padding: var(--sp-6); text-align: center;
+  border: 1px dashed var(--rule); border-radius: var(--radius);
+  margin-bottom: var(--sp-7);
+}
+/* Bottom CTA strip back into the Create flow. */
+.mh-arch-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.mh-arch-cta-text { display: flex; flex-direction: column; gap: 4px; }
+.mh-arch-cta-text strong {
+  font-family: var(--font-display); font-size: 16px; color: var(--ink);
+  text-transform: uppercase; letter-spacing: 0.01em;
+}
+.mh-arch-cta-text span { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
+/* Link from the Create page into the gallery. */
+.mh-arch-gallery-link {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-gallery-link:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; }
+.mh-arch-gallery-link .mh-agl-text { display: flex; flex-direction: column; gap: 2px; }
+.mh-arch-gallery-link .mh-agl-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 800;
+  color: var(--ink); text-transform: uppercase; letter-spacing: 0.02em;
+}
+.mh-arch-gallery-link .mh-agl-sub { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-dim); }
+.mh-arch-gallery-link .mh-agl-cta {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--lane);
+  white-space: nowrap;
+}
+/* Schematic preview parts — scoped to .mh-arch-svg so the short class names
+   never leak. gd = brand ground, sf = surface/secondary zone, ac = accent,
+   ik/ik2 = muted/stronger type bars, ph = photo placeholder, ln = hairline,
+   acln = accent seam, paper/dk/dkln = light editorial ground + dark ink on it,
+   onac = ink on the accent panel, ln-f = ruled cell outline. */
+.mh-arch-svg .gd { fill: var(--surface-3); }
+.mh-arch-svg .sf { fill: var(--bg); }
+.mh-arch-svg .ac { fill: var(--lane); }
+.mh-arch-svg .ik { fill: rgba(245,242,232,0.30); }
+.mh-arch-svg .ik2 { fill: rgba(245,242,232,0.58); }
+.mh-arch-svg .ph { fill: rgba(245,242,232,0.10); }
+.mh-arch-svg .onac { fill: rgba(10,11,17,0.78); }
+.mh-arch-svg .ln { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .acln { fill: none; stroke: var(--lane); stroke-width: 2; }
+.mh-arch-svg .ln-f { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .paper { fill: rgba(245,242,232,0.92); }
+.mh-arch-svg .dk { fill: rgba(10,11,17,0.55); }
+.mh-arch-svg .dkln { fill: none; stroke: rgba(10,11,17,0.40); stroke-width: 1; }
+@media (max-width: 560px) {
+  .mh-arch-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
 /* === Provider badge on home — broadcast pill === */
 .mh-provider-badge {
   display: inline-flex; align-items: center; gap: 10px;
@@ -8541,6 +8734,7 @@ def _layout(title: str, body: str, active: str = "home", dock: dict | None = Non
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
@@ -20672,6 +20866,26 @@ function mhPlanGenerate(btn) {{
     # V7 NEW ROUTES
     # ====================================================================
 
+    # ---- /templates &mdash; the visual template/archetype gallery (UI 1.10) ---
+    @app.route("/templates")
+    def template_gallery():
+        # Browse-only gallery of the content archetypes the design director
+        # draws from, shown *before* creating a pack. Renders existing data
+        # only (the live archetype catalog + each archetype's authored notes)
+        # with deterministic schematic previews + category filters — no new
+        # API, no external service, and no way to force an archetype (the
+        # engine still picks per moment). All logic lives in the Flask-free
+        # ``template_gallery`` helper so it unit-tests without a request.
+        from mediahub.web import template_gallery as _gallery
+
+        active = _gallery.valid_category(request.args.get("category"))
+        body = _gallery.render_gallery_body(
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            active_category=active,
+        )
+        return _layout("Templates", body, active="templates")
+
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
     def make_page():
@@ -20936,6 +21150,19 @@ function mhPlanGenerate(btn) {{
                     button_label="Generate a sample pack →",
                 )
 
+        # Browse-the-templates entry point — lets a user see the card styles
+        # the engine can produce *before* picking a starting point (UI 1.10).
+        gallery_link_html = (
+            f'<a class="mh-arch-gallery-link" href="{_h(url_for("template_gallery"))}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">Browse the template gallery</span>'
+            '<span class="mh-agl-sub">See the 12 card styles your packs are '
+            "composed from — the engine picks the right one per moment.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">View templates &rarr;</span>'
+            "</a>"
+        )
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
@@ -20945,6 +21172,7 @@ function mhPlanGenerate(btn) {{
             f"{_free_tier_banner_html()}"
             f"{brand_strip_html}"
             f"{first_run_cta}"
+            f"{gallery_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
