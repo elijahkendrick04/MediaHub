@@ -4007,8 +4007,11 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
             )
 
         crawl = crawl_results_site(url, progress_cb=_on_progress)
+        _data_exts = (".pdf", ".csv", ".tsv", ".json", ".xlsx", ".xls", ".txt")
+        _result_files = sum(1 for k in crawl.files if k.lower().endswith(_data_exts))
         summary = (
-            f"Fetched {crawl.pages_visited} pages · {crawl.kept} kept · "
+            f"Fetched {crawl.pages_visited} pages · {crawl.kept} kept "
+            f"({_result_files} result file{'' if _result_files == 1 else 's'}) · "
             f"{crawl.total_bytes // 1024} KB"
         )
         if crawl.render_budget_hit:
