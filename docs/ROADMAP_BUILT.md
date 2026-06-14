@@ -67,6 +67,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **U.12** · Phase 1 (Product polish) — Animated count-up stat numerals (inspired by Max Yinger): odometer count-up for Organisations / Total runs etc. triggers on load + scroll-into-view · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 - ✅ **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) *(completed 2026-06-14)*
 - ✅ **U.16** · Phase 1 (Product polish) — Subtle 3D tilt on output cards (inspired by Atlas): premium parallax/tilt-on-hover for the sample output cards · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
+- ✅ **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence) *(completed 2026-06-14)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
