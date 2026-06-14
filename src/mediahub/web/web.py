@@ -3240,7 +3240,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-      function _renderActive(idx) {
+      function _renderActive(idx, reveal) {
         var active = variants[idx] || text;
         if (captionDiv) {
           var pickerHtml = '';
@@ -3251,14 +3251,22 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.innerHTML = pickerHtml + '<span class="mh-cap-body" style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
             btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
           });
+          // UI2.7 — word-by-word "AI is writing" reveal, on the *read-only*
+          // caption preview only and only on a fresh generation (reveal=true);
+          // variant-pill swaps re-render plainly. The editable textarea below
+          // is set with the plain value and never typed on.
+          if (reveal && window.MH && typeof MH.typeOn === 'function') {
+            var capBody = captionDiv.querySelector('.mh-cap-body');
+            if (capBody) MH.typeOn(capBody);
+          }
         }
         if (textarea) { textarea.value = active; }
       }
-      _renderActive(0);
+      _renderActive(0, true);
       // W.13 (generalised): bilingual workspaces get the side-by-side
       // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
       // so both are approved in one pass. Label + text direction come from
