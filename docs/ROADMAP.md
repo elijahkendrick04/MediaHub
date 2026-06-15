@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `1953e1fa1` · Merge pull request #630 from elijahkendrick04/claude/brave-clarke-4vw57i
+**Last updated:** 2026-06-15 · `e703242a5` · Merge pull request #619 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1486,12 +1486,12 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `975f99a5d` | Fix multi-column PDF extraction dropping rows and scrambling events |
 | 2026-06-15 | `2d6318c73` | Reframe the homepage around the engine diagram, in a human voice |
 | 2026-06-15 | `7ae96a16d` | feat(motion): mirror still style packs into Remotion reels |
 | 2026-06-15 | `c9b71d894` | style: apply ruff-format to style_packs.py |
 | 2026-06-15 | `61e99b623` | feat(graphics): 1,000+ unique templates via a deterministic style-pack catalog |
 | 2026-06-15 | `4ddb2d302` | Make the landing-hero product demo engaging and self-explanatory |
 | 2026-06-15 | `955fa4cf3` | ui: remove the command palette (Cmd-K "search or jump to") from the top nav |
-| 2026-06-15 | `0fa259f69` | ui: widen content column on large screens so the layout fills the viewport |
-| 2026-06-15 | `f4aa388d7` | UI2.4: client-side workflow tabs on the review queue |
+| 2026-06-15 | `c95bde112` | Strengthen AI-read event association so results aren't filed under the wrong event |
 <!-- /ROADMAP:ACTIVITY -->
