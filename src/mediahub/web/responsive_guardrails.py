@@ -99,6 +99,19 @@ RESPONSIVE_GUARDRAILS_CSS = r"""
   --mh-bp-desktop:   860px;
   --mh-bp-wide:     1280px;
   --mh-bp-ultrawide:1920px;
+
+  /* Content-wrap width policy (the centred reading column). Generous on
+     large monitors so the layout fills the screen instead of stranding a
+     narrow column in the middle, but vw-bounded so it can never overflow
+     and px-capped so 4K / ultrawide don't get absurd line lengths. Two
+     surfaces:
+       --mh-wrap-max       app / content pages (main.wrap)
+       --mh-wrap-max-home  landing + chapter-nav pages — these carry the
+                           196px nav rail, so they run a little wider.
+     Stepped up per viewport tier in section 6 below; consumed by
+     main.wrap / main.wrap.mh-has-chapnav in BASE_CSS. */
+  --mh-wrap-max:      min(1400px, 92vw);
+  --mh-wrap-max-home: min(1640px, 93vw);
 }
 
 /* Promote to modern dynamic viewport units where supported. dvh/svh/lvh
@@ -246,16 +259,31 @@ img, video { block-size: auto; }
   .grid-2, .grid-3 { gap: 8px; }
 }
 
-/* Ultrawide & 4K (≥ 1920px). Caps line length for readability but lets
-   the wrap stretch a bit beyond its 1200px desktop max so the layout
-   doesn't look stranded in the middle of a 34" monitor. */
+/* Ultrawide & 4K width tiers. Step the wrap tokens up per viewport so the
+   layout keeps filling large monitors instead of stranding a narrow column;
+   each value stays vw-bounded (no overflow) and px-capped (readable line
+   length). Driving the *tokens* — not main.wrap directly — means the home
+   chapter-nav surface (main.wrap.mh-has-chapnav, a higher-specificity
+   selector) scales in lockstep without a specificity fight. */
 @media (min-width: 1920px) {
-  main.wrap { max-width: min(1400px, 88vw); }
+  :root {
+    --mh-wrap-max:      min(1560px, 90vw);
+    --mh-wrap-max-home: min(1840px, 90vw);
+  }
 }
-
-/* TV / very large displays (≥ 2400px). Centred reading column. */
 @media (min-width: 2400px) {
-  main.wrap { max-width: 1600px; }
+  :root {
+    --mh-wrap-max:      min(1760px, 88vw);
+    --mh-wrap-max-home: min(2120px, 90vw);
+  }
+}
+/* TV / very large displays (≥ 3200px). Fixed ceiling so 4K / 5K panels
+   don't sprawl the reading column past a sane line length. */
+@media (min-width: 3200px) {
+  :root {
+    --mh-wrap-max:      1920px;
+    --mh-wrap-max-home: 2280px;
+  }
 }
 
 /* ---------------------------------------------------------------------
