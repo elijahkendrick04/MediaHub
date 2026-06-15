@@ -23057,7 +23057,55 @@ window.mhSchedulerDisconnect = function(btn) {
             " &mdash; Playwright / Node / Remotion availability.</li>"
             f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
             " &mdash; process RSS and active-run counters.</li>"
-            "</ul></div>"
+            "</ul></div>" + _render_settings_cache_purge_card()
+        )
+
+    def _render_settings_cache_purge_card() -> str:
+        """Operator-only — clear every re-derivable cache for the whole site.
+
+        A deployment-wide purge across all organisations and runs. Only safe
+        because everything it removes is re-derivable; source data is untouched.
+        Counts the current on-disk cache so the operator sees the scale before
+        clearing.
+        """
+        from mediahub.privacy.cache_purge import cache_roots
+
+        total_files = 0
+        total_bytes = 0
+        for _label, path in cache_roots():
+            try:
+                if not path.exists():
+                    continue
+                for f in path.rglob("*"):
+                    if f.is_file():
+                        total_files += 1
+                        try:
+                            total_bytes += f.stat().st_size
+                        except OSError:
+                            pass
+            except OSError:
+                continue
+        size_mb = total_bytes / (1024 * 1024)
+        return (
+            '<div class="card" style="padding:18px 22px;margin-top:14px;'
+            'border-left:2px solid var(--mh-prim-error-500)">'
+            '<h3 style="margin-top:0;font-size:16px">Clear all caches (site-wide)</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">'
+            "Permanently deletes every <strong>re-derivable</strong> cache for the whole "
+            "deployment — all organisations, all runs: PB lookups, motion &amp; graphic "
+            "renders, brand-DNA captures, narration, and web research. Runs, uploads, the "
+            "databases, the media library and the ledgers are <strong>not</strong> touched; "
+            "the engine re-derives what it needs on the next request. Operator-only."
+            "</p>"
+            '<p class="dim" style="font-size:13px;margin-bottom:12px">'
+            f"Currently caching <strong>{total_files:,}</strong> file(s) "
+            f"(<strong>{size_mb:.1f} MB</strong>).</p>"
+            f'<form method="post" action="{url_for("operator_cache_purge")}" style="display:inline" '
+            "onsubmit=\"return confirm('Permanently delete ALL caches for the entire site, "
+            "for all runs? This cannot be undone (but everything is re-derivable).')\">"
+            '<button class="btn secondary" type="submit" '
+            'style="border-color:rgba(255,93,108,0.4)">Clear all caches</button>'
+            "</form></div>"
         )
 
     # ---- /api/settings/llm-status ----
@@ -28984,6 +29032,45 @@ what you're doing, what they should do.</p>
 </div>
 """
         return _layout("Notify all users", body, active="")
+
+    @app.route("/operator/cache/purge", methods=["POST"])
+    def operator_cache_purge():
+        """Permanently delete every re-derivable cache, site-wide.
+
+        Operator-only: this clears the cache for the whole deployment — all
+        organisations, all runs. Only re-derivable performance caches are
+        touched (PB lookups, motion/graphic renders, brand-DNA captures,
+        narration, web research); runs, uploads, the databases, the media
+        library and the ledgers are never removed. The engine re-derives what
+        it needs on the next request.
+        """
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.privacy.cache_purge import purge_all_caches
+
+        try:
+            report = purge_all_caches()
+        except Exception as e:  # honest failure rather than a silent no-op
+            log.warning("site-wide cache purge failed: %s", e, exc_info=True)
+            _flash_toast(f"Cache purge failed: {e}", "error")
+            return redirect(url_for("settings_section", section="developer"))
+
+        # Drop the in-process derived caches too, so a purge doesn't leave the
+        # running worker serving stale "why this card" / perf-context strings.
+        try:
+            _perf_context_cache.clear()
+            _explanation_cache.clear()
+        except Exception:
+            pass
+
+        files = int(report.get("files_deleted") or 0)
+        mb = (report.get("bytes_reclaimed") or 0) / (1024 * 1024)
+        _flash_toast(
+            f"Site-wide cache cleared — {files:,} file(s) deleted, {mb:.1f} MB reclaimed.",
+            "success",
+        )
+        return redirect(url_for("settings_section", section="developer"))
 
     def _pounds_to_pence(raw: str) -> int:
         from decimal import Decimal, InvalidOperation
