@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `c22fe88a7` · Merge pull request #622 from elijahkendrick04/claude/brave-clarke-4vw57i
+**Last updated:** 2026-06-15 · `d6f6e71a6` · Merge pull request #623: 1,000+ unique templates via a deterministic style-pack catalog
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1486,6 +1486,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `c9b71d894` | style: apply ruff-format to style_packs.py |
+| 2026-06-15 | `61e99b623` | feat(graphics): 1,000+ unique templates via a deterministic style-pack catalog |
 | 2026-06-15 | `4ddb2d302` | Make the landing-hero product demo engaging and self-explanatory |
 | 2026-06-15 | `955fa4cf3` | ui: remove the command palette (Cmd-K "search or jump to") from the top nav |
 | 2026-06-15 | `0fa259f69` | ui: widen content column on large screens so the layout fills the viewport |
@@ -1493,6 +1495,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `ebb08dc15` | Document MEDIAHUB_RESULTS_FETCH_RENDER_RECYCLE; regen env inventory |
 | 2026-06-15 | `f47f4a88d` | Recycle headless browser periodically so heavy-site crawls don't wedge |
 | 2026-06-15 | `71bcbca55` | Remove light/dark theme toggle and heading scramble animation |
-| 2026-06-15 | `ea5197d87` | Make every page phone/tablet friendly: fix the remaining mobile overflow + cramped tables |
-| 2026-06-15 | `05dd8ba50` | Tidy home page: curate to 7 focused sections |
 <!-- /ROADMAP:ACTIVITY -->
