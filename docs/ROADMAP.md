@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `2c1e0c3ff` · Merge pull request #615 from elijahkendrick04/claude/gracious-cannon-zsnf4k
+**Last updated:** 2026-06-15 · `09709d66b` · Merge pull request #616 from elijahkendrick04/claude/wizardly-dirac-x0lhra
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1486,6 +1486,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `0fa259f69` | ui: widen content column on large screens so the layout fills the viewport |
 | 2026-06-15 | `f4aa388d7` | UI2.4: client-side workflow tabs on the review queue |
 | 2026-06-15 | `ebb08dc15` | Document MEDIAHUB_RESULTS_FETCH_RENDER_RECYCLE; regen env inventory |
 | 2026-06-15 | `f47f4a88d` | Recycle headless browser periodically so heavy-site crawls don't wedge |
@@ -1494,5 +1495,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `05dd8ba50` | Tidy home page: curate to 7 focused sections |
 | 2026-06-15 | `359eaa707` | Spread the Phase-U motion/effect kit across every page, not just home |
 | 2026-06-14 | `522aab03f` | Remove unused imports in scripts/ (ruff F401) |
-| 2026-06-14 | `8f2de7cb7` | Keep heartbeat drain thread alive past a task_done() ValueError |
 <!-- /ROADMAP:ACTIVITY -->
