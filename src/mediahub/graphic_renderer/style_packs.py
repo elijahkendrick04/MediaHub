@@ -256,9 +256,7 @@ def list_style_packs() -> tuple[StylePack, ...]:
     """
     packs: list[StylePack] = []
     seen: set[str] = set()
-    for ground, texture, accent_geo, density in product(
-        GROUNDS, TEXTURES, ACCENT_GEOS, DENSITIES
-    ):
+    for ground, texture, accent_geo, density in product(GROUNDS, TEXTURES, ACCENT_GEOS, DENSITIES):
         pack = StylePack(ground, texture, accent_geo, density)
         cap = _WEIGHT_CAP_BOLD if density == "bold" else _WEIGHT_CAP_STANDARD
         if pack.weight > cap:
@@ -513,7 +511,9 @@ def pack_overlay_html(pack: StylePack, *, width: int, height: int) -> str:
         tile = _TEX_TILES.get(pack.texture, "")
         size = _TEX_SIZE.get(pack.texture, 20)
         if tile:
-            opacity = (0.16 if bold else 0.10) if pack.texture != "grain" else (0.18 if bold else 0.12)
+            opacity = (
+                (0.16 if bold else 0.10) if pack.texture != "grain" else (0.18 if bold else 0.12)
+            )
             layers.append(
                 f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
                 f"background-image:url(&quot;{tile}&quot;);background-size:{size}px {size}px;"
@@ -541,7 +541,7 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
         off = int(min(width, height) * 0.05)
         return (
             f'<div style="position:absolute;left:{off}px;top:{off}px;width:{arm}px;height:{arm}px;'
-            f"border-top:{weight}px solid {acc};border-left:{weight}px solid {acc};{z}\"></div>"
+            f'border-top:{weight}px solid {acc};border-left:{weight}px solid {acc};{z}"></div>'
             f'<div style="position:absolute;right:{off}px;bottom:{off}px;width:{arm}px;height:{arm}px;'
             f'border-bottom:{weight}px solid {acc};border-right:{weight}px solid {acc};{z}"></div>'
         )
@@ -551,7 +551,7 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
         op = 0.92 if bold else 0.8
         return (
             f'<div style="position:absolute;left:{off}px;top:{off}px;width:{sq}px;height:{sq}px;'
-            f"background:{acc};opacity:{op};{z}\"></div>"
+            f'background:{acc};opacity:{op};{z}"></div>'
             f'<div style="position:absolute;right:{off}px;bottom:{off}px;width:{sq}px;height:{sq}px;'
             f'background:{acc};opacity:{op};{z}"></div>'
         )
@@ -590,7 +590,7 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
         op = 0.85 if bold else 0.65
         return (
             f'<div style="position:absolute;right:{off}px;top:{off}px;width:{d}px;height:{d}px;'
-            f"border:{weight}px solid {acc};border-radius:50%;opacity:{op};{z}\"></div>"
+            f'border:{weight}px solid {acc};border-radius:50%;opacity:{op};{z}"></div>'
         )
     return ""
 
