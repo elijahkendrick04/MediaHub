@@ -44,6 +44,11 @@ export const cardSchema = z.object({
   // the pre-v2 behaviour for cards rendered by older callers.
   archetype: z.string().default(""),
   heroStat: z.string().default(""),
+  // The still graphic's style pack id (graphic_renderer.style_packs), shape
+  // "ground-texture-accentGeo-density". The motion render layers the same
+  // ground / texture / accent-geometry overlay over the scene so a card's
+  // video carries the still's exact decorative treatment. Empty = bare.
+  stylePack: z.string().default(""),
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
@@ -821,6 +826,224 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         transform: `translateY(${ctx.anim.bgDrift}px)`,
       }}
     />
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Style-pack overlay — still↔motion parity with graphic_renderer.style_packs.
+//
+// The still renderer drops a ground / texture / accent-geometry overlay into
+// each archetype's {{ACCENT_DECORATION}} slot; this mirrors it verbatim on the
+// motion side so a card's video carries the exact same decorative treatment.
+// Same lever semantics and the same capped, legibility-safe values: ground is
+// darken-only, texture is a low-opacity blended tile (the grain precedent), and
+// accent geometry lives in the margins painted in the resolved accent role — so
+// no role colour is invented and text contrast is never reduced. Pack id shape:
+// "ground-texture-accentGeo-density" (see style_packs.StylePack.id).
+// ---------------------------------------------------------------------------
+
+const PACK_GROUNDS = new Set([
+  "flat", "top_fade", "bottom_fade", "corner_fade", "vignette", "spotlight", "twotone",
+]);
+const PACK_TEXTURES = new Set([
+  "none", "grain", "dots", "grid", "hatch", "halftone", "crosshatch",
+]);
+const PACK_ACCENT_GEOS = new Set([
+  "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
+]);
+
+type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
+
+// Parse a pack id into its levers, or null for the bare/unknown pack (→ no
+// overlay, byte-equivalent to the still's bare card).
+function parseStylePack(id: string): ParsedPack | null {
+  const parts = (id || "").split("-");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const [ground, texture, accentGeo, density] = parts;
+  if (
+    !PACK_GROUNDS.has(ground) ||
+    !PACK_TEXTURES.has(texture) ||
+    !PACK_ACCENT_GEOS.has(accentGeo)
+  ) {
+    return null;
+  }
+  if (ground === "flat" && texture === "none" && accentGeo === "none") {
+    return null; // the bare pack
+  }
+  return { ground, texture, accentGeo, bold: density === "bold" };
+}
+
+function packGroundGradient(ground: string, a: number): string | null {
+  switch (ground) {
+    case "vignette":
+      return `radial-gradient(115% 95% at 50% 45%, rgba(0,0,0,0) 52%, rgba(0,0,0,${a}) 100%)`;
+    case "spotlight":
+      return `radial-gradient(60% 50% at 50% 38%, rgba(0,0,0,0) 0%, rgba(0,0,0,${a}) 100%)`;
+    case "top_fade":
+      return `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 44%)`;
+    case "bottom_fade":
+      return `linear-gradient(0deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 44%)`;
+    case "corner_fade":
+      return `radial-gradient(125% 125% at 100% 100%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 55%)`;
+    case "twotone":
+      return `linear-gradient(122deg, rgba(0,0,0,0) 46%, rgba(0,0,0,${a}) 92%)`;
+    default:
+      return null;
+  }
+}
+
+const PACK_TEX_SIZE: Record<string, number> = {
+  grain: 160, dots: 18, grid: 32, hatch: 14, crosshatch: 16, halftone: 22,
+};
+
+// White-on-transparent tiles (blended over the ground), mirroring style_packs.
+function packTextureImage(texture: string): string | null {
+  const enc = (svg: string) => `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`;
+  switch (texture) {
+    case "grain":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'>` +
+        `<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter>` +
+        `<rect width='100%' height='100%' filter='url(#n)' opacity='0.5'/></svg>`,
+      );
+    case "dots":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18'>` +
+        `<circle cx='3' cy='3' r='1.4' fill='white'/></svg>`,
+      );
+    case "grid":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'>` +
+        `<path d='M32 0H0V32' fill='none' stroke='white' stroke-width='1'/></svg>`,
+      );
+    case "hatch":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14'>` +
+        `<path d='M-2 16L16 -2' stroke='white' stroke-width='1.4'/></svg>`,
+      );
+    case "crosshatch":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<path d='M-2 18L18 -2M-2 -2L18 18' stroke='white' stroke-width='1.1'/></svg>`,
+      );
+    case "halftone":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22'>` +
+        `<circle cx='6' cy='6' r='3.2' fill='white'/><circle cx='17' cy='17' r='1.6' fill='white'/></svg>`,
+      );
+    default:
+      return null;
+  }
+}
+
+// Accent geometry confined to the margins, painted in the resolved accent role.
+function packAccentGeometry(
+  style: string, width: number, height: number, bold: boolean, accent: string,
+): React.ReactNode {
+  const mult = bold ? 1.35 : 1.0;
+  const weight = Math.max(3, Math.round(Math.min(width, height) * 0.006 * mult));
+  const m = Math.min(width, height);
+  switch (style) {
+    case "corner_ticks": {
+      const arm = Math.round(m * 0.085 * mult);
+      const off = Math.round(m * 0.05);
+      return (
+        <>
+          <div style={{ position: "absolute", left: off, top: off, width: arm, height: arm, borderTop: `${weight}px solid ${accent}`, borderLeft: `${weight}px solid ${accent}` }} />
+          <div style={{ position: "absolute", right: off, bottom: off, width: arm, height: arm, borderBottom: `${weight}px solid ${accent}`, borderRight: `${weight}px solid ${accent}` }} />
+        </>
+      );
+    }
+    case "corner_blocks": {
+      const sq = Math.round(m * 0.05 * mult);
+      const off = Math.round(m * 0.045);
+      const op = bold ? 0.92 : 0.8;
+      return (
+        <>
+          <div style={{ position: "absolute", left: off, top: off, width: sq, height: sq, background: accent, opacity: op }} />
+          <div style={{ position: "absolute", right: off, bottom: off, width: sq, height: sq, background: accent, opacity: op }} />
+        </>
+      );
+    }
+    case "frame": {
+      const inset = Math.round(m * 0.035);
+      return <div style={{ position: "absolute", left: inset, right: inset, top: inset, bottom: inset, border: `${weight}px solid ${accent}`, opacity: bold ? 0.7 : 0.5 }} />;
+    }
+    case "side_rule": {
+      const bw = Math.max(5, Math.round(width * 0.012 * mult));
+      const inset = Math.round(height * 0.1);
+      return <div style={{ position: "absolute", left: 0, top: inset, bottom: inset, width: bw, background: accent }} />;
+    }
+    case "baseline_rule": {
+      const bh = Math.max(5, Math.round(height * 0.009 * mult));
+      const inset = Math.round(width * 0.08);
+      const bottom = Math.round(height * 0.06);
+      return <div style={{ position: "absolute", left: inset, right: inset, bottom, height: bh, background: accent }} />;
+    }
+    case "wedge": {
+      const size = Math.round(m * 0.16 * mult);
+      return <div style={{ position: "absolute", right: 0, top: 0, width: 0, height: 0, borderTop: `${size}px solid ${accent}`, borderLeft: `${size}px solid transparent` }} />;
+    }
+    case "ring": {
+      const d = Math.round(m * 0.16 * mult);
+      const off = Math.round(m * 0.06);
+      return <div style={{ position: "absolute", right: off, top: off, width: d, height: d, border: `${weight}px solid ${accent}`, borderRadius: "50%", opacity: bold ? 0.85 : 0.65 }} />;
+    }
+    default:
+      return null;
+  }
+}
+
+const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  const pack = parseStylePack(ctx.card.stylePack || "");
+  if (!pack) {
+    return null;
+  }
+  const { width, height, frame, roles } = ctx;
+  const accent = roles.accent || "#FFFFFF";
+  // Ease the whole treatment in with the scene (motion only for feedback).
+  const enter = interpolate(frame, [2, 16], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const children: React.ReactNode[] = [];
+
+  const ground = packGroundGradient(pack.ground, pack.bold ? 0.34 : 0.24);
+  if (ground) {
+    children.push(
+      <div key="ground" style={{ position: "absolute", inset: 0, background: ground }} />,
+    );
+  }
+  const tex = packTextureImage(pack.texture);
+  if (tex) {
+    const size = PACK_TEX_SIZE[pack.texture] || 20;
+    const op = pack.texture === "grain" ? (pack.bold ? 0.18 : 0.12) : pack.bold ? 0.16 : 0.1;
+    children.push(
+      <div
+        key="texture"
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: tex,
+          backgroundSize: `${size}px ${size}px`,
+          backgroundRepeat: "repeat",
+          opacity: op,
+          mixBlendMode: "overlay",
+        }}
+      />,
+    );
+  }
+  const geo = packAccentGeometry(pack.accentGeo, width, height, pack.bold, accent);
+  if (geo) {
+    children.push(<React.Fragment key="geo">{geo}</React.Fragment>);
+  }
+
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", opacity: enter }}>
+      {children}
+    </div>
   );
 };
 
@@ -1989,6 +2212,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       }}
     >
       <Scene ctx={ctx} />
+      <StylePackLayer ctx={ctx} />
     </AbsoluteFill>
   );
 };
