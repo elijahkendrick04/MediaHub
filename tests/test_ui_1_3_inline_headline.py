@@ -119,15 +119,15 @@ class TestHomeHeadline:
         assert "feed graphic" in body
         assert "and a reel" in body
 
-    def test_band_sits_after_hero_before_steps(self, client):
+    def test_band_sits_after_hero_before_engine(self, client):
         body = self._home(client)
         i_hero = body.find('class="mh-hero"')
         i_band = body.find('class="mh-pipeline"')
-        # The workflow section is now the UI 1.7 pinned-panel scrollytelling.
+        # After the input→output band comes the "what the engine does" bento.
         # Anchor on the HTML class="…" form (the bare name also appears in the
         # injected <style>, which would order by stylesheet, not DOM, position).
-        i_steps = body.find('class="mh-scrolly-grid"')
-        assert -1 < i_hero < i_band < i_steps, (i_hero, i_band, i_steps)
+        i_engine = body.find('class="mh-bento')
+        assert -1 < i_hero < i_band < i_engine, (i_hero, i_band, i_engine)
 
     def test_all_four_thumbs_inlined(self, client):
         body = self._home(client)

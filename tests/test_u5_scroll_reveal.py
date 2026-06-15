@@ -175,32 +175,23 @@ class TestHomeSignedOut:
 
     def test_line_spans_two_per_headline(self, app):
         # Each reveal-lines headline is split into exactly two editorial lines
-        # (steps, before/after, bento, UI 1.27 sample-output gallery, UI 1.6
-        # charts, UI 1.19 testimonials, frames, audience, promise, UI 1.22 FAQ,
-        # final-CTA) → 22 line spans.
+        # (bento, audience, promise, UI 1.22 FAQ, final-CTA) → 10 line spans.
         body = _home(app)
-        assert body.count('<span class="mh-line">') == 22
+        assert body.count('<span class="mh-line">') == 10
 
     def test_section_eyebrows_and_ledes_reveal_on_scroll(self, app):
         body = _home(app)
-        # The content-section eyebrows now reveal (were static before): steps,
-        # before/after, bento, UI 1.27 sample outputs, UI 1.6 charts, UI 1.19
-        # testimonials, frames, audience, UI 1.22 FAQ.
-        assert body.count("mh-section-eyebrow-strip mh-reveal") == 9
+        # The content-section eyebrows reveal (were static before):
+        # bento, audience, UI 1.22 FAQ.
+        assert body.count("mh-section-eyebrow-strip mh-reveal") == 3
         # Promise lede + final-CTA sub reveal as their own blocks.
         assert "mh-promise-lede mh-reveal" in body
         assert "mh-final-cta-sub mh-reveal" in body
 
     def test_rows_keep_their_group_stagger(self, app):
         body = _home(app)
-        # The card rows + the promise list stagger via .mh-reveal-group. (The
-        # workflow steps moved to the UI 1.7 pinned-panel scrollytelling, whose
-        # steps reveal via pure-CSS scroll-driven animation, not reveal-group.)
-        assert "mh-scrolly-grid" in body
+        # The card rows + the promise list stagger via .mh-reveal-group.
         assert "mh-bento mh-reveal-group" in body
-        # U.11's platform-frame carousel reveals as one block (the stacked
-        # phones run their own CSS autoplay loop, not a reveal-group stagger).
-        assert "mh-frames mh-reveal" in body
         assert "mh-audience-row mh-reveal-group" in body
         assert "mh-promise-list mh-reveal-group" in body
         # The promise section is no longer one big block reveal.
@@ -210,11 +201,8 @@ class TestHomeSignedOut:
         body = _home(app)
         # The marketing copy survived the split into lines …
         for frag in (
-            "From the results sheet to",
             "A results sheet in.",
             "of content out.",
-            "Your results, the way your",
-            "see them.",
             "Built for the people who",
             "Human in the loop,",
             "A minute to set up.",
@@ -222,9 +210,7 @@ class TestHomeSignedOut:
             assert frag in body, frag
         # … and the gold editorial accents still ride inside their lines.
         for em in (
-            '<em class="editorial">posting-ready</em>',
             '<em class="editorial">weekend</em>',
-            '<em class="editorial">followers</em>',
             '<em class="editorial">post the results</em>',
             "<em>by design</em>",
             "<em>Then</em>",

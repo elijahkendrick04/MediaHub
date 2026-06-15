@@ -280,12 +280,12 @@ def test_home_injects_pipeline_css(client):
     assert ".mh-pl-stage" in body
 
 
-def test_home_section_order_hero_then_pipeline_then_steps(client):
+def test_home_section_order_hero_then_pipeline_then_engine(client):
     body = _home_body(client)
     i_hero = body.index("mh-hero")
     i_pipeline = body.index("mh-pl-stage")
-    i_steps = body.index("From the results sheet")
-    assert i_hero < i_pipeline < i_steps
+    i_engine = body.index("What the engine does")
+    assert i_hero < i_pipeline < i_engine
 
 
 def test_pipeline_css_sits_before_guardrails_layer(client):
