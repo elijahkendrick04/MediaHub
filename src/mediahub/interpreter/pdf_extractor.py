@@ -266,45 +266,45 @@ def extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate], dic
                 bands = detect_column_bands(words, page.width)
                 info["page_columns"].append(len(bands))
 
+                # Logical lines for the structural parser: group ALL words on the
+                # page by y-position so a single results row (and an event header)
+                # stays intact. A wide intra-row gap — e.g. between the name and
+                # the "(YoB)" in "1. Gabrielle Idle-Beavers (08) Mt Kelly 30.82",
+                # or between "EVENT 101 Women's" and "50m Breaststroke" — would
+                # otherwise be read as a column corridor and split the row across
+                # bands, dropping the place/name (so the row never matches) and
+                # the event gender (so events merge/vanish).
+                page_lines = _band_lines(words)
+                y_to_x = {y: (ws[0]["x0"] if ws else 0.0) for y, ws in page_lines}
+                merged_rows = _merge_split_time_continuations(
+                    [(y, [w["text"] for w in ws]) for y, ws in page_lines]
+                )
+
                 page_text_parts: list[str] = []
-                for band_idx, (lo, hi) in enumerate(bands):
+                for y, toks in merged_rows:
+                    line_text = " ".join(toks)
+                    page_text_parts.append(line_text)
+                    lines.append(
+                        Line(
+                            text=line_text,
+                            page_no=page_no,
+                            y_position=float(line_y_counter),
+                            x_position=float(y_to_x.get(y, 0.0)),
+                            font_size_hint=None,
+                        )
+                    )
+                    line_y_counter += 1
+
+                # Table candidates stay column-band aware (the schema path wants
+                # column structure); only the structural line stream above is
+                # reconstructed full-width.
+                for lo, hi in bands:
                     in_band = [w for w in words if lo <= w["x0"] < hi]
                     grouped = _band_lines(in_band)
-
-                    # Convert each grouped row to a list of tokens
-                    raw_rows: list[tuple[float, list[str]]] = []
-                    for y, ws in grouped:
-                        raw_rows.append((y, [w["text"] for w in ws]))
-
-                    # Merge split-time continuation lines
-                    merged_rows = _merge_split_time_continuations(raw_rows)
-
-                    # Build per-line records for downstream stages.
-                    # Use TableCandidate row format AND emit Line objects so
-                    # both schema-by-table and schema-by-line paths see data.
-                    table_rows: list[list[str]] = []
-                    for y, toks in merged_rows:
-                        line_text = " ".join(toks)
-                        page_text_parts.append(line_text)
-                        # Compute approximate x of first token for x_position
-                        # by finding it in the raw words list
-                        first_x = lo
-                        for raw_y, raw_ws in grouped:
-                            if abs(raw_y - y) <= 5 and raw_ws:
-                                first_x = raw_ws[0]["x0"]
-                                break
-                        lines.append(
-                            Line(
-                                text=line_text,
-                                page_no=page_no,
-                                y_position=float(line_y_counter),
-                                x_position=float(first_x),
-                                font_size_hint=None,
-                            )
-                        )
-                        line_y_counter += 1
-                        table_rows.append(toks)
-
+                    band_rows = _merge_split_time_continuations(
+                        [(y, [w["text"] for w in ws]) for y, ws in grouped]
+                    )
+                    table_rows = [toks for _, toks in band_rows]
                     if len(table_rows) >= 2:
                         tables.append(
                             TableCandidate(
