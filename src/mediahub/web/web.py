@@ -5532,6 +5532,13 @@ _url_jobs: dict[str, dict] = {}
 _url_jobs_lock = threading.Lock()
 _URL_JOBS_MAX = 32
 
+# A fetch job whose heartbeat has been silent for this long is treated as stalled
+# (a hung render, or a recycled worker that took the crawl thread with it) and
+# reported as a terminal error so the page stops polling "Reading the site…"
+# forever. Comfortably longer than the crawl's own page/render budgets (180/240s)
+# so a healthy-but-slow crawl is never killed early.
+_URL_JOB_STALL_S = 300.0
+
 # Per-session rate limit on the fetch route — a headless browser crawl is a real
 # cost, so cap how many a single session can kick off in a window.
 _url_fetch_rate: dict[str, list[float]] = {}
@@ -16497,15 +16504,36 @@ def create_app() -> Flask:
         entry = _url_job_get(job_id)
         if entry is None:
             return jsonify({"status": "unknown"}), 404
+        status = entry.get("status", "unknown")
+        # Stall guard: a crawl runs in a background thread, so if it hangs (a
+        # render that never settles) or its worker is recycled mid-run, the job
+        # can sit in "running"/"queued" forever and the page shows "Reading the
+        # site…" with no end. The heartbeat is refreshed on every progress
+        # update; if it's gone quiet well past the crawl's own budgets, report
+        # an honest terminal error instead of polling into the void.
+        if status in ("running", "queued"):
+            hb = float(entry.get("heartbeat") or 0.0)
+            if hb and (time.time() - hb) > _URL_JOB_STALL_S:
+                status = "error"
+                entry = {
+                    **entry,
+                    "status": "error",
+                    "error": (
+                        "The fetch stalled while reading the site and didn't finish. "
+                        "This site is unusually heavy to crawl; try again, or ask your "
+                        "administrator to raise MEDIAHUB_RESULTS_FETCH_TIMEOUT_S / "
+                        "RENDER_BUDGET_S (or set MEDIAHUB_SEARCH_ENDPOINT)."
+                    ),
+                }
         payload = {
-            "status": entry.get("status", "unknown"),
+            "status": status,
             "phase": entry.get("phase", ""),
             "progress": entry.get("progress", ""),
             "percent": entry.get("percent", 0),
         }
-        if entry.get("status") == "done" and entry.get("run_id"):
+        if status == "done" and entry.get("run_id"):
             payload["redirect"] = url_for("upload_configure", run_id=entry["run_id"])
-        elif entry.get("status") == "error":
+        elif status == "error":
             payload["error"] = entry.get("error", "The fetch failed.")
         return jsonify(payload)
 

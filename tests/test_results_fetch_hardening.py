@@ -386,6 +386,35 @@ def test_status_endpoint_reports_percent(app_mod):
     assert body["status"] == "running"
 
 
+def test_status_reports_stall_when_heartbeat_goes_quiet(app_mod):
+    """A crawl that hangs (or whose worker is recycled) stops updating its
+    heartbeat; the poll must then report a terminal error instead of showing
+    'Reading the site…' forever."""
+    app, wm = app_mod
+    job_id = "feedface0001"
+    wm._url_job_set(
+        job_id, status="running", phase="fetching", progress="Reading the site…", percent=8
+    )
+    # Force the heartbeat ancient → stalled.
+    with wm._url_jobs_lock:
+        wm._url_jobs[job_id]["heartbeat"] = 1.0
+    c = app.test_client()
+    body = c.get(f"/api/upload/from-url/{job_id}/status").get_json()
+    assert body["status"] == "error"
+    assert "stall" in body["error"].lower()
+
+
+def test_status_stays_running_when_heartbeat_fresh(app_mod):
+    app, wm = app_mod
+    job_id = "feedface0002"
+    wm._url_job_set(
+        job_id, status="running", phase="fetching", progress="Fetched 3 pages", percent=15
+    )
+    c = app.test_client()
+    body = c.get(f"/api/upload/from-url/{job_id}/status").get_json()
+    assert body["status"] == "running"  # recent heartbeat → not stalled
+
+
 def test_refetch_route_rejects_non_link_run(app_mod):
     app, wm = app_mod
     rid = "nolink000001"
