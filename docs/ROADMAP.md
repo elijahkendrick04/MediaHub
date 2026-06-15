@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `57a26bbba` · Merge pull request #569 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-15 · `2c1e0c3ff` · Merge pull request #615 from elijahkendrick04/claude/gracious-cannon-zsnf4k
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -134,7 +134,6 @@ parallel session**; 🟡 = touches a shared file (the `.btn` system or a list fi
 sequence it or merge with care.
 
 <!-- ROADMAP:TODO -->
-- **UI2.4** · UI2 (top priority) — **Client-side Tabs**: turn a server-nav filter (review workflow queue/approved, or activity status) into client-side panels with the kit's sliding `.mh-tabs` indicator — switch without a full reload · 🟡 coordinate (touches the review/activity filter region) · ❌ **NOT STARTED**
 - **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) · ❌ **NOT STARTED**
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1487,6 +1486,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `f4aa388d7` | UI2.4: client-side workflow tabs on the review queue |
 | 2026-06-15 | `ebb08dc15` | Document MEDIAHUB_RESULTS_FETCH_RENDER_RECYCLE; regen env inventory |
 | 2026-06-15 | `f47f4a88d` | Recycle headless browser periodically so heavy-site crawls don't wedge |
 | 2026-06-15 | `71bcbca55` | Remove light/dark theme toggle and heading scramble animation |
@@ -1495,5 +1495,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `359eaa707` | Spread the Phase-U motion/effect kit across every page, not just home |
 | 2026-06-14 | `522aab03f` | Remove unused imports in scripts/ (ruff F401) |
 | 2026-06-14 | `8f2de7cb7` | Keep heartbeat drain thread alive past a task_done() ValueError |
-| 2026-06-14 | `9001dfb53` | UI 1.7: pinned-panel scrollytelling on the landing how-it-works |
 <!-- /ROADMAP:ACTIVITY -->
