@@ -701,6 +701,7 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
     if style == "cross_ticks":
         arm = int(min(width, height) * 0.028 * mult)
         off = int(min(width, height) * 0.06)
+
         def _cross(x_css: str, y_css: str) -> str:
             return (
                 f'<div style="position:absolute;{x_css};{y_css};width:{arm * 2}px;height:{weight}px;'
@@ -708,18 +709,17 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
                 f'<div style="position:absolute;{x_css};{y_css};width:{weight}px;height:{arm * 2}px;'
                 f'background:{acc};{z}"></div>'
             )
-        return _cross(f"left:{off}px", f"top:{off}px") + _cross(
-            f"right:{off}px", f"bottom:{off}px"
-        )
+
+        return _cross(f"left:{off}px", f"top:{off}px") + _cross(f"right:{off}px", f"bottom:{off}px")
     if style == "corner_arc":
         arm = int(min(width, height) * 0.11 * mult)
         off = int(min(width, height) * 0.05)
         return (
             f'<div style="position:absolute;left:{off}px;top:{off}px;width:{arm}px;height:{arm}px;'
-            f'border-top:{weight}px solid {acc};border-left:{weight}px solid {acc};'
+            f"border-top:{weight}px solid {acc};border-left:{weight}px solid {acc};"
             f'border-top-left-radius:100%;{z}"></div>'
             f'<div style="position:absolute;right:{off}px;bottom:{off}px;width:{arm}px;height:{arm}px;'
-            f'border-bottom:{weight}px solid {acc};border-right:{weight}px solid {acc};'
+            f"border-bottom:{weight}px solid {acc};border-right:{weight}px solid {acc};"
             f'border-bottom-right-radius:100%;{z}"></div>'
         )
     return ""
