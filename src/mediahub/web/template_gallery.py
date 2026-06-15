@@ -492,7 +492,7 @@ def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str
         '<section class="mh-hero" data-lane="04" '
         'style="padding-top:var(--sp-9);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
         '<span class="mh-hero-eyebrow">Template gallery</span>'
-        f'<h1>{n} ways to tell<br>the <em class="editorial">story</em>.</h1>'
+        f'<h1 class="mh-scramble">{n} ways to tell<br>the <em class="editorial">story</em>.</h1>'
         '<p class="lede">Every content pack is composed from this library of card '
         "templates. The design director picks the best one for each moment "
         "automatically — browse the range here so you know what your cards can "
