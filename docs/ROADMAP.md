@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `f1be9ed17` · Merge pull request #607 from elijahkendrick04/claude/nice-fermat-ka9bh4
+**Last updated:** 2026-06-15 · `8f4cbee48` · Merge pull request #612: Remove light/dark theme toggle and heading scramble animation
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1487,6 +1487,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `71bcbca55` | Remove light/dark theme toggle and heading scramble animation |
 | 2026-06-15 | `ea5197d87` | Make every page phone/tablet friendly: fix the remaining mobile overflow + cramped tables |
 | 2026-06-15 | `05dd8ba50` | Tidy home page: curate to 7 focused sections |
 | 2026-06-15 | `359eaa707` | Spread the Phase-U motion/effect kit across every page, not just home |
