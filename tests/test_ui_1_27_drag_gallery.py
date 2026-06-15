@@ -297,57 +297,6 @@ class TestKitJs:
             assert bad not in low, f"ui-kit.js must stay dependency-free; found {bad!r}"
 
 
-# ── 3. Server-side — landing sample-output gallery ───────────────────────────
-
-
-class TestLandingGallery:
-    def _home(self, client) -> str:
-        r = client.get("/")
-        assert r.status_code == 200
-        return r.get_data(as_text=True)
-
-    def test_gallery_section_present(self, client):
-        body = self._home(client)
-        assert 'class="mh-drag-scroll"' in body
-        assert 'aria-label="Sample MediaHub outputs' in body
-        assert 'tabindex="0" role="group"' in body, "row must be keyboard-focusable"
-        assert ">Sample outputs<" in body, "section eyebrow missing"
-
-    def test_four_output_cards(self, client):
-        body = self._home(client)
-        assert body.count('class="mh-ds-card mh-ds-card--output"') == 4, (
-            "the showcase should carry the four sample outputs"
-        )
-
-    def test_uses_the_first_party_sample_svgs(self, client):
-        body = self._home(client)
-        for fn in ("results-sheet.svg", "story-card.svg", "feed-graphic.svg", "reel.svg"):
-            assert f"samples/{fn}" in body, f"sample {fn} not in the gallery"
-            assert (_SAMPLES_DIR / fn).is_file(), f"sample asset {fn} missing on disk"
-
-    def test_drag_hint_ships_hidden(self, client):
-        body = self._home(client)
-        assert 'class="mh-ds-hint" hidden' in body, (
-            "the hint must ship hidden — JS reveals it only on an overflowing row"
-        )
-        assert "Drag to explore" in body
-
-    def test_sits_between_bento_and_in_feed_frames(self, client):
-        body = self._home(client)
-        bento = body.find('class="mh-bento mh-reveal-group"')
-        gallery = body.find('aria-label="Sample MediaHub outputs')
-        frames = body.find('aria-label="Sample outputs shown inside Instagram')
-        assert -1 < bento < gallery < frames, (
-            f"gallery must sit after the bento and before the frames "
-            f"(got bento={bento}, gallery={gallery}, frames={frames})"
-        )
-
-    def test_css_inlined_and_js_referenced(self, client):
-        body = self._home(client)
-        assert ".mh-drag-scroll.is-dragging" in body, "motion CSS not inlined on the page"
-        assert "js/ui-kit.js" in body, "ui-kit.js not loaded by the page"
-
-
 # ── 4. Server-side — Media Library filmstrip ─────────────────────────────────
 
 

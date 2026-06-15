@@ -89,10 +89,7 @@ def home_html(client):
 EXPECTED_CHAPTERS = [
     ("mh-ch-overview", "Overview"),
     ("mh-ch-how", "How it works"),
-    ("mh-ch-workflow", "The workflow"),
-    ("mh-ch-transformation", "Transformation"),
     ("mh-ch-engine", "What it does"),
-    ("mh-ch-feed", "In the feed"),
     ("mh-ch-audience", "Who it&#39;s for"),  # apostrophe is HTML-escaped
     ("mh-ch-promise", "Our promise"),
     ("mh-ch-start", "Get started"),
@@ -342,14 +339,14 @@ class TestScrollSpyBrowser:
             # Clicking a chapter that sits inside a section taller than the
             # viewport must still settle on that chapter — the case a naive
             # top-band observer gets wrong.
-            page.click('.mh-chapter-nav a[href="#mh-ch-feed"]')
+            page.click('.mh-chapter-nav a[href="#mh-ch-engine"]')
             page.wait_for_timeout(900)
-            assert self._active(page) == ["#mh-ch-feed"]
+            assert self._active(page) == ["#mh-ch-engine"]
             # The section is scrolled clear of the sticky masthead, not behind it.
-            top = page.eval_on_selector("#mh-ch-feed", "el => el.getBoundingClientRect().top")
+            top = page.eval_on_selector("#mh-ch-engine", "el => el.getBoundingClientRect().top")
             assert 0 <= top <= 130
             # The hash reflects the chapter for shareable deep links.
-            assert page.evaluate("location.hash") == "#mh-ch-feed"
+            assert page.evaluate("location.hash") == "#mh-ch-engine"
         finally:
             browser.close()
             pw.stop()

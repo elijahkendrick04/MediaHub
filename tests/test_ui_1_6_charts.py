@@ -424,49 +424,6 @@ class TestRevealJs:
 
 
 # =========================================================================== #
-# 5) Landing page — the sample-outputs charts section
-# =========================================================================== #
-class TestLandingCharts:
-    def _home(self, client):
-        resp = client.get("/")
-        assert resp.status_code == 200, resp.status_code
-        return resp.get_data(as_text=True)
-
-    def test_section_present(self, client):
-        body = self._home(client)
-        assert "The meet, read by the engine" in body
-        assert "mh-charts-grid" in body
-
-    def test_both_chart_types_render(self, client):
-        body = self._home(client)
-        assert "mh-chart--bars" in body
-        assert "mh-chart--area" in body
-        assert 'pathLength="1"' in body
-
-    def test_sample_data_is_honestly_labelled(self, client):
-        # Honesty rule: the landing figures carry clearly-marked SAMPLE data.
-        body = self._home(client)
-        assert "Sample meet" in body
-        assert "Sample season" in body
-
-    def test_section_sits_after_frames_before_audience(self, client):
-        body = self._home(client)
-        i_frames = body.find('class="mh-frames')
-        i_charts = body.find("The meet, read by the engine")
-        i_aud = body.find('class="mh-audience-row')
-        assert -1 < i_frames < i_charts < i_aud, (i_frames, i_charts, i_aud)
-
-    def test_charts_build_on_scroll(self, client):
-        body = self._home(client)
-        # at least the two landing charts opt into the scroll animation
-        assert body.count("data-mh-animate") >= 2
-
-    def test_landing_area_gradient_present(self, client):
-        body = self._home(client)
-        assert "mh-area-grad-home-pbs" in body
-
-
-# =========================================================================== #
 # 6) Review page — real run data only
 # =========================================================================== #
 class TestReviewCharts:

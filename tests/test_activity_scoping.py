@@ -180,9 +180,8 @@ class TestHomeIsStripped:
         assert "Club A" in body
         assert "Create new content" in body
         assert "Edit profile" in body
-        # Workflow steps still present.
+        # The "how it works" explainer (pipeline diagram) is still present.
         assert ("How it works" in body) or ("workflow" in body.lower())
-        assert "Add an input" in body
 
     def test_home_banner_morphs_to_setup_when_no_org(self, gated_client):
         c, _ = gated_client

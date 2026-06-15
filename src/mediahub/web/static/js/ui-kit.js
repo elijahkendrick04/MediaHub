@@ -107,21 +107,6 @@
     });
   }
 
-  /* --- Infinite marquee: clone children for a seamless -50% loop ------- */
-  function bindMarquee(el) {
-    if (!once(el, "data-mh-marquee-init")) return;
-    var track = el.querySelector(".mh-marquee__track");
-    if (!track || track.children.length === 0) return;
-    var n = track.children.length;
-    for (var i = 0; i < n; i++) {
-      var c = track.children[i].cloneNode(true);
-      c.setAttribute("aria-hidden", "true");
-      track.appendChild(c);
-    }
-    var speed = parseFloat(el.getAttribute("data-mh-speed"));
-    if (speed > 0) track.style.animationDuration = speed + "s";
-  }
-
   /* --- Text-generate: wrap words, reveal on view ---------------------- */
   function splitWords(el) {
     if (!once(el, "data-mh-split")) return;
@@ -764,7 +749,6 @@
     each(root, ".mh-spotlight-card, .mh-glow-border, .mh-glare", bindPointer);
     each(root, ".mh-lens", bindLens);
     each(root, ".mh-tilt", bindTilt);
-    each(root, ".mh-marquee", bindMarquee);
     each(root, ".mh-text-generate", function (el) { splitWords(el); observe(el); });
     each(root, ".mh-highlight, .mh-flapboard, .mh-scramble", observe);
     each(root, ".mh-flip-words", bindFlipWords);
