@@ -319,6 +319,52 @@
 .btn[data-mh-state="success"] .mh-btn-check { display: inline-block; animation: mh-pop 320ms var(--ease-spring); }
 @keyframes mh-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
+/* --- Primary-CTA variant: Moving-Border ring + Stateful states (UI2.5) ----
+   One purpose-built host so the two kit effects above can co-exist on a single
+   primary action. A bare `.btn` paints its solid lane fill right to its own
+   edge, which buries an inset border ring — the exact reason a raw
+   `.mh-moving-border` is invisible on a filled button. `.mh-cta-motion` solves it by
+   moving that fill to the PADDING box behind a transparent 1.5px border, then
+   riding the animated conic ring through the transparent gap: nothing is
+   painted over the edge, so the ring is finally visible. The stateful
+   loading/success contract (`.mh-btn-label/-spin/-check` + `data-mh-state`,
+   defined just above) keeps working unchanged — `success` simply re-tints the
+   same padding-box fill while the ring carries on. Token-driven, so a re-skin
+   re-skins the CTA; reduced-motion stills it to a clean static hairline. */
+.btn.mh-cta-motion {
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+.btn.mh-cta-motion::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1.5px;
+  /* A near-black glint travelling the gold rim (the fill is lane-yellow, so
+     the contrasting accent is on-primary, not the primary itself). */
+  background: conic-gradient(from var(--mh-ba),
+    transparent 0 62%,
+    color-mix(in oklch, var(--mh-on-primary) 60%, transparent) 80%,
+    var(--mh-on-primary) 90%,
+    transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: mh-ba-spin var(--mh-beam-speed) linear infinite;
+}
+/* The success fill flips to green; keep the rim glint on the matching
+   on-success ink so the ring stays legible through the state change. */
+.btn.mh-cta-motion[data-mh-state="success"]::before {
+  background: conic-gradient(from var(--mh-ba),
+    transparent 0 62%,
+    color-mix(in oklch, var(--mh-surface-deep) 60%, transparent) 80%,
+    var(--mh-surface-deep) 90%,
+    transparent 100%);
+}
+
 /* =====================================================================
    4. TEXT EFFECTS  (Text-Generate · Flip-Words · Hero-Highlight · Flapboard)
    ===================================================================== */
@@ -986,11 +1032,16 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
   .mh-aurora::before,
   .mh-gradient-border::before,
   .mh-moving-border::before,
+  .mh-cta-motion::before,
   .mh-sparkles .mh-spark,
   .mh-bar-fill,
   .mh-steploader__step[data-state="active"] .mh-steploader__dot {
     animation: none !important;
   }
+  /* A frozen conic arc reads as an arbitrary partial border, so under reduced
+     motion the CTA ring settles to a clean static lane-yellow hairline frame —
+     a deliberate accent, not a stalled animation. */
+  .btn.mh-cta-motion::before { background: var(--mh-primary); }
   .mh-aurora::before { transform: none; }
   .mh-tilt { transform: none !important; transition: none; }
   /* Drag-scroll stays usable (direct manipulation), but the smooth-scroll

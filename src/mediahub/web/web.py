@@ -5178,8 +5178,10 @@ def _render_turn_into_card(run_id: str) -> str:
       <div>{_ti_chips}</div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
-        &#x2726; Generate the pack
+      <button id="ti-btn" class="btn mh-cta-motion" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink)">
+        <span class="mh-btn-label">&#x2726; Generate the pack</span>
+        <span class="mh-btn-spin" aria-hidden="true"></span>
+        <span class="mh-btn-check" aria-hidden="true">&#x2713;</span>
       </button>
     </div>
   </div>
@@ -5190,10 +5192,11 @@ def _render_turn_into_card(run_id: str) -> str:
 function turnMeetIntoPack() {{
   var btn = document.getElementById('ti-btn');
   var status = document.getElementById('ti-status');
-  var origText = btn.textContent;
   var secs = 0;
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
+  function setState(s) {{ if (window.MH && MH.btnState) MH.btnState(btn, s); }}
+  // Stateful CTA: loading spins the primary action; data-mh-state="loading"
+  // also blocks a second click (pointer-events:none), so no disabled toggle.
+  setState('loading');
   status.style.display = '';
   status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
     '<span id="ti-status-text">Drafting every artefact with live AI&hellip;</span>';
@@ -5205,17 +5208,20 @@ function turnMeetIntoPack() {{
   function _fail(msg) {{
     clearInterval(ticker);
     status.textContent = 'Failed: ' + msg;
-    btn.disabled = false;
-    btn.textContent = origText;
+    setState('idle');
+  }}
+  function _done(packUrl) {{
+    clearInterval(ticker);
+    setState('success');
+    status.textContent = 'Done — opening pack…';
+    window.location.href = packUrl;
   }}
   function _poll(statusUrl) {{
     fetch(statusUrl).then(function(r) {{ return r.json(); }}).then(function(j) {{
       if (j.status === 'running') {{
         setTimeout(function() {{ _poll(statusUrl); }}, 2000);
       }} else if (j.status === 'done' && j.pack_url) {{
-        clearInterval(ticker);
-        status.textContent = 'Done — opening pack…';
-        window.location.href = j.pack_url;
+        _done(j.pack_url);
       }} else {{
         _fail(j.error || 'unknown error');
       }}
@@ -5230,9 +5236,7 @@ function turnMeetIntoPack() {{
       if (j && j.status_url) {{
         setTimeout(function() {{ _poll(j.status_url); }}, 2000);
       }} else if (j && j.pack_url) {{
-        clearInterval(ticker);
-        status.textContent = 'Done — opening pack…';
-        window.location.href = j.pack_url;
+        _done(j.pack_url);
       }} else {{
         _fail(j && j.message ? j.message : 'unknown error');
       }}
@@ -15428,7 +15432,11 @@ def create_app() -> Flask:
     </div>
     <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-      <button id="mh-upload-submit" class="btn" type="submit">Continue &rarr;</button>
+      <button id="mh-upload-submit" class="btn mh-cta-motion" type="submit">
+        <span class="mh-btn-label">Continue &rarr;</span>
+        <span class="mh-btn-spin" aria-hidden="true"></span>
+        <span class="mh-btn-check" aria-hidden="true">&#x2713;</span>
+      </button>
       <a class="btn ghost" href="{url_for("home")}">Cancel</a>
     </div>
   </form>
@@ -15497,7 +15505,11 @@ def create_app() -> Flask:
     if (!hasFile()) {{
       e.preventDefault();
       showError('Please choose a results file first.');
+      return;
     }}
+    // Stateful CTA: spin while the file uploads + the parser runs, so the
+    // single primary action shows it's working before the page turns over.
+    if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
   }});
   refresh();
 }})();
