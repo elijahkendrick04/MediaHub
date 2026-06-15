@@ -188,7 +188,7 @@ def test_gallery_entries_shape():
 
 def test_render_body_structure():
     html = G.render_gallery_body(gallery_url="/templates", make_url="/make")
-    assert _cards(html) == len(A.list_archetypes()) == 12
+    assert _cards(html) == len(A.list_archetypes()) == 20
     assert _hidden_cards(html) == 0  # the default "all" view hides nothing
     # Chips for All + every category, with counts.
     assert 'aria-label="Filter templates by category"' in html
@@ -212,8 +212,8 @@ def test_render_body_server_side_filtering():
     )
     entries = G.gallery_entries()
     n_photo = sum(1 for e in entries if e["category"] == "photo")
-    assert _cards(html) == 12  # all cards still in the DOM …
-    assert _hidden_cards(html) == 12 - n_photo  # … non-matching are hidden
+    assert _cards(html) == len(A.list_archetypes())  # all cards still in the DOM …
+    assert _hidden_cards(html) == len(A.list_archetypes()) - n_photo  # non-matching hidden
     # The active chip is marked.
     assert re.search(r'class="mh-arch-chip is-active"[^>]*data-cat="photo"', html) or \
            re.search(r'data-cat="photo"[^>]*aria-current="true"', html)
@@ -251,7 +251,7 @@ def test_route_renders(client):
     assert r.mimetype == "text/html"
     html = r.get_data(as_text=True)
     assert "Template gallery" in html
-    assert _cards(html) == 12
+    assert _cards(html) == len(A.list_archetypes())
     assert _hidden_cards(html) == 0
 
 
@@ -261,7 +261,7 @@ def test_route_category_filter(client):
     html = r.get_data(as_text=True)
     entries = G.gallery_entries()
     n_data = sum(1 for e in entries if e["category"] == "data")
-    assert _hidden_cards(html) == 12 - n_data
+    assert _hidden_cards(html) == len(A.list_archetypes()) - n_data
 
 
 def test_route_junk_category_falls_back_to_all(client):
@@ -279,7 +279,7 @@ def test_route_works_with_gen_v2_enabled(client, monkeypatch):
     # so the gallery shows the full library whether v2 is on or off.
     monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
     html = client.get("/templates").get_data(as_text=True)
-    assert _cards(html) == 12
+    assert _cards(html) == len(A.list_archetypes())
 
 
 # ---------------------------------------------------------------------------

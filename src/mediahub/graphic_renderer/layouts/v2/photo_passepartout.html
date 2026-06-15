@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   photo_passepartout  (v2 archetype)
+
+   The athlete photo is hung like a framed print: a generous brand "mat"
+   (passe-partout) surrounds a windowed image with a thin accent keyline,
+   and a caption plate beneath the window carries the name, event and
+   result like a gallery label. The matted window + caption plate is the
+   signature — a calm, premium, gallery feel distinct from the full-bleed
+   stage or the diagonal wedge. With no photo the window holds a clean
+   brand panel so the framing still reads.
+   =================================================================== */
+
+.pp {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  padding: 72px;
+}
+.pp *, .pp *::before, .pp *::after { box-sizing: border-box; }
+
+.pp__head { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 36px; }
+.pp__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 24px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
+.pp__tick { width: 40px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.pp__brand { display: flex; align-items: center; gap: 14px; }
+.pp__logo { height: 54px; width: auto; }
+.pp__logo img, .pp__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.pp__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px; text-transform: uppercase; color: var(--mh-on-primary); }
+
+/* the matted window */
+.pp__window { flex: 1 1 0; position: relative; z-index: 2; background: var(--mh-surface); border: 3px solid var(--mh-accent); overflow: hidden; }
+.pp__window img { width: 100%; height: 100%; object-fit: cover; object-position: var(--mh-photo-pos, center 30%); display: block; }
+
+/* gallery caption plate */
+.pp__plate { position: relative; z-index: 2; margin-top: 32px; display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.pp__meta { min-width: 0; }
+.pp__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 28px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-accent); }
+.pp__surname { font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400; font-size: var(--mh-fit-surname-px, 104px); line-height: 0.88; text-transform: uppercase; color: var(--mh-on-primary); white-space: nowrap; }
+.pp__event { margin-top: 12px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 26px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-primary); }
+.pp__sub { margin-top: 6px; font-family: 'Inter',sans-serif; font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
+.pp__right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+.pp__result { display: inline-block; padding: 14px 24px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: var(--mh-fit-result-px, 70px); line-height: 0.9; }
+.pp__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 20px; color: var(--mh-on-primary); opacity: 0.82; }
+.pp__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="pp">
+
+  <div class="pp__head">
+    <div class="pp__kicker"><span class="pp__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+    <div class="pp__brand">
+      <div class="pp__logo">{{LOGO_BLOCK}}</div>
+      <div class="pp__club">{{CLUB_FULL}}</div>
+    </div>
+  </div>
+
+  <div class="pp__window">{{ATHLETE_IMG_BLOCK}}</div>
+
+  <div class="pp__plate">
+    <div class="pp__meta">
+      <div class="pp__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="pp__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+      <div class="pp__event">{{EVENT_NAME}}</div>
+      <div class="pp__sub">{{MEET_NAME}}</div>
+    </div>
+    <div class="pp__right">
+      <span class="pp__result">{{RESULT_VALUE}}</span>
+      <div class="pp__stat">{{HERO_STAT}}</div>
+      <div class="pp__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   broadcast_scorebug  (v2 archetype)
+
+   A live-TV treatment: the athlete fills a full-bleed photo stage, a thin
+   top ribbon carries club + meet like a broadcast banner, and a compact
+   "scorebug" module sits bottom-left — a boxed event→result cluster with
+   an accent tab, exactly like an on-air lower-corner graphic. The bug
+   cluster (not a full-width band) is the signature, distinct from the
+   lower-third archetype. With no photo the stage stays a clean brand
+   gradient so the bug still reads.
+   =================================================================== */
+
+.bg {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: linear-gradient(160deg, var(--mh-surface) 0%, var(--mh-primary) 70%);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.bg *, .bg *::before, .bg *::after { box-sizing: border-box; }
+
+.bg__stage { position: absolute; inset: 0; z-index: 0; }
+.bg__stage img { width: 100%; height: 100%; object-fit: cover; object-position: var(--mh-photo-pos, center 24%); display: block; }
+.bg__scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0) 26%, rgba(0,0,0,0) 50%, rgba(0,0,0,0.55) 100%); }
+
+/* top broadcast ribbon */
+.bg__ribbon {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 26px 56px; background: rgba(0,0,0,0.28);
+}
+.bg__rib-id { display: flex; align-items: center; gap: 14px; }
+.bg__logo { height: 48px; width: auto; }
+.bg__logo img, .bg__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.bg__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); }
+.bg__meet { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 19px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mh-on-primary); opacity: 0.86; }
+
+/* lower-corner cluster: name banner + scorebug */
+.bg__lower { position: absolute; left: 56px; right: 56px; bottom: 56px; z-index: 4; display: flex; flex-direction: column; gap: 22px; align-items: flex-start; }
+.bg__kicker { display: inline-flex; padding: 10px 18px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.14em; text-transform: uppercase; }
+.bg__name {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: var(--mh-fit-surname-px, 112px); line-height: 0.86; letter-spacing: -0.01em;
+  text-transform: uppercase; color: var(--mh-on-primary); white-space: nowrap;
+  text-shadow: 0 4px 22px rgba(0,0,0,0.45);
+}
+/* the scorebug module */
+.bg__bug { display: flex; align-items: stretch; background: var(--mh-primary); border: 2px solid var(--mh-outline); }
+.bg__bug-tab { background: var(--mh-accent); width: 10px; flex: 0 0 auto; }
+.bg__bug-cells { display: flex; align-items: center; }
+.bg__bug-cell { padding: 16px 26px; display: flex; flex-direction: column; gap: 4px; }
+.bg__bug-cell + .bg__bug-cell { border-left: 2px solid var(--mh-outline); }
+.bg__bug-lab { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 16px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mh-on-primary); opacity: 0.66; }
+.bg__bug-event { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--mh-on-primary); }
+.bg__bug-result { font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: var(--mh-fit-result-px, 56px); line-height: 0.9; color: var(--mh-accent); white-space: nowrap; }
+.bg__bug-stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 20px; color: var(--mh-on-primary); opacity: 0.82; }
+.bg__sponsor { position: absolute; right: 56px; bottom: 56px; z-index: 5; }
+</style>
+</head>
+<body>
+<div class="bg">
+
+  <div class="bg__stage">{{ATHLETE_IMG_BLOCK}}</div>
+  <div class="bg__scrim"></div>
+
+  <div class="bg__ribbon">
+    <div class="bg__rib-id">
+      <div class="bg__logo">{{LOGO_BLOCK}}</div>
+      <div class="bg__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="bg__meet">{{MEET_NAME}}</div>
+  </div>
+
+  <div class="bg__lower">
+    <div class="bg__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="bg__name">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="bg__bug">
+      <div class="bg__bug-tab"></div>
+      <div class="bg__bug-cells">
+        <div class="bg__bug-cell">
+          <div class="bg__bug-lab">Event</div>
+          <div class="bg__bug-event">{{EVENT_NAME}}</div>
+        </div>
+        <div class="bg__bug-cell">
+          <div class="bg__bug-lab">Result</div>
+          <div class="bg__bug-result">{{RESULT_VALUE}}</div>
+          <div class="bg__bug-stat">{{HERO_STAT}}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg__sponsor">{{SPONSOR_BLOCK}}</div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

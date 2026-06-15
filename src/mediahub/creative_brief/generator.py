@@ -123,6 +123,11 @@ class CreativeBrief:
     mood: str = ""  # one or two mood words
     ai_directed: bool = False  # True when AI chose the direction
     variation_signature: str = ""  # short signature for dedup/audit
+    # Gen Engine v2 style pack (additive; default-safe). The decorative lever
+    # bundle (ground × texture × accent-geometry × density) the renderer layers
+    # over the chosen archetype — see ``graphic_renderer.style_packs``. Empty =
+    # the bare pack (undecorated), so legacy/flag-off callers are byte-identical.
+    style_pack: str = ""
     # --- Gen Engine v2 Tier B (additive; default-safe for legacy callers) ---
     # The measured emphasis facts this card can honestly lead with, keyed by
     # design_spec.STAT_KEYS ("pb_delta" → "−0.42s on PB"). Only facts the
@@ -664,18 +669,54 @@ def generate(
     except Exception:  # never break brief generation for an optional feature
         log.debug("gen-v2 archetype selection skipped", exc_info=True)
 
+    # Gen Engine v2 style pack: layer a deterministic decorative treatment over
+    # the chosen archetype so a content pack reads as varied per-card designs,
+    # not one repeated look. Mirrors the archetype floor's contract — an
+    # explicit seed (incl. 0, the ?stable path) is an exact, reproducible pick;
+    # no seed derives a stable-per-card pack that spreads across the pack and
+    # walks past this card's recently-used packs. v2-only and additive: under
+    # the kill switch the pack stays empty (bare) and the legacy render is
+    # byte-identical.
+    try:
+        if _v2_on:
+            from mediahub.graphic_renderer import style_packs as _sp
+
+            if variation_seed is not None:
+                _pack = _sp.pick_style_pack(variation_seed)
+            else:
+                _recent_packs = [
+                    s.split("sp:", 1)[1] for s in (recent_signatures or []) if "sp:" in s
+                ]
+                _pack_key = str(
+                    content_item.get("id")
+                    or content_item.get("swim_id")
+                    or ach.get("swim_id")
+                    or ""
+                )
+                _pack = _sp.pick_style_pack_for_card(_pack_key or None, _recent_packs)
+            brief.style_pack = _pack.id
+    except Exception:
+        log.debug("gen-v2 style-pack selection skipped", exc_info=True)
+
     # Stamp a signature so callers can dedupe / audit recent renders.
     _stamp_signature(brief)
     return brief
 
 
 def _stamp_signature(brief: CreativeBrief) -> None:
-    """(Re)compute the dedupe/audit signature from the brief's final axes."""
+    """(Re)compute the dedupe/audit signature from the brief's final axes.
+
+    The trailing ``sp:<pack-id>`` token records the v2 style pack so callers
+    threading recent signatures (regenerate, bulk-pack) can walk both the
+    archetype *and* the pack axis past recent renders. Old signatures without
+    the token are simply ignored by the pack-avoidance parse.
+    """
     brief.variation_signature = (
         f"{brief.layout_template}|{brief.palette.get('primary', '')}|"
         f"{brief.background_style}|{brief.accent_style}|"
         f"{brief.typography_pair}|{brief.composition}|"
         f"{brief.photo_treatment}|{brief.primary_hook[:40]}"
+        f"|sp:{brief.style_pack}"
     )
 
 

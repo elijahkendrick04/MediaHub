@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   mega_surname_bleed  (v2 archetype)
+
+   The surname is set enormous and bleeds off the right edge — an
+   asymmetric type poster where the name itself is the artwork. A tight
+   left lockup (kicker, first name, event, result chip, brand) reads as
+   the caption to the oversized type. The clipped right-bleeding headline
+   is the signature, distinct from the centred/stacked minimal poster and
+   from the dead-centre big numeral. Purely typographic; never needs a
+   photo and shines on a strong, short surname.
+   =================================================================== */
+
+.ms {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.ms *, .ms *::before, .ms *::after { box-sizing: border-box; }
+
+/* the bleeding mega surname, anchored left and allowed to run off-frame */
+.ms__mega {
+  position: absolute; left: 64px; right: -20%; top: 50%; transform: translateY(-50%);
+  z-index: 1;
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: var(--mh-fit-mega-name-px, 300px);
+  line-height: 0.8; letter-spacing: -0.04em; text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap; opacity: 0.97;
+}
+
+/* top lockup — kicker + first name */
+.ms__top { position: absolute; left: 64px; top: 84px; right: 64px; z-index: 3; display: flex; flex-direction: column; gap: 16px; }
+.ms__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 26px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent); }
+.ms__tick { width: 46px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.ms__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 52px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-primary); }
+
+/* bottom lockup — event, result chip, brand */
+.ms__bottom { position: absolute; left: 64px; right: 64px; bottom: 84px; z-index: 3; display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
+.ms__meta { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.ms__event { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 32px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mh-on-primary); }
+.ms__result { display: inline-block; align-self: flex-start; padding: 14px 26px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: var(--mh-fit-result-px, 80px); line-height: 0.9; }
+.ms__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; color: var(--mh-on-primary); opacity: 0.84; }
+.ms__brand { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; text-align: right; }
+.ms__id { display: flex; align-items: center; gap: 14px; }
+.ms__logo { height: 58px; width: auto; }
+.ms__logo img, .ms__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.ms__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); }
+.ms__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.72; }
+.ms__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="ms">
+
+  <div class="ms__mega">{{ATHLETE_SURNAME_DISPLAY}}</div>
+
+  <div class="ms__top">
+    <div class="ms__kicker"><span class="ms__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+    <div class="ms__first">{{ATHLETE_FIRST_NAME}}</div>
+  </div>
+
+  <div class="ms__bottom">
+    <div class="ms__meta">
+      <div class="ms__event">{{EVENT_NAME}}</div>
+      <div class="ms__result">{{RESULT_VALUE}}</div>
+      <div class="ms__stat">{{HERO_STAT}}</div>
+    </div>
+    <div class="ms__brand">
+      <div class="ms__id">
+        <div class="ms__logo">{{LOGO_BLOCK}}</div>
+        <div class="ms__club">{{CLUB_FULL}}</div>
+      </div>
+      <div class="ms__meet">{{MEET_NAME}}</div>
+      <div class="ms__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>
