@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `68e28726e` · Merge pull request #641 from elijahkendrick04/claude/roadmap-next-stage-dy5bvd
+**Last updated:** 2026-06-15 · `cf6b41179` · Merge pull request #643 from elijahkendrick04/claude/graphic-reel-generation-upgrade-ktyu25
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1485,6 +1485,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
+| 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
 | 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
 | 2026-06-15 | `b7cbc227e` | UI2.5: primary-CTA motion variant (Moving-Border + Stateful-Button) |
 | 2026-06-15 | `eb35ee68a` | Format cache-purge card line per ruff |
