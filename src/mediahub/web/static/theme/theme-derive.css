@@ -128,12 +128,11 @@
        Equivalent to today's rgba(245,242,232,N) but driven by the
        neutral seed so a theme change ripples through.
        ---------------------------------------------------------------- */
-    /* Stage D (UI 1.23): the light branch tints with the dark neutral
-       (ink on paper) so borders stay visible on the light page; the
-       dark branch is the Stage C cream blend, unchanged. */
-    --mh-outline:         light-dark(color-mix(in oklch, var(--mh-prim-neutral-900) 18%, transparent), color-mix(in oklch, var(--mh-prim-neutral-50) 14%, transparent));
-    --mh-outline-variant: light-dark(color-mix(in oklch, var(--mh-prim-neutral-900) 10%, transparent), color-mix(in oklch, var(--mh-prim-neutral-50)  6%, transparent));
-    --mh-outline-rule:    light-dark(color-mix(in oklch, var(--mh-prim-neutral-900) 14%, transparent), color-mix(in oklch, var(--mh-prim-neutral-50) 10%, transparent));
+    /* Cream blend tinted with the neutral seed so a theme change
+       ripples through (dark-only). */
+    --mh-outline:         color-mix(in oklch, var(--mh-prim-neutral-50) 14%, transparent);
+    --mh-outline-variant: color-mix(in oklch, var(--mh-prim-neutral-50)  6%, transparent);
+    --mh-outline-rule:    color-mix(in oklch, var(--mh-prim-neutral-50) 10%, transparent);
 
     /* ----------------------------------------------------------------
        Elevation shadows — color-mix versions so the shadow tint

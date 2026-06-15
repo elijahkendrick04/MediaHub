@@ -23,10 +23,8 @@ mechanism switch (Stage D handles the network-level switch from inline
    its hue shift mid-ramp isn't a clean tonal palette.
 
 2. **Semantic role tokens (``--mh-*``)** — ~25 Material-3-style tokens
-   referencing primitives. Each declared via ``light-dark(…, …)`` so
-   the same role adapts to ``prefers-color-scheme`` automatically.
-   For Stage C, both arguments are identical (dark-only design today);
-   Stage D introduces real light-mode values.
+   referencing primitives. MediaHub ships a single dark theme, so each
+   role resolves to one dark value.
 
 3. **Component tokens** — deliberately not introduced in Stage A or C
    (Nathan Curtis's "promote across 3+ component reuses" rule).
@@ -36,7 +34,7 @@ mechanism switch (Stage D handles the network-level switch from inline
     THEME_BASE_CSS  →  THEME_FALLBACK_CSS  →  THEME_DERIVE_CSS
 
 theme-base.css declares the seed variables, the tier-2 role tokens
-(via light-dark wrappers), and the @property registrations.
+(dark-only var() references), and the @property registrations.
 theme-fallback.css declares the tier-1 primitives inside
 @supports not (...). theme-derive.css declares them again inside
 @supports (color: oklch(from red l c h)) — the modern branch.
