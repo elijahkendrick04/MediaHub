@@ -187,14 +187,21 @@ def test_helper_reuses_the_sample_examples_for_cohesion():
 # =========================================================================== #
 # Group B — home-page integration + the fresh-visitor-only gate
 # =========================================================================== #
-def test_home_fresh_visitor_shows_demo_inside_the_hero(app):
+def test_home_fresh_visitor_shows_demo_in_its_own_section(app):
     with app.test_client() as c:
         body = c.get("/").get_data(as_text=True)
     el = '<div class="mh-hero-demo"'
     assert body.count(el) == 1, "demo should appear exactly once"
+    # The looping demo was relocated out of the hero into its own "See it work"
+    # section (id mh-see-it-work) just below the engine diagram, so the diagram
+    # is the hero's first visual. The section deliberately uses a non-chapter id
+    # (it is shown to fresh visitors only, while the chapter rail is static), so
+    # the nav-integrity tests don't expect it in the rail.
     hero_start = body.index('<section class="mh-hero"')
     hero_end = body.index("</section>", hero_start)
-    assert hero_start < body.index(el) < hero_end, "demo must live inside the hero"
+    assert body.index(el) > hero_end, "demo no longer lives inside the hero"
+    assert 'id="mh-see-it-work"' in body and "See it work" in body
+    assert body.index('id="mh-see-it-work"') < body.index(el), "demo is in the See-it-work section"
 
 
 def test_home_still_renders_the_rest_of_the_landing(app):
