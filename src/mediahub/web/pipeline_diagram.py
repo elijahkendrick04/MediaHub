@@ -309,11 +309,11 @@ def pipeline_diagram_section_html() -> str:
         '<section class="mh-section mh-reveal mh-pl-section" id="mh-ch-how" aria-labelledby="mh-pl-title">'
         '<div class="mh-section-eyebrow-strip"><span class="label">How it works</span></div>'
         '<h2 class="mh-section-title" id="mh-pl-title">'
-        'The whole pipeline, <em class="editorial">at a glance</em>.</h2>'
-        '<p class="mh-pl-lede">MediaHub reads the sources you already have — your '
-        "club site, social profiles and brand kit — finds and ranks what matters, "
-        "then writes captions, builds graphics and renders reels. On brand, every "
-        "time. Nothing leaves without your approval.</p>"
+        'Reads what your club already has. <em class="editorial">Writes</em> what you need.</h2>'
+        '<p class="mh-pl-lede">MediaHub reads the sources you already have: your '
+        "club site, social profiles and brand kit. It works out what matters, ranks "
+        "it, then writes captions, builds graphics and renders reels. In your "
+        "colours, in your voice. Nothing leaves without your approval.</p>"
         '<div class="mh-pl-stage">'
         f'<p class="mh-visually-hidden">{_A11Y_SUMMARY}</p>'
         f"{_svg_horizontal()}{_svg_vertical()}"
@@ -363,10 +363,16 @@ PIPELINE_DIAGRAM_CSS = """
 .mh-pl-grid { stroke: rgba(245,242,232,0.05); stroke-width: 1; fill: none; }
 
 /* Static base traces — always visible */
-.mh-pl-wire { fill: none; stroke: var(--chrome); stroke-width: 1.5; }
+.mh-pl-wire { fill: none; stroke: var(--chrome); stroke-width: 1.6; }
 
 /* Node chips */
 .mh-pl-chip-bg { fill: var(--surface-2); stroke: var(--chrome); stroke-width: 1; }
+/* Writes are the branded output, so their chips pick up a faint lane edge and
+   bed-glow — neutral sources in, club-coloured content out. */
+.mh-pl-chip--write .mh-pl-chip-bg {
+  stroke: color-mix(in oklab, var(--lane) 34%, var(--chrome));
+  fill: color-mix(in oklab, var(--lane) 5%, var(--surface-2));
+}
 .mh-pl-chip-label {
   fill: var(--ink);
   font-family: var(--font-display);
@@ -388,8 +394,8 @@ PIPELINE_DIAGRAM_CSS = """
 .mh-pl-engine-bg {
   fill: var(--surface-3);
   stroke: var(--lane);
-  stroke-width: 1.5;
-  filter: drop-shadow(0 0 8px rgba(212,255,58,0.28));
+  stroke-width: 1.75;
+  filter: drop-shadow(0 0 10px rgba(212,255,58,0.32));
   animation: mh-pl-breathe 3.4s ease-in-out infinite;
 }
 .mh-pl-engine-title {
@@ -444,7 +450,7 @@ PIPELINE_DIAGRAM_CSS = """
   50%      { opacity: 1; }
 }
 @keyframes mh-pl-breathe {
-  0%, 100% { filter: drop-shadow(0 0 8px rgba(212,255,58,0.26)); }
-  50%      { filter: drop-shadow(0 0 16px rgba(212,255,58,0.46)); }
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(212,255,58,0.30)); }
+  50%      { filter: drop-shadow(0 0 18px rgba(212,255,58,0.52)); }
 }
 """

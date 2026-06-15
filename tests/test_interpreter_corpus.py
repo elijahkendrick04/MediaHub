@@ -307,3 +307,75 @@ def test_implausible_time_for_event_is_flagged_not_trusted():
     assert "Real Swimmer" not in flagged_detail
     assert by_name["Real Swimmer"].confidence > 0.5
     assert by_name["Proper Distance"].confidence > 0.5
+
+
+def _build_wide_column_pdf_bytes() -> bytes:
+    """A multi-event results PDF whose columns are spaced far apart (the
+    SportSystems 'Place Name (YoB) Club Time WA Pts' layout). The wide gap
+    between the name and the (YoB) creates a vertical whitespace corridor that
+    the column-band detector used to mistake for a real column boundary —
+    splitting every row so the place/name was dropped and the row never parsed."""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+    except ImportError:
+        pytest.skip("reportlab not installed")
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    c.setFont("Courier", 10)
+    cx = [55, 120, 330, 390, 540]  # place | name | (yob) | club | time — wide gaps
+
+    def row(y, place, name, yob, club, t):
+        c.drawString(cx[0], y, place)
+        c.drawString(cx[1], y, name)
+        c.drawString(cx[2], y, yob)
+        c.drawString(cx[3], y, club)
+        c.drawString(cx[4], y, t)
+
+    y = 740
+    c.drawString(55, y, "EVENT 101 Women's 50m Breaststroke")
+    y -= 16
+    c.drawString(55, y, "Place Name YoB Club Time")
+    y -= 16
+    for p, n, yo, cl, t in [
+        ("1.", "Alpha Beta", "(08)", "Mt Kelly", "30.82"),
+        ("2.", "Gamma Delta", "(03)", "Edinburgh Un", "30.90"),
+        ("3.", "Delta Echo", "(05)", "Repton", "31.20"),
+    ]:
+        row(y, p, n, yo, cl, t)
+        y -= 16
+    y -= 18
+    c.drawString(55, y, "EVENT 104 Men's 100m Backstroke")
+    y -= 16
+    c.drawString(55, y, "Place Name YoB Club Time")
+    y -= 16
+    for p, n, yo, cl, t in [
+        ("1.", "Foxtrot Golf", "(04)", "Millfield", "55.10"),
+        ("2.", "Hotel India", "(06)", "Mt Kelly", "55.80"),
+    ]:
+        row(y, p, n, yo, cl, t)
+        y -= 16
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def test_wide_column_pdf_keeps_rows_whole_and_events_separate():
+    """Regression for the SportSystems multi-column PDF: every swimmer must be
+    extracted (place+name not dropped) and paired with the correct event, not
+    collapsed onto the first event or lost to a false column split."""
+    res = interpret_document(_build_wide_column_pdf_bytes(), hint="pdf")
+    by_event = {(e.distance_m, e.stroke): e for e in res.events}
+    assert (50, "Breaststroke") in by_event, [(e.distance_m, e.stroke) for e in res.events]
+    assert (100, "Backstroke") in by_event
+
+    breast_names = {s.swimmer_name for s in by_event[(50, "Breaststroke")].swims}
+    back_names = {s.swimmer_name for s in by_event[(100, "Backstroke")].swims}
+    assert {"Alpha Beta", "Gamma Delta", "Delta Echo"} <= breast_names
+    # The 100m Backstroke swimmers land under THEIR event, not the first one.
+    assert {"Foxtrot Golf", "Hotel India"} <= back_names
+    assert "Foxtrot Golf" not in breast_names
+    # Names survived the wide-gap layout (the bug dropped them entirely).
+    a = next(s for s in by_event[(50, "Breaststroke")].swims if s.swimmer_name == "Alpha Beta")
+    assert a.time == "30.82" and a.yob == 2008 and a.club == "Mt Kelly"

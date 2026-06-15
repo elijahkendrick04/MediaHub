@@ -133,6 +133,18 @@ def test_ai_read_prompt_has_a_year_column():
     assert "team/affiliation" in prompt  # explicit steer away from the club cols
 
 
+def test_ai_read_prompt_pins_event_association():
+    """The prompt must tell the model to copy the event heading above each table
+    into every row and never guess the event from a time — the fix for results
+    being filed under the wrong event."""
+    rec: dict = {}
+    ai_read_page(_rendered_rr("anything"), generate=_gen("NONE", rec))
+    prompt = rec["prompt"].lower()
+    assert "event association is critical" in prompt
+    assert "verbatim" in prompt
+    assert "never guess the event from a swimmer's time" in prompt
+
+
 def test_ai_read_image_only_page():
     rec: dict = {}
     out = ai_read_page(_image_rr(), generate=_gen(_GOOD_CSV, rec))

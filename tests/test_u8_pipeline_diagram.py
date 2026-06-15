@@ -75,7 +75,7 @@ def test_section_is_one_reveal_section(section):
 def test_eyebrow_title_and_lede(section):
     assert '<span class="label">How it works</span>' in section
     assert 'class="mh-section-title"' in section
-    assert '<em class="editorial">at a glance</em>' in section
+    assert '<em class="editorial">Writes</em>' in section
     # The lede states the read → write thesis in words.
     assert 'class="mh-pl-lede"' in section
     assert "club site, social profiles and brand kit" in section

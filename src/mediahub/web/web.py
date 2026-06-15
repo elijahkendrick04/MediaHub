@@ -12933,8 +12933,8 @@ def _hero_product_demo() -> str:
         "</div>"
         '<div class="mh-demo-cardbody">'
         '<span class="mh-demo-eyebrow">Story card · caption draft</span>'
-        '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark> '
-        "&mdash; <mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
+        '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark>. '
+        "<mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
         "<mark>0.74s</mark> off his old mark.</p>"
         '<div class="mh-demo-acts"><span>Edit</span>'
         '<span class="ghost">Reject</span><span class="go">Approve</span></div>'
@@ -12951,7 +12951,7 @@ def _hero_product_demo() -> str:
         '<div class="mh-demo-approve">'
         f'<span class="mh-demo-check">{check}</span>'
         '<div class="txt"><b>Approved by you</b>'
-        "<span>Tom Davies — PB 100m Free · ready to export</span></div>"
+        "<span>Tom Davies · PB 100m Free · ready to export</span></div>"
         "</div>"
         '<div class="mh-demo-formats">'
         '<span class="mh-demo-chip">Story</span>'
@@ -13682,7 +13682,7 @@ def create_app() -> Flask:
                     f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
                     "Sign in</a>"
                 )
-            eyebrow = "Sport content automation"
+            eyebrow = "The content engine for sports clubs"
             lane_no = "01"
 
         # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
@@ -13731,11 +13731,24 @@ def create_app() -> Flask:
                 "</p>"
             )
 
-        # U.10 — framed, looping product demo as the hero's closing
-        # centerpiece. A first-visit affordance like the "Just looking?"
-        # line above, so it is shown only to fresh / signed-out visitors;
-        # a pinned org gets the utilitarian "Ready to file" hero instead.
+        # U.10 — framed, looping product demo. Relocated out of the hero into
+        # its own "See it work" section just below the engine diagram, so the
+        # diagram (the read -> engine -> write map) is the hero's first visual.
+        # Fresh / signed-out visitors only; a pinned org gets the utilitarian
+        # "Ready to file" hero with no marketing demo.
         demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
+        demo_section_html = ""
+        if demo_html:
+            demo_section_html = (
+                '<section class="mh-section mh-reveal" id="mh-see-it-work">'
+                '<div class="mh-section-eyebrow-strip mh-reveal">'
+                '<span class="label">See it work</span></div>'
+                + _reveal_lines(
+                    ["One result in.", 'A post you <em class="editorial">approve</em>.']
+                )
+                + demo_html
+                + "</section>"
+            )
 
         hero_html = (
             f'<section class="mh-hero" id="mh-ch-overview" data-lane="{lane_no}">'
@@ -13745,7 +13758,6 @@ def create_app() -> Flask:
             f'<div class="mh-hero-actions">{hero_actions}</div>'
             f"{demo_line_html}"
             f"{meta_html}"
-            f"{demo_html}"
             "</section>"
             f"{word_cycle_js}"
         )
@@ -13783,9 +13795,9 @@ def create_app() -> Flask:
             + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
             + "."
             "</h2>"
-            '<p class="mh-pipeline-sub">One upload, four posting-ready formats '
-            "&mdash; every name, time and place grounded in the result you "
-            "uploaded. Nothing is invented; nothing posts without you.</p>"
+            '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
+            "Every name, time and place comes straight from the file you "
+            "uploaded. Nothing is invented, and nothing posts without you.</p>"
             "</section>"
         )
 
@@ -13810,9 +13822,9 @@ def create_app() -> Flask:
             # Tile 1 — story card showpiece (2×2)
             '<div class="mh-bento-tile feature is-medal">'
             '<span class="mh-bento-eyebrow">Story card · 1080×1920</span>'
-            '<div class="mh-bento-title">Tom Davies —<br><em>PB</em> 100m free.</div>'
+            '<div class="mh-bento-title">Tom Davies.<br><em>PB</em> 100m free.</div>'
             '<div class="mh-bento-time">52.41<span class="mh-bento-delta">−0.74s</span></div>'
-            '<p class="mh-bento-note">A clean vertical story graphic — name, event and split, set in your club’s palette and type, rendered server-side and ready to post to Stories.</p>'
+            '<p class="mh-bento-note">A clean vertical story graphic. Name, event and split, set in your club’s palette and type, rendered on our server and ready to post to Stories.</p>'
             '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
             "</div>"
             # Tile 2 — motion reel (2×1)
@@ -13841,7 +13853,7 @@ def create_app() -> Flask:
             '<span style="background:var(--ink)"></span>'
             "</span>"
             "</div>"
-            '<p class="mh-bento-note">Palette, fonts and logo read from your site — then locked onto every card.</p>'
+            '<p class="mh-bento-note">Palette, fonts and logo, read from your site and locked onto every card.</p>'
             "</div>"
             # Tile 5 — moments we detect (2×1)
             '<div class="mh-bento-tile wide">'
@@ -13889,13 +13901,13 @@ def create_app() -> Flask:
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></span>'
             '<span class="mh-audience-role">Coach · Performance · Selection</span>'
             '<h3 class="mh-audience-title">Coaches</h3>'
-            '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts — surfaced before you finish your coffee.</p>'
+            '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
             "</div>"
             '<div class="mh-audience" data-mh-tilt>'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
             '<span class="mh-audience-role">Society · University · Team</span>'
             '<h3 class="mh-audience-title">University teams</h3>'
-            '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures — all in your colours, with the right tone for an Instagram feed.</p>'
+            '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures, all in your colours, with the right tone for an Instagram feed.</p>'
             "</div>"
             "</div>"
             "</section>"
@@ -13973,14 +13985,11 @@ def create_app() -> Flask:
                 "</section>"
             )
 
-        # U.8 — animated how-it-works pipeline diagram. Sits right after the
-        # hero as a visual amplification of its "reads X … writes Y" claim,
-        # ahead of the UI 1.3 inline-thumbnail headline and the numbered steps.
-        # PREPEND, don't overwrite: `pipeline_html` already holds the UI 1.3
-        # inline-thumbnail display headline built above. U.8 originally assigned
-        # over it, which silently dropped UI 1.3 from the live page — both now
-        # render (diagram, then the inline-thumbnail headline, then the steps).
-        pipeline_html = _pipeline_diagram_section_html() + pipeline_html
+        # U.8 — animated how-it-works pipeline diagram. Placed explicitly in
+        # the return below (hero -> diagram -> "see it work" demo -> inline-
+        # thumbnail headline), so the diagram is the hero's first visual.
+        # `pipeline_html` here is just the UI 1.3 inline-thumbnail headline
+        # built above.
 
         # UI 1.29 — sticky chaptered scroll-spy nav. Each (anchor-id, label)
         # maps to a section id set above; _layout renders the sticky side rail
@@ -14010,7 +14019,7 @@ def create_app() -> Flask:
                 "Does anything post to our socials automatically?",
                 "No. MediaHub is an intelligence layer, not an auto-poster. "
                 "Every caption, graphic and reel stops at a review queue you "
-                "control — nothing leaves this deployment without an explicit "
+                "control. Nothing leaves this deployment without an explicit "
                 "approval click.",
             ),
             (
@@ -14031,14 +14040,14 @@ def create_app() -> Flask:
                 "How does it learn our club brand?",
                 "It reads your club website, social profiles and brand "
                 "guidelines once, then locks your palette, fonts, logo and tone "
-                "onto every card. Set up once, reuse forever — and your data is "
+                "onto every card. Set up once, reuse forever, and your data is "
                 "never used to re-train a shared model.",
             ),
             (
                 "What can it produce from one upload?",
                 "Posting-ready story cards, feed graphics, athlete spotlights, "
-                "meet recaps and branded motion reels — every name, time and "
-                "place sized for the formats your club actually posts.",
+                "meet recaps and branded motion reels. Every name, time and "
+                "place is sized for the formats your club actually posts.",
             ),
             (
                 "Which sports does it work for?",
@@ -14087,6 +14096,8 @@ def create_app() -> Flask:
             '<div class="mh-fx mh-spotlight">'
             + hero_html
             + "</div>"
+            + _pipeline_diagram_section_html()
+            + demo_section_html
             + pipeline_html
             + bento_html
             + audience_html
