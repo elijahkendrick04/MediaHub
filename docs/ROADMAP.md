@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `09709d66b` · Merge pull request #616 from elijahkendrick04/claude/wizardly-dirac-x0lhra
+**Last updated:** 2026-06-15 · `9b5117c24` · Merge pull request #620 from elijahkendrick04/claude/wizardly-dirac-x0lhra
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1486,6 +1486,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `955fa4cf3` | ui: remove the command palette (Cmd-K "search or jump to") from the top nav |
 | 2026-06-15 | `0fa259f69` | ui: widen content column on large screens so the layout fills the viewport |
 | 2026-06-15 | `f4aa388d7` | UI2.4: client-side workflow tabs on the review queue |
 | 2026-06-15 | `ebb08dc15` | Document MEDIAHUB_RESULTS_FETCH_RENDER_RECYCLE; regen env inventory |
@@ -1494,5 +1495,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `ea5197d87` | Make every page phone/tablet friendly: fix the remaining mobile overflow + cramped tables |
 | 2026-06-15 | `05dd8ba50` | Tidy home page: curate to 7 focused sections |
 | 2026-06-15 | `359eaa707` | Spread the Phase-U motion/effect kit across every page, not just home |
-| 2026-06-14 | `522aab03f` | Remove unused imports in scripts/ (ruff F401) |
 <!-- /ROADMAP:ACTIVITY -->
