@@ -844,12 +844,15 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 
 const PACK_GROUNDS = new Set([
   "flat", "top_fade", "bottom_fade", "corner_fade", "vignette", "spotlight", "twotone",
+  "dual_fade", "top_corner_fade", "edge_frame", "diagonal_fade",
 ]);
 const PACK_TEXTURES = new Set([
   "none", "grain", "dots", "grid", "hatch", "halftone", "crosshatch",
+  "weave", "scanline", "carbon", "chevron",
 ]);
 const PACK_ACCENT_GEOS = new Set([
   "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
+  "double_rule", "dot_row", "cross_ticks", "corner_arc",
 ]);
 
 type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
@@ -889,6 +892,22 @@ function packGroundGradient(ground: string, a: number): string | null {
       return `radial-gradient(125% 125% at 100% 100%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 55%)`;
     case "twotone":
       return `linear-gradient(122deg, rgba(0,0,0,0) 46%, rgba(0,0,0,${a}) 92%)`;
+    case "dual_fade":
+      return (
+        `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 30%, ` +
+        `rgba(0,0,0,0) 70%, rgba(0,0,0,${a}) 100%)`
+      );
+    case "top_corner_fade":
+      return `radial-gradient(125% 125% at 0% 0%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 55%)`;
+    case "edge_frame":
+      return (
+        `linear-gradient(90deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 18%, ` +
+        `rgba(0,0,0,0) 82%, rgba(0,0,0,${a}) 100%),` +
+        `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 18%, ` +
+        `rgba(0,0,0,0) 82%, rgba(0,0,0,${a}) 100%)`
+      );
+    case "diagonal_fade":
+      return `linear-gradient(122deg, rgba(0,0,0,${a}) 8%, rgba(0,0,0,0) 54%)`;
     default:
       return null;
   }
@@ -896,6 +915,7 @@ function packGroundGradient(ground: string, a: number): string | null {
 
 const PACK_TEX_SIZE: Record<string, number> = {
   grain: 160, dots: 18, grid: 32, hatch: 14, crosshatch: 16, halftone: 22,
+  weave: 20, scanline: 6, carbon: 8, chevron: 24,
 };
 
 // White-on-transparent tiles (blended over the ground), mirroring style_packs.
@@ -932,6 +952,29 @@ function packTextureImage(texture: string): string | null {
       return enc(
         `<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22'>` +
         `<circle cx='6' cy='6' r='3.2' fill='white'/><circle cx='17' cy='17' r='1.6' fill='white'/></svg>`,
+      );
+    case "weave":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>` +
+        `<rect x='0' y='8' width='20' height='3' fill='white'/>` +
+        `<rect x='8' y='0' width='3' height='20' fill='white'/></svg>`,
+      );
+    case "scanline":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'>` +
+        `<rect width='6' height='1' fill='white'/></svg>`,
+      );
+    case "carbon":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'>` +
+        `<path d='M0 8L8 0' stroke='white' stroke-width='1'/>` +
+        `<path d='M-2 2L2 -2' stroke='white' stroke-width='1'/>` +
+        `<path d='M6 10L10 6' stroke='white' stroke-width='1'/></svg>`,
+      );
+    case "chevron":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='12'>` +
+        `<path d='M0 12L12 3L24 12' fill='none' stroke='white' stroke-width='1.4'/></svg>`,
       );
     default:
       return null;
@@ -990,6 +1033,56 @@ function packAccentGeometry(
       const d = Math.round(m * 0.16 * mult);
       const off = Math.round(m * 0.06);
       return <div style={{ position: "absolute", right: off, top: off, width: d, height: d, border: `${weight}px solid ${accent}`, borderRadius: "50%", opacity: bold ? 0.85 : 0.65 }} />;
+    }
+    case "double_rule": {
+      const bh = Math.max(4, Math.round(height * 0.007 * mult));
+      const inset = Math.round(width * 0.08);
+      const bottom = Math.round(height * 0.06);
+      const gap = bh * 3;
+      return (
+        <>
+          <div style={{ position: "absolute", left: inset, right: inset, bottom, height: bh, background: accent }} />
+          <div style={{ position: "absolute", left: inset, right: inset, bottom: bottom + gap, height: bh, background: accent, opacity: 0.55 }} />
+        </>
+      );
+    }
+    case "dot_row": {
+      const d = Math.max(7, Math.round(m * 0.013 * mult));
+      const bottom = Math.round(height * 0.065);
+      const gap = d * 2;
+      return (
+        <div style={{ position: "absolute", left: 0, right: 0, bottom, display: "flex", justifyContent: "center", gap }}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <span key={i} style={{ width: d, height: d, borderRadius: "50%", background: accent, display: "inline-block" }} />
+          ))}
+        </div>
+      );
+    }
+    case "cross_ticks": {
+      const arm = Math.round(m * 0.028 * mult);
+      const off = Math.round(m * 0.06);
+      const cross = (key: string, pos: React.CSSProperties) => (
+        <React.Fragment key={key}>
+          <div style={{ position: "absolute", ...pos, width: arm * 2, height: weight, background: accent }} />
+          <div style={{ position: "absolute", ...pos, width: weight, height: arm * 2, background: accent }} />
+        </React.Fragment>
+      );
+      return (
+        <>
+          {cross("tl", { left: off, top: off })}
+          {cross("br", { right: off, bottom: off })}
+        </>
+      );
+    }
+    case "corner_arc": {
+      const arm = Math.round(m * 0.11 * mult);
+      const off = Math.round(m * 0.05);
+      return (
+        <>
+          <div style={{ position: "absolute", left: off, top: off, width: arm, height: arm, borderTop: `${weight}px solid ${accent}`, borderLeft: `${weight}px solid ${accent}`, borderTopLeftRadius: "100%" }} />
+          <div style={{ position: "absolute", right: off, bottom: off, width: arm, height: arm, borderBottom: `${weight}px solid ${accent}`, borderRight: `${weight}px solid ${accent}`, borderBottomRightRadius: "100%" }} />
+        </>
+      );
     }
     default:
       return null;
