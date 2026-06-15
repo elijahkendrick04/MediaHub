@@ -2526,6 +2526,29 @@ def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
     return root_vars
 
 
+def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
+    """The injected overlay markup for the brief's v2 style pack (or "").
+
+    Resolves ``brief.style_pack`` (a ``graphic_renderer.style_packs`` pack id)
+    and builds its ground/texture/accent-geometry overlay. An empty/unknown
+    pack id → "" (the undecorated card), so every legacy/flag-off brief renders
+    exactly as before. Any failure degrades silently to the bare card — a pack
+    is decoration, never load-bearing.
+    """
+    pack_id = (getattr(brief, "style_pack", "") or "").strip()
+    if not pack_id:
+        return ""
+    try:
+        from mediahub.graphic_renderer import style_packs as _sp
+
+        pack = _sp.style_pack_from_id(pack_id)
+        if pack is None:
+            return ""
+        return _sp.pack_overlay_html(pack, width=width, height=height)
+    except Exception:
+        return ""
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -2555,11 +2578,14 @@ def _fill_v2_archetype(
     surname = (layers.get("athlete_surname") or "").upper()
     repl["RESULT_VALUE"] = html_escape(result)
     repl["HERO_STAT"] = html_escape(_v2_hero_stat(brief))
-    # v2 archetypes carry their OWN accent design (ticks / rules / rings / chips),
-    # so the v1 accent-decoration overlay — which targets the v1 `.canvas` and
-    # would otherwise be re-injected before </body> — must NOT also fire, or it
-    # paints a stray band across the composition. Suppress it for v2.
-    repl["ACCENT_DECORATION"] = ""
+    # The v1 accent-decoration overlay targets the v1 `.canvas` and would paint a
+    # stray band on a v2 composition, so it stays suppressed. Instead the v2
+    # ``{{ACCENT_DECORATION}}`` slot (the last child inside every archetype root)
+    # carries the brief's **style pack** — the ground/texture/accent-geometry
+    # overlay that turns the v2 archetypes into thousands of distinct, brand-safe
+    # templates (``graphic_renderer.style_packs``). The bare pack (and any
+    # legacy brief with no ``style_pack``) yields "", i.e. the undecorated card.
+    repl["ACCENT_DECORATION"] = _v2_style_pack_overlay(brief, width, height)
 
     # Tier A baseline → director's APCA-gated colour-role assignment → medal
     # tint (the metal IS the information, gated the same way). One resolver,
@@ -2788,8 +2814,11 @@ def render_brief(
     # rest of the layout. We insert it before the closing </div> of the
     # .canvas wrapper; if we can't find it cleanly we fall back to just
     # before </body>.
+    # v1 only: the v2 path already substituted the style-pack overlay into the
+    # archetype's ``{{ACCENT_DECORATION}}`` slot via _apply(), so re-injecting it
+    # here would paint it twice. v1 templates have no such slot and rely on this.
     accent_html = repl.get("ACCENT_DECORATION") or ""
-    if accent_html:
+    if accent_html and not _v2_archetype:
         # Find the canvas's closing </div> using the same depth-walk the
         # grain injector below uses.
         canvas_marker = '<div class="canvas'

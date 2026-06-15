@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   horizon_band  (v2 archetype)
+
+   One thick accent "horizon" runs across the vertical middle and carries
+   the result on it; the athlete name sits in the sky above the line and
+   the event + meet + brand sit on the ground below it. The single strong
+   horizontal axis is the signature — distinct from ticker_strip's stack
+   of broadcast bands and from the lower-third's pinned-to-floor band.
+   Fully typographic; reads with or without a photo.
+   =================================================================== */
+
+.hb {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+}
+
+.hb *, .hb *::before, .hb *::after { box-sizing: border-box; }
+
+/* sky — name above the horizon */
+.hb__sky { flex: 1 1 0; padding: 88px 84px 28px; display: flex; flex-direction: column; justify-content: flex-end; gap: 18px; position: relative; z-index: 2; }
+.hb__kicker {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent);
+}
+.hb__tick { width: 42px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.hb__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-on-primary); }
+.hb__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: var(--mh-fit-surname-px, 124px);
+  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap;
+}
+
+/* the horizon band — result rides it, full-width accent */
+.hb__band {
+  flex: 0 0 auto; background: var(--mh-accent); color: var(--mh-primary);
+  padding: 26px 84px; display: flex; align-items: baseline; justify-content: space-between; gap: 32px;
+  position: relative; z-index: 3;
+}
+.hb__event { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 32px; letter-spacing: 0.05em; text-transform: uppercase; }
+.hb__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 84px); line-height: 0.9; white-space: nowrap;
+}
+
+/* ground — meta + brand below the horizon */
+.hb__ground { flex: 1 1 0; padding: 30px 84px 84px; display: flex; flex-direction: column; justify-content: space-between; position: relative; z-index: 2; }
+.hb__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 26px; color: var(--mh-on-primary); opacity: 0.84; }
+.hb__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.hb__brand { display: flex; align-items: center; gap: 16px; }
+.hb__logo { height: 60px; width: auto; }
+.hb__logo img, .hb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.hb__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
+.hb__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 24px; text-transform: uppercase; color: var(--mh-on-primary); }
+.hb__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-primary); opacity: 0.72; margin-top: 4px; }
+.hb__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="hb">
+
+  <div class="hb__sky">
+    <div class="hb__kicker"><span class="hb__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+    <div class="hb__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="hb__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  </div>
+
+  <div class="hb__band">
+    <div class="hb__event">{{EVENT_NAME}}</div>
+    <div class="hb__result">{{RESULT_VALUE}}</div>
+  </div>
+
+  <div class="hb__ground">
+    <div class="hb__stat">{{HERO_STAT}}</div>
+    <div class="hb__foot">
+      <div class="hb__brand">
+        <div class="hb__logo">{{LOGO_BLOCK}}</div>
+        <div class="hb__brand-text">
+          <div class="hb__club">{{CLUB_FULL}}</div>
+          <div class="hb__meet">{{MEET_NAME}}</div>
+        </div>
+      </div>
+      <div class="hb__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

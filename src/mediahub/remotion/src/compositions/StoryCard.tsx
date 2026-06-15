@@ -428,10 +428,11 @@ function animProgram(
 // Archetype scene system (Gen v2 parity)
 // ---------------------------------------------------------------------------
 //
-// The still engine's 12 archetypes map onto seven structurally distinct
-// motion scenes, so a card's video reads like its still instead of every
-// archetype collapsing into one hero layout. Unknown / v1 names keep the
-// "hero" scene — the pre-parity behaviour.
+// The still engine's archetypes map onto eight structurally distinct motion
+// scenes, so a card's video reads like its still instead of every archetype
+// collapsing into one hero layout. Each archetype picks the scene group whose
+// motion choreography matches its still composition. Unknown / v1 names keep
+// the "hero" scene — the pre-parity behaviour.
 
 type SceneMode =
   | "hero"
@@ -448,15 +449,23 @@ function sceneForArchetype(archetype: string): SceneMode {
     case "big_number_dominant":
     case "minimal_type_poster":
     case "quote_led_recap":
+    case "cornerstone_numeral":
+    case "mega_surname_bleed":
       return "poster";
     case "full_bleed_photo_lower_third":
+    case "broadcast_scorebug":
       return "lowerThird";
     case "centered_medal_spotlight":
+    case "photo_passepartout":
+    case "spotlight_disc":
       return "spotlight";
     case "editorial_numbers_grid":
     case "stat_stack_sidebar":
+    case "index_card":
+    case "scoreline_versus":
       return "grid";
     case "ticker_strip":
+    case "horizon_band":
       return "ticker";
     case "split_diagonal_hero":
     case "duo_athlete_split":

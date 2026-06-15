@@ -1,12 +1,14 @@
 """UI 1.10 — the visual template / archetype gallery.
 
-A browse-only surface that shows the twelve content **archetypes** the design
-director draws from, *before* a user creates a pack. It renders existing data
-only — the live archetype list plus each archetype's authored notes
+A browse-only surface that shows the content **archetypes** the design director
+draws from, *before* a user creates a pack. It renders existing data only — the
+live archetype list plus each archetype's authored notes
 (``graphic_renderer.archetypes``) — with a lightweight, deterministic schematic
-preview per archetype and client-/server-side category filters. No new API, no
-external service, and (deliberately) no way to *force* an archetype: the engine
-still picks the best composition per moment. The gallery just shows the range.
+preview per archetype and client-/server-side category filters. The gallery
+lists the structural archetypes (each then varied by a deterministic style pack
+— ``graphic_renderer.style_packs`` — into 1,000+ unique templates). No new API,
+no external service, and (deliberately) no way to *force* an archetype: the
+engine still picks the best composition per moment. It just shows the range.
 
 Everything here is pure / Flask-free so it unit-tests without a request: the
 route in ``web.py`` passes the resolved ``url_for(...)`` strings in and wraps
@@ -24,6 +26,7 @@ from __future__ import annotations
 from markupsafe import escape
 
 from mediahub.graphic_renderer import archetypes as _arch
+from mediahub.graphic_renderer import style_packs as _sp
 
 # ---------------------------------------------------------------------------
 # Categories (presentation-only metadata — like the Create page's format chips,
@@ -54,23 +57,31 @@ _CATEGORY_LABELS: dict[str, str] = {cid: label for cid, label, _ in CATEGORIES}
 # Which category each archetype belongs to. Derived from each archetype's own
 # notes (what it is built around): a photo stage/well/ring → photo; a
 # number/scoreline/grid as the structural hero → data; type/quote/narrative as
-# the hero → editorial. Balanced 4/4/4 across the twelve.
+# the hero → editorial.
 CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     # Photo-led — the image dominates the composition.
     "split_diagonal_hero": "photo",
     "full_bleed_photo_lower_third": "photo",
     "centered_medal_spotlight": "photo",
     "duo_athlete_split": "photo",
+    "broadcast_scorebug": "photo",
+    "photo_passepartout": "photo",
+    "spotlight_disc": "photo",
     # Data-led — the figures are the structural hero; no photo needed.
     "big_number_dominant": "data",
     "editorial_numbers_grid": "data",
     "ticker_strip": "data",
     "stat_stack_sidebar": "data",
+    "cornerstone_numeral": "data",
+    "horizon_band": "data",
+    "scoreline_versus": "data",
     # Editorial — type / quote / narrative leads; no photo needed.
     "magazine_cover": "editorial",
     "quote_led_recap": "editorial",
     "minimal_type_poster": "editorial",
     "triptych_progression": "editorial",
+    "index_card": "editorial",
+    "mega_surname_bleed": "editorial",
 }
 
 # Default for any future archetype with no explicit mapping yet (a test guards
@@ -93,6 +104,14 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "duo_athlete_split",
     "stat_stack_sidebar",
     "minimal_type_poster",
+    "broadcast_scorebug",
+    "cornerstone_numeral",
+    "index_card",
+    "photo_passepartout",
+    "horizon_band",
+    "mega_surname_bleed",
+    "spotlight_disc",
+    "scoreline_versus",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -110,6 +129,14 @@ _TITLE: dict[str, str] = {
     "stat_stack_sidebar": "Stat Sidebar",
     "ticker_strip": "Ticker Strip",
     "triptych_progression": "Triptych",
+    "broadcast_scorebug": "Scorebug",
+    "cornerstone_numeral": "Cornerstone",
+    "horizon_band": "Horizon Band",
+    "index_card": "Index Card",
+    "mega_surname_bleed": "Mega Surname",
+    "photo_passepartout": "Framed Print",
+    "scoreline_versus": "Scoreline",
+    "spotlight_disc": "Spotlight Disc",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -128,6 +155,14 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "ticker_strip": "Stacked broadcast bands with a fenced event-to-result scoreline.",
     "triptych_progression": "Three vertical bays read who → result → context.",
     "duo_athlete_split": "A 50/50 photo-vs-scoreline duel crossed by one name band.",
+    "broadcast_scorebug": "A full-bleed photo with a live-TV corner scorebug and top ribbon.",
+    "cornerstone_numeral": "A mega numeral cornerstoned into the bottom-left of a brand ground.",
+    "horizon_band": "One full-width accent horizon carries the result; name above, meta below.",
+    "index_card": "A clerical filing card: a label tab, ruled header and leader ledger.",
+    "mega_surname_bleed": "The surname set huge and bled off the right edge as the artwork.",
+    "photo_passepartout": "A matted, framed-print window over a gallery caption plate.",
+    "scoreline_versus": "Event versus result across a bold central fence, like a scoreline.",
+    "spotlight_disc": "A circular photo portal ringed by the accent, radially centred.",
 }
 
 _CARD_SUMMARY_MAX = 180
@@ -315,6 +350,101 @@ _SVG: dict[str, str] = {
         '<line class="acln" x1="40" y1="0" x2="40" y2="150"/>'
         '<line class="acln" x1="80" y1="0" x2="80" y2="150"/>'
     ),
+    # Data-led — mega numeral cornerstoned into the bottom-left.
+    "cornerstone_numeral": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="12" y="16" width="9" height="4" rx="1"/>'
+        '<rect class="ik2" x="25" y="15" width="38" height="6" rx="1"/>'
+        '<rect class="ik" x="86" y="16" width="22" height="6" rx="1"/>'
+        '<rect class="ik" x="12" y="72" width="40" height="4" rx="1"/>'
+        '<rect class="ac" x="10" y="82" width="78" height="48" rx="2"/>'
+        '<line class="ln" x1="12" y1="138" x2="108" y2="138"/>'
+        '<rect class="ik" x="12" y="141" width="30" height="4" rx="1"/>'
+    ),
+    # Data-led — one full-width accent horizon carrying the result.
+    "horizon_band": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="12" y="20" width="9" height="4" rx="1"/>'
+        '<rect class="ik2" x="12" y="34" width="62" height="10" rx="1"/>'
+        '<rect class="ac" x="0" y="64" width="120" height="24"/>'
+        '<rect class="onac" x="12" y="72" width="34" height="8" rx="1"/>'
+        '<rect class="onac" x="86" y="71" width="22" height="10" rx="1"/>'
+        '<rect class="ik" x="12" y="104" width="40" height="4" rx="1"/>'
+        '<rect class="ik" x="12" y="134" width="14" height="10" rx="1"/>'
+        '<rect class="ik" x="30" y="136" width="40" height="6" rx="1"/>'
+    ),
+    # Data-led — two cells across a central accent fence.
+    "scoreline_versus": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="12" y="16" width="9" height="4" rx="1"/>'
+        '<rect class="ik2" x="25" y="15" width="50" height="7" rx="1"/>'
+        '<rect class="ac" x="58" y="44" width="4" height="74"/>'
+        '<rect class="ik" x="14" y="56" width="20" height="4" rx="1"/>'
+        '<rect class="ik2" x="14" y="64" width="34" height="12" rx="1"/>'
+        '<rect class="ik" x="86" y="56" width="20" height="4" rx="1"/>'
+        '<rect class="ac" x="72" y="64" width="36" height="14" rx="1"/>'
+        '<line class="ln" x1="12" y1="128" x2="108" y2="128"/>'
+        '<rect class="ik" x="12" y="134" width="44" height="6" rx="1"/>'
+    ),
+    # Photo-led — full-bleed photo with a corner broadcast scorebug.
+    "broadcast_scorebug": (
+        '<rect class="ph" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="sf" x="0" y="0" width="120" height="16"/>'
+        '<rect class="ik" x="8" y="6" width="30" height="4" rx="1"/>'
+        '<rect class="ik" x="86" y="6" width="26" height="4" rx="1"/>'
+        '<rect class="ac" x="12" y="96" width="22" height="7" rx="1"/>'
+        '<rect class="ik2" x="12" y="107" width="54" height="11" rx="1"/>'
+        '<rect class="ac" x="12" y="124" width="4" height="20"/>'
+        '<rect class="sf" x="16" y="124" width="66" height="20" rx="1"/>'
+        '<rect class="ik" x="22" y="130" width="24" height="8" rx="1"/>'
+        '<rect class="ac" x="52" y="129" width="22" height="10" rx="1"/>'
+    ),
+    # Photo-led — matted window with a gallery caption plate.
+    "photo_passepartout": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="16" y="20" width="88" height="74" rx="1"/>'
+        '<rect class="ph" x="20" y="24" width="80" height="66" rx="1"/>'
+        '<rect class="ik2" x="16" y="104" width="56" height="9" rx="1"/>'
+        '<rect class="ik" x="16" y="118" width="40" height="4" rx="1"/>'
+        '<rect class="ac" x="80" y="104" width="28" height="14" rx="1"/>'
+        '<rect class="ik" x="16" y="138" width="36" height="5" rx="1"/>'
+    ),
+    # Photo-led — circular portal ringed by the accent, radial symmetry.
+    "spotlight_disc": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="45" y="16" width="30" height="4" rx="1"/>'
+        '<circle class="ac" cx="60" cy="58" r="34"/>'
+        '<circle class="ph" cx="60" cy="58" r="27"/>'
+        '<rect class="ik2" x="34" y="100" width="52" height="9" rx="1"/>'
+        '<rect class="ac" x="42" y="114" width="36" height="12" rx="1"/>'
+        '<rect class="ik" x="40" y="134" width="40" height="5" rx="1"/>'
+    ),
+    # Editorial — clerical filing card: tab, ruled header, leader ledger.
+    "index_card": (
+        '<rect class="sf" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="12" y="14" width="26" height="8" rx="1"/>'
+        '<rect class="ik2" x="12" y="28" width="60" height="10" rx="1"/>'
+        '<line class="ln" x1="12" y1="46" x2="108" y2="46"/>'
+        '<rect class="ik" x="12" y="56" width="18" height="4" rx="1"/>'
+        '<line class="ln" x1="36" y1="59" x2="92" y2="59"/>'
+        '<rect class="ik" x="96" y="55" width="12" height="5" rx="1"/>'
+        '<rect class="ik" x="12" y="74" width="18" height="4" rx="1"/>'
+        '<line class="ln" x1="36" y1="77" x2="86" y2="77"/>'
+        '<rect class="ac" x="90" y="72" width="18" height="8" rx="1"/>'
+        '<rect class="ik" x="12" y="92" width="18" height="4" rx="1"/>'
+        '<line class="ln" x1="36" y1="95" x2="92" y2="95"/>'
+        '<rect class="ik" x="96" y="91" width="12" height="5" rx="1"/>'
+        '<rect class="ik" x="12" y="128" width="40" height="6" rx="1"/>'
+    ),
+    # Editorial — surname set huge and bled off the right edge.
+    "mega_surname_bleed": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="10" y="16" width="9" height="4" rx="1"/>'
+        '<rect class="ik" x="22" y="15" width="30" height="6" rx="1"/>'
+        '<rect class="ik2" x="8" y="54" width="128" height="44" rx="0"/>'
+        '<rect class="ac" x="10" y="118" width="34" height="14" rx="1"/>'
+        '<rect class="ik" x="10" y="138" width="40" height="4" rx="1"/>'
+    ),
 }
 
 # Generic placeholder schematic for any future archetype that has no bespoke
@@ -487,16 +617,24 @@ def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str
     active = active_category if active_category in _CATEGORY_LABELS else "all"
     entries = gallery_entries()
     n = len(entries)
+    # The structural archetypes are only half the story: the renderer dresses
+    # each one with a deterministic style pack (ground × texture × accent ×
+    # density), so the true template space is archetypes × packs. Surface the
+    # honest total so operators can see the variety the engine draws from.
+    total_templates = _sp.style_pack_count() * n
 
     hero = (
         '<section class="mh-hero" data-lane="04" '
         'style="padding-top:var(--sp-9);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
         '<span class="mh-hero-eyebrow">Template gallery</span>'
         f'<h1>{n} ways to tell<br>the <em class="editorial">story</em>.</h1>'
-        '<p class="lede">Every content pack is composed from this library of card '
-        "templates. The design director picks the best one for each moment "
-        "automatically — browse the range here so you know what your cards can "
-        "look like before you create a pack.</p>"
+        '<p class="lede">Every content pack is composed from this library of '
+        f"{n} structural card templates — each then re-dressed by the style "
+        f"engine into one of <strong>{total_templates:,} unique, on-brand "
+        "variations</strong>, so a pack reads as a set of deliberate, distinct "
+        "designs rather than one repeated look. The design director picks the "
+        "best one for each moment automatically — browse the range here so you "
+        "know what your cards can look like before you create a pack.</p>"
         "</section>"
     )
 
