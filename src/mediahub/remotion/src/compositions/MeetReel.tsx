@@ -58,11 +58,48 @@ export function reelStats(cards: CardItem[]): { swims: number; pbs: number; meda
   };
 }
 
-// Per-beat transition variety, picked deterministically from the card's
-// variation seed so re-renders are stable: crossfade / push-up / wipe.
-type TransitionKind = "crossfade" | "push" | "wipe";
+// Per-beat transitions, picked deterministically so re-renders stay
+// byte-identical. The set is split by narrative role (motion-craft
+// transitions.md): the entry into the peak (top-ranked) beat earns the one
+// bold, mood-chosen cut a reel is allowed, while the connective beats between
+// same-rank moments share a single quiet kind so they read as one continuous
+// piece rather than a transition showreel.
+type TransitionKind =
+  | "crossfade"
+  | "push"
+  | "wipe"
+  | "blur"
+  | "zoom"
+  | "whip"
+  | "iris";
 
-export function transitionFor(seed: number): TransitionKind {
+export function transitionFor(
+  seed: number,
+  opts?: { peak?: boolean; mood?: string },
+): TransitionKind {
+  if (opts?.peak) {
+    // The earned, boldest cut — its character derives from the beat's mood:
+    // soft moods resolve out of a defocus, percussive moods whip in, a
+    // medal/celebration irises open, everything else drives in with momentum.
+    const m = (opts.mood || "").toLowerCase();
+    if (
+      m.includes("calm") ||
+      m.includes("stoic") ||
+      m.includes("precise") ||
+      m.includes("warm") ||
+      m.includes("minimal")
+    ) {
+      return "blur";
+    }
+    if (m.includes("explosive") || m.includes("electric") || m.includes("fierce")) {
+      return "whip";
+    }
+    if (m.includes("celebratory") || m.includes("triumph") || m.includes("medal")) {
+      return "iris";
+    }
+    return "zoom";
+  }
+  // Connective beats: one consistent quiet kind, spread only across reels.
   const mode = ((seed | 0) % 3 + 3) % 3;
   if (mode === 1) return "push";
   if (mode === 2) return "wipe";
@@ -429,18 +466,25 @@ export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
   );
   cursor += coverFrames;
 
+  // One consistent connective cut for every same-rank handoff, derived from
+  // the reel (the top card's seed) so the lower beats feel like one piece.
+  const connective = transitionFor(safeCards[0]?.variationSeed || 0);
+
   safeCards.forEach((card, i) => {
     const dur = beatFrames[i];
+    // The first beat is the #1 (top-ranked) moment — its entry off the brand
+    // cover is the reel's peak, so it earns the bold, mood-chosen cut.
+    const isPeak = i === 0 && safeCards.length > 1;
+    const kind = isPeak
+      ? transitionFor(card.variationSeed || 0, { peak: true, mood: card.mood })
+      : connective;
     sequences.push(
       <Sequence
         key={`card-${i}`}
         from={cursor}
         durationInFrames={dur + transitionFrames}
       >
-        <TransitionWrap
-          fadeInFrames={transitionFrames}
-          kind={transitionFor(card.variationSeed || i)}
-        >
+        <TransitionWrap fadeInFrames={transitionFrames} kind={kind}>
           <StoryCard card={card} brand={brand} />
         </TransitionWrap>
       </Sequence>,
@@ -476,34 +520,80 @@ const TransitionWrap: React.FC<{
   children: React.ReactNode;
 }> = ({ fadeInFrames, kind, children }) => {
   const frame = useCurrentFrame();
-  const { height } = useVideoConfig();
-  const t = interpolate(frame, [0, fadeInFrames], [0, 1], {
-    extrapolateRight: "clamp",
-  });
+  const { width, height } = useVideoConfig();
+  // The incoming beat overlaps the outgoing one for `fadeInFrames`, so the
+  // transition reads against the previous beat still on screen (its exit).
+  // Each kind eases differently — easing is the adverb (motion-craft).
+  const ease = (easing: (n: number) => number) =>
+    interpolate(frame, [0, fadeInFrames], [0, 1], {
+      extrapolateRight: "clamp",
+      easing,
+    });
+
   if (kind === "push") {
+    const t = ease(Easing.out(Easing.cubic));
     return (
       <AbsoluteFill
-        style={{
-          opacity: t,
-          transform: `translateY(${(1 - t) * height * 0.12}px)`,
-        }}
+        style={{ opacity: t, transform: `translateY(${(1 - t) * height * 0.12}px)` }}
       >
         {children}
       </AbsoluteFill>
     );
   }
   if (kind === "wipe") {
+    const t = ease(Easing.inOut(Easing.cubic));
     const pct = Math.round((1 - t) * 100);
+    return (
+      <AbsoluteFill style={{ opacity: Math.min(1, t * 2), clipPath: `inset(0 ${pct}% 0 0)` }}>
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "blur") {
+    // Soft register shift — the beat resolves out of a defocus. For calm peaks.
+    const t = ease(Easing.out(Easing.cubic));
+    return (
+      <AbsoluteFill style={{ opacity: t, filter: `blur(${(1 - t) * 16}px)` }}>
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "zoom") {
+    // Momentum into the headline — scales up to its resting size, decisive.
+    const t = ease(Easing.out(Easing.exp));
+    return (
+      <AbsoluteFill
+        style={{ opacity: Math.min(1, t * 1.4), transform: `scale(${0.9 + 0.1 * t})` }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "whip") {
+    // High-energy lateral snap with a directional blur that resolves on landing.
+    const t = ease(Easing.out(Easing.cubic));
     return (
       <AbsoluteFill
         style={{
-          opacity: Math.min(1, t * 2),
-          clipPath: `inset(0 ${pct}% 0 0)`,
+          opacity: Math.min(1, t * 1.6),
+          transform: `translateX(${(1 - t) * width * 0.5}px)`,
+          filter: `blur(${(1 - t) * 14}px)`,
         }}
       >
         {children}
       </AbsoluteFill>
     );
   }
-  return <AbsoluteFill style={{ opacity: t }}>{children}</AbsoluteFill>;
+  if (kind === "iris") {
+    // Spotlight reveal opening from the centre — the medal/celebration peak.
+    const t = ease(Easing.out(Easing.cubic));
+    return (
+      <AbsoluteFill
+        style={{ opacity: Math.min(1, t * 2), clipPath: `circle(${Math.round(t * 130)}% at 50% 45%)` }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  return <AbsoluteFill style={{ opacity: ease((n) => n) }}>{children}</AbsoluteFill>;
 };

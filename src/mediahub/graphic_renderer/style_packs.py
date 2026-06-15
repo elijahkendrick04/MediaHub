@@ -61,6 +61,10 @@ GROUNDS: tuple[str, ...] = (
     "vignette",
     "spotlight",
     "twotone",
+    "dual_fade",
+    "top_corner_fade",
+    "edge_frame",
+    "diagonal_fade",
 )
 
 # Surface micro-texture — a low-opacity, blended overlay (the grain precedent).
@@ -72,6 +76,10 @@ TEXTURES: tuple[str, ...] = (
     "hatch",
     "halftone",
     "crosshatch",
+    "weave",
+    "scanline",
+    "carbon",
+    "chevron",
 )
 
 # Accent geometry drawn in the resolved ``--mh-accent``, confined to the margins.
@@ -84,6 +92,10 @@ ACCENT_GEOS: tuple[str, ...] = (
     "wedge",
     "ring",
     "corner_blocks",
+    "double_rule",
+    "dot_row",
+    "cross_ticks",
+    "corner_arc",
 )
 
 # Intensity tier — scales the alphas / weights / sizes of the levers above.
@@ -100,6 +112,10 @@ _GROUND_W = {
     "vignette": 2,
     "spotlight": 2,
     "twotone": 2,
+    "dual_fade": 1,
+    "top_corner_fade": 1,
+    "edge_frame": 2,
+    "diagonal_fade": 2,
 }
 _TEXTURE_W = {
     "none": 0,
@@ -109,6 +125,10 @@ _TEXTURE_W = {
     "hatch": 1,
     "halftone": 2,
     "crosshatch": 2,
+    "weave": 1,
+    "scanline": 1,
+    "carbon": 2,
+    "chevron": 2,
 }
 _ACCENT_W = {
     "none": 0,
@@ -119,6 +139,10 @@ _ACCENT_W = {
     "wedge": 2,
     "ring": 2,
     "corner_blocks": 2,
+    "double_rule": 1,
+    "dot_row": 1,
+    "cross_ticks": 1,
+    "corner_arc": 2,
 }
 
 # Coherence caps: standard density tolerates a little more stacking than bold
@@ -135,6 +159,10 @@ _GROUND_LABEL = {
     "vignette": "vignetted",
     "spotlight": "spotlit",
     "twotone": "two-tone",
+    "dual_fade": "edge-lit",
+    "top_corner_fade": "top-cornered",
+    "edge_frame": "edge-framed",
+    "diagonal_fade": "diagonal",
 }
 _TEXTURE_LABEL = {
     "none": "clean",
@@ -144,6 +172,10 @@ _TEXTURE_LABEL = {
     "hatch": "hatched",
     "halftone": "halftone",
     "crosshatch": "crosshatched",
+    "weave": "weave",
+    "scanline": "scanline",
+    "carbon": "carbon",
+    "chevron": "chevron",
 }
 _ACCENT_LABEL = {
     "none": "bare",
@@ -154,6 +186,10 @@ _ACCENT_LABEL = {
     "wedge": "wedge",
     "ring": "ring",
     "corner_blocks": "corner blocks",
+    "double_rule": "double rule",
+    "dot_row": "dot row",
+    "cross_ticks": "register marks",
+    "corner_arc": "corner arcs",
 }
 
 
@@ -446,6 +482,29 @@ _TEX_TILES: dict[str, str] = {
         "<circle cx='6' cy='6' r='3.2' fill='white'/>"
         "<circle cx='17' cy='17' r='1.6' fill='white'/></svg>"
     ),
+    "weave": (
+        "data:image/svg+xml;utf8,"
+        "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>"
+        "<rect x='0' y='8' width='20' height='3' fill='white'/>"
+        "<rect x='8' y='0' width='3' height='20' fill='white'/></svg>"
+    ),
+    "scanline": (
+        "data:image/svg+xml;utf8,"
+        "<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'>"
+        "<rect width='6' height='1' fill='white'/></svg>"
+    ),
+    "carbon": (
+        "data:image/svg+xml;utf8,"
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'>"
+        "<path d='M0 8L8 0' stroke='white' stroke-width='1'/>"
+        "<path d='M-2 2L2 -2' stroke='white' stroke-width='1'/>"
+        "<path d='M6 10L10 6' stroke='white' stroke-width='1'/></svg>"
+    ),
+    "chevron": (
+        "data:image/svg+xml;utf8,"
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='12'>"
+        "<path d='M0 12L12 3L24 12' fill='none' stroke='white' stroke-width='1.4'/></svg>"
+    ),
 }
 
 # Texture tile background-size (px). Halftone/grain tile larger for presence.
@@ -456,6 +515,10 @@ _TEX_SIZE: dict[str, int] = {
     "hatch": 14,
     "crosshatch": 16,
     "halftone": 22,
+    "weave": 20,
+    "scanline": 6,
+    "carbon": 8,
+    "chevron": 24,
 }
 
 
@@ -482,6 +545,25 @@ def _ground_layer(ground: str, alpha: float) -> str:
     if ground == "twotone":
         # Soft diagonal half-darken (no hard edge → no banded text).
         return f"linear-gradient(122deg, rgba(0,0,0,0) 46%, rgba(0,0,0,{a}) 92%)"
+    if ground == "dual_fade":
+        # Both ends darken toward a lit centre band — symmetric letterbox feel.
+        return (
+            f"linear-gradient(180deg, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 30%, "
+            f"rgba(0,0,0,0) 70%, rgba(0,0,0,{a}) 100%)"
+        )
+    if ground == "top_corner_fade":
+        return f"radial-gradient(125% 125% at 0% 0%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 55%)"
+    if ground == "edge_frame":
+        # All four edges darken via two crossed axis fades (lit centre).
+        return (
+            f"linear-gradient(90deg, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 18%, "
+            f"rgba(0,0,0,0) 82%, rgba(0,0,0,{a}) 100%),"
+            f"linear-gradient(180deg, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 18%, "
+            f"rgba(0,0,0,0) 82%, rgba(0,0,0,{a}) 100%)"
+        )
+    if ground == "diagonal_fade":
+        # Mirror of twotone — darkens the top-left wedge instead of bottom-right.
+        return f"linear-gradient(122deg, rgba(0,0,0,{a}) 8%, rgba(0,0,0,0) 54%)"
     return ""
 
 
@@ -591,6 +673,54 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
         return (
             f'<div style="position:absolute;right:{off}px;top:{off}px;width:{d}px;height:{d}px;'
             f'border:{weight}px solid {acc};border-radius:50%;opacity:{op};{z}"></div>'
+        )
+    if style == "double_rule":
+        bar_h = max(4, int(height * 0.007 * mult))
+        inset = int(width * 0.08)
+        bottom = int(height * 0.06)
+        gap = bar_h * 3
+        return (
+            f'<div style="position:absolute;left:{inset}px;right:{inset}px;bottom:{bottom}px;'
+            f'height:{bar_h}px;background:{acc};{z}"></div>'
+            f'<div style="position:absolute;left:{inset}px;right:{inset}px;bottom:{bottom + gap}px;'
+            f'height:{bar_h}px;background:{acc};opacity:0.55;{z}"></div>'
+        )
+    if style == "dot_row":
+        d = max(7, int(min(width, height) * 0.013 * mult))
+        bottom = int(height * 0.065)
+        gap = d * 2
+        dots = "".join(
+            f'<span style="width:{d}px;height:{d}px;border-radius:50%;background:{acc};'
+            f'display:inline-block;"></span>'
+            for _ in range(6)
+        )
+        return (
+            f'<div style="position:absolute;left:0;right:0;bottom:{bottom}px;display:flex;'
+            f'justify-content:center;gap:{gap}px;{z}">{dots}</div>'
+        )
+    if style == "cross_ticks":
+        arm = int(min(width, height) * 0.028 * mult)
+        off = int(min(width, height) * 0.06)
+        def _cross(x_css: str, y_css: str) -> str:
+            return (
+                f'<div style="position:absolute;{x_css};{y_css};width:{arm * 2}px;height:{weight}px;'
+                f'background:{acc};{z}"></div>'
+                f'<div style="position:absolute;{x_css};{y_css};width:{weight}px;height:{arm * 2}px;'
+                f'background:{acc};{z}"></div>'
+            )
+        return _cross(f"left:{off}px", f"top:{off}px") + _cross(
+            f"right:{off}px", f"bottom:{off}px"
+        )
+    if style == "corner_arc":
+        arm = int(min(width, height) * 0.11 * mult)
+        off = int(min(width, height) * 0.05)
+        return (
+            f'<div style="position:absolute;left:{off}px;top:{off}px;width:{arm}px;height:{arm}px;'
+            f'border-top:{weight}px solid {acc};border-left:{weight}px solid {acc};'
+            f'border-top-left-radius:100%;{z}"></div>'
+            f'<div style="position:absolute;right:{off}px;bottom:{off}px;width:{arm}px;height:{arm}px;'
+            f'border-bottom:{weight}px solid {acc};border-right:{weight}px solid {acc};'
+            f'border-bottom-right-radius:100%;{z}"></div>'
         )
     return ""
 
