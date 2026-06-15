@@ -13435,8 +13435,14 @@ def _hero_product_demo() -> str:
 
     A browser-framed mockup that loops the core flow
     **generate → review → approve**, with a subtle ambient glow behind the
-    frame (inspired by Reflect, reflect.app). It is first-party HTML + CSS
-    only — there is no screen-capture asset to host and no JS framework:
+    frame (inspired by Reflect, reflect.app). Each beat carries its own
+    purposeful micro-motion so the frame never reads as static: the raw
+    results sheet is *read* by a scan line and resolves into detected,
+    ranked moments; a premium branded story card lands while the
+    source-grounded facts highlight in turn and the confidence meter fills;
+    then the human approval gate fans out into the posting-ready formats.
+    It is first-party HTML + CSS only — there is no screen-capture asset to
+    host and no JS framework:
 
       * the loop is three cross-fading CSS-keyframe scenes (the
         ``.mh-demo-phase`` tracks in theme-components.css), reused to light
@@ -13468,11 +13474,20 @@ def _hero_product_demo() -> str:
         "</div>"
         # --- screen / cross-fading stage ---
         '<div class="mh-demo-screen"><div class="mh-demo-stage">'
-        # Scene 1 — Generate (engine reads the file, ranks the moments)
+        # Scene 1 — Generate: the raw results sheet is read (scan line) and
+        # resolves into detected, ranked moments — input → intelligence.
         '<div class="mh-demo-phase p1">'
         '<div class="mh-demo-row">'
         '<span class="mh-demo-eyebrow">01 · Generate</span>'
         '<span class="mh-demo-file">spring-open.hy3</span>'
+        "</div>"
+        '<div class="mh-demo-ingest">'
+        '<div class="mh-demo-sheet"><span class="scan"></span>'
+        '<span class="row head"><i>LN</i><i>NAME</i><i>TIME</i></span>'
+        '<span class="row"><i>3</i><i>T. Davies</i><i>52.41</i></span>'
+        '<span class="row"><i>5</i><i>A. Nolan</i><i>59.74</i></span>'
+        '<span class="row"><i>1</i><i>R. Khan</i><i>1:04.2</i></span>'
+        '<span class="row"><i>6</i><i>W. 4&times;100</i><i>4:12.8</i></span>'
         "</div>"
         '<div class="mh-demo-finds">'
         '<div class="mh-demo-find"><span class="badge pb">PB</span>'
@@ -13480,23 +13495,29 @@ def _hero_product_demo() -> str:
         '<div class="mh-demo-find"><span class="badge gold">1st</span>'
         '<span class="who">Women&rsquo;s 4&times;100 Relay</span><b>4:12.8</b></div>'
         '<div class="mh-demo-find"><span class="badge new">NEW</span>'
-        '<span class="who">Aoife N. · first sub-1:00</span><b>59.74</b></div>'
+        '<span class="who">Aoife Nolan · first sub-1:00</span><b>59.74</b></div>'
+        "</div>"
         "</div>"
         '<div class="mh-demo-meter"><span class="bar"><i></i></span>'
         '<span class="lab">42 swims read · 3 moments ranked</span></div>'
         "</div>"
-        # Scene 2 — Review (branded card + caption draft + confidence) — the
-        # richest single frame, so it is the reduced-motion resting state.
+        # Scene 2 — Review (branded story card + caption draft + confidence) —
+        # the richest single frame, so it is the reduced-motion resting state.
         '<div class="mh-demo-phase p2 is-rest">'
         '<div class="mh-demo-row">'
         '<span class="mh-demo-eyebrow">02 · Review</span>'
         '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
         "</div>"
         '<div class="mh-demo-card">'
+        # The OUTPUT — a real, premium branded story card the engine returns.
         '<div class="mh-demo-thumb">'
-        '<span class="ev">100M FREE</span>'
+        '<span class="mh-demo-brandmark"></span>'
+        '<span class="mh-demo-flash">PB</span>'
+        '<span class="ev">100m Freestyle</span>'
         '<span class="tm">52.41</span>'
-        '<span class="nm">T. Davies</span>'
+        '<span class="nm">Tom Davies</span>'
+        '<span class="mh-demo-delta">&minus;0.74s on his best</span>'
+        '<span class="mh-demo-cardbar"></span>'
         "</div>"
         '<div class="mh-demo-cardbody">'
         '<span class="mh-demo-eyebrow">Story card · caption draft</span>'
@@ -13508,7 +13529,8 @@ def _hero_product_demo() -> str:
         "</div>"
         "</div>"
         "</div>"
-        # Scene 3 — Approve (the human gate — nothing leaves without it)
+        # Scene 3 — Approve: the human gate, then one approval fans out into
+        # the posting-ready formats (nothing leaves the queue without it).
         '<div class="mh-demo-phase p3">'
         '<div class="mh-demo-row">'
         '<span class="mh-demo-eyebrow">03 · Approve</span>'
@@ -13518,6 +13540,12 @@ def _hero_product_demo() -> str:
         f'<span class="mh-demo-check">{check}</span>'
         '<div class="txt"><b>Approved by you</b>'
         "<span>Tom Davies — PB 100m Free · ready to export</span></div>"
+        "</div>"
+        '<div class="mh-demo-formats">'
+        '<span class="mh-demo-chip">Story</span>'
+        '<span class="mh-demo-chip">Feed</span>'
+        '<span class="mh-demo-chip">Reel</span>'
+        '<span class="mh-demo-chip">Caption</span>'
         "</div>"
         '<div class="mh-demo-meter"><span class="lab">'
         "Nothing leaves the queue without your approval.</span></div>"

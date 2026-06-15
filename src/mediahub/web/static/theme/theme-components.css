@@ -902,28 +902,40 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
    U.10 — FRAMED IN-APP PRODUCT DEMO (landing hero)
    ---------------------------------------------------------------------
    A browser-framed mockup that loops generate → review → approve with a
-   subtle ambient glow behind it. Pure CSS: three cross-fading scenes
-   driven by the shared p1/p2/p3 tracks (also reused to light the
-   chrome-step dots), a one-shot fade-up entrance matching the other hero
-   children, and a slow glow breathe. It pauses on hover/focus and, under
-   reduced-motion, freezes on the single "Review" scene. Inspired by
-   Reflect (reflect.app). All hooks are emitted by _hero_product_demo().
+   subtle ambient glow behind it. Pure CSS: three blur-masked cross-fading
+   scenes driven by the shared p1/p2/p3 tracks (also reused to light the
+   chrome-step dots), each carrying its own purposeful micro-motion so the
+   frame never reads as static — a scan line reads the raw results sheet
+   into ranked moments (s1); a premium branded story card lands while the
+   grounded facts highlight in turn and the confidence meter fills (s2);
+   the approval tick draws on and the posting-ready formats light up (s3).
+   A one-shot fade-up entrance matches the other hero children, plus a slow
+   glow breathe. It pauses on hover/focus and, under reduced-motion, freezes
+   fully-composed on the single "Review" scene. Inspired by Reflect
+   (reflect.app). All hooks are emitted by _hero_product_demo().
    ===================================================================== */
 
 /* Cycle length is 12s. Each scene is opaque for ~its third of the loop and
-   cross-fades (~0.6s) at every boundary; the tracks are authored so the
-   loop wraps seamlessly — scene 1 is opaque at both 0% and 100%. */
+   cross-fades (~0.6s) at every boundary; the tracks are authored so the loop
+   wraps seamlessly — scene 1 is opaque at both 0% and 100%. A synchronised
+   blur rides the opacity: each scene is sharp while it owns the frame and
+   softens to blur(7px) as it leaves, so two very different layouts never ghost
+   through one another during the cross-fade (the eye reads one smooth morph,
+   not two stacked frames). */
 @keyframes mh-demo-p1 {
-  0% { opacity: 1; } 28% { opacity: 1; } 33% { opacity: 0; }
-  95% { opacity: 0; } 100% { opacity: 1; }
+  0% { opacity: 1; filter: blur(0); } 28% { opacity: 1; filter: blur(0); }
+  33% { opacity: 0; filter: blur(7px); } 95% { opacity: 0; filter: blur(7px); }
+  100% { opacity: 1; filter: blur(0); }
 }
 @keyframes mh-demo-p2 {
-  0% { opacity: 0; } 28% { opacity: 0; } 33% { opacity: 1; }
-  61% { opacity: 1; } 66% { opacity: 0; } 100% { opacity: 0; }
+  0% { opacity: 0; filter: blur(7px); } 28% { opacity: 0; filter: blur(7px); }
+  33% { opacity: 1; filter: blur(0); } 61% { opacity: 1; filter: blur(0); }
+  66% { opacity: 0; filter: blur(7px); } 100% { opacity: 0; filter: blur(7px); }
 }
 @keyframes mh-demo-p3 {
-  0% { opacity: 0; } 61% { opacity: 0; } 66% { opacity: 1; }
-  95% { opacity: 1; } 100% { opacity: 0; }
+  0% { opacity: 0; filter: blur(7px); } 61% { opacity: 0; filter: blur(7px); }
+  66% { opacity: 1; filter: blur(0); } 95% { opacity: 1; filter: blur(0); }
+  100% { opacity: 0; filter: blur(7px); }
 }
 /* The "reading…" progress bar fills while scene 1 is on screen. */
 @keyframes mh-demo-fill {
@@ -934,6 +946,54 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 @keyframes mh-demo-breathe {
   0%, 100% { opacity: 0.5; transform: scale(1); }
   50% { opacity: 0.85; transform: scale(1.04); }
+}
+
+/* --- per-scene micro-motion --------------------------------------------
+   Each is a 12s track so it stays locked to the cross-fade cycle and only
+   "plays" while its scene owns the frame. transform / opacity / filter only
+   (GPU-friendly), and every one is neutralised under prefers-reduced-motion. */
+/* Scene 1 — a scan line reads down the raw results sheet, then clears. */
+@keyframes mh-demo-scan {
+  0% { transform: translateY(-22px); opacity: 0; }
+  4% { opacity: 0.9; }
+  22% { transform: translateY(94px); opacity: 0.9; }
+  26% { transform: translateY(102px); opacity: 0; }
+  100% { transform: translateY(102px); opacity: 0; }
+}
+/* Scene 2 — the headline stat lands (settles from a soft, slightly-larger
+   blur), the PB sticker pops in, the grounded facts wipe a highlighter across
+   in turn, and the confidence meter fills. */
+@keyframes mh-demo-land {
+  0%, 29% { opacity: 0; transform: translateY(6px) scale(1.06); filter: blur(5px); }
+  37% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes mh-demo-pop {
+  0%, 33% { opacity: 0; transform: scale(0.6); }
+  40% { opacity: 1; transform: scale(1.12); }
+  46% { transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes mh-demo-mark {
+  0%, 33% { background-size: 0% 100%; }
+  41% { background-size: 100% 100%; }
+  100% { background-size: 100% 100%; }
+}
+@keyframes mh-demo-conf {
+  0%, 30% { transform: scaleX(0); }
+  40% { transform: scaleX(1); }
+  100% { transform: scaleX(1); }
+}
+/* Scene 3 — the approval tick draws on, then the format chips light in turn. */
+@keyframes mh-demo-check {
+  0%, 66% { stroke-dashoffset: 26; }
+  77% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes mh-demo-chips {
+  0%, 70% { opacity: 0; transform: translateY(6px); }
+  80% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 .mh-hero-demo {
@@ -1022,7 +1082,7 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
     radial-gradient(120% 100% at 50% 0%, rgba(245, 242, 232, 0.03), transparent 60%),
     var(--surface);
 }
-.mh-demo-stage { position: relative; min-height: 250px; }
+.mh-demo-stage { position: relative; min-height: 224px; }
 .mh-demo-phase {
   position: absolute;
   inset: 0;
@@ -1057,6 +1117,51 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   border: 1px dashed var(--hairline);
   border-radius: var(--radius-sm);
 }
+
+/* Scene 1 — the raw results sheet (read) resolves into detected moments.
+   Two columns: dim monochrome source on the left, the bright ranked finds on
+   the right — the "understand what matters" step made literal. */
+.mh-demo-ingest {
+  display: grid;
+  grid-template-columns: 0.82fr 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+.mh-demo-sheet {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+}
+.mh-demo-sheet .row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.mh-demo-sheet .row i { font-style: normal; overflow: hidden; text-overflow: ellipsis; }
+.mh-demo-sheet .row i:last-child { text-align: right; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.mh-demo-sheet .row.head i { color: var(--ink-faint); letter-spacing: 0.1em; }
+.mh-demo-sheet .scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(var(--lane-glow), transparent);
+  border-top: 1px solid var(--lane);
+}
+.mh-demo-phase.p1 .mh-demo-sheet .scan { animation: mh-demo-scan 12s linear infinite; }
 
 /* Scene 1 — detected, ranked moments */
 .mh-demo-finds { display: flex; flex-direction: column; gap: 7px; }
@@ -1139,47 +1244,125 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   border-radius: 2px;
   overflow: hidden;
 }
-.mh-demo-conf .track i { display: block; width: 94%; height: 100%; background: var(--good); }
+.mh-demo-conf .track i {
+  display: block; width: 94%; height: 100%;
+  background: var(--good);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.mh-demo-phase.p2 .mh-demo-conf .track i { animation: mh-demo-conf 12s var(--ease-out) infinite; }
 .mh-demo-card {
   display: grid;
-  grid-template-columns: 104px 1fr;
+  grid-template-columns: 150px 1fr;
   gap: var(--sp-4);
   padding: var(--sp-3);
   background: var(--bg-deep);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
 }
+/* The OUTPUT preview — composed to read like a real branded story card, not
+   a placeholder: lane-line motif, a club brand mark, the time as the display
+   hero, a PB sticker, the athlete, an improvement delta and a brand footer. */
 .mh-demo-thumb {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  min-height: 116px;
-  padding: var(--sp-3);
+  gap: 4px;
+  min-height: 160px;
+  padding: var(--sp-4) var(--sp-3) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in oklab, var(--lane) 26%, var(--hairline));
+  background:
+    radial-gradient(120% 78% at 82% 4%, color-mix(in oklab, var(--lane) 20%, transparent), transparent 58%),
+    linear-gradient(168deg, color-mix(in oklab, var(--lane) 12%, var(--surface)) 0%, var(--bg-deep) 86%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--lane) 8%, transparent);
+}
+.mh-demo-thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.65;
+  background: repeating-linear-gradient(
+    118deg, transparent 0 15px,
+    color-mix(in oklab, var(--lane) 8%, transparent) 15px 16px
+  );
+}
+.mh-demo-thumb > * { position: relative; z-index: 1; }
+.mh-demo-brandmark {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--lane);
+  box-shadow: 0 0 10px var(--lane-glow);
+}
+.mh-demo-flash {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--fs-9);
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--hairline);
-  background: linear-gradient(160deg, color-mix(in oklab, var(--lane) 22%, var(--surface)), var(--surface));
+  background: var(--lane);
+  color: var(--lane-ink);
+  box-shadow: 0 0 14px var(--lane-glow);
+  opacity: 0;
+  transform: scale(0.6);
+  transform-origin: top right;
 }
 .mh-demo-thumb .ev {
+  margin-top: 20px;
   font-family: var(--font-mono);
   font-size: var(--fs-9);
-  letter-spacing: 0.14em;
-  color: var(--ink-muted);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
 }
 .mh-demo-thumb .tm {
-  font-family: var(--font-mono);
-  font-size: 26px;
-  font-weight: 700;
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 46px;
+  line-height: 0.9;
+  letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+  transform-origin: left center;
 }
 .mh-demo-thumb .nm {
   font-family: var(--font-display);
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  font-size: var(--fs-md);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink);
 }
+.mh-demo-delta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.04em;
+  color: var(--good);
+}
+.mh-demo-cardbar {
+  margin-top: auto;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--lane), color-mix(in oklab, var(--lane) 30%, transparent));
+  box-shadow: 0 0 12px var(--lane-glow);
+}
+/* The stat lands + the PB sticker pops as the Review scene takes the frame. */
+.mh-demo-phase.p2 .mh-demo-thumb .tm { animation: mh-demo-land 12s var(--ease-out) infinite; }
+.mh-demo-phase.p2 .mh-demo-flash { animation: mh-demo-pop 12s var(--ease-spring) infinite; }
 .mh-demo-cardbody { display: flex; flex-direction: column; gap: 8px; }
 .mh-demo-caption {
   margin: 0;
@@ -1187,13 +1370,25 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   line-height: 1.5;
   color: var(--ink-muted);
 }
-/* Source-grounded entities sharp + pill-highlighted (the U.7 motif). */
+/* Source-grounded entities light up in sequence — a lane-tinted highlighter
+   wipes across each fact in turn (the U.7 "focus the facts" motif), reading as
+   the engine grounding every name/time against the uploaded result. */
 .mh-demo-caption mark {
-  background: color-mix(in oklab, var(--lane) 16%, transparent);
+  /* kill the user-agent yellow first, then paint the lane wipe over it */
+  background-color: transparent;
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--lane) 26%, transparent),
+    color-mix(in oklab, var(--lane) 26%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
   color: var(--ink);
   padding: 0 3px;
   border-radius: 3px;
 }
+.mh-demo-phase.p2 .mh-demo-caption mark { animation: mh-demo-mark 12s var(--ease-out) infinite; }
+.mh-demo-caption mark:nth-of-type(1) { animation-delay: -0.34s; }
+.mh-demo-caption mark:nth-of-type(2) { animation-delay: -0.17s; }
 .mh-demo-acts { display: flex; gap: 7px; margin-top: auto; }
 .mh-demo-acts span {
   font-size: var(--fs-10);
@@ -1250,9 +1445,32 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   color: var(--lane-ink);
 }
 .mh-demo-check svg { width: 24px; height: 24px; }
+.mh-demo-check svg polyline { stroke-dasharray: 26; stroke-dashoffset: 26; }
+.mh-demo-phase.p3 .mh-demo-check svg polyline { animation: mh-demo-check 12s var(--ease-out) infinite; }
 .mh-demo-approve .txt { display: flex; flex-direction: column; gap: 2px; }
 .mh-demo-approve .txt b { font-size: var(--fs-lg); color: var(--ink); }
 .mh-demo-approve .txt span { font-size: var(--fs-md); color: var(--ink-dim); }
+
+/* The multi-format payoff — one approval, four posting-ready formats light up
+   in turn (the breadth of what a single result becomes). */
+.mh-demo-formats { display: flex; flex-wrap: wrap; gap: 7px; margin-top: var(--sp-2); }
+.mh-demo-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--bg-deep);
+  color: var(--ink-dim);
+  opacity: 0;
+  transform: translateY(6px);
+}
+.mh-demo-phase.p3 .mh-demo-chip { animation: mh-demo-chips 12s var(--ease-out) infinite; }
+.mh-demo-phase.p3 .mh-demo-chip:nth-child(1) { animation-delay: -0.45s; }
+.mh-demo-phase.p3 .mh-demo-chip:nth-child(2) { animation-delay: -0.30s; }
+.mh-demo-phase.p3 .mh-demo-chip:nth-child(3) { animation-delay: -0.15s; }
 
 /* ---- step indicator (dots lit by the same p1/p2/p3 tracks) ---- */
 .mh-demo-steps {
@@ -1292,35 +1510,76 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 .mh-demo-step.s3 .dot .on { animation: mh-demo-p3 12s linear infinite; }
 
 /* Dwell-to-pause: freeze the whole synchronised loop together (so it never
-   desyncs) while the pointer is over the frame or a child has focus. */
+   desyncs) while the pointer is over the frame or a child has focus — the
+   ambient glow and every per-scene micro-motion stop with it. */
 .mh-hero-demo:hover .mh-demo-phase,
+.mh-hero-demo:hover .mh-demo-glow,
 .mh-hero-demo:hover .mh-demo-phase.p1 .mh-demo-meter .bar i,
 .mh-hero-demo:hover .mh-demo-step .dot .on,
+.mh-hero-demo:hover .mh-demo-sheet .scan,
+.mh-hero-demo:hover .mh-demo-thumb .tm,
+.mh-hero-demo:hover .mh-demo-flash,
+.mh-hero-demo:hover .mh-demo-caption mark,
+.mh-hero-demo:hover .mh-demo-conf .track i,
+.mh-hero-demo:hover .mh-demo-check svg polyline,
+.mh-hero-demo:hover .mh-demo-chip,
 .mh-hero-demo:focus-within .mh-demo-phase,
+.mh-hero-demo:focus-within .mh-demo-glow,
 .mh-hero-demo:focus-within .mh-demo-phase.p1 .mh-demo-meter .bar i,
-.mh-hero-demo:focus-within .mh-demo-step .dot .on {
+.mh-hero-demo:focus-within .mh-demo-step .dot .on,
+.mh-hero-demo:focus-within .mh-demo-sheet .scan,
+.mh-hero-demo:focus-within .mh-demo-thumb .tm,
+.mh-hero-demo:focus-within .mh-demo-flash,
+.mh-hero-demo:focus-within .mh-demo-caption mark,
+.mh-hero-demo:focus-within .mh-demo-conf .track i,
+.mh-hero-demo:focus-within .mh-demo-check svg polyline,
+.mh-hero-demo:focus-within .mh-demo-chip {
   animation-play-state: paused;
 }
 
 @media (max-width: 720px) {
-  .mh-demo-stage { min-height: 280px; }
-  .mh-demo-card { grid-template-columns: 84px 1fr; }
+  .mh-demo-stage { min-height: 240px; }
+  /* The raw sheet is desktop colour; on narrow screens lead with the ranked
+     finds so the frame stays readable. */
+  .mh-demo-ingest { grid-template-columns: 1fr; }
+  .mh-demo-ingest .mh-demo-sheet { display: none; }
+  .mh-demo-card { grid-template-columns: 118px 1fr; }
+  .mh-demo-thumb { min-height: 140px; padding: var(--sp-3); }
+  .mh-demo-thumb .tm { font-size: 34px; }
+  .mh-demo-thumb .ev { margin-top: 18px; }
   .mh-demo-flag { display: none; }
 }
 
-/* No motion at all: drop the entrance + glow breathe + scene loop and rest
-   on the single Review scene with its step dot lit. */
+/* No motion at all: drop the entrance + glow breathe + scene loop and every
+   per-scene micro-motion, and rest on the single Review scene — fully
+   composed (stat landed, facts grounded, confidence full) — with its step
+   dot lit. */
 @media (prefers-reduced-motion: reduce) {
   .mh-hero-demo,
   .mh-demo-glow { animation: none; }
   .mh-demo-phase,
   .mh-demo-phase.p1 .mh-demo-meter .bar i,
-  .mh-demo-step .dot .on { animation: none !important; }
-  .mh-demo-phase { opacity: 0; }
+  .mh-demo-step .dot .on,
+  .mh-demo-sheet .scan,
+  .mh-demo-thumb .tm,
+  .mh-demo-flash,
+  .mh-demo-caption mark,
+  .mh-demo-conf .track i,
+  .mh-demo-check svg polyline,
+  .mh-demo-chip { animation: none !important; }
+  .mh-demo-phase { opacity: 0; filter: none; }
   .mh-demo-phase.is-rest { opacity: 1; }
   .mh-demo-phase.p1 .mh-demo-meter .bar i { transform: scaleX(1); }
   .mh-demo-step .dot .on { opacity: 0; }
   .mh-demo-step.s2 .dot .on { opacity: 1; }
+  /* settle every one-shot in its end state */
+  .mh-demo-sheet .scan { opacity: 0; }
+  .mh-demo-thumb .tm { opacity: 1; transform: none; filter: none; }
+  .mh-demo-flash { opacity: 1; transform: none; }
+  .mh-demo-caption mark { background-size: 100% 100%; }
+  .mh-demo-conf .track i { transform: scaleX(1); }
+  .mh-demo-check svg polyline { stroke-dashoffset: 0; }
+  .mh-demo-chip { opacity: 1; transform: none; }
 }
 
 /* =====================================================================
