@@ -38,7 +38,7 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 | **Home / landing** | Spotlight (hero ambient), Infinite-Moving-Cards (sport marquee), Card-Spotlight (sample cards + the 4 step cards), split-flap Flapboard (PB time), gradient-text (marquee label), reveal (final CTA via `.mh-reveal`) |
 | **Upload** | Aurora ambient (entry hero) |
 | **Processing** | Multi-Step Loader (real pipeline log → live step checklist via `MH.renderLogSteps`) |
-| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars), Animated-Tooltip (athlete avatar on every card → name · club · meet haul, via `.mh-tooltip`) |
+| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars), Animated-Tooltip (athlete avatar on every card → name · club · meet haul, via `.mh-tooltip`), client-side workflow Tabs (`.mh-tabs` — Queue/Approved filter switches in place, no reload, UI2.4) |
 | **Make** | Glow-border (live content-type tiles) |
 | **Settings** | Glow-border (category tiles) + reveal-group (tile grid) |
 | **Sign-in** | Card-Spotlight (org profile cards) |
@@ -48,8 +48,8 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 
 The kit also ships ready-to-use effects not yet wired to a specific screen (Aurora, Grid/
 Dot/Scales/Grain backgrounds, gradient-border, 3D tilt, Glare, hover-group, Moving-Border,
-Hover-Border-Gradient, Stateful-Button, Text-Generate, Flip-Words, Hero-Highlight, Tabs
-indicator, Compare slider, Tracing-Beam, Timeline, Vanish-input) for follow-on surfaces.
+Hover-Border-Gradient, Stateful-Button, Text-Generate, Flip-Words, Hero-Highlight,
+Compare slider, Tracing-Beam, Timeline, Vanish-input) for follow-on surfaces.
 
 ---
 
@@ -147,7 +147,7 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Navbar Menu | PARTIAL | |
 | Sidebar | PARTIAL | app is top-nav only by design |
 | Floating Dock | PARTIAL | |
-| Tabs | ADOPT | `.mh-tabs` sliding indicator (kit; wf filter is server-nav) |
+| Tabs | ADOPT | `.mh-tabs` sliding indicator — wired to the review Queue/Approved filter as client-side tabs (UI2.4) |
 | Sticky Banner | PARTIAL | |
 | Signup Form | PARTIAL | informs auth-form styling |
 | Placeholders & Vanish Input | ADOPT | `.mh-vanish` |
