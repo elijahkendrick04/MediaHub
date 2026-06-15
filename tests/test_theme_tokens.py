@@ -173,13 +173,11 @@ class TestTier2RoleTokens:
         assert f"{token}:" in theme_tokens_css
 
     def test_no_role_token_references_raw_hex(self, theme_tokens_css):
-        """Tier-2 tokens reference primitives via var() or light-dark().
+        """Tier-2 tokens reference primitives via var() (dark-only).
 
-        Stage C wrapped tier-2 tokens in light-dark(<light>, <dark>) so
-        the same role adapts to prefers-color-scheme. The rgba outline
-        / elevation tokens remain alpha-blended (Stage C's modern
-        branch derives them via color-mix in theme-derive.css; the
-        base file keeps the rgba fallback).
+        The rgba outline / elevation tokens remain alpha-blended (the
+        modern branch derives them via color-mix in theme-derive.css;
+        the base file keeps the rgba fallback).
         """
         allowed_rgba_only = {
             "--mh-outline",
@@ -197,14 +195,9 @@ class TestTier2RoleTokens:
             )
             assert m, f"Could not find declaration for {token}"
             value = m.group(1).strip()
-            # Must be a var() reference OR light-dark(var(), var()).
-            ok_prefix = (
-                value.startswith("var(")
-                or value.startswith("light-dark(var(")
-            )
-            assert ok_prefix, (
-                f"{token} must reference a primitive via var() or "
-                f"light-dark(var(), var()), got {value!r}"
+            # Must be a var() reference to a primitive.
+            assert value.startswith("var("), (
+                f"{token} must reference a primitive via var(), got {value!r}"
             )
             assert not re.search(r"#[0-9A-Fa-f]{3,8}", value), (
                 f"{token} must not contain raw hex, got {value!r}"

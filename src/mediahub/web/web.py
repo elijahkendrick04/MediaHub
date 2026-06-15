@@ -3013,7 +3013,7 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     return f"""
 <div style="text-align:center;padding:64px 24px">
   <div class="mh-spinner" style="margin:0 auto 24px"></div>
-  <h1 class="mh-scramble" style="margin-bottom:10px">Still processing your run</h1>
+  <h1 style="margin-bottom:10px">Still processing your run</h1>
   <p class="dim" style="max-width:480px;margin:0 auto 24px">
     The pipeline is reading the file, finding your athletes, and drafting
     captions. This usually takes 20&ndash;60 seconds. We&rsquo;ll auto-refresh
@@ -6039,10 +6039,10 @@ body {
     /* One subtle radial lift at top centre — stadium-light fall-off.
        Light mode swaps the cream tint for a faint ink tint so the lift
        and the grid lattice stay visible on the paper page. */
-    radial-gradient(1400px 600px at 50% -10%, light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04)), transparent 70%),
+    radial-gradient(1400px 600px at 50% -10%, rgba(245,242,232,0.04), transparent 70%),
     /* Faint 40px grid lattice — pit-wall / scoreboard substrate */
-    linear-gradient(light-dark(rgba(20,23,31,0.03), rgba(245,242,232,0.022)) 1px, transparent 1px) 0 0 / 40px 40px,
-    linear-gradient(90deg, light-dark(rgba(20,23,31,0.03), rgba(245,242,232,0.022)) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
@@ -6058,61 +6058,14 @@ body {
 a {
   /* Dark: pure lane-yellow (unchanged). Light: a dark-olive brand tone
      (--mh-link) — lane-yellow text is illegible on the paper page. */
-  color: light-dark(var(--mh-link), var(--lane));
+  color: var(--lane);
   text-decoration: none;
   transition: color var(--transition);
   text-underline-offset: 0.18em;
   text-decoration-thickness: 1px;
 }
-a:hover { color: light-dark(var(--mh-link-hover), var(--lane-h)); text-decoration: underline; text-decoration-color: light-dark(var(--mh-link), var(--lane)); }
+a:hover { color: var(--lane-h); text-decoration: underline; text-decoration-color: var(--lane); }
 ::selection { background: var(--lane); color: var(--lane-ink); }
-
-/* UI 1.23 — Light/dark theme toggle (a compact Light · System · Dark
-   segmented control in the masthead). The control is pure chrome; the
-   active segment is driven by the data-theme attribute the boot script
-   writes onto <html> from localStorage. Every colour flows through the
-   light-dark() token layer, so the control itself re-themes. */
-/* The toggle is a JS control (it persists + forces the mode), so hide
-   it when JS is unavailable — those visitors still get the OS-default
-   theme via color-scheme. Matches the .mh-js progressive-enhancement
-   pattern used elsewhere. */
-html:not(.mh-js) .mh-theme-toggle { display: none; }
-.mh-theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  gap: 0;
-  padding: 2px;
-  border: 1px solid var(--chrome);
-  border-radius: var(--radius-pill);
-  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
-  flex-shrink: 0;
-}
-.mh-theme-toggle button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px; height: 24px;
-  padding: 0; margin: 0; border: 0;
-  background: transparent;
-  color: var(--ink-muted);
-  cursor: pointer;
-  border-radius: var(--radius-pill);
-  transition: color var(--transition), background var(--transition);
-  -webkit-tap-highlight-color: transparent;
-}
-.mh-theme-toggle button svg { width: 15px; height: 15px; display: block; }
-.mh-theme-toggle button:hover { color: var(--ink); }
-.mh-theme-toggle button:focus-visible { outline: 2px solid var(--mh-focus); outline-offset: 2px; }
-/* Active segment = the one matching the current data-theme (or System
-   before the boot script / for no-JS visitors). */
-html[data-theme="light"]  .mh-theme-toggle button[data-theme-value="light"],
-html[data-theme="dark"]   .mh-theme-toggle button[data-theme-value="dark"],
-html[data-theme="system"] .mh-theme-toggle button[data-theme-value="system"],
-html:not([data-theme])    .mh-theme-toggle button[data-theme-value="system"] {
-  background: var(--lane);
-  color: var(--lane-ink);
-}
 
 /* TOPNAV — pit-wall masthead: condensed wordmark + mono control panel */
 header.topnav {
@@ -6122,7 +6075,7 @@ header.topnav {
   padding: 0 var(--sp-7);
   height: 64px;
   border-bottom: 1px solid var(--hairline);
-  background: light-dark(rgba(248,246,239,0.92), rgba(10,11,17,0.92));
+  background: rgba(10,11,17,0.92);
   /* No blur — glass is banned by every audit. Solid pit-wall (dark) /
      solid paper (light) instead. */
   position: sticky;
@@ -6686,7 +6639,7 @@ p:last-child { margin-bottom: 0; }
 }
 .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--chrome); }
 .btn.secondary:hover {
-  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
+  background: rgba(245,242,232,0.04);
   color: var(--ink);
   border-color: var(--lane);
   box-shadow: none;
@@ -6787,7 +6740,7 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
   font-size: 10px; font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
+  background: rgba(245,242,232,0.04);
   color: var(--ink-dim);
   border: 1px solid var(--hairline);
   white-space: nowrap;
@@ -6866,7 +6819,7 @@ label.mh-choice input { margin: 0; }
   text-transform: uppercase;
 }
 input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], input[type=number], textarea, select {
-  background: light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025)); color: var(--ink);
+  background: rgba(245,242,232,0.025); color: var(--ink);
   border: 1px solid var(--chrome);
   border-radius: var(--radius-sm); padding: 11px 14px;
   /* 44px touch-target floor for every text/file/email/number field. */
@@ -6881,7 +6834,7 @@ input[type=text]:hover, input[type=email]:hover, textarea:hover, select:hover {
 input[type=text]:focus, input[type=email]:focus, input[type=password]:focus, input[type=url]:focus, input[type=number]:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--lane);
   box-shadow: 0 0 0 2px rgba(212,255,58,0.18);
-  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
+  background: rgba(245,242,232,0.04);
 }
 input[type=checkbox], input[type=radio] {
   /* Bump native checkbox/radio from the browser's ~13px default so it
@@ -6923,7 +6876,7 @@ input[type=color] {
      on phone / tablet. Width stays compact so the hex input next to it
      dominates the row. */
   height: 44px; min-width: 44px; padding: 2px; cursor: pointer;
-  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04)); border-color: var(--chrome);
+  background: rgba(245,242,232,0.04); border-color: var(--chrome);
 }
 /* Pair the bumped checkbox with a 44px-tall click target on the wrapping
    label. Covers /organisation/setup's `palette_use_fourth` row plus the
@@ -6996,8 +6949,8 @@ label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio
 
 /* PROGRESS LOG */
 .progress-log {
-  background: light-dark(rgba(20,23,31,0.05), rgba(0,0,0,0.3));
-  color: light-dark(var(--mh-on-surface-variant), #9EB3C8);
+  background: rgba(0,0,0,0.3);
+  color: #9EB3C8;
   border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px; white-space: pre-wrap; max-height: 360px; overflow-y: auto; line-height: 1.7;
@@ -7131,7 +7084,7 @@ a.card:hover, .card[data-interactive]:hover {
   position: fixed; inset: 0;
   /* Light: a translucent paper scrim so the (now dark) loader text
      stays readable; dark: the original deep-ink scrim. */
-  background: light-dark(rgba(245,243,237,0.82), rgba(11,18,32,0.78));
+  background: rgba(11,18,32,0.78);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   z-index: 9999;
   display: none; align-items: center; justify-content: center;
@@ -7538,15 +7491,15 @@ body.mh-cmdk-open { overflow: hidden; }
   font-weight: 600;
   padding: 0 4px;
   border-radius: 4px;
-  background: light-dark(rgba(20, 23, 31, 0.07), rgba(245, 242, 232, 0.06));   /* faint --ink wash */
+  background: rgba(245, 242, 232, 0.06);   /* faint --ink wash */
   /* clone the pill across wrapped lines and keep the line box tight */
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 /* Athlete — the person: the brightest neutral pill (the hero of the card). */
-.mh-fact--athlete { background: light-dark(rgba(20, 23, 31, 0.09), rgba(245, 242, 232, 0.08)); }
+.mh-fact--athlete { background: rgba(245, 242, 232, 0.08); }
 /* Event — the race: a quieter neutral pill. */
-.mh-fact--event { background: light-dark(rgba(20, 23, 31, 0.055), rgba(245, 242, 232, 0.045)); }
+.mh-fact--event { background: rgba(245, 242, 232, 0.045); }
 /* Time — the data: monospace + tabular figures with a faint gold edge. */
 .mh-fact--time {
   font-family: var(--font-mono);
@@ -7929,7 +7882,7 @@ textarea, select { max-width: 100%; }
   content: '';
   position: absolute; inset: 0;
   background:
-    linear-gradient(light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025)) 1px, transparent 1px) 0 0 / 100% 64px,
+    linear-gradient(rgba(245,242,232,0.025) 1px, transparent 1px) 0 0 / 100% 64px,
     linear-gradient(90deg, rgba(245,242,232,0.018) 1px, transparent 1px) 0 0 / 64px 100%;
   pointer-events: none;
   mask-image: radial-gradient(ellipse 80% 70% at 30% 50%, black 30%, transparent 75%);
@@ -8086,7 +8039,7 @@ textarea, select { max-width: 100%; }
   border-color: var(--chrome);
 }
 .mh-cta-secondary:hover {
-  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
+  background: rgba(245,242,232,0.04);
   border-color: var(--lane);
   color: var(--ink);
   transform: translateY(-1px);
@@ -8096,7 +8049,7 @@ textarea, select { max-width: 100%; }
    settles the hover lift (so the button feels responsive to the click),
    and a visible focus ring keeps them keyboard-navigable. */
 .mh-cta-primary:active { transform: translateY(0); background: var(--lane-deep); box-shadow: none; }
-.mh-cta-secondary:active { transform: translateY(0); background: light-dark(rgba(20,23,31,0.08), rgba(245,242,232,0.07)); }
+.mh-cta-secondary:active { transform: translateY(0); background: rgba(245,242,232,0.07); }
 .mh-cta-primary:focus-visible,
 .mh-cta-secondary:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
@@ -10404,27 +10357,9 @@ def _layout(
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark light" />
+<meta name="color-scheme" content="dark" />
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
-<script>
-  /* UI 1.23 — theme boot. Runs BEFORE any CSS paints so the chosen
-     light/dark mode is applied on first frame (no flash). Reads the
-     persisted preference (light | dark | system; default System =
-     follow the OS, dark-first). For an explicit choice we force the
-     mode by writing color-scheme onto <html> (an inline style beats
-     the stylesheet's OS-aware default); System leaves it to the CSS.
-     Every visible colour resolves through light-dark() against this. */
-  (function(){
-    try {
-      var pref = localStorage.getItem('mh-theme');
-      if (pref !== 'light' && pref !== 'dark') pref = 'system';
-      var el = document.documentElement;
-      el.setAttribute('data-theme', pref);
-      if (pref === 'light' || pref === 'dark') el.style.colorScheme = pref;
-    } catch (e) {}
-  })();
-</script>
 <title>{{ title }} &mdash; MediaHub</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
 <link rel="manifest" href="{{ url_for('web_manifest') }}" />
@@ -10592,17 +10527,6 @@ def _layout(
       <a href="{{ url_for('login_page') }}">Log in</a>
       <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
     {% endif %}
-    <div class="mh-theme-toggle" role="radiogroup" aria-label="Colour theme">
-      <button type="button" role="radio" data-theme-value="light" aria-checked="false" aria-label="Light theme" title="Light theme">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-      </button>
-      <button type="button" role="radio" data-theme-value="system" aria-checked="false" aria-label="System theme (follow device)" title="System theme">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
-      </button>
-      <button type="button" role="radio" data-theme-value="dark" aria-checked="false" aria-label="Dark theme" title="Dark theme">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
-      </button>
-    </div>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
@@ -11232,73 +11156,6 @@ def _layout(
       e.preventDefault(); open(); return;
     }
   }, true);
-})();
-</script>
-<script>
-/* UI 1.23 — theme-toggle behaviour. The <head> boot script already
-   applied the saved preference before first paint; this wires the
-   masthead control: reflects the active choice, persists clicks to
-   localStorage, forces (light/dark) or clears (system) color-scheme on
-   <html>, and keeps the mobile browser theme-colour in sync with the
-   resolved page colour. Keyboard: arrow keys move between segments
-   (the WAI-ARIA radiogroup pattern, with roving tabindex). */
-(function(){
-  var group = document.querySelector('.mh-theme-toggle');
-  if (!group) return;
-  var buttons = Array.prototype.slice.call(group.querySelectorAll('button[data-theme-value]'));
-  if (!buttons.length) return;
-
-  function syncMeta(){
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (!meta || !document.body) return;
-    var c = getComputedStyle(document.body).backgroundColor;
-    if (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') meta.setAttribute('content', c);
-  }
-  function current(){
-    var p = document.documentElement.getAttribute('data-theme');
-    return (p === 'light' || p === 'dark') ? p : 'system';
-  }
-  function reflect(){
-    var pref = current();
-    buttons.forEach(function(b){
-      var on = b.getAttribute('data-theme-value') === pref;
-      b.setAttribute('aria-checked', on ? 'true' : 'false');
-      b.tabIndex = on ? 0 : -1;
-    });
-  }
-  function apply(pref, focusIt){
-    if (pref !== 'light' && pref !== 'dark') pref = 'system';
-    var el = document.documentElement;
-    el.setAttribute('data-theme', pref);
-    if (pref === 'light' || pref === 'dark') el.style.colorScheme = pref;
-    else el.style.removeProperty('color-scheme');
-    try { localStorage.setItem('mh-theme', pref); } catch (e) {}
-    reflect();
-    requestAnimationFrame(syncMeta);
-    if (focusIt){
-      var active = group.querySelector('button[aria-checked="true"]');
-      if (active) active.focus();
-    }
-  }
-  buttons.forEach(function(b, i){
-    b.addEventListener('click', function(){ apply(b.getAttribute('data-theme-value'), false); });
-    b.addEventListener('keydown', function(e){
-      var dir = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1
-              : (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   ? -1 : 0;
-      if (!dir) return;
-      e.preventDefault();
-      var next = buttons[(i + dir + buttons.length) % buttons.length];
-      apply(next.getAttribute('data-theme-value'), true);
-    });
-  });
-  try {
-    var mq = window.matchMedia('(prefers-color-scheme: light)');
-    var onOS = function(){ if (current() === 'system') requestAnimationFrame(syncMeta); };
-    if (mq.addEventListener) mq.addEventListener('change', onOS);
-    else if (mq.addListener) mq.addListener(onOS);
-  } catch (e) {}
-  reflect();
-  syncMeta();
 })();
 </script>
 <script>
@@ -14942,7 +14799,7 @@ def create_app() -> Flask:
             empty_body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Activity</span>'
-                f'<h1 class="mh-scramble">Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">'
                 "No runs yet for this organisation. Upload a results file, paste "
                 "a sponsor brief, or describe a moment in your own words &mdash; "
@@ -15241,7 +15098,7 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity</span>'
-            '<h1 class="mh-scramble">Recent runs</h1>'
+            '<h1>Recent runs</h1>'
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
             f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
@@ -15526,7 +15383,7 @@ def create_app() -> Flask:
             empty_body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Activity feed</span>'
-                f'<h1 class="mh-scramble">Nothing here yet, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                f'<h1>Nothing here yet, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">Runs, review decisions, and publishes will stream '
                 "in here as cards &mdash; newest first, each one expandable for the "
                 "detail behind it. Create your first piece to get started.</p>"
@@ -15617,7 +15474,7 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity feed</span>'
-            '<h1 class="mh-scramble">What&rsquo;s happened</h1>'
+            '<h1>What&rsquo;s happened</h1>'
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
             f"<span>{counts['all']:02d} {'event' if counts['all'] == 1 else 'events'}{showing}</span>"
@@ -15687,7 +15544,7 @@ def create_app() -> Flask:
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 f"{eyebrow}"
-                f'<h1 class="mh-scramble">Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">Process your first meet and it lands on this timeline '
                 "&mdash; every meet a node on the season, with the swims matched and the "
                 "moments detected, and a beam that traces the season as you scroll.</p>"
@@ -15812,7 +15669,7 @@ def create_app() -> Flask:
         hero = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             f"{eyebrow}"
-            f'<h1 class="mh-scramble">{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
@@ -16061,7 +15918,7 @@ def create_app() -> Flask:
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
-  <h1 class="mh-scramble">Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
+  <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
@@ -16412,7 +16269,7 @@ def create_app() -> Flask:
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
-  <h1 class="mh-scramble">One more look,<br><em class="editorial">then we run it.</em></h1>
+  <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
   <p class="lede">{_h(meet_name) or "Meet uploaded."} &mdash; {len(clubs)} club{"s" if len(clubs) != 1 else ""} detected. Pick yours and tune the palette for this one-off. Photos are added later, per graphic, so each one lands on the right athlete&rsquo;s card.</p>
 </section>
 
@@ -16960,12 +16817,12 @@ def create_app() -> Flask:
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Pipeline running</span>
-  <h1 class="mh-scramble">Processing run</h1>
+  <h1>Processing run</h1>
   <p class="lede">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds. This page will redirect you to the review queue the moment it's ready.</p>
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage" class="mh-scramble">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
+  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
@@ -17002,13 +16859,10 @@ def create_app() -> Flask:
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
 
-  // UI 1.21 — decode each new "engine is generating…" stage label in. The
-  // helper falls back to a plain text swap if the UI kit hasn't loaded, and
-  // scrambleTo itself no-ops when the label is unchanged between polls.
+  // The live "engine is generating…" stage label updates each poll.
   function setStage(txt) {{
     if (!stage) return;
-    if (window.MH && MH.scrambleTo) MH.scrambleTo(stage, txt);
-    else stage.textContent = txt;
+    stage.textContent = txt;
   }}
 
   function fillBar(colour) {{
@@ -18200,7 +18054,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Review queue</span>
-  <h1 class="mh-scramble">{_h(meet.get("name", "(unknown meet)"))}</h1>
+  <h1>{_h(meet.get("name", "(unknown meet)"))}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(data.get("profile_display", "—"))}</span><span class="sep">·</span>
     <span>{_h(meet.get("start_date", "?"))} – {_h(meet.get("end_date", "?"))}</span><span class="sep">·</span>
@@ -18736,7 +18590,7 @@ function copyWhyCard(btn, taId) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Results table</span>
-  <h1 class="mh-scramble">{_h(meet.get("name") or "(unknown meet)")}</h1>
+  <h1>{_h(meet.get("name") or "(unknown meet)")}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(meet.get("start_date") or "?")} – {_h(meet.get("end_date") or "?")}</span><span class="sep">·</span>
     <span>{_h(meet.get("course") or "?")}</span><span class="sep">·</span>
@@ -20083,7 +19937,7 @@ Relay team broke club record"></textarea>
             '<section class="mh-hero" data-lane="" '
             'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Developer</span>'
-            '<h1 class="mh-scramble">API <em class="editorial">reference</em></h1>'
+            '<h1>API <em class="editorial">reference</em></h1>'
             '<p class="lede">Drive MediaHub from your own scripts: poll a run, pull the '
             "generated cards, export a content pack, or render a reel &mdash; over plain "
             "HTTP and JSON.</p>"
@@ -21847,7 +21701,7 @@ Relay team broke club record"></textarea>
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
                 '<span class="mh-hero-eyebrow">Status</span>'
-                '<h1 class="mh-scramble">Service <em class="editorial">status</em></h1></section>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
                 + _render_settings_status_public_section()
             )
             resp = make_response(_layout("Status", body, active="status"))
@@ -21940,7 +21794,7 @@ Relay team broke club record"></textarea>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">System status</span>'
-            '<h1 class="mh-scramble">Live <em class="editorial">health</em>.</h1>'
+            '<h1>Live <em class="editorial">health</em>.</h1>'
             '<p class="lede">Operational health of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
             "</section>"
             '<div class="card" style="display:flex;align-items:center;gap:14px;'
@@ -22516,7 +22370,7 @@ Relay team broke club record"></textarea>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
-            '<h1 class="mh-scramble">Operations &amp; <em class="editorial">data</em></h1>'
+            '<h1>Operations &amp; <em class="editorial">data</em></h1>'
             '<p class="lede">Pick a heading to manage it. Each card opens its own '
             "page so nothing is buried in one long scroll.</p>"
             "</section>"
@@ -23962,7 +23816,7 @@ window.mhSchedulerDisconnect = function(btn) {
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Plan</span>
-  <h1 class="mh-scramble">What should we<br><em class="editorial">post next?</em></h1>
+  <h1>What should we<br><em class="editorial">post next?</em></h1>
   <p class="lede">This page suggests your next posts, in order, and shows its working.
   Hit <strong>Generate plan</strong> and you get a ranked to-post list built from your
   recent results, the calendar, and anything you tell it below. Each item explains
@@ -25097,7 +24951,7 @@ function mhPlanGenerate(btn) {{
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
-            '<h1 class="mh-scramble">What do you want<br>to <em class="editorial">make</em>?</h1>'
+            '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
             f"{_free_tier_banner_html()}"
@@ -30391,7 +30245,7 @@ what you're doing, what they should do.</p>
             _PRICING_CSS
             + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
-            '<h1 class="mh-scramble">Simple <em class="editorial">plans</em> for every club.</h1>'
+            '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
             "Annual prepay keeps it cheaper.</p>"
             "</section>"
@@ -30755,7 +30609,7 @@ what you're doing, what they should do.</p>
             new_org_url = url_for("organisation_setup")
             home_url = url_for("home")
             empty_body = (
-                '<h1 class="mh-scramble">Sign in</h1>'
+                "<h1>Sign in</h1>"
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
                 "No organisation profiles exist on this deployment yet. "
                 "Create one and it will appear here for sign-in next time."
@@ -30910,7 +30764,7 @@ what you're doing, what they should do.</p>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Sign in</span>'
-            '<h1 class="mh-scramble">Pick the <em class="editorial">organisation</em>.</h1>'
+            '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
             f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
             "Picking one loads its brand voice, palette, logo, and history. "
             "Switch any time from the home page.</p>"
@@ -35499,7 +35353,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 empty_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                     '<span class="mh-hero-eyebrow">Media library</span>'
-                    '<h1 class="mh-scramble">No organisation,<br><em class="editorial">no library.</em></h1>'
+                    '<h1>No organisation,<br><em class="editorial">no library.</em></h1>'
                     '<p class="lede">'
                     "The media library is scoped per organisation. Set up your "
                     "organisation first &mdash; or jump into Create and one "
@@ -35584,7 +35438,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
-  <h1 class="mh-scramble">Library</h1>
+  <h1>Library</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(profile_id)}</span><span class="sep">·</span>
     <span><span data-mh-asset-count>{len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"}</span>

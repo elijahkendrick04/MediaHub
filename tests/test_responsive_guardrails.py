@@ -168,9 +168,11 @@ class TestUserPreferenceMediaQueries:
     def test_forced_colors_active(self, guardrails_css):
         assert "@media (forced-colors: active)" in guardrails_css
 
-    def test_prefers_color_scheme_responsive(self, guardrails_css):
-        assert "prefers-color-scheme: light" in guardrails_css
-        assert "prefers-color-scheme: dark" in guardrails_css
+    def test_color_scheme_pinned_dark(self, guardrails_css):
+        # MediaHub is dark-only: color-scheme is pinned to dark and there
+        # is no prefers-color-scheme light/dark switching.
+        assert "color-scheme: dark;" in guardrails_css
+        assert "prefers-color-scheme" not in guardrails_css
 
 
 class TestContainerQueries:

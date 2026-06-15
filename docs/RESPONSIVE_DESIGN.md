@@ -56,7 +56,9 @@ Act since June 2025.
 | `prefers-reduced-motion: reduce` | Disables animations & transitions (pre-existing) |
 | `prefers-contrast: more` | Boosts hairline / rule / chrome opacity, lifts muted ink |
 | `forced-colors: active` | Keeps focus rings visible in Windows High Contrast Mode |
-| `prefers-color-scheme: light/dark` | Advertises the dark-first scheme to browser chrome |
+
+`color-scheme` is pinned to `dark` (MediaHub is dark-only), so the UA
+chrome (scrollbars, form controls, text selection) always renders dark.
 
 ### 7. Form-factor breakpoints
 - **`max-width: 320px`** — smartwatch / Wear-OS. Tight padding so content fits.
@@ -92,7 +94,7 @@ clean PDF.
 The shared page template now emits:
 ```html
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark light" />
+<meta name="color-scheme" content="dark" />
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
 ```

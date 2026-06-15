@@ -16,7 +16,7 @@ None of them prove that:
     interpolable,
   - the inline ``<style id="mh-theme-seed">`` override wins the
     cascade over the static fallback declarations,
-  - the ``light-dark()`` wrappers respect ``color-scheme: dark``.
+  - every tier-2 role token resolves to its dark value.
 
 A Playwright test catches all of the above via a single
 ``getComputedStyle`` call.

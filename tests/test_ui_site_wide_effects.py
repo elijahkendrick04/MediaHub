@@ -1,13 +1,13 @@
 """Site-wide UX/UI effect coverage — the landing-page motion kit, spread.
 
 Yesterday's Phase-U work landed a rich motion/effect layer (scroll-reveal,
-decode-in headlines, count-up stats, card hover-lift, hero entrance). The
+count-up stats, card hover-lift, hero entrance). The
 *engine* for all of it is global — it ships in ``_layout`` (inline CSS/JS) and
 ``ui-kit.js`` on every page — but the landing page was the only surface that
 actually *wore* the signature effects.
 
 This test pins the follow-up: the effects are now incorporated across all of the
-main navigable surfaces, not just the home page. Three contracts:
+main navigable surfaces, not just the home page. Two contracts:
 
   1. ``BASE_CSS`` carries the two *global* enhancements that reach every page
      with no per-page markup — the shared ``.mh-hero`` header entrance and the
@@ -15,10 +15,6 @@ main navigable surfaces, not just the home page. Three contracts:
      ``prefers-reduced-motion``.
   2. Every page's ``<body>`` is tagged ``data-page="<active>"`` so page-scoped
      effects (and the home-hero opt-out) can key off it.
-  3. The signature decode-in (``.mh-scramble``) rides the primary ``<h1>`` of
-     the main navigable pages — signed-out *and* signed-in — while the landing
-     hero ``<h1>`` stays deliberately attribute-free (its bespoke word-cycle
-     owns that headline).
 
 Presentation-only: the deterministic engine, AI surfaces and explainability
 logic are untouched. Mirrors the fixture/gating style of
@@ -72,13 +68,6 @@ def _get(client, path, *, signed_in=False):
     resp = client.get(path, follow_redirects=True)
     assert resp.status_code == 200, f"GET {path} → {resp.status_code}"
     return resp.get_data(as_text=True)
-
-
-def _primary_h1(body: str) -> str:
-    """The first <h1 …>…</h1> on the page — its primary heading."""
-    m = re.search(r"<h1\b[^>]*>.*?</h1>", body, re.DOTALL)
-    assert m, "page has no <h1>"
-    return m.group(0)
 
 
 # =========================================================================== #
@@ -153,36 +142,3 @@ class TestBodyPageTag:
         for path in ("/", "/pricing", "/status", "/media-library"):
             body = _get(client, path)
             assert re.search(r'<body[^>]*\sdata-page="[a-z_]+"', body), f"{path} has no data-page"
-
-
-# =========================================================================== #
-# 3) The decode-in (.mh-scramble) signature rides the primary heading of
-#    every main page — but never the landing hero.
-# =========================================================================== #
-class TestDecodeInHeadlines:
-    def test_landing_hero_h1_stays_attribute_free(self, client):
-        # The U.9 word-cycle owns the hero headline; it must stay bare.
-        body = _get(client, "/")
-        assert _primary_h1(body) == re.search(r"<h1>.*?</h1>", body, re.DOTALL).group(0)
-        assert "mh-scramble" not in _primary_h1(body)
-
-    @pytest.mark.parametrize(
-        "path",
-        ["/make", "/templates", "/settings", "/pricing", "/sign-in", "/status", "/media-library"],
-    )
-    def test_signed_out_pages_decode_their_heading(self, client, path):
-        body = _get(client, path)
-        assert "mh-scramble" in _primary_h1(body), f"{path} heading is not a decode-in"
-
-    @pytest.mark.parametrize(
-        "path", ["/plan", "/activity", "/season", "/media-library", "/settings"]
-    )
-    def test_signed_in_pages_decode_their_heading(self, client, path):
-        body = _get(client, path, signed_in=True)
-        assert "mh-scramble" in _primary_h1(body), f"{path} (signed in) heading is not a decode-in"
-
-    def test_templates_still_has_exactly_one_h1(self, client):
-        # The decode-in is a class on the existing <h1>, not a second heading —
-        # the gallery's heading-order contract is preserved.
-        body = _get(client, "/templates")
-        assert body.count("<h1") == 1

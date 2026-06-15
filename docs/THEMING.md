@@ -115,42 +115,22 @@ The 25+ Material 3 role tokens you actually consume:
 | `--mh-elevation-2` | Card drop | composite shadow |
 | `--mh-elevation-3` | Modal drop | composite shadow |
 
-### Light & dark mode (Stage D — UI 1.23)
+### Dark-only colour scheme
 
-MediaHub is **dark-first** but ships a real **light** palette. Every
-surface / text / outline role above is declared
-`light-dark(<light>, <dark>)` in `theme-base.css`, so the *same* token
-resolves to a warm-paper value in light and the pit-wall value in dark.
-The light branch is the inverse of the dark ramp — page = paper-cream
-(`neutral-50`), cards = white (`neutral-0`), text = deep ink
-(`neutral-900..500`) — and clears WCAG AA on both the page and white
-cards (`tests/test_theme_toggle.py` pins the contrast). The dark branch
-is byte-identical to Stage C, so **dark mode does not move a pixel**.
+MediaHub ships a **single dark theme** — there is no light mode and no
+in-app theme toggle. Every surface / text / outline role above resolves
+to one dark value in `theme-base.css`. `color-scheme: dark` is pinned in
+`responsive_guardrails.py` so the UA chrome (scrollbars, form controls,
+text selection) renders dark to match.
 
-Three rules make this work without per-component effort:
+Lane-yellow is the brand *fill*: button fills stay lane-yellow with dark
+`--mh-on-primary` text, generic links use `--lane`, and the
+medal/tertiary accent is the pale gold that glows on the pit-wall.
 
-1. **`color-scheme` drives everything.** `light-dark()` resolves against
-   the element's used `color-scheme`. The default
-   (`responsive_guardrails.py`) is `color-scheme: dark light` —
-   dark-first, but a visitor whose OS prefers light gets the light
-   branch automatically. No selector, no media query, no JS needed for
-   the colour swap.
-2. **The in-app toggle just sets `color-scheme`.** The masthead control
-   (Light · System · Dark) writes the choice to `localStorage['mh-theme']`
-   and, for an explicit pick, forces an inline `color-scheme` onto
-   `<html>` (which beats the stylesheet). A `<head>` boot script applies
-   the saved choice **before first paint** (no flash). "System" clears
-   the override and follows the OS.
-3. **Lane-yellow is a fill, not text, in light.** Yellow-on-paper is
-   illegible, so links (`--mh-link`) and the focus ring (`--mh-focus`)
-   darken to the olive end of the brand ramp in the light branch, while
-   button *fills* stay lane-yellow (with dark `--mh-on-primary` text)
-   in both modes. The medal/tertiary accent steps to a richer gold so
-   it holds its weight on white.
-
-When you add chrome that hardcodes a dark colour (a scrim, a tint), wrap
-it in `light-dark(<light>, <dark>)` so it flips too — keep the dark
-branch byte-identical to avoid drifting dark mode.
+When you add chrome that needs a colour (a scrim, a tint), reference an
+existing role token (`--mh-surface*`, `--mh-on-surface*`,
+`--mh-outline*`) rather than hardcoding a hex, so a brand re-seed still
+ripples through.
 
 ### Tier 3 — Component tokens
 
@@ -210,7 +190,7 @@ convention in `mediahub.theming.theme_store`:
 
 | Surface | Scheme | `primary ←` |
 |---|---|---|
-| Web (cascade) | both via `light-dark()` | `--mh-primary` |
+| Web (cascade) | dark | `--mh-primary` |
 | Motion (Remotion) | dark | `roles.dark.primary` |
 | Email | light | `roles.light.primary` |
 | Static graphics | light | `roles.light.primary` |
@@ -321,8 +301,7 @@ If a new role appears in 3+ components and needs to be themed:
 
 1. Add the token declaration to `theme-base.css`:
    ```css
-   --mh-new-role: light-dark(var(--mh-prim-X-Y),
-                              var(--mh-prim-X-Z));
+   --mh-new-role: var(--mh-prim-X-Y);
    ```
 2. Add the matching `@property` registration:
    ```css

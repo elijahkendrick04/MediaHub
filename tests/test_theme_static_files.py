@@ -247,68 +247,34 @@ class TestDerive:
 
 
 # ---------------------------------------------------------------------------
-# C3 — light-dark() for prefers-color-scheme parity
+# C3 — dark-only colour scheme
 # ---------------------------------------------------------------------------
 
 
-class TestLightDark:
-    def test_color_scheme_declared(self, base_css):
+class TestDarkOnly:
+    def test_color_scheme_declared_dark(self, base_css):
         # color-scheme tells the UA chrome (scrollbars, form controls)
-        # which mode to render in.
-        assert "color-scheme:" in base_css
+        # which mode to render in. MediaHub ships a single dark theme.
+        assert "color-scheme: dark;" in base_css
 
-    def test_light_dark_used_extensively(self, base_css):
-        # Tier-2 role tokens are wrapped in light-dark(). Count how
-        # many actually fire.
-        matches = re.findall(r"light-dark\(", base_css)
-        assert len(matches) >= 20, (
-            f"only {len(matches)} light-dark() wrappers; expected ≥ 20 "
-            f"(one per tier-2 role token)"
-        )
+    def test_no_light_dark_wrappers(self, base_css):
+        # The light/dark theme was removed — no light-dark() wrappers
+        # remain; every tier-2 role resolves to a single dark value.
+        assert "light-dark(" not in base_css
 
-    def test_light_dark_arguments_are_valid_primitive_refs(self, base_css):
-        """Stage D (UI 1.23): every light-dark(var(--a), var(--b)) must
-        reference declared primitives (or tier-2 roles) on BOTH sides —
-        no dangling vars. This is the structural successor to the old
-        Stage-C "args must be identical" pin, which UI 1.23 replaces by
-        shipping a real light palette (asserted below).
-        """
-        declared = set(re.findall(r"(--mh-[\w-]+)\s*:", base_css))
-        # Primitives live in the fallback/derive files, not base — accept
-        # the documented primitive namespace without requiring a local decl.
-        for m in re.finditer(
-            r"light-dark\(\s*var\((--[\w-]+)\)\s*,\s*var\((--[\w-]+)\)\s*\)",
-            base_css,
-        ):
-            light, dark = m.group(1), m.group(2)
-            for ref in (light, dark):
-                ok = ref.startswith("--mh-prim-") or ref in declared
-                assert ok, f"light-dark() references undeclared var {ref}"
-
-    def test_real_light_palette_shipped(self, base_css):
-        """UI 1.23 turns the dark-only Stage C scaffold into a real
-        light theme: the core surface + on-surface role tokens MUST now
-        resolve to DIFFERENT primitives in light vs dark. (The brand /
-        status roles are intentionally allowed to stay identical — the
-        lane-yellow fill is brand identity in both modes.)
-        """
-        must_differ = {
-            "--mh-surface", "--mh-surface-deep", "--mh-surface-variant",
-            "--mh-surface-container", "--mh-surface-container-high",
-            "--mh-on-surface", "--mh-on-surface-variant",
-            "--mh-on-surface-muted", "--mh-on-surface-faint",
+    def test_surface_roles_resolve_to_dark_primitives(self, base_css):
+        # The core surface + on-surface roles map to the dark neutral ramp.
+        expected = {
+            "--mh-surface": "--mh-prim-neutral-950",
+            "--mh-surface-deep": "--mh-prim-neutral-1000",
+            "--mh-surface-variant": "--mh-prim-neutral-900",
+            "--mh-on-surface": "--mh-prim-neutral-50",
         }
-        for token in must_differ:
-            m = re.search(
-                rf"{re.escape(token)}:\s*light-dark\(\s*var\((--[\w-]+)\)\s*,"
-                rf"\s*var\((--[\w-]+)\)\s*\)",
-                base_css,
-            )
-            assert m, f"{token} is no longer a light-dark(var(), var()) role"
-            light, dark = m.group(1), m.group(2)
-            assert light != dark, (
-                f"{token} still ships identical light/dark args ({light}); "
-                f"UI 1.23 requires a real light value"
+        for token, prim in expected.items():
+            m = re.search(rf"{re.escape(token)}:\s*var\((--[\w-]+)\)\s*;", base_css)
+            assert m, f"{token} is not a single var() role"
+            assert m.group(1) == prim, (
+                f"{token} resolves to {m.group(1)}, expected {prim}"
             )
 
 
