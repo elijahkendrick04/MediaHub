@@ -418,6 +418,12 @@ def _card_to_props(
         "photoSrc": _photo_data_uri_for_brief(b),
         "photoPos": _photo_focus_for_brief(b),
         "archetype": str(b.get("layout_template") or ""),
+        # The still's style pack id (graphic_renderer.style_packs): the motion
+        # render layers the same ground/texture/accent-geometry overlay so a
+        # card's video carries the still's exact decorative treatment. Folds
+        # into the cache key via the card payload; "" = the bare (undecorated)
+        # card, byte-equivalent to the pre-pack render.
+        "stylePack": str(b.get("style_pack") or ""),
         "heroStat": str(brief_layers.get("hero_stat") or ""),
         # The director's motion language for this card (design_spec
         # MOTION_INTENTS). "" = the composition's mood/seed default.
@@ -471,6 +477,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
     """The per-card explainability axes worth recording (no photo bytes)."""
     return {
         "archetype": card_props.get("archetype") or "",
+        "style_pack": card_props.get("stylePack") or "",
         "motion_intent": card_props.get("motionIntent") or "",
         "mood": card_props.get("mood") or "",
         "variation_seed": card_props.get("variationSeed") or 0,
