@@ -23057,8 +23057,7 @@ window.mhSchedulerDisconnect = function(btn) {
             " &mdash; Playwright / Node / Remotion availability.</li>"
             f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
             " &mdash; process RSS and active-run counters.</li>"
-            "</ul></div>"
-            + _render_settings_cache_purge_card()
+            "</ul></div>" + _render_settings_cache_purge_card()
         )
 
     def _render_settings_cache_purge_card() -> str:
