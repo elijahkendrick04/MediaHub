@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `c7e02c0a9` · Merge pull request #606: Spread the Phase-U motion/effect kit across every page
+**Last updated:** 2026-06-15 · `43b24cdcd` · Merge pull request #608 from elijahkendrick04/claude/elegant-fermi-bmj26m
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1487,11 +1487,11 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `ea5197d87` | Make every page phone/tablet friendly: fix the remaining mobile overflow + cramped tables |
 | 2026-06-15 | `359eaa707` | Spread the Phase-U motion/effect kit across every page, not just home |
 | 2026-06-14 | `522aab03f` | Remove unused imports in scripts/ (ruff F401) |
 | 2026-06-14 | `8f2de7cb7` | Keep heartbeat drain thread alive past a task_done() ValueError |
 | 2026-06-14 | `9001dfb53` | UI 1.7: pinned-panel scrollytelling on the landing how-it-works |
 | 2026-06-14 | `fb24b2247` | chore: fix workflow README end-of-file newline (pre-commit hygiene) |
 | 2026-06-14 | `20d61fa39` | Apply ruff-format after merge reconstruction |
-| 2026-06-14 | `01ed161d6` | Move activity-feed CSS into a page-scoped <style> (avoid shared-file churn) |
 <!-- /ROADMAP:ACTIVITY -->
