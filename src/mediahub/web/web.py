@@ -7011,6 +7011,27 @@ main.wrap > .card:nth-of-type(3) { animation-delay: 0.15s; }
 main.wrap > .card:nth-of-type(4) { animation-delay: 0.20s; }
 main.wrap > .card:nth-of-type(5) { animation-delay: 0.25s; }
 
+/* Shared page-header entrance. Almost every surface opens with a `.mh-hero`
+   block (eyebrow -> headline -> lede); give those three a gentle staggered rise
+   so the *whole site* — not just the landing page — settles in with the same
+   editorial cadence. The home hero keeps its bespoke word-cycle / odometer
+   treatment, so it's excluded here. Pure CSS load animation (no persistent
+   hidden state -> nothing can get stuck), and it stands down under
+   prefers-reduced-motion via the reset below. */
+body:not([data-page="home"]) main.wrap .mh-hero > .mh-hero-eyebrow,
+body:not([data-page="home"]) main.wrap .mh-hero > h1,
+body:not([data-page="home"]) main.wrap .mh-hero > .lede {
+  animation: mh-fade-in 0.5s var(--ease-out, ease-out) backwards;
+}
+body:not([data-page="home"]) main.wrap .mh-hero > .mh-hero-eyebrow { animation-delay: 0.04s; }
+body:not([data-page="home"]) main.wrap .mh-hero > h1 { animation-delay: 0.12s; }
+body:not([data-page="home"]) main.wrap .mh-hero > .lede { animation-delay: 0.20s; }
+@media (prefers-reduced-motion: reduce) {
+  body:not([data-page="home"]) main.wrap .mh-hero > .mh-hero-eyebrow,
+  body:not([data-page="home"]) main.wrap .mh-hero > h1,
+  body:not([data-page="home"]) main.wrap .mh-hero > .lede { animation: none; }
+}
+
 /* Single static lane-yellow wash at the top edge — broadcast lower-third feel */
 body::before {
   content: ''; position: fixed;
@@ -7065,12 +7086,25 @@ body::before {
   .mh-bg-logos { animation: none; }
 }
 
-/* Card hover */
-.card { transition: background var(--transition), border-color var(--transition); }
+/* Card hover. Interactive cards (links / [data-interactive]) lift a touch and
+   deepen their shadow on hover — the same tactile feedback the activity-feed
+   rows and bento tiles use, applied site-wide so every clickable card on every
+   surface feels alive, not just the landing page. The lift is gated to
+   fine-pointer + motion-allowed so touch and the reduced-motion cohort keep the
+   flat, static card; non-interactive info cards never move (correct affordance). */
+.card { transition: background var(--transition), border-color var(--transition),
+                    box-shadow var(--transition), transform var(--transition); }
 a.card, .card[data-interactive] { cursor: pointer; }
 a.card:hover, .card[data-interactive]:hover {
   border-color: var(--rule);
   background: var(--surface-2);
+}
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  a.card:hover, .card[data-interactive]:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-2, var(--shadow-1));
+  }
+  a.card:active, .card[data-interactive]:active { transform: translateY(0); }
 }
 
 /* Loading overlay */
@@ -10428,7 +10462,7 @@ def _layout(
      page fully usable (effects are decorative). -->
 <script defer src="{{ url_for('static', filename='js/ui-kit.js') }}"></script>
 </head>
-<body class="{{ 'mh-has-dock' if dock else '' }}">
+<body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
 {{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
@@ -15801,7 +15835,7 @@ def create_app() -> Flask:
             empty_body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Activity</span>'
-                f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                f'<h1 class="mh-scramble">Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">'
                 "No runs yet for this organisation. Upload a results file, paste "
                 "a sponsor brief, or describe a moment in your own words &mdash; "
@@ -16100,7 +16134,7 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity</span>'
-            "<h1>Recent runs</h1>"
+            '<h1 class="mh-scramble">Recent runs</h1>'
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
             f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
@@ -16385,7 +16419,7 @@ def create_app() -> Flask:
             empty_body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Activity feed</span>'
-                f'<h1>Nothing here yet, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                f'<h1 class="mh-scramble">Nothing here yet, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">Runs, review decisions, and publishes will stream '
                 "in here as cards &mdash; newest first, each one expandable for the "
                 "detail behind it. Create your first piece to get started.</p>"
@@ -16476,7 +16510,7 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity feed</span>'
-            "<h1>What&rsquo;s happened</h1>"
+            '<h1 class="mh-scramble">What&rsquo;s happened</h1>'
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
             f"<span>{counts['all']:02d} {'event' if counts['all'] == 1 else 'events'}{showing}</span>"
@@ -16546,7 +16580,7 @@ def create_app() -> Flask:
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 f"{eyebrow}"
-                f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                f'<h1 class="mh-scramble">Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">Process your first meet and it lands on this timeline '
                 "&mdash; every meet a node on the season, with the swims matched and the "
                 "moments detected, and a beam that traces the season as you scroll.</p>"
@@ -16671,7 +16705,7 @@ def create_app() -> Flask:
         hero = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             f"{eyebrow}"
-            f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            f'<h1 class="mh-scramble">{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
@@ -17271,7 +17305,7 @@ def create_app() -> Flask:
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
-  <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
+  <h1 class="mh-scramble">One more look,<br><em class="editorial">then we run it.</em></h1>
   <p class="lede">{_h(meet_name) or "Meet uploaded."} &mdash; {len(clubs)} club{"s" if len(clubs) != 1 else ""} detected. Pick yours and tune the palette for this one-off. Photos are added later, per graphic, so each one lands on the right athlete&rsquo;s card.</p>
 </section>
 
@@ -19059,7 +19093,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Review queue</span>
-  <h1>{_h(meet.get("name", "(unknown meet)"))}</h1>
+  <h1 class="mh-scramble">{_h(meet.get("name", "(unknown meet)"))}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(data.get("profile_display", "—"))}</span><span class="sep">·</span>
     <span>{_h(meet.get("start_date", "?"))} – {_h(meet.get("end_date", "?"))}</span><span class="sep">·</span>
@@ -19595,7 +19629,7 @@ function copyWhyCard(btn, taId) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Results table</span>
-  <h1>{_h(meet.get("name") or "(unknown meet)")}</h1>
+  <h1 class="mh-scramble">{_h(meet.get("name") or "(unknown meet)")}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(meet.get("start_date") or "?")} – {_h(meet.get("end_date") or "?")}</span><span class="sep">·</span>
     <span>{_h(meet.get("course") or "?")}</span><span class="sep">·</span>
@@ -19607,10 +19641,10 @@ function copyWhyCard(btn, taId) {{
 </section>
 
 <div class="stat-block" style="margin-bottom:var(--sp-5)">
-  <div class="stat"><div class="l">Swims</div><div class="v">{n_swims}</div></div>
-  <div class="stat"><div class="l">Athletes</div><div class="v">{n_athletes}</div></div>
-  <div class="stat"><div class="l">Personal bests</div><div class="v" style="color:var(--medal)">{n_pb}</div></div>
-  <div class="stat"><div class="l">Improvements</div><div class="v" style="color:var(--good)">{n_impr}</div></div>
+  <div class="stat"><div class="l">Swims</div><div class="v" data-mh-count="{n_swims}">{n_swims}</div></div>
+  <div class="stat"><div class="l">Athletes</div><div class="v" data-mh-count="{n_athletes}">{n_athletes}</div></div>
+  <div class="stat"><div class="l">Personal bests</div><div class="v" data-mh-count="{n_pb}" style="color:var(--medal)">{n_pb}</div></div>
+  <div class="stat"><div class="l">Improvements</div><div class="v" data-mh-count="{n_impr}" style="color:var(--good)">{n_impr}</div></div>
 </div>
 
 <div class="card">
@@ -20942,7 +20976,7 @@ Relay team broke club record"></textarea>
             '<section class="mh-hero" data-lane="" '
             'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Developer</span>'
-            '<h1>API <em class="editorial">reference</em></h1>'
+            '<h1 class="mh-scramble">API <em class="editorial">reference</em></h1>'
             '<p class="lede">Drive MediaHub from your own scripts: poll a run, pull the '
             "generated cards, export a content pack, or render a reel &mdash; over plain "
             "HTTP and JSON.</p>"
@@ -22706,7 +22740,7 @@ Relay team broke club record"></textarea>
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
                 '<span class="mh-hero-eyebrow">Status</span>'
-                '<h1>Service <em class="editorial">status</em></h1></section>'
+                '<h1 class="mh-scramble">Service <em class="editorial">status</em></h1></section>'
                 + _render_settings_status_public_section()
             )
             resp = make_response(_layout("Status", body, active="status"))
@@ -22799,7 +22833,7 @@ Relay team broke club record"></textarea>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">System status</span>'
-            '<h1>Live <em class="editorial">health</em>.</h1>'
+            '<h1 class="mh-scramble">Live <em class="editorial">health</em>.</h1>'
             '<p class="lede">Operational health of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
             "</section>"
             '<div class="card" style="display:flex;align-items:center;gap:14px;'
@@ -23375,7 +23409,7 @@ Relay team broke club record"></textarea>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
-            '<h1>Operations &amp; <em class="editorial">data</em></h1>'
+            '<h1 class="mh-scramble">Operations &amp; <em class="editorial">data</em></h1>'
             '<p class="lede">Pick a heading to manage it. Each card opens its own '
             "page so nothing is buried in one long scroll.</p>"
             "</section>"
@@ -24821,7 +24855,7 @@ window.mhSchedulerDisconnect = function(btn) {
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Plan</span>
-  <h1>What should we<br><em class="editorial">post next?</em></h1>
+  <h1 class="mh-scramble">What should we<br><em class="editorial">post next?</em></h1>
   <p class="lede">This page suggests your next posts, in order, and shows its working.
   Hit <strong>Generate plan</strong> and you get a ranked to-post list built from your
   recent results, the calendar, and anything you tell it below. Each item explains
@@ -25956,7 +25990,7 @@ function mhPlanGenerate(btn) {{
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
-            '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
+            '<h1 class="mh-scramble">What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
             f"{_free_tier_banner_html()}"
@@ -31250,7 +31284,7 @@ what you're doing, what they should do.</p>
             _PRICING_CSS
             + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
-            '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
+            '<h1 class="mh-scramble">Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
             "Annual prepay keeps it cheaper.</p>"
             "</section>"
@@ -31614,7 +31648,7 @@ what you're doing, what they should do.</p>
             new_org_url = url_for("organisation_setup")
             home_url = url_for("home")
             empty_body = (
-                "<h1>Sign in</h1>"
+                '<h1 class="mh-scramble">Sign in</h1>'
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
                 "No organisation profiles exist on this deployment yet. "
                 "Create one and it will appear here for sign-in next time."
@@ -31769,7 +31803,7 @@ what you're doing, what they should do.</p>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Sign in</span>'
-            '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
+            '<h1 class="mh-scramble">Pick the <em class="editorial">organisation</em>.</h1>'
             f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
             "Picking one loads its brand voice, palette, logo, and history. "
             "Switch any time from the home page.</p>"
@@ -36358,7 +36392,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 empty_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                     '<span class="mh-hero-eyebrow">Media library</span>'
-                    '<h1>No organisation,<br><em class="editorial">no library.</em></h1>'
+                    '<h1 class="mh-scramble">No organisation,<br><em class="editorial">no library.</em></h1>'
                     '<p class="lede">'
                     "The media library is scoped per organisation. Set up your "
                     "organisation first &mdash; or jump into Create and one "
@@ -36443,7 +36477,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
-  <h1>Library</h1>
+  <h1 class="mh-scramble">Library</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(profile_id)}</span><span class="sep">·</span>
     <span><span data-mh-asset-count>{len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"}</span>

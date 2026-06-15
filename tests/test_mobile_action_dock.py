@@ -15,6 +15,7 @@ These tests pin the contract on three surfaces:
   below modals + above the bottom-tab bar it replaces, highlights the targeted
   card, and is a no-op under prefers-reduced-motion.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -44,6 +45,7 @@ _PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
 def _playwright_available() -> bool:
     try:
         import playwright.sync_api  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -55,6 +57,7 @@ def _chromium_available() -> bool:
 
 def _launch_browser():
     from playwright.sync_api import sync_playwright
+
     pw = sync_playwright().start()
     browser = pw.chromium.launch(
         executable_path=str(_PINNED_CHROMIUM),
@@ -67,6 +70,7 @@ def _launch_browser():
 # ---------------------------------------------------------------------------
 # Fixtures / helpers (mirrors tests/test_review_body_content.py)
 # ---------------------------------------------------------------------------
+
 
 def _seed_run(tmp_path, wm, profile_id, run_payload):
     """Write run JSON to disk and insert a matching DB row."""
@@ -144,15 +148,19 @@ def env(tmp_path, monkeypatch):
 
     import mediahub.web.club_profile as cp
     import mediahub.web.web as wm
+
     importlib.reload(cp)
     importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(
-        profile_id="org-test",
-        display_name="Test Club",
-        brand_voice_summary="Clear and energetic.",
-    ))
+
+    save_profile(
+        ClubProfile(
+            profile_id="org-test",
+            display_name="Test Club",
+            brand_voice_summary="Clear and energetic.",
+        )
+    )
 
     app = wm.create_app()
     app.config["TESTING"] = True
@@ -166,9 +174,11 @@ def env(tmp_path, monkeypatch):
 
 def _real_body_tag(html: str) -> str:
     """The actual <body> element (the one after </head>), not any literal that
-    might live inside the inlined <style>/comments."""
+    might live inside the inlined <style>/comments. The tag also carries a
+    ``data-page="…"`` attribute (the site-wide page-scoped-effect hook), so the
+    match is not anchored to the closing ``">`` right after the class."""
     head_end = html.find("</head>")
-    m = re.search(r"<body class=\"[^\"]*\">", html[head_end if head_end >= 0 else 0:])
+    m = re.search(r"<body class=\"[^\"]*\"[^>]*>", html[head_end if head_end >= 0 else 0 :])
     return m.group(0) if m else ""
 
 
@@ -176,29 +186,33 @@ def _real_body_tag(html: str) -> str:
 # Unit: _layout(dock=...) contract
 # ---------------------------------------------------------------------------
 
+
 class TestLayoutDockContract:
     def test_no_dock_by_default(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("Anything", "<p>body</p>")
         assert 'class="mh-action-dock"' not in html
-        assert _real_body_tag(html) == '<body class="">'
+        body_tag = _real_body_tag(html)
+        assert body_tag.startswith('<body class="" ')
+        assert "mh-has-dock" not in body_tag
 
     def test_dock_renders_when_opted_in(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("Anything", "<p>body</p>", dock={"builder": "/pack/abc"})
         assert 'class="mh-action-dock"' in html
-        assert _real_body_tag(html) == '<body class="mh-has-dock">'
+        assert 'class="mh-has-dock"' in _real_body_tag(html)
 
     def test_dock_links_use_url_for(self, env):
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("Anything", "<p>body</p>", dock={"builder": "/pack/abc"})
             # Slice to just the dock element so we assert on its own links.
-            dock = html[html.find('class="mh-action-dock"'):]
+            dock = html[html.find('class="mh-action-dock"') :]
             dock = dock[: dock.find("</nav>")]
             from flask import url_for
+
             assert f'href="{url_for("make_page")}"' in dock
             assert f'href="{url_for("media_library_page")}"' in dock
         assert 'data-builder-url="/pack/abc"' in html
@@ -207,7 +221,7 @@ class TestLayoutDockContract:
         wm = env["wm"]
         with env["app"].test_request_context("/"):
             html = wm._layout("X", "<p>b</p>", dock={"builder": "/pack/abc"})
-        dock = html[html.find('class="mh-action-dock"'):]
+        dock = html[html.find('class="mh-action-dock"') :]
         dock = dock[: dock.find("</nav>")]
         # Two navigation anchors (Create, Library) + one action button (Approve).
         assert dock.count("<a ") == 2
@@ -222,8 +236,9 @@ class TestLayoutDockContract:
         assert "data-mh-dock-count" in html
         # The count chip is decorative for SR (the button's aria-label carries
         # the live number), so it must be aria-hidden.
-        assert re.search(r'data-mh-dock-count[^>]*aria-hidden="true"', html) or \
-            re.search(r'aria-hidden="true"[^>]*data-mh-dock-count', html)
+        assert re.search(r'data-mh-dock-count[^>]*aria-hidden="true"', html) or re.search(
+            r'aria-hidden="true"[^>]*data-mh-dock-count', html
+        )
 
     def test_dock_js_present_and_feature_detected(self, env):
         wm = env["wm"]
@@ -251,11 +266,16 @@ class TestLayoutDockContract:
 # Integration: /review/<run_id> carries the dock; other surfaces do not
 # ---------------------------------------------------------------------------
 
+
 class TestDockOnReview:
     def _seed(self, env, n=3):
         achs = [
-            {"swim_id": f"s{i}", "swimmer_name": f"Swimmer {i}",
-             "event": f"{50 * i}m Free", "headline": f"PB {i}"}
+            {
+                "swim_id": f"s{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": f"{50 * i}m Free",
+                "headline": f"PB {i}",
+            }
             for i in range(1, n + 1)
         ]
         payload = _make_run_payload("org-test", achs)
@@ -265,7 +285,7 @@ class TestDockOnReview:
         run_id = self._seed(env)
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
         assert 'class="mh-action-dock"' in body
-        assert '<body class="mh-has-dock">' in body
+        assert 'class="mh-has-dock"' in body
 
     def test_builder_url_points_at_content_pack(self, env):
         run_id = self._seed(env)
@@ -275,7 +295,7 @@ class TestDockOnReview:
     def test_create_and_library_links_in_dock(self, env):
         run_id = self._seed(env)
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-        dock = body[body.find('class="mh-action-dock"'):]
+        dock = body[body.find('class="mh-action-dock"') :]
         dock = dock[: dock.find("</nav>")]
         assert 'href="/make"' in dock
         assert 'href="/media-library"' in dock
@@ -286,14 +306,14 @@ class TestDockOnReview:
         the initial value must be right for no-JS / pre-hydration)."""
         run_id = self._seed(env, n=4)  # 4 fresh cards, none decided → all queued
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
-        m = re.search(r'data-mh-dock-count[^>]*>(\d+)</span>', body)
+        m = re.search(r"data-mh-dock-count[^>]*>(\d+)</span>", body)
         assert m, "count chip not found"
         assert m.group(1) == "4", f"expected initial queued count 4, got {m.group(1)}"
 
     def test_dock_absent_on_home(self, env):
         body = env["client"].get("/").get_data(as_text=True)
         assert 'class="mh-action-dock"' not in body
-        assert '<body class="mh-has-dock">' not in body
+        assert 'class="mh-has-dock"' not in body
 
     def test_dock_absent_on_failed_run_review(self, env):
         """A terminally-failed run renders the U.2 error state via _layout with
@@ -310,7 +330,7 @@ class TestDockOnReview:
         body = env["client"].get(f"/review/{run_id}").get_data(as_text=True)
         assert "couldn" in body.lower()  # the failure hero rendered
         assert 'class="mh-action-dock"' not in body
-        assert '<body class="mh-has-dock">' not in body
+        assert 'class="mh-has-dock"' not in body
 
     def test_magic_link_mobile_page_has_no_dock(self, env):
         """The un-authed phone approval page (/m/<token>) is deliberately
@@ -331,6 +351,7 @@ class TestDockOnReview:
 # CSS: desktop-hidden / mobile-shown / stacking / highlight / reduced-motion
 # ---------------------------------------------------------------------------
 
+
 class TestDockCss:
     @pytest.fixture(scope="class")
     def css(self):
@@ -343,7 +364,7 @@ class TestDockCss:
         # Desktop default: display:none, declared before the mobile media query.
         assert re.search(r"\.mh-action-dock\s*\{\s*display:\s*none", css)
         # And it becomes a flex capsule inside the <=720px breakpoint.
-        mobile = css[css.find("@media (max-width: 720px)"):]
+        mobile = css[css.find("@media (max-width: 720px)") :]
         assert ".mh-action-dock" in mobile
         assert re.search(r"\.mh-action-dock\s*\{[^}]*display:\s*flex", mobile, re.DOTALL)
 
@@ -379,12 +400,13 @@ class TestDockCss:
         assert ".ach-row.mh-dock-target" in css
 
     def test_reduced_motion_disables_animation(self, css):
-        rm = css[css.rfind("@media (prefers-reduced-motion: reduce)"):]
+        rm = css[css.rfind("@media (prefers-reduced-motion: reduce)") :]
         # The last reduced-motion block (the one we added) neutralises the dock.
-        assert ".mh-action-dock" in css[css.find(".mh-action-dock"):]
+        assert ".mh-action-dock" in css[css.find(".mh-action-dock") :]
         assert re.search(
             r"@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.mh-action-dock\s*\{\s*animation:\s*none",
-            css, re.DOTALL,
+            css,
+            re.DOTALL,
         )
 
     def test_no_google_fonts_cdn_introduced(self, css):
@@ -398,18 +420,24 @@ class TestDockCss:
 # approves the highlighted card + advances the queue (the real JS path).
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
 @pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
 class TestDockBrowserBehaviour:
     def _review_body(self, env, n=4):
         achs = [
-            {"swim_id": f"s{i}", "swimmer_name": f"Swimmer {i}",
-             "event": f"{50 * i}m Free", "headline": f"PB {i}"}
+            {
+                "swim_id": f"s{i}",
+                "swimmer_name": f"Swimmer {i}",
+                "event": f"{50 * i}m Free",
+                "headline": f"PB {i}",
+            }
             for i in range(1, n + 1)
         ]
-        run_id = _seed_run(env["tmp_path"], env["wm"], "org-test",
-                           _make_run_payload("org-test", achs))
+        run_id = _seed_run(
+            env["tmp_path"], env["wm"], "org-test", _make_run_payload("org-test", achs)
+        )
         return env["client"].get(f"/review/{run_id}").get_data(as_text=True)
 
     _PROBE = """
@@ -442,7 +470,8 @@ class TestDockBrowserBehaviour:
             page.wait_for_timeout(150)
             state = page.evaluate(self._PROBE, None)
         finally:
-            browser.close(); pw.stop()
+            browser.close()
+            pw.stop()
         assert state["dockVisible"] is False, "dock must be hidden on desktop"
 
     def test_dock_shown_and_targets_a_card_on_mobile(self, env):
@@ -454,7 +483,8 @@ class TestDockBrowserBehaviour:
             page.wait_for_timeout(200)
             state = page.evaluate(self._PROBE, None)
         finally:
-            browser.close(); pw.stop()
+            browser.close()
+            pw.stop()
         assert state["dockVisible"] is True, "dock must show on a mobile viewport"
         assert state["count"] == "4", f"initial queue count should be 4, got {state['count']}"
         assert state["targetIdx"] >= 0, "a queued card must be highlighted on load"
@@ -476,7 +506,8 @@ class TestDockBrowserBehaviour:
             page.wait_for_timeout(250)
             after = page.evaluate(self._PROBE, before["targetIdx"])
         finally:
-            browser.close(); pw.stop()
+            browser.close()
+            pw.stop()
         assert before["targetStatus"] == "queue"
         # The card that was highlighted is now approved …
         assert after["probedStatus"] == "approved", "tapped card should be approved"
@@ -498,7 +529,8 @@ class TestDockBrowserBehaviour:
                 page.wait_for_timeout(120)
             state = page.evaluate(self._PROBE, None)
         finally:
-            browser.close(); pw.stop()
+            browser.close()
+            pw.stop()
         assert state["isDone"] is True, "dock should enter the done state at queue=0"
         assert state["label"] == "Open builder"
         assert state["targetIdx"] == -1, "no card should be highlighted when done"
@@ -518,7 +550,7 @@ def _mobile_dock_block(css: str) -> str:
     media query. Anchored on the U.13 section header so it never collides with
     the bottom-tab bar's own ``@media (max-width: 720px)`` block above it, nor
     with the desktop ``.mh-action-dock { display: none }`` default."""
-    section = css[css.find("U.13 — FLOATING MOBILE ACTION DOCK"):]
+    section = css[css.find("U.13 — FLOATING MOBILE ACTION DOCK") :]
     assert section, "U.13 dock CSS section not found"
-    mq = section[section.find("@media (max-width: 720px)"):]
+    mq = section[section.find("@media (max-width: 720px)") :]
     return _rule_block(mq, ".mh-action-dock {")
