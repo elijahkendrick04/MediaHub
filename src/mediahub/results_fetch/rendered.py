@@ -29,6 +29,7 @@ is referenced, never modified. Inert: importing this adds no route.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -174,6 +175,13 @@ class RenderedBackend:
         self.budget_hit = False
         self._deadline: Optional[float] = None
         self._safe_cache: dict[str, bool] = {}
+        # Recycle the headless browser every N renders. A Chromium that has
+        # rendered many heavy JS pages on a memory-tight host can wedge so a
+        # later new_context/new_page blocks forever (the crawl appears stuck at
+        # "Reading the site…"). Relaunching between batches keeps each render on
+        # a fresh process. 0/blank disables.
+        _raw_recycle = os.environ.get("MEDIAHUB_RESULTS_FETCH_RENDER_RECYCLE", "").strip()
+        self._recycle_every = int(_raw_recycle) if _raw_recycle.isdigit() else 15
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -292,11 +300,36 @@ class RenderedBackend:
             return True
         return False
 
+    def _recycle_browser(self) -> None:
+        """Close + drop the browser so the next render relaunches a fresh one.
+
+        Frees memory accumulated over a long crawl; no-op under the injected
+        test page-provider (no real browser to recycle).
+        """
+        if self._page_provider is not None or self._browser is None:
+            return
+        for obj, meth in ((self._browser, "close"), (self._pw, "stop")):
+            if obj is not None:
+                try:
+                    getattr(obj, meth)()
+                except Exception:  # pragma: no cover - best-effort teardown
+                    pass
+        self._browser = None
+        self._pw = None
+
     def fetch(self, url: str) -> Optional[RenderedPage]:
         if not self._host_ok(url):
             return None
         if self._budget_blocks_render():
             return None
+        # Periodic recycle to keep a long crawl off a degrading browser process.
+        if (
+            self._page_provider is None
+            and self._recycle_every > 0
+            and self.renders_done > 0
+            and self.renders_done % self._recycle_every == 0
+        ):
+            self._recycle_browser()
 
         scope = scope_for(url)
         captures: list[CapturedResponse] = []
