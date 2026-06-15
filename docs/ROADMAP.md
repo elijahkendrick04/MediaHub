@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `e703242a5` · Merge pull request #619 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-15 · `af296be32` · Read multi-column result PDFs correctly (PDF row F1 0.53 → 0.99) (#631)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1487,6 +1487,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-15 | `975f99a5d` | Fix multi-column PDF extraction dropping rows and scrambling events |
+| 2026-06-15 | `20dc0d308` | Read multi-column result PDFs correctly: full-width lines + time-anchored record parser |
 | 2026-06-15 | `2d6318c73` | Reframe the homepage around the engine diagram, in a human voice |
 | 2026-06-15 | `7ae96a16d` | feat(motion): mirror still style packs into Remotion reels |
 | 2026-06-15 | `c9b71d894` | style: apply ruff-format to style_packs.py |
