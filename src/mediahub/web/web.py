@@ -6751,6 +6751,20 @@ p:last-child { margin-bottom: 0; }
 @media (max-width: 860px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .row { flex-direction: column; }
+  /* Inline-styled equivalents of .grid-2/.grid-3 — style="grid-template-columns:
+     1fr 1fr" (and the 1fr 1fr 1fr / repeat(3,…) variants) — don't inherit the
+     class collapse above, so they would stay multi-column and overflow narrow
+     screens (this was the /sponsors add-sponsor + exposure-report two-up, and
+     the same two-column pattern recurs on settings / billing / organisation
+     panels). Collapse them to a single column too. Inline styles outrank a
+     class selector, so !important is required here — the same technique the
+     .mh-palette-grid collapse (below) already uses. */
+  [style*="grid-template-columns:1fr 1fr"],
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns:repeat(3,"],
+  [style*="grid-template-columns: repeat(3,"] {
+    grid-template-columns: 1fr !important;
+  }
 }
 .divider { height: 1px; background: var(--border); margin: 20px 0; }
 .muted { color: var(--ink-muted); }
@@ -6800,6 +6814,11 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
 }
 /* legacy alias */
 .tag.gold { background: rgba(244,213,141,0.10); color: var(--medal); border-color: rgba(244,213,141,0.40); }
+/* A `<p class="tag">` is a block-level NOTE banner (a full sentence), not an
+   inline status pill — so it must wrap and never exceed its container. The base
+   `.tag` is `white-space:nowrap`, which on a phone pushed the /athletes consent
+   banner ~860px past the right edge. Block usage opts back into normal wrapping. */
+p.tag { white-space: normal; max-width: 100%; }
 
 /* FORMS — mono scoreboard labels, lane-yellow focus */
 label {
@@ -7777,8 +7796,13 @@ body.mh-cmdk-open { overflow: hidden; }
   .mh-hero-ctas { flex-direction: column; align-items: stretch; }
   .mh-hero-ctas .btn { width: 100%; justify-content: center; }
 }
-/* Force inputs/selects to never overflow their container, even with inline max-widths */
-input[type=text], input[type=file], textarea, select { max-width: 100%; }
+/* Force inputs/selects to never overflow their container, even with inline
+   max-widths. Covers every text-like control — including type=date / type=month
+   / type=number / type=email, whose intrinsic min-width otherwise widened the
+   /sponsors date pickers past a phone column. Checkbox / radio / range keep
+   their fixed intrinsic size. */
+input:not([type=checkbox]):not([type=radio]):not([type=range]),
+textarea, select { max-width: 100%; }
 
 /* === Hero (Holo-style) === */
 .mh-hero {
@@ -31982,10 +32006,10 @@ what you're doing, what they should do.</p>
                 )
             return (
                 "<tr>"
-                f'<td style="padding:8px 12px">{_h(m.email)}</td>'
-                f'<td style="padding:8px 12px">{role_badge}</td>'
-                f'<td style="padding:8px 12px">{status_badge}</td>'
-                f'<td style="padding:8px 12px;font-size:12px;color:var(--ink-muted)">'
+                f'<td data-label="Email" style="padding:8px 12px">{_h(m.email)}</td>'
+                f'<td data-label="Role" style="padding:8px 12px">{role_badge}</td>'
+                f'<td data-label="Status" style="padding:8px 12px">{status_badge}</td>'
+                f'<td data-label="Invited by" style="padding:8px 12px;font-size:12px;color:var(--ink-muted)">'
                 f"{_h(m.invited_by or '')}</td>"
                 f'<td style="padding:8px 12px;text-align:right">{remove_html}</td>'
                 "</tr>"
@@ -32051,7 +32075,7 @@ what you're doing, what they should do.</p>
             + state_html
             + flash_html
             + '<div class="card" style="padding:0;overflow:hidden">'
-            '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
             '<thead><tr style="text-align:left;border-bottom:1px solid '
             'rgba(255,255,255,0.08)">'
             '<th style="padding:10px 12px">Email</th>'
@@ -36461,12 +36485,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             rows_html += f"""
 <tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}">
   <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
-  <td><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
-  <td>{_h(ad.get("type", ""))}</td>
-  <td>{_h(athlete_names)}</td>
-  <td>{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
-  <td>{_h(ad.get("permission_status", ""))}</td>
-  <td><code>{_h(ad.get("id", "")[:12])}</code></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td data-label="Type">{_h(ad.get("type", ""))}</td>
+  <td data-label="Athlete">{_h(athlete_names)}</td>
+  <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
+  <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
+  <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
@@ -36542,7 +36566,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 data-confirm="Delete {{n}} selected photo(s)? Graphics already rendered keep their copy.">Delete</button>
       </div>
     </div>
-    <table style="width:100%">
+    <table class="mh-table-stack" style="width:100%">
       <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
       <tbody>{
             rows_html
@@ -38084,10 +38108,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             )
             rows += (
                 "<tr>"
-                f"<td><b>{_h(s['name'])}</b></td>"
-                f"<td>{_h(s['tier'])}</td>"
-                f"<td>{window}</td>"
-                f"<td>{state}</td>"
+                f'<td data-label="Sponsor"><b>{_h(s["name"])}</b></td>'
+                f'<td data-label="Tier">{_h(s["tier"])}</td>'
+                f'<td data-label="Window">{window}</td>'
+                f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0">'
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
@@ -38127,7 +38151,7 @@ where they appeared, ready to forward.</p>
 
 <div class="card" style="margin-bottom:20px">
   <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor registry</h3>
-  <table style="width:100%;border-collapse:collapse;font-size:14px">
+  <table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:14px">
     <thead><tr style="text-align:left;color:var(--ink-dim);font-size:12px;text-transform:uppercase">
       <th style="padding:6px 8px">Sponsor</th><th>Tier</th><th>Active window</th><th>State</th><th></th>
     </tr></thead>
@@ -38454,7 +38478,8 @@ ever appear; queued, edited and rejected cards never do.</p>
   header{{padding:28px 24px 8px;border-bottom:3px solid {_h(primary)}}}
   header h1{{margin:0;font-size:24px}}
   header p{{margin:4px 0 16px;color:#93a1b3}}
-  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;padding:24px}}
+  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:18px;padding:18px}}
+  @media (max-width:420px){{.grid{{gap:12px;padding:14px}}header{{padding:20px 16px 6px}}}}
   .wall-card{{margin:0;background:#131a24;border:1px solid #233042;border-radius:12px;overflow:hidden}}
   .wall-card img{{width:100%;height:auto;display:block}}
   .wall-card figcaption{{padding:10px 12px}}
@@ -40606,16 +40631,16 @@ voice, and queues them for one-click approval.</p>
             aliases = ", ".join(a for a in rec.aliases if a != rec.canonical_name.casefold())
             rows.append(
                 "<tr>"
-                f"<td><strong>{_h(rec.canonical_name)}</strong>"
+                f'<td data-label="Athlete"><strong>{_h(rec.canonical_name)}</strong>'
                 + (
                     f'<br/><span class="muted" style="font-size:11px">also seen as: {_h(aliases)}</span>'
                     if aliases
                     else ""
                 )
                 + "</td>"
-                f"<td>{rec.race_count}</td>"
-                f"<td>{_h(str(rec.birth_year or ''))}</td>"
-                f'<td><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
+                f'<td data-label="Races">{rec.race_count}</td>'
+                f'<td data-label="Born">{_h(str(rec.birth_year or ""))}</td>'
+                f'<td data-label="Permission"><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
                 f'<input type="hidden" name="action" value="set_consent"/>'
                 f'<input type="hidden" name="athlete_id" value="{_h(rec.athlete_id)}"/>'
                 f'<select name="level" style="font-size:12px">{unknown_opt}{opts}</select>'
@@ -40666,7 +40691,7 @@ voice, and queues them for one-click approval.</p>
 </div>
 <div class="card" style="margin-bottom:16px">
   <h2 style="margin-top:0">Roster</h2>
-  <table class="mh-table" style="width:100%">
+  <table class="mh-table mh-table-stack" style="width:100%">
     <thead><tr><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
