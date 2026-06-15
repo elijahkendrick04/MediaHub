@@ -314,3 +314,126 @@ def test_every_demo_html_class_has_a_css_rule():
     # Decorative state classes handled via compound selectors are fine to skip.
     for cls in sorted(classes):
         assert f".{cls}" in sec, f"class {cls!r} is emitted but never styled"
+
+
+# =========================================================================== #
+# Group D — the richer scenes: input is shown, the output looks premium, and
+# the approval fans out into the posting-ready formats. These guard the
+# "engaging + explains the product" redesign, not just the loop skeleton.
+# =========================================================================== #
+def test_generate_scene_shows_the_raw_results_sheet_being_read():
+    """Scene 1 makes the *input* visible: a raw results sheet (with a scan
+    line) sitting before the detected moments, so the input → intelligence
+    story reads at a glance."""
+    html = _demo_html()
+    assert '<div class="mh-demo-ingest">' in html        # the two-column wrap
+    assert '<div class="mh-demo-sheet">' in html          # the raw source sheet
+    assert '<span class="scan">' in html                  # the reading scan line
+    assert '<span class="row head">' in html              # a header row
+    assert "T. Davies" in html                            # raw rows, sheet voice
+    # The raw sheet is *read first*, then resolves into the ranked finds.
+    assert html.index("mh-demo-sheet") < html.index("mh-demo-finds")
+
+
+def test_review_scene_card_is_a_premium_branded_story_card():
+    """Scene 2's card reads like a real branded post, not a flat placeholder:
+    a brand mark, a PB sticker, the athlete, an improvement delta and a brand
+    footer bar — the actual value the product produces."""
+    html = _demo_html()
+    assert '<span class="mh-demo-brandmark">' in html      # club brand mark
+    assert '<span class="mh-demo-flash">PB</span>' in html  # the PB sticker
+    assert '<span class="mh-demo-delta">' in html           # improvement delta
+    assert "0.74s" in html                                  # the delta value
+    assert '<span class="mh-demo-cardbar">' in html         # brand footer bar
+    # The full lockup: event, the headline time, the athlete.
+    assert "100m Freestyle" in html
+    assert '<span class="tm">52.41</span>' in html
+    assert '<span class="nm">Tom Davies</span>' in html
+
+
+def test_approve_scene_fans_out_into_the_posting_ready_formats():
+    """Scene 3 pays off the human gate with the breadth — one approval becomes
+    four posting-ready formats."""
+    html = _demo_html()
+    assert '<div class="mh-demo-formats">' in html
+    assert html.count('<span class="mh-demo-chip">') == 4
+    s, f, r, c = (
+        html.index(">Story<"), html.index(">Feed<"),
+        html.index(">Reel<"), html.index(">Caption<"),
+    )
+    assert s < f < r < c, "formats light in a stable order"
+
+
+# =========================================================================== #
+# Group E — the new motion contract (scoped to the U.10 CSS section). Each beat
+# carries its own purposeful, reduced-motion-safe micro-motion.
+# =========================================================================== #
+def test_scene_crossfade_is_blur_masked():
+    """The cross-fade blurs each scene as it leaves so two very different
+    layouts never ghost through one another (Emil's blur-to-mask tip)."""
+    sec = _u10_css_section()
+    assert "filter: blur(7px)" in sec
+    # the blur rides the same opacity tracks, so it stays perfectly in sync
+    assert "@keyframes mh-demo-p1" in sec
+
+
+def test_each_beat_defines_and_binds_its_micro_motion():
+    sec = _u10_css_section()
+    for kf in (
+        "@keyframes mh-demo-scan",   # s1: reads the sheet
+        "@keyframes mh-demo-land",   # s2: the stat lands
+        "@keyframes mh-demo-pop",    # s2: the PB sticker pops
+        "@keyframes mh-demo-mark",   # s2: facts highlight in turn
+        "@keyframes mh-demo-conf",   # s2: confidence fills
+        "@keyframes mh-demo-check",  # s3: the tick draws on
+        "@keyframes mh-demo-chips",  # s3: formats light up
+    ):
+        assert kf in sec, f"missing keyframes {kf!r}"
+    # Each micro-motion is bound to its own scene's phase, so it only plays
+    # while that scene owns the frame.
+    assert ".mh-demo-phase.p1 .mh-demo-sheet .scan { animation: mh-demo-scan 12s linear infinite; }" in sec
+    assert ".mh-demo-phase.p2 .mh-demo-thumb .tm { animation: mh-demo-land 12s var(--ease-out) infinite; }" in sec
+    assert ".mh-demo-phase.p2 .mh-demo-flash { animation: mh-demo-pop 12s var(--ease-spring) infinite; }" in sec
+    assert ".mh-demo-phase.p3 .mh-demo-chip { animation: mh-demo-chips 12s var(--ease-out) infinite; }" in sec
+
+
+def test_caption_facts_wipe_in_sequence():
+    """The grounded facts use a highlighter *wipe* (background-size 0→100%),
+    staggered so they light one after another rather than all at once."""
+    sec = _u10_css_section()
+    assert "background-size: 0% 100%" in sec  # the un-wiped resting width
+    # the wipe is a lane-tinted background-IMAGE, so the UA default yellow
+    # background-color must be explicitly cleared or it bleeds through.
+    mark_rule = sec[sec.index(".mh-demo-caption mark {"):]
+    mark_rule = mark_rule[: mark_rule.index("}")]
+    assert "background-color: transparent" in mark_rule
+    assert ".mh-demo-caption mark:nth-of-type(1) { animation-delay: -0.34s; }" in sec
+    assert ".mh-demo-caption mark:nth-of-type(2) { animation-delay: -0.17s; }" in sec
+
+
+def test_approval_tick_draws_on():
+    sec = _u10_css_section()
+    assert ".mh-demo-check svg polyline { stroke-dasharray: 26; stroke-dashoffset: 26; }" in sec
+    assert ".mh-demo-phase.p3 .mh-demo-check svg polyline { animation: mh-demo-check" in sec
+
+
+def test_new_micro_motions_pause_on_dwell():
+    """Dwell-to-pause must freeze the new beats too, or the loop would desync
+    when a visitor hovers."""
+    sec = _u10_css_section()
+    assert ".mh-hero-demo:hover .mh-demo-chip" in sec
+    assert ".mh-hero-demo:focus-within .mh-demo-flash" in sec
+    assert ".mh-hero-demo:hover .mh-demo-caption mark" in sec
+
+
+def test_reduced_motion_rests_every_new_beat_composed():
+    """Under reduced motion every one-shot settles in its end state: the tick
+    fully drawn, the facts fully highlighted, the confidence full."""
+    sec = _u10_css_section()
+    rm = sec[sec.index("prefers-reduced-motion"):]
+    assert ".mh-demo-check svg polyline { stroke-dashoffset: 0; }" in rm
+    assert ".mh-demo-caption mark { background-size: 100% 100%; }" in rm
+    assert ".mh-demo-conf .track i { transform: scaleX(1); }" in rm
+    assert ".mh-demo-chip { opacity: 1; transform: none; }" in rm
+    # the new beats are also in the hard `animation: none !important` reset
+    assert ".mh-demo-chip { animation: none !important; }" in rm
