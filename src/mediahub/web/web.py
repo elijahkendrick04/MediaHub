@@ -12145,6 +12145,13 @@ def _layout(
     set('mh-wf-n-rejected', nRejected);
     var bar = document.getElementById('mh-wf-bar');
     if (bar) bar.style.width = pct + '%';
+    // UI2.4 — keep the client-side filter tab counts live, then re-sync the tab
+    // filter (visible cards, per-tab empty hint, "N of M shown") so approving or
+    // re-queueing a card updates the tabs with no reload.
+    set('mh-wf-tabcount-all', total);
+    set('mh-wf-tabcount-queue', nQueue);
+    set('mh-wf-tabcount-approved', nApproved);
+    if (window.mhWfTabsSync) window.mhWfTabsSync();
   };
 
   window.mhWorkflowSet = function(runId, cardId, status) {
@@ -17684,40 +17691,66 @@ def create_app() -> Flask:
             return o
 
         # --- V7: build workflow summary card (triage counts)
-        _wf_n_queue = _wf_summary.get("queue", 0)
         _wf_n_approved = _wf_summary.get("approved", 0)
         _wf_n_rejected = _wf_summary.get("rejected", 0)
         _wf_n_total = _wf_summary.get("total", 0)
 
+        # UI2.4 — the filter tab badges + the stat block count from the ACTUAL
+        # rendered cards (each defaults to "queue" with no sidecar state), so
+        # they match the DOM and the live JS recount on first paint. The bare
+        # sidecar summary is empty until the first action, which would otherwise
+        # read "Queue 0" beside a full queue. (The progress strip below keeps its
+        # own store-summary "decided / ranked-total" maths — a separate concept
+        # with its own regression guard.)
+        _wf_card_counts: dict[str, int] = {}
+        for _ra in ranked_achs:
+            _cid = (_ra.get("achievement") or {}).get("swim_id", "")
+            _cst = _wf_states.get(_cid)
+            _cst_val = _cst.status.value if _cst else "queue"
+            _wf_card_counts[_cst_val] = _wf_card_counts.get(_cst_val, 0) + 1
+        _n_queue_cards = _wf_card_counts.get("queue", 0)
+        _n_approved_cards = _wf_card_counts.get("approved", 0)
+
         # Only show workflow card if there's any state or any achievements
         if _wf_summary or ranked_achs:
-            _wf_filter_opts = ""
             _review_base = url_for("review", run_id=run_id)
             _wf_filter_buttons = ""
             _wf_counts = {
                 "": len(ranked_achs) or _wf_n_total,
-                "queue": _wf_n_queue if _wf_summary else len(ranked_achs),
-                "approved": _wf_n_approved,
+                "queue": _n_queue_cards,
+                "approved": _n_approved_cards,
+            }
+            # UI2.4 — the filter is a client-side tab control (kit `.mh-tabs`
+            # sliding indicator): switching shows/hides cards in place with no
+            # full reload. Each tab keeps its `?wf=` href so a no-JS page (or a
+            # deep-link) still filters server-side via `#ach-list[data-wf-filter]`.
+            # The count spans always render (even at 0) with stable ids so the
+            # live recount can update them as cards are approved/re-queued.
+            _wf_tab_count_id = {
+                "": "mh-wf-tabcount-all",
+                "queue": "mh-wf-tabcount-queue",
+                "approved": "mh-wf-tabcount-approved",
             }
             for _wf_opt in [
                 ("", "All"),
                 ("queue", "Queue"),
                 ("approved", "Approved"),
             ]:
-                _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
+                _wf_is_on = _wf_filter == _wf_opt[0]
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
-                _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
-                _wf_btn_cls = " is-active" if _wf_filter == _wf_opt[0] else ""
+                _wf_btn_cls = " is-active" if _wf_is_on else ""
                 _wf_count_for_opt = _wf_counts.get(_wf_opt[0], 0)
-                _wf_count_html = (
-                    f'<span class="count">{_wf_count_for_opt}</span>' if _wf_count_for_opt else ""
-                )
                 _wf_filter_buttons += (
-                    f'<a class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
-                    f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
-                    f"{_wf_opt[1]}{_wf_count_html}</a>"
+                    f'<a role="tab" class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
+                    f'data-wf-filter-to="{_wf_opt[0]}" '
+                    f'aria-selected="{"true" if _wf_is_on else "false"}">'
+                    f'{_wf_opt[1]}'
+                    f'<span class="count" id="{_wf_tab_count_id[_wf_opt[0]]}">{_wf_count_for_opt}</span>'
+                    f"</a>"
                 )
             # Progress maths — how much of the queue has the user actioned?
+            # Denominator is the ranked total (not the store total, which only
+            # counts touched cards); regression-guarded in test_review_body_content.
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
             _wf_grand_total = len(ranked_achs) or _wf_n_total or 0
             _wf_pct = int(round(100 * _wf_decided / _wf_grand_total)) if _wf_grand_total else 0
@@ -17754,8 +17787,8 @@ def create_app() -> Flask:
     <div>
       <h2 style="margin-bottom:var(--sp-3)">Workflow</h2>
       <div class="stat-block">
-        <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_wf_n_queue or len(ranked_achs)}</div></div>
-        <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_wf_n_approved}</div></div>
+        <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_n_queue_cards}</div></div>
+        <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_n_approved_cards}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -17793,8 +17826,9 @@ def create_app() -> Flask:
   </script>
   <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span class="muted" style="font-size:12px;font-family:var(--font-mono);letter-spacing:0.14em;text-transform:uppercase">Filter</span>
-    <nav class="mh-segmented" role="tablist" aria-label="Filter cards by workflow status">
+    <nav class="mh-tabs" role="tablist" aria-label="Filter cards by workflow status">
       {_wf_filter_buttons}
+      <span class="mh-tabs__ind" aria-hidden="true"></span>
     </nav>
     <span class="mh-kbd-hint" aria-hidden="true">
       <kbd>J</kbd><kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>?</kbd> help
@@ -17830,9 +17864,12 @@ def create_app() -> Flask:
             wf_state = _wf_states.get(card_id_raw)
             wf_status = wf_state.status.value if wf_state else "queue"
 
-            # Skip if filtered
-            if _wf_filter and wf_status != _wf_filter:
-                continue
+            # UI2.4 — every card is rendered into the DOM regardless of the
+            # active filter; the Queue/Approved tabs hide/show them client-side
+            # (CSS on `#ach-list[data-wf-filter]`) so switching needs no reload
+            # and a card leaving the queue on approval drops out of the Queue
+            # view live. The no-JS / deep-link path still filters server-side via
+            # the same `data-wf-filter` attribute set from `?wf=` below.
 
             # Evidence list
             ev_html = ""
@@ -17927,16 +17964,11 @@ def create_app() -> Flask:
 </div>"""
 
         if not ach_rows_html_wf:
-            if _wf_filter:
-                _all_url = url_for("review", run_id=run_id)
-                ach_rows_html_wf = _empty_state(
-                    "search",
-                    f"No <em>{_h(_wf_filter)}</em> cards",
-                    f"Nothing is in the &ldquo;{_h(_wf_filter)}&rdquo; state right now. "
-                    "Switch the filter to see the rest of the queue.",
-                    actions=f'<a class="btn secondary" href="{_all_url}">Show all cards</a>',
-                )
-            elif recognition_error:
+            # UI2.4 — a per-filter empty view (e.g. "nothing approved yet") is no
+            # longer a server concern: every card renders and the tabs hide/show
+            # them client-side, so emptiness here means there are genuinely no
+            # ranked cards. The client-side tab sync shows the per-tab hint.
+            if recognition_error:
                 ach_rows_html_wf = _empty_state(
                     "alert",
                     "Recognition hit a snag",
@@ -18042,6 +18074,14 @@ def create_app() -> Flask:
 .filters-bar {{ display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);position:sticky;top:56px;z-index:50; }}
 .filters-bar select {{ width:auto;min-width:120px;font-size:13px;padding:6px 10px; }}
 .ach-row.hidden {{ display:none; }}
+/* UI2.4 — client-side workflow tabs. The active tab sets data-wf-filter on
+   #ach-list; these rules hide the cards that don't match, so Queue/Approved
+   switch with no reload. Set server-side from ?wf= too, so the no-JS / deep-
+   link path filters identically. Composes with .ach-row.hidden (the dropdown
+   filters above): a row hidden by either axis stays hidden. */
+#ach-list[data-wf-filter="queue"] .ach-row:not([data-status="queue"]) {{ display:none; }}
+#ach-list[data-wf-filter="approved"] .ach-row:not([data-status="approved"]) {{ display:none; }}
+#mh-wf-empty {{ margin-top: var(--sp-2); }}
 /* Council UI verdict (2026-05-31) — the review list collapses each card's
    reasoning by default for scroll relief (a 249-card meet was a ~70,000px
    wall). These rules keep the reasoning one click away with a clear "show
@@ -18138,7 +18178,11 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
                 formaction="{url_for('api_cards_bulk_export', run_id=run_id)}">Export</button>
       </div>
     </div>
-    <div id="ach-list">{ach_rows_html_wf}</div>
+    <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
+    <div id="mh-wf-empty" class="mh-empty-inline" hidden>
+      <b id="mh-wf-empty-title">Nothing here yet</b><br>
+      <span id="mh-wf-empty-body">Switch the filter to see the rest of the queue.</span>
+    </div>
   </form>
 </div>
 
@@ -18228,6 +18272,10 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 </div>
 
 <script>
+function mhActiveWfFilter() {{
+  var list = document.getElementById('ach-list');
+  return (list && list.getAttribute('data-wf-filter')) || '';
+}}
 function applyFilters() {{
   var fType = document.getElementById('f-type').value;
   var fConf = document.getElementById('f-conf').value;
@@ -18235,9 +18283,14 @@ function applyFilters() {{
   var fEvent = document.getElementById('f-event').value;
   var fBand = document.getElementById('f-band').value;
   var fPost = document.getElementById('f-post').value;
+  var wf = mhActiveWfFilter();
   var rows = document.querySelectorAll('#ach-list .ach-row');
-  var shown = 0;
+  var shown = 0, inTab = 0;
   rows.forEach(function(row) {{
+    // UI2.4 — the workflow tab axis is applied by CSS (#ach-list[data-wf-filter]);
+    // fold it into the count only, so "N of M shown" tracks the active tab.
+    var wfOk = !wf || row.dataset.status === wf;
+    if (wfOk) inTab++;
     var match = true;
     if (fType && row.dataset.type !== fType) match = false;
     if (fConf && row.dataset.conf !== fConf) match = false;
@@ -18245,11 +18298,13 @@ function applyFilters() {{
     if (fEvent && row.dataset.event !== fEvent) match = false;
     if (fBand && row.dataset.band !== fBand) match = false;
     if (fPost && row.dataset.post !== fPost) match = false;
+    // .hidden carries only the dropdown axis so it composes with the CSS tab
+    // hide — a row hidden by either axis stays hidden.
     row.classList.toggle('hidden', !match);
-    if (match) shown++;
+    if (match && wfOk) shown++;
   }});
   var countEl = document.getElementById('f-count');
-  if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
+  if (countEl) countEl.textContent = shown + ' of ' + inTab + ' shown';
 }}
 function clearFilters() {{
   ['f-type','f-conf','f-swimmer','f-event','f-band','f-post'].forEach(function(id) {{
@@ -18259,6 +18314,59 @@ function clearFilters() {{
   applyFilters();
 }}
 applyFilters();
+
+// UI2.4 — client-side workflow filter tabs. The kit (.mh-tabs) already slides
+// the indicator + toggles the active tab on click; this turns that tab into an
+// in-place filter: it sets #ach-list[data-wf-filter] (CSS hides the cards that
+// don't match), keeps the URL's ?wf= in sync without a reload, and refreshes
+// the per-tab empty hint + the "N of M shown" count. Each tab keeps its href so
+// a no-JS page still filters via a normal navigation.
+(function() {{
+  var nav = document.querySelector('.mh-tabs[role="tablist"]');
+  var list = document.getElementById('ach-list');
+  if (!nav || !list) return;
+
+  window.mhWfTabsSync = function() {{
+    var wf = list.getAttribute('data-wf-filter') || '';
+    var rows = document.querySelectorAll('#ach-list .ach-row');
+    var inTab = 0;
+    rows.forEach(function(r) {{ if (!wf || r.dataset.status === wf) inTab++; }});
+    var empty = document.getElementById('mh-wf-empty');
+    if (empty) {{
+      var show = rows.length > 0 && inTab === 0;
+      empty.hidden = !show;
+      if (show) {{
+        var t = document.getElementById('mh-wf-empty-title');
+        var b = document.getElementById('mh-wf-empty-body');
+        if (wf === 'approved') {{
+          if (t) t.textContent = 'Nothing approved yet';
+          if (b) b.textContent = 'Approve cards from the Queue and they move here.';
+        }} else if (wf === 'queue') {{
+          if (t) t.textContent = 'Queue clear';
+          if (b) b.textContent = 'Every card has been reviewed \\u2014 nice work.';
+        }} else {{
+          if (t) t.textContent = 'Nothing here yet';
+          if (b) b.textContent = 'Switch the filter to see the rest of the queue.';
+        }}
+      }}
+    }}
+    if (window.applyFilters) window.applyFilters();
+  }};
+
+  nav.addEventListener('click', function(ev) {{
+    var tab = ev.target.closest('[data-wf-filter-to]');
+    if (!tab || !nav.contains(tab)) return;
+    ev.preventDefault();           // no full reload — the kit moves the indicator
+    var val = tab.getAttribute('data-wf-filter-to') || '';
+    list.setAttribute('data-wf-filter', val);
+    try {{
+      history.replaceState(null, '', location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+    }} catch (e) {{}}
+    window.mhWfTabsSync();
+  }});
+
+  window.mhWfTabsSync();           // initial sync (covers a ?wf= deep-link)
+}})();
 
 // V9: Copy "Why this card?" reasoning to clipboard (for sponsor reports etc.)
 function copyWhyCard(btn, taId) {{
@@ -18418,7 +18526,7 @@ function copyWhyCard(btn, taId) {{
         # empty it links to the content builder. `queue` is the initial count
         # (mirrors the page's Queue stat); the dock script keeps it live.
         _review_dock = (
-            {"builder": _pack_url, "queue": _wf_n_queue or len(ranked_achs)}
+            {"builder": _pack_url, "queue": _n_queue_cards}
             if (_wf_summary or ranked_achs)
             else None
         )
