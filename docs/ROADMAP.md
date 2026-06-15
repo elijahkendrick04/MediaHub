@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `cb190a4dd` · Merge pull request #638 from elijahkendrick04/claude/roadmap-next-stage-dy5bvd
+**Last updated:** 2026-06-15 · `68e28726e` · Merge pull request #641 from elijahkendrick04/claude/roadmap-next-stage-dy5bvd
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1485,6 +1485,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
 | 2026-06-15 | `b7cbc227e` | UI2.5: primary-CTA motion variant (Moving-Border + Stateful-Button) |
 | 2026-06-15 | `eb35ee68a` | Format cache-purge card line per ruff |
 | 2026-06-15 | `2dca30d47` | Add operator site-wide cache purge |
@@ -1492,5 +1493,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `20dc0d308` | Read multi-column result PDFs correctly: full-width lines + time-anchored record parser |
 | 2026-06-15 | `2d6318c73` | Reframe the homepage around the engine diagram, in a human voice |
 | 2026-06-15 | `7ae96a16d` | feat(motion): mirror still style packs into Remotion reels |
-| 2026-06-15 | `c9b71d894` | style: apply ruff-format to style_packs.py |
 <!-- /ROADMAP:ACTIVITY -->
