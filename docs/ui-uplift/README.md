@@ -45,11 +45,14 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 | **Plan** | reveal (plan items) |
 | **Media library** | Lens (asset thumbnail magnify-to-inspect) |
 | **Athlete spotlight** | Animated-Tooltip (`.mh-tooltip`) — decorative avatars on the swimmer roster, a keyboard-reachable hero avatar carrying name · club · band haul |
+| **Upload · Make** | Primary-CTA (`.btn.mh-cta-motion`, UI2.5) — Moving-Border ring + Stateful-Button (`data-mh-state`, idle→loading→success) on one borderless host: the Upload "Continue" submit (spins while the file uploads) and the Make "Generate the pack" action (loading→success before the pack opens) |
 
-The kit also ships ready-to-use effects not yet wired to a specific screen (Aurora, Grid/
-Dot/Scales/Grain backgrounds, gradient-border, 3D tilt, Glare, hover-group, Moving-Border,
-Hover-Border-Gradient, Stateful-Button, Text-Generate, Flip-Words, Hero-Highlight,
-Compare slider, Tracing-Beam, Timeline, Vanish-input) for follow-on surfaces.
+Moving-Border + Stateful-Button are wired together on the primary-CTA host
+(`.btn.mh-cta-motion`, UI2.5 — Upload / Make). The kit also ships ready-to-use effects not yet
+wired to a specific screen (Aurora, Grid/Dot/Scales/Grain backgrounds, gradient-border,
+3D tilt, Glare, hover-group, Hover-Border-Gradient, Text-Generate, Flip-Words,
+Hero-Highlight, Compare slider, Tracing-Beam, Timeline, Vanish-input) for follow-on
+surfaces.
 
 ---
 
@@ -138,8 +141,8 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | Magnetic Button | PARTIAL | |
 | Tailwind Buttons | SKIP | the app has its own `.btn` system |
 | Hover Border Gradient | ADOPT | `.mh-hover-border-gradient` |
-| Moving Border | ADOPT | `.mh-moving-border` |
-| Stateful Button | ADOPT | `.btn[data-mh-state]` + `MH.btnState` |
+| Moving Border | ADOPT | `.mh-moving-border`; wired on the `.btn.mh-cta-motion` primary CTA (UI2.5) |
+| Stateful Button | ADOPT | `.btn[data-mh-state]` + `MH.btnState`; wired on the `.btn.mh-cta-motion` primary CTA (UI2.5) |
 | Multi Step Loader | ADOPT | processing screen (`MH.renderLogSteps`) |
 | Loader | ADOPT | reuses existing `.mh-spinner` / skeletons |
 | Notch | SKIP | |
