@@ -35,6 +35,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from .sprint_hooks import RenderHookCtx as _RenderHookCtx
+from .sprint_hooks import apply_render_hooks as _apply_render_hooks
+
 log = logging.getLogger(__name__)
 
 # Optional: PIL only if needed for size sanity / fallbacks.
@@ -2934,6 +2937,21 @@ def render_brief(
             'place-items:center;overflow:hidden">' + tiles + "</div>"
         )
         html = html.replace("</body>", watermark_html + "</body>", 1)
+
+    # Sprint render hooks (G1.*): deterministic post-render HTML transforms that
+    # register as their own module under graphic_renderer/sprint_hooks/ — no edits
+    # here. A no-op until a hook module is present, so renders stay byte-identical.
+    html = _apply_render_hooks(
+        html,
+        _RenderHookCtx(
+            brief=brief,
+            width=width,
+            height=height,
+            family=family,
+            format_name=format_name,
+            is_v2=_v2_archetype,
+        ),
+    )
 
     # Output path
     visual_id = "v_" + uuid.uuid4().hex[:12]
