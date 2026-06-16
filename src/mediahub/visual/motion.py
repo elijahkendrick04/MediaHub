@@ -579,7 +579,9 @@ def _caption_roles(card_dict: dict, brand_dict: dict) -> tuple[str, str, str]:
     return ground, onground, accent
 
 
-def _story_caption_json(card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float) -> str:
+def _story_caption_json(
+    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float
+) -> str:
     """The caption track for a story render as a JSON string, or ``""``.
 
     Reads the story narration's voiceover SRT (built from the same fact-only
@@ -883,9 +885,7 @@ def render_story_card(
 
     # Burn-in captions (R1.3): only attach the prop when a track exists so the
     # captions-off path keeps the historic cache key byte-identical.
-    caption_json = _story_caption_json(
-        card_dict, brand_dict, audio_plan, duration_sec=duration_sec
-    )
+    caption_json = _story_caption_json(card_dict, brand_dict, audio_plan, duration_sec=duration_sec)
     if caption_json:
         card_dict = {**card_dict, "captionsJson": caption_json}
 

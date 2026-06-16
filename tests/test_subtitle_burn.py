@@ -16,6 +16,7 @@ Remotion overlay + the FFmpeg burn):
 
 Network-free: the one online seam (voiceover._synthesize_raw) is monkeypatched.
 """
+
 from __future__ import annotations
 
 import json
@@ -463,7 +464,10 @@ def test_story_caption_json_helper_gating(tmp_path, monkeypatch):
 
     monkeypatch.setenv("MEDIAHUB_SUBTITLES", "1")
     assert motion._story_caption_json(card_dict, brand_dict, None, duration_sec=6.0) == ""
-    assert motion._story_caption_json(card_dict, brand_dict, {"music": "x.mp3"}, duration_sec=6.0) == ""
+    assert (
+        motion._story_caption_json(card_dict, brand_dict, {"music": "x.mp3"}, duration_sec=6.0)
+        == ""
+    )
     assert motion._story_caption_json(card_dict, brand_dict, plan, duration_sec=6.0) != ""
 
 
