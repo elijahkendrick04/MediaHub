@@ -26,8 +26,9 @@ def apply(html: str, ctx: RenderHookCtx) -> str:
 unless `ctx.brief` requests the effect. A hook that raises is skipped, never fatal.
 With no modules here (today) the registry is a no-op and renders are byte-identical.
 
-Capabilities that fit this seam include **G1.8** (gradient-mesh backgrounds),
-**G1.19** (mono mode), **G1.21** (depth-of-field blur), **G1.22** (icon/badge
-overlays), **G1.29** (animated-still loops) and **G1.30** (inspection overlay).
-Capabilities that change formats, encoding, fonts, palettes or text-fitting edit
-their own dedicated module/region instead.
+Capabilities that fit this seam include **G1.7** (photo-derived ground tinting —
+`photo_tint.py`, opt-in via `MEDIAHUB_PHOTO_TINT`), **G1.8** (gradient-mesh
+backgrounds), **G1.19** (mono mode), **G1.21** (depth-of-field blur), **G1.22**
+(icon/badge overlays), **G1.29** (animated-still loops) and **G1.30** (inspection
+overlay). Capabilities that change formats, encoding, fonts, palettes or
+text-fitting edit their own dedicated module/region instead.
