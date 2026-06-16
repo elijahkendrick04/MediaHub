@@ -110,17 +110,37 @@ def test_card_props_without_brief_keep_new_axes_empty():
         assert props[key] == "", key
 
 
+def _motion_source_corpus() -> str:
+    """StoryCard.tsx plus every sprint-registry module.
+
+    Generator-sprint capabilities (R1.*) may live either inline in StoryCard.tsx
+    or as their own auto-discovered file under ``src/compositions/sprint/`` (an
+    intent registers ``{ name: "<intent>" }``, a scene ``{ archetype: "<name>" }``).
+    Both are real execution paths, so parity scans the union.
+    """
+    comp = motion.REMOTION_DIR / "src" / "compositions"
+    parts = [(comp / "StoryCard.tsx").read_text()]
+    sprint = comp / "sprint"
+    if sprint.is_dir():
+        parts.extend(
+            p.read_text()
+            for p in sorted(sprint.rglob("*"))
+            if p.suffix in {".ts", ".tsx"}
+        )
+    return "\n".join(parts)
+
+
 def test_tsx_executes_every_motion_intent():
     """Drift guard: every vocabulary member the director can pick must have
-    an execution branch in the composition — a picked-but-ignored intent is
-    the bug this whole feature removes."""
-    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    an execution branch — inline in StoryCard.tsx or as a registered file under
+    sprint/intents/. A picked-but-ignored intent is the bug this removes."""
+    src = _motion_source_corpus()
     for intent in ds.MOTION_INTENTS:
         if intent == "fade_in":
             # fade_in is also the documented safe default; still must appear.
             assert '"fade_in"' in src
             continue
-        assert f'"{intent}"' in src, f"StoryCard.tsx does not execute {intent!r}"
+        assert f'"{intent}"' in src, f"no execution path for intent {intent!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +200,7 @@ def test_every_v2_archetype_has_a_motion_scene_mapping():
     hero layout silently is the 'samey video' bug."""
     from mediahub.graphic_renderer.archetypes import list_archetypes
 
-    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    src = _motion_source_corpus()
     missing = [a for a in list_archetypes() if f'"{a}"' not in src]
     assert not missing, f"archetypes without a motion scene mapping: {missing}"
 

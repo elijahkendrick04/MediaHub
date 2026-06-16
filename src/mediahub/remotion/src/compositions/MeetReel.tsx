@@ -10,6 +10,7 @@ import {
 } from "remotion";
 import { z } from "zod";
 import { StoryCard, cardSchema } from "./StoryCard";
+import { REEL_LAYERS } from "./sprint/reelRegistry";
 
 // The reel reuses StoryCard's card schema verbatim (single source of truth):
 // zod strips undeclared keys, so a shared schema means a prop added for the
@@ -417,7 +418,8 @@ const OutroScreen: React.FC<{
 };
 
 export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+  const rootFrame = useCurrentFrame();
 
   // Allocate the reel: 2s cover + rank-weighted card beats + 1s outro.
   const safeCards = (cards || []).slice(0, 5);
@@ -509,7 +511,26 @@ export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
     </Sequence>,
   );
 
-  return <AbsoluteFill>{sequences}</AbsoluteFill>;
+  return (
+    <AbsoluteFill>
+      {sequences}
+      {/* Sprint reel-overlay layers — additive, in order (see sprint/reelRegistry). */}
+      {REEL_LAYERS.map(({ Layer }, i) => (
+        <Layer
+          key={`reel-layer-${i}`}
+          ctx={{
+            frame: rootFrame,
+            fps,
+            durationInFrames,
+            width,
+            height,
+            cardCount: safeCards.length,
+            meetName,
+          }}
+        />
+      ))}
+    </AbsoluteFill>
+  );
 };
 
 // Transition wrapper — eases its children in over `fadeInFrames` with the

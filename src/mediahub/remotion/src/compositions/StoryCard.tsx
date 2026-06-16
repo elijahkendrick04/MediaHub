@@ -8,6 +8,14 @@ import {
   useVideoConfig,
 } from "remotion";
 import { z } from "zod";
+import {
+  EXTRA_ACCENTS,
+  EXTRA_INTENTS,
+  EXTRA_LAYERS,
+  EXTRA_PATTERNS,
+  EXTRA_SCENES,
+  EXTRA_SPRINGS,
+} from "./sprint/registry";
 
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
@@ -79,7 +87,7 @@ export const storyCardSchema = z.object({
 type Props = z.infer<typeof storyCardSchema>;
 type CardProps = Props["card"];
 type BrandProps = Props["brand"];
-type Roles = { ground: string; surface: string; accent: string; onGround: string };
+export type Roles = { ground: string; surface: string; accent: string; onGround: string };
 
 // Six palette role permutations — mirror creative_brief/generator.py
 // _apply_palette_seed so the static graphic and motion render agree on
@@ -165,8 +173,12 @@ function bgPatternFor(style: string, roles: Roles): string {
     case "radial":
     case "duotone":
     case "clean":
-    default:
       return "";
+    default: {
+      // Sprint patterns (R1.4) register their own file under sprint/patterns/.
+      const extra = EXTRA_PATTERNS[style];
+      return extra ? extra(roles) : "";
+    }
   }
 }
 
@@ -206,6 +218,12 @@ function springConfigFor(mood: string): { damping: number; stiffness: number; ma
   if (m.includes("celebratory") || m.includes("bold") || m.includes("triumph")) {
     return { damping: 15, stiffness: 110, mass: 0.7 };
   }
+  // Sprint moods (R1.26) register their own file under sprint/springs/; built-in
+  // moods above always win, so this only resolves tokens they don't recognise.
+  const extra = EXTRA_SPRINGS[m];
+  if (extra) {
+    return extra;
+  }
   return { damping: 18, stiffness: 90, mass: 0.7 };
 }
 
@@ -219,7 +237,7 @@ function springConfigFor(mood: string): { damping: number; stiffness: number; ma
 // a scene compose freely. The "" default reproduces the original spring
 // programme exactly (legacy callers see no change).
 
-type AnimChannels = {
+export type AnimChannels = {
   heroY: number; // translateY of the hero text block (px @ design scale)
   heroOpacity: number;
   heroScale: number;
@@ -424,8 +442,11 @@ function animProgram(
         wordAt: identityWord,
       };
     }
-    default:
-      return base;
+    default: {
+      // Sprint intents (R1.1) register their own file under sprint/intents/.
+      const extra = EXTRA_INTENTS[intent];
+      return extra ? extra(frame, fps, durationInFrames, mood, base) : base;
+    }
   }
 }
 
@@ -635,8 +656,12 @@ function accentDecoration(
         />
       );
     case "minimal":
-    default:
       return null;
+    default: {
+      // Sprint accents (R1.5) register their own file under sprint/accents/.
+      const extra = EXTRA_ACCENTS[style];
+      return extra ? extra(roles, opacity, width, height) : null;
+    }
   }
 }
 
@@ -750,7 +775,7 @@ const KineticLine: React.FC<{
 };
 
 // Shared per-scene context, built once in the component body.
-type SceneCtx = {
+export type SceneCtx = {
   card: CardProps;
   brand: BrandProps;
   roles: Roles;
@@ -2294,7 +2319,9 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     club: (brand.displayName || brand.shortName || "").toUpperCase(),
   };
 
-  const Scene = SCENES[mode];
+  // A sprint scene (R1.2) registered for this exact archetype replaces the
+  // built-in scene; otherwise the parity-mapped built-in scene renders.
+  const Scene = EXTRA_SCENES[card.archetype || ""] || SCENES[mode];
 
   return (
     <AbsoluteFill
@@ -2306,6 +2333,10 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     >
       <Scene ctx={ctx} />
       <StylePackLayer ctx={ctx} />
+      {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order. */}
+      {EXTRA_LAYERS.map(({ Layer }, i) => (
+        <Layer key={`sprint-layer-${i}`} ctx={ctx} />
+      ))}
     </AbsoluteFill>
   );
 };
