@@ -40,6 +40,12 @@ A hook that no brief opts into is a no-op, so renders stay byte-identical.
   animated SVG layer so a live preview of the card breathes. The matching APNG/
   GIF exporter and the loop maths live in `graphic_renderer/animated_still.py`.
   Opt-in, byte-identical for every other brief.
+- `photo_tint.py` (**G1.7**, `ORDER = 40`) — photo-derived ground tinting. When
+  `MEDIAHUB_PHOTO_TINT` is set, nudges a v2 card's derived `--mh-surface` (and the
+  no-brand fallback ground only) toward the dominant colour of the card's photo —
+  extracted by deterministic PIL k-means (`graphic_renderer.photo_palette`) —
+  APCA-gated and never overriding a confirmed brand hex. Opt-in, byte-identical
+  when the flag is off.
 
 Capabilities that also fit this seam include **G1.8** (gradient-mesh
 backgrounds), **G1.19** (mono mode), **G1.22** (icon/badge overlays) and
