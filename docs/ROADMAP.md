@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `121b30491` · Merge pull request #662 from elijahkendrick04/claude/eloquent-volta-u45dum
+**Last updated:** 2026-06-16 · `3e9a776b3` · Merge pull request #674: Kerning- and ligature-aware text measurement (G1.11)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -184,7 +184,6 @@ sequence it or merge with care.
 - **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.10** · Graphic generator sprint — Club custom-font upload pipeline — security-sandboxed validation, subsetting, first-party self-hosting. *Build: new `typography/font_intake.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **G1.11** · Graphic generator sprint — Kerning/ligature-aware autofit — kerning-pair corrections + common ligatures for truer measured fits. *Build: `autofit.py` (file-sibling G1.12 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.12** · Graphic generator sprint — Multi-line hero & split-result fitting — wrap/balance compound surnames and split times (`1:45.23 / 50.12`). *Build: `autofit.py` (file-sibling G1.11) + v2 hero slots.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1578,6 +1577,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
 | 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
 | 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
 | 2026-06-16 | `debb43795` | G1.20: brand-palette expansion to N custom club colours |
@@ -1586,6 +1586,4 @@ list and the auto table below, not here.
 | 2026-06-16 | `6d553dbb1` | R1.26: expanded mood→spring easing-curve vocabulary |
 | 2026-06-16 | `076835b0d` | R1.13 — Custom reel stat chips: configurable honest stat labels |
 | 2026-06-16 | `2f9644bcf` | Add G1.6 texture-layering engine (two-texture blend-mode stacking) |
-| 2026-06-16 | `289efaf63` | Add G1.22 icon/badge overlay system for still graphics |
-| 2026-06-16 | `9b435597e` | Build G1.2 — multi-athlete collage / relay layout engine |
 <!-- /ROADMAP:ACTIVITY -->
