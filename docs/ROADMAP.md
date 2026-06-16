@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `5f7595569` · Merge pull request #667: G1.29 · Animated still loops
+**Last updated:** 2026-06-16 · `b10a31658` · G1.25 — server-side photo adjustment stack (deterministic PIL recipes) (#673)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -192,7 +192,6 @@ sequence it or merge with care.
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.25** · Graphic generator sprint — Server-side photo adjustment stack — deterministic PIL recipes (sharpen, contrast, saturation, levels) pre-inline. *Build: new `graphic_renderer/photo_adjust.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.28** · Graphic generator sprint — Mood-keyed style-pack preset bundles — curated, deterministic bundles selected from `brief.mood`. *Build: new preset-map functions in `style_packs.py` (new region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1574,6 +1573,5 @@ list and the auto table below, not here.
 | 2026-06-16 | `635ef6da1` | Add G1.29 animated still loops (subtle living APNG/GIF backgrounds) |
 | 2026-06-16 | `415935fa8` | feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding |
 | 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
-| 2026-06-16 | `4ba4f7dfd` | R1.8: photo scrim variant system for motion (role-driven) |
-| 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
+| 2026-06-16 | `99f69222f` | Add G1.25 server-side photo adjustment stack (deterministic PIL recipes) |
 <!-- /ROADMAP:ACTIVITY -->
