@@ -68,6 +68,10 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // Subtitle/caption burn-in track (R1.3): a JSON string of the APCA-gated,
+  // frame-timed caption cues built by visual/subtitle_burn.py and painted by
+  // sprint/layers/captions.tsx. Empty = no captions (byte-identical render).
+  captionsJson: z.string().default(""),
 });
 
 const brandSchema = z.object({

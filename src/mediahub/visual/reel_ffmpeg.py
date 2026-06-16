@@ -42,6 +42,7 @@ FFmpeg binary resolution order:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -407,6 +408,28 @@ def _ken_burns_filter(duration_sec: float, *, variant: str = "zoom_in", tag: str
     return f"{base},zoompan={z}:d=1:{pos}{tail}"
 
 
+def _write_caption_ass(caption_json: str, work_dir: Path, name: str) -> Optional[Path]:
+    """Write a card's caption track (R1.3) as an ASS file for burn-in, or None.
+
+    Best-effort: a malformed/empty track yields None and the frame renders
+    without captions — an overlay never fails the render.
+    """
+    if not caption_json:
+        return None
+    try:
+        from mediahub.visual import subtitle_burn
+
+        track = json.loads(caption_json)
+        if not isinstance(track, dict) or not track.get("cues"):
+            return None
+        doc = subtitle_burn.ass_document(track, width=WIDTH, height=HEIGHT, fps=FPS)
+        path = work_dir / f"{name}.ass"
+        path.write_text(doc, encoding="utf-8")
+        return path
+    except Exception:
+        return None
+
+
 def _ken_burns_variant_for(seed: int, *, motion_intent: str = "") -> str:
     """Pick a beat's Ken Burns programme deterministically.
 
@@ -484,13 +507,20 @@ def _reel_transition_names(cards_props: list[dict]) -> list[str]:
 
 
 def story_ffmpeg_args(
-    still: Path, out_path: Path, duration_sec: float, *, variant: str = "zoom_in"
+    still: Path,
+    out_path: Path,
+    duration_sec: float,
+    *,
+    variant: str = "zoom_in",
+    ass_path: Optional[Path] = None,
 ) -> list[str]:
     """Argument list (after the binary) for a single-card story MP4.
 
     ``variant`` selects the Ken Burns programme (or the 2.5D parallax /
     held-frame treatment); the default keeps the historic centre zoom-in, so
-    a caller that passes no variant renders exactly as before.
+    a caller that passes no variant renders exactly as before. ``ass_path``
+    (R1.3) burns the card's caption track onto the final frame via FFmpeg's
+    ``ass`` filter — engine parity with the Remotion captions overlay.
     """
     fade_out = max(0.0, duration_sec - 0.6)
     vf = (
@@ -498,6 +528,10 @@ def story_ffmpeg_args(
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=0.6,"
         f"format=yuv420p,setsar=1"
     )
+    if ass_path is not None:
+        from mediahub.visual.subtitle_burn import ass_filter
+
+        vf = f"{vf},{ass_filter(str(ass_path))}"
     return [
         "-loop",
         "1",
@@ -722,7 +756,10 @@ def render_story_card_from_props(
         work = Path(td)
         still = _render_still(brief, brand_kit, work, name="story")
         tmp_mp4 = work / "story.mp4"
-        _run_ffmpeg(story_ffmpeg_args(still, tmp_mp4, duration_sec, variant=variant))
+        ass_path = _write_caption_ass(str(card_props.get("captionsJson") or ""), work, "story")
+        _run_ffmpeg(
+            story_ffmpeg_args(still, tmp_mp4, duration_sec, variant=variant, ass_path=ass_path)
+        )
         return _finalise(
             tmp_mp4,
             cached,

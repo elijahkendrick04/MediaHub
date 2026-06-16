@@ -95,5 +95,21 @@ Videos used to be silent. Now, when the operator opts in, they can carry sound:
   thumbnail frame out of every finished video. Works for both engines
   (Remotion and the free FFmpeg one).
 
-Not done yet (on purpose): burning the `.srt` subtitles into the video frames.
-The subtitle file is produced now; the burn-in rides the same mux seam later.
+## subtitle_burn.py — captions burned onto the video (off by default)
+
+Most feed video autoplays **muted**, so the words a card/reel narrates have to be
+*on the screen* too. `subtitle_burn.py` reads the `.srt` that `voiceover.py`
+already makes, picks a caption colour that is **provably legible** on the card's
+own brand colour (the same APCA contrast maths the still renderer uses, in
+`theming/contrast.py`), and turns it into a frame-timed caption track. The
+Remotion video paints that track with `remotion/.../sprint/layers/captions.tsx`;
+the free FFmpeg engine burns the same track onto the story frame as an ASS
+subtitle. The words are the **verbatim** narration (no AI, no invention) and the
+phonetic name fixes never leak on screen. If anything fails, the video simply
+renders **without** captions — a missing overlay never breaks or fakes a render.
+
+It's **off by default**: an operator turns it on with `MEDIAHUB_SUBTITLES=1` on
+top of `MEDIAHUB_VOICEOVER=1` (captions ride on the narration). With it off,
+nothing changes — the renders are byte-identical. (The still+FFmpeg fallback
+burns captions on the **story** cut only; reel captions there are a known gap —
+the Remotion engine captions reels too.)
