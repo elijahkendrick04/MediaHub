@@ -856,6 +856,33 @@ def reel_duration_for(n_cards: int) -> float:
     return REEL_COVER_SEC + REEL_PER_CARD_SEC * n + REEL_OUTRO_SEC
 
 
+def _render_reel_parallel_or_none(
+    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int]
+) -> Optional[Path]:
+    """Opt-in parallel reel composition (roadmap R1.28).
+
+    Delegates to :mod:`mediahub.visual.reel_parallel`: when
+    ``MEDIAHUB_REEL_PARALLEL`` is set and Node/Remotion/FFmpeg are available,
+    the reel's frame timeline is split across concurrent segment renders and
+    composited into the silent cache MP4 at ``cached`` — exactly what the
+    serial ``_run_remotion`` would write, just faster on a multi-core worker.
+
+    Returns the path on success, or ``None`` (the signal to take the serial
+    render) when the feature is disabled, the prerequisites are missing, or
+    anything goes wrong. Frame-purity makes the parallel output identical to
+    the serial reel, so the content cache key is unchanged either way.
+    """
+    from mediahub.visual import reel_parallel
+
+    return reel_parallel.try_render_reel_parallel(
+        composition_id=COMP_REEL,
+        props=props,
+        out_path=cached,
+        duration_sec=duration_sec,
+        size=size,
+    )
+
+
 def render_meet_reel(
     top_cards: list[dict],
     brand_kit: Any,
@@ -974,13 +1001,28 @@ def render_meet_reel(
             _update_manifest_audio(cached, audio_rec)
         return _publish(cached, out_path)
 
-    _run_remotion(
-        composition_id=COMP_REEL,
-        props={"cards": cards_props, "brand": brand_dict, "meetName": meet_name},
-        out_path=cached,
-        duration_sec=duration_sec,
-        size=size,
-    )
+    reel_props = {"cards": cards_props, "brand": brand_dict, "meetName": meet_name}
+    # Cold render. Try the opt-in parallel composition path (R1.28) first: it
+    # splits the reel's frames across concurrent segment renders and composites
+    # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
+    # workers. It returns None — and we take the unchanged serial render — when
+    # disabled, unavailable, or on any failure.
+    render_strategy = "serial"
+    if (
+        _render_reel_parallel_or_none(
+            props=reel_props, cached=cached, duration_sec=duration_sec, size=size
+        )
+        is not None
+    ):
+        render_strategy = "parallel-segments"
+    else:
+        _run_remotion(
+            composition_id=COMP_REEL,
+            props=reel_props,
+            out_path=cached,
+            duration_sec=duration_sec,
+            size=size,
+        )
     audio_rec = _finish_cached_video(
         cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
     )
@@ -991,6 +1033,7 @@ def render_meet_reel(
         {
             "kind": "reel",
             "engine": engine,
+            "render_strategy": render_strategy,
             "format": format_name,
             "size": list(size),
             "duration_sec": duration_sec,

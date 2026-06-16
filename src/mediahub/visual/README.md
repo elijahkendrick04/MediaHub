@@ -28,6 +28,20 @@ sidecar — a single picked frame to use as the thumbnail.
 engine is active (the health page shows its answer). Asking for an engine that
 isn't recognised produces a clear, honest error — never a fake video.
 
+`reel_parallel.py` is an **opt-in speed-up** for the Remotion reel (turn it on
+with `MEDIAHUB_REEL_PARALLEL=1`). A reel is one long video, so making it
+normally means rendering its frames one after another. This helper instead cuts
+the reel's frames into a few equal chunks, renders the chunks **at the same
+time** (the Node side, `remotion/render_segments.js`, builds the project once
+and then renders every chunk together), and **glues them back** end-to-end with
+FFmpeg. Because every frame of these videos always looks the *same* no matter
+when it's drawn, gluing the chunks gives the **exact same reel** as the slow way
+— it's just faster on a computer with several cores. The glued reel is even
+stored under the same name in the cache, so a reel made the fast way and one
+made the slow way are interchangeable. If anything is missing (Node, Remotion,
+or FFmpeg) or any chunk fails, it quietly falls back to the normal one-pass
+render — never a half-made or broken reel.
+
 ## voiceover.py + pronunciation.py
 
 `voiceover.py` reads a card's **already-approved caption out loud** and saves it as
