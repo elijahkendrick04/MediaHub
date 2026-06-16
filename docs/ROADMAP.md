@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `6f0fb8a05` · Merge pull request #672 from elijahkendrick04/claude/festive-meitner-lfshma
+**Last updated:** 2026-06-16 · `121b30491` · Merge pull request #662 from elijahkendrick04/claude/eloquent-volta-u45dum
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -223,7 +223,6 @@ sequence it or merge with care.
 - **R1.23** · Reel generator sprint — Dynamic logo sizing + animated logo reveals per scene (small/medium/large/auto, scene-aware entrance). *Build: `sprint/layers/logo_anim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.24** · Reel generator sprint — Ambient motion programmes — slow drift / pan / temperature shift sustained through the breathe phase. *Build: `sprint/layers/ambient.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.26** · Reel generator sprint — Easing-curve customisation + expanded mood→spring vocabulary (melancholic, energetic, victorious, contemplative…). *Build: one file each in `sprint/springs/<mood>.ts` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.28** · Reel generator sprint — Parallel reel composition — render the card beats concurrently and composite, cutting wall-clock time. *Build: new `visual/reel_parallel.py` helper + a small call from `render_meet_reel` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1589,5 +1588,4 @@ list and the auto table below, not here.
 | 2026-06-16 | `2f9644bcf` | Add G1.6 texture-layering engine (two-texture blend-mode stacking) |
 | 2026-06-16 | `289efaf63` | Add G1.22 icon/badge overlay system for still graphics |
 | 2026-06-16 | `9b435597e` | Build G1.2 — multi-athlete collage / relay layout engine |
-| 2026-06-16 | `db6ea663b` | feat(graphic): G1.21 depth-of-field background-blur photo treatment |
 <!-- /ROADMAP:ACTIVITY -->
