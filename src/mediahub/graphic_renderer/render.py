@@ -25,15 +25,23 @@ Public API
 
 from __future__ import annotations
 
+import atexit
 import base64
 import logging
 import os
+import queue
 import re
+import threading
+import time
 import uuid
+from collections import OrderedDict
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as _FutureTimeout
+from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from .sprint_hooks import RenderHookCtx as _RenderHookCtx
 from .sprint_hooks import apply_render_hooks as _apply_render_hooks
@@ -2138,32 +2146,70 @@ def _apply(template: str, replacements: dict[str, str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Playwright runner
+# Playwright runner — launch args + per-context security + per-page pixels
 # ---------------------------------------------------------------------------
 
+# Chromium launch flags shared by the one-shot path and every pooled browser, so
+# a warm pooled render is byte-identical to a cold one-shot render.
+_CHROMIUM_LAUNCH_ARGS = ["--no-sandbox", "--font-render-hinting=none"]
 
-def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]) -> int:
-    """Headless-Chromium render; returns bytes written. Raises if Playwright is unavailable.
+
+def _renderer_net_locked() -> bool:
+    """True unless the operator has opened the renderer's network egress.
+
+    Renderer lockdown (THREAT_MODEL §3): card HTML carries user-influenced
+    text, so by default the render context gets NO network — only file:// (the
+    page itself + self-hosted fonts/assets), data: URIs and about:blank may
+    load. A template-injected https:// fetch is aborted, killing both SSRF and
+    exfiltration through the renderer. Escape hatch: MEDIAHUB_RENDERER_ALLOW_NET=1.
+    """
+    return os.environ.get("MEDIAHUB_RENDERER_ALLOW_NET", "") != "1"
+
+
+def _renderer_route_guard(route) -> None:
+    """Abort any non-local subresource the card HTML tries to fetch."""
+    url = route.request.url
+    if url.startswith(("file://", "data:", "about:")):
+        route.continue_()
+    else:
+        log.warning("renderer blocked network request: %s", url.split("?")[0][:200])
+        route.abort()
+
+
+def _new_render_context(browser, size: tuple[int, int], dpr: int):
+    """Create a Chromium context sized for ``size`` at device-scale ``dpr``.
+
+    Identical construction on the one-shot and pooled paths — same viewport,
+    same device_scale_factor, same network lockdown — so pooling never changes
+    a single rendered pixel.
+    """
+    width, height = size
+    ctx = browser.new_context(
+        viewport={"width": width, "height": height},
+        device_scale_factor=dpr,
+    )
+    if _renderer_net_locked():
+        ctx.route("**/*", _renderer_route_guard)
+    return ctx
+
+
+def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
+    """Render ``html`` to ``output_path`` on an already-built context; return bytes.
+
+    This is the single source of render pixels — both the one-shot launch and
+    the warm pool funnel through here, so a pooled render is byte-for-byte the
+    same as a cold one.
 
     V8.1 Issue 7 upgrades:
-      - device_scale_factor configurable (default 2) for sharper text +
-        gradients; the captured PNG is then resampled back down to the
-        target dimensions with PIL Lanczos for a clean final size.
+      - device_scale_factor (default 2) for sharper text + gradients; the
+        captured PNG is then resampled back down to the target dimensions with
+        PIL Lanczos for a clean final size.
       - Awaits ``document.fonts.ready`` so @font-face WOFF2 fetches finish
         before the screenshot fires.
-    Both upgrades degrade gracefully: if PIL is missing or the larger PNG
-    is already the target size, we just write what we have.
+    Both degrade gracefully: if PIL is missing or the larger PNG is already the
+    target size, we just write what we have.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        from playwright.sync_api import sync_playwright  # type: ignore
-    except Exception as e:
-        raise RuntimeError(f"Playwright not installed: {e}")
-
     width, height = size
-    dpr = _dpr_render()
     # The page MUST be navigated as a real file:// document, not injected via
     # set_content(): set_content leaves the document on an about:blank origin,
     # and Chromium refuses to fetch file:// subresources from there — so every
@@ -2173,55 +2219,36 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
     # which is allowed to load file fonts.
     page_path = output_path.with_suffix(output_path.suffix + ".render.html")
     page_path.write_text(html, encoding="utf-8")
+    page = ctx.new_page()
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--no-sandbox", "--font-render-hinting=none"])
-            ctx = browser.new_context(
-                viewport={"width": width, "height": height},
-                device_scale_factor=dpr,
+        page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
+        # Wait for ALL @font-face downloads to settle. Playwright exposes
+        # `evaluate` with a Promise return — the inner JS resolves once
+        # `document.fonts.ready` does. Falls back to a timed pause if the
+        # page doesn't expose document.fonts at all.
+        try:
+            page.evaluate(
+                "() => (document.fonts && document.fonts.ready) "
+                "? document.fonts.ready.then(() => true) : true"
             )
-            # Renderer lockdown (THREAT_MODEL §3): card HTML carries
-            # user-influenced text, so the render context gets NO network —
-            # only file:// (the page itself + self-hosted fonts/assets),
-            # data: URIs and about:blank may load. A template-injected
-            # https:// fetch is aborted, killing both SSRF and exfiltration
-            # through the renderer. Operator escape hatch for knowingly
-            # remote assets: MEDIAHUB_RENDERER_ALLOW_NET=1.
-            if os.environ.get("MEDIAHUB_RENDERER_ALLOW_NET", "") != "1":
-
-                def _renderer_route_guard(route):
-                    url = route.request.url
-                    if url.startswith(("file://", "data:", "about:")):
-                        route.continue_()
-                    else:
-                        log.warning("renderer blocked network request: %s", url.split("?")[0][:200])
-                        route.abort()
-
-                ctx.route("**/*", _renderer_route_guard)
-            page = ctx.new_page()
-            page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
-            # Wait for ALL @font-face downloads to settle. Playwright exposes
-            # `evaluate` with a Promise return — the inner JS resolves once
-            # `document.fonts.ready` does. Falls back to a timed pause if the
-            # page doesn't expose document.fonts at all.
+        except Exception:
             try:
-                page.evaluate(
-                    "() => (document.fonts && document.fonts.ready) "
-                    "? document.fonts.ready.then(() => true) : true"
-                )
+                page.wait_for_timeout(400)
             except Exception:
-                try:
-                    page.wait_for_timeout(400)
-                except Exception:
-                    pass
-            png = page.screenshot(
-                full_page=False,
-                type="png",
-                omit_background=False,
-                clip={"x": 0, "y": 0, "width": width, "height": height},
-            )
-            browser.close()
+                pass
+        png = page.screenshot(
+            full_page=False,
+            type="png",
+            omit_background=False,
+            clip={"x": 0, "y": 0, "width": width, "height": height},
+        )
     finally:
+        # Close the page (NOT the context) so a pooled context stays warm for
+        # the next render while per-render page memory is released immediately.
+        try:
+            page.close()
+        except Exception:
+            pass
         try:
             page_path.unlink()
         except OSError:
@@ -2248,6 +2275,353 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
 
     output_path.write_bytes(png)
     return len(png)
+
+
+# ---------------------------------------------------------------------------
+# Headless-Chromium context pool (roadmap G1.23)
+# ---------------------------------------------------------------------------
+#
+# Launching Chromium — and even spinning up the Playwright driver subprocess —
+# costs hundreds of milliseconds to a couple of seconds. A content pack renders
+# many cards back-to-back (each at 2–3 formats), so paying that cost per render
+# dominates a batch. This pool keeps a small set of Chromium browsers WARM and
+# reuses their contexts across renders, turning a batch from
+# ``N × (launch + render)`` into ``launch + N × render``.
+#
+# Sync Playwright objects are bound to the OS thread that created them — you
+# cannot create a browser on one thread and close it on another. So the pool
+# owns its own long-lived worker threads: each worker creates, uses, and tears
+# down its browser entirely on its own thread. That also means warm browsers
+# survive across the transient ``ThreadPoolExecutor`` that ``render_all_formats``
+# spins up per call, and are cleaned up deterministically when the pool shuts
+# down (no leaked Chromium processes).
+#
+# Pooling is OFF for a lone render (byte-identical, zero lingering process) and
+# turns ON inside a ``render_pool_session()`` — which the content-pack batch
+# loop opens — or globally when ``MEDIAHUB_RENDER_POOL_ALWAYS`` is set. The
+# master kill switch ``MEDIAHUB_RENDER_POOL=0`` forces the one-shot path
+# everywhere. On any pool-infrastructure failure the renderer falls back to a
+# one-shot launch, so a broken pool degrades to "slow but correct", never broken.
+
+# Each worker keeps at most this many warm contexts (keyed by size/dpr/net). A
+# content pack uses a tiny fixed set of formats, so this is never a real cap;
+# it just bounds memory if an unusual mix of sizes streams through one worker.
+_CTX_CACHE_CAP = 6
+# Hard ceiling on how long a single pooled render may take before the caller
+# gives up on the pool and falls back to a one-shot launch (renders are bounded
+# by the 30s goto timeout, so this only fires if a worker is truly wedged).
+_POOL_SUBMIT_TIMEOUT_S = 90.0
+# Sentinel pushed onto the task queue to tell a worker to shut down.
+_POOL_SHUTDOWN = object()
+
+
+class _PoolUnavailable(RuntimeError):
+    """Raised when the pool cannot service a render (so the caller one-shots)."""
+
+
+def _pool_enabled() -> bool:
+    """Master switch. Default ON; ``MEDIAHUB_RENDER_POOL=0`` is the kill switch."""
+    return _flag("MEDIAHUB_RENDER_POOL", "1")
+
+
+def _pool_always_on() -> bool:
+    """When set, every render (even outside a session) uses a process-wide pool."""
+    return _flag("MEDIAHUB_RENDER_POOL_ALWAYS", "0")
+
+
+def _pool_size() -> int:
+    """Number of warm browsers. Defaults to the render-worker count (≈3)."""
+    raw = os.environ.get("MEDIAHUB_RENDER_POOL_SIZE") or os.environ.get(
+        "MEDIAHUB_RENDER_WORKERS", "3"
+    )
+    try:
+        return max(1, min(8, int(raw)))
+    except Exception:
+        return 3
+
+
+def _is_closed_error(exc: Exception) -> bool:
+    """Heuristic: did Chromium / the context / the page die under us?"""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(s in text for s in ("closed", "crash", "disconnected", "target page"))
+
+
+class _RenderWorker(threading.Thread):
+    """A long-lived thread owning one warm Chromium browser + a context cache.
+
+    All Playwright calls for this worker's browser happen on this thread, which
+    is the only thread allowed to touch them. Tasks arrive on a shared queue;
+    results come back via per-task ``Future`` objects.
+    """
+
+    def __init__(self, task_q: "queue.Queue", broken: threading.Event) -> None:
+        super().__init__(name="mh-render-pool", daemon=True)
+        self._q = task_q
+        self._broken = broken
+        self._pw = None
+        self._browser = None
+        self._contexts: "OrderedDict[tuple, Any]" = OrderedDict()
+
+    # -- browser lifecycle (all on this thread) ----------------------------
+    def _launch_browser(self) -> None:
+        self._browser = self._pw.chromium.launch(args=_CHROMIUM_LAUNCH_ARGS)
+
+    def _recreate_browser(self) -> None:
+        """Tear the (probably-dead) browser down and launch a fresh one."""
+        for ctx in self._contexts.values():
+            try:
+                ctx.close()
+            except Exception:
+                pass
+        self._contexts.clear()
+        try:
+            if self._browser is not None:
+                self._browser.close()
+        except Exception:
+            pass
+        self._launch_browser()
+
+    def _context_for(self, size: tuple[int, int], dpr: int):
+        key = (size[0], size[1], dpr, _renderer_net_locked())
+        ctx = self._contexts.get(key)
+        if ctx is not None:
+            self._contexts.move_to_end(key)
+            return ctx
+        ctx = _new_render_context(self._browser, size, dpr)
+        self._contexts[key] = ctx
+        while len(self._contexts) > _CTX_CACHE_CAP:
+            _old_key, old_ctx = self._contexts.popitem(last=False)
+            try:
+                old_ctx.close()
+            except Exception:
+                pass
+        return ctx
+
+    def _render(self, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
+        try:
+            ctx = self._context_for(size, dpr)
+            return _render_on_context(ctx, html, output_path, size, dpr)
+        except Exception as exc:
+            # Browser/context died mid-batch — recreate once and retry so a
+            # single Chromium hiccup doesn't fail the whole pack.
+            if _is_closed_error(exc):
+                log.warning("render pool: browser closed mid-render, recreating (%s)", exc)
+                self._recreate_browser()
+                ctx = self._context_for(size, dpr)
+                return _render_on_context(ctx, html, output_path, size, dpr)
+            raise
+
+    # -- thread body -------------------------------------------------------
+    def run(self) -> None:
+        try:
+            from playwright.sync_api import sync_playwright  # type: ignore
+
+            self._pw = sync_playwright().start()
+            self._launch_browser()
+        except Exception as exc:
+            # Could not stand up a warm browser: mark the pool broken so
+            # submitters fall back to a one-shot launch (which surfaces the
+            # real error honestly), and exit WITHOUT draining the queue so a
+            # healthy sibling worker can still pick the tasks up.
+            log.warning("render pool worker failed to start: %s", exc)
+            self._broken.set()
+            try:
+                if self._pw is not None:
+                    self._pw.stop()
+            except Exception:
+                pass
+            return
+
+        try:
+            while True:
+                task = self._q.get()
+                try:
+                    if task is _POOL_SHUTDOWN:
+                        return
+                    html, output_path, size, dpr, fut = task
+                    if not fut.set_running_or_notify_cancel():
+                        continue
+                    try:
+                        fut.set_result(self._render(html, output_path, size, dpr))
+                    except Exception as exc:
+                        fut.set_exception(exc)
+                finally:
+                    self._q.task_done()
+        finally:
+            # Teardown on this (the owning) thread — never cross-thread.
+            for ctx in self._contexts.values():
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+            try:
+                if self._browser is not None:
+                    self._browser.close()
+            except Exception:
+                pass
+            try:
+                if self._pw is not None:
+                    self._pw.stop()
+            except Exception:
+                pass
+
+
+class _RenderPool:
+    """A fixed set of warm-browser workers sharing one task queue."""
+
+    def __init__(self, size: int) -> None:
+        self._q: "queue.Queue" = queue.Queue()
+        self._broken = threading.Event()
+        self._size = max(1, size)
+        self._workers = [_RenderWorker(self._q, self._broken) for _ in range(self._size)]
+        for w in self._workers:
+            w.start()
+
+    def submit(self, html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
+        if self._broken.is_set():
+            raise _PoolUnavailable("render pool has no live browser")
+        fut: "Future[int]" = Future()
+        self._q.put((html, output_path, size, dpr, fut))
+        # Poll the future rather than block forever: if a worker fails to stand
+        # up its browser AFTER we queued (so ``_broken`` flips under us), wake
+        # within the poll interval and bail to a one-shot launch instead of
+        # hanging on a task no live worker will ever serve.
+        deadline = time.monotonic() + _POOL_SUBMIT_TIMEOUT_S
+        while True:
+            try:
+                return fut.result(timeout=0.5)
+            except _FutureTimeout:
+                if self._broken.is_set():
+                    raise _PoolUnavailable("render pool lost its browser") from None
+                if time.monotonic() >= deadline:
+                    raise _PoolUnavailable(
+                        f"render pool timed out after {_POOL_SUBMIT_TIMEOUT_S}s"
+                    ) from None
+
+    def shutdown(self) -> None:
+        for _ in self._workers:
+            self._q.put(_POOL_SHUTDOWN)
+        for w in self._workers:
+            try:
+                w.join(timeout=15.0)
+            except Exception:
+                pass
+
+
+# Process-global pool state, guarded by one lock. ``_POOL`` is the live pool (or
+# None); ``_SESSION_DEPTH`` ref-counts nested ``render_pool_session`` scopes so
+# only the outermost one warms and tears the pool down.
+_POOL: Optional[_RenderPool] = None
+_SESSION_DEPTH = 0
+_POOL_LOCK = threading.RLock()
+
+
+def warm_render_pool(size: Optional[int] = None) -> Optional[_RenderPool]:
+    """Start the process-wide render pool if pooling is enabled. Idempotent."""
+    global _POOL
+    if not _pool_enabled():
+        return None
+    with _POOL_LOCK:
+        if _POOL is None:
+            _POOL = _RenderPool(size or _pool_size())
+        return _POOL
+
+
+def shutdown_render_pool() -> None:
+    """Tear the process-wide render pool down (safe to call repeatedly)."""
+    global _POOL, _SESSION_DEPTH
+    with _POOL_LOCK:
+        pool, _POOL = _POOL, None
+        _SESSION_DEPTH = 0
+    if pool is not None:
+        pool.shutdown()
+
+
+def render_pool_active() -> bool:
+    """True when a warm render pool is currently serving renders."""
+    with _POOL_LOCK:
+        return _POOL is not None
+
+
+@contextmanager
+def render_pool_session(size: Optional[int] = None) -> Iterator[None]:
+    """Keep one warm Chromium pool alive for the duration of a batch render.
+
+    Wrap a loop that renders many cards in this and every ``render_html_to_png``
+    inside it reuses warm browsers instead of relaunching Chromium each time.
+    Nesting is ref-counted — only the outermost scope warms and tears down — so
+    callers can open a session defensively without worrying about double work.
+    A no-op when pooling is disabled (``MEDIAHUB_RENDER_POOL=0``).
+    """
+    global _SESSION_DEPTH
+    if not _pool_enabled():
+        yield
+        return
+    with _POOL_LOCK:
+        _SESSION_DEPTH += 1
+        outermost = _SESSION_DEPTH == 1
+        if outermost:
+            warm_render_pool(size)
+    try:
+        yield
+    finally:
+        with _POOL_LOCK:
+            _SESSION_DEPTH = max(0, _SESSION_DEPTH - 1)
+            tear_down = _SESSION_DEPTH == 0
+        if tear_down:
+            shutdown_render_pool()
+
+
+def _active_pool() -> Optional[_RenderPool]:
+    """The pool to use for the current render, or None for the one-shot path."""
+    if not _pool_enabled():
+        return None
+    with _POOL_LOCK:
+        if _POOL is not None:
+            return _POOL
+    if _pool_always_on():
+        return warm_render_pool()
+    return None
+
+
+# A broken process-wide pool is torn down at exit; daemon workers wouldn't block
+# shutdown, but this closes their Chromium processes promptly.
+atexit.register(shutdown_render_pool)
+
+
+def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]) -> int:
+    """Headless-Chromium render; returns bytes written. Raises if Playwright is unavailable.
+
+    Routes through the warm render pool when one is active (see
+    ``render_pool_session``); otherwise launches a fresh one-shot Chromium. Both
+    paths share ``_render_on_context``, so the output PNG is identical either way.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except Exception as e:
+        raise RuntimeError(f"Playwright not installed: {e}")
+
+    dpr = _dpr_render()
+
+    pool = _active_pool()
+    if pool is not None:
+        try:
+            return pool.submit(html, output_path, size, dpr)
+        except _PoolUnavailable as exc:
+            # Pool can't serve this render — fall through to a one-shot launch
+            # so the render still succeeds (just without the warm-reuse win).
+            log.warning("render pool unavailable, falling back to one-shot: %s", exc)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=_CHROMIUM_LAUNCH_ARGS)
+        try:
+            ctx = _new_render_context(browser, size, dpr)
+            return _render_on_context(ctx, html, output_path, size, dpr)
+        finally:
+            browser.close()
 
 
 # ---------------------------------------------------------------------------
@@ -2985,6 +3359,10 @@ __all__ = [
     "RenderResult",
     "render_brief",
     "render_html_to_png",
+    "render_pool_session",
+    "warm_render_pool",
+    "shutdown_render_pool",
+    "render_pool_active",
     "darken",
     "lighten",
 ]
