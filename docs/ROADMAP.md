@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `e83fd239d` · Merge pull request #682 from elijahkendrick04/claude/dreamy-meitner-hzm5tm
+**Last updated:** 2026-06-16 · `b08ce2814` · Merge pull request #691: Subtitle/caption burn-in engine (R1.3)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -194,7 +194,6 @@ sequence it or merge with care.
 - **G1.30** · Graphic generator sprint — Render debug/inspection overlay + design-explainability sidecar (crop box, saliency centroid, fitted sizes, why-this-design JSON). *Build: new `sprint_hooks/inspect_overlay.py` + new `graphic_renderer/inspect.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.3** · Reel generator sprint — Subtitle/caption burn-in engine — read the voiceover SRT, render APCA-gated on-video captions. *Build: new `visual/subtitle_burn.py` + `sprint/layers/captions.tsx`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.5** · Reel generator sprint — Motion accent-decoration expansion + sizing variants (thick/thin stripe, large/small brackets, offset badge). *Build: one file each in `sprint/accents/<name>.tsx` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1562,7 +1561,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
 | 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
+| 2026-06-16 | `2b0691b5b` | Add subtitle/caption burn-in engine (R1.3) |
 | 2026-06-16 | `1abe2fd96` | G1.23: regenerate ENV_INVENTORY.md for the new render-pool env vars |
-| 2026-06-16 | `d7a55f922` | Apply ruff-format to reel_parallel.py |
 <!-- /ROADMAP:ACTIVITY -->
