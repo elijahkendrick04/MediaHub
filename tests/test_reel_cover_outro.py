@@ -78,7 +78,7 @@ class TestCoverVariants:
         weekend's pool excludes it, so the cover never fabricates a hero stat."""
         fn = _reel_src().split("export function coverVariantFor", 1)[1].split("\n}", 1)[0]
         assert "statForward" in fn
-        assert "stats.medals > 0 || stats.pbs >= 2" in fn
+        assert "counts.medals > 0 || counts.pbs >= 2" in fn
         # spotlight present in the stat-forward pool, absent from the quiet pool.
         assert '["spotlight", "masthead", "stack", "banner"]' in fn
         assert '["masthead", "stack", "banner"]' in fn
@@ -92,9 +92,9 @@ class TestCoverVariants:
         src = _reel_src()
         spot = src.split("const SpotlightCover", 1)[1].split("\n};", 1)[0]
         # Hero number is one of the honest stat totals, in priority order.
-        assert "stats.medals > 0" in spot
-        assert "stats.pbs > 0" in spot
-        assert "stats.swims" in spot
+        assert "counts.medals > 0" in spot
+        assert "counts.pbs > 0" in spot
+        assert "counts.swims" in spot
         # Count-up lands on the true total: round(n · progress) → n at progress 1.
         assert "Math.round(hero.n * countP)" in spot
         # Stacked/animated number carries tabular figures (no width jitter).
@@ -164,12 +164,13 @@ class TestSchemaAndParity:
             "export function transitionFor",
             "chipsProgress",
             "progress: number",
-            'stats.pbs === 1 ? "" : "S"',
+            # R1.13's count-up chips (the cover variants render these verbatim).
+            "Math.round(chip.value * p)",
             'from "./StoryCard"',
             "cardSchema",
         ):
             assert token in src, f"parity contract {token!r} lost in the redesign"
-        # reelStats stays honest (label-derived medals, never a bare place).
+        # reelStats stays honest (label-derived counts, never a bare place).
         stats_fn = src.split("export function reelStats", 1)[1].split("\n}", 1)[0]
         assert "achievementLabel" in stats_fn and ".place" not in stats_fn
 

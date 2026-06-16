@@ -3,6 +3,15 @@
 Calls ``render_brief`` for each declared format size and returns a list of
 ``RenderResult`` records. Default formats produce a feed-square, feed-portrait,
 and a story PNG — the minimum required by the V8 spec.
+
+G1.3 adds landscape & extended aspect ratios (16:9, 3:2, 4:3). These are
+**opt-in** — requested explicitly via a ``formats=`` argument, a ``?format=``
+request param, or a ``brief.format_priority`` entry — so the default render
+still emits only the square/portrait/story trio (no extra cost/time per card).
+The matching *per-format composition rules* live in ``render.py``
+(``_format_aspect`` / ``_scale_for_format`` / ``_v2_fit_boxes`` /
+``_format_composition_css``): a wide canvas is composed as a deliberate
+landscape design, not a portrait layout stretched sideways.
 """
 
 from __future__ import annotations
@@ -19,6 +28,12 @@ FORMAT_SIZES: dict[str, tuple[int, int]] = {
     "story": (1080, 1920),
     "reel_cover": (1080, 1920),
     "carousel_slide": (1080, 1080),
+    # G1.3 — landscape & extended aspect ratios. Height is held at 1080 so the
+    # long edge grows with the ratio (clean, consistent landscape outputs).
+    # "landscape" deliberately matches the motion renderer's 1920×1080 name.
+    "landscape": (1920, 1080),  # 16:9 — web / YouTube / X header
+    "landscape_3_2": (1620, 1080),  # 3:2 — classic photo landscape
+    "landscape_4_3": (1440, 1080),  # 4:3 — presentation / legacy
 }
 
 

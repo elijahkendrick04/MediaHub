@@ -24,10 +24,19 @@ def apply(html: str, ctx: RenderHookCtx) -> str:
 
 `apply` must be **deterministic** and should opt out (return `html` unchanged)
 unless `ctx.brief` requests the effect. A hook that raises is skipped, never fatal.
-With no modules here (today) the registry is a no-op and renders are byte-identical.
+A hook that no brief opts into is a no-op, so renders stay byte-identical.
 
-Capabilities that fit this seam include **G1.8** (gradient-mesh backgrounds),
-**G1.19** (mono mode), **G1.21** (depth-of-field blur), **G1.22** (icon/badge
-overlays), **G1.29** (animated-still loops) and **G1.30** (inspection overlay).
+## Implemented hooks
+
+- `depth_of_field.py` (**G1.21**, `ORDER = 40`) — depth-of-field photo
+  treatment. When a brief sets `photo_treatment` (or `background_style`) to a
+  depth-of-field token (`depth_of_field` / `dof` / `background_blur` / …), it
+  blurs the photographic background layers (`.bg-photo`, `.bg-ai`) and keeps the
+  athlete cutout (`.athlete-cutout`) sharp. Pure CSS-filter transform, opt-in,
+  byte-identical for every other brief.
+
+Capabilities that also fit this seam include **G1.8** (gradient-mesh
+backgrounds), **G1.19** (mono mode), **G1.22** (icon/badge overlays),
+**G1.29** (animated-still loops) and **G1.30** (inspection overlay).
 Capabilities that change formats, encoding, fonts, palettes or text-fitting edit
 their own dedicated module/region instead.
