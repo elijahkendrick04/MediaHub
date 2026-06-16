@@ -108,6 +108,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **UI2.5** · UI2 (top priority) — **CTA motion**: a purpose-built primary-CTA variant that actually shows Moving-Border (`.mh-moving-border`) + Stateful-Button (`.btn[data-mh-state]`, loading→success) — needs a borderless/transparent host so the animated border isn't hidden behind the button's own border · 🟡 coordinate (edits the shared `.btn` system) *(completed 2026-06-15)*
 - ✅ **R1.4** · Reel generator sprint — Motion background-pattern expansion — 6 new frame-pure animated SVG patterns (checkerboard, diamonds, circuit, organic-waves…). *Build: one file each in `sprint/patterns/<name>.ts` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **R1.11** · Reel generator sprint — On-video text-effect library — glow, outline, 3D-shadow, stroke-animate, blur-to-focus. *Build: `sprint/layers/text_fx.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
+- ✅ **R1.18** · Reel generator sprint — Narration script-style templates (verbose / compact / poetic / technical), strictly fact-only. *Build: `visual/narration.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
