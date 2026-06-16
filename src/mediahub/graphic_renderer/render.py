@@ -2876,6 +2876,35 @@ def render_brief(
             family = "text_led_recap"
             template_path = LAYOUTS_DIR / f"{family}.html"
 
+    # G1.25 — server-side photo adjustment stack (deterministic PIL recipes).
+    # Resolve the recipe once; ``None`` (the default) keeps the un-adjusted
+    # inline so the render is byte-identical. When a recipe is set it bakes
+    # sharpen/contrast/saturation/levels into the photo bytes *before* they're
+    # base64-inlined below — the athlete cutout's alpha mask is preserved exactly.
+    _photo_recipe = None
+    try:
+        from mediahub.graphic_renderer import photo_adjust as _photo_adjust
+
+        _photo_recipe = _photo_adjust.recipe_for(
+            explicit=getattr(brief, "photo_adjust", "") or "",
+            treatment=getattr(brief, "photo_treatment", "") or "",
+        )
+    except Exception:
+        _photo_recipe = None
+
+    def _inline_photo(path) -> str:
+        """Inline a real photo, applying the resolved adjustment recipe if any.
+
+        Falls back to the plain (un-adjusted) inline on any error, so an
+        optional adjustment can never break a render.
+        """
+        if _photo_recipe is not None:
+            try:
+                return _photo_adjust.adjust_to_data_uri(path, _photo_recipe)
+            except Exception:
+                pass
+        return _img_to_data_uri(path)
+
     # Athlete cutout
     athlete_uri = None
     if athlete_path:
@@ -2885,7 +2914,7 @@ def render_brief(
                 if skip_cutout
                 else _maybe_cut_out_athlete(athlete_path, profile_id=brief.profile_id or "default")
             )
-            athlete_uri = _img_to_data_uri(cut_path)
+            athlete_uri = _inline_photo(cut_path)
         except Exception:
             athlete_uri = None
 
@@ -2896,14 +2925,14 @@ def render_brief(
     hero_photo_uri = ""
     if family == "action_photo_hero" and athlete_path:
         try:
-            hero_photo_uri = _img_to_data_uri(athlete_path)
+            hero_photo_uri = _inline_photo(athlete_path)
         except Exception:
             hero_photo_uri = ""
 
     venue_uri = None
     if venue_path:
         try:
-            venue_uri = _img_to_data_uri(venue_path)
+            venue_uri = _inline_photo(venue_path)
         except Exception:
             venue_uri = None
 
@@ -2912,7 +2941,7 @@ def render_brief(
     bg_photo_uri = ""
     if bg_photo_path:
         try:
-            bg_photo_uri = _img_to_data_uri(bg_photo_path)
+            bg_photo_uri = _inline_photo(bg_photo_path)
         except Exception:
             bg_photo_uri = ""
 

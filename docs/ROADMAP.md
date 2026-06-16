@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `1f3a4b04a` · Merge pull request #675 from elijahkendrick04/claude/wizardly-hypatia-go15i0
+**Last updated:** 2026-06-16 · `785f7a717` · Merge pull request #679 from elijahkendrick04/claude/fervent-goodall-lbe8g3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -187,22 +187,17 @@ sequence it or merge with care.
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.15** · Graphic generator sprint — Batch ZIP export of a pack's every format + a `metadata.json` manifest. *Build: new `graphic_renderer/pack_export.py` + a new download route.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.17** · Graphic generator sprint — Print pipeline expansion — trim/bleed/crop marks + CMYK-aware export. *Build: `print_export.py` (sole owner) + new print layouts.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.25** · Graphic generator sprint — Server-side photo adjustment stack — deterministic PIL recipes (sharpen, contrast, saturation, levels) pre-inline. *Build: new `graphic_renderer/photo_adjust.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.28** · Graphic generator sprint — Mood-keyed style-pack preset bundles — curated, deterministic bundles selected from `brief.mood`. *Build: new preset-map functions in `style_packs.py` (new region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.29** · Graphic generator sprint — Animated still loops — subtle SVG-animation backgrounds exported as APNG/GIF for static-but-living posts. *Build: new `sprint_hooks/animated_still.py` + new `graphic_renderer/animated_still.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.30** · Graphic generator sprint — Render debug/inspection overlay + design-explainability sidecar (crop box, saliency centroid, fitted sizes, why-this-design JSON). *Build: new `sprint_hooks/inspect_overlay.py` + new `graphic_renderer/inspect.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.3** · Reel generator sprint — Subtitle/caption burn-in engine — read the voiceover SRT, render APCA-gated on-video captions. *Build: new `visual/subtitle_burn.py` + `sprint/layers/captions.tsx`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.5** · Reel generator sprint — Motion accent-decoration expansion + sizing variants (thick/thin stripe, large/small brackets, offset badge). *Build: one file each in `sprint/accents/<name>.tsx` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.6** · Reel generator sprint — Animated-pattern drift layer — per-pattern frame-pure motion (rotate/opacity/scale) during the breathe phase. *Build: `sprint/layers/pattern_drift.tsx` additive overlay (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.10** · Reel generator sprint — Motion photo filter stack — deterministic frame-pure brightness/contrast/saturation/blur from brief fields. *Build: `sprint/layers/photo_filters.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -215,10 +210,8 @@ sequence it or merge with care.
 - **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.23** · Reel generator sprint — Dynamic logo sizing + animated logo reveals per scene (small/medium/large/auto, scene-aware entrance). *Build: `sprint/layers/logo_anim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.24** · Reel generator sprint — Ambient motion programmes — slow drift / pan / temperature shift sustained through the breathe phase. *Build: `sprint/layers/ambient.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.28** · Reel generator sprint — Parallel reel composition — render the card beats concurrently and composite, cutting wall-clock time. *Build: new `visual/reel_parallel.py` helper + a small call from `render_meet_reel` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.30** · Reel generator sprint — Reel cover & outro redesign system — data-driven cover variants + outro CTA variants (follow handle, next meet, sponsor thanks). *Build: `MeetReel.tsx` `CoverScreen`/`OutroScreen` (sole owner) + optional `sprint/reel/` overlays.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1572,9 +1565,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-16 | `415935fa8` | feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding |
-| 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
-| 2026-06-16 | `4ba4f7dfd` | R1.8: photo scrim variant system for motion (role-driven) |
-| 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
-| 2026-06-16 | `742c2cbe9` | G1.3: landscape & extended aspect-ratio support (16:9, 3:2, 4:3) |
+| 2026-06-16 | `d7a55f922` | Apply ruff-format to reel_parallel.py |
+| 2026-06-16 | `635ef6da1` | Add G1.29 animated still loops (subtle living APNG/GIF backgrounds) |
+| 2026-06-16 | `acb791a65` | Add parallel reel composition (R1.28) |
 <!-- /ROADMAP:ACTIVITY -->
