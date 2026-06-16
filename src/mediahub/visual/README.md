@@ -7,12 +7,18 @@ reels. There are two ways it can do that, picked by `MEDIAHUB_REEL_ENGINE`:
   full animated compositions. Remotion is *not* free for companies above three
   people (it needs a paid Company License), which is why the next engine exists.
 - **ffmpeg** (`reel_ffmpeg.py`, free) — takes the card's **own still graphic**
-  (the same picture the "Create graphic" button makes), gives it a slow,
-  steady zoom, and joins the frames with smooth crossfades using FFmpeg.
-  Nothing about it costs money: no Node, no Remotion, no license. A reel is
-  the meet-name cover plus one beat per top card, exactly the same length the
-  Remotion reel would be. (It renders the story size only; square and
-  landscape cuts need the Remotion engine and say so honestly.)
+  (the same picture the "Create graphic" button makes), gives it real camera
+  motion, and joins the frames using FFmpeg. Each beat picks a Ken Burns move
+  from the card's own number (zoom in or out, a pan in any of four
+  directions, a corner zoom, a soft-focus 2.5D **parallax** depth beat, or an
+  honest held frame for a "static" card), and each cut between beats
+  **mirrors the Remotion reel's choice**: one bold, mood-chosen cut into the
+  top moment (a blur for calm, a whip for fierce, an iris for a medal, a zoom
+  otherwise) and one quiet, consistent cut everywhere else. Nothing about it
+  costs money: no Node, no Remotion, no license. A reel is the meet-name cover
+  plus one beat per top card, exactly the same length the Remotion reel would
+  be. (It renders the story size only; square and landscape cuts need the
+  Remotion engine and say so honestly.)
 
 `motion.py` makes the video match the approved still card exactly: it resolves
 the same colour roles the still painted (medal tints included), reuses the
