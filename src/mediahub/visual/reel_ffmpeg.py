@@ -446,6 +446,7 @@ def _finalise(
     kind: str = "story",
     duration_sec: float = 6.0,
     audio_plan: Optional[dict] = None,
+    n_cards: int = 0,
 ) -> Path:
     if not tmp_mp4.exists() or tmp_mp4.stat().st_size < 1024:
         raise RuntimeError("FFmpeg reported success but the MP4 is missing or empty")
@@ -455,7 +456,9 @@ def _finalise(
     # silent fallback) + the poster-frame sidecar, then publish.
     from mediahub.visual.motion import _finish_cached_video, _publish
 
-    _finish_cached_video(cached, kind=kind, plan=audio_plan, duration_sec=duration_sec)
+    _finish_cached_video(
+        cached, kind=kind, plan=audio_plan, duration_sec=duration_sec, n_cards=n_cards
+    )
     return _publish(cached, out_path)
 
 
@@ -559,7 +562,13 @@ def render_meet_reel_from_props(
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
-        _finish_cached_video(cached, kind="reel", plan=audio_plan, duration_sec=duration_sec)
+        _finish_cached_video(
+            cached,
+            kind="reel",
+            plan=audio_plan,
+            duration_sec=duration_sec,
+            n_cards=len(cards_props),
+        )
         return _publish(cached, out_path)
 
     with tempfile.TemporaryDirectory(prefix="mh_reel_ffmpeg_") as td:
@@ -587,6 +596,7 @@ def render_meet_reel_from_props(
             kind="reel",
             duration_sec=duration_sec,
             audio_plan=audio_plan,
+            n_cards=len(cards_props),
         )
 
 
