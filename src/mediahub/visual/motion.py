@@ -556,15 +556,21 @@ def _audio_record_path(cached: Path) -> Path:
     return Path(cached).with_suffix(".audio.json")
 
 
-def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) -> dict:
+def _finish_cached_video(
+    cached: Path, *, kind: str, plan, duration_sec: float, n_cards: int = 0
+) -> dict:
     """Idempotent finishing pass on the cached MP4: attach the planned audio
     (honest silent fallback on failure; retried on the next request) and
     ensure the poster-frame sidecar exists. Returns the manifest-ready
     audio record.
+
+    ``n_cards`` (reels only) yields the card-cut beat grid the music accents
+    align to; stories have no internal cuts and leave it at 0.
     """
     try:
         from mediahub.visual import audio_mux
 
+        cut_times = audio_mux.card_cut_times(duration_sec, n_cards) if kind == "reel" else None
         if plan:
             record_path = _audio_record_path(cached)
             audio_rec: dict = {}
@@ -576,7 +582,9 @@ def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) 
                 except (OSError, ValueError):
                     audio_rec = {}
             if not audio_rec:
-                audio_rec = audio_mux.apply_audio(cached, plan, duration_sec=duration_sec)
+                audio_rec = audio_mux.apply_audio(
+                    cached, plan, duration_sec=duration_sec, cut_times=cut_times
+                )
                 try:
                     record_path.write_text(
                         json.dumps(audio_rec, indent=2, sort_keys=True, default=str),
@@ -968,7 +976,11 @@ def render_meet_reel(
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
         audio_rec = _finish_cached_video(
-            cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+            cached,
+            kind="reel",
+            plan=audio_plan,
+            duration_sec=duration_sec,
+            n_cards=len(cards_props),
         )
         if audio_plan:
             _update_manifest_audio(cached, audio_rec)
@@ -982,7 +994,11 @@ def render_meet_reel(
         size=size,
     )
     audio_rec = _finish_cached_video(
-        cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+        cached,
+        kind="reel",
+        plan=audio_plan,
+        duration_sec=duration_sec,
+        n_cards=len(cards_props),
     )
     from mediahub.visual.audio_mux import poster_path_for
 
