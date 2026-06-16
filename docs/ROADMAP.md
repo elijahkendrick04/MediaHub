@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `b10a31658` · G1.25 — server-side photo adjustment stack (deterministic PIL recipes) (#673)
+**Last updated:** 2026-06-16 · `bb6fed2f0` · Add parallel reel composition (R1.28) (#689)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -216,7 +216,6 @@ sequence it or merge with care.
 - **R1.24** · Reel generator sprint — Ambient motion programmes — slow drift / pan / temperature shift sustained through the breathe phase. *Build: `sprint/layers/ambient.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.28** · Reel generator sprint — Parallel reel composition — render the card beats concurrently and composite, cutting wall-clock time. *Build: new `visual/reel_parallel.py` helper + a small call from `render_meet_reel` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.30** · Reel generator sprint — Reel cover & outro redesign system — data-driven cover variants + outro CTA variants (follow handle, next meet, sponsor thanks). *Build: `MeetReel.tsx` `CoverScreen`/`OutroScreen` (sole owner) + optional `sprint/reel/` overlays.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
@@ -1570,8 +1569,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `d7a55f922` | Apply ruff-format to reel_parallel.py |
 | 2026-06-16 | `635ef6da1` | Add G1.29 animated still loops (subtle living APNG/GIF backgrounds) |
+| 2026-06-16 | `acb791a65` | Add parallel reel composition (R1.28) |
 | 2026-06-16 | `415935fa8` | feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding |
-| 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
-| 2026-06-16 | `99f69222f` | Add G1.25 server-side photo adjustment stack (deterministic PIL recipes) |
 <!-- /ROADMAP:ACTIVITY -->
