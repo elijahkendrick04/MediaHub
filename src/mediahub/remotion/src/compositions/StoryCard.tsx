@@ -874,6 +874,9 @@ const PACK_GROUNDS = new Set([
 const PACK_TEXTURES = new Set([
   "none", "grain", "dots", "grid", "hatch", "halftone", "crosshatch",
   "weave", "scanline", "carbon", "chevron",
+  // Layered (two-texture) surfaces — G1.6, mirrors style_packs._TEXTURE_STACKS.
+  "grain_dots", "halftone_weave", "hatch_grid", "crosshatch_grain",
+  "dots_scanline", "carbon_hatch", "chevron_grain", "grid_dots",
 ]);
 const PACK_ACCENT_GEOS = new Set([
   "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
@@ -941,6 +944,20 @@ function packGroundGradient(ground: string, a: number): string | null {
 const PACK_TEX_SIZE: Record<string, number> = {
   grain: 160, dots: 18, grid: 32, hatch: 14, crosshatch: 16, halftone: 22,
   weave: 20, scanline: 6, carbon: 8, chevron: 24,
+};
+
+// Layered textures (G1.6) — a composite token fuses two base tiles with a
+// background-blend-mode, mirroring style_packs._TEXTURE_STACKS so a card's video
+// carries the same stacked surface as its still. [base_a, base_b, blend].
+const PACK_TEXTURE_STACKS: Record<string, [string, string, string]> = {
+  "grain_dots": ["grain", "dots", "soft-light"],
+  "halftone_weave": ["halftone", "weave", "overlay"],
+  "hatch_grid": ["hatch", "grid", "lighten"],
+  "crosshatch_grain": ["crosshatch", "grain", "screen"],
+  "dots_scanline": ["dots", "scanline", "screen"],
+  "carbon_hatch": ["carbon", "hatch", "overlay"],
+  "chevron_grain": ["chevron", "grain", "soft-light"],
+  "grid_dots": ["grid", "dots", "lighten"],
 };
 
 // White-on-transparent tiles (blended over the ground), mirroring style_packs.
@@ -1134,24 +1151,53 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <div key="ground" style={{ position: "absolute", inset: 0, background: ground }} />,
     );
   }
-  const tex = packTextureImage(pack.texture);
-  if (tex) {
-    const size = PACK_TEX_SIZE[pack.texture] || 20;
-    const op = pack.texture === "grain" ? (pack.bold ? 0.18 : 0.12) : pack.bold ? 0.16 : 0.1;
-    children.push(
-      <div
-        key="texture"
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: tex,
-          backgroundSize: `${size}px ${size}px`,
-          backgroundRepeat: "repeat",
-          opacity: op,
-          mixBlendMode: "overlay",
-        }}
-      />,
-    );
+  const stack = PACK_TEXTURE_STACKS[pack.texture];
+  if (stack) {
+    // Layered surface (G1.6): fuse two tiles with a background-blend-mode, then
+    // composite onto the card with the shared low-opacity mix-blend overlay —
+    // exactly as legibility-safe as one tile, just richer (mirrors the still).
+    const [a, b, blend] = stack;
+    const ta = packTextureImage(a);
+    const tb = packTextureImage(b);
+    if (ta && tb) {
+      const sa = PACK_TEX_SIZE[a] || 20;
+      const sb = PACK_TEX_SIZE[b] || 20;
+      children.push(
+        <div
+          key="texture"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: `${ta}, ${tb}`,
+            backgroundSize: `${sa}px ${sa}px, ${sb}px ${sb}px`,
+            backgroundRepeat: "repeat, repeat",
+            backgroundBlendMode: blend,
+            opacity: pack.bold ? 0.15 : 0.1,
+            mixBlendMode: "overlay",
+          }}
+        />,
+      );
+    }
+  } else {
+    const tex = packTextureImage(pack.texture);
+    if (tex) {
+      const size = PACK_TEX_SIZE[pack.texture] || 20;
+      const op = pack.texture === "grain" ? (pack.bold ? 0.18 : 0.12) : pack.bold ? 0.16 : 0.1;
+      children.push(
+        <div
+          key="texture"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: tex,
+            backgroundSize: `${size}px ${size}px`,
+            backgroundRepeat: "repeat",
+            opacity: op,
+            mixBlendMode: "overlay",
+          }}
+        />,
+      );
+    }
   }
   const geo = packAccentGeometry(pack.accentGeo, width, height, pack.bold, accent);
   if (geo) {
