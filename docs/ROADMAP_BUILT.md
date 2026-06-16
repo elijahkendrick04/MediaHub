@@ -119,6 +119,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.18** · Graphic generator sprint — Colour accessibility audit + colourblind simulation (per-card APCA/WCAG report + deut/prot/trit previews). *Build: new `quality/colour_audit.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **R1.8** · Reel generator sprint — Photo scrim variant system for motion — edge / radial / gradient / corner scrims, role-driven. *Build: `sprint/layers/photo_scrim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **G1.16** · Graphic generator sprint — EXIF/IPTC metadata + photographer-attribution embedding in exported PNG/JPEG. *Build: new `graphic_renderer/metadata_embed.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
+- ✅ **G1.3** · Graphic generator sprint — Landscape & extended aspect-ratio support (16:9, 3:2, 4:3) with per-format composition rules. *Build: extend `FORMAT_SIZES` in `render.py` + `variants.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
