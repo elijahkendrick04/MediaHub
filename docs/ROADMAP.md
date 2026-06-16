@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `3e9a776b3` · Merge pull request #674: Kerning- and ligature-aware text measurement (G1.11)
+**Last updated:** 2026-06-16 · `3ba0e7a6e` · Merge pull request #668 from elijahkendrick04/claude/hopeful-lamport-9rdwwl
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -216,7 +216,6 @@ sequence it or merge with care.
 - **R1.15** · Reel generator sprint — Multi-format batch reel render — one request renders + caches all four cuts in a single pass. *Build: `visual/motion.py` `render_meet_reel` + a new web route (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.19** · Reel generator sprint — Per-card audio-mix profiles (voice_lead / balanced / music_forward) folded into the audio plan + cache key. *Build: `visual/audio_mux.py` (file-sibling R1.20 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.20** · Reel generator sprint — Music-bed upgrade — refined automatic ducking, intro/outro stings, beat-aware alignment of card cuts. *Build: `visual/audio_mux.py` (file-sibling R1.19) + music-pool logic.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.23** · Reel generator sprint — Dynamic logo sizing + animated logo reveals per scene (small/medium/large/auto, scene-aware entrance). *Build: `sprint/layers/logo_anim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1577,13 +1576,12 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
 | 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
 | 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
+| 2026-06-16 | `bdb343867` | R1.20 — reel music-bed upgrade: ducking, stings, beat-aware cut accents |
 | 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
 | 2026-06-16 | `debb43795` | G1.20: brand-palette expansion to N custom club colours |
 | 2026-06-16 | `ea3fa4140` | Reel ffmpeg engine: richer motion — Ken Burns variants, parallax, beat transitions (R1.17) |
-| 2026-06-16 | `cef00b9b1` | Apply ruff-format to collage.py |
-| 2026-06-16 | `6d553dbb1` | R1.26: expanded mood→spring easing-curve vocabulary |
-| 2026-06-16 | `076835b0d` | R1.13 — Custom reel stat chips: configurable honest stat labels |
-| 2026-06-16 | `2f9644bcf` | Add G1.6 texture-layering engine (two-texture blend-mode stacking) |
+| 2026-06-16 | `91db21501` | Add G1.18 per-card colour-accessibility audit + colourblind simulation |
 <!-- /ROADMAP:ACTIVITY -->
