@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from . import render_cache as _render_cache
 from .sprint_hooks import RenderHookCtx as _RenderHookCtx
 from .sprint_hooks import apply_render_hooks as _apply_render_hooks
 
@@ -190,9 +191,8 @@ def lighten(hex_colour: str, amount: float = 0.25) -> str:
     return _rgb_to_hex((r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount))
 
 
-def _img_to_data_uri(path: str | Path) -> str:
-    """Read an image from disk, return a data: URI (PNG-ish)."""
-    p = Path(path)
+def _encode_img_data_uri(p: Path) -> str:
+    """Read an image from disk and return a base64 ``data:`` URI (the raw work)."""
     raw = p.read_bytes()
     suffix = p.suffix.lower().lstrip(".")
     mime = {
@@ -204,6 +204,18 @@ def _img_to_data_uri(path: str | Path) -> str:
         "gif": "image/gif",
     }.get(suffix, "application/octet-stream")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _img_to_data_uri(path: str | Path) -> str:
+    """Read an image from disk, return a data: URI (PNG-ish).
+
+    Routed through the G1.24 render cache (``render_cache.asset_data_uri``) so an
+    unchanged file is read and base64-encoded once per process — the returned
+    text is byte-identical to a direct encode. A genuine read error still
+    surfaces, exactly as before, because the cache falls through to the encoder
+    for any file it can't ``stat``.
+    """
+    return _render_cache.asset_data_uri(path, loader=_encode_img_data_uri)
 
 
 # ----- Background generators (SVG data URIs, no network) -------------------
@@ -2157,13 +2169,24 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    width, height = size
+    dpr = _dpr_render()
+
+    # G1.24 incremental render-stage cache (top region): the screenshot is a
+    # pure function of (final HTML, canvas size, DPR), so an identical card
+    # reuses the previously-rendered PNG byte-for-byte and never launches
+    # Chromium. A warm hit even serves when Playwright is absent.
+    _cache_key = _render_cache.png_cache_key(html, width, height, dpr)
+    _cached_png = _render_cache.get_cached_png(_cache_key)
+    if _cached_png is not None:
+        output_path.write_bytes(_cached_png)
+        return len(_cached_png)
+
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
     except Exception as e:
         raise RuntimeError(f"Playwright not installed: {e}")
 
-    width, height = size
-    dpr = _dpr_render()
     # The page MUST be navigated as a real file:// document, not injected via
     # set_content(): set_content leaves the document on an about:blank origin,
     # and Chromium refuses to fetch file:// subresources from there — so every
@@ -2245,6 +2268,10 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
             # Fall back to the high-DPR PNG; size on disk will be larger
             # but the contents are still correct.
             pass
+
+    # G1.24 cache (bottom region): persist the finished PNG so the next
+    # identical (HTML, size, DPR) render is a cache hit.
+    _render_cache.store_png(_cache_key, png)
 
     output_path.write_bytes(png)
     return len(png)
