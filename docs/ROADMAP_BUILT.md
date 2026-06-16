@@ -124,6 +124,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.25** · Graphic generator sprint — Server-side photo adjustment stack — deterministic PIL recipes (sharpen, contrast, saturation, levels) pre-inline. *Build: new `graphic_renderer/photo_adjust.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **R1.28** · Reel generator sprint — Parallel reel composition — render the card beats concurrently and composite, cutting wall-clock time. *Build: new `visual/reel_parallel.py` helper + a small call from `render_meet_reel` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **R1.24** · Reel generator sprint — Ambient motion programmes — slow drift / pan / temperature shift sustained through the breathe phase. *Build: `sprint/layers/ambient.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
+- ✅ **G1.17** · Graphic generator sprint — Print pipeline expansion — trim/bleed/crop marks + CMYK-aware export. *Build: `print_export.py` (sole owner) + new print layouts.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
