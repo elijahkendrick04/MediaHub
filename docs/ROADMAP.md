@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `b431664d5` · feat(graphic): G1.21 depth-of-field background-blur photo treatment (#658)
+**Last updated:** 2026-06-16 · `4c274bef6` · Merge pull request #660: G1.6 · Texture-layering engine
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -180,7 +180,6 @@ sequence it or merge with care.
 - **G1.3** · Graphic generator sprint — Landscape & extended aspect-ratio support (16:9, 3:2, 4:3) with per-format composition rules. *Build: extend `FORMAT_SIZES` in `render.py` + `variants.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.5** · Graphic generator sprint — Accent-geometry expansion pack — hexagons, art-deco corners, wave rules, spiral flourishes, glitch dividers. *Build: append to `style_packs.ACCENT_GEOS` + accent-geo generator (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.6** · Graphic generator sprint — Texture-layering engine stacking two textures with blend modes (grain+dots, halftone+weave…). *Build: append to `style_packs.TEXTURES` + texture generator + a new compositor (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.7** · Graphic generator sprint — Photo-derived palette extraction + APCA-gated ground tinting (PIL k-means; never overrides confirmed brand hex). *Build: new `graphic_renderer/photo_palette.py` + a `sprint_hooks/` tint module.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1582,15 +1581,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
+| 2026-06-16 | `ea3fa4140` | Reel ffmpeg engine: richer motion — Ken Burns variants, parallax, beat transitions (R1.17) |
+| 2026-06-16 | `cef00b9b1` | Apply ruff-format to collage.py |
+| 2026-06-16 | `076835b0d` | R1.13 — Custom reel stat chips: configurable honest stat labels |
+| 2026-06-16 | `2f9644bcf` | Add G1.6 texture-layering engine (two-texture blend-mode stacking) |
 | 2026-06-16 | `289efaf63` | Add G1.22 icon/badge overlay system for still graphics |
+| 2026-06-16 | `9b435597e` | Build G1.2 — multi-athlete collage / relay layout engine |
 | 2026-06-16 | `db6ea663b` | feat(graphic): G1.21 depth-of-field background-blur photo treatment |
 | 2026-06-16 | `0688aba0d` | Add R1.2 reel scene-mode pack: vertical-split, radial-rings, marquee-crawl |
 | 2026-06-16 | `dfd0d9833` | Add narration script-style templates (R1.18) |
 | 2026-06-16 | `2b453f3ea` | Add ground-treatment expansion pack (G1.4): mesh, bokeh, light-ray, paper-weave |
 | 2026-06-16 | `554b7d37e` | R1.11: on-video text-effect library (text_fx overlay) |
-| 2026-06-16 | `f18d5875e` | Add R1.4 motion background-pattern expansion (6 sprint patterns) |
-| 2026-06-16 | `3664003bb` | Make the 60-item generator sprint conflict-free for parallel dispatch |
-| 2026-06-16 | `79c012568` | ci: gate the ground-truth oracle in the PR unit suite |
-| 2026-06-16 | `39c1b1cb0` | Add 60-item generator upgrade sprint to roadmap (30 graphic G1.*, 30 reel R1.*) |
-| 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
 <!-- /ROADMAP:ACTIVITY -->
