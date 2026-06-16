@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `712d44353` · R1.8 — Photo scrim variant system for motion (#677)
+**Last updated:** 2026-06-16 · `8e155cffc` · feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding (#680)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -188,7 +188,6 @@ sequence it or merge with care.
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.15** · Graphic generator sprint — Batch ZIP export of a pack's every format + a `metadata.json` manifest. *Build: new `graphic_renderer/pack_export.py` + a new download route.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.16** · Graphic generator sprint — EXIF/IPTC metadata + photographer-attribution embedding in exported PNG/JPEG. *Build: new `graphic_renderer/metadata_embed.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.17** · Graphic generator sprint — Print pipeline expansion — trim/bleed/crop marks + CMYK-aware export. *Build: `print_export.py` (sole owner) + new print layouts.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1580,5 +1579,4 @@ list and the auto table below, not here.
 | 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
 | 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
 | 2026-06-16 | `bdb343867` | R1.20 — reel music-bed upgrade: ducking, stings, beat-aware cut accents |
-| 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
 <!-- /ROADMAP:ACTIVITY -->
