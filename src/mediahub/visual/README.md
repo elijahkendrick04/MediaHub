@@ -57,7 +57,13 @@ Videos used to be silent. Now, when the operator opts in, they can carry sound:
   time, label, the honest cover stats). Times get a deterministic spoken form
   ("1:02.45" → "1 minute 2.45 seconds"). There is no AI here. If the script
   would run longer than the video, whole lines are dropped from the bottom of
-  the ranking — never sped up, never summarised.
+  the ranking — never sped up, never summarised. The same facts can be spoken
+  in five **script-style registers** (`MEDIAHUB_NARRATION_STYLE`): `standard`
+  (the default), `compact`, `verbose`, `poetic`, `technical`. A register only
+  changes the *phrasing* — never which facts are spoken or their values — so
+  every register is equally honest and result-agnostic (a "DQ" or a place is
+  never re-spoken as a time). Because the assembled script text is folded into
+  the audio cache key, switching registers can never serve a stale mix.
 - `audio_mux.py` attaches the sound to the finished MP4 with FFmpeg: the
   narration (spoken by the same `voiceover.py` engine, `MEDIAHUB_VOICEOVER=1`),
   and/or a music bed from `MEDIAHUB_REEL_MUSIC_DIR` — a folder of music files
