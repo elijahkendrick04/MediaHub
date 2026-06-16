@@ -38417,6 +38417,24 @@ voice, and queues them for one-click approval.</p>
         except Exception:
             brand_kit = None
 
+        # R1.30 — honest sponsor for the reel's outro close: the club's active
+        # sponsor (registry first, then the legacy single sponsor_name field),
+        # or "" when none is configured. Never fabricated — a club with no
+        # sponsor simply gets the follow-the-club close.
+        sponsor_name = ""
+        try:
+            prof = load_profile(profile_id)
+            if prof is not None:
+                from mediahub.club_platform.sponsors import active_sponsors
+
+                actives = active_sponsors(prof)
+                if actives:
+                    sponsor_name = str(actives[0].get("name") or "").strip()
+                if not sponsor_name:
+                    sponsor_name = str(getattr(prof, "sponsor_name", "") or "").strip()
+        except Exception:
+            sponsor_name = ""
+
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
         # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
@@ -38439,6 +38457,7 @@ voice, and queues them for one-click approval.</p>
                 "out_path": out_path,
                 "meet_name": meet_name,
                 "briefs": brief_list,
+                "sponsor": sponsor_name,
             },
             None,
         )
@@ -38470,6 +38489,7 @@ voice, and queues them for one-click approval.</p>
                     meet_name=inputs["meet_name"],
                     briefs=inputs["briefs"],
                     format_name=inputs["format"],
+                    sponsor=inputs.get("sponsor", ""),
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -38546,6 +38566,7 @@ voice, and queues them for one-click approval.</p>
                         meet_name=inputs["meet_name"],
                         briefs=inputs["briefs"],
                         format_name=inputs["format"],
+                        sponsor=inputs.get("sponsor", ""),
                     )
                 if not Path(mp4).exists():
                     raise RuntimeError("mp4 missing after render")
