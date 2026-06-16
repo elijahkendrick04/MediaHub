@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `5e9fab946` · Merge pull request #654: R1.11 on-video text-effect library
+**Last updated:** 2026-06-16 · `dfe16f828` · Merge pull request #653 from elijahkendrick04/claude/ecstatic-brahmagupta-e00ajt
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -220,7 +220,6 @@ sequence it or merge with care.
 - **R1.15** · Reel generator sprint — Multi-format batch reel render — one request renders + caches all four cuts in a single pass. *Build: `visual/motion.py` `render_meet_reel` + a new web route (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.17** · Reel generator sprint — ffmpeg fallback engine richer motion — Ken Burns variants, parallax, beat transitions mirroring the Remotion cuts. *Build: `visual/reel_ffmpeg.py` (file-sibling R1.16).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.18** · Reel generator sprint — Narration script-style templates (verbose / compact / poetic / technical), strictly fact-only. *Build: `visual/narration.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.19** · Reel generator sprint — Per-card audio-mix profiles (voice_lead / balanced / music_forward) folded into the audio plan + cache key. *Build: `visual/audio_mux.py` (file-sibling R1.20 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.20** · Reel generator sprint — Music-bed upgrade — refined automatic ducking, intro/outro stings, beat-aware alignment of card cuts. *Build: `visual/audio_mux.py` (file-sibling R1.19) + music-pool logic.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1584,6 +1583,11 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `289efaf63` | Add G1.22 icon/badge overlay system for still graphics |
+| 2026-06-16 | `db6ea663b` | feat(graphic): G1.21 depth-of-field background-blur photo treatment |
+| 2026-06-16 | `0688aba0d` | Add R1.2 reel scene-mode pack: vertical-split, radial-rings, marquee-crawl |
+| 2026-06-16 | `dfd0d9833` | Add narration script-style templates (R1.18) |
+| 2026-06-16 | `2b453f3ea` | Add ground-treatment expansion pack (G1.4): mesh, bokeh, light-ray, paper-weave |
 | 2026-06-16 | `554b7d37e` | R1.11: on-video text-effect library (text_fx overlay) |
 | 2026-06-16 | `f18d5875e` | Add R1.4 motion background-pattern expansion (6 sprint patterns) |
 | 2026-06-16 | `3664003bb` | Make the 60-item generator sprint conflict-free for parallel dispatch |
@@ -1591,6 +1595,4 @@ list and the auto table below, not here.
 | 2026-06-16 | `39c1b1cb0` | Add 60-item generator upgrade sprint to roadmap (30 graphic G1.*, 30 reel R1.*) |
 | 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
 | 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
-| 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
-| 2026-06-15 | `b7cbc227e` | UI2.5: primary-CTA motion variant (Moving-Border + Stateful-Button) |
 <!-- /ROADMAP:ACTIVITY -->
