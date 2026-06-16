@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `bb6fed2f0` · Add parallel reel composition (R1.28) (#689)
+**Last updated:** 2026-06-16 · `23fe84eaa` · Merge pull request #686 from elijahkendrick04/claude/nice-rubin-aav1t9
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -213,7 +213,6 @@ sequence it or merge with care.
 - **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.23** · Reel generator sprint — Dynamic logo sizing + animated logo reveals per scene (small/medium/large/auto, scene-aware entrance). *Build: `sprint/layers/logo_anim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.24** · Reel generator sprint — Ambient motion programmes — slow drift / pan / temperature shift sustained through the breathe phase. *Build: `sprint/layers/ambient.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1572,5 +1571,5 @@ list and the auto table below, not here.
 | 2026-06-16 | `d7a55f922` | Apply ruff-format to reel_parallel.py |
 | 2026-06-16 | `635ef6da1` | Add G1.29 animated still loops (subtle living APNG/GIF backgrounds) |
 | 2026-06-16 | `acb791a65` | Add parallel reel composition (R1.28) |
-| 2026-06-16 | `415935fa8` | feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding |
+| 2026-06-16 | `ece2c4d24` | Add R1.24 ambient motion overlay for reels & story cards |
 <!-- /ROADMAP:ACTIVITY -->
