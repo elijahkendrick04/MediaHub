@@ -14,6 +14,12 @@
 # (To *block* merges on it, add "Full unit suite (pytest)" to the branch
 # protection required-checks for main — a repo-settings change.)
 #
+# It also gates the DETERMINISTIC-ENGINE ground-truth oracle (a second step
+# below): the real pipeline on the fixed sample meet, diffed against the
+# committed golden baseline. The rest of tests/test_autotest_* stays in
+# autotest.yml, but this one regression oracle must redden a PR rather than
+# only the 6-hourly schedule — see that step's comment for the why.
+#
 # Browser/Playwright layers self-skip here: CI has no pinned Chromium and we
 # set MEDIAHUB_SKIP_BROWSER_TESTS=1, so those tests skip cleanly (their CSS/JS/
 # rendered-HTML siblings still run and catch landing regressions). Deps mirror
@@ -68,9 +74,28 @@ jobs:
           # Scope = the application suite. The autonomous-tester FRAMEWORK's own
           # self-tests (tests/test_autotest_*) are exercised by autotest.yml and
           # are sensitive to xdist worker distribution under CI's small core
-          # count, so they're out of this application-level gate. The renderer /
-          # browser tests run against the Chromium installed above; the handful
+          # count, so they're out of this application-level gate — EXCEPT the
+          # ground-truth oracle, which the next step carves back in. The renderer
+          # / browser tests run against the Chromium installed above; the handful
           # pinned to a specific local Chromium build self-skip when it's absent.
           python -m pytest tests/ \
             --ignore-glob='tests/test_autotest_*.py' \
             -q -p no:randomly -n auto --tb=short
+
+      - name: Ground-truth regression oracle (deterministic engine gate)
+        run: |
+          # CARVE-OUT from the test_autotest_* exclusion above. The broad ignore
+          # keeps the autonomous-tester FRAMEWORK self-tests (xdist-worker-
+          # sensitive on CI's small core count) in autotest.yml — but the
+          # ground-truth oracle is a different animal: it runs the REAL pipeline
+          # on the fixed sample meet and diffs the deterministic output (parser
+          # swim count, club match, card/achievement counts, known swimmers)
+          # against the committed golden baseline. A stale baseline OR a real
+          # parser / detector / ranker drift must redden the PR here — not sit
+          # latent until the 6-hourly autotest.yml run. That latency is exactly
+          # how the golden baseline went stale behind the multi-column PDF fix
+          # (#631): the count moved 1217 -> 3597 on main and nothing reddened a
+          # PR. Run SERIALLY (no -n) so the result never depends on xdist worker
+          # distribution; -p no:randomly keeps it order-stable.
+          python -m pytest tests/test_autotest_ground_truth.py \
+            -q -p no:randomly --tb=short
