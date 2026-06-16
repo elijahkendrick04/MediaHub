@@ -865,6 +865,8 @@ def render_meet_reel(
     duration_sec: Optional[float] = None,
     briefs: Optional[list[Optional[dict]]] = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    sponsor: str = "",
+    next_meet: str = "",
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -882,6 +884,13 @@ def render_meet_reel(
                   (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
       format_name  output cut: ``story`` (default) / ``portrait`` /
                   ``square`` / ``landscape``.
+      sponsor     optional sponsor name for the reel's outro close (R1.30).
+                  When set, the Remotion outro shows a "proudly supported by"
+                  thank-you; blank falls back to the follow-the-club close.
+                  Only ever names a sponsor the caller actually supplied.
+      next_meet   optional next-meet label for the outro "next up" close
+                  (R1.30). Sponsor wins when both are given; the next meet
+                  then rides along as the outro's secondary line.
 
     Audio + poster behaviour matches ``render_story_card``: opt-in narration
     (built only from the cards' own facts) and/or the operator's music bed
@@ -933,6 +942,19 @@ def render_meet_reel(
     if duration_sec is None:
         duration_sec = reel_duration_for(len(cards_props))
 
+    # R1.30 — optional outro-CTA inputs (sponsor thanks / next meet). Folded
+    # into the Remotion props AND the cache key ONLY when present, so a reel
+    # with neither stays byte-identical (same cache key, same render) to
+    # before this landed. Honest: only a sponsor / next meet the caller
+    # actually supplied is ever shown.
+    cta_props: dict[str, str] = {}
+    sponsor = (sponsor or "").strip()
+    next_meet = (next_meet or "").strip()
+    if sponsor:
+        cta_props["sponsor"] = sponsor
+    if next_meet:
+        cta_props["nextMeet"] = next_meet
+
     audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
 
     if engine == "ffmpeg":
@@ -962,6 +984,8 @@ def render_meet_reel(
         "duration": duration_sec,
         "size": list(size),
     }
+    if cta_props:
+        cache_payload["cta"] = cta_props
     if audio_plan:
         cache_payload["audio"] = audio_plan
     cache_key = _content_hash(cache_payload, kind="reel")
@@ -976,7 +1000,12 @@ def render_meet_reel(
 
     _run_remotion(
         composition_id=COMP_REEL,
-        props={"cards": cards_props, "brand": brand_dict, "meetName": meet_name},
+        props={
+            "cards": cards_props,
+            "brand": brand_dict,
+            "meetName": meet_name,
+            **cta_props,
+        },
         out_path=cached,
         duration_sec=duration_sec,
         size=size,
@@ -995,6 +1024,7 @@ def render_meet_reel(
             "size": list(size),
             "duration_sec": duration_sec,
             "meet_name": meet_name,
+            "cta": cta_props,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "audio": audio_rec,
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
