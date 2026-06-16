@@ -121,6 +121,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.16** · Graphic generator sprint — EXIF/IPTC metadata + photographer-attribution embedding in exported PNG/JPEG. *Build: new `graphic_renderer/metadata_embed.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **G1.3** · Graphic generator sprint — Landscape & extended aspect-ratio support (16:9, 3:2, 4:3) with per-format composition rules. *Build: extend `FORMAT_SIZES` in `render.py` + `variants.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **G1.29** · Graphic generator sprint — Animated still loops — subtle SVG-animation backgrounds exported as APNG/GIF for static-but-living posts. *Build: new `sprint_hooks/animated_still.py` + new `graphic_renderer/animated_still.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
+- ✅ **G1.25** · Graphic generator sprint — Server-side photo adjustment stack — deterministic PIL recipes (sharpen, contrast, saturation, levels) pre-inline. *Build: new `graphic_renderer/photo_adjust.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
