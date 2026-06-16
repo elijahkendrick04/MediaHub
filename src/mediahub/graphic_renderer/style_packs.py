@@ -76,6 +76,11 @@ GROUNDS: tuple[str, ...] = (
 )
 
 # Surface micro-texture — a low-opacity, blended overlay (the grain precedent).
+# The first block is the closed *single-tile* vocabulary; the trailing block is
+# the **layered** vocabulary (G1.6) — each token fuses two of the singles with a
+# blend mode (see ``_TEXTURE_STACKS`` + the compositor). Layered tokens use ``_``
+# (never ``-``) so the ``ground-texture-accentGeo-density`` pack id still splits
+# into exactly four parts on both the still and motion sides.
 TEXTURES: tuple[str, ...] = (
     "none",
     "grain",
@@ -88,6 +93,15 @@ TEXTURES: tuple[str, ...] = (
     "scanline",
     "carbon",
     "chevron",
+    # Layered (two-texture) surfaces — G1.6 texture-layering engine.
+    "grain_dots",
+    "halftone_weave",
+    "hatch_grid",
+    "crosshatch_grain",
+    "dots_scanline",
+    "carbon_hatch",
+    "chevron_grain",
+    "grid_dots",
 )
 
 # Accent geometry drawn in the resolved ``--mh-accent``, confined to the margins.
@@ -144,6 +158,16 @@ _TEXTURE_W = {
     "scanline": 1,
     "carbon": 2,
     "chevron": 2,
+    # Layered surfaces read as one busy texture — weight 2 keeps them off the
+    # already-heavy grounds/accents so a card never stacks busy-on-busy-on-busy.
+    "grain_dots": 2,
+    "halftone_weave": 2,
+    "hatch_grid": 2,
+    "crosshatch_grain": 2,
+    "dots_scanline": 2,
+    "carbon_hatch": 2,
+    "chevron_grain": 2,
+    "grid_dots": 2,
 }
 _ACCENT_W = {
     "none": 0,
@@ -195,6 +219,15 @@ _TEXTURE_LABEL = {
     "scanline": "scanline",
     "carbon": "carbon",
     "chevron": "chevron",
+    # Layered surfaces (G1.6) — names read as one compound texture.
+    "grain_dots": "grain-dot",
+    "halftone_weave": "halftone-weave",
+    "hatch_grid": "blueprint",
+    "crosshatch_grain": "etched",
+    "dots_scanline": "scan-dot",
+    "carbon_hatch": "carbon-weave",
+    "chevron_grain": "chevron-grain",
+    "grid_dots": "graph",
 }
 _ACCENT_LABEL = {
     "none": "bare",
@@ -540,6 +573,96 @@ _TEX_SIZE: dict[str, int] = {
     "chevron": 24,
 }
 
+# ---------------------------------------------------------------------------
+# Texture-layering engine (G1.6) — stack two single tiles with a blend mode.
+#
+# A *layered* texture token resolves to a recipe ``(base_a, base_b, blend)``
+# whose two bases are drawn from the closed single-tile vocabulary above. The
+# compositor paints both tiles as one element's two background layers and fuses
+# them with ``background-blend-mode`` (the *blend* lever), then composites the
+# result onto the card with the same low-opacity ``mix-blend-mode:overlay`` the
+# single-tile precedent uses — so a layered surface is exactly as legibility-safe
+# as one tile, just richer. No new tile art: the engine only adds the *stacking*.
+#
+# Blend modes are kept to the lightening/neutral family (``screen``/``lighten``/
+# ``overlay``/``soft-light``) so two faint white-on-transparent tiles never fuse
+# into a dark opaque mass over copy. ``_TEXTURE_STACKS`` is the closed recipe
+# vocabulary; its keys are the layered tokens appended to ``TEXTURES``.
+# ---------------------------------------------------------------------------
+
+_TEXTURE_STACKS: dict[str, tuple[str, str, str]] = {
+    "grain_dots": ("grain", "dots", "soft-light"),
+    "halftone_weave": ("halftone", "weave", "overlay"),
+    "hatch_grid": ("hatch", "grid", "lighten"),
+    "crosshatch_grain": ("crosshatch", "grain", "screen"),
+    "dots_scanline": ("dots", "scanline", "screen"),
+    "carbon_hatch": ("carbon", "hatch", "overlay"),
+    "chevron_grain": ("chevron", "grain", "soft-light"),
+    "grid_dots": ("grid", "dots", "lighten"),
+}
+
+
+def texture_stack(texture: str) -> Optional[tuple[str, str, str]]:
+    """The ``(base_a, base_b, blend)`` recipe for a layered texture, or ``None``.
+
+    A plain single-tile texture (or ``none``/unknown) returns ``None``; this is
+    the one predicate that distinguishes a layered token from a single one, used
+    by the generator and surfaced for explainability/trace.
+    """
+    return _TEXTURE_STACKS.get(str(texture or "").strip().lower())
+
+
+def _composite_texture_layer(base_a: str, base_b: str, blend: str, opacity: float) -> str:
+    """Compositor: fuse two base tiles into one blended overlay div (G1.6).
+
+    The two white-on-transparent tiles become the div's two ``background-image``
+    layers, fused per-pixel by ``background-blend-mode:{blend}``; the composite
+    then rides onto the card via the shared ``mix-blend-mode:overlay`` at low
+    ``opacity``. Returns ``""`` if either base tile is unknown (never a broken
+    half-rendered layer). Distinct region from the ground/accent generators.
+    """
+    tile_a = _TEX_TILES.get(base_a, "")
+    tile_b = _TEX_TILES.get(base_b, "")
+    if not tile_a or not tile_b:
+        return ""
+    size_a = _TEX_SIZE.get(base_a, 20)
+    size_b = _TEX_SIZE.get(base_b, 20)
+    return (
+        f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
+        f"background-image:url(&quot;{tile_a}&quot;),url(&quot;{tile_b}&quot;);"
+        f"background-size:{size_a}px {size_a}px,{size_b}px {size_b}px;"
+        f"background-repeat:repeat,repeat;background-blend-mode:{blend};"
+        f'opacity:{round(opacity, 3)};mix-blend-mode:overlay;"></div>'
+    )
+
+
+def _texture_layer_html(texture: str, bold: bool) -> str:
+    """Texture generator: the surface-texture overlay for one texture token.
+
+    Dispatches a *layered* token (two tiles fused by the compositor) or a plain
+    *single* tile (the original grain-precedent overlay), returning ``""`` for
+    ``none``/unknown so an undecorated surface injects nothing. The single-tile
+    branch is byte-identical to the pre-G1.6 inline block.
+    """
+    if texture == "none":
+        return ""
+    stack = _TEXTURE_STACKS.get(texture)
+    if stack:
+        base_a, base_b, blend = stack
+        # Two stacked patterns → a touch under the single-tile opacity so the
+        # combined surface stays as faint as one tile (legibility-safe).
+        return _composite_texture_layer(base_a, base_b, blend, 0.15 if bold else 0.10)
+    tile = _TEX_TILES.get(texture, "")
+    if not tile:
+        return ""
+    size = _TEX_SIZE.get(texture, 20)
+    opacity = (0.16 if bold else 0.10) if texture != "grain" else (0.18 if bold else 0.12)
+    return (
+        f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
+        f"background-image:url(&quot;{tile}&quot;);background-size:{size}px {size}px;"
+        f'background-repeat:repeat;opacity:{opacity};mix-blend-mode:overlay;"></div>'
+    )
+
 
 def _ground_layer(ground: str, alpha: float) -> str:
     """A darken-only atmospheric overlay (CSS ``background`` value), or ''.
@@ -645,19 +768,12 @@ def pack_overlay_html(pack: StylePack, *, width: int, height: int) -> str:
             f'background:{ground_css};"></div>'
         )
 
-    # 2) Surface texture (a faint, blended tile — the grain precedent).
-    if pack.texture != "none":
-        tile = _TEX_TILES.get(pack.texture, "")
-        size = _TEX_SIZE.get(pack.texture, 20)
-        if tile:
-            opacity = (
-                (0.16 if bold else 0.10) if pack.texture != "grain" else (0.18 if bold else 0.12)
-            )
-            layers.append(
-                f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
-                f"background-image:url(&quot;{tile}&quot;);background-size:{size}px {size}px;"
-                f'background-repeat:repeat;opacity:{opacity};mix-blend-mode:overlay;"></div>'
-            )
+    # 2) Surface texture — a faint blended tile, or (G1.6) a two-tile layered
+    #    composite. The generator dispatches single vs layered; both stay the
+    #    low-opacity, mix-blend grain-precedent overlay.
+    tex_layer = _texture_layer_html(pack.texture, bold)
+    if tex_layer:
+        layers.append(tex_layer)
 
     # 3) Accent geometry (z-index 8: above texture, confined to the margins).
     geo = _accent_geometry_html(pack.accent_geo, width, height, bold)
@@ -787,6 +903,7 @@ __all__ = [
     "TEXTURES",
     "ACCENT_GEOS",
     "DENSITIES",
+    "texture_stack",
     "StylePack",
     "Template",
     "normalise_pack",
