@@ -65,6 +65,14 @@ GROUNDS: tuple[str, ...] = (
     "top_corner_fade",
     "edge_frame",
     "diagonal_fade",
+    # Ground-treatment expansion pack — richer atmospheric grounds (multi-stop
+    # meshes, defocused pools, raking rays, woven fields). Each is still a
+    # darken-only overlay that fades to transparent, so it composes over any
+    # archetype without lowering text contrast below the flat baseline.
+    "gradient_mesh",
+    "bokeh",
+    "light_ray",
+    "paper_weave",
 )
 
 # Surface micro-texture — a low-opacity, blended overlay (the grain precedent).
@@ -116,6 +124,13 @@ _GROUND_W = {
     "top_corner_fade": 1,
     "edge_frame": 2,
     "diagonal_fade": 2,
+    # Expansion pack: bokeh is sparse + light (1); the mesh / ray / weave fields
+    # carry more presence (2). The coherence cap then limits how much texture +
+    # geometry can stack on top of them.
+    "gradient_mesh": 2,
+    "bokeh": 1,
+    "light_ray": 2,
+    "paper_weave": 2,
 }
 _TEXTURE_W = {
     "none": 0,
@@ -163,6 +178,10 @@ _GROUND_LABEL = {
     "top_corner_fade": "top-cornered",
     "edge_frame": "edge-framed",
     "diagonal_fade": "diagonal",
+    "gradient_mesh": "mesh",
+    "bokeh": "bokeh",
+    "light_ray": "ray-lit",
+    "paper_weave": "paper-woven",
 }
 _TEXTURE_LABEL = {
     "none": "clean",
@@ -564,6 +583,44 @@ def _ground_layer(ground: str, alpha: float) -> str:
     if ground == "diagonal_fade":
         # Mirror of twotone — darkens the top-left wedge instead of bottom-right.
         return f"linear-gradient(122deg, rgba(0,0,0,{a}) 8%, rgba(0,0,0,0) 54%)"
+    # --- Ground-treatment expansion pack -------------------------------------
+    # All four stay strictly darken-only: every stop is black, every pool/band
+    # falls to rgba(0,0,0,0), so the lit centre is preserved and the overlay can
+    # only add contrast for light copy (kept gentle for dark copy by the cap).
+    if ground == "gradient_mesh":
+        # Three soft shadow pools (two top corners + bottom edge) ring a lit
+        # centre — an atmospheric mesh, unlike the single ring of `vignette`.
+        return (
+            f"radial-gradient(62% 55% at 14% 12%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 60%),"
+            f"radial-gradient(58% 52% at 86% 18%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 60%),"
+            f"radial-gradient(85% 60% at 50% 104%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 58%)"
+        )
+    if ground == "bokeh":
+        # Scattered defocused discs of varied size in the margins — a soft
+        # out-of-focus field that leaves the centre clear for the hero.
+        return (
+            f"radial-gradient(20% 14% at 16% 82%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%),"
+            f"radial-gradient(14% 10% at 82% 14%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%),"
+            f"radial-gradient(11% 8% at 92% 70%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%),"
+            f"radial-gradient(9% 6% at 8% 30%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%)"
+        )
+    if ground == "light_ray":
+        # Raking crepuscular rays from just beyond the top-right corner: thin
+        # dark bands fan out, reading as light streaming between them.
+        return (
+            f"repeating-conic-gradient(from 192deg at 84% -8%, "
+            f"rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 10deg, "
+            f"rgba(0,0,0,{a}) 13deg, rgba(0,0,0,0) 16deg)"
+        )
+    if ground == "paper_weave":
+        # Fine woven field — crossed thin dark lines (2px every 14px on both
+        # axes), a textile/paper ground that stays faint between the threads.
+        return (
+            f"repeating-linear-gradient(90deg, rgba(0,0,0,{a}) 0, rgba(0,0,0,{a}) 2px, "
+            f"rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px),"
+            f"repeating-linear-gradient(0deg, rgba(0,0,0,{a}) 0, rgba(0,0,0,{a}) 2px, "
+            f"rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px)"
+        )
     return ""
 
 

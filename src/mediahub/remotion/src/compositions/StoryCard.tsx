@@ -870,6 +870,8 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 const PACK_GROUNDS = new Set([
   "flat", "top_fade", "bottom_fade", "corner_fade", "vignette", "spotlight", "twotone",
   "dual_fade", "top_corner_fade", "edge_frame", "diagonal_fade",
+  // Ground-treatment expansion pack (mirrors style_packs.GROUNDS).
+  "gradient_mesh", "bokeh", "light_ray", "paper_weave",
 ]);
 const PACK_TEXTURES = new Set([
   "none", "grain", "dots", "grid", "hatch", "halftone", "crosshatch",
@@ -933,6 +935,33 @@ function packGroundGradient(ground: string, a: number): string | null {
       );
     case "diagonal_fade":
       return `linear-gradient(122deg, rgba(0,0,0,${a}) 8%, rgba(0,0,0,0) 54%)`;
+    // --- Ground-treatment expansion pack (mirrors style_packs._ground_layer) ---
+    case "gradient_mesh":
+      return (
+        `radial-gradient(62% 55% at 14% 12%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 60%),` +
+        `radial-gradient(58% 52% at 86% 18%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 60%),` +
+        `radial-gradient(85% 60% at 50% 104%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 58%)`
+      );
+    case "bokeh":
+      return (
+        `radial-gradient(20% 14% at 16% 82%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(14% 10% at 82% 14%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(11% 8% at 92% 70%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(9% 6% at 8% 30%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%)`
+      );
+    case "light_ray":
+      return (
+        `repeating-conic-gradient(from 192deg at 84% -8%, ` +
+        `rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 10deg, ` +
+        `rgba(0,0,0,${a}) 13deg, rgba(0,0,0,0) 16deg)`
+      );
+    case "paper_weave":
+      return (
+        `repeating-linear-gradient(90deg, rgba(0,0,0,${a}) 0, rgba(0,0,0,${a}) 2px, ` +
+        `rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px),` +
+        `repeating-linear-gradient(0deg, rgba(0,0,0,${a}) 0, rgba(0,0,0,${a}) 2px, ` +
+        `rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px)`
+      );
     default:
       return null;
   }
