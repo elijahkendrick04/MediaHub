@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `6225b8c2b` · Merge pull request #665 from elijahkendrick04/claude/vibrant-albattani-07uodr
+**Last updated:** 2026-06-16 · `712d44353` · R1.8 — Photo scrim variant system for motion (#677)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -206,7 +206,6 @@ sequence it or merge with care.
 - **R1.5** · Reel generator sprint — Motion accent-decoration expansion + sizing variants (thick/thin stripe, large/small brackets, offset badge). *Build: one file each in `sprint/accents/<name>.tsx` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.6** · Reel generator sprint — Animated-pattern drift layer — per-pattern frame-pure motion (rotate/opacity/scale) during the breathe phase. *Build: `sprint/layers/pattern_drift.tsx` additive overlay (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.8** · Reel generator sprint — Photo scrim variant system for motion — edge / radial / gradient / corner scrims, role-driven. *Build: `sprint/layers/photo_scrim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.10** · Reel generator sprint — Motion photo filter stack — deterministic frame-pure brightness/contrast/saturation/blur from brief fields. *Build: `sprint/layers/photo_filters.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1575,12 +1574,11 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `415935fa8` | feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding |
 | 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
 | 2026-06-16 | `4ba4f7dfd` | R1.8: photo scrim variant system for motion (role-driven) |
 | 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
 | 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
 | 2026-06-16 | `bdb343867` | R1.20 — reel music-bed upgrade: ducking, stings, beat-aware cut accents |
 | 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
-| 2026-06-16 | `debb43795` | G1.20: brand-palette expansion to N custom club colours |
-| 2026-06-16 | `ea3fa4140` | Reel ffmpeg engine: richer motion — Ken Burns variants, parallax, beat transitions (R1.17) |
 <!-- /ROADMAP:ACTIVITY -->
