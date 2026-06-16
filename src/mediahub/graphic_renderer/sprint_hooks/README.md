@@ -34,6 +34,12 @@ A hook that no brief opts into is a no-op, so renders stay byte-identical.
   blurs the photographic background layers (`.bg-photo`, `.bg-ai`) and keeps the
   athlete cutout (`.athlete-cutout`) sharp. Pure CSS-filter transform, opt-in,
   byte-identical for every other brief.
+- `animated_still.py` (**G1.29**, `ORDER = 20`) — animated still loops. When a
+  brief opts in (`animate_still` truthy, `background_style == "animated_loop"`,
+  or an explicit `animated_loop` name), it injects a subtle, seamlessly-looping
+  animated SVG layer so a live preview of the card breathes. The matching APNG/
+  GIF exporter and the loop maths live in `graphic_renderer/animated_still.py`.
+  Opt-in, byte-identical for every other brief.
 - `photo_tint.py` (**G1.7**, `ORDER = 40`) — photo-derived ground tinting. When
   `MEDIAHUB_PHOTO_TINT` is set, nudges a v2 card's derived `--mh-surface` (and the
   no-brand fallback ground only) toward the dominant colour of the card's photo —
@@ -42,7 +48,6 @@ A hook that no brief opts into is a no-op, so renders stay byte-identical.
   when the flag is off.
 
 Capabilities that also fit this seam include **G1.8** (gradient-mesh
-backgrounds), **G1.19** (mono mode), **G1.22** (icon/badge overlays),
-**G1.29** (animated-still loops) and **G1.30** (inspection overlay).
-Capabilities that change formats, encoding, fonts, palettes or text-fitting edit
-their own dedicated module/region instead.
+backgrounds), **G1.19** (mono mode), **G1.22** (icon/badge overlays) and
+**G1.30** (inspection overlay). Capabilities that change formats, encoding,
+fonts, palettes or text-fitting edit their own dedicated module/region instead.
