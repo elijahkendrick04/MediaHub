@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `3ba0e7a6e` · Merge pull request #668 from elijahkendrick04/claude/hopeful-lamport-9rdwwl
+**Last updated:** 2026-06-16 · `6225b8c2b` · Merge pull request #665 from elijahkendrick04/claude/vibrant-albattani-07uodr
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -190,7 +190,6 @@ sequence it or merge with care.
 - **G1.15** · Graphic generator sprint — Batch ZIP export of a pack's every format + a `metadata.json` manifest. *Build: new `graphic_renderer/pack_export.py` + a new download route.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.16** · Graphic generator sprint — EXIF/IPTC metadata + photographer-attribution embedding in exported PNG/JPEG. *Build: new `graphic_renderer/metadata_embed.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.17** · Graphic generator sprint — Print pipeline expansion — trim/bleed/crop marks + CMYK-aware export. *Build: `print_export.py` (sole owner) + new print layouts.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.18** · Graphic generator sprint — Colour accessibility audit + colourblind simulation (per-card APCA/WCAG report + deut/prot/trit previews). *Build: new `quality/colour_audit.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1577,11 +1576,11 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
+| 2026-06-16 | `4ba4f7dfd` | R1.8: photo scrim variant system for motion (role-driven) |
 | 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
 | 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
 | 2026-06-16 | `bdb343867` | R1.20 — reel music-bed upgrade: ducking, stings, beat-aware cut accents |
 | 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
 | 2026-06-16 | `debb43795` | G1.20: brand-palette expansion to N custom club colours |
 | 2026-06-16 | `ea3fa4140` | Reel ffmpeg engine: richer motion — Ken Burns variants, parallax, beat transitions (R1.17) |
-| 2026-06-16 | `91db21501` | Add G1.18 per-card colour-accessibility audit + colourblind simulation |
 <!-- /ROADMAP:ACTIVITY -->
