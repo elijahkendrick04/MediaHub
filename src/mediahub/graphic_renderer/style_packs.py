@@ -65,9 +65,22 @@ GROUNDS: tuple[str, ...] = (
     "top_corner_fade",
     "edge_frame",
     "diagonal_fade",
+    # Ground-treatment expansion pack — richer atmospheric grounds (multi-stop
+    # meshes, defocused pools, raking rays, woven fields). Each is still a
+    # darken-only overlay that fades to transparent, so it composes over any
+    # archetype without lowering text contrast below the flat baseline.
+    "gradient_mesh",
+    "bokeh",
+    "light_ray",
+    "paper_weave",
 )
 
 # Surface micro-texture — a low-opacity, blended overlay (the grain precedent).
+# The first block is the closed *single-tile* vocabulary; the trailing block is
+# the **layered** vocabulary (G1.6) — each token fuses two of the singles with a
+# blend mode (see ``_TEXTURE_STACKS`` + the compositor). Layered tokens use ``_``
+# (never ``-``) so the ``ground-texture-accentGeo-density`` pack id still splits
+# into exactly four parts on both the still and motion sides.
 TEXTURES: tuple[str, ...] = (
     "none",
     "grain",
@@ -80,6 +93,15 @@ TEXTURES: tuple[str, ...] = (
     "scanline",
     "carbon",
     "chevron",
+    # Layered (two-texture) surfaces — G1.6 texture-layering engine.
+    "grain_dots",
+    "halftone_weave",
+    "hatch_grid",
+    "crosshatch_grain",
+    "dots_scanline",
+    "carbon_hatch",
+    "chevron_grain",
+    "grid_dots",
 )
 
 # Accent geometry drawn in the resolved ``--mh-accent``, confined to the margins.
@@ -116,6 +138,13 @@ _GROUND_W = {
     "top_corner_fade": 1,
     "edge_frame": 2,
     "diagonal_fade": 2,
+    # Expansion pack: bokeh is sparse + light (1); the mesh / ray / weave fields
+    # carry more presence (2). The coherence cap then limits how much texture +
+    # geometry can stack on top of them.
+    "gradient_mesh": 2,
+    "bokeh": 1,
+    "light_ray": 2,
+    "paper_weave": 2,
 }
 _TEXTURE_W = {
     "none": 0,
@@ -129,6 +158,16 @@ _TEXTURE_W = {
     "scanline": 1,
     "carbon": 2,
     "chevron": 2,
+    # Layered surfaces read as one busy texture — weight 2 keeps them off the
+    # already-heavy grounds/accents so a card never stacks busy-on-busy-on-busy.
+    "grain_dots": 2,
+    "halftone_weave": 2,
+    "hatch_grid": 2,
+    "crosshatch_grain": 2,
+    "dots_scanline": 2,
+    "carbon_hatch": 2,
+    "chevron_grain": 2,
+    "grid_dots": 2,
 }
 _ACCENT_W = {
     "none": 0,
@@ -163,6 +202,10 @@ _GROUND_LABEL = {
     "top_corner_fade": "top-cornered",
     "edge_frame": "edge-framed",
     "diagonal_fade": "diagonal",
+    "gradient_mesh": "mesh",
+    "bokeh": "bokeh",
+    "light_ray": "ray-lit",
+    "paper_weave": "paper-woven",
 }
 _TEXTURE_LABEL = {
     "none": "clean",
@@ -176,6 +219,15 @@ _TEXTURE_LABEL = {
     "scanline": "scanline",
     "carbon": "carbon",
     "chevron": "chevron",
+    # Layered surfaces (G1.6) — names read as one compound texture.
+    "grain_dots": "grain-dot",
+    "halftone_weave": "halftone-weave",
+    "hatch_grid": "blueprint",
+    "crosshatch_grain": "etched",
+    "dots_scanline": "scan-dot",
+    "carbon_hatch": "carbon-weave",
+    "chevron_grain": "chevron-grain",
+    "grid_dots": "graph",
 }
 _ACCENT_LABEL = {
     "none": "bare",
@@ -380,6 +432,208 @@ def pick_style_pack_for_card(
 
 
 # ---------------------------------------------------------------------------
+# Mood-keyed preset bundles (Gen v2 Tier B — design-spec ``mood`` → curated packs).
+#
+# The four-lever pack space is large (1000+ packs); a blind seeded pick gives
+# variety but ignores the *feeling* the design-spec director chose for a card.
+# A **preset bundle** closes that gap: each ``design_spec`` mood maps to a small,
+# hand-curated tuple of packs whose ground/texture/accent vocabulary expresses
+# that mood — explosive → sharp diagonals + wedges, calm → soft fades + light
+# rules, celebratory → festive dots/rings, and so on.
+#
+# The same rules the rest of this module keeps still hold:
+#   * **Deterministic.** Same mood → same bundle; a seeded/card-keyed pick walks
+#     it the same way every render (no LLM in the selection).
+#   * **In-catalog & coherent.** Every preset is authored from the closed lever
+#     vocabularies and stays under the weight cap, so it is a real member of
+#     ``list_style_packs()`` (asserted by the catalog tests) — addressable,
+#     brand-safe and legibility-safe by construction, like any other pack.
+#   * **Inert when absent.** An empty/unknown mood yields no bundle, so the
+#     mood-aware pickers fall straight through to the full-catalog pickers — the
+#     no-mood path (every legacy / non-AI brief) is byte-identical to before.
+#
+# The mood keys mirror ``creative_brief.design_spec.MOODS`` exactly. They are
+# duplicated here (not imported) to keep this low-level renderer module free of
+# a back-edge onto ``creative_brief`` (which imports *this* module); a drift test
+# pins the two vocabularies together.
+# ---------------------------------------------------------------------------
+
+# mood → ordered tuple of (ground, texture, accent_geo, density) lever tuples.
+# Curated by hand for feel + internal variety; each row stays under the coherence
+# weight cap so it round-trips through ``list_style_packs()``.
+_MOOD_PRESETS: dict[str, tuple[tuple[str, str, str, str], ...]] = {
+    "neutral": (
+        ("flat", "none", "baseline_rule", "standard"),
+        ("top_fade", "grain", "none", "standard"),
+        ("flat", "grain", "side_rule", "standard"),
+    ),
+    "explosive": (
+        ("diagonal_fade", "none", "wedge", "standard"),
+        ("twotone", "chevron", "none", "standard"),
+        ("flat", "scanline", "wedge", "bold"),
+    ),
+    "electric": (
+        ("spotlight", "scanline", "none", "bold"),
+        ("flat", "carbon", "cross_ticks", "standard"),
+        ("corner_fade", "grid", "corner_ticks", "standard"),
+    ),
+    "calm": (
+        ("top_fade", "none", "none", "standard"),
+        ("flat", "grain", "baseline_rule", "standard"),
+        ("dual_fade", "none", "side_rule", "standard"),
+    ),
+    "fierce": (
+        ("vignette", "carbon", "none", "standard"),
+        ("vignette", "none", "corner_blocks", "standard"),
+        ("spotlight", "hatch", "none", "bold"),
+    ),
+    "celebratory": (
+        ("corner_fade", "dots", "ring", "standard"),
+        ("flat", "halftone", "dot_row", "standard"),
+        ("top_fade", "dots", "dot_row", "bold"),
+    ),
+    "stoic": (
+        ("edge_frame", "none", "none", "standard"),
+        ("flat", "none", "frame", "standard"),
+        ("vignette", "none", "double_rule", "standard"),
+    ),
+    "precise": (
+        ("flat", "grid", "cross_ticks", "standard"),
+        ("corner_fade", "none", "corner_ticks", "standard"),
+        ("flat", "grid", "corner_ticks", "bold"),
+    ),
+    "warm": (
+        ("corner_fade", "weave", "none", "standard"),
+        ("bottom_fade", "grain", "baseline_rule", "standard"),
+        ("top_fade", "weave", "side_rule", "standard"),
+    ),
+    "bold": (
+        ("twotone", "none", "corner_blocks", "standard"),
+        ("flat", "carbon", "corner_blocks", "standard"),
+        ("twotone", "none", "side_rule", "bold"),
+    ),
+    "triumphant": (
+        ("spotlight", "none", "ring", "standard"),
+        ("top_fade", "none", "frame", "standard"),
+        ("corner_fade", "grain", "ring", "standard"),
+    ),
+    "minimal": (
+        ("flat", "none", "none", "standard"),
+        ("flat", "none", "baseline_rule", "standard"),
+        ("top_fade", "none", "none", "standard"),
+    ),
+}
+
+# One plain line per mood for the why-trace / gallery — what its bundle is going
+# for, in human terms.
+_MOOD_NOTES: dict[str, str] = {
+    "neutral": "Quiet, balanced treatments — clean grounds and light rules that stay out of the way.",
+    "explosive": "High-energy diagonals and sharp wedges for peak-action, breakthrough moments.",
+    "electric": "Crisp technical textures and register marks — a charged, high-voltage feel.",
+    "calm": "Soft, airy grounds and minimal marks for composed, measured moments.",
+    "fierce": "Dark, dramatic grounds with heavy accents — intensity and grit.",
+    "celebratory": "Festive dots, halftone pop and ring accents for joyful wins.",
+    "stoic": "Restrained, classical framing — contained grounds and quiet rules.",
+    "precise": "Grid textures and registration marks — a measured, exacting look.",
+    "warm": "Filmic grain and woven textures under gentle light for an inviting feel.",
+    "bold": "Two-tone blocks and strong accents for high-impact, confident statements.",
+    "triumphant": "Spotlit, framed grounds with ring accents — a victory-stand register.",
+    "minimal": "Spare, near-bare treatments — the archetype's own composition, barely dressed.",
+}
+
+
+def _mood_key(mood: Optional[str]) -> str:
+    """Normalise a raw mood string to a lookup key (or '' when none/unknown)."""
+    key = str(mood or "").strip().lower()
+    return key if key in _MOOD_PRESETS else ""
+
+
+def mood_preset_moods() -> tuple[str, ...]:
+    """Every mood that carries a curated bundle, in declaration order."""
+    return tuple(_MOOD_PRESETS.keys())
+
+
+@lru_cache(maxsize=64)
+def mood_preset_packs(mood: Optional[str]) -> tuple[StylePack, ...]:
+    """The curated style-pack bundle for a design-spec ``mood``.
+
+    Returns the mood's hand-curated packs (normalised, so each is a valid,
+    in-catalog pack), or an **empty tuple** for an empty/unknown mood — the
+    signal the mood-aware pickers use to fall through to the full-catalog
+    pickers. Cached: same mood → same tuple object.
+    """
+    key = _mood_key(mood)
+    if not key:
+        return ()
+    return tuple(normalise_pack(*levers) for levers in _MOOD_PRESETS[key])
+
+
+def mood_preset_ids(mood: Optional[str]) -> tuple[str, ...]:
+    """The pack ids in a mood's bundle (``()`` for an empty/unknown mood)."""
+    return tuple(p.id for p in mood_preset_packs(mood))
+
+
+def mood_preset_note(mood: Optional[str]) -> str:
+    """One plain line describing a mood's bundle for the why-trace (or '')."""
+    return _MOOD_NOTES.get(_mood_key(mood), "")
+
+
+def pick_mood_pack(mood: Optional[str], seed: int) -> StylePack:
+    """Deterministic pick from a mood's bundle by seed.
+
+    Mirrors :func:`pick_style_pack` but scoped to the mood's curated packs.
+    Falls back to the full-catalog :func:`pick_style_pack` when the mood has no
+    bundle, so a no-mood / unknown-mood caller is unchanged.
+    """
+    bundle = mood_preset_packs(mood)
+    if not bundle:
+        return pick_style_pack(seed)
+    return bundle[int(seed) % len(bundle)]
+
+
+def pick_mood_pack_avoiding(mood: Optional[str], seed: int, recent: Iterable[str]) -> StylePack:
+    """Seeded pick from a mood's bundle that steps past recently-used ids.
+
+    The mood-scoped analogue of :func:`pick_style_pack_avoiding`: start at the
+    seeded pack in the bundle and walk forward until one not in ``recent`` is
+    found, so consecutive same-mood cards vary within the bundle instead of
+    repeating one look. Degrades to the strict seeded pick when the whole bundle
+    is recent, and to the full-catalog avoider when there is no bundle.
+    """
+    bundle = mood_preset_packs(mood)
+    if not bundle:
+        return pick_style_pack_avoiding(seed, recent)
+    avoid = {str(r).strip().lower() for r in recent if r}
+    start = int(seed) % len(bundle)
+    for offset in range(len(bundle)):
+        cand = bundle[(start + offset) % len(bundle)]
+        if cand.id not in avoid:
+            return cand
+    return bundle[start]
+
+
+def pick_mood_pack_for_card(
+    mood: Optional[str], card_key: Optional[str], recent: Optional[Iterable[str]] = None
+) -> StylePack:
+    """Pick a mood-appropriate pack for a card: stable per card, spread per pack.
+
+    The mood-aware sibling of :func:`pick_style_pack_for_card`. With a curated
+    bundle for ``mood`` it picks within it (stable per ``card_key``, walking past
+    this card's recent packs); with no bundle it is exactly
+    :func:`pick_style_pack_for_card`, so the no-mood path is byte-identical.
+    A missing ``card_key`` falls back to a time-seeded pick (a fresh look each
+    call) rather than always the first preset.
+    """
+    if not mood_preset_packs(mood):
+        return pick_style_pack_for_card(card_key, recent)
+    if not card_key:
+        import time
+
+        return pick_mood_pack(mood, int(time.time() * 1000))
+    return pick_mood_pack_avoiding(mood, _seed_for(card_key, salt="pack"), recent or ())
+
+
+# ---------------------------------------------------------------------------
 # Template = archetype × style pack (the addressable unit).
 # ---------------------------------------------------------------------------
 
@@ -521,6 +775,96 @@ _TEX_SIZE: dict[str, int] = {
     "chevron": 24,
 }
 
+# ---------------------------------------------------------------------------
+# Texture-layering engine (G1.6) — stack two single tiles with a blend mode.
+#
+# A *layered* texture token resolves to a recipe ``(base_a, base_b, blend)``
+# whose two bases are drawn from the closed single-tile vocabulary above. The
+# compositor paints both tiles as one element's two background layers and fuses
+# them with ``background-blend-mode`` (the *blend* lever), then composites the
+# result onto the card with the same low-opacity ``mix-blend-mode:overlay`` the
+# single-tile precedent uses — so a layered surface is exactly as legibility-safe
+# as one tile, just richer. No new tile art: the engine only adds the *stacking*.
+#
+# Blend modes are kept to the lightening/neutral family (``screen``/``lighten``/
+# ``overlay``/``soft-light``) so two faint white-on-transparent tiles never fuse
+# into a dark opaque mass over copy. ``_TEXTURE_STACKS`` is the closed recipe
+# vocabulary; its keys are the layered tokens appended to ``TEXTURES``.
+# ---------------------------------------------------------------------------
+
+_TEXTURE_STACKS: dict[str, tuple[str, str, str]] = {
+    "grain_dots": ("grain", "dots", "soft-light"),
+    "halftone_weave": ("halftone", "weave", "overlay"),
+    "hatch_grid": ("hatch", "grid", "lighten"),
+    "crosshatch_grain": ("crosshatch", "grain", "screen"),
+    "dots_scanline": ("dots", "scanline", "screen"),
+    "carbon_hatch": ("carbon", "hatch", "overlay"),
+    "chevron_grain": ("chevron", "grain", "soft-light"),
+    "grid_dots": ("grid", "dots", "lighten"),
+}
+
+
+def texture_stack(texture: str) -> Optional[tuple[str, str, str]]:
+    """The ``(base_a, base_b, blend)`` recipe for a layered texture, or ``None``.
+
+    A plain single-tile texture (or ``none``/unknown) returns ``None``; this is
+    the one predicate that distinguishes a layered token from a single one, used
+    by the generator and surfaced for explainability/trace.
+    """
+    return _TEXTURE_STACKS.get(str(texture or "").strip().lower())
+
+
+def _composite_texture_layer(base_a: str, base_b: str, blend: str, opacity: float) -> str:
+    """Compositor: fuse two base tiles into one blended overlay div (G1.6).
+
+    The two white-on-transparent tiles become the div's two ``background-image``
+    layers, fused per-pixel by ``background-blend-mode:{blend}``; the composite
+    then rides onto the card via the shared ``mix-blend-mode:overlay`` at low
+    ``opacity``. Returns ``""`` if either base tile is unknown (never a broken
+    half-rendered layer). Distinct region from the ground/accent generators.
+    """
+    tile_a = _TEX_TILES.get(base_a, "")
+    tile_b = _TEX_TILES.get(base_b, "")
+    if not tile_a or not tile_b:
+        return ""
+    size_a = _TEX_SIZE.get(base_a, 20)
+    size_b = _TEX_SIZE.get(base_b, 20)
+    return (
+        f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
+        f"background-image:url(&quot;{tile_a}&quot;),url(&quot;{tile_b}&quot;);"
+        f"background-size:{size_a}px {size_a}px,{size_b}px {size_b}px;"
+        f"background-repeat:repeat,repeat;background-blend-mode:{blend};"
+        f'opacity:{round(opacity, 3)};mix-blend-mode:overlay;"></div>'
+    )
+
+
+def _texture_layer_html(texture: str, bold: bool) -> str:
+    """Texture generator: the surface-texture overlay for one texture token.
+
+    Dispatches a *layered* token (two tiles fused by the compositor) or a plain
+    *single* tile (the original grain-precedent overlay), returning ``""`` for
+    ``none``/unknown so an undecorated surface injects nothing. The single-tile
+    branch is byte-identical to the pre-G1.6 inline block.
+    """
+    if texture == "none":
+        return ""
+    stack = _TEXTURE_STACKS.get(texture)
+    if stack:
+        base_a, base_b, blend = stack
+        # Two stacked patterns → a touch under the single-tile opacity so the
+        # combined surface stays as faint as one tile (legibility-safe).
+        return _composite_texture_layer(base_a, base_b, blend, 0.15 if bold else 0.10)
+    tile = _TEX_TILES.get(texture, "")
+    if not tile:
+        return ""
+    size = _TEX_SIZE.get(texture, 20)
+    opacity = (0.16 if bold else 0.10) if texture != "grain" else (0.18 if bold else 0.12)
+    return (
+        f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
+        f"background-image:url(&quot;{tile}&quot;);background-size:{size}px {size}px;"
+        f'background-repeat:repeat;opacity:{opacity};mix-blend-mode:overlay;"></div>'
+    )
+
 
 def _ground_layer(ground: str, alpha: float) -> str:
     """A darken-only atmospheric overlay (CSS ``background`` value), or ''.
@@ -564,6 +908,44 @@ def _ground_layer(ground: str, alpha: float) -> str:
     if ground == "diagonal_fade":
         # Mirror of twotone — darkens the top-left wedge instead of bottom-right.
         return f"linear-gradient(122deg, rgba(0,0,0,{a}) 8%, rgba(0,0,0,0) 54%)"
+    # --- Ground-treatment expansion pack -------------------------------------
+    # All four stay strictly darken-only: every stop is black, every pool/band
+    # falls to rgba(0,0,0,0), so the lit centre is preserved and the overlay can
+    # only add contrast for light copy (kept gentle for dark copy by the cap).
+    if ground == "gradient_mesh":
+        # Three soft shadow pools (two top corners + bottom edge) ring a lit
+        # centre — an atmospheric mesh, unlike the single ring of `vignette`.
+        return (
+            f"radial-gradient(62% 55% at 14% 12%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 60%),"
+            f"radial-gradient(58% 52% at 86% 18%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 60%),"
+            f"radial-gradient(85% 60% at 50% 104%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 58%)"
+        )
+    if ground == "bokeh":
+        # Scattered defocused discs of varied size in the margins — a soft
+        # out-of-focus field that leaves the centre clear for the hero.
+        return (
+            f"radial-gradient(20% 14% at 16% 82%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%),"
+            f"radial-gradient(14% 10% at 82% 14%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%),"
+            f"radial-gradient(11% 8% at 92% 70%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%),"
+            f"radial-gradient(9% 6% at 8% 30%, rgba(0,0,0,{a}) 0%, rgba(0,0,0,0) 72%)"
+        )
+    if ground == "light_ray":
+        # Raking crepuscular rays from just beyond the top-right corner: thin
+        # dark bands fan out, reading as light streaming between them.
+        return (
+            f"repeating-conic-gradient(from 192deg at 84% -8%, "
+            f"rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 10deg, "
+            f"rgba(0,0,0,{a}) 13deg, rgba(0,0,0,0) 16deg)"
+        )
+    if ground == "paper_weave":
+        # Fine woven field — crossed thin dark lines (2px every 14px on both
+        # axes), a textile/paper ground that stays faint between the threads.
+        return (
+            f"repeating-linear-gradient(90deg, rgba(0,0,0,{a}) 0, rgba(0,0,0,{a}) 2px, "
+            f"rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px),"
+            f"repeating-linear-gradient(0deg, rgba(0,0,0,{a}) 0, rgba(0,0,0,{a}) 2px, "
+            f"rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px)"
+        )
     return ""
 
 
@@ -588,19 +970,12 @@ def pack_overlay_html(pack: StylePack, *, width: int, height: int) -> str:
             f'background:{ground_css};"></div>'
         )
 
-    # 2) Surface texture (a faint, blended tile — the grain precedent).
-    if pack.texture != "none":
-        tile = _TEX_TILES.get(pack.texture, "")
-        size = _TEX_SIZE.get(pack.texture, 20)
-        if tile:
-            opacity = (
-                (0.16 if bold else 0.10) if pack.texture != "grain" else (0.18 if bold else 0.12)
-            )
-            layers.append(
-                f'<div style="position:absolute;inset:0;z-index:6;pointer-events:none;'
-                f"background-image:url(&quot;{tile}&quot;);background-size:{size}px {size}px;"
-                f'background-repeat:repeat;opacity:{opacity};mix-blend-mode:overlay;"></div>'
-            )
+    # 2) Surface texture — a faint blended tile, or (G1.6) a two-tile layered
+    #    composite. The generator dispatches single vs layered; both stay the
+    #    low-opacity, mix-blend grain-precedent overlay.
+    tex_layer = _texture_layer_html(pack.texture, bold)
+    if tex_layer:
+        layers.append(tex_layer)
 
     # 3) Accent geometry (z-index 8: above texture, confined to the margins).
     geo = _accent_geometry_html(pack.accent_geo, width, height, bold)
@@ -730,6 +1105,7 @@ __all__ = [
     "TEXTURES",
     "ACCENT_GEOS",
     "DENSITIES",
+    "texture_stack",
     "StylePack",
     "Template",
     "normalise_pack",
@@ -739,6 +1115,13 @@ __all__ = [
     "pick_style_pack",
     "pick_style_pack_avoiding",
     "pick_style_pack_for_card",
+    "mood_preset_moods",
+    "mood_preset_packs",
+    "mood_preset_ids",
+    "mood_preset_note",
+    "pick_mood_pack",
+    "pick_mood_pack_avoiding",
+    "pick_mood_pack_for_card",
     "list_templates",
     "template_count",
     "template_from_id",
