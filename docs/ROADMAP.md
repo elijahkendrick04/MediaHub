@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `cf6b41179` · Merge pull request #643 from elijahkendrick04/claude/graphic-reel-generation-upgrade-ktyu25
+**Last updated:** 2026-06-16 · `89e6af61e` · Merge pull request #647 from elijahkendrick04/claude/roadmap-next-stage-dy5bvd
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1485,6 +1485,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `79c012568` | ci: gate the ground-truth oracle in the PR unit suite |
 | 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
 | 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
 | 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
@@ -1494,5 +1495,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `975f99a5d` | Fix multi-column PDF extraction dropping rows and scrambling events |
 | 2026-06-15 | `20dc0d308` | Read multi-column result PDFs correctly: full-width lines + time-anchored record parser |
 | 2026-06-15 | `2d6318c73` | Reframe the homepage around the engine diagram, in a human voice |
-| 2026-06-15 | `7ae96a16d` | feat(motion): mirror still style packs into Remotion reels |
 <!-- /ROADMAP:ACTIVITY -->
