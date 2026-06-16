@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `ae6cec6ff` · Merge pull request #652: R1.4 motion background-pattern expansion
+**Last updated:** 2026-06-16 · `5e9fab946` · Merge pull request #654: R1.11 on-video text-effect library
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -214,7 +214,6 @@ sequence it or merge with care.
 - **R1.8** · Reel generator sprint — Photo scrim variant system for motion — edge / radial / gradient / corner scrims, role-driven. *Build: `sprint/layers/photo_scrim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.10** · Reel generator sprint — Motion photo filter stack — deterministic frame-pure brightness/contrast/saturation/blur from brief fields. *Build: `sprint/layers/photo_filters.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.11** · Reel generator sprint — On-video text-effect library — glow, outline, 3D-shadow, stroke-animate, blur-to-focus. *Build: `sprint/layers/text_fx.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.13** · Reel generator sprint — Custom reel stat chips — configurable honest stat labels (top splits, season records, relay wins) from card facts. *Build: `MeetReel.tsx` `reelStats`/`StatChips` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.14** · Reel generator sprint — Transition library expansion + per-card timing — new transitions (glitch, slide-stack, light-sweep) + a duration field. *Build: `MeetReel.tsx` `transitionFor` + `TransitionWrap` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1585,6 +1584,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `554b7d37e` | R1.11: on-video text-effect library (text_fx overlay) |
 | 2026-06-16 | `f18d5875e` | Add R1.4 motion background-pattern expansion (6 sprint patterns) |
 | 2026-06-16 | `3664003bb` | Make the 60-item generator sprint conflict-free for parallel dispatch |
 | 2026-06-16 | `79c012568` | ci: gate the ground-truth oracle in the PR unit suite |
@@ -1593,6 +1593,4 @@ list and the auto table below, not here.
 | 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
 | 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
 | 2026-06-15 | `b7cbc227e` | UI2.5: primary-CTA motion variant (Moving-Border + Stateful-Button) |
-| 2026-06-15 | `eb35ee68a` | Format cache-purge card line per ruff |
-| 2026-06-15 | `2dca30d47` | Add operator site-wide cache purge |
 <!-- /ROADMAP:ACTIVITY -->
