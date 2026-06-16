@@ -545,6 +545,115 @@ def _reel_audio_plan(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Subtitle / caption burn-in (R1.3; see visual/subtitle_burn.py)
+# ---------------------------------------------------------------------------
+
+# The Remotion compositions and the FFmpeg engine both run at 30fps; the caption
+# engine needs the cadence to turn millisecond SRT cues into frame windows.
+MOTION_FPS = 30
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _subtitles_enabled() -> bool:
+    """True when the operator opted into burned captions (``MEDIAHUB_SUBTITLES``).
+
+    Captions paint the spoken narration on screen for muted autoplay, so they
+    ride on top of the existing voiceover opt-in: a render only burns captions
+    when a voice-narration plan exists for it too (the story path literally
+    reads that voiceover's SRT).
+    """
+    return os.environ.get("MEDIAHUB_SUBTITLES", "").strip().lower() in _TRUTHY
+
+
+def _caption_roles(card_dict: dict, brand_dict: dict) -> tuple[str, str, str]:
+    """``(ground, onground, accent)`` for the caption colour, brand-filled.
+
+    Prefers the card's resolved still-parity roles (already APCA-gated) and
+    falls back to the brand palette so the caption is always legible on its
+    own ground.
+    """
+    ground = str(card_dict.get("roleGround") or brand_dict.get("primary") or "")
+    onground = str(card_dict.get("roleOnGround") or "")
+    accent = str(card_dict.get("roleAccent") or brand_dict.get("accent") or "")
+    return ground, onground, accent
+
+
+def _story_caption_json(card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float) -> str:
+    """The caption track for a story render as a JSON string, or ``""``.
+
+    Reads the story narration's voiceover SRT (built from the same fact-only
+    script the audio speaks). Returns ``""`` whenever captions are off or no
+    voice plan exists, so the silent-path cache key stays byte-identical.
+    """
+    if not _subtitles_enabled() or not audio_plan:
+        return ""
+    script = str(audio_plan.get("script") or "").strip()
+    voice = str(audio_plan.get("voice") or "")
+    if not script or not voice:
+        return ""
+    try:
+        from mediahub.visual import subtitle_burn
+
+        ground, onground, accent = _caption_roles(card_dict, brand_dict)
+        track = subtitle_burn.story_caption_track(
+            script,
+            voice=voice,
+            duration_sec=duration_sec,
+            fps=MOTION_FPS,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+        )
+        return subtitle_burn.track_json(track)
+    except Exception:
+        return ""
+
+
+def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -> str:
+    """Per-beat caption track for a reel card as a JSON string, or ``""``.
+
+    The reel narrates one continuous script, so each beat is captioned from its
+    own verified line (``narration.story_script`` with no club sign-off),
+    distributed across the beat — no extra synthesis, fully deterministic.
+    """
+    try:
+        from mediahub.visual import narration, subtitle_burn
+
+        line = narration.story_script(card_dict, {})
+        if not line.strip():
+            return ""
+        ground, onground, accent = _caption_roles(card_dict, brand_dict)
+        track = subtitle_burn.text_caption_track(
+            line,
+            total_frames=beat_frames,
+            fps=MOTION_FPS,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+        )
+        return subtitle_burn.track_json(track)
+    except Exception:
+        return ""
+
+
+def _caption_manifest(caption_json: str) -> dict:
+    """Explainability record for a story render's captions."""
+    if not caption_json:
+        return {"status": "off"}
+    try:
+        cues = len(json.loads(caption_json).get("cues", []))
+    except Exception:
+        cues = 0
+    return {"status": "on", "cues": cues}
+
+
+def _reel_caption_manifest(cards_props: list[dict]) -> dict:
+    """Explainability record for a reel render's per-beat captions."""
+    counts = [_caption_manifest(cp.get("captionsJson") or "").get("cues", 0) for cp in cards_props]
+    return {"status": "on" if any(counts) else "off", "cues_per_card": counts}
+
+
 def _audio_record_path(cached: Path) -> Path:
     """Sidecar recording whether the planned audio was attached to this MP4.
 
@@ -764,6 +873,14 @@ def render_story_card(
     )
     audio_plan = _story_audio_plan(card_dict, brand_dict)
 
+    # Burn-in captions (R1.3): only attach the prop when a track exists so the
+    # captions-off path keeps the historic cache key byte-identical.
+    caption_json = _story_caption_json(
+        card_dict, brand_dict, audio_plan, duration_sec=duration_sec
+    )
+    if caption_json:
+        card_dict = {**card_dict, "captionsJson": caption_json}
+
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
             raise ReelEngineUnavailable(
@@ -828,6 +945,7 @@ def render_story_card(
             "duration_sec": duration_sec,
             "card": _card_manifest_axes(card_dict),
             "audio": audio_rec,
+            "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
@@ -935,6 +1053,18 @@ def render_meet_reel(
 
     audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
 
+    # Burn-in captions (R1.3): caption each beat from its own verified line when
+    # the reel has a voice plan and the operator opted in. Only set when a track
+    # exists, so the captions-off cache key stays byte-identical. The Remotion
+    # engine paints these via captions.tsx; the still+FFmpeg fallback does not
+    # burn reel captions (it renders pre-baked stills) and silently ignores them.
+    if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
+        beat_frames = max(1, round(REEL_PER_CARD_SEC * MOTION_FPS))
+        for cp in cards_props:
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames)
+            if cj:
+                cp["captionsJson"] = cj
+
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
             raise ReelEngineUnavailable(
@@ -997,6 +1127,7 @@ def render_meet_reel(
             "meet_name": meet_name,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "audio": audio_rec,
+            "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )

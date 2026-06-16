@@ -47,6 +47,7 @@ const defaultCard = {
   roleSurface: "",
   roleAccent: "",
   roleOnGround: "",
+  captionsJson: "",
 };
 
 export const RemotionRoot: React.FC = () => {
