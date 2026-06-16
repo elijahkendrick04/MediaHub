@@ -341,9 +341,7 @@ def simulate_roles(role_vars: dict, cvd: str) -> dict[str, str]:
     rgba hairline) pass through unchanged. This *is* the colourblind "preview"
     palette — hand it to a renderer or paint it as swatches.
     """
-    return {
-        k: (_cvd.simulate(v, cvd) if _is_hex(v) else v) for k, v in role_vars.items()
-    }
+    return {k: (_cvd.simulate(v, cvd) if _is_hex(v) else v) for k, v in role_vars.items()}
 
 
 def _score_pairs(role_vars: dict) -> list[PairContrast]:
@@ -449,9 +447,7 @@ def audit_roles(
     """
     pairs = _score_pairs(role_vars)
     passes = all(p.passes for p in pairs)
-    score = round(
-        min((min(1.0, abs(p.apca_lc) / p.min_apca) for p in pairs), default=1.0), 3
-    )
+    score = round(min((min(1.0, abs(p.apca_lc) / p.min_apca) for p in pairs), default=1.0), 3)
 
     warnings: list[str] = []
     for p in pairs:
@@ -509,9 +505,7 @@ def audit_brief(brief, brand_kit=None, **kwargs) -> ColourAudit:
 
 
 def _xml_escape(s: str) -> str:
-    return (
-        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-    )
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 def swatches_svg(role_vars: dict, *, cvd_types=CVD_TYPES) -> str:
@@ -539,7 +533,7 @@ def swatches_svg(role_vars: dict, *, cvd_types=CVD_TYPES) -> str:
         f'viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="Colour palette across full-colour and colourblind vision">',
         f'<rect width="{width}" height="{height}" fill="#0A0B11"/>',
-        '<style>text{font-family:system-ui,-apple-system,Segoe UI,sans-serif;}</style>',
+        "<style>text{font-family:system-ui,-apple-system,Segoe UI,sans-serif;}</style>",
     ]
 
     # Column headers (role names).
