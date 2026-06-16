@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `89e6af61e` · Merge pull request #647 from elijahkendrick04/claude/roadmap-next-stage-dy5bvd
+**Last updated:** 2026-06-16 · `b6855b650` · Merge pull request #648 from elijahkendrick04/claude/generator-upgrade-roadmap-bib4b3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1586,14 +1586,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `3664003bb` | Make the 60-item generator sprint conflict-free for parallel dispatch |
 | 2026-06-16 | `79c012568` | ci: gate the ground-truth oracle in the PR unit suite |
+| 2026-06-16 | `39c1b1cb0` | Add 60-item generator upgrade sprint to roadmap (30 graphic G1.*, 30 reel R1.*) |
 | 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
 | 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
 | 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
 | 2026-06-15 | `b7cbc227e` | UI2.5: primary-CTA motion variant (Moving-Border + Stateful-Button) |
 | 2026-06-15 | `eb35ee68a` | Format cache-purge card line per ruff |
 | 2026-06-15 | `2dca30d47` | Add operator site-wide cache purge |
-| 2026-06-15 | `975f99a5d` | Fix multi-column PDF extraction dropping rows and scrambling events |
-| 2026-06-15 | `20dc0d308` | Read multi-column result PDFs correctly: full-width lines + time-anchored record parser |
-| 2026-06-15 | `2d6318c73` | Reframe the homepage around the engine diagram, in a human voice |
 <!-- /ROADMAP:ACTIVITY -->
