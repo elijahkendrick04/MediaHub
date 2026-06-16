@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `dfe16f828` · Merge pull request #653 from elijahkendrick04/claude/ecstatic-brahmagupta-e00ajt
+**Last updated:** 2026-06-16 · `b431664d5` · feat(graphic): G1.21 depth-of-field background-blur photo treatment (#658)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -195,7 +195,6 @@ sequence it or merge with care.
 - **G1.18** · Graphic generator sprint — Colour accessibility audit + colourblind simulation (per-card APCA/WCAG report + deut/prot/trit previews). *Build: new `quality/colour_audit.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.21** · Graphic generator sprint — Depth-of-field background-blur photo treatment — focus the athlete, soften the background. *Build: new `sprint_hooks/depth_of_field.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.24** · Graphic generator sprint — Incremental render-stage caching — hash/cache HTML/CSS/asset-URI stages so re-renders skip unchanged work. *Build: new cache module + a `render.py` hook (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1594,5 +1593,4 @@ list and the auto table below, not here.
 | 2026-06-16 | `79c012568` | ci: gate the ground-truth oracle in the PR unit suite |
 | 2026-06-16 | `39c1b1cb0` | Add 60-item generator upgrade sprint to roadmap (30 graphic G1.*, 30 reel R1.*) |
 | 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
-| 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
 <!-- /ROADMAP:ACTIVITY -->
