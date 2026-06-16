@@ -113,6 +113,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.6** · Graphic generator sprint — Texture-layering engine stacking two textures with blend modes (grain+dots, halftone+weave…). *Build: append to `style_packs.TEXTURES` + texture generator + a new compositor (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **R1.17** · Reel generator sprint — ffmpeg fallback engine richer motion — Ken Burns variants, parallax, beat transitions mirroring the Remotion cuts. *Build: `visual/reel_ffmpeg.py` (file-sibling R1.16).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **G1.24** · Graphic generator sprint — Incremental render-stage caching — hash/cache HTML/CSS/asset-URI stages so re-renders skip unchanged work. *Build: new cache module + a `render.py` hook (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
+- ✅ **R1.26** · Reel generator sprint — Easing-curve customisation + expanded mood→spring vocabulary (melancholic, energetic, victorious, contemplative…). *Build: one file each in `sprint/springs/<mood>.ts` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
