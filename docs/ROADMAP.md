@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `8e155cffc` · feat(graphic): G1.16 EXIF/IPTC metadata + photographer-attribution embedding (#680)
+**Last updated:** 2026-06-16 · `1f3a4b04a` · Merge pull request #675 from elijahkendrick04/claude/wizardly-hypatia-go15i0
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -177,7 +177,6 @@ sequence it or merge with care.
 <!-- ROADMAP:TODO -->
 - **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.2** · Graphic generator sprint — Multi-athlete collage / relay layout engine compositing 2–4 cutouts into one balanced frame with deterministic multi-subject placement. *Build: new `graphic_renderer/collage.py` + `layouts/v2/relay_collage.html`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **G1.3** · Graphic generator sprint — Landscape & extended aspect-ratio support (16:9, 3:2, 4:3) with per-format composition rules. *Build: extend `FORMAT_SIZES` in `render.py` + `variants.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.5** · Graphic generator sprint — Accent-geometry expansion pack — hexagons, art-deco corners, wave rules, spiral flourishes, glitch dividers. *Build: append to `style_packs.ACCENT_GEOS` + accent-geo generator (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.7** · Graphic generator sprint — Photo-derived palette extraction + APCA-gated ground tinting (PIL k-means; never overrides confirmed brand hex). *Build: new `graphic_renderer/photo_palette.py` + a `sprint_hooks/` tint module.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1577,6 +1576,5 @@ list and the auto table below, not here.
 | 2026-06-16 | `5975dffeb` | Apply ruff-format to colour_audit.py |
 | 2026-06-16 | `4ba4f7dfd` | R1.8: photo scrim variant system for motion (role-driven) |
 | 2026-06-16 | `6cdfbdb6e` | feat(autofit): kerning- and ligature-aware text measurement (G1.11) |
-| 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
-| 2026-06-16 | `bdb343867` | R1.20 — reel music-bed upgrade: ducking, stings, beat-aware cut accents |
+| 2026-06-16 | `742c2cbe9` | G1.3: landscape & extended aspect-ratio support (16:9, 3:2, 4:3) |
 <!-- /ROADMAP:ACTIVITY -->
