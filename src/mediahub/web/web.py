@@ -131,14 +131,24 @@ except ImportError:
     _voiceover = None
 
 
+# Query-arg parsing helpers (shared by the print-production routes below).
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _clamp_float(value, *, default: float, lo: float, hi: float) -> float:
+    """Parse a query-arg float, clamped to ``[lo, hi]``; ``default`` on failure."""
+    try:
+        v = float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return lo if v < lo else hi if v > hi else v
+
+
 def _voiceover_enabled() -> bool:
     """True only when the module imported AND the operator opted in."""
-    return bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return (
+        bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in _TRUTHY
+    )
 
 
 # V7.3 imports
@@ -33184,6 +33194,7 @@ function mhSetupMode(mode) {{
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
+        _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
 
         # W.14: what this club's own approval history says it prefers —
@@ -33266,7 +33277,10 @@ function mhSetupMode(mode) {{
     <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
   </div>
-  <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_print_url)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+  </div>
 </div>
 
 <div class="no-print">{_turn_into_html}</div>
@@ -39817,8 +39831,9 @@ voice, and queues them for one-click approval.</p>
   noticeboard poster, or use the highlights to build posts.</p>
 </section>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">{chips}</div>
-<div class="card" style="margin-bottom:16px">
+<div class="card" style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
   <a class="btn" href="{url_for("season_wrap_poster", draft_id=draft_id)}">Print A4 noticeboard poster (PDF)</a>
+  <a class="btn secondary" href="{url_for("season_wrap_poster", draft_id=draft_id, print=1)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop version (bleed + crop marks)</a>
 </div>
 <div class="card">
   <h2 style="margin-top:0">Highlights</h2>
@@ -39837,6 +39852,7 @@ voice, and queues them for one-click approval.</p>
             abort(403)
         from mediahub.graphic_renderer.print_export import (
             build_poster_html,
+            export_poster_print_pdf,
             render_html_to_pdf,
         )
         from mediahub.season_wrap import load_draft
@@ -39860,7 +39876,7 @@ voice, and queues them for one-click approval.</p>
             }
             for h in (draft.get("highlights") or [])[:10]
         ]
-        html = build_poster_html(
+        poster_kwargs = dict(
             title=draft.get("title", "Club wrap"),
             meet_name=", ".join((draft.get("stats") or {}).get("meet_names", [])[:3]),
             stat_lines=[(str(k), str(v)) for k, v in (draft.get("stat_chips") or [])],
@@ -39868,14 +39884,21 @@ voice, and queues them for one-click approval.</p>
             club_name=(prof.display_name if prof else pid),
             brand=brand,
         )
+        # G1.17: ?print=1 emits a print-shop-ready poster (bleed + crop marks).
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
         out = DATA_DIR / "print_exports" / f"wrap-{pid}-{draft_id}.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
-        render_html_to_pdf(html, out)
+        if print_mode:
+            bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+            crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+            export_poster_print_pdf(out, bleed_mm=bleed_mm, crop_marks=crop_marks, **poster_kwargs)
+        else:
+            render_html_to_pdf(build_poster_html(**poster_kwargs), out)
         return send_file(
             out,
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"{draft_id}-poster.pdf",
+            download_name=f"{draft_id}-poster{'-print' if print_mode else ''}.pdf",
         )
 
     # ---- W.9: magic-link mobile approvals -----------------------------------
@@ -40253,6 +40276,8 @@ and can be revoked by the club.</p>
         from mediahub.content_pack.builder import build_grouped_pack
         from mediahub.graphic_renderer.print_export import (
             build_certificate_html,
+            export_certificate_print_pdf,
+            ghostscript_available,
             render_html_to_pdf,
         )
 
@@ -40285,6 +40310,25 @@ and can be revoked by the club.</p>
         meet = data.get("meet") or {}
         meet_name = meet.get("name") or data.get("file_name") or run_id
         meet_date = str(meet.get("start_date") or "")
+        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
+        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
+        do_cmyk = print_mode and want_cmyk and ghostscript_available()
+        cmyk_note = None
+        if print_mode and want_cmyk and not do_cmyk:
+            cmyk_note = (
+                "CMYK conversion was requested but Ghostscript is not installed on "
+                "the server, so these PDFs are RGB (the 3mm bleed and crop marks are "
+                "intact). Most digital print shops convert RGB to CMYK with their own "
+                "press/paper ICC profile, which is more accurate than a generic "
+                "conversion would be.\n"
+            )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
         buf = _io.BytesIO()
@@ -40294,7 +40338,7 @@ and can be revoked by the club.</p>
                 name = a.get("swimmer_name") or "Swimmer"
                 facts = a.get("raw_facts") or {}
                 time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
-                html = build_certificate_html(
+                cert_kwargs = dict(
                     swimmer_name=name,
                     event_label=a.get("event", ""),
                     time_str=str(time_str),
@@ -40306,15 +40350,67 @@ and can be revoked by the club.</p>
                     detail_line=a.get("angle_hint", ""),
                 )
                 pdf_path = out_dir / f"cert-{i:02d}.pdf"
-                render_html_to_pdf(html, pdf_path)
+                if print_mode:
+                    export_certificate_print_pdf(
+                        pdf_path,
+                        bleed_mm=bleed_mm,
+                        crop_marks=crop_marks,
+                        colour_bar=colour_bar,
+                        cmyk=do_cmyk,
+                        **cert_kwargs,
+                    )
+                else:
+                    render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
                 safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
                 zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+            if cmyk_note:
+                zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
         buf.seek(0)
+        kind = "print" if print_mode else "certificates"
         return send_file(
             buf,
             mimetype="application/zip",
             as_attachment=True,
-            download_name=f"certificates-{run_id}.zip",
+            download_name=f"{kind}-{run_id}.zip",
+        )
+
+    @app.route("/pack/<run_id>/print/separations.json")
+    def pack_print_separations(run_id: str):
+        """G1.17: the CMYK separations report for a run's brand colours.
+
+        Machine-readable breakdown a club can hand to a print shop: each brand
+        role's hex + uncalibrated CMYK percentages, the default print geometry,
+        and whether the server can do a true DeviceCMYK conversion.
+        """
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.graphic_renderer.print_export import (
+            cmyk_separations,
+            geometry_for,
+            ghostscript_available,
+        )
+
+        pid = _run_owner_profile_id(run_id) or ""
+        prof = load_profile(pid) if pid else None
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        geom = geometry_for("A4")
+        return jsonify(
+            {
+                "run_id": run_id,
+                "colour_mode": "CMYK (uncalibrated device preview)",
+                "ghostscript_available": ghostscript_available(),
+                "geometry": {
+                    "paper": "A4",
+                    "trim_mm": [geom.trim_w_mm, geom.trim_h_mm],
+                    "bleed_mm": geom.bleed_mm,
+                    "crop_mark_mm": geom.mark_len_mm,
+                    "media_mm": [geom.media_w_mm, geom.media_h_mm],
+                },
+                "separations": cmyk_separations(brand),
+            }
         )
 
     # ---- W.6: entry-file parsing for the event preview -----------------------

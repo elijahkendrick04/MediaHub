@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+from . import render_cache as _render_cache
 from .sprint_hooks import RenderHookCtx as _RenderHookCtx
 from .sprint_hooks import apply_render_hooks as _apply_render_hooks
 
@@ -198,9 +199,8 @@ def lighten(hex_colour: str, amount: float = 0.25) -> str:
     return _rgb_to_hex((r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount))
 
 
-def _img_to_data_uri(path: str | Path) -> str:
-    """Read an image from disk, return a data: URI (PNG-ish)."""
-    p = Path(path)
+def _encode_img_data_uri(p: Path) -> str:
+    """Read an image from disk and return a base64 ``data:`` URI (the raw work)."""
     raw = p.read_bytes()
     suffix = p.suffix.lower().lstrip(".")
     mime = {
@@ -212,6 +212,18 @@ def _img_to_data_uri(path: str | Path) -> str:
         "gif": "image/gif",
     }.get(suffix, "application/octet-stream")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _img_to_data_uri(path: str | Path) -> str:
+    """Read an image from disk, return a data: URI (PNG-ish).
+
+    Routed through the G1.24 render cache (``render_cache.asset_data_uri``) so an
+    unchanged file is read and base64-encoded once per process — the returned
+    text is byte-identical to a direct encode. A genuine read error still
+    surfaces, exactly as before, because the cache falls through to the encoder
+    for any file it can't ``stat``.
+    """
+    return _render_cache.asset_data_uri(path, loader=_encode_img_data_uri)
 
 
 # ----- Background generators (SVG data URIs, no network) -------------------
@@ -1077,22 +1089,161 @@ def _mega_watermark_px(text: str, width: int, cap_px: int) -> int:
     )
 
 
+# ---------------------------------------------------------------------------
+# Per-format composition (G1.3) — landscape & extended aspect-ratio support
+#
+# The standard formats are all square or taller-than-wide (feed_square 1:1,
+# feed_portrait 4:5, story 9:16). G1.3 adds landscape / extended ratios to
+# FORMAT_SIZES (16:9, 3:2, 4:3), and the three helpers below carry the matching
+# composition rules so a wide canvas reads as a deliberate landscape design
+# rather than a portrait layout stretched sideways:
+#   * _scale_for_format        — v1 layout typography multipliers (height-rel)
+#   * _v2_fit_boxes            — v2 archetype autofit box constraints
+#   * _format_composition_css  — wide-canvas retune of the shared base classes
+#
+# Hard invariant: every helper returns its *legacy* value for any
+# square/portrait/story canvas, so renders of the existing formats stay
+# byte-identical. Only width > height (landscape) canvases pick up new
+# behaviour.
+# ---------------------------------------------------------------------------
+
+# The three landscape families G1.3 supports. Used by the helpers below to key
+# their per-format rules and by tests/callers that want to reason about them.
+_LANDSCAPE_ASPECTS = ("landscape_169", "landscape_32", "landscape_43")
+
+
+def _format_aspect(width: int, height: int) -> str:
+    """Classify a canvas into a composition family.
+
+    Returns one of ``square``, ``portrait``, ``story`` (tall portrait),
+    ``landscape_43`` (≈4:3), ``landscape_32`` (≈3:2) or ``landscape_169``
+    (≈16:9 or wider). The square/portrait/story split is exactly the one
+    ``_scale_for_format`` used before G1.3, so existing renders are unaffected.
+    Landscape thresholds sit *between* the target ratios (4:3≈1.333, 3:2=1.5,
+    16:9≈1.778) so an off-nominal wide canvas snaps to the nearest family.
+    """
+    if width == height:
+        return "square"
+    if height > width:
+        return "story" if (height / width) >= 1.7 else "portrait"
+    ratio = width / height
+    if ratio >= 1.64:  # midpoint between 3:2 (1.500) and 16:9 (1.778)
+        return "landscape_169"
+    if ratio >= 1.42:  # midpoint between 4:3 (1.333) and 3:2 (1.500)
+        return "landscape_32"
+    return "landscape_43"
+
+
 def _scale_for_format(width: int, height: int) -> dict[str, float]:
-    """Return per-format multipliers used to pick font sizes."""
-    if width == height:  # square
+    """Return per-format multipliers used to pick font sizes (v1 layouts).
+
+    Each multiplier is applied to the canvas **height** by the layout fillers.
+    Landscape families lift the multipliers above the portrait baseline so the
+    hero type stays visually large despite the short (height) edge — the wider
+    the format, the more vertical share the hero can claim.
+    """
+    kind = _format_aspect(width, height)
+    if kind == "square":
         return {"surname": 0.32, "first": 0.075, "event": 0.026, "result": 0.055, "ribbon": 0.034}
-    if height > width:  # portrait / story
-        ratio = height / width
-        if ratio >= 1.7:  # 9:16 story
-            return {
-                "surname": 0.28,
-                "first": 0.06,
-                "event": 0.022,
-                "result": 0.045,
-                "ribbon": 0.028,
-            }
+    if kind == "story":  # 9:16
+        return {"surname": 0.28, "first": 0.06, "event": 0.022, "result": 0.045, "ribbon": 0.028}
+    if kind == "portrait":  # 4:5
         return {"surname": 0.34, "first": 0.07, "event": 0.024, "result": 0.052, "ribbon": 0.032}
-    return {"surname": 0.30, "first": 0.07, "event": 0.024, "result": 0.050, "ribbon": 0.032}
+    if kind == "landscape_169":  # 16:9 — widest, biggest height share
+        return {"surname": 0.42, "first": 0.078, "event": 0.028, "result": 0.062, "ribbon": 0.037}
+    if kind == "landscape_32":  # 3:2
+        return {"surname": 0.40, "first": 0.075, "event": 0.027, "result": 0.059, "ribbon": 0.036}
+    # landscape_43 — closest to square, gentlest lift
+    return {"surname": 0.38, "first": 0.072, "event": 0.026, "result": 0.056, "ribbon": 0.035}
+
+
+def _v2_fit_boxes(width: int, height: int) -> dict[str, tuple[float, float, int, int]]:
+    """Per-format autofit box constraints for the v2 archetype hero slots.
+
+    Each value is ``(width_fraction, height_fraction, min_px, max_px)`` fed to
+    ``_fit_one_line_px``. Square/portrait/story keep the historic fractions so
+    those renders stay byte-identical. Landscape families let the hero claim a
+    larger share of the short (height) edge and a tighter share of the now-
+    abundant width — so a 16:9 card reads as boldly as a portrait one without a
+    single line spanning the whole ultra-wide frame — and raise the minimum so
+    type stays substantial on the larger canvas.
+    """
+    kind = _format_aspect(width, height)
+    if kind not in _LANDSCAPE_ASPECTS:
+        return {
+            "surname": (0.86, 0.18, 44, 132),
+            "result": (0.52, 0.12, 40, 104),
+            "mega_result": (0.92, 0.34, 72, 300),
+            "mega_name": (0.92, 0.22, 64, 220),
+        }
+    if kind == "landscape_169":
+        return {
+            "surname": (0.66, 0.30, 56, 150),
+            "result": (0.42, 0.22, 48, 120),
+            "mega_result": (0.80, 0.56, 96, 360),
+            "mega_name": (0.80, 0.40, 84, 260),
+        }
+    if kind == "landscape_32":
+        return {
+            "surname": (0.72, 0.27, 52, 144),
+            "result": (0.46, 0.20, 46, 116),
+            "mega_result": (0.84, 0.52, 90, 340),
+            "mega_name": (0.84, 0.37, 80, 248),
+        }
+    # landscape_43
+    return {
+        "surname": (0.78, 0.24, 50, 138),
+        "result": (0.50, 0.18, 44, 110),
+        "mega_result": (0.88, 0.46, 84, 320),
+        "mega_name": (0.88, 0.32, 74, 236),
+    }
+
+
+def _format_composition_css(width: int, height: int) -> str:
+    """Per-format CSS composition overrides appended to BASE_CSS.
+
+    Empty for square/portrait/story (those renders stay byte-identical). For a
+    landscape / extended aspect ratio it (a) publishes the format as CSS custom
+    properties future layouts and sprint-hooks can read, and (b) retunes the
+    shared base-layout classes — tuned for a 1080-wide *portrait* canvas — so
+    the v1 layouts compose for the wide frame: wider safe insets, capped
+    vertical type, and a denser stat grid. v2 archetypes additionally adapt via
+    the aspect-aware autofit boxes (``_v2_fit_boxes``) and their own
+    flex/percentage CSS, so these class overrides are harmless no-ops for them.
+    """
+    kind = _format_aspect(width, height)
+    if kind not in _LANDSCAPE_ASPECTS:
+        return ""
+    ratio = width / height
+    # 56px portrait baseline inset scales up with the ratio (≈99px at 16:9).
+    pad = int(round(56 * min(1.8, ratio)))
+    fg_bottom = int(height * 0.14)
+    fg_first = int(height * 0.13)
+    recap_top = int(height * 0.10)
+    recap_size = int(height * 0.16)
+    recap_bottom = int(height * 0.10)
+    grid_cols = 4 if kind == "landscape_169" else 3
+    grid_top = int(height * 0.12)
+    grid_bottom = int(height * 0.14)
+    stat_num = int(height * 0.16)
+    # Equal-specificity selectors mirroring layouts/_base.css; appended after
+    # the base sheet so they win the cascade. Doubled braces are literal CSS.
+    return f"""
+/* --- G1.3 per-format composition ({kind}) --- */
+:root{{--mh-format:"{kind}";--mh-format-ratio:{ratio:.3f};--mh-edge-pad:{pad}px;}}
+.label-ribbon{{top:var(--mh-edge-pad);left:var(--mh-edge-pad);}}
+.result-chip{{top:var(--mh-edge-pad);right:var(--mh-edge-pad);}}
+.brand-corner{{bottom:var(--mh-edge-pad);left:var(--mh-edge-pad);}}
+.sponsor-strip{{padding-left:var(--mh-edge-pad);padding-right:var(--mh-edge-pad);}}
+.fg-text{{left:var(--mh-edge-pad);right:var(--mh-edge-pad);bottom:{fg_bottom}px;}}
+.fg-firstname{{font-size:min(168px,{fg_first}px);line-height:0.9;}}
+.surname-bg{{line-height:0.82;}}
+.recap-headline{{top:{recap_top}px;left:var(--mh-edge-pad);right:var(--mh-edge-pad);font-size:min(160px,{recap_size}px);}}
+.recap-bullets{{bottom:{recap_bottom}px;left:var(--mh-edge-pad);right:var(--mh-edge-pad);}}
+.stat-grid{{inset:{grid_top}px var(--mh-edge-pad) {grid_bottom}px var(--mh-edge-pad);grid-template-columns:repeat({grid_cols},1fr);}}
+.stat-tile .num{{font-size:min(130px,{stat_num}px);}}
+.medal-badge{{right:var(--mh-edge-pad);}}
+"""
 
 
 def _detect_medal_tier(brief) -> Optional[str]:
@@ -2274,6 +2425,12 @@ def _render_on_context(ctx, html: str, output_path: Path, size: tuple[int, int],
             pass
 
     output_path.write_bytes(png)
+    # G1.24 cache: persist the finished PNG so the next identical
+    # (HTML, size, DPR) render is a cache hit (served by render_html_to_png
+    # below without launching Chromium). The key is the same pure function of
+    # (html, size, dpr) the dispatcher checks, so pooled and one-shot renders
+    # populate one shared cache.
+    _render_cache.store_png(_render_cache.png_cache_key(html, width, height, dpr), png)
     return len(png)
 
 
@@ -2599,12 +2756,24 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    width, height = size
+    dpr = _dpr_render()
+
+    # G1.24 incremental render-stage cache: the screenshot is a pure function of
+    # (final HTML, canvas size, DPR), so an identical card reuses the previously
+    # rendered PNG byte-for-byte and never launches Chromium — nor the pool. A
+    # warm hit even serves when Playwright is absent, so this check sits ahead of
+    # the import and the pool dispatch.
+    _cache_key = _render_cache.png_cache_key(html, width, height, dpr)
+    _cached_png = _render_cache.get_cached_png(_cache_key)
+    if _cached_png is not None:
+        output_path.write_bytes(_cached_png)
+        return len(_cached_png)
+
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
     except Exception as e:
         raise RuntimeError(f"Playwright not installed: {e}")
-
-    dpr = _dpr_render()
 
     pool = _active_pool()
     if pool is not None:
@@ -2971,43 +3140,51 @@ def _fill_v2_archetype(
     # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
     # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
     # shrink rather than overflow. The per-layout defaults handle the short case.
+    # Per-format autofit boxes (G1.3). Square/portrait/story keep the historic
+    # fractions (byte-identical renders); landscape families give the hero more
+    # of the short edge and less of the abundant width.
+    _boxes = _v2_fit_boxes(width, height)
+    _sw, _sh, _smin, _smax = _boxes["surname"]
     root_vars["--mh-fit-surname-px"] = "%dpx" % _fit_one_line_px(
         surname or "X",
-        width * 0.86,
-        height * 0.18,
+        width * _sw,
+        height * _sh,
         font_family="Anton",
         weight=400,
-        min_px=44,
-        max_px=132,
+        min_px=_smin,
+        max_px=_smax,
     )
+    _rw, _rh, _rmin, _rmax = _boxes["result"]
     root_vars["--mh-fit-result-px"] = "%dpx" % _fit_one_line_px(
         result or "X",
-        width * 0.52,
-        height * 0.12,
+        width * _rw,
+        height * _rh,
         font_family="JetBrains Mono",
         weight=700,
-        min_px=40,
-        max_px=104,
+        min_px=_rmin,
+        max_px=_rmax,
     )
     # "Mega" sizes for archetypes where the numeral or the name is THE hero
     # (big_number_dominant, minimal_type_poster) — fit to almost the full width.
+    _mw, _mh, _mmin, _mmax = _boxes["mega_result"]
     root_vars["--mh-fit-mega-result-px"] = "%dpx" % _fit_one_line_px(
         result or "X",
-        width * 0.92,
-        height * 0.34,
+        width * _mw,
+        height * _mh,
         font_family="JetBrains Mono",
         weight=700,
-        min_px=72,
-        max_px=300,
+        min_px=_mmin,
+        max_px=_mmax,
     )
+    _nw, _nh, _nmin, _nmax = _boxes["mega_name"]
     root_vars["--mh-fit-mega-name-px"] = "%dpx" % _fit_one_line_px(
         surname or "X",
-        width * 0.92,
-        height * 0.22,
+        width * _nw,
+        height * _nh,
         font_family="Anton",
         weight=400,
-        min_px=64,
-        max_px=220,
+        min_px=_nmin,
+        max_px=_nmax,
     )
     root_vars["--mh-photo-pos"] = _sanitise_photo_pos(photo_pos_override) or _v2_photo_position(
         athlete_path
@@ -3076,6 +3253,35 @@ def render_brief(
             family = "text_led_recap"
             template_path = LAYOUTS_DIR / f"{family}.html"
 
+    # G1.25 — server-side photo adjustment stack (deterministic PIL recipes).
+    # Resolve the recipe once; ``None`` (the default) keeps the un-adjusted
+    # inline so the render is byte-identical. When a recipe is set it bakes
+    # sharpen/contrast/saturation/levels into the photo bytes *before* they're
+    # base64-inlined below — the athlete cutout's alpha mask is preserved exactly.
+    _photo_recipe = None
+    try:
+        from mediahub.graphic_renderer import photo_adjust as _photo_adjust
+
+        _photo_recipe = _photo_adjust.recipe_for(
+            explicit=getattr(brief, "photo_adjust", "") or "",
+            treatment=getattr(brief, "photo_treatment", "") or "",
+        )
+    except Exception:
+        _photo_recipe = None
+
+    def _inline_photo(path) -> str:
+        """Inline a real photo, applying the resolved adjustment recipe if any.
+
+        Falls back to the plain (un-adjusted) inline on any error, so an
+        optional adjustment can never break a render.
+        """
+        if _photo_recipe is not None:
+            try:
+                return _photo_adjust.adjust_to_data_uri(path, _photo_recipe)
+            except Exception:
+                pass
+        return _img_to_data_uri(path)
+
     # Athlete cutout
     athlete_uri = None
     if athlete_path:
@@ -3085,7 +3291,7 @@ def render_brief(
                 if skip_cutout
                 else _maybe_cut_out_athlete(athlete_path, profile_id=brief.profile_id or "default")
             )
-            athlete_uri = _img_to_data_uri(cut_path)
+            athlete_uri = _inline_photo(cut_path)
         except Exception:
             athlete_uri = None
 
@@ -3096,14 +3302,14 @@ def render_brief(
     hero_photo_uri = ""
     if family == "action_photo_hero" and athlete_path:
         try:
-            hero_photo_uri = _img_to_data_uri(athlete_path)
+            hero_photo_uri = _inline_photo(athlete_path)
         except Exception:
             hero_photo_uri = ""
 
     venue_uri = None
     if venue_path:
         try:
-            venue_uri = _img_to_data_uri(venue_path)
+            venue_uri = _inline_photo(venue_path)
         except Exception:
             venue_uri = None
 
@@ -3112,7 +3318,7 @@ def render_brief(
     bg_photo_uri = ""
     if bg_photo_path:
         try:
-            bg_photo_uri = _img_to_data_uri(bg_photo_path)
+            bg_photo_uri = _inline_photo(bg_photo_path)
         except Exception:
             bg_photo_uri = ""
 
@@ -3151,6 +3357,13 @@ def render_brief(
         skip_ai_bg=bool(_v2_archetype),
     )
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
+
+    # G1.3 — per-format composition rules. Appended to BASE_CSS for every
+    # layout family; an empty string for square/portrait/story so those renders
+    # stay byte-identical. Landscape / extended ratios pick up the wide-canvas
+    # retune of the shared base classes here, and v2 archetypes additionally
+    # adapt via the aspect-aware autofit boxes in _fill_v2_archetype.
+    base_repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + _format_composition_css(width, height)
 
     # Layout-specific
     if _v2_archetype:

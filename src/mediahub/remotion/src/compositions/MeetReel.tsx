@@ -25,10 +25,42 @@ const brandSchema = z.object({
   logoDataUri: z.string().default(""),
 });
 
+// R1.13 — custom reel stat chips. The honest stat vocabulary the cover can
+// surface plus the operator config that selects / orders / renames them. Every
+// value is counted from real card facts (see reelStats); the config only
+// chooses WHICH honest chips show, HOW MANY, and their display WORDING — never
+// the numbers themselves.
+export const DEFAULT_STAT_IDS = ["swims", "pbs", "medals"];
+export const DEFAULT_MAX_CHIPS = 3;
+
+const reelStatConfigSchema = z.object({
+  // Ordered allow-list of stat ids to surface; empty = the honest default set.
+  include: z.array(z.string()).default([]),
+  // Cap on how many chips the cover shows (cover space is finite).
+  max: z.number().default(DEFAULT_MAX_CHIPS),
+  // Per-id display-wording overrides. A "{n}" placeholder marks where the
+  // honest count is rendered (one is prepended if absent), so the value still
+  // counts up — only the words change, never the number.
+  labels: z.record(z.string(), z.string()).default({}),
+});
+
+// One honest stat chip: its id, the integer value counted from real card
+// facts, and the literal prefix / suffix wrapped around the count-up number.
+export type ReelStat = { id: string; value: number; prefix: string; suffix: string };
+export type ReelStatConfig = {
+  include?: string[];
+  max?: number;
+  labels?: Record<string, string>;
+};
+
 export const meetReelSchema = z.object({
   cards: z.array(cardSchema),
   brand: brandSchema,
   meetName: z.string().default(""),
+  // Optional — omitting it keeps the byte-identical default cover (TOP-N
+  // SWIMS / PBS / MEDALS). This is the configurable seam; the renderer derives
+  // every value from the cards' own facts regardless of config.
+  reelStatConfig: reelStatConfigSchema.optional(),
 });
 
 type Props = z.infer<typeof meetReelSchema>;
@@ -41,22 +73,84 @@ const COVER_FONT =
 const BODY_FONT =
   "'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
 
-// Honest cover/outro stats — derived ONLY from the real card labels the
-// recognition layer produced. A medal counts only when the label says so;
-// no place-number guessing, no invented numbers.
-export function reelStats(cards: CardItem[]): { swims: number; pbs: number; medals: number } {
-  const labels = (cards || []).map((c) => (c.achievementLabel || "").toUpperCase());
-  return {
-    swims: (cards || []).length,
-    pbs: labels.filter((l) => l.includes("PB")).length,
-    medals: labels.filter(
-      (l) =>
-        l.includes("GOLD") ||
-        l.includes("SILVER") ||
-        l.includes("BRONZE") ||
-        l.includes("MEDAL"),
-    ).length,
+// Honest cover/outro stats — every chip is counted ONLY from the real card
+// facts the recognition layer produced (achievementLabel, eventName, heroStat).
+// We never read a card's raw .place (heat-vs-final places are ambiguous — a
+// medal or win counts only when the label says so) and never invent a number.
+// R1.13 makes the set configurable: `config.include` selects/orders the ids,
+// `config.max` caps the count, `config.labels` overrides display wording. With
+// no config the result is byte-identical to before (TOP-N SWIMS / PBS / MEDALS).
+export function reelStats(cards: CardItem[], config?: ReelStatConfig): ReelStat[] {
+  const list = cards || [];
+  // Uppercased honest facts, computed once per card.
+  const labels = list.map((c) => (c.achievementLabel || "").toUpperCase());
+  const events = list.map((c) => (c.eventName || "").toUpperCase());
+  const heroes = list.map((c) => (c.heroStat || "").toUpperCase());
+
+  const any = (s: string, ...needles: string[]) => needles.some((n) => s.includes(n));
+  // Word-boundary helpers for short tokens that would false-match as substrings.
+  const seasonBest = (s: string) => /\bSB\b/.test(s) || s.includes("SEASON BEST");
+  const isFinal = (s: string) => /\bFINALS?\b/.test(s) && !s.includes("SEMI");
+  // A win is counted only when the verified label says so — never from a bare
+  // place number — and relay wins additionally require a relay event. Word
+  // boundaries keep "CHAMPIONS" (a win) apart from "CHAMPIONSHIP" (a meet name)
+  // and catch WIN / WINS / WON / WINNER(S) / WINNING without matching "WINDOW".
+  const won = (s: string) =>
+    s.includes("GOLD") ||
+    s.includes("VICTORY") ||
+    /\bCHAMPIONS?\b/.test(s) ||
+    /\bWIN(?:S|NER|NERS|NING)?\b/.test(s) ||
+    /\bWON\b/.test(s) ||
+    /\b1ST\b/.test(s);
+
+  // Honest integer counts, keyed by stat id.
+  const counts: Record<string, number> = {
+    swims: list.length,
+    pbs: labels.filter((l) => l.includes("PB") || l.includes("PERSONAL BEST")).length,
+    medals: labels.filter((l) => any(l, "GOLD", "SILVER", "BRONZE", "MEDAL")).length,
+    records: labels.filter((l) => l.includes("RECORD")).length,
+    seasonBests: labels.filter((l) => seasonBest(l)).length,
+    relayWins: list.filter((_, i) => events[i].includes("RELAY") && won(labels[i])).length,
+    finals: list.filter((_, i) => isFinal(events[i]) || isFinal(labels[i])).length,
+    topSplits: list.filter((_, i) => labels[i].includes("SPLIT") || heroes[i].includes("SPLIT"))
+      .length,
   };
+
+  // Default display wording per id, pluralised on the FINAL count so the words
+  // never flicker mid count-up. "{n}" marks where the number is rendered.
+  const wording = (id: string, n: number): string => {
+    const one = n === 1;
+    if (id === "swims") return `TOP {n} ${one ? "SWIM" : "SWIMS"}`;
+    if (id === "pbs") return `{n} ${one ? "PB" : "PBS"}`;
+    if (id === "medals") return `{n} ${one ? "MEDAL" : "MEDALS"}`;
+    if (id === "records") return `{n} ${one ? "RECORD" : "RECORDS"}`;
+    if (id === "seasonBests") return `{n} ${one ? "SEASON BEST" : "SEASON BESTS"}`;
+    if (id === "relayWins") return `{n} ${one ? "RELAY WIN" : "RELAY WINS"}`;
+    if (id === "finals") return `{n} ${one ? "FINAL" : "FINALS"}`;
+    if (id === "topSplits") return `{n} ${one ? "TOP SPLIT" : "TOP SPLITS"}`;
+    return `{n} ${id.toUpperCase()}`;
+  };
+
+  const order =
+    config && config.include && config.include.length ? config.include : DEFAULT_STAT_IDS;
+  const max = Math.max(
+    0,
+    config && typeof config.max === "number" ? config.max : DEFAULT_MAX_CHIPS,
+  );
+  const overrides = (config && config.labels) || {};
+
+  const chips: ReelStat[] = [];
+  for (const id of order) {
+    if (chips.length >= max) break; // cap reached (max 0 → no chips)
+    if (!(id in counts)) continue; // ignore unknown ids
+    const value = counts[id];
+    if (value <= 0) continue; // honest: never render a zero chip
+    let tpl = overrides[id] || wording(id, value);
+    if (!tpl.includes("{n}")) tpl = `{n} ${tpl}`; // keep the count visible
+    const cut = tpl.indexOf("{n}");
+    chips.push({ id, value, prefix: tpl.slice(0, cut), suffix: tpl.slice(cut + 3) });
+  }
+  return chips;
 }
 
 // Per-beat transitions, picked deterministically so re-renders stay
@@ -108,30 +202,23 @@ export function transitionFor(
 }
 
 const StatChips: React.FC<{
-  stats: { swims: number; pbs: number; medals: number };
+  chips: ReelStat[];
   accent: string;
   ground: string;
   ts: number;
   opacity: number;
   progress: number;
-}> = ({ stats, accent, ground, ts, opacity, progress }) => {
-  // The numbers count up to their honest totals as the chips fade in —
-  // pure function of the frame-derived progress. Pluralisation follows the
-  // FINAL count so the label never flickers between forms mid-count.
-  const shown = (n: number) => Math.round(n * Math.max(0, Math.min(1, progress)));
-  const chips: string[] = [];
-  if (stats.swims > 0) {
-    chips.push(`TOP ${shown(stats.swims)} SWIM${stats.swims === 1 ? "" : "S"}`);
-  }
-  if (stats.pbs > 0) {
-    chips.push(`${shown(stats.pbs)} PB${stats.pbs === 1 ? "" : "S"}`);
-  }
-  if (stats.medals > 0) {
-    chips.push(`${shown(stats.medals)} MEDAL${stats.medals === 1 ? "" : "S"}`);
-  }
-  if (chips.length === 0) {
+}> = ({ chips, accent, ground, ts, opacity, progress }) => {
+  if (!chips || chips.length === 0) {
     return null;
   }
+  // Each chip's number counts up to its honest value as the row fades in — a
+  // pure function of the frame-derived progress, so re-renders stay
+  // byte-identical. The surrounding words were pluralised on the FINAL value
+  // (in reelStats), so they never flicker between forms mid-count. flexWrap +
+  // nowrap let a configured, longer chip set fall to a second row instead of
+  // clipping, while the default three-chip row is unchanged.
+  const p = Math.max(0, Math.min(1, progress));
   return (
     <div
       style={{
@@ -139,12 +226,13 @@ const StatChips: React.FC<{
         display: "flex",
         gap: Math.round(18 * ts),
         justifyContent: "center",
+        flexWrap: "wrap",
         opacity,
       }}
     >
-      {chips.map((c, i) => (
+      {chips.map((chip, i) => (
         <div
-          key={i}
+          key={chip.id || i}
           style={{
             padding: `${Math.round(12 * ts)}px ${Math.round(24 * ts)}px`,
             border: `3px solid ${accent}`,
@@ -155,9 +243,12 @@ const StatChips: React.FC<{
             fontWeight: 800,
             letterSpacing: "0.12em",
             fontFamily: BODY_FONT,
+            whiteSpace: "nowrap",
           }}
         >
-          {c}
+          {chip.prefix}
+          {Math.round(chip.value * p)}
+          {chip.suffix}
         </div>
       ))}
     </div>
@@ -168,8 +259,8 @@ const CoverScreen: React.FC<{
   brand: Props["brand"];
   meetName: string;
   durationInFrames: number;
-  stats: { swims: number; pbs: number; medals: number };
-}> = ({ brand, meetName, durationInFrames, stats }) => {
+  chips: ReelStat[];
+}> = ({ brand, meetName, durationInFrames, chips }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const ts = Math.min(width / 1080, height / 1440, 1);
@@ -288,7 +379,7 @@ const CoverScreen: React.FC<{
           {display}
         </div>
         <StatChips
-          stats={stats}
+          chips={chips}
           accent={brand.accent || "#FFFFFF"}
           ground={brand.primary || "#0A2540"}
           ts={ts}
@@ -417,20 +508,20 @@ const OutroScreen: React.FC<{
   );
 };
 
-export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
+export const MeetReel: React.FC<Props> = ({ cards, brand, meetName, reelStatConfig }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
 
   // Allocate the reel: 2s cover + rank-weighted card beats + 1s outro.
   const safeCards = (cards || []).slice(0, 5);
-  const stats = reelStats(safeCards);
+  const chips = reelStats(safeCards, reelStatConfig);
   if (safeCards.length === 0) {
     return (
       <CoverScreen
         brand={brand}
         meetName={meetName}
         durationInFrames={durationInFrames}
-        stats={stats}
+        chips={chips}
       />
     );
   }
@@ -462,7 +553,7 @@ export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
         brand={brand}
         meetName={meetName}
         durationInFrames={coverFrames + transitionFrames}
-        stats={stats}
+        chips={chips}
       />
     </Sequence>,
   );
