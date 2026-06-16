@@ -129,6 +129,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.28** · Graphic generator sprint — Mood-keyed style-pack preset bundles — curated, deterministic bundles selected from `brief.mood`. *Build: new preset-map functions in `style_packs.py` (new region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **G1.7** · Graphic generator sprint — Photo-derived palette extraction + APCA-gated ground tinting (PIL k-means; never overrides confirmed brand hex). *Build: new `graphic_renderer/photo_palette.py` + a `sprint_hooks/` tint module.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
+- ✅ **R1.30** · Reel generator sprint — Reel cover & outro redesign system — data-driven cover variants + outro CTA variants (follow handle, next meet, sponsor thanks). *Build: `MeetReel.tsx` `CoverScreen`/`OutroScreen` (sole owner) + optional `sprint/reel/` overlays.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
