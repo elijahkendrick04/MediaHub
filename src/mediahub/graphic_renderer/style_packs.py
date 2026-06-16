@@ -380,6 +380,208 @@ def pick_style_pack_for_card(
 
 
 # ---------------------------------------------------------------------------
+# Mood-keyed preset bundles (Gen v2 Tier B — design-spec ``mood`` → curated packs).
+#
+# The four-lever pack space is large (1000+ packs); a blind seeded pick gives
+# variety but ignores the *feeling* the design-spec director chose for a card.
+# A **preset bundle** closes that gap: each ``design_spec`` mood maps to a small,
+# hand-curated tuple of packs whose ground/texture/accent vocabulary expresses
+# that mood — explosive → sharp diagonals + wedges, calm → soft fades + light
+# rules, celebratory → festive dots/rings, and so on.
+#
+# The same rules the rest of this module keeps still hold:
+#   * **Deterministic.** Same mood → same bundle; a seeded/card-keyed pick walks
+#     it the same way every render (no LLM in the selection).
+#   * **In-catalog & coherent.** Every preset is authored from the closed lever
+#     vocabularies and stays under the weight cap, so it is a real member of
+#     ``list_style_packs()`` (asserted by the catalog tests) — addressable,
+#     brand-safe and legibility-safe by construction, like any other pack.
+#   * **Inert when absent.** An empty/unknown mood yields no bundle, so the
+#     mood-aware pickers fall straight through to the full-catalog pickers — the
+#     no-mood path (every legacy / non-AI brief) is byte-identical to before.
+#
+# The mood keys mirror ``creative_brief.design_spec.MOODS`` exactly. They are
+# duplicated here (not imported) to keep this low-level renderer module free of
+# a back-edge onto ``creative_brief`` (which imports *this* module); a drift test
+# pins the two vocabularies together.
+# ---------------------------------------------------------------------------
+
+# mood → ordered tuple of (ground, texture, accent_geo, density) lever tuples.
+# Curated by hand for feel + internal variety; each row stays under the coherence
+# weight cap so it round-trips through ``list_style_packs()``.
+_MOOD_PRESETS: dict[str, tuple[tuple[str, str, str, str], ...]] = {
+    "neutral": (
+        ("flat", "none", "baseline_rule", "standard"),
+        ("top_fade", "grain", "none", "standard"),
+        ("flat", "grain", "side_rule", "standard"),
+    ),
+    "explosive": (
+        ("diagonal_fade", "none", "wedge", "standard"),
+        ("twotone", "chevron", "none", "standard"),
+        ("flat", "scanline", "wedge", "bold"),
+    ),
+    "electric": (
+        ("spotlight", "scanline", "none", "bold"),
+        ("flat", "carbon", "cross_ticks", "standard"),
+        ("corner_fade", "grid", "corner_ticks", "standard"),
+    ),
+    "calm": (
+        ("top_fade", "none", "none", "standard"),
+        ("flat", "grain", "baseline_rule", "standard"),
+        ("dual_fade", "none", "side_rule", "standard"),
+    ),
+    "fierce": (
+        ("vignette", "carbon", "none", "standard"),
+        ("vignette", "none", "corner_blocks", "standard"),
+        ("spotlight", "hatch", "none", "bold"),
+    ),
+    "celebratory": (
+        ("corner_fade", "dots", "ring", "standard"),
+        ("flat", "halftone", "dot_row", "standard"),
+        ("top_fade", "dots", "dot_row", "bold"),
+    ),
+    "stoic": (
+        ("edge_frame", "none", "none", "standard"),
+        ("flat", "none", "frame", "standard"),
+        ("vignette", "none", "double_rule", "standard"),
+    ),
+    "precise": (
+        ("flat", "grid", "cross_ticks", "standard"),
+        ("corner_fade", "none", "corner_ticks", "standard"),
+        ("flat", "grid", "corner_ticks", "bold"),
+    ),
+    "warm": (
+        ("corner_fade", "weave", "none", "standard"),
+        ("bottom_fade", "grain", "baseline_rule", "standard"),
+        ("top_fade", "weave", "side_rule", "standard"),
+    ),
+    "bold": (
+        ("twotone", "none", "corner_blocks", "standard"),
+        ("flat", "carbon", "corner_blocks", "standard"),
+        ("twotone", "none", "side_rule", "bold"),
+    ),
+    "triumphant": (
+        ("spotlight", "none", "ring", "standard"),
+        ("top_fade", "none", "frame", "standard"),
+        ("corner_fade", "grain", "ring", "standard"),
+    ),
+    "minimal": (
+        ("flat", "none", "none", "standard"),
+        ("flat", "none", "baseline_rule", "standard"),
+        ("top_fade", "none", "none", "standard"),
+    ),
+}
+
+# One plain line per mood for the why-trace / gallery — what its bundle is going
+# for, in human terms.
+_MOOD_NOTES: dict[str, str] = {
+    "neutral": "Quiet, balanced treatments — clean grounds and light rules that stay out of the way.",
+    "explosive": "High-energy diagonals and sharp wedges for peak-action, breakthrough moments.",
+    "electric": "Crisp technical textures and register marks — a charged, high-voltage feel.",
+    "calm": "Soft, airy grounds and minimal marks for composed, measured moments.",
+    "fierce": "Dark, dramatic grounds with heavy accents — intensity and grit.",
+    "celebratory": "Festive dots, halftone pop and ring accents for joyful wins.",
+    "stoic": "Restrained, classical framing — contained grounds and quiet rules.",
+    "precise": "Grid textures and registration marks — a measured, exacting look.",
+    "warm": "Filmic grain and woven textures under gentle light for an inviting feel.",
+    "bold": "Two-tone blocks and strong accents for high-impact, confident statements.",
+    "triumphant": "Spotlit, framed grounds with ring accents — a victory-stand register.",
+    "minimal": "Spare, near-bare treatments — the archetype's own composition, barely dressed.",
+}
+
+
+def _mood_key(mood: Optional[str]) -> str:
+    """Normalise a raw mood string to a lookup key (or '' when none/unknown)."""
+    key = str(mood or "").strip().lower()
+    return key if key in _MOOD_PRESETS else ""
+
+
+def mood_preset_moods() -> tuple[str, ...]:
+    """Every mood that carries a curated bundle, in declaration order."""
+    return tuple(_MOOD_PRESETS.keys())
+
+
+@lru_cache(maxsize=64)
+def mood_preset_packs(mood: Optional[str]) -> tuple[StylePack, ...]:
+    """The curated style-pack bundle for a design-spec ``mood``.
+
+    Returns the mood's hand-curated packs (normalised, so each is a valid,
+    in-catalog pack), or an **empty tuple** for an empty/unknown mood — the
+    signal the mood-aware pickers use to fall through to the full-catalog
+    pickers. Cached: same mood → same tuple object.
+    """
+    key = _mood_key(mood)
+    if not key:
+        return ()
+    return tuple(normalise_pack(*levers) for levers in _MOOD_PRESETS[key])
+
+
+def mood_preset_ids(mood: Optional[str]) -> tuple[str, ...]:
+    """The pack ids in a mood's bundle (``()`` for an empty/unknown mood)."""
+    return tuple(p.id for p in mood_preset_packs(mood))
+
+
+def mood_preset_note(mood: Optional[str]) -> str:
+    """One plain line describing a mood's bundle for the why-trace (or '')."""
+    return _MOOD_NOTES.get(_mood_key(mood), "")
+
+
+def pick_mood_pack(mood: Optional[str], seed: int) -> StylePack:
+    """Deterministic pick from a mood's bundle by seed.
+
+    Mirrors :func:`pick_style_pack` but scoped to the mood's curated packs.
+    Falls back to the full-catalog :func:`pick_style_pack` when the mood has no
+    bundle, so a no-mood / unknown-mood caller is unchanged.
+    """
+    bundle = mood_preset_packs(mood)
+    if not bundle:
+        return pick_style_pack(seed)
+    return bundle[int(seed) % len(bundle)]
+
+
+def pick_mood_pack_avoiding(mood: Optional[str], seed: int, recent: Iterable[str]) -> StylePack:
+    """Seeded pick from a mood's bundle that steps past recently-used ids.
+
+    The mood-scoped analogue of :func:`pick_style_pack_avoiding`: start at the
+    seeded pack in the bundle and walk forward until one not in ``recent`` is
+    found, so consecutive same-mood cards vary within the bundle instead of
+    repeating one look. Degrades to the strict seeded pick when the whole bundle
+    is recent, and to the full-catalog avoider when there is no bundle.
+    """
+    bundle = mood_preset_packs(mood)
+    if not bundle:
+        return pick_style_pack_avoiding(seed, recent)
+    avoid = {str(r).strip().lower() for r in recent if r}
+    start = int(seed) % len(bundle)
+    for offset in range(len(bundle)):
+        cand = bundle[(start + offset) % len(bundle)]
+        if cand.id not in avoid:
+            return cand
+    return bundle[start]
+
+
+def pick_mood_pack_for_card(
+    mood: Optional[str], card_key: Optional[str], recent: Optional[Iterable[str]] = None
+) -> StylePack:
+    """Pick a mood-appropriate pack for a card: stable per card, spread per pack.
+
+    The mood-aware sibling of :func:`pick_style_pack_for_card`. With a curated
+    bundle for ``mood`` it picks within it (stable per ``card_key``, walking past
+    this card's recent packs); with no bundle it is exactly
+    :func:`pick_style_pack_for_card`, so the no-mood path is byte-identical.
+    A missing ``card_key`` falls back to a time-seeded pick (a fresh look each
+    call) rather than always the first preset.
+    """
+    if not mood_preset_packs(mood):
+        return pick_style_pack_for_card(card_key, recent)
+    if not card_key:
+        import time
+
+        return pick_mood_pack(mood, int(time.time() * 1000))
+    return pick_mood_pack_avoiding(mood, _seed_for(card_key, salt="pack"), recent or ())
+
+
+# ---------------------------------------------------------------------------
 # Template = archetype × style pack (the addressable unit).
 # ---------------------------------------------------------------------------
 
@@ -739,6 +941,13 @@ __all__ = [
     "pick_style_pack",
     "pick_style_pack_avoiding",
     "pick_style_pack_for_card",
+    "mood_preset_moods",
+    "mood_preset_packs",
+    "mood_preset_ids",
+    "mood_preset_note",
+    "pick_mood_pack",
+    "pick_mood_pack_avoiding",
+    "pick_mood_pack_for_card",
     "list_templates",
     "template_count",
     "template_from_id",
