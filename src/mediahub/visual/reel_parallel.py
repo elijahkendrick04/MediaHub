@@ -137,9 +137,7 @@ def node_available() -> bool:
 
 def remotion_segments_installed() -> bool:
     """True when the segment render script + Remotion deps are present."""
-    return RENDER_SEGMENTS_SCRIPT.exists() and (
-        REMOTION_DIR / "node_modules" / "remotion"
-    ).exists()
+    return RENDER_SEGMENTS_SCRIPT.exists() and (REMOTION_DIR / "node_modules" / "remotion").exists()
 
 
 def available() -> bool:
@@ -423,9 +421,7 @@ def try_render_reel_parallel(
         _log.info("reel_parallel: %s; using serial render", e)
         return None
     except Exception as e:  # noqa: BLE001 — any failure degrades to serial
-        _log.warning(
-            "reel_parallel: parallel render failed (%s); falling back to serial render", e
-        )
+        _log.warning("reel_parallel: parallel render failed (%s); falling back to serial render", e)
         return None
 
 
