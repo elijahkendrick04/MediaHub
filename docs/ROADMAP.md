@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `b6855b650` · Merge pull request #648 from elijahkendrick04/claude/generator-upgrade-roadmap-bib4b3
+**Last updated:** 2026-06-16 · `ae6cec6ff` · Merge pull request #652: R1.4 motion background-pattern expansion
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -208,7 +208,6 @@ sequence it or merge with care.
 - **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.3** · Reel generator sprint — Subtitle/caption burn-in engine — read the voiceover SRT, render APCA-gated on-video captions. *Build: new `visual/subtitle_burn.py` + `sprint/layers/captions.tsx`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.4** · Reel generator sprint — Motion background-pattern expansion — 6 new frame-pure animated SVG patterns (checkerboard, diamonds, circuit, organic-waves…). *Build: one file each in `sprint/patterns/<name>.ts` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.5** · Reel generator sprint — Motion accent-decoration expansion + sizing variants (thick/thin stripe, large/small brackets, offset badge). *Build: one file each in `sprint/accents/<name>.tsx` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.6** · Reel generator sprint — Animated-pattern drift layer — per-pattern frame-pure motion (rotate/opacity/scale) during the breathe phase. *Build: `sprint/layers/pattern_drift.tsx` additive overlay (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1586,6 +1585,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `f18d5875e` | Add R1.4 motion background-pattern expansion (6 sprint patterns) |
 | 2026-06-16 | `3664003bb` | Make the 60-item generator sprint conflict-free for parallel dispatch |
 | 2026-06-16 | `79c012568` | ci: gate the ground-truth oracle in the PR unit suite |
 | 2026-06-16 | `39c1b1cb0` | Add 60-item generator upgrade sprint to roadmap (30 graphic G1.*, 30 reel R1.*) |
