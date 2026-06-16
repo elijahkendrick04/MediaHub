@@ -139,34 +139,111 @@ class CollagePlan:
 
 _VARIANTS: dict[int, tuple[dict, ...]] = {
     1: (
-        {"name": "solo_centre", "spread": 0.0, "profile": (1.0,), "base": 0.94,
-         "tilt": 0.0, "lift": 0.0, "face_in": False},
-        {"name": "solo_raised", "spread": 0.0, "profile": (1.0,), "base": 0.88,
-         "tilt": 0.0, "lift": 0.0, "face_in": False},
+        {
+            "name": "solo_centre",
+            "spread": 0.0,
+            "profile": (1.0,),
+            "base": 0.94,
+            "tilt": 0.0,
+            "lift": 0.0,
+            "face_in": False,
+        },
+        {
+            "name": "solo_raised",
+            "spread": 0.0,
+            "profile": (1.0,),
+            "base": 0.88,
+            "tilt": 0.0,
+            "lift": 0.0,
+            "face_in": False,
+        },
     ),
     2: (
-        {"name": "duo_face_off", "spread": 0.50, "profile": (1.0, 1.0), "base": 0.90,
-         "tilt": 4.0, "lift": 0.018, "face_in": True},
-        {"name": "duo_lead", "spread": 0.46, "profile": (1.0, 0.90), "base": 0.92,
-         "tilt": 3.0, "lift": 0.030, "face_in": True},
-        {"name": "duo_wide", "spread": 0.58, "profile": (0.96, 0.96), "base": 0.86,
-         "tilt": 2.0, "lift": 0.010, "face_in": True},
+        {
+            "name": "duo_face_off",
+            "spread": 0.50,
+            "profile": (1.0, 1.0),
+            "base": 0.90,
+            "tilt": 4.0,
+            "lift": 0.018,
+            "face_in": True,
+        },
+        {
+            "name": "duo_lead",
+            "spread": 0.46,
+            "profile": (1.0, 0.90),
+            "base": 0.92,
+            "tilt": 3.0,
+            "lift": 0.030,
+            "face_in": True,
+        },
+        {
+            "name": "duo_wide",
+            "spread": 0.58,
+            "profile": (0.96, 0.96),
+            "base": 0.86,
+            "tilt": 2.0,
+            "lift": 0.010,
+            "face_in": True,
+        },
     ),
     3: (
-        {"name": "trio_pyramid", "spread": 0.62, "profile": (0.86, 1.0, 0.86), "base": 0.86,
-         "tilt": 3.0, "lift": 0.022, "face_in": True},
-        {"name": "trio_arc", "spread": 0.68, "profile": (1.0, 1.0, 1.0), "base": 0.80,
-         "tilt": 2.0, "lift": 0.040, "face_in": True},
-        {"name": "trio_lead_left", "spread": 0.60, "profile": (1.0, 0.90, 0.82), "base": 0.86,
-         "tilt": 2.5, "lift": 0.020, "face_in": True},
+        {
+            "name": "trio_pyramid",
+            "spread": 0.62,
+            "profile": (0.86, 1.0, 0.86),
+            "base": 0.86,
+            "tilt": 3.0,
+            "lift": 0.022,
+            "face_in": True,
+        },
+        {
+            "name": "trio_arc",
+            "spread": 0.68,
+            "profile": (1.0, 1.0, 1.0),
+            "base": 0.80,
+            "tilt": 2.0,
+            "lift": 0.040,
+            "face_in": True,
+        },
+        {
+            "name": "trio_lead_left",
+            "spread": 0.60,
+            "profile": (1.0, 0.90, 0.82),
+            "base": 0.86,
+            "tilt": 2.5,
+            "lift": 0.020,
+            "face_in": True,
+        },
     ),
     4: (
-        {"name": "quad_lineup", "spread": 0.74, "profile": (1.0, 1.0, 1.0, 1.0), "base": 0.78,
-         "tilt": 2.0, "lift": 0.020, "face_in": False},
-        {"name": "quad_centre_weight", "spread": 0.72, "profile": (0.86, 1.0, 1.0, 0.86),
-         "base": 0.80, "tilt": 2.0, "lift": 0.016, "face_in": True},
-        {"name": "quad_wave", "spread": 0.76, "profile": (0.92, 1.0, 0.92, 0.84), "base": 0.80,
-         "tilt": 2.5, "lift": 0.030, "face_in": True},
+        {
+            "name": "quad_lineup",
+            "spread": 0.74,
+            "profile": (1.0, 1.0, 1.0, 1.0),
+            "base": 0.78,
+            "tilt": 2.0,
+            "lift": 0.020,
+            "face_in": False,
+        },
+        {
+            "name": "quad_centre_weight",
+            "spread": 0.72,
+            "profile": (0.86, 1.0, 1.0, 0.86),
+            "base": 0.80,
+            "tilt": 2.0,
+            "lift": 0.016,
+            "face_in": True,
+        },
+        {
+            "name": "quad_wave",
+            "spread": 0.76,
+            "profile": (0.92, 1.0, 0.92, 0.84),
+            "base": 0.80,
+            "tilt": 2.5,
+            "lift": 0.030,
+            "face_in": True,
+        },
     ),
 }
 
@@ -324,11 +401,10 @@ def render_collage(
         # A soft contact shadow grounds the subject on the shared baseline.
         shadow = (
             f'<span class="rc-collage__shadow" style="bottom:{max(bottom - 1.2, 0):.3f}%;'
-            f"left:{left:.3f}%;width:{box_w * 0.62:.3f}%\"></span>"
+            f'left:{left:.3f}%;width:{box_w * 0.62:.3f}%"></span>'
         )
         figures.append(
-            shadow
-            + f'<figure class="rc-collage__subject" style="'
+            shadow + f'<figure class="rc-collage__subject" style="'
             f"left:{left:.3f}%;bottom:{bottom:.3f}%;width:{box_w:.3f}%;height:{box_h:.3f}%;"
             f"z-index:{s.z};transform:translateX(-50%) rotate({s.rotate:.3f}deg) scaleX({sx});"
             f'transform-origin:bottom center">'
@@ -349,9 +425,7 @@ def render_collage(
     return (
         f'<div class="rc-collage" data-collage-layout="{plan.layout}" '
         f'data-collage-count="{plan.count}">'
-        f"<style>{style}</style>"
-        + "".join(figures)
-        + "</div>"
+        f"<style>{style}</style>" + "".join(figures) + "</div>"
     )
 
 
@@ -374,9 +448,7 @@ def collage_seed_for_brief(brief: Any) -> int:
         seed = 0
     if seed:
         return abs(seed)
-    key = str(
-        getattr(brief, "content_item_id", "") or getattr(brief, "id", "") or "relay"
-    )
+    key = str(getattr(brief, "content_item_id", "") or getattr(brief, "id", "") or "relay")
     return int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
 
 
@@ -489,9 +561,7 @@ def collage_block_for_brief(
     uris = collage_images_for_brief(brief, store=store)
     if len(uris) < 2:
         return ""
-    return render_collage(
-        uris, width=width, height=height, seed=collage_seed_for_brief(brief)
-    )
+    return render_collage(uris, width=width, height=height, seed=collage_seed_for_brief(brief))
 
 
 __all__ = [
