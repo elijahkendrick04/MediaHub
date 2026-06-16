@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `4c274bef6` · Merge pull request #660: G1.6 · Texture-layering engine
+**Last updated:** 2026-06-16 · `f2411e04d` · Merge pull request #666 from elijahkendrick04/claude/optimistic-allen-an7jkn
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -217,7 +217,6 @@ sequence it or merge with care.
 - **R1.14** · Reel generator sprint — Transition library expansion + per-card timing — new transitions (glitch, slide-stack, light-sweep) + a duration field. *Build: `MeetReel.tsx` `transitionFor` + `TransitionWrap` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.15** · Reel generator sprint — Multi-format batch reel render — one request renders + caches all four cuts in a single pass. *Build: `visual/motion.py` `render_meet_reel` + a new web route (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.17** · Reel generator sprint — ffmpeg fallback engine richer motion — Ken Burns variants, parallax, beat transitions mirroring the Remotion cuts. *Build: `visual/reel_ffmpeg.py` (file-sibling R1.16).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.19** · Reel generator sprint — Per-card audio-mix profiles (voice_lead / balanced / music_forward) folded into the audio plan + cache key. *Build: `visual/audio_mux.py` (file-sibling R1.20 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.20** · Reel generator sprint — Music-bed upgrade — refined automatic ducking, intro/outro stings, beat-aware alignment of card cuts. *Build: `visual/audio_mux.py` (file-sibling R1.19) + music-pool logic.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1581,7 +1580,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `c432270b1` | G1.24: incremental render-stage caching for the graphic renderer |
 | 2026-06-16 | `549d8d1eb` | Add R1.25 multi-part stagger sequence motion layer |
+| 2026-06-16 | `debb43795` | G1.20: brand-palette expansion to N custom club colours |
 | 2026-06-16 | `ea3fa4140` | Reel ffmpeg engine: richer motion — Ken Burns variants, parallax, beat transitions (R1.17) |
 | 2026-06-16 | `cef00b9b1` | Apply ruff-format to collage.py |
 | 2026-06-16 | `076835b0d` | R1.13 — Custom reel stat chips: configurable honest stat labels |
@@ -1591,6 +1592,4 @@ list and the auto table below, not here.
 | 2026-06-16 | `db6ea663b` | feat(graphic): G1.21 depth-of-field background-blur photo treatment |
 | 2026-06-16 | `0688aba0d` | Add R1.2 reel scene-mode pack: vertical-split, radial-rings, marquee-crawl |
 | 2026-06-16 | `dfd0d9833` | Add narration script-style templates (R1.18) |
-| 2026-06-16 | `2b453f3ea` | Add ground-treatment expansion pack (G1.4): mesh, bokeh, light-ray, paper-weave |
-| 2026-06-16 | `554b7d37e` | R1.11: on-video text-effect library (text_fx overlay) |
 <!-- /ROADMAP:ACTIVITY -->
