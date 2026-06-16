@@ -191,6 +191,11 @@ def _clean_pool_state(monkeypatch):
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("MEDIAHUB_RENDER_DPR", "1")  # skip PIL resample in fakes
+    # Disable the G1.24 render-stage cache here: these tests reuse identical HTML
+    # to count browser/page reuse, and a warm PNG cache would short-circuit the
+    # pool (a cache hit never launches Chromium). Pool behaviour is what we test;
+    # the cache has its own suite (test_render_cache.py).
+    monkeypatch.setenv("MEDIAHUB_RENDER_CACHE", "0")
     R.shutdown_render_pool()
     yield
     R.shutdown_render_pool()
