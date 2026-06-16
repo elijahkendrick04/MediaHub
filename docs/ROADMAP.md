@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `840b935bc` · G1.7: photo-derived palette extraction + APCA-gated ground tinting (#684)
+**Last updated:** 2026-06-16 · `1856f9896` · Merge pull request #670: G1.23 headless-Chromium context pooling
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -189,7 +189,6 @@ sequence it or merge with care.
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.30** · Graphic generator sprint — Render debug/inspection overlay + design-explainability sidecar (crop box, saliency centroid, fitted sizes, why-this-design JSON). *Build: new `sprint_hooks/inspect_overlay.py` + new `graphic_renderer/inspect.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1564,6 +1563,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
+| 2026-06-16 | `1abe2fd96` | G1.23: regenerate ENV_INVENTORY.md for the new render-pool env vars |
 | 2026-06-16 | `d7a55f922` | Apply ruff-format to reel_parallel.py |
-| 2026-06-16 | `635ef6da1` | Add G1.29 animated still loops (subtle living APNG/GIF backgrounds) |
 <!-- /ROADMAP:ACTIVITY -->
