@@ -109,6 +109,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **R1.4** · Reel generator sprint — Motion background-pattern expansion — 6 new frame-pure animated SVG patterns (checkerboard, diamonds, circuit, organic-waves…). *Build: one file each in `sprint/patterns/<name>.ts` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **R1.11** · Reel generator sprint — On-video text-effect library — glow, outline, 3D-shadow, stroke-animate, blur-to-focus. *Build: `sprint/layers/text_fx.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **R1.18** · Reel generator sprint — Narration script-style templates (verbose / compact / poetic / technical), strictly fact-only. *Build: `visual/narration.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
+- ✅ **G1.21** · Graphic generator sprint — Depth-of-field background-blur photo treatment — focus the athlete, soften the background. *Build: new `sprint_hooks/depth_of_field.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
