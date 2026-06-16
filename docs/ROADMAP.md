@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `785f7a717` · Merge pull request #679 from elijahkendrick04/claude/fervent-goodall-lbe8g3
+**Last updated:** 2026-06-16 · `840b935bc` · G1.7: photo-derived palette extraction + APCA-gated ground tinting (#684)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -179,7 +179,6 @@ sequence it or merge with care.
 - **G1.2** · Graphic generator sprint — Multi-athlete collage / relay layout engine compositing 2–4 cutouts into one balanced frame with deterministic multi-subject placement. *Build: new `graphic_renderer/collage.py` + `layouts/v2/relay_collage.html`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.5** · Graphic generator sprint — Accent-geometry expansion pack — hexagons, art-deco corners, wave rules, spiral flourishes, glitch dividers. *Build: append to `style_packs.ACCENT_GEOS` + accent-geo generator (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.7** · Graphic generator sprint — Photo-derived palette extraction + APCA-gated ground tinting (PIL k-means; never overrides confirmed brand hex). *Build: new `graphic_renderer/photo_palette.py` + a `sprint_hooks/` tint module.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.10** · Graphic generator sprint — Club custom-font upload pipeline — security-sandboxed validation, subsetting, first-party self-hosting. *Build: new `typography/font_intake.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1567,5 +1566,4 @@ list and the auto table below, not here.
 |---|---|---|
 | 2026-06-16 | `d7a55f922` | Apply ruff-format to reel_parallel.py |
 | 2026-06-16 | `635ef6da1` | Add G1.29 animated still loops (subtle living APNG/GIF backgrounds) |
-| 2026-06-16 | `acb791a65` | Add parallel reel composition (R1.28) |
 <!-- /ROADMAP:ACTIVITY -->
