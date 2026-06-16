@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `f2411e04d` · Merge pull request #666 from elijahkendrick04/claude/optimistic-allen-an7jkn
+**Last updated:** 2026-06-16 · `6f0fb8a05` · Merge pull request #672 from elijahkendrick04/claude/festive-meitner-lfshma
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -196,7 +196,6 @@ sequence it or merge with care.
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.24** · Graphic generator sprint — Incremental render-stage caching — hash/cache HTML/CSS/asset-URI stages so re-renders skip unchanged work. *Build: new cache module + a `render.py` hook (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.25** · Graphic generator sprint — Server-side photo adjustment stack — deterministic PIL recipes (sharpen, contrast, saturation, levels) pre-inline. *Build: new `graphic_renderer/photo_adjust.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1585,11 +1584,10 @@ list and the auto table below, not here.
 | 2026-06-16 | `debb43795` | G1.20: brand-palette expansion to N custom club colours |
 | 2026-06-16 | `ea3fa4140` | Reel ffmpeg engine: richer motion — Ken Burns variants, parallax, beat transitions (R1.17) |
 | 2026-06-16 | `cef00b9b1` | Apply ruff-format to collage.py |
+| 2026-06-16 | `6d553dbb1` | R1.26: expanded mood→spring easing-curve vocabulary |
 | 2026-06-16 | `076835b0d` | R1.13 — Custom reel stat chips: configurable honest stat labels |
 | 2026-06-16 | `2f9644bcf` | Add G1.6 texture-layering engine (two-texture blend-mode stacking) |
 | 2026-06-16 | `289efaf63` | Add G1.22 icon/badge overlay system for still graphics |
 | 2026-06-16 | `9b435597e` | Build G1.2 — multi-athlete collage / relay layout engine |
 | 2026-06-16 | `db6ea663b` | feat(graphic): G1.21 depth-of-field background-blur photo treatment |
-| 2026-06-16 | `0688aba0d` | Add R1.2 reel scene-mode pack: vertical-split, radial-rings, marquee-crawl |
-| 2026-06-16 | `dfd0d9833` | Add narration script-style templates (R1.18) |
 <!-- /ROADMAP:ACTIVITY -->
