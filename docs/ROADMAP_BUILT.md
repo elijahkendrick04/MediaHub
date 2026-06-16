@@ -126,6 +126,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **R1.24** · Reel generator sprint — Ambient motion programmes — slow drift / pan / temperature shift sustained through the breathe phase. *Build: `sprint/layers/ambient.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **G1.17** · Graphic generator sprint — Print pipeline expansion — trim/bleed/crop marks + CMYK-aware export. *Build: `print_export.py` (sole owner) + new print layouts.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **R1.6** · Reel generator sprint — Animated-pattern drift layer — per-pattern frame-pure motion (rotate/opacity/scale) during the breathe phase. *Build: `sprint/layers/pattern_drift.tsx` additive overlay (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
+- ✅ **G1.28** · Graphic generator sprint — Mood-keyed style-pack preset bundles — curated, deterministic bundles selected from `brief.mood`. *Build: new preset-map functions in `style_packs.py` (new region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)

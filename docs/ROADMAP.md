@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `c36e2b1b3` · Merge pull request #683 from elijahkendrick04/claude/keen-darwin-qgz04v
+**Last updated:** 2026-06-16 · `785f7a717` · Merge pull request #679 from elijahkendrick04/claude/fervent-goodall-lbe8g3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -193,7 +193,6 @@ sequence it or merge with care.
 - **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.28** · Graphic generator sprint — Mood-keyed style-pack preset bundles — curated, deterministic bundles selected from `brief.mood`. *Build: new preset-map functions in `style_packs.py` (new region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.30** · Graphic generator sprint — Render debug/inspection overlay + design-explainability sidecar (crop box, saliency centroid, fitted sizes, why-this-design JSON). *Build: new `sprint_hooks/inspect_overlay.py` + new `graphic_renderer/inspect.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
