@@ -209,7 +209,7 @@ The future data model should handle: organisations / clubs / societies / teams; 
 
 ## External integrations
 
-- Human approval before external publishing is the **default, always** — nothing auto-publishes out of the box. The ONLY exception is the Phase-2 autonomy model (`docs/AUTONOMY_MODEL.md`): a workspace may explicitly opt a single post type into `fully_autonomous`, and even then a post ships only when the full publish gate passes (`publishing/publish_gate.py`: kill switch, per-type policy, provenance, confidence threshold, brand safety, safeguarding — minors' content never auto-publishes — and rate caps), with every decision in the immutable per-org audit ledger. Never widen this exception, never default any type above `approval_required`, and never weaken a guardrail without explicit user sign-off.
+- **MediaHub does not publish or schedule content onto external social channels.** The social-scheduling tool (the Buffer-backed "Schedule…" action and "Auto scheduling" settings) and the autonomous publish-to-social path (`fully_autonomous` opt-in, the publish gate, the per-type policy, the publish kill switch, the posting log) have all been **removed** (the `publishing/` package and `workflow/approval.py` are gone). The Settings "Auto scheduling" and "Autonomy" surfaces now render a "Coming soon" placeholder. Approved cards are reviewed by a human and then exported/downloaded for manual posting — there is no machine path that places content on a social account. Do NOT reintroduce a social-publishing/auto-scheduling integration without explicit user sign-off; if rebuilt, human approval before external publishing is the default, always.
 - Use least privilege for every integration; never connect external accounts without explicit approval
 - Keep credentials out of source control — `.env` only
 
@@ -371,7 +371,7 @@ repeatable content automation engine. Before building anything, ask:
 The intelligence layer is the moat:
 - Ingest → detect → rank → brand → generate → approve → export
 - Every step should be explainable and auditable
-- Human approval before external publishing — always the default; the sole
-  exception is a per-type, per-workspace `fully_autonomous` opt-in behind the
-  full publish gate + kill switch + audit trail (see "External integrations"
-  and `docs/AUTONOMY_MODEL.md`)
+- Human approval before external publishing — always, with no exception.
+  MediaHub does not place content on a social account; approved cards are
+  exported/downloaded for manual posting (the auto-scheduling and autonomous
+  publish-to-social features were removed — see "External integrations")

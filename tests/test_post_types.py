@@ -138,56 +138,6 @@ def test_post_types_for_respects_enabled_flag():
 # ---------------------------------------------------------------------------
 
 
-def test_policy_load_migrates_legacy_keys_preserving_operator_intent(tmp_path):
-    from mediahub.publishing.per_type_policy import load_policy
-
-    legacy = {
-        "weekend_preview": "fully_autonomous",
-        "sponsor_post": "draft_only",
-        "meet_recap": "approval_required",
-    }
-    pol_dir = tmp_path / "per_type_autonomy"
-    pol_dir.mkdir(parents=True)
-    (pol_dir / "org-a.json").write_text(json.dumps(legacy), encoding="utf-8")
-
-    out = load_policy("org-a", data_dir=tmp_path)
-    # Operator-set levels survive the rename — never silently reset.
-    assert out["event_preview"] == "fully_autonomous"
-    assert out["sponsor_activation"] == "draft_only"
-    # Legacy keys do not survive as parallel entries.
-    assert "weekend_preview" not in out
-    assert "sponsor_post" not in out
-    assert set(out) == {ct.value for ct in ContentType}
-
-
-def test_policy_save_canonicalises_incoming_keys(tmp_path):
-    from mediahub.publishing.per_type_policy import load_policy, save_policy
-
-    save_policy("org-b", {"weekend_preview": "fully_autonomous"}, data_dir=tmp_path)
-    stored = json.loads((tmp_path / "per_type_autonomy" / "org-b.json").read_text())
-    assert stored["event_preview"] == "fully_autonomous"
-    assert "weekend_preview" not in stored
-    assert load_policy("org-b", data_dir=tmp_path)["event_preview"] == "fully_autonomous"
-
-
-def test_type_gate_accepts_legacy_and_canonical_strings(tmp_path):
-    from mediahub.publishing.per_type_policy import save_policy
-    from mediahub.publishing.type_gate import TypeGated, assert_type_publishing_allowed
-
-    # Default: gated, whichever vocabulary the caller uses.
-    for value in ("event_preview", "weekend_preview"):
-        with pytest.raises(TypeGated):
-            assert_type_publishing_allowed("org-c", value, data_dir=tmp_path)
-
-    # Opting the canonical slug in unlocks the legacy spelling too — the gate
-    # and the policy can never disagree about which type they mean.
-    save_policy("org-c", {"event_preview": "fully_autonomous"}, data_dir=tmp_path)
-    assert_type_publishing_allowed("org-c", "event_preview", data_dir=tmp_path)
-    assert_type_publishing_allowed("org-c", "weekend_preview", data_dir=tmp_path)
-    with pytest.raises(TypeGated):
-        assert_type_publishing_allowed("org-c", "sponsor_post", data_dir=tmp_path)
-
-
 def test_stub_pack_store_normalises_legacy_packs(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.club_platform import stub_pack_store as sps

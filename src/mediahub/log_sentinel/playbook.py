@@ -1,8 +1,8 @@
 """mediahub/log_sentinel/playbook.py — what the sentinel may DO about a finding.
 
-Mirrors the publishing-gate philosophy (``publishing/publish_gate.py``): every
-finding is notified; an *action* additionally requires every gate to pass, and
-every decision is auditable. Defaults are deliberately conservative:
+Notify-then-gate philosophy: every finding is notified; an *action* additionally
+requires every gate to pass, and every decision is auditable. Defaults are
+deliberately conservative:
 
 * **Notify-first.** Out of the box the sentinel only ever notifies — auto-fix is
   a double opt-in: ``MEDIAHUB_SENTINEL_AUTOFIX=1`` (global) AND

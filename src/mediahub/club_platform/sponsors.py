@@ -254,23 +254,6 @@ def exposure_report(profile_id: str, month: str, *, workflow_store=None) -> dict
         status = getattr(state, "status", "queue")
         return getattr(status, "value", str(status))
 
-    try:
-        from mediahub.publishing.posting_log import attempts_summary_for_run
-    except Exception:  # pragma: no cover - posting log is optional context
-        attempts_summary_for_run = None
-
-    attempts_cache: dict[str, dict] = {}
-
-    def _attempts_ok(run_id: str) -> int:
-        if attempts_summary_for_run is None:
-            return 0
-        if run_id not in attempts_cache:
-            try:
-                attempts_cache[run_id] = attempts_summary_for_run(profile_id, run_id) or {}
-            except Exception:
-                attempts_cache[run_id] = {}
-        return int(attempts_cache[run_id].get("ok") or 0)
-
     by_sponsor: dict[str, dict] = {}
     for r in rows:
         sid = str(r.get("sponsor_id", "") or "")
@@ -282,7 +265,6 @@ def exposure_report(profile_id: str, month: str, *, workflow_store=None) -> dict
                 "cards": 0,
                 "approved": 0,
                 "posted": 0,
-                "publish_attempts_ok": 0,
                 "runs": set(),
             },
         )
@@ -306,7 +288,6 @@ def exposure_report(profile_id: str, month: str, *, workflow_store=None) -> dict
         agg.pop("_seen_cards", None)
         runs = sorted(r for r in agg.pop("runs") if r)
         agg["runs"] = runs
-        agg["publish_attempts_ok"] = sum(_attempts_ok(r) for r in runs)
         sponsors.append(agg)
     sponsors.sort(key=lambda a: (-a["cards"], a["sponsor_name"].lower()))
 

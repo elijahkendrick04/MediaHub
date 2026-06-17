@@ -70,18 +70,6 @@ def test_voiceover_is_off_by_default(no_paid_config):
     assert flag not in {"1", "true", "yes", "on"}
 
 
-# --- the scheduler (paid scheduling SaaS) ------------------------------------------
-
-
-def test_scheduler_errors_honestly_without_a_token(no_paid_config):
-    from mediahub.publishing.scheduler import SchedulerAuthError, _PreparedToken
-
-    with pytest.raises(SchedulerAuthError, match="not configured"):
-        _PreparedToken.require(None)
-    with pytest.raises(SchedulerAuthError):
-        _PreparedToken.require("   ")
-
-
 # --- Replicate / PhotoRoom (paid per-call cutout APIs) ----------------------
 
 

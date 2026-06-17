@@ -219,32 +219,6 @@ def gather_own_signals(
                 )
             )
 
-    # --- Posting history (best-effort; absent log = no signal) ----------
-    try:
-        from mediahub.publishing.posting_log import recent_attempts
-
-        attempts = recent_attempts(profile_id, limit=10)
-    except Exception:
-        attempts = []
-    if attempts:
-        last = attempts[0]
-        when = _parse_when(last.get("created_at") or last.get("attempted_at"))
-        age = (today - when).days if when else None
-        signals.append(
-            Signal(
-                source="own",
-                kind="posting_recency",
-                summary=(
-                    f"Last publishing attempt was {age}d ago."
-                    if age is not None
-                    else "Publishing attempts exist (date unknown)."
-                ),
-                provenance="publishing.posting_log",
-                occurs_at=when.isoformat() if when else None,
-                payload={"age_days": age, "n_recent": len(attempts)},
-            )
-        )
-
     return signals
 
 

@@ -6,7 +6,7 @@
 The handler only ever *drafts* — nothing is published; the draft waits for
 a human on the review surface (the standing approval-first rule).
 
-Registration follows the ``workflow.approval`` convention: an exported
+Registration follows the standard scheduler-task convention: an exported
 ``register_season_wrap_task()`` the app calls at startup — never a
 side effect of import.
 """

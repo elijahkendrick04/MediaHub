@@ -758,8 +758,8 @@ def register_live_watch_task(
 
     The web layer calls this at startup with its pipeline ``runner`` (which
     feeds ``watch.run_id`` and queues cards for approval — by construction
-    nothing here can publish). Same convention as
-    ``workflow.approval.register_approval_signal_task``."""
+    nothing here can publish). Same convention as the other scheduler tasks
+    (season wrap, retention purge)."""
     try:
         from mediahub.scheduler import register_task_type  # noqa: PLC0415
 
