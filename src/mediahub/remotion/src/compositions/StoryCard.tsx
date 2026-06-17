@@ -878,6 +878,7 @@ const PACK_TEXTURES = new Set([
 const PACK_ACCENT_GEOS = new Set([
   "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
   "double_rule", "dot_row", "cross_ticks", "corner_arc",
+  "hexagons", "deco_corners", "wave_rule", "spiral_flourish", "glitch_divider",
 ]);
 
 type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
@@ -1109,9 +1110,112 @@ function packAccentGeometry(
         </>
       );
     }
+    // --- G1.5 accent-geometry expansion pack (mirrors style_packs.py) ------
+    // Curved/ornamental shapes drawn as stroked inline SVG (the div-border
+    // tricks above can't express them); stroke paints the resolved accent,
+    // vector-effect keeps it a true `weight` px regardless of viewBox scale.
+    case "hexagons": {
+      const size = Math.round(m * 0.16 * mult);
+      const off = Math.round(m * 0.05);
+      const hex = (
+        <polygon points="92,50 71,86 29,86 8,50 29,14 71,14" fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinejoin: "round" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{hex}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size }}>{hex}</svg>
+        </>
+      );
+    }
+    case "deco_corners": {
+      const size = Math.round(m * 0.15 * mult);
+      const off = Math.round(m * 0.045);
+      const d = "M 64 8 L 8 8 L 8 64 M 50 21 L 21 21 L 21 50 M 38 31 L 31 31 L 31 38";
+      const bracket = (
+        <path d={d} fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "square" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{bracket}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size, transform: "rotate(180deg)" }}>{bracket}</svg>
+        </>
+      );
+    }
+    case "wave_rule": {
+      const inset = Math.round(width * 0.08);
+      const inner = Math.max(1, width - 2 * inset);
+      const band = Math.max(12, Math.round(height * 0.022 * mult));
+      const bottom = Math.round(height * 0.06);
+      return (
+        <svg viewBox={`0 0 ${inner} ${band}`} preserveAspectRatio="none" style={{ position: "absolute", left: inset, width: inner, bottom, height: band }}>
+          <path d={packWavePath(inner, band)} fill="none" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "round" }} />
+        </svg>
+      );
+    }
+    case "spiral_flourish": {
+      const size = Math.round(m * 0.15 * mult);
+      const off = Math.round(m * 0.05);
+      const spiral = (
+        <polyline points={packSpiralPoints()} fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "round", strokeLinejoin: "round" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{spiral}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size, transform: "rotate(180deg)" }}>{spiral}</svg>
+        </>
+      );
+    }
+    case "glitch_divider": {
+      const bh = Math.max(4, Math.round(height * 0.006 * mult));
+      const inset = Math.round(width * 0.08);
+      const inner = Math.max(1, width - 2 * inset);
+      const bottom = Math.round(height * 0.06);
+      const gap = Math.max(2, bh);
+      return (
+        <>
+          <div style={{ position: "absolute", left: inset, width: inner, bottom, height: bh, background: accent }} />
+          <div style={{ position: "absolute", left: inset + Math.round(inner * 0.12), width: Math.round(inner * 0.55), bottom: bottom + bh + gap, height: bh, background: accent, opacity: 0.7 }} />
+          <div style={{ position: "absolute", left: inset, width: Math.round(inner * 0.34), bottom: bottom + 2 * (bh + gap), height: bh, background: accent, opacity: 0.45 }} />
+        </>
+      );
+    }
     default:
       return null;
   }
+}
+
+// A smooth horizontal sine as alternating cubic-bézier humps, in px units
+// (the wave SVG's viewBox is the px region itself). Mirrors style_packs._wave_path.
+function packWavePath(inner: number, band: number, humps = 7): string {
+  const amp = band * 0.3;
+  const mid = band / 2;
+  const half = inner / humps;
+  let d = `M 0 ${mid.toFixed(1)}`;
+  let x = 0;
+  let up = true;
+  while (x < inner - 0.5) {
+    const nx = Math.min(x + half, inner);
+    const cy = up ? mid - amp : mid + amp;
+    const c1 = x + half * 0.36;
+    const c2 = x + half * 0.64;
+    d += ` C ${c1.toFixed(1)} ${cy.toFixed(1)} ${c2.toFixed(1)} ${cy.toFixed(1)} ${nx.toFixed(1)} ${mid.toFixed(1)}`;
+    x = nx;
+    up = !up;
+  }
+  return d;
+}
+
+// An Archimedean spiral sampled as a polyline in a 0–100 viewBox, centred at
+// (50, 50). Mirrors style_packs._spiral_points.
+function packSpiralPoints(steps = 72, turns = 2.4, maxR = 44): string {
+  const pts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const ang = t * turns * 2 * Math.PI;
+    const r = maxR * t;
+    pts.push(`${(50 + r * Math.cos(ang)).toFixed(1)},${(50 + r * Math.sin(ang)).toFixed(1)}`);
+  }
+  return pts.join(" ");
 }
 
 const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
