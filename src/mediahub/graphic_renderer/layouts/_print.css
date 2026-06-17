@@ -1,0 +1,65 @@
+/* MediaHub print-production page furniture (roadmap G1.17).
+
+   Injected by print_export.to_print_production() right AFTER a trim-sized
+   layout's own <style> block, so these rules win the cascade (later +
+   !important) and turn the trim page into a bleed + crop-marks print page.
+
+   The artwork is never edited: its root element (SHEET_SELECTOR, e.g. .sheet)
+   is simply repositioned into the trim box, the bled background is painted
+   behind it with body::before, and the unprinted slug margin stays white so
+   the SVG crop marks read. Placeholder tokens are mm values (or the bleed
+   colour / sheet selector) substituted in print_export._print_css(). */
+
+@page { size: {{MEDIA_W}}mm {{MEDIA_H}}mm; margin: 0; }
+
+html, body {
+  width: {{MEDIA_W}}mm !important;
+  height: {{MEDIA_H}}mm !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  /* The crop-mark slug margin is unprinted white; the bled background and the
+     artwork cover the trim + bleed area on top of it. */
+  background: #FFFFFF !important;
+}
+
+body {
+  position: relative !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* Bleed: extend the artwork's edge colour past the trim line so a slightly
+   off guillotine cut never reveals a white sliver. Painted behind the sheet. */
+body::before {
+  content: "";
+  position: absolute;
+  left: {{BLEED_RECT_LEFT}}mm;
+  top: {{BLEED_RECT_TOP}}mm;
+  width: {{BLEED_RECT_W}}mm;
+  height: {{BLEED_RECT_H}}mm;
+  background: {{BLEED_BG}};
+  z-index: 0;
+}
+
+/* The trim box holds the existing artwork, unchanged, positioned in from the
+   media edge by the full margin (bleed band + crop-mark slug). */
+{{SHEET_SELECTOR}} {
+  position: absolute !important;
+  left: {{SHEET_LEFT}}mm !important;
+  top: {{SHEET_TOP}}mm !important;
+  z-index: 1 !important;
+}
+
+/* Vector printer's-marks overlay (crop marks, registration, CMYK colour bar)
+   — the full media box, never interactive, always on top. */
+.mh-print-marks {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: {{MEDIA_W}}mm !important;
+  height: {{MEDIA_H}}mm !important;
+  z-index: 5 !important;
+  pointer-events: none !important;
+}
+.mh-print-marks svg { display: block; width: 100%; height: 100%; }

@@ -272,3 +272,193 @@ def test_pillow_font_path_is_deterministic_and_linear():
     # Real metrics land in the same ballpark as the deterministic table estimate.
     table = af.measure_line_px("Hannah", 100, font_family="Work Sans", weight=400)
     assert w100 == pytest.approx(table, rel=0.20)
+
+
+# --------------------------------------------------------------------------- #
+# G1.11 — kerning-pair + common-ligature corrections ("truer measured fits")
+#
+# em_width now subtracts a conservative, deterministic correction for kerning
+# pairs (VA, To, W. …) and the default f-ligatures (fi, fl, ff, ffi, ffl). The
+# correction only ever *narrows* the estimate and never pushes it below the real
+# rendered advance — the never-overflow contract these tests pin from every angle.
+# --------------------------------------------------------------------------- #
+
+# An independent advance-sum oracle (no kerning/ligatures) built from the same
+# documented per-character model, so the identity below is a genuine cross-check
+# rather than a tautology over kern_ligature_em.
+def _raw_advance_em(text, *, font_family, weight):
+    profile = af._classify_family(font_family)
+    scale = af._table_scale(font_family)
+    factor = af._weight_factor(weight)
+    return sum(af._char_em(ch, profile, scale) for ch in text) * factor
+
+
+def test_kern_ligature_em_is_exported_and_zero_for_trivial_input():
+    assert "kern_ligature_em" in af.__all__
+    assert af.kern_ligature_em("") == 0.0
+    assert af.kern_ligature_em("A") == 0.0  # single char — no pair to kern
+
+
+def test_correction_only_ever_narrows():
+    # Across a realistic corpus the correction is never positive: kerning and
+    # ligatures may tighten a line but must never widen it.
+    corpus = [
+        "VANCE", "Taylor", "Wong", "Young", "Griffiths", "Butterfly Final",
+        "Hannah Cox", "100m Freestyle", "AVERY", "Wolajimi-Abubakari",
+        "O'Sullivan", "T.", "Llewelyn-Smythe", "PB",
+    ]
+    for fam in ("Inter", "Anton", "Lora", "Oswald", "JetBrains Mono"):
+        for text in corpus:
+            assert af.kern_ligature_em(text, font_family=fam) <= 0.0
+
+
+def test_em_width_identity_raw_plus_correction():
+    # em_width(t) == raw advance sum + kern_ligature_em(t), exactly.
+    for fam in ("Inter", "Anton", "Lora", "JetBrains Mono"):
+        for weight in (400, 700, 900):
+            for text in ("VANCE To W. fifl", "Griffiths", "Cox", "Taylor Young"):
+                raw = _raw_advance_em(text, font_family=fam, weight=weight)
+                corr = af.kern_ligature_em(text, font_family=fam, weight=weight)
+                assert af.em_width(text, font_family=fam, weight=weight) == pytest.approx(
+                    raw + corr
+                )
+
+
+def test_kerned_pairs_tighten_unkerned_do_not():
+    # Classic kern pairs register a tightening; pairs with no entry do not.
+    for pair in ("VA", "AV", "To", "Ta", "Yo", "W.", "P,", "L'", "Av"):
+        assert af.kern_ligature_em(pair) < 0.0, pair
+    for pair in ("Co", "ox", "Ha", "nn", "XQ", "mn", "ZZ"):
+        assert af.kern_ligature_em(pair) == 0.0, pair
+
+
+def test_more_kern_pairs_tighten_more():
+    # Each additional kerning pair makes the correction strictly more negative
+    # (until the safety cap, which realistic text never reaches).
+    one = af.kern_ligature_em("VA")
+    three = af.kern_ligature_em("VAVA")  # pairs VA, AV, VA — all kern
+    assert three < one < 0.0
+
+
+def test_unkerned_words_are_unchanged():
+    # "Cox"/"Hannah" contain no kern pair or ligature, so the estimate is the
+    # bare advance sum — this is why their golden fit sizes above are unaffected.
+    for text in ("Cox", "Hannah", "Nelson", "Bloom"):
+        assert af.kern_ligature_em(text) == 0.0
+        assert af.em_width(text) == pytest.approx(_raw_advance_em(text, font_family="Inter", weight=400))
+
+
+# --------------------------------------------------------------------------- #
+# Ligatures
+# --------------------------------------------------------------------------- #
+def test_common_ligatures_tighten():
+    for seq in ("fi", "fl", "ff", "ffi", "ffl"):
+        assert af.kern_ligature_em(seq) < 0.0, seq
+
+
+def test_ligature_detected_mid_word():
+    # The f-ligatures fire inside real swim words, not just in isolation.
+    assert af.kern_ligature_em("Butterfly") < 0.0   # "fl"
+    assert af.kern_ligature_em("Griffiths") < 0.0   # "ffi"
+    assert af.kern_ligature_em("afib") == pytest.approx(af.kern_ligature_em("fi"))
+
+
+def test_ligature_longest_match_not_double_counted():
+    # "ffi" is one ligature, not "ff" + "fi": it must differ from the bare "ff"
+    # prefix, and repetition must scale linearly in units of the whole ligature.
+    assert af.kern_ligature_em("ffi") == af.kern_ligature_em("ffl")  # both 3-glyph
+    assert af.kern_ligature_em("ffi") != af.kern_ligature_em("ffa")  # 'ffa' folds only "ff"
+    assert af.kern_ligature_em("fflffl") == pytest.approx(2 * af.kern_ligature_em("ffl"))
+    assert af.kern_ligature_em("fifi") == pytest.approx(2 * af.kern_ligature_em("fi"))
+
+
+# --------------------------------------------------------------------------- #
+# Family + weight behaviour of the correction
+# --------------------------------------------------------------------------- #
+def test_monospace_is_never_corrected():
+    for text in ("VANCE", "Griffiths", "Butterfly", "To W."):
+        for fam in ("JetBrains Mono", "monospace", "Courier New"):
+            assert af.kern_ligature_em(text, font_family=fam) == 0.0
+
+
+def test_condensed_correction_scales_below_sans():
+    # The correction rides the per-family table scale, so a condensed face's
+    # tightening is proportionally smaller than the sans base for the same text.
+    sans = abs(af.kern_ligature_em("VANCE", font_family="Inter"))
+    cond = abs(af.kern_ligature_em("VANCE", font_family="Anton"))
+    assert 0.0 < cond < sans
+
+
+def test_heavier_weight_amplifies_the_correction():
+    light = abs(af.kern_ligature_em("VANCE", weight=300))
+    bold = abs(af.kern_ligature_em("VANCE", weight=900))
+    assert 0.0 < light < bold
+
+
+# --------------------------------------------------------------------------- #
+# Safety — the correction never breaks the never-overflow contract
+# --------------------------------------------------------------------------- #
+def test_correction_is_bounded_by_the_global_cap():
+    # However many kern pairs a string packs, the tightening can never exceed
+    # _MAX_TIGHTEN_FRACTION of the raw advance width.
+    cap = af._MAX_TIGHTEN_FRACTION
+    for text in ("VA" * 40, "AVAW" * 20, "T." * 30, "Griffiths" * 10):
+        raw = _raw_advance_em(text, font_family="Inter", weight=400)
+        corr = af.kern_ligature_em(text, font_family="Inter", weight=400)
+        assert corr >= -raw * cap - 1e-9
+
+
+def test_cap_floors_a_pathological_string(monkeypatch):
+    # Force a tiny cap so the floor branch engages deterministically: the
+    # correction is clamped to exactly -cap * raw_advance.
+    monkeypatch.setattr(af, "_MAX_TIGHTEN_FRACTION", 0.001)
+    text = "VAVAVAVAVA"
+    raw = _raw_advance_em(text, font_family="Inter", weight=400)
+    corr = af.kern_ligature_em(text, font_family="Inter", weight=400)
+    assert corr == pytest.approx(-raw * 0.001)
+
+
+def test_corrected_estimate_still_errs_wide_vs_real_anton():
+    # The decisive safety pin: even after kerning, em_width must not under-measure
+    # the real shipped Anton metrics, or fitted hero lines would overflow.
+    pytest.importorskip("PIL")
+    from PIL import ImageFont
+
+    from mediahub.graphic_renderer.render import LAYOUTS_DIR
+
+    anton = LAYOUTS_DIR / "fonts" / "anton.woff2"
+    if not anton.is_file():
+        pytest.skip("shipped anton.woff2 not present")
+    try:
+        ImageFont.truetype(str(anton), 1000)
+    except Exception:
+        pytest.skip("Pillow/FreeType cannot load anton.woff2")
+
+    def real_em(text):
+        return ImageFont.truetype(str(anton), 1000).getlength(text) / 1000.0
+
+    # All-caps strings carrying the kern pairs the correction now applies.
+    for text in ("VANCE", "TAYLOR", "WALTON", "AVERY", "LAYTON",
+                 "VAN DER BERG", "4X100M MEDLEY RELAY", "TYLER-WATSON"):
+        est = af.em_width(text, font_family="Anton", weight=400)
+        assert est >= real_em(text), text
+
+
+def test_kern_aware_fit_still_never_overflows():
+    # The fit invariant holds for kern-heavy hero strings: the returned size fits
+    # (via the independent oracle) and one px larger does not.
+    for text in ("TAYLOR", "VANCE", "WALTON-AVERY", "Butterfly Final"):
+        size = af.fit_font_px(text, 700, 300, font_family="Anton", weight=900,
+                              min_px=8, max_px=400)
+        if size > 8:
+            assert _block_fits(text, size, 700, 300,
+                               font_family="Anton", weight=900, line_height=1.0)
+        if size < 400:
+            assert not _block_fits(text, size + 1, 700, 300,
+                                   font_family="Anton", weight=900, line_height=1.0)
+
+
+def test_kern_aware_fit_is_deterministic():
+    a = af.fit_font_px("TAYLOR-VANCE", 600, 300, font_family="Anton", weight=900)
+    b = af.fit_font_px("TAYLOR-VANCE", 600, 300, font_family="Anton", weight=900)
+    assert a == b

@@ -106,9 +106,11 @@ def test_hook_is_auto_discovered_and_runs_late():
     assert hook.ORDER == 95
 
 
-def test_disabled_render_is_byte_identical():
-    out = apply_render_hooks(SAMPLE_HTML, _ctx())
-    assert out == SAMPLE_HTML
+def test_disabled_hook_is_byte_identical():
+    # Assert on our hook directly: the shared registry now carries sibling
+    # sprint hooks (icon overlay, depth-of-field, …) that legitimately fire on
+    # some briefs, so a whole-registry diff would not isolate our guarantee.
+    assert hook.apply(SAMPLE_HTML, _ctx()) == SAMPLE_HTML
 
 
 def test_env_toggle_enables_overlay(monkeypatch):

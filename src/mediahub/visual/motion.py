@@ -545,6 +545,117 @@ def _reel_audio_plan(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Subtitle / caption burn-in (R1.3; see visual/subtitle_burn.py)
+# ---------------------------------------------------------------------------
+
+# The Remotion compositions and the FFmpeg engine both run at 30fps; the caption
+# engine needs the cadence to turn millisecond SRT cues into frame windows.
+MOTION_FPS = 30
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _subtitles_enabled() -> bool:
+    """True when the operator opted into burned captions (``MEDIAHUB_SUBTITLES``).
+
+    Captions paint the spoken narration on screen for muted autoplay, so they
+    ride on top of the existing voiceover opt-in: a render only burns captions
+    when a voice-narration plan exists for it too (the story path literally
+    reads that voiceover's SRT).
+    """
+    return os.environ.get("MEDIAHUB_SUBTITLES", "").strip().lower() in _TRUTHY
+
+
+def _caption_roles(card_dict: dict, brand_dict: dict) -> tuple[str, str, str]:
+    """``(ground, onground, accent)`` for the caption colour, brand-filled.
+
+    Prefers the card's resolved still-parity roles (already APCA-gated) and
+    falls back to the brand palette so the caption is always legible on its
+    own ground.
+    """
+    ground = str(card_dict.get("roleGround") or brand_dict.get("primary") or "")
+    onground = str(card_dict.get("roleOnGround") or "")
+    accent = str(card_dict.get("roleAccent") or brand_dict.get("accent") or "")
+    return ground, onground, accent
+
+
+def _story_caption_json(
+    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float
+) -> str:
+    """The caption track for a story render as a JSON string, or ``""``.
+
+    Reads the story narration's voiceover SRT (built from the same fact-only
+    script the audio speaks). Returns ``""`` whenever captions are off or no
+    voice plan exists, so the silent-path cache key stays byte-identical.
+    """
+    if not _subtitles_enabled() or not audio_plan:
+        return ""
+    script = str(audio_plan.get("script") or "").strip()
+    voice = str(audio_plan.get("voice") or "")
+    if not script or not voice:
+        return ""
+    try:
+        from mediahub.visual import subtitle_burn
+
+        ground, onground, accent = _caption_roles(card_dict, brand_dict)
+        track = subtitle_burn.story_caption_track(
+            script,
+            voice=voice,
+            duration_sec=duration_sec,
+            fps=MOTION_FPS,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+        )
+        return subtitle_burn.track_json(track)
+    except Exception:
+        return ""
+
+
+def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -> str:
+    """Per-beat caption track for a reel card as a JSON string, or ``""``.
+
+    The reel narrates one continuous script, so each beat is captioned from its
+    own verified line (``narration.story_script`` with no club sign-off),
+    distributed across the beat — no extra synthesis, fully deterministic.
+    """
+    try:
+        from mediahub.visual import narration, subtitle_burn
+
+        line = narration.story_script(card_dict, {})
+        if not line.strip():
+            return ""
+        ground, onground, accent = _caption_roles(card_dict, brand_dict)
+        track = subtitle_burn.text_caption_track(
+            line,
+            total_frames=beat_frames,
+            fps=MOTION_FPS,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+        )
+        return subtitle_burn.track_json(track)
+    except Exception:
+        return ""
+
+
+def _caption_manifest(caption_json: str) -> dict:
+    """Explainability record for a story render's captions."""
+    if not caption_json:
+        return {"status": "off"}
+    try:
+        cues = len(json.loads(caption_json).get("cues", []))
+    except Exception:
+        cues = 0
+    return {"status": "on", "cues": cues}
+
+
+def _reel_caption_manifest(cards_props: list[dict]) -> dict:
+    """Explainability record for a reel render's per-beat captions."""
+    counts = [_caption_manifest(cp.get("captionsJson") or "").get("cues", 0) for cp in cards_props]
+    return {"status": "on" if any(counts) else "off", "cues_per_card": counts}
+
+
 def _audio_record_path(cached: Path) -> Path:
     """Sidecar recording whether the planned audio was attached to this MP4.
 
@@ -556,15 +667,21 @@ def _audio_record_path(cached: Path) -> Path:
     return Path(cached).with_suffix(".audio.json")
 
 
-def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) -> dict:
+def _finish_cached_video(
+    cached: Path, *, kind: str, plan, duration_sec: float, n_cards: int = 0
+) -> dict:
     """Idempotent finishing pass on the cached MP4: attach the planned audio
     (honest silent fallback on failure; retried on the next request) and
     ensure the poster-frame sidecar exists. Returns the manifest-ready
     audio record.
+
+    ``n_cards`` (reels only) yields the card-cut beat grid the music accents
+    align to; stories have no internal cuts and leave it at 0.
     """
     try:
         from mediahub.visual import audio_mux
 
+        cut_times = audio_mux.card_cut_times(duration_sec, n_cards) if kind == "reel" else None
         if plan:
             record_path = _audio_record_path(cached)
             audio_rec: dict = {}
@@ -576,7 +693,9 @@ def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) 
                 except (OSError, ValueError):
                     audio_rec = {}
             if not audio_rec:
-                audio_rec = audio_mux.apply_audio(cached, plan, duration_sec=duration_sec)
+                audio_rec = audio_mux.apply_audio(
+                    cached, plan, duration_sec=duration_sec, cut_times=cut_times
+                )
                 try:
                     record_path.write_text(
                         json.dumps(audio_rec, indent=2, sort_keys=True, default=str),
@@ -764,6 +883,12 @@ def render_story_card(
     )
     audio_plan = _story_audio_plan(card_dict, brand_dict)
 
+    # Burn-in captions (R1.3): only attach the prop when a track exists so the
+    # captions-off path keeps the historic cache key byte-identical.
+    caption_json = _story_caption_json(card_dict, brand_dict, audio_plan, duration_sec=duration_sec)
+    if caption_json:
+        card_dict = {**card_dict, "captionsJson": caption_json}
+
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
             raise ReelEngineUnavailable(
@@ -828,6 +953,7 @@ def render_story_card(
             "duration_sec": duration_sec,
             "card": _card_manifest_axes(card_dict),
             "audio": audio_rec,
+            "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
@@ -856,6 +982,33 @@ def reel_duration_for(n_cards: int) -> float:
     return REEL_COVER_SEC + REEL_PER_CARD_SEC * n + REEL_OUTRO_SEC
 
 
+def _render_reel_parallel_or_none(
+    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int]
+) -> Optional[Path]:
+    """Opt-in parallel reel composition (roadmap R1.28).
+
+    Delegates to :mod:`mediahub.visual.reel_parallel`: when
+    ``MEDIAHUB_REEL_PARALLEL`` is set and Node/Remotion/FFmpeg are available,
+    the reel's frame timeline is split across concurrent segment renders and
+    composited into the silent cache MP4 at ``cached`` — exactly what the
+    serial ``_run_remotion`` would write, just faster on a multi-core worker.
+
+    Returns the path on success, or ``None`` (the signal to take the serial
+    render) when the feature is disabled, the prerequisites are missing, or
+    anything goes wrong. Frame-purity makes the parallel output identical to
+    the serial reel, so the content cache key is unchanged either way.
+    """
+    from mediahub.visual import reel_parallel
+
+    return reel_parallel.try_render_reel_parallel(
+        composition_id=COMP_REEL,
+        props=props,
+        out_path=cached,
+        duration_sec=duration_sec,
+        size=size,
+    )
+
+
 def render_meet_reel(
     top_cards: list[dict],
     brand_kit: Any,
@@ -865,6 +1018,8 @@ def render_meet_reel(
     duration_sec: Optional[float] = None,
     briefs: Optional[list[Optional[dict]]] = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    sponsor: str = "",
+    next_meet: str = "",
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -882,6 +1037,13 @@ def render_meet_reel(
                   (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
       format_name  output cut: ``story`` (default) / ``portrait`` /
                   ``square`` / ``landscape``.
+      sponsor     optional sponsor name for the reel's outro close (R1.30).
+                  When set, the Remotion outro shows a "proudly supported by"
+                  thank-you; blank falls back to the follow-the-club close.
+                  Only ever names a sponsor the caller actually supplied.
+      next_meet   optional next-meet label for the outro "next up" close
+                  (R1.30). Sponsor wins when both are given; the next meet
+                  then rides along as the outro's secondary line.
 
     Audio + poster behaviour matches ``render_story_card``: opt-in narration
     (built only from the cards' own facts) and/or the operator's music bed
@@ -933,7 +1095,32 @@ def render_meet_reel(
     if duration_sec is None:
         duration_sec = reel_duration_for(len(cards_props))
 
+    # R1.30 — optional outro-CTA inputs (sponsor thanks / next meet). Folded
+    # into the Remotion props AND the cache key ONLY when present, so a reel
+    # with neither stays byte-identical (same cache key, same render) to
+    # before this landed. Honest: only a sponsor / next meet the caller
+    # actually supplied is ever shown.
+    cta_props: dict[str, str] = {}
+    sponsor = (sponsor or "").strip()
+    next_meet = (next_meet or "").strip()
+    if sponsor:
+        cta_props["sponsor"] = sponsor
+    if next_meet:
+        cta_props["nextMeet"] = next_meet
+
     audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
+
+    # Burn-in captions (R1.3): caption each beat from its own verified line when
+    # the reel has a voice plan and the operator opted in. Only set when a track
+    # exists, so the captions-off cache key stays byte-identical. The Remotion
+    # engine paints these via captions.tsx; the still+FFmpeg fallback does not
+    # burn reel captions (it renders pre-baked stills) and silently ignores them.
+    if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
+        beat_frames = max(1, round(REEL_PER_CARD_SEC * MOTION_FPS))
+        for cp in cards_props:
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames)
+            if cj:
+                cp["captionsJson"] = cj
 
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
@@ -962,27 +1149,59 @@ def render_meet_reel(
         "duration": duration_sec,
         "size": list(size),
     }
+    if cta_props:
+        cache_payload["cta"] = cta_props
     if audio_plan:
         cache_payload["audio"] = audio_plan
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
         audio_rec = _finish_cached_video(
-            cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+            cached,
+            kind="reel",
+            plan=audio_plan,
+            duration_sec=duration_sec,
+            n_cards=len(cards_props),
         )
         if audio_plan:
             _update_manifest_audio(cached, audio_rec)
         return _publish(cached, out_path)
 
-    _run_remotion(
-        composition_id=COMP_REEL,
-        props={"cards": cards_props, "brand": brand_dict, "meetName": meet_name},
-        out_path=cached,
-        duration_sec=duration_sec,
-        size=size,
-    )
+    # R1.30 outro-CTA props (sponsor / next meet) ride into reel_props so BOTH
+    # the parallel (R1.28) and the serial render path carry them.
+    reel_props = {
+        "cards": cards_props,
+        "brand": brand_dict,
+        "meetName": meet_name,
+        **cta_props,
+    }
+    # Cold render. Try the opt-in parallel composition path (R1.28) first: it
+    # splits the reel's frames across concurrent segment renders and composites
+    # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
+    # workers. It returns None — and we take the unchanged serial render — when
+    # disabled, unavailable, or on any failure.
+    render_strategy = "serial"
+    if (
+        _render_reel_parallel_or_none(
+            props=reel_props, cached=cached, duration_sec=duration_sec, size=size
+        )
+        is not None
+    ):
+        render_strategy = "parallel-segments"
+    else:
+        _run_remotion(
+            composition_id=COMP_REEL,
+            props=reel_props,
+            out_path=cached,
+            duration_sec=duration_sec,
+            size=size,
+        )
     audio_rec = _finish_cached_video(
-        cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+        cached,
+        kind="reel",
+        plan=audio_plan,
+        duration_sec=duration_sec,
+        n_cards=len(cards_props),
     )
     from mediahub.visual.audio_mux import poster_path_for
 
@@ -991,12 +1210,15 @@ def render_meet_reel(
         {
             "kind": "reel",
             "engine": engine,
+            "render_strategy": render_strategy,
             "format": format_name,
             "size": list(size),
             "duration_sec": duration_sec,
             "meet_name": meet_name,
+            "cta": cta_props,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "audio": audio_rec,
+            "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
