@@ -73,6 +73,11 @@ class BoundedCache:
                 return self._data.pop(key)
             return self._data.pop(key, default)
 
+    def clear(self) -> None:
+        """Drop every entry (e.g. a site-wide cache purge)."""
+        with self._lock:
+            self._data.clear()
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._data)

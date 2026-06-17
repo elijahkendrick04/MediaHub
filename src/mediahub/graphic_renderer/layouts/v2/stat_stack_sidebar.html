@@ -121,7 +121,7 @@
 .ss__result {
   font-family: 'JetBrains Mono','Space Grotesk',monospace;
   font-feature-settings: "tnum"; font-weight: 700;
-  font-size: var(--mh-fit-result-px, 92px); line-height: 0.9;
+  font-size: var(--mh-fit-result-px, 92px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
   color: var(--mh-accent); white-space: nowrap;
 }
 
@@ -197,6 +197,8 @@
       <div class="ss__sponsor">{{SPONSOR_BLOCK}}</div>
     </div>
   </div>
+
+  {{ACCENT_DECORATION}}
 
 </div>
 </body>

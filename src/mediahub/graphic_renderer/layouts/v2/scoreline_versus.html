@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   scoreline_versus  (v2 archetype)
+
+   A centred "scoreline": the event on the left and the result on the
+   right, divided by a bold vertical fence down the middle — the layout
+   reads like a fixture/scoreboard line. The athlete name banners the top,
+   meet + brand close the foot. The mirror-symmetric left|right split
+   across a central divider is the signature, distinct from the stacked
+   ticker and the single horizon band. Built for splits, relays and
+   head-to-head/comparison moments; reads with no photo.
+   =================================================================== */
+
+.sv {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  padding: 84px 76px;
+}
+.sv *, .sv *::before, .sv *::after { box-sizing: border-box; }
+
+.sv__top { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 14px; }
+.sv__kicker { display: inline-flex; align-items: center; gap: 14px; font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--mh-accent); }
+.sv__tick { width: 42px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.sv__name {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: var(--mh-fit-surname-px, 116px); line-height: 0.88; letter-spacing: -0.01em;
+  text-transform: uppercase; color: var(--mh-on-surface); white-space: nowrap;
+}
+
+/* the scoreline — two cells across a central fence */
+.sv__board {
+  flex: 1 1 0; margin: 44px 0; position: relative; z-index: 2;
+  display: grid; grid-template-columns: 1fr 4px 1fr; align-items: center; gap: 0;
+}
+.sv__fence { background: var(--mh-accent); align-self: stretch; }
+.sv__cell { padding: 0 40px; display: flex; flex-direction: column; gap: 14px; }
+.sv__cell--r { text-align: right; align-items: flex-end; }
+.sv__lab { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 24px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mh-on-surface); opacity: 0.7; }
+.sv__event { font-family: 'Anton','Bebas Neue',sans-serif; font-weight: 400; font-size: 70px; line-height: 0.92; text-transform: uppercase; color: var(--mh-on-surface); }
+.sv__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 92px); font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9; color: var(--mh-accent); white-space: nowrap;
+}
+.sv__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; color: var(--mh-on-surface); opacity: 0.8; }
+
+.sv__foot { position: relative; z-index: 2; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-top: 2px solid var(--mh-outline); padding-top: 26px; }
+.sv__brand { display: flex; align-items: center; gap: 16px; }
+.sv__logo { height: 58px; width: auto; }
+.sv__logo img, .sv__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.sv__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
+.sv__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--mh-on-surface); }
+.sv__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-surface); opacity: 0.72; margin-top: 4px; }
+.sv__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="sv">
+
+  <div class="sv__top">
+    <div class="sv__kicker"><span class="sv__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+    <div class="sv__name">{{ATHLETE_FULL_NAME}}</div>
+  </div>
+
+  <div class="sv__board">
+    <div class="sv__cell">
+      <div class="sv__lab">Event</div>
+      <div class="sv__event">{{EVENT_NAME}}</div>
+    </div>
+    <div class="sv__fence"></div>
+    <div class="sv__cell sv__cell--r">
+      <div class="sv__lab">Result</div>
+      <div class="sv__result">{{RESULT_VALUE}}</div>
+      <div class="sv__stat">{{HERO_STAT}}</div>
+    </div>
+  </div>
+
+  <div class="sv__foot">
+    <div class="sv__brand">
+      <div class="sv__logo">{{LOGO_BLOCK}}</div>
+      <div class="sv__brand-text">
+        <div class="sv__club">{{CLUB_FULL}}</div>
+        <div class="sv__meet">{{MEET_NAME}}</div>
+      </div>
+    </div>
+    <div class="sv__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

@@ -247,38 +247,34 @@ class TestDerive:
 
 
 # ---------------------------------------------------------------------------
-# C3 — light-dark() for prefers-color-scheme parity
+# C3 — dark-only colour scheme
 # ---------------------------------------------------------------------------
 
 
-class TestLightDark:
-    def test_color_scheme_declared(self, base_css):
+class TestDarkOnly:
+    def test_color_scheme_declared_dark(self, base_css):
         # color-scheme tells the UA chrome (scrollbars, form controls)
-        # which mode to render in.
-        assert "color-scheme:" in base_css
+        # which mode to render in. MediaHub ships a single dark theme.
+        assert "color-scheme: dark;" in base_css
 
-    def test_light_dark_used_extensively(self, base_css):
-        # Tier-2 role tokens are wrapped in light-dark(). Count how
-        # many actually fire.
-        matches = re.findall(r"light-dark\(", base_css)
-        assert len(matches) >= 20, (
-            f"only {len(matches)} light-dark() wrappers; expected ≥ 20 "
-            f"(one per tier-2 role token)"
-        )
+    def test_no_light_dark_wrappers(self, base_css):
+        # The light/dark theme was removed — no light-dark() wrappers
+        # remain; every tier-2 role resolves to a single dark value.
+        assert "light-dark(" not in base_css
 
-    def test_light_dark_arguments_identical_for_now(self, base_css):
-        """For Stage C, light-dark(<light>, <dark>) ships identical
-        arguments — Stage D introduces real light-mode values.
-        """
-        # Find every light-dark(var(--a), var(--b)) and assert a == b.
-        for m in re.finditer(
-            r"light-dark\(\s*var\((--[\w-]+)\)\s*,\s*var\((--[\w-]+)\)\s*\)",
-            base_css,
-        ):
-            light, dark = m.group(1), m.group(2)
-            assert light == dark, (
-                f"Stage C requires identical light/dark args; got "
-                f"light={light} != dark={dark}"
+    def test_surface_roles_resolve_to_dark_primitives(self, base_css):
+        # The core surface + on-surface roles map to the dark neutral ramp.
+        expected = {
+            "--mh-surface": "--mh-prim-neutral-950",
+            "--mh-surface-deep": "--mh-prim-neutral-1000",
+            "--mh-surface-variant": "--mh-prim-neutral-900",
+            "--mh-on-surface": "--mh-prim-neutral-50",
+        }
+        for token, prim in expected.items():
+            m = re.search(rf"{re.escape(token)}:\s*var\((--[\w-]+)\)\s*;", base_css)
+            assert m, f"{token} is not a single var() role"
+            assert m.group(1) == prim, (
+                f"{token} resolves to {m.group(1)}, expected {prim}"
             )
 
 

@@ -4,8 +4,8 @@
    The framework. Three pieces:
      1. The seven seed variables — the ONLY hand-coded brand inputs.
         Python ships these; the browser derives everything else.
-     2. Tier-2 semantic role tokens (~25 Material-3-style roles), light-
-        dark()-wrapped so the same seed yields light AND dark variants.
+     2. Tier-2 semantic role tokens (~25 Material-3-style roles),
+        dark-only (MediaHub ships a single dark theme).
      3. @property registrations so every tier-2 colour interpolates
         during Stage E's cascade animation.
 
@@ -25,9 +25,9 @@
 
 :root {
   /* color-scheme tells the UA chrome (scrollbars, form controls,
-     text selection) to follow the user's preferred mode. Stage C
-     ships dark-mode as the visual default; Stage D may flip to
-     `light dark` once a real light-mode palette is signed off. */
+     text selection) which mode to render in. MediaHub is dark-only.
+     The authoritative declaration lives in responsive_guardrails.py
+     (appended last); this one keeps the base file self-consistent. */
   color-scheme: dark;
 
   /* ------------------------------------------------------------------
@@ -48,34 +48,34 @@
 /* =====================================================================
    TIER 2 — SEMANTIC ROLE TOKENS (Material 3 vocabulary)
    ---------------------------------------------------------------------
-   Each role wraps its value in light-dark(<light>, <dark>) so the same
-   declaration adapts to the user's prefers-color-scheme. For Stage C
-   both branches ship identical pixels (dark mode is the only visual
-   design today); Stage D introduces real light-mode values once the
-   designer signs off.
+   ~25 Material-3-style roles referencing the tier-1 primitives.
+   MediaHub ships a single dark theme, so each role resolves to one
+   dark value (no light branch).
    ===================================================================== */
 
 :root {
-  /* Surfaces — the page, cards, raised elements */
-  --mh-surface:                light-dark(var(--mh-prim-neutral-950), var(--mh-prim-neutral-950));
-  --mh-surface-deep:           light-dark(var(--mh-prim-neutral-1000), var(--mh-prim-neutral-1000));
-  --mh-surface-variant:        light-dark(var(--mh-prim-neutral-900), var(--mh-prim-neutral-900));
-  --mh-surface-container:      light-dark(var(--mh-prim-neutral-850), var(--mh-prim-neutral-850));
-  --mh-surface-container-high: light-dark(var(--mh-prim-neutral-800), var(--mh-prim-neutral-800));
+  /* Surfaces — the page, cards, raised elements. */
+  --mh-surface:                var(--mh-prim-neutral-950);
+  --mh-surface-deep:           var(--mh-prim-neutral-1000);
+  --mh-surface-variant:        var(--mh-prim-neutral-900);
+  --mh-surface-container:      var(--mh-prim-neutral-850);
+  --mh-surface-container-high: var(--mh-prim-neutral-800);
 
-  /* On-surface (text + icons on neutral surfaces) */
-  --mh-on-surface:         light-dark(var(--mh-prim-neutral-50), var(--mh-prim-neutral-50));
-  --mh-on-surface-variant: light-dark(var(--mh-prim-neutral-300), var(--mh-prim-neutral-300));
-  --mh-on-surface-muted:   light-dark(var(--mh-prim-neutral-400), var(--mh-prim-neutral-400));
-  --mh-on-surface-faint:   light-dark(var(--mh-prim-neutral-600), var(--mh-prim-neutral-600));
+  /* On-surface (text + icons on neutral surfaces) — paper-cream on the
+     dark pit-wall. */
+  --mh-on-surface:         var(--mh-prim-neutral-50);
+  --mh-on-surface-variant: var(--mh-prim-neutral-300);
+  --mh-on-surface-muted:   var(--mh-prim-neutral-400);
+  --mh-on-surface-faint:   var(--mh-prim-neutral-600);
 
-  /* Primary (brand) — CTAs, links, focus, live state */
-  --mh-primary:               light-dark(var(--mh-prim-brand-400), var(--mh-prim-brand-400));
-  --mh-primary-hover:         light-dark(var(--mh-prim-brand-300), var(--mh-prim-brand-300));
-  --mh-primary-pressed:       light-dark(var(--mh-prim-brand-600), var(--mh-prim-brand-600));
-  --mh-on-primary:            light-dark(var(--mh-prim-neutral-950), var(--mh-prim-neutral-950));
-  --mh-primary-container:     light-dark(var(--mh-prim-brand-100), var(--mh-prim-brand-100));
-  --mh-on-primary-container:  light-dark(var(--mh-prim-brand-900), var(--mh-prim-brand-900));
+  /* Primary (brand) — CTAs, links, focus, live state. The lane-yellow
+     fill is brand identity. */
+  --mh-primary:               var(--mh-prim-brand-400);
+  --mh-primary-hover:         var(--mh-prim-brand-300);
+  --mh-primary-pressed:       var(--mh-prim-brand-600);
+  --mh-on-primary:            var(--mh-prim-neutral-950);
+  --mh-primary-container:     var(--mh-prim-brand-100);
+  --mh-on-primary-container:  var(--mh-prim-brand-900);
 
   /* Secondary — Stage A aliases to primary; Stage B's HCT-derived
      secondary palette is wired in by Stage D. */
@@ -83,11 +83,12 @@
   --mh-on-secondary: var(--mh-on-primary);
 
   /* Tertiary (medal) — RESERVED EXCLUSIVELY for athlete achievements
-     per the existing "Podium After Dark" convention */
-  --mh-tertiary:               light-dark(var(--mh-prim-tertiary-400), var(--mh-prim-tertiary-400));
-  --mh-on-tertiary:            light-dark(var(--mh-prim-tertiary-950), var(--mh-prim-tertiary-950));
-  --mh-tertiary-container:     light-dark(var(--mh-prim-tertiary-100), var(--mh-prim-tertiary-100));
-  --mh-on-tertiary-container:  light-dark(var(--mh-prim-tertiary-900), var(--mh-prim-tertiary-900));
+     per the existing "Podium After Dark" convention. The pale medal-
+     gold (400) glows on the dark pit-wall. */
+  --mh-tertiary:               var(--mh-prim-tertiary-400);
+  --mh-on-tertiary:            var(--mh-prim-tertiary-950);
+  --mh-tertiary-container:     var(--mh-prim-tertiary-100);
+  --mh-on-tertiary-container:  var(--mh-prim-tertiary-900);
 
   /* Outline (borders, dividers, form chrome).
      Today's values are rgba(245,242,232,N) ink blends. Modern browsers
@@ -99,14 +100,14 @@
 
   /* Status roles — locked by hue family per cross-cultural-semantics
      research (Aslam 2006, WCAG 1.4.1). */
-  --mh-error:    light-dark(var(--mh-prim-error-400), var(--mh-prim-error-400));
-  --mh-on-error: light-dark(var(--mh-prim-neutral-950), var(--mh-prim-neutral-950));
+  --mh-error:    var(--mh-prim-error-400);
+  --mh-on-error: var(--mh-prim-neutral-950);
 
-  --mh-success: light-dark(var(--mh-prim-success-400), var(--mh-prim-success-400));
-  --mh-warning: light-dark(var(--mh-prim-warning-400), var(--mh-prim-warning-400));
-  --mh-info:    light-dark(var(--mh-prim-info-400), var(--mh-prim-info-400));
+  --mh-success: var(--mh-prim-success-400);
+  --mh-warning: var(--mh-prim-warning-400);
+  --mh-info:    var(--mh-prim-info-400);
 
-  /* Focus */
+  /* Focus — lane-yellow ring on dark. */
   --mh-focus: var(--mh-primary);
 
   /* Elevation (shadows) — three depths */

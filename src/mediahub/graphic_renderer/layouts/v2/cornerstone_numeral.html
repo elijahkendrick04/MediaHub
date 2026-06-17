@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   cornerstone_numeral  (v2 archetype)
+
+   The result is anchored as a "cornerstone": a mega monospace numeral
+   pinned to the bottom-left and reading up off the floor, with the
+   athlete + brand stacked along the top edge and the event sitting on
+   the baseline beside the figure. Unlike big_number_dominant (numeral
+   floated dead-centre with a ghost word), the weight here is bottom-left
+   corner-anchored, leaving the upper field open — a different silhouette
+   at a glance. Entirely typographic; needs no photo.
+   =================================================================== */
+
+.cn {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 92px 84px 84px;
+}
+.cn *, .cn *::before, .cn *::after { box-sizing: border-box; }
+
+.cn__head {
+  position: relative; z-index: 2;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+}
+.cn__id { display: flex; flex-direction: column; gap: 16px; }
+.cn__kicker {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 25px; letter-spacing: 0.24em;
+  text-transform: uppercase; color: var(--mh-accent);
+}
+.cn__tick { width: 42px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.cn__name {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: 64px; line-height: 0.94;
+  letter-spacing: 0.004em; text-transform: uppercase; color: var(--mh-on-primary);
+}
+.cn__brand { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.cn__logo { height: 60px; width: auto; }
+.cn__logo img, .cn__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.cn__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-primary); text-align: right; }
+
+/* the cornerstone — numeral hard against the lower-left, event on its baseline */
+.cn__hero { position: relative; z-index: 2; }
+.cn__event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 34px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--mh-on-primary); margin-bottom: 8px;
+}
+.cn__num {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-mega-result-px, 220px); font-variation-settings: var(--mh-axes-mega-result, normal);
+  line-height: 0.82; letter-spacing: -0.035em; color: var(--mh-accent);
+  white-space: nowrap;
+}
+.cn__row {
+  margin-top: 24px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  border-top: 2px solid var(--mh-outline); padding-top: 24px;
+}
+.cn__stat { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 26px; color: var(--mh-on-primary); opacity: 0.84; }
+.cn__meet { font-family: 'Inter', sans-serif; font-weight: 500; font-size: 19px; color: var(--mh-on-primary); opacity: 0.72; }
+.cn__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="cn">
+
+  <div class="cn__head">
+    <div class="cn__id">
+      <div class="cn__kicker"><span class="cn__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+      <div class="cn__name">{{ATHLETE_FULL_NAME}}</div>
+    </div>
+    <div class="cn__brand">
+      <div class="cn__logo">{{LOGO_BLOCK}}</div>
+      <div class="cn__club">{{CLUB_FULL}}</div>
+    </div>
+  </div>
+
+  <div class="cn__hero">
+    <div class="cn__event">{{EVENT_NAME}}</div>
+    <div class="cn__num">{{RESULT_VALUE}}</div>
+    <div class="cn__row">
+      <div class="cn__stat">{{HERO_STAT}}</div>
+      <div class="cn__meta">
+        <div class="cn__meet">{{MEET_NAME}}</div>
+        <div class="cn__sponsor">{{SPONSOR_BLOCK}}</div>
+      </div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

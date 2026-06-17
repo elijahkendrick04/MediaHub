@@ -42,7 +42,9 @@ The roadmap's list contract (kept by this script):
   maintainer can do — ``F.*`` ids plus the founder-owned ``PC.*`` items).
   Both are searched for directive ids; an id must be unique across them.
 
-* Completed items live between ``<!-- ROADMAP:DONE -->`` markers::
+* Completed items live between ``<!-- ROADMAP:DONE -->`` markers, in
+  ``docs/ROADMAP_BUILT.md`` (split out 2026-06-13 so the forward roadmap stays
+  clean — the two to-do blocks above stay in ``docs/ROADMAP.md``)::
 
       - ✅ **<ID>** · <description> *(completed <date>[, refs])*
 
@@ -62,6 +64,10 @@ from datetime import date
 from pathlib import Path
 
 ROADMAP = Path(__file__).resolve().parents[1] / "docs" / "ROADMAP.md"
+# The Completed/Done list lives in its own file (split out 2026-06-13 so the
+# forward roadmap stays a clean to-do plan); this script maintains the DONE
+# block there. ``main`` reads both files and writes whichever changed.
+ROADMAP_BUILT = Path(__file__).resolve().parents[1] / "docs" / "ROADMAP_BUILT.md"
 
 # Status keyword -> (emoji, label) rendered into an item badge.
 STATUS = {
@@ -182,26 +188,54 @@ def _append_line(body: str, line: str) -> str:
     return body.rstrip("\n") + "\n" + line + "\n"
 
 
-def set_item_status(text: str, ident: str, status_kw: str, *, today: str | None = None):
+def _apply_block_updates(text, originals, new_bodies, names):
+    """Substitute the changed blocks in ``names`` back into ``text``.
+
+    Only blocks whose body actually changed are rewritten. This lets the to-do
+    blocks (in ROADMAP.md) and the DONE block (in ROADMAP_BUILT.md) be written
+    back into *different* source texts from one ``new_bodies`` dict.
+    """
+    out = text
+    for name in names:
+        if name in new_bodies and new_bodies[name] != originals.get(name):
+            out = _block_re(name).sub(
+                lambda _m, n=name, b=new_bodies[name]: f"<!-- ROADMAP:{n} -->{b}<!-- /ROADMAP:{n} -->",
+                out,
+                count=1,
+            )
+    return out
+
+
+def set_item_status(text, ident, status_kw, *, today=None, done_text=None):
     """Apply a directive to the to-do / Completed lists.
 
     ``done`` moves the item (from whichever to-do block holds it) into the
     Completed block with a ``*(completed <date>)*`` stamp (an
     already-completed item keeps its original annotation). Any other status
     sets the badge in place, or — for a Completed item — demotes it back to a
-    to-do block (``F.*`` → the founder block, else the main block). Returns
-    ``(new_text, changed)``; unknown ids are a no-op.
+    to-do block (``F.*`` → the founder block, else the main block).
+
+    The to-do blocks are read from ``text``; the DONE block is read from
+    ``done_text`` when given, else from ``text``. With ``done_text=None``
+    (single-document mode — used by the unit tests) it returns
+    ``(new_text, changed)``; with a ``done_text`` (the two-file ROADMAP.md /
+    ROADMAP_BUILT.md split) it returns ``(new_text, new_done_text, changed)``.
+    Unknown ids are a no-op.
     """
     if status_kw not in STATUS:
-        return text, False
+        return (text, False) if done_text is None else (text, done_text, False)
+    done_src = text if done_text is None else done_text
     bodies = {}
-    for name in (*_TODO_BLOCKS, "DONE"):
+    for name in _TODO_BLOCKS:
         m = _block_re(name).search(text)
         if m:
             bodies[name] = m.group(1)
+    m = _block_re("DONE").search(done_src)
+    if m:
+        bodies["DONE"] = m.group(1)
     if "TODO" not in bodies or "DONE" not in bodies:
-        print("warning: TODO/DONE marker blocks not found in ROADMAP.md", file=sys.stderr)
-        return text, False
+        print("warning: TODO/DONE marker blocks not found", file=sys.stderr)
+        return (text, False) if done_text is None else (text, done_text, False)
 
     found_in, item = None, None
     for name in (*_TODO_BLOCKS, "DONE"):
@@ -211,7 +245,7 @@ def set_item_status(text: str, ident: str, status_kw: str, *, today: str | None 
                 found_in = name
                 break
     if not item:
-        return text, False
+        return (text, False) if done_text is None else (text, done_text, False)
     old_line = item.group(0)
     core = _item_core(old_line)
 
@@ -239,15 +273,12 @@ def set_item_status(text: str, ident: str, status_kw: str, *, today: str | None 
         else:
             new_bodies[found_in] = bodies[found_in].replace(old_line, new_line, 1)
 
-    new_text = text
-    for name, body in new_bodies.items():
-        if body != bodies[name]:
-            new_text = _block_re(name).sub(
-                lambda _m, n=name, b=body: f"<!-- ROADMAP:{n} -->{b}<!-- /ROADMAP:{n} -->",
-                new_text,
-                count=1,
-            )
-    return new_text, new_text != text
+    if done_text is None:
+        new_text = _apply_block_updates(text, bodies, new_bodies, (*_TODO_BLOCKS, "DONE"))
+        return new_text, new_text != text
+    new_text = _apply_block_updates(text, bodies, new_bodies, _TODO_BLOCKS)
+    new_done = _apply_block_updates(done_text, bodies, new_bodies, ("DONE",))
+    return new_text, new_done, (new_text != text) or (new_done != done_text)
 
 
 # A ✅ badge wherever it sits on a to-do line (`· ✅ **LABEL**`). Open items
@@ -276,8 +307,13 @@ def _next_f_number(bodies) -> int:
     return max(nums) + 1
 
 
-def sweep_completed(text: str, *, today: str | None = None):
+def sweep_completed(text, *, done_text=None, today=None):
     """Move every to-do item already hand-marked ✅ into the Completed list.
+
+    The to-do blocks are read from ``text``; the DONE block from ``done_text``
+    when given, else from ``text``. With ``done_text=None`` returns
+    ``(new_text, moved_ids)``; with a ``done_text`` (the two-file split)
+    returns ``(new_text, new_done_text, moved_ids)``.
 
     Sessions sometimes record a ship by editing the badge in place
     (``· ✅ **BUILT (2026-06-12)**: …``) instead of issuing a
@@ -292,13 +328,17 @@ def sweep_completed(text: str, *, today: str | None = None):
     flagged as needing its step-by-step guide. Returns
     ``(new_text, moved_ids)``; idempotent — a second run is a no-op.
     """
+    done_src = text if done_text is None else done_text
     bodies = {}
-    for name in (*_TODO_BLOCKS, "DONE"):
+    for name in _TODO_BLOCKS:
         m = _block_re(name).search(text)
         if m:
             bodies[name] = m.group(1)
+    m = _block_re("DONE").search(done_src)
+    if m:
+        bodies["DONE"] = m.group(1)
     if "TODO" not in bodies or "DONE" not in bodies:
-        return text, []
+        return (text, []) if done_text is None else (text, done_text, [])
 
     moved = []
     new_bodies = dict(bodies)
@@ -352,16 +392,13 @@ def sweep_completed(text: str, *, today: str | None = None):
             moved.append(ident)
 
     if not moved:
-        return text, []
-    new_text = text
-    for name, body in new_bodies.items():
-        if body != bodies.get(name):
-            new_text = _block_re(name).sub(
-                lambda _m, n=name, b=body: f"<!-- ROADMAP:{n} -->{b}<!-- /ROADMAP:{n} -->",
-                new_text,
-                count=1,
-            )
-    return new_text, moved
+        return (text, []) if done_text is None else (text, done_text, [])
+    if done_text is None:
+        new_text = _apply_block_updates(text, bodies, new_bodies, (*_TODO_BLOCKS, "DONE"))
+        return new_text, moved
+    new_text = _apply_block_updates(text, bodies, new_bodies, _TODO_BLOCKS)
+    new_done = _apply_block_updates(done_text, bodies, new_bodies, ("DONE",))
+    return new_text, new_done, moved
 
 
 def replace_block(text: str, name: str, content: str):
@@ -470,6 +507,54 @@ def _commits_in_range(before: str, after: str):
     return [c.strip() for c in out.split("\x1e") if c.strip()]
 
 
+# How many recent non-merge commits to re-scan for `roadmap:` directives on
+# every run, on top of this push's own range. The narrow push range alone is
+# not enough: `main` is updated by a SHARED bot branch landed via async
+# auto-merge, and under concurrent feature merges a later run rebuilds that
+# branch from the freshest main — which still lacks an earlier run's *un-merged*
+# roadmap delta — and force-overwrites it, applying only its own range's
+# directives. Any directive whose commit sat solely in the overwritten run's
+# range is then silently lost (this is how G1.2 / G1.22 / G1.30 stalled at
+# NOT-STARTED despite shipping). Re-applying the directives found in a bounded
+# recent window every run makes the apply self-healing: a `done` is idempotent
+# (re-applying it to an already-moved item is a no-op), so a re-scan can only
+# converge the lists toward the directives' intent, never corrupt them — the
+# next push to land reinstates anything a force-overwrite dropped.
+_DIRECTIVE_LOOKBACK = int(os.environ.get("ROADMAP_DIRECTIVE_LOOKBACK", "400"))
+
+
+def _directive_messages(before: str, after: str, lookback: int | None = None):
+    """Commit bodies to scan for directives, ordered oldest->newest.
+
+    The union of this push's explicit range ``(before, after]`` and a bounded
+    recent backstop (the last ``lookback`` non-merge commits ending at
+    ``after``). The backstop is the self-heal; the explicit range guarantees a
+    directive is never *less* likely to apply than before. Returned oldest-first
+    so that — via :func:`parse_directives`' last-write-wins — the **newest**
+    directive for any id is the one that takes effect.
+    """
+    if lookback is None:
+        lookback = _DIRECTIVE_LOOKBACK
+    bodies = list(_commits_in_range(before, after))  # newest-first
+    if lookback > 0:
+        try:
+            out = _git("log", "--no-merges", f"-{int(lookback)}", "--format=%B%x1e", after)
+            bodies += [c.strip() for c in out.split("\x1e") if c.strip()]
+        except subprocess.CalledProcessError:
+            pass
+    # De-dup identical bodies (the range is a subset of the backstop), keeping
+    # the first — newest — occurrence, then reverse to hand parse_directives an
+    # oldest->newest stream so the latest directive for an id wins.
+    seen = set()
+    uniq = []
+    for body in bodies:
+        if body not in seen:
+            seen.add(body)
+            uniq.append(body)
+    uniq.reverse()
+    return uniq
+
+
 def _recent_commits(n: int = 12):
     out = _git("log", "--no-merges", f"-{n + 5}", "--format=%cs%x1f%H%x1f%s%x1e")
     items = []
@@ -491,19 +576,22 @@ def main() -> int:
     before = os.environ.get("ROADMAP_BEFORE") or ""
 
     text = ROADMAP.read_text(encoding="utf-8")
-    original = text
+    built = ROADMAP_BUILT.read_text(encoding="utf-8") if ROADMAP_BUILT.exists() else ""
+    original, original_built = text, built
 
     # 1. completed-item sweep: anything hand-marked ✅ on a to-do list moves
-    #    to Completed (no directive needed); declared human remainders are
-    #    kept on / filed into the founder list.
-    text, swept = sweep_completed(text)
+    #    to the Completed list in ROADMAP_BUILT.md (no directive needed);
+    #    declared human remainders are kept on / filed into the founder list.
+    text, built, swept = sweep_completed(text, done_text=built)
     applied = [f"{ident}=done(sweep)" for ident in swept]
 
-    # 2. status directives from this push → update/move list items (after the
-    #    sweep, so an explicit directive in this push wins over it)
-    directives = parse_directives(_commits_in_range(before, after))
+    # 2. status directives → update/move list items (after the sweep, so an
+    #    explicit directive wins over it). Scanned from this push's range PLUS a
+    #    bounded recent backstop so a directive force-dropped by the concurrent
+    #    bot-branch race (see _DIRECTIVE_LOOKBACK) self-heals on the next push.
+    directives = parse_directives(_directive_messages(before, after))
     for ident, status_kw in directives:
-        text, changed = set_item_status(text, ident, status_kw)
+        text, built, changed = set_item_status(text, ident, status_kw, done_text=built)
         if changed:
             applied.append(f"{ident}={status_kw}")
         else:
@@ -523,8 +611,14 @@ def main() -> int:
     if sentinel_issues is not None:
         text, _ = replace_block(text, "SENTINEL", render_sentinel_block(sentinel_issues))
 
+    wrote = False
     if text != original:
         ROADMAP.write_text(text, encoding="utf-8")
+        wrote = True
+    if built != original_built:
+        ROADMAP_BUILT.write_text(built, encoding="utf-8")
+        wrote = True
+    if wrote:
         print("roadmap updated" + (f" (status: {', '.join(applied)})" if applied else ""))
         return 0
     print("roadmap unchanged")

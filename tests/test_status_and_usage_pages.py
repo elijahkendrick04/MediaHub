@@ -60,15 +60,17 @@ class TestStatusPageReachableWithoutOrg:
         assert "Status" in body
         assert "Backend" in body
 
-    def test_status_page_says_no_data_yet_when_log_empty(self, fresh_app):
+    def test_status_page_is_simple_operational_or_down(self, fresh_app):
+        # The public status page is now the simple "Website operational" /
+        # "Website down" view — no uptime percentages are shown to the public.
+        # The detailed uptime/incident breakdown moved to operator-only
+        # Settings -> Developer.
         c, _ = fresh_app
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
-        # Honest behaviour: with no heartbeats logged, the page must
-        # NOT claim 100% uptime — it shows em-dashes.
-        assert "100%" not in body or "&mdash;" in body
-        # And the pill should reflect "no data yet" / similar.
-        assert "no data yet" in body or "heartbeat" in body.lower()
+        # No uptime-percentage claims, and the reachable site reads operational.
+        assert "uptime" not in body.lower()
+        assert "Website operational" in body or "Website down" in body
 
 
 class TestApiStatusJsonShape:
@@ -125,6 +127,63 @@ class TestHealthzRecordsHeartbeat:
         assert latest is not None
         assert latest["source"] == "health"
         assert latest["ok"] is expected_ok
+
+
+class TestHeartbeatDrainResilience:
+    """The heartbeat drain thread is a per-worker daemon: it must NEVER die.
+
+    task_done() can raise ValueError("called too many times") if the queue is
+    join()ed or reset (e.g. the test reload of web.py) between the loop's get()
+    and its task_done(). If that escaped the loop the thread would terminate and
+    the worker would silently stop recording heartbeats for the rest of its
+    life — so the loop must keep draining past a task_done() ValueError.
+    """
+
+    def test_drain_loop_survives_task_done_value_error(self, monkeypatch):
+        import queue as _queue
+        import threading
+        import time
+
+        import mediahub.observability.uptime as upt
+        import mediahub.web.web as wm
+
+        class _FlakyTaskDoneQueue(_queue.Queue):
+            def __init__(self):
+                super().__init__()
+                self._raised_once = False
+
+            def task_done(self):
+                if not self._raised_once:
+                    self._raised_once = True
+                    raise ValueError("task_done() called too many times")
+                return super().task_done()
+
+        flaky = _FlakyTaskDoneQueue()
+        recorded: list[str] = []
+        done = threading.Event()
+
+        def _fake_record(*, ok, source, response_ms, error):
+            recorded.append(source)
+            if len(recorded) >= 2:
+                done.set()
+
+        monkeypatch.setattr(wm, "_HEARTBEAT_QUEUE", flaky)
+        monkeypatch.setattr(upt, "record_heartbeat", _fake_record)
+
+        t = threading.Thread(target=wm._heartbeat_drain_loop, daemon=True)
+        t.start()
+
+        # First item's task_done() raises ValueError; the loop must swallow it
+        # and keep going, so the SECOND item still gets recorded.
+        flaky.put((True, "first", 1.0, None))
+        flaky.put((True, "second", 1.0, None))
+
+        assert done.wait(timeout=5.0), (
+            "drain thread died after task_done() ValueError — "
+            f"only recorded {recorded}"
+        )
+        assert recorded[:2] == ["first", "second"]
+        assert t.is_alive()
 
 
 class TestHealthzPing:

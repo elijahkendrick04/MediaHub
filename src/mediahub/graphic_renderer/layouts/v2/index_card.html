@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   index_card  (v2 archetype)
+
+   A precise "filing card": a labelled tab up top, a ruled header bearing
+   the name, then a left-aligned monospace data ledger — Event / Result /
+   Detail set as index lines with dotted leaders to right-aligned values.
+   The clerical, ruled, left-aligned register is the signature, cooler and
+   more documentary than the editorial numbers grid's cells. Entirely
+   typographic; never needs a photo.
+   =================================================================== */
+
+.ix {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  padding: 84px 80px;
+}
+.ix *, .ix *::before, .ix *::after { box-sizing: border-box; }
+
+.ix__tab { position: relative; z-index: 2; align-self: flex-start; display: inline-flex; padding: 12px 22px; background: var(--mh-accent); color: var(--mh-primary); font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800; font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase; }
+.ix__header { position: relative; z-index: 2; margin-top: 28px; padding-bottom: 24px; border-bottom: 3px solid var(--mh-on-surface); }
+.ix__first { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 28px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--mh-accent); }
+.ix__surname { font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400; font-size: var(--mh-fit-surname-px, 112px); line-height: 0.88; text-transform: uppercase; color: var(--mh-on-surface); white-space: nowrap; }
+
+/* the ledger */
+.ix__ledger { position: relative; z-index: 2; flex: 1 1 0; margin-top: 40px; display: flex; flex-direction: column; gap: 0; }
+.ix__line { display: flex; align-items: baseline; gap: 18px; padding: 26px 0; border-bottom: 1px solid var(--mh-outline); }
+.ix__key { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 26px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mh-on-surface); opacity: 0.74; flex: 0 0 auto; }
+.ix__lead { flex: 1 1 auto; border-bottom: 2px dotted var(--mh-outline); transform: translateY(-6px); }
+.ix__val { font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum"; font-weight: 700; font-size: 40px; line-height: 1; color: var(--mh-on-surface); flex: 0 0 auto; text-align: right; }
+.ix__val--hero { font-size: var(--mh-fit-result-px, 64px); font-variation-settings: var(--mh-axes-result, normal); color: var(--mh-accent); }
+
+.ix__foot { position: relative; z-index: 2; margin-top: 36px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.ix__brand { display: flex; align-items: center; gap: 14px; }
+.ix__logo { height: 56px; width: auto; }
+.ix__logo img, .ix__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.ix__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 22px; text-transform: uppercase; color: var(--mh-on-surface); }
+.ix__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="ix">
+
+  <div class="ix__tab">{{ACHIEVEMENT_LABEL}}</div>
+
+  <div class="ix__header">
+    <div class="ix__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="ix__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  </div>
+
+  <div class="ix__ledger">
+    <div class="ix__line">
+      <div class="ix__key">Event</div>
+      <div class="ix__lead"></div>
+      <div class="ix__val">{{EVENT_NAME}}</div>
+    </div>
+    <div class="ix__line">
+      <div class="ix__key">Result</div>
+      <div class="ix__lead"></div>
+      <div class="ix__val ix__val--hero">{{RESULT_VALUE}}</div>
+    </div>
+    <div class="ix__line">
+      <div class="ix__key">Detail</div>
+      <div class="ix__lead"></div>
+      <div class="ix__val">{{HERO_STAT}}</div>
+    </div>
+  </div>
+
+  <div class="ix__foot">
+    <div class="ix__brand">
+      <div class="ix__logo">{{LOGO_BLOCK}}</div>
+      <div class="ix__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="ix__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

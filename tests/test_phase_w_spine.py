@@ -19,6 +19,7 @@ from mediahub.athletes.registry import (
     merge_athletes,
     milestone_context,
     normalise_name,
+    purge_run,
     record_run_swims,
     resolve,
     sync_run_payload,
@@ -155,6 +156,39 @@ class TestRegistry:
         entry = ctx["maya patel"]
         assert entry["prior_races"] == 1
         assert entry["prior_events"] == ["100FRLC"]
+
+    def test_purge_run_erases_swims_and_history(self, db):
+        # Two meets for the same swimmer; deleting one must leave only the
+        # other's swim in the milestone log (no leaked race counts).
+        record_run_swims(
+            ORG, "run1", [{"name": "Maya Patel", "event": "100FRLC", "time_cs": 6532}], db_path=db
+        )
+        record_run_swims(
+            ORG, "run2", [{"name": "Maya Patel", "event": "50FRLC", "time_cs": 3001}], db_path=db
+        )
+        rep = purge_run(ORG, "run1", db_path=db)
+        assert rep["swims"] == 1
+        assert rep["athletes_deactivated"] == 0  # still has run2
+        roster = list_athletes(ORG, db_path=db)
+        assert len(roster) == 1 and roster[0].race_count == 1
+        # Nothing from run1 survives in prior history.
+        ctx = milestone_context(ORG, db_path=db)
+        assert ctx["maya patel"]["prior_events"] == ["50FRLC"]
+
+    def test_purge_run_deactivates_athlete_with_no_swims_left(self, db):
+        # A swimmer who only ever appears in the deleted run should drop off
+        # the active roster entirely — otherwise they'd survive a deletion.
+        record_run_swims(
+            ORG, "run1", [{"name": "Solo Swimmer", "event": "200IMSC", "time_cs": 14000}], db_path=db
+        )
+        assert len(list_athletes(ORG, db_path=db)) == 1
+        rep = purge_run(ORG, "run1", db_path=db)
+        assert rep["swims"] == 1 and rep["athletes_deactivated"] == 1
+        assert list_athletes(ORG, db_path=db) == []
+
+    def test_purge_run_noop_for_unknown(self, db):
+        assert purge_run(ORG, "nope", db_path=db) == {"swims": 0, "athletes_deactivated": 0}
+        assert purge_run("", "run1", db_path=db) == {"swims": 0, "athletes_deactivated": 0}
 
     def test_merge_moves_swims_and_aliases_and_persists(self, db):
         a = get_or_create(ORG, "Maya Patel", db_path=db)

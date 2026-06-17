@@ -127,7 +127,14 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
     excerpts, and the motion cache. Never raises — erasure of one store must
     not abort erasure of the rest.
     """
-    report = {"pb_cache_files": 0, "memory_rows": 0, "posting_excerpts": 0, "motion_files": 0}
+    report = {
+        "pb_cache_files": 0,
+        "memory_rows": 0,
+        "posting_excerpts": 0,
+        "motion_files": 0,
+        "athlete_swims": 0,
+        "review_comments": 0,
+    }
     try:
         from mediahub.pb_discovery.cache import _discovered_root
 
@@ -152,6 +159,12 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
             report["memory_rows"] = memory_store.delete_run(tenant_id=profile_id, run_id=run_id)
         except Exception as exc:
             log.warning("erasure: memory sweep failed for %s: %s", run_id, exc)
+        try:
+            from mediahub.athletes import registry as athlete_registry
+
+            report["athlete_swims"] = athlete_registry.purge_run(profile_id, run_id).get("swims", 0)
+        except Exception as exc:
+            log.warning("erasure: athlete-swims purge failed for %s: %s", run_id, exc)
     try:
         from mediahub.publishing.posting_log import scrub_run_excerpts
 
@@ -162,6 +175,12 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         report["motion_files"] = _purge_motion_cache_for_run(run_id)
     except Exception as exc:
         log.warning("erasure: motion-cache sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.workflow.review_comments import delete_comments_for_run
+
+        report["review_comments"] = delete_comments_for_run(run_id)
+    except Exception as exc:
+        log.warning("erasure: reel review-comments sweep failed for %s: %s", run_id, exc)
     return report
 
 

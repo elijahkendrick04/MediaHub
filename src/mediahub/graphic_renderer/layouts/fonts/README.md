@@ -18,6 +18,26 @@ The `@font-face` declarations are in `../_shared.css` with relative
 `render.py` rewrites those to absolute `file://` URLs before inlining the CSS.
 Same families as before, so `autofit.py` text-fit metrics are unchanged.
 
+## Variable fonts (G1.9)
+
+The three text/data families ship a genuine **variable** `woff2` — one file that
+holds every weight continuously, declared in `../_shared.css` over an axis range
+(`font-weight: <lo> <hi>`):
+
+| File | Axes |
+| --- | --- |
+| `inter.woff2` | `wght` 100–900 + `opsz` 14–32 (optical size) |
+| `space-grotesk.woff2` | `wght` 300–700 |
+| `jetbrains-mono.woff2` | `wght` 100–800 |
+
+This lets the renderer instance any weight continuously (the autofit axis
+optimiser, `graphic_renderer.autofit.optimise_axes`, can ask for `'wght' 612`)
+rather than snapping to a pinned cut, and Inter's optical axis is tracked to the
+rendered size by `font-optical-sizing: auto`. The three display faces (`anton`,
+`bebas-neue`, `bowlby-one`) have no variable cut on Google Fonts, so they stay
+single static instances. `tests/test_variable_font_axes.py` verifies each
+shipped file's real `fvar` axes against the CSS declarations.
+
 ## Regenerate
 
 ```bash

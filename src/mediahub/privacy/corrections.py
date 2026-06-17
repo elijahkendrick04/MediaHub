@@ -9,7 +9,7 @@ honest about what it can't:
 - pull the card off every surface MediaHub controls (the public wall, via
   the profile's ``public_wall_excluded_cards``) — done by the web route;
 - tell the operator what remains manual: deleting/editing the post on the
-  social platform itself. MediaHub publishes via Buffer and cannot edit or
+  social platform itself. MediaHub publishes via the scheduler and cannot edit or
   delete a post after it has shipped, so the checklist says so plainly.
 
 Same exception-safe SQLite conventions as ``publishing/posting_log.py``.

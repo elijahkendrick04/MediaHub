@@ -90,12 +90,16 @@ class TestWebRenderedHead:
     @pytest.mark.parametrize("font_file", [
         "hanken-latin-normal-400.woff2",
         "bigshoulders-latin-normal-800.woff2",
+        # Regression: fraunces-latin-italic-400-900.woff2 returned 502 on /dpa
+        # (2026-06-13, Render cold-start) and was absent from MIME coverage.
+        "fraunces-latin-italic-400-900.woff2",
     ])
     def test_woff2_served_as_font_mimetype(self, app, font_file):
         # Regression: Python's mimetypes omits font/woff2 on some Linux
         # systems, causing Flask to serve woff2 as application/octet-stream
         # and Playwright/browsers to trigger a download instead of loading.
-        # Covers every font in the HTML preload list (web.py lines 5778-5781).
+        # Covers the HTML preload fonts (web.py) plus fraunces italic
+        # (CSS @font-face only, loaded on demand by pages like /dpa).
         with app.test_client() as c:
             resp = c.get(f"/static/fonts/{font_file}")
         assert resp.status_code == 200

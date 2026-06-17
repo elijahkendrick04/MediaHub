@@ -258,7 +258,12 @@ server:
 - **Story cards** — 6 seconds, one card per swimmer/achievement
 - **Meet reels** — data-driven length (`reel_duration_for`: 1 card → 7s …
   5 cards → 23s; 3 cards keep the historic 15s): branded cover with honest
-  label-derived stat chips → rank-weighted card beats → club outro
+  label-derived stat chips → rank-weighted card beats → club outro. The beat
+  rhythm is customisable (R1.12): `reel_duration_for` / `normalise_reel_rhythm`
+  take optional per-card beat weights + custom cover/outro seconds (mirrored
+  into `MeetReel.tsx`'s carve and the ffmpeg fallback, folded into the cache
+  key); a weighted card earns proportionally more seconds and an uncustomised
+  reel stays byte-identical
 - **Formats** — story 1080×1920 (default), portrait 1080×1350, square
   1080×1080, landscape 1920×1080 from the same compositions
   (`render.js --width/--height`)
@@ -279,6 +284,15 @@ with a `<hash>.json` explainability manifest and a `<hash>.poster.png`
 poster-frame sidecar beside each MP4 (the poster also ships next to the
 published file; the reel file route serves it via `?poster=1`).
 
+**Parallel reel composition (opt-in, `MEDIAHUB_REEL_PARALLEL=1`)** — a cold
+reel render can split its frame timeline into contiguous ranges, render them
+concurrently as segments sharing one bundle (`remotion/render_segments.js`),
+and composite them with FFmpeg's lossless concat (`visual/reel_parallel.py`,
+called from `render_meet_reel`). Frame-purity makes this **byte-identical** to
+the serial render — same output, same content-cache key — so it only cuts
+wall-clock on multi-core workers; it falls back to the serial render whenever
+Node/Remotion/FFmpeg are missing or any segment/concat step fails.
+
 Outputs are programmatic and data-driven (never static templates), club-branded
 from the `BrandKit`, and use real athlete/team imagery where provided — no
 synthetic AI-generated people unless explicitly requested.
@@ -292,8 +306,11 @@ synthetic AI-generated people unless explicitly requested.
 Both accept `?format=story|portrait|square|landscape` (default `story`) and
 serve the rendered MP4 directly with `Content-Type: video/mp4`. Cache hits
 return the existing file (< 30s wall-clock); cold renders take 30–90s on the
-deployment's worker. The free ffmpeg fallback engine renders the story format
-only and raises an honest `ReelEngineUnavailable` for the other cuts.
+deployment's worker. The free ffmpeg fallback engine renders all four cuts too
+(story/portrait/square/landscape): it renders the card's own still at the
+requested geometry and threads that `(width, height)` through every FFmpeg
+filter, folding the non-story cut into the cache key while keeping the story
+path's cache keys byte-identical.
 
 ### Brand consistency (motion ↔ still parity)
 
@@ -326,6 +343,13 @@ Branch model: feature branches from `dev`. Merges to `main` may happen
 autonomously without human approval, gated only on green CI — `main` is a
 trunk that auto-deploys to Render production, so a red build must never be
 merged. (This replaces the former human-approval-before-`main` rule.)
+**Merge method: merge commits, not squash** (maintainer decision 2026-06-13;
+squash + rebase disabled repo-side so the merge button can only create a merge
+commit). PR commit bodies therefore land on `main` verbatim — which the
+roadmap bot relies on to read `roadmap: <ID> <status>` directives. The two
+self-merging bots (`roadmap-autoupdate.yml`, the `autotest` CI fixer in
+`gitops.py`) use `gh pr merge --merge`; the roadmap bot keeps its `[skip render]`
+marker on the merge-commit subject via `--subject`.
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path. This is a deliberate,
 decided commercial principle (hosted-only; no free or capped self-host tier) —

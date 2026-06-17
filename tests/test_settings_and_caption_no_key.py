@@ -1,6 +1,6 @@
 """Settings page + caption-no-key behaviour.
 
-Operator credentials (AI keys, Buffer token) remain env-var only —
+Operator credentials (AI keys, the scheduler token) remain env-var only —
 they have NO user-facing configuration surface. /settings now renders
 a consolidated Operations page (Activity, Status, Privacy, Deployment
 status) but exposes zero credential editing.
@@ -54,23 +54,23 @@ def app(tmp_path, monkeypatch):
 # /settings renders the consolidated Operations page
 # ---------------------------------------------------------------------------
 
-def test_settings_renders_consolidated_operations_page(app):
-    """The Settings route used to 302-redirect to home (a relic of the
-    operator-config rewrite that stripped the settings UI). It now
-    renders a real consolidated Operations page — Activity, Status,
-    Privacy, and Deployment status sections all on one URL — which
-    is the topnav target."""
+def test_settings_renders_card_grid_landing(app):
+    """Settings renders a card grid (like Create): one tile per heading,
+    each opening its own detail page. It is the topnav target and no
+    longer a 302-to-home relic."""
     c = app.test_client()
     r = c.get("/settings", follow_redirects=False)
     assert r.status_code == 200
     body = r.get_data(as_text=True)
-    # All four consolidated sections appear on the page.
+    # The heading cards are present on the landing grid.
     assert "Activity" in body
-    assert "Status" in body
-    assert "Privacy" in body
-    assert "Deployment status" in body
-    # And it carries the Settings topnav active state.
-    assert "Operations" in body or "Settings" in body
+    assert "Auto scheduling" in body
+    assert "Autonomy" in body
+    assert "Privacy &amp; data" in body or "Privacy & data" in body
+    assert "System status" in body
+    # Styled like the Create tiles, and carries the Settings active state.
+    assert "mh-template" in body
+    assert "Settings" in body
 
 
 # ---------------------------------------------------------------------------
@@ -181,32 +181,34 @@ def test_no_env_no_provider(app):
 # ---------------------------------------------------------------------------
 # Rendered-page invariant — the Settings topnav link is the only
 # /settings reference allowed. The error-message paths that used to
-# surface a dead "Open Settings" / "Add an API key" / Buffer-redirect
+# surface a dead "Open Settings" / "Add an API key" / the scheduler-redirect
 # anchor must still be gone — those flows steer users to their
 # administrator instead, because /settings has no credential surface.
 # ---------------------------------------------------------------------------
 
 def test_rendered_page_has_only_topnav_settings_link(app):
-    """The Settings navigation anchors exist (the desktop topnav link plus
-    the mobile bottom-tab link — both plain navigation, both to the
-    consolidated Operations page). Beyond those, no JS error message or
-    Buffer flow is allowed to redirect to /settings — those paths still
-    need to steer the user to their administrator, since the Settings
-    page has no credential controls."""
+    """The Settings navigation anchors exist (the desktop topnav link, the
+    mobile bottom-tab link, and the UI 1.28 keyboard-shortcuts overlay's
+    'Go to Settings' row — all three plain navigation, all to the consolidated
+    Operations page). Beyond those, no JS error message or the scheduler flow
+    is allowed to redirect to /settings — those paths still need to steer the
+    user to their administrator, since the Settings page has no credential
+    controls."""
     import re
     c = app.test_client()
     r = c.get("/", follow_redirects=True)
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    # The Settings anchors are navigation only: the desktop topnav link
-    # and the mobile bottom-tab link. (The bottom-tab nav was added in the
-    # mobile-nav pass; it's display:none on desktop but always in the DOM.)
+    # The Settings anchors are navigation only: the desktop topnav link, the
+    # mobile bottom-tab link (added in the mobile-nav pass; display:none on
+    # desktop but always in the DOM), and the global shortcuts-overlay 'g s'
+    # row (UI 1.28 — a plain url_for() link that doubles as a click menu).
     settings_anchors = re.findall(
         r"""<a[^>]+href\s*=\s*["']/settings["'][^>]*>""", html,
     )
-    assert len(settings_anchors) == 2, (
-        f"expected the topnav + mobile-bottomnav /settings anchors, "
-        f"found {len(settings_anchors)}"
+    assert len(settings_anchors) == 3, (
+        f"expected the topnav + mobile-bottomnav + shortcuts-overlay /settings "
+        f"anchors, found {len(settings_anchors)}"
     )
     # Both must be plain navigation anchors, not credential-flow links.
     assert all("aria-label" in a or 'class="' in a for a in settings_anchors)

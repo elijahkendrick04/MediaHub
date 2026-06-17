@@ -8,6 +8,14 @@ import {
   useVideoConfig,
 } from "remotion";
 import { z } from "zod";
+import {
+  EXTRA_ACCENTS,
+  EXTRA_INTENTS,
+  EXTRA_LAYERS,
+  EXTRA_PATTERNS,
+  EXTRA_SCENES,
+  EXTRA_SPRINGS,
+} from "./sprint/registry";
 
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
@@ -39,11 +47,23 @@ export const cardSchema = z.object({
   // the still renderer's --mh-photo-pos) so faces stay in frame. Empty =
   // the safe "center 28%" default.
   photoPos: z.string().default(""),
+  // R1.9: the athlete cut out from their photo (background removed to alpha),
+  // inlined by motion.py as a PNG data URI. The cutout sprint layer
+  // (sprint/layers/cutout.tsx) composites this as a parallax FOREGROUND plane
+  // over the scrimmed full-bleed background photo, giving the card real depth.
+  // Empty = no prepared cutout (no sourced photo, or no background remover
+  // available), and the layer no-ops — byte-identical to the pre-R1.9 render.
+  cutoutSrc: z.string().default(""),
   // Gen v2 (SEQ-4): the still graphic's archetype + measured emphasis line,
   // so the motion render of a card visually matches its still. Empty keeps
   // the pre-v2 behaviour for cards rendered by older callers.
   archetype: z.string().default(""),
   heroStat: z.string().default(""),
+  // The still graphic's style pack id (graphic_renderer.style_packs), shape
+  // "ground-texture-accentGeo-density". The motion render layers the same
+  // ground / texture / accent-geometry overlay over the scene so a card's
+  // video carries the still's exact decorative treatment. Empty = bare.
+  stylePack: z.string().default(""),
   // The design-spec director's motion language for this card
   // (design_spec.MOTION_INTENTS). Empty = the mood/seed default programme.
   motionIntent: z.string().default(""),
@@ -55,6 +75,10 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // Subtitle/caption burn-in track (R1.3): a JSON string of the APCA-gated,
+  // frame-timed caption cues built by visual/subtitle_burn.py and painted by
+  // sprint/layers/captions.tsx. Empty = no captions (byte-identical render).
+  captionsJson: z.string().default(""),
 });
 
 const brandSchema = z.object({
@@ -74,7 +98,7 @@ export const storyCardSchema = z.object({
 type Props = z.infer<typeof storyCardSchema>;
 type CardProps = Props["card"];
 type BrandProps = Props["brand"];
-type Roles = { ground: string; surface: string; accent: string; onGround: string };
+export type Roles = { ground: string; surface: string; accent: string; onGround: string };
 
 // Six palette role permutations — mirror creative_brief/generator.py
 // _apply_palette_seed so the static graphic and motion render agree on
@@ -160,8 +184,12 @@ function bgPatternFor(style: string, roles: Roles): string {
     case "radial":
     case "duotone":
     case "clean":
-    default:
       return "";
+    default: {
+      // Sprint patterns (R1.4) register their own file under sprint/patterns/.
+      const extra = EXTRA_PATTERNS[style];
+      return extra ? extra(roles) : "";
+    }
   }
 }
 
@@ -201,6 +229,12 @@ function springConfigFor(mood: string): { damping: number; stiffness: number; ma
   if (m.includes("celebratory") || m.includes("bold") || m.includes("triumph")) {
     return { damping: 15, stiffness: 110, mass: 0.7 };
   }
+  // Sprint moods (R1.26) register their own file under sprint/springs/; built-in
+  // moods above always win, so this only resolves tokens they don't recognise.
+  const extra = EXTRA_SPRINGS[m];
+  if (extra) {
+    return extra;
+  }
   return { damping: 18, stiffness: 90, mass: 0.7 };
 }
 
@@ -214,7 +248,7 @@ function springConfigFor(mood: string): { damping: number; stiffness: number; ma
 // a scene compose freely. The "" default reproduces the original spring
 // programme exactly (legacy callers see no change).
 
-type AnimChannels = {
+export type AnimChannels = {
   heroY: number; // translateY of the hero text block (px @ design scale)
   heroOpacity: number;
   heroScale: number;
@@ -419,8 +453,11 @@ function animProgram(
         wordAt: identityWord,
       };
     }
-    default:
-      return base;
+    default: {
+      // Sprint intents (R1.1) register their own file under sprint/intents/.
+      const extra = EXTRA_INTENTS[intent];
+      return extra ? extra(frame, fps, durationInFrames, mood, base) : base;
+    }
   }
 }
 
@@ -428,10 +465,11 @@ function animProgram(
 // Archetype scene system (Gen v2 parity)
 // ---------------------------------------------------------------------------
 //
-// The still engine's 12 archetypes map onto seven structurally distinct
-// motion scenes, so a card's video reads like its still instead of every
-// archetype collapsing into one hero layout. Unknown / v1 names keep the
-// "hero" scene — the pre-parity behaviour.
+// The still engine's archetypes map onto eight structurally distinct motion
+// scenes, so a card's video reads like its still instead of every archetype
+// collapsing into one hero layout. Each archetype picks the scene group whose
+// motion choreography matches its still composition. Unknown / v1 names keep
+// the "hero" scene — the pre-parity behaviour.
 
 type SceneMode =
   | "hero"
@@ -448,15 +486,23 @@ function sceneForArchetype(archetype: string): SceneMode {
     case "big_number_dominant":
     case "minimal_type_poster":
     case "quote_led_recap":
+    case "cornerstone_numeral":
+    case "mega_surname_bleed":
       return "poster";
     case "full_bleed_photo_lower_third":
+    case "broadcast_scorebug":
       return "lowerThird";
     case "centered_medal_spotlight":
+    case "photo_passepartout":
+    case "spotlight_disc":
       return "spotlight";
     case "editorial_numbers_grid":
     case "stat_stack_sidebar":
+    case "index_card":
+    case "scoreline_versus":
       return "grid";
     case "ticker_strip":
+    case "horizon_band":
       return "ticker";
     case "split_diagonal_hero":
     case "duo_athlete_split":
@@ -621,8 +667,12 @@ function accentDecoration(
         />
       );
     case "minimal":
-    default:
       return null;
+    default: {
+      // Sprint accents (R1.5) register their own file under sprint/accents/.
+      const extra = EXTRA_ACCENTS[style];
+      return extra ? extra(roles, opacity, width, height) : null;
+    }
   }
 }
 
@@ -736,7 +786,7 @@ const KineticLine: React.FC<{
 };
 
 // Shared per-scene context, built once in the component body.
-type SceneCtx = {
+export type SceneCtx = {
   card: CardProps;
   brand: BrandProps;
   roles: Roles;
@@ -812,6 +862,496 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         transform: `translateY(${ctx.anim.bgDrift}px)`,
       }}
     />
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Style-pack overlay — still↔motion parity with graphic_renderer.style_packs.
+//
+// The still renderer drops a ground / texture / accent-geometry overlay into
+// each archetype's {{ACCENT_DECORATION}} slot; this mirrors it verbatim on the
+// motion side so a card's video carries the exact same decorative treatment.
+// Same lever semantics and the same capped, legibility-safe values: ground is
+// darken-only, texture is a low-opacity blended tile (the grain precedent), and
+// accent geometry lives in the margins painted in the resolved accent role — so
+// no role colour is invented and text contrast is never reduced. Pack id shape:
+// "ground-texture-accentGeo-density" (see style_packs.StylePack.id).
+// ---------------------------------------------------------------------------
+
+const PACK_GROUNDS = new Set([
+  "flat", "top_fade", "bottom_fade", "corner_fade", "vignette", "spotlight", "twotone",
+  "dual_fade", "top_corner_fade", "edge_frame", "diagonal_fade",
+  // Ground-treatment expansion pack (mirrors style_packs.GROUNDS).
+  "gradient_mesh", "bokeh", "light_ray", "paper_weave",
+]);
+const PACK_TEXTURES = new Set([
+  "none", "grain", "dots", "grid", "hatch", "halftone", "crosshatch",
+  "weave", "scanline", "carbon", "chevron",
+  // Layered (two-texture) surfaces — G1.6, mirrors style_packs._TEXTURE_STACKS.
+  "grain_dots", "halftone_weave", "hatch_grid", "crosshatch_grain",
+  "dots_scanline", "carbon_hatch", "chevron_grain", "grid_dots",
+]);
+const PACK_ACCENT_GEOS = new Set([
+  "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
+  "double_rule", "dot_row", "cross_ticks", "corner_arc",
+  "hexagons", "deco_corners", "wave_rule", "spiral_flourish", "glitch_divider",
+]);
+
+type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
+
+// Parse a pack id into its levers, or null for the bare/unknown pack (→ no
+// overlay, byte-equivalent to the still's bare card).
+function parseStylePack(id: string): ParsedPack | null {
+  const parts = (id || "").split("-");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const [ground, texture, accentGeo, density] = parts;
+  if (
+    !PACK_GROUNDS.has(ground) ||
+    !PACK_TEXTURES.has(texture) ||
+    !PACK_ACCENT_GEOS.has(accentGeo)
+  ) {
+    return null;
+  }
+  if (ground === "flat" && texture === "none" && accentGeo === "none") {
+    return null; // the bare pack
+  }
+  return { ground, texture, accentGeo, bold: density === "bold" };
+}
+
+function packGroundGradient(ground: string, a: number): string | null {
+  switch (ground) {
+    case "vignette":
+      return `radial-gradient(115% 95% at 50% 45%, rgba(0,0,0,0) 52%, rgba(0,0,0,${a}) 100%)`;
+    case "spotlight":
+      return `radial-gradient(60% 50% at 50% 38%, rgba(0,0,0,0) 0%, rgba(0,0,0,${a}) 100%)`;
+    case "top_fade":
+      return `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 44%)`;
+    case "bottom_fade":
+      return `linear-gradient(0deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 44%)`;
+    case "corner_fade":
+      return `radial-gradient(125% 125% at 100% 100%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 55%)`;
+    case "twotone":
+      return `linear-gradient(122deg, rgba(0,0,0,0) 46%, rgba(0,0,0,${a}) 92%)`;
+    case "dual_fade":
+      return (
+        `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 30%, ` +
+        `rgba(0,0,0,0) 70%, rgba(0,0,0,${a}) 100%)`
+      );
+    case "top_corner_fade":
+      return `radial-gradient(125% 125% at 0% 0%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 55%)`;
+    case "edge_frame":
+      return (
+        `linear-gradient(90deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 18%, ` +
+        `rgba(0,0,0,0) 82%, rgba(0,0,0,${a}) 100%),` +
+        `linear-gradient(180deg, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 18%, ` +
+        `rgba(0,0,0,0) 82%, rgba(0,0,0,${a}) 100%)`
+      );
+    case "diagonal_fade":
+      return `linear-gradient(122deg, rgba(0,0,0,${a}) 8%, rgba(0,0,0,0) 54%)`;
+    // --- Ground-treatment expansion pack (mirrors style_packs._ground_layer) ---
+    case "gradient_mesh":
+      return (
+        `radial-gradient(62% 55% at 14% 12%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 60%),` +
+        `radial-gradient(58% 52% at 86% 18%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 60%),` +
+        `radial-gradient(85% 60% at 50% 104%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 58%)`
+      );
+    case "bokeh":
+      return (
+        `radial-gradient(20% 14% at 16% 82%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(14% 10% at 82% 14%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(11% 8% at 92% 70%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(9% 6% at 8% 30%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%)`
+      );
+    case "light_ray":
+      return (
+        `repeating-conic-gradient(from 192deg at 84% -8%, ` +
+        `rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 10deg, ` +
+        `rgba(0,0,0,${a}) 13deg, rgba(0,0,0,0) 16deg)`
+      );
+    case "paper_weave":
+      return (
+        `repeating-linear-gradient(90deg, rgba(0,0,0,${a}) 0, rgba(0,0,0,${a}) 2px, ` +
+        `rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px),` +
+        `repeating-linear-gradient(0deg, rgba(0,0,0,${a}) 0, rgba(0,0,0,${a}) 2px, ` +
+        `rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px)`
+      );
+    default:
+      return null;
+  }
+}
+
+const PACK_TEX_SIZE: Record<string, number> = {
+  grain: 160, dots: 18, grid: 32, hatch: 14, crosshatch: 16, halftone: 22,
+  weave: 20, scanline: 6, carbon: 8, chevron: 24,
+};
+
+// Layered textures (G1.6) — a composite token fuses two base tiles with a
+// background-blend-mode, mirroring style_packs._TEXTURE_STACKS so a card's video
+// carries the same stacked surface as its still. [base_a, base_b, blend].
+const PACK_TEXTURE_STACKS: Record<string, [string, string, string]> = {
+  "grain_dots": ["grain", "dots", "soft-light"],
+  "halftone_weave": ["halftone", "weave", "overlay"],
+  "hatch_grid": ["hatch", "grid", "lighten"],
+  "crosshatch_grain": ["crosshatch", "grain", "screen"],
+  "dots_scanline": ["dots", "scanline", "screen"],
+  "carbon_hatch": ["carbon", "hatch", "overlay"],
+  "chevron_grain": ["chevron", "grain", "soft-light"],
+  "grid_dots": ["grid", "dots", "lighten"],
+};
+
+// White-on-transparent tiles (blended over the ground), mirroring style_packs.
+function packTextureImage(texture: string): string | null {
+  const enc = (svg: string) => `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`;
+  switch (texture) {
+    case "grain":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'>` +
+        `<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter>` +
+        `<rect width='100%' height='100%' filter='url(#n)' opacity='0.5'/></svg>`,
+      );
+    case "dots":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18'>` +
+        `<circle cx='3' cy='3' r='1.4' fill='white'/></svg>`,
+      );
+    case "grid":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'>` +
+        `<path d='M32 0H0V32' fill='none' stroke='white' stroke-width='1'/></svg>`,
+      );
+    case "hatch":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14'>` +
+        `<path d='M-2 16L16 -2' stroke='white' stroke-width='1.4'/></svg>`,
+      );
+    case "crosshatch":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<path d='M-2 18L18 -2M-2 -2L18 18' stroke='white' stroke-width='1.1'/></svg>`,
+      );
+    case "halftone":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22'>` +
+        `<circle cx='6' cy='6' r='3.2' fill='white'/><circle cx='17' cy='17' r='1.6' fill='white'/></svg>`,
+      );
+    case "weave":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>` +
+        `<rect x='0' y='8' width='20' height='3' fill='white'/>` +
+        `<rect x='8' y='0' width='3' height='20' fill='white'/></svg>`,
+      );
+    case "scanline":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'>` +
+        `<rect width='6' height='1' fill='white'/></svg>`,
+      );
+    case "carbon":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'>` +
+        `<path d='M0 8L8 0' stroke='white' stroke-width='1'/>` +
+        `<path d='M-2 2L2 -2' stroke='white' stroke-width='1'/>` +
+        `<path d='M6 10L10 6' stroke='white' stroke-width='1'/></svg>`,
+      );
+    case "chevron":
+      return enc(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='12'>` +
+        `<path d='M0 12L12 3L24 12' fill='none' stroke='white' stroke-width='1.4'/></svg>`,
+      );
+    default:
+      return null;
+  }
+}
+
+// Accent geometry confined to the margins, painted in the resolved accent role.
+function packAccentGeometry(
+  style: string, width: number, height: number, bold: boolean, accent: string,
+): React.ReactNode {
+  const mult = bold ? 1.35 : 1.0;
+  const weight = Math.max(3, Math.round(Math.min(width, height) * 0.006 * mult));
+  const m = Math.min(width, height);
+  switch (style) {
+    case "corner_ticks": {
+      const arm = Math.round(m * 0.085 * mult);
+      const off = Math.round(m * 0.05);
+      return (
+        <>
+          <div style={{ position: "absolute", left: off, top: off, width: arm, height: arm, borderTop: `${weight}px solid ${accent}`, borderLeft: `${weight}px solid ${accent}` }} />
+          <div style={{ position: "absolute", right: off, bottom: off, width: arm, height: arm, borderBottom: `${weight}px solid ${accent}`, borderRight: `${weight}px solid ${accent}` }} />
+        </>
+      );
+    }
+    case "corner_blocks": {
+      const sq = Math.round(m * 0.05 * mult);
+      const off = Math.round(m * 0.045);
+      const op = bold ? 0.92 : 0.8;
+      return (
+        <>
+          <div style={{ position: "absolute", left: off, top: off, width: sq, height: sq, background: accent, opacity: op }} />
+          <div style={{ position: "absolute", right: off, bottom: off, width: sq, height: sq, background: accent, opacity: op }} />
+        </>
+      );
+    }
+    case "frame": {
+      const inset = Math.round(m * 0.035);
+      return <div style={{ position: "absolute", left: inset, right: inset, top: inset, bottom: inset, border: `${weight}px solid ${accent}`, opacity: bold ? 0.7 : 0.5 }} />;
+    }
+    case "side_rule": {
+      const bw = Math.max(5, Math.round(width * 0.012 * mult));
+      const inset = Math.round(height * 0.1);
+      return <div style={{ position: "absolute", left: 0, top: inset, bottom: inset, width: bw, background: accent }} />;
+    }
+    case "baseline_rule": {
+      const bh = Math.max(5, Math.round(height * 0.009 * mult));
+      const inset = Math.round(width * 0.08);
+      const bottom = Math.round(height * 0.06);
+      return <div style={{ position: "absolute", left: inset, right: inset, bottom, height: bh, background: accent }} />;
+    }
+    case "wedge": {
+      const size = Math.round(m * 0.16 * mult);
+      return <div style={{ position: "absolute", right: 0, top: 0, width: 0, height: 0, borderTop: `${size}px solid ${accent}`, borderLeft: `${size}px solid transparent` }} />;
+    }
+    case "ring": {
+      const d = Math.round(m * 0.16 * mult);
+      const off = Math.round(m * 0.06);
+      return <div style={{ position: "absolute", right: off, top: off, width: d, height: d, border: `${weight}px solid ${accent}`, borderRadius: "50%", opacity: bold ? 0.85 : 0.65 }} />;
+    }
+    case "double_rule": {
+      const bh = Math.max(4, Math.round(height * 0.007 * mult));
+      const inset = Math.round(width * 0.08);
+      const bottom = Math.round(height * 0.06);
+      const gap = bh * 3;
+      return (
+        <>
+          <div style={{ position: "absolute", left: inset, right: inset, bottom, height: bh, background: accent }} />
+          <div style={{ position: "absolute", left: inset, right: inset, bottom: bottom + gap, height: bh, background: accent, opacity: 0.55 }} />
+        </>
+      );
+    }
+    case "dot_row": {
+      const d = Math.max(7, Math.round(m * 0.013 * mult));
+      const bottom = Math.round(height * 0.065);
+      const gap = d * 2;
+      return (
+        <div style={{ position: "absolute", left: 0, right: 0, bottom, display: "flex", justifyContent: "center", gap }}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <span key={i} style={{ width: d, height: d, borderRadius: "50%", background: accent, display: "inline-block" }} />
+          ))}
+        </div>
+      );
+    }
+    case "cross_ticks": {
+      const arm = Math.round(m * 0.028 * mult);
+      const off = Math.round(m * 0.06);
+      const cross = (key: string, pos: React.CSSProperties) => (
+        <React.Fragment key={key}>
+          <div style={{ position: "absolute", ...pos, width: arm * 2, height: weight, background: accent }} />
+          <div style={{ position: "absolute", ...pos, width: weight, height: arm * 2, background: accent }} />
+        </React.Fragment>
+      );
+      return (
+        <>
+          {cross("tl", { left: off, top: off })}
+          {cross("br", { right: off, bottom: off })}
+        </>
+      );
+    }
+    case "corner_arc": {
+      const arm = Math.round(m * 0.11 * mult);
+      const off = Math.round(m * 0.05);
+      return (
+        <>
+          <div style={{ position: "absolute", left: off, top: off, width: arm, height: arm, borderTop: `${weight}px solid ${accent}`, borderLeft: `${weight}px solid ${accent}`, borderTopLeftRadius: "100%" }} />
+          <div style={{ position: "absolute", right: off, bottom: off, width: arm, height: arm, borderBottom: `${weight}px solid ${accent}`, borderRight: `${weight}px solid ${accent}`, borderBottomRightRadius: "100%" }} />
+        </>
+      );
+    }
+    // --- G1.5 accent-geometry expansion pack (mirrors style_packs.py) ------
+    // Curved/ornamental shapes drawn as stroked inline SVG (the div-border
+    // tricks above can't express them); stroke paints the resolved accent,
+    // vector-effect keeps it a true `weight` px regardless of viewBox scale.
+    case "hexagons": {
+      const size = Math.round(m * 0.16 * mult);
+      const off = Math.round(m * 0.05);
+      const hex = (
+        <polygon points="92,50 71,86 29,86 8,50 29,14 71,14" fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinejoin: "round" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{hex}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size }}>{hex}</svg>
+        </>
+      );
+    }
+    case "deco_corners": {
+      const size = Math.round(m * 0.15 * mult);
+      const off = Math.round(m * 0.045);
+      const d = "M 64 8 L 8 8 L 8 64 M 50 21 L 21 21 L 21 50 M 38 31 L 31 31 L 31 38";
+      const bracket = (
+        <path d={d} fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "square" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{bracket}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size, transform: "rotate(180deg)" }}>{bracket}</svg>
+        </>
+      );
+    }
+    case "wave_rule": {
+      const inset = Math.round(width * 0.08);
+      const inner = Math.max(1, width - 2 * inset);
+      const band = Math.max(12, Math.round(height * 0.022 * mult));
+      const bottom = Math.round(height * 0.06);
+      return (
+        <svg viewBox={`0 0 ${inner} ${band}`} preserveAspectRatio="none" style={{ position: "absolute", left: inset, width: inner, bottom, height: band }}>
+          <path d={packWavePath(inner, band)} fill="none" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "round" }} />
+        </svg>
+      );
+    }
+    case "spiral_flourish": {
+      const size = Math.round(m * 0.15 * mult);
+      const off = Math.round(m * 0.05);
+      const spiral = (
+        <polyline points={packSpiralPoints()} fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "round", strokeLinejoin: "round" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{spiral}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size, transform: "rotate(180deg)" }}>{spiral}</svg>
+        </>
+      );
+    }
+    case "glitch_divider": {
+      const bh = Math.max(4, Math.round(height * 0.006 * mult));
+      const inset = Math.round(width * 0.08);
+      const inner = Math.max(1, width - 2 * inset);
+      const bottom = Math.round(height * 0.06);
+      const gap = Math.max(2, bh);
+      return (
+        <>
+          <div style={{ position: "absolute", left: inset, width: inner, bottom, height: bh, background: accent }} />
+          <div style={{ position: "absolute", left: inset + Math.round(inner * 0.12), width: Math.round(inner * 0.55), bottom: bottom + bh + gap, height: bh, background: accent, opacity: 0.7 }} />
+          <div style={{ position: "absolute", left: inset, width: Math.round(inner * 0.34), bottom: bottom + 2 * (bh + gap), height: bh, background: accent, opacity: 0.45 }} />
+        </>
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+// A smooth horizontal sine as alternating cubic-bézier humps, in px units
+// (the wave SVG's viewBox is the px region itself). Mirrors style_packs._wave_path.
+function packWavePath(inner: number, band: number, humps = 7): string {
+  const amp = band * 0.3;
+  const mid = band / 2;
+  const half = inner / humps;
+  let d = `M 0 ${mid.toFixed(1)}`;
+  let x = 0;
+  let up = true;
+  while (x < inner - 0.5) {
+    const nx = Math.min(x + half, inner);
+    const cy = up ? mid - amp : mid + amp;
+    const c1 = x + half * 0.36;
+    const c2 = x + half * 0.64;
+    d += ` C ${c1.toFixed(1)} ${cy.toFixed(1)} ${c2.toFixed(1)} ${cy.toFixed(1)} ${nx.toFixed(1)} ${mid.toFixed(1)}`;
+    x = nx;
+    up = !up;
+  }
+  return d;
+}
+
+// An Archimedean spiral sampled as a polyline in a 0–100 viewBox, centred at
+// (50, 50). Mirrors style_packs._spiral_points.
+function packSpiralPoints(steps = 72, turns = 2.4, maxR = 44): string {
+  const pts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const ang = t * turns * 2 * Math.PI;
+    const r = maxR * t;
+    pts.push(`${(50 + r * Math.cos(ang)).toFixed(1)},${(50 + r * Math.sin(ang)).toFixed(1)}`);
+  }
+  return pts.join(" ");
+}
+
+const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  const pack = parseStylePack(ctx.card.stylePack || "");
+  if (!pack) {
+    return null;
+  }
+  const { width, height, frame, roles } = ctx;
+  const accent = roles.accent || "#FFFFFF";
+  // Ease the whole treatment in with the scene (motion only for feedback).
+  const enter = interpolate(frame, [2, 16], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const children: React.ReactNode[] = [];
+
+  const ground = packGroundGradient(pack.ground, pack.bold ? 0.34 : 0.24);
+  if (ground) {
+    children.push(
+      <div key="ground" style={{ position: "absolute", inset: 0, background: ground }} />,
+    );
+  }
+  const stack = PACK_TEXTURE_STACKS[pack.texture];
+  if (stack) {
+    // Layered surface (G1.6): fuse two tiles with a background-blend-mode, then
+    // composite onto the card with the shared low-opacity mix-blend overlay —
+    // exactly as legibility-safe as one tile, just richer (mirrors the still).
+    const [a, b, blend] = stack;
+    const ta = packTextureImage(a);
+    const tb = packTextureImage(b);
+    if (ta && tb) {
+      const sa = PACK_TEX_SIZE[a] || 20;
+      const sb = PACK_TEX_SIZE[b] || 20;
+      children.push(
+        <div
+          key="texture"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: `${ta}, ${tb}`,
+            backgroundSize: `${sa}px ${sa}px, ${sb}px ${sb}px`,
+            backgroundRepeat: "repeat, repeat",
+            backgroundBlendMode: blend,
+            opacity: pack.bold ? 0.15 : 0.1,
+            mixBlendMode: "overlay",
+          }}
+        />,
+      );
+    }
+  } else {
+    const tex = packTextureImage(pack.texture);
+    if (tex) {
+      const size = PACK_TEX_SIZE[pack.texture] || 20;
+      const op = pack.texture === "grain" ? (pack.bold ? 0.18 : 0.12) : pack.bold ? 0.16 : 0.1;
+      children.push(
+        <div
+          key="texture"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: tex,
+            backgroundSize: `${size}px ${size}px`,
+            backgroundRepeat: "repeat",
+            opacity: op,
+            mixBlendMode: "overlay",
+          }}
+        />,
+      );
+    }
+  }
+  const geo = packAccentGeometry(pack.accentGeo, width, height, pack.bold, accent);
+  if (geo) {
+    children.push(<React.Fragment key="geo">{geo}</React.Fragment>);
+  }
+
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", opacity: enter }}>
+      {children}
+    </div>
   );
 };
 
@@ -1969,7 +2509,9 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     club: (brand.displayName || brand.shortName || "").toUpperCase(),
   };
 
-  const Scene = SCENES[mode];
+  // A sprint scene (R1.2) registered for this exact archetype replaces the
+  // built-in scene; otherwise the parity-mapped built-in scene renders.
+  const Scene = EXTRA_SCENES[card.archetype || ""] || SCENES[mode];
 
   return (
     <AbsoluteFill
@@ -1980,6 +2522,11 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       }}
     >
       <Scene ctx={ctx} />
+      <StylePackLayer ctx={ctx} />
+      {/* Sprint overlay layers (R1.6/8/9/10/11/22/23/24/25) — additive, in order. */}
+      {EXTRA_LAYERS.map(({ Layer }, i) => (
+        <Layer key={`sprint-layer-${i}`} ctx={ctx} />
+      ))}
     </AbsoluteFill>
   );
 };

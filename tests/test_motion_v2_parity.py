@@ -12,8 +12,7 @@ Covers the reel-side catch-up with the Gen v2 still engine:
   * every v2 still archetype maps to a motion scene (no archetype silently
     collapses back into the one hero layout);
   * output formats: story / portrait / square / landscape sizes, cache-key
-    sensitivity,
-    and an honest error from the ffmpeg fallback engine for non-story cuts;
+    sensitivity, and the ffmpeg fallback engine rendering every cut too (R1.16);
   * the explainability manifest written next to each cached MP4;
   * the reel's outro scene, honest cover stats, and deterministic per-beat
     transitions exist in the composition.
@@ -34,7 +33,6 @@ from mediahub.brand.kit import BrandKit
 from mediahub.creative_brief import design_spec as ds
 from mediahub.creative_brief.generator import CreativeBrief, apply_design_spec, generate
 from mediahub.visual import motion
-from mediahub.visual.reel_engine import ReelEngineUnavailable
 
 
 BRAND = BrandKit(
@@ -110,17 +108,37 @@ def test_card_props_without_brief_keep_new_axes_empty():
         assert props[key] == "", key
 
 
+def _motion_source_corpus() -> str:
+    """StoryCard.tsx plus every sprint-registry module.
+
+    Generator-sprint capabilities (R1.*) may live either inline in StoryCard.tsx
+    or as their own auto-discovered file under ``src/compositions/sprint/`` (an
+    intent registers ``{ name: "<intent>" }``, a scene ``{ archetype: "<name>" }``).
+    Both are real execution paths, so parity scans the union.
+    """
+    comp = motion.REMOTION_DIR / "src" / "compositions"
+    parts = [(comp / "StoryCard.tsx").read_text()]
+    sprint = comp / "sprint"
+    if sprint.is_dir():
+        parts.extend(
+            p.read_text()
+            for p in sorted(sprint.rglob("*"))
+            if p.suffix in {".ts", ".tsx"}
+        )
+    return "\n".join(parts)
+
+
 def test_tsx_executes_every_motion_intent():
     """Drift guard: every vocabulary member the director can pick must have
-    an execution branch in the composition — a picked-but-ignored intent is
-    the bug this whole feature removes."""
-    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    an execution branch — inline in StoryCard.tsx or as a registered file under
+    sprint/intents/. A picked-but-ignored intent is the bug this removes."""
+    src = _motion_source_corpus()
     for intent in ds.MOTION_INTENTS:
         if intent == "fade_in":
             # fade_in is also the documented safe default; still must appear.
             assert '"fade_in"' in src
             continue
-        assert f'"{intent}"' in src, f"StoryCard.tsx does not execute {intent!r}"
+        assert f'"{intent}"' in src, f"no execution path for intent {intent!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +198,7 @@ def test_every_v2_archetype_has_a_motion_scene_mapping():
     hero layout silently is the 'samey video' bug."""
     from mediahub.graphic_renderer.archetypes import list_archetypes
 
-    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    src = _motion_source_corpus()
     missing = [a for a in list_archetypes() if f'"{a}"' not in src]
     assert not missing, f"archetypes without a motion scene mapping: {missing}"
 
@@ -245,21 +263,48 @@ def test_cache_key_varies_with_format(tmp_path, monkeypatch):
     assert len(list(cache.glob("*.mp4"))) == len(motion.MOTION_FORMATS)
 
 
-def test_ffmpeg_engine_rejects_non_story_formats_honestly(tmp_path, monkeypatch):
+def test_ffmpeg_engine_renders_non_story_formats(tmp_path, monkeypatch):
+    """R1.16: the free ffmpeg fallback renders every cut (story / portrait /
+    square / landscape), not only story — parity with the Remotion path. The
+    chosen format flows through to reel_ffmpeg and Node is never invoked."""
+    from mediahub.visual import reel_ffmpeg
+
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
-    with pytest.raises(ReelEngineUnavailable, match="story"):
-        motion.render_story_card(
-            _card(1), BRAND, tmp_path / "x.mp4", format_name="square"
+
+    seen: dict = {}
+
+    def _fake_story(card_props, brand_dict, brand_kit, out_path, **kw):
+        seen.setdefault("story", []).append(kw.get("format_name"))
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"0" * 2048)
+        return out
+
+    def _fake_reel(cards_props, brand_dict, brand_kit, out_path, **kw):
+        seen.setdefault("reel", []).append(kw.get("format_name"))
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"0" * 2048)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_story_card_from_props", _fake_story)
+    monkeypatch.setattr(reel_ffmpeg, "render_meet_reel_from_props", _fake_reel)
+
+    with mock.patch.object(motion, "_run_remotion") as remotion:
+        for fmt in ("portrait", "square", "landscape"):
+            out = motion.render_story_card(
+                _card(1), BRAND, tmp_path / f"s_{fmt}.mp4", format_name=fmt
+            )
+            assert Path(out).exists()
+        reel = motion.render_meet_reel(
+            [_card(1)], BRAND, tmp_path / "reel.mp4", format_name="landscape"
         )
-    with pytest.raises(ReelEngineUnavailable, match="story"):
-        motion.render_meet_reel(
-            [_card(1)], BRAND, tmp_path / "y.mp4", format_name="landscape"
-        )
-    with pytest.raises(ReelEngineUnavailable, match="story"):
-        motion.render_story_card(
-            _card(1), BRAND, tmp_path / "z.mp4", format_name="portrait"
-        )
+        assert Path(reel).exists()
+        assert not remotion.called  # the ffmpeg engine never falls back to Node
+
+    assert seen["story"] == ["portrait", "square", "landscape"]
+    assert seen["reel"] == ["landscape"]
 
 
 # ---------------------------------------------------------------------------
@@ -285,8 +330,11 @@ def test_reel_cover_chips_count_up_honestly():
     # Chips count up to totals derived only from the honest reelStats.
     assert "chipsProgress" in src
     assert "progress: number" in src
-    # Pluralisation follows the final count (no mid-count flicker).
-    assert 'stats.pbs === 1 ? "" : "S"' in src
+    # The number counts up over each chip's honest value (frame-pure).
+    assert "Math.round(chip.value * p)" in src
+    # Pluralisation follows the FINAL count (no mid-count flicker): the words
+    # are chosen on n in reelStats and baked into the chip before the count-up.
+    assert "n === 1" in src
 
 
 # ---------------------------------------------------------------------------

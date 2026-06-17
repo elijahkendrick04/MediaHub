@@ -15,7 +15,7 @@ order:
      post/review/hold vocabulary) must be affirmatively safe. No verdict =
      no autonomy (fail closed).
   4. **Confidence gate** — the card's deterministic confidence must clear the
-     per-type threshold (operator-tunable, default 0.85, floor 0.5). Below
+     per-type threshold (operator-tunable, default 0.90, floor 0.5). Below
      it the card falls back to human approval (AUTONOMY_MODEL §2.2).
   5. **Brand safety** — deterministic caption checks: non-empty, no AI-tell
      ban-list phrases, none of the org's ``brand_phrases_to_avoid``, within
@@ -53,7 +53,7 @@ from mediahub.club_platform.post_types import canonical_slug
 from mediahub.publishing.kill_switch import publish_kill_switch_engaged
 from mediahub.publishing.per_type_policy import AutonomyLevel, load_policy
 
-DEFAULT_CONFIDENCE_THRESHOLD = 0.85
+DEFAULT_CONFIDENCE_THRESHOLD = 0.90
 MIN_CONFIDENCE_THRESHOLD = 0.5
 MAX_CAPTION_CHARS = 2200  # the strictest mainstream platform cap (Instagram)
 

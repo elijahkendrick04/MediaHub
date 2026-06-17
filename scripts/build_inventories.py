@@ -7,7 +7,6 @@ Walks the export and writes auto-generated inventories under docs/.
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys

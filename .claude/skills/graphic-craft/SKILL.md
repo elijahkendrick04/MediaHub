@@ -19,14 +19,26 @@ file and `mediahub-engineering` disagree, `mediahub-engineering` wins.
 - Renderer: `src/mediahub/graphic_renderer/render.py::render_brief` —
   HTML/CSS templates → PNG via headless Chromium (Playwright), DPR from
   `MEDIAHUB_RENDER_DPR` (default 2).
-- Layouts: 12 v2 archetypes under `graphic_renderer/layouts/v2/*.html` —
-  `big_number_dominant`, `minimal_type_poster`,
+- Layouts: 20 v2 **archetypes** (structural skeletons) under
+  `graphic_renderer/layouts/v2/*.html` — the originals
+  (`big_number_dominant`, `minimal_type_poster`,
   `full_bleed_photo_lower_third`, `duo_athlete_split`, `ticker_strip`,
   `stat_stack_sidebar`, `magazine_cover`, `centered_medal_spotlight`,
   `editorial_numbers_grid`, `split_diagonal_hero`, `quote_led_recap`,
-  `triptych_progression`. Shared CSS + self-hosted fonts in
-  `layouts/_shared.css` (+ `layouts/fonts/*.woff2`, rewritten to `file://`
-  at render time).
+  `triptych_progression`) plus `cornerstone_numeral`, `horizon_band`,
+  `scoreline_versus`, `broadcast_scorebug`, `photo_passepartout`,
+  `spotlight_disc`, `index_card`, `mega_surname_bleed`. Shared CSS +
+  self-hosted fonts in `layouts/_shared.css` (+ `layouts/fonts/*.woff2`,
+  rewritten to `file://` at render time).
+- Templates: an archetype is **not** the whole design — the renderer layers a
+  **style pack** over it (`graphic_renderer/style_packs.py`): a deterministic,
+  coherence-pruned bundle of orthogonal levers (ground treatment × surface
+  texture × accent geometry × density). Archetype × pack = the **template
+  catalog** — 1,000+ unique, brand-safe, explainable templates. The pack is a
+  margin-safe, role-coloured *overlay* injected into each archetype's
+  `{{ACCENT_DECORATION}}` slot; it never touches the `--mh-*` role tokens, so
+  contrast and still↔motion colour parity are unchanged. Variety lives in the
+  pack levers, never in generative pixels.
 - Direction: the LLM design-spec director (`creative_brief/ai_director.py`
   → `design_spec.py`) emits a structured spec over closed vocabularies
   (`MOODS`, `ACCENT_TREATMENTS`, `FOCAL_ELEMENTS`, `STAT_KEYS`,

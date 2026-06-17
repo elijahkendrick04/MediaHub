@@ -1,0 +1,101 @@
+# Unit Test Suite — the full `pytest tests/` gate.
+#
+# WHY THIS EXISTS: the other CI workflows only run narrow slices of the suite
+# (the responsive contract, the API contract, the security scans). The full
+# unit suite was never a gate, so feature branches that each pass their own
+# tests could still collide on shared surfaces — the logged-out landing page
+# especially — and land a *latent* red on main that nothing caught. Two real
+# examples: U.8's pipeline diagram silently overwrote UI 1.3's inline-thumbnail
+# headline, and U.15's before/after section tripped two U.5 reveal invariants.
+# Both only surfaced when someone ran `pytest tests/` by hand.
+#
+# This workflow runs the whole suite on every PR and on push to the trunk, so
+# a cross-feature collision reddens the PR instead of slipping onto main.
+# (To *block* merges on it, add "Full unit suite (pytest)" to the branch
+# protection required-checks for main — a repo-settings change.)
+#
+# It also gates the DETERMINISTIC-ENGINE ground-truth oracle (a second step
+# below): the real pipeline on the fixed sample meet, diffed against the
+# committed golden baseline. The rest of tests/test_autotest_* stays in
+# autotest.yml, but this one regression oracle must redden a PR rather than
+# only the 6-hourly schedule — see that step's comment for the why.
+#
+# Browser/Playwright layers self-skip here: CI has no pinned Chromium and we
+# set MEDIAHUB_SKIP_BROWSER_TESTS=1, so those tests skip cleanly (their CSS/JS/
+# rendered-HTML siblings still run and catch landing regressions). Deps mirror
+# the runtime image (requirements.txt) + the test tooling (.[dev]) so optional
+# modules import rather than erroring.
+
+name: Unit Test Suite
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-suite:
+    name: Full unit suite (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install MediaHub (runtime + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          # Runtime deps mirror the deployed image so optional modules (rembg,
+          # onnxruntime, playwright, sqlite-vec, …) import instead of erroring;
+          # the dev extra adds pytest + xdist + reportlab + schemathesis.
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+
+      - name: Install Chromium for the renderer/browser tests
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run the application unit suite
+        run: |
+          # Scope = the application suite. The autonomous-tester FRAMEWORK's own
+          # self-tests (tests/test_autotest_*) are exercised by autotest.yml and
+          # are sensitive to xdist worker distribution under CI's small core
+          # count, so they're out of this application-level gate — EXCEPT the
+          # ground-truth oracle, which the next step carves back in. The renderer
+          # / browser tests run against the Chromium installed above; the handful
+          # pinned to a specific local Chromium build self-skip when it's absent.
+          python -m pytest tests/ \
+            --ignore-glob='tests/test_autotest_*.py' \
+            -q -p no:randomly -n auto --tb=short
+
+      - name: Ground-truth regression oracle (deterministic engine gate)
+        run: |
+          # CARVE-OUT from the test_autotest_* exclusion above. The broad ignore
+          # keeps the autonomous-tester FRAMEWORK self-tests (xdist-worker-
+          # sensitive on CI's small core count) in autotest.yml — but the
+          # ground-truth oracle is a different animal: it runs the REAL pipeline
+          # on the fixed sample meet and diffs the deterministic output (parser
+          # swim count, club match, card/achievement counts, known swimmers)
+          # against the committed golden baseline. A stale baseline OR a real
+          # parser / detector / ranker drift must redden the PR here — not sit
+          # latent until the 6-hourly autotest.yml run. That latency is exactly
+          # how the golden baseline went stale behind the multi-column PDF fix
+          # (#631): the count moved 1217 -> 3597 on main and nothing reddened a
+          # PR. Run SERIALLY (no -n) so the result never depends on xdist worker
+          # distribution; -p no:randomly keeps it order-stable.
+          python -m pytest tests/test_autotest_ground_truth.py \
+            -q -p no:randomly --tb=short

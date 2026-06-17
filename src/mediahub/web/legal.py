@@ -187,9 +187,9 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
     ),
     Subprocessor(
         name="Buffer, Inc.",
-        processing="Relay of approved posts to social platforms",
+        processing="Auto scheduling — relay of approved posts to social platforms",
         location="United States",
-        env_keys=("BUFFER_ACCESS_TOKEN",),
+        env_keys=("SCHEDULER_ACCESS_TOKEN",),
         transfer_mechanism="DPA; SCCs/IDTA",
         engaged_when="Only if the club connects publishing",
     ),
@@ -668,10 +668,10 @@ def privacy_html(
         <td>Search queries containing athlete name, club and birth year; fetches of
             public results pages</td>
         <td>DuckDuckGo (or a self-hosted SearXNG instance)</td></tr>
-    <tr><td>Social scheduling</td>
+    <tr><td>Auto scheduling</td>
         <td>Approved caption and graphic (athlete name embedded)</td>
-        <td>Buffer, then your connected social platforms &mdash; only if your club
-            connects Buffer</td></tr>
+        <td>Auto scheduling (provided by Buffer, Inc.), then your connected social
+            platforms &mdash; only if your club connects auto scheduling</td></tr>
     <tr><td>Payments</td><td>Email, plan, payment details (collected by Stripe
         directly)</td><td>Stripe</td></tr>
     <tr><td>Transactional email (password resets, verification, workspace
@@ -730,7 +730,8 @@ def privacy_html(
 <div class="card">
   <h2>7. International transfers</h2>
   <p>Google (Gemini), Anthropic, Replicate, Microsoft (voiceover, where enabled),
-  Resend (email, where configured), Stripe and Buffer process data in the United
+  Resend (email, where configured), Stripe and Buffer, Inc. (the auto-scheduling
+  provider) process data in the United
   States; Photoroom processes data in [PHOTOROOM_REGION]; an operator-configured
   OpenAI-compatible endpoint (where one is configured) processes data wherever that
   chosen provider runs. Where a provider is

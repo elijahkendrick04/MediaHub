@@ -45,7 +45,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
     monkeypatch.delenv(KILL_SWITCH_ENV, raising=False)
-    monkeypatch.delenv("BUFFER_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SCHEDULER_ACCESS_TOKEN", raising=False)
     (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
     (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
     return tmp_path
@@ -330,7 +330,7 @@ class TestApprovalSignal:
         out = apply_approval_signal(ORG, run_id)
         assert out["ok"] is False
 
-    def test_autonomous_publish_rides_the_buffer_path(self, env, monkeypatch):
+    def test_autonomous_publish_rides_the_scheduler_path(self, env, monkeypatch):
         from mediahub.web.club_profile import ClubProfile, save_profile
 
         save_policy(ORG, {"meet_recap": "fully_autonomous"})
@@ -338,7 +338,7 @@ class TestApprovalSignal:
             ClubProfile(
                 profile_id=ORG,
                 display_name="Auto SC",
-                buffer_access_token="tok-123",
+                scheduler_access_token="tok-123",
                 autonomy_channel_ids=["chan-1", "chan-2"],
             )
         )
@@ -350,7 +350,7 @@ class TestApprovalSignal:
 
         import mediahub.workflow.approval as approval_mod
 
-        monkeypatch.setattr("mediahub.publishing.buffer.schedule_post", fake_schedule_post)
+        monkeypatch.setattr("mediahub.publishing.scheduler.schedule_post", fake_schedule_post)
         run_id = _seed_run(env, achievements=[_ach("s1")])
         out = approval_mod.apply_approval_signal(ORG, run_id)
 
@@ -360,7 +360,7 @@ class TestApprovalSignal:
         state = WorkflowStore(env / "runs_v4").load(run_id)["s1"]
         assert state.status == CardStatus.APPROVED
         assert state.schedule_status == ScheduleStatus.SCHEDULED
-        assert "upd-chan-1" in (state.buffer_update_id or "")
+        assert "upd-chan-1" in (state.scheduler_update_id or "")
         # Every attempt is in the posting log; the decision is in the ledger.
         from mediahub.publishing.posting_log import recent_attempts
 
@@ -368,8 +368,8 @@ class TestApprovalSignal:
         assert len(rows) == 2 and all(r["status"] == "ok" for r in rows)
         assert any(e["kind"] == "auto_publish" for e in AuditLog().read(ORG))
 
-    def test_buffer_failure_is_honest_card_stays_approved(self, env, monkeypatch):
-        from mediahub.publishing.buffer import BufferAuthError
+    def test_scheduler_failure_is_honest_card_stays_approved(self, env, monkeypatch):
+        from mediahub.publishing.scheduler import SchedulerAuthError
         from mediahub.web.club_profile import ClubProfile, save_profile
 
         save_policy(ORG, {"meet_recap": "fully_autonomous"})
@@ -377,15 +377,15 @@ class TestApprovalSignal:
             ClubProfile(
                 profile_id=ORG,
                 display_name="Auto SC",
-                buffer_access_token="tok-bad",
+                scheduler_access_token="tok-bad",
                 autonomy_channel_ids=["chan-1"],
             )
         )
 
         def failing_schedule_post(**kw):
-            raise BufferAuthError("Buffer rejected the token")
+            raise SchedulerAuthError("the scheduler rejected the token")
 
-        monkeypatch.setattr("mediahub.publishing.buffer.schedule_post", failing_schedule_post)
+        monkeypatch.setattr("mediahub.publishing.scheduler.schedule_post", failing_schedule_post)
         run_id = _seed_run(env, achievements=[_ach("s1")])
         out = apply_approval_signal(ORG, run_id)
         assert out["published"] == 0
@@ -434,13 +434,13 @@ def test_phase2_exit_criterion_end_to_end(env, monkeypatch):
         ClubProfile(
             profile_id=ORG,
             display_name="Auto SC",
-            buffer_access_token="tok-123",
+            scheduler_access_token="tok-123",
             autonomy_channel_ids=["chan-1"],
         )
     )
     published: list[str] = []
     monkeypatch.setattr(
-        "mediahub.publishing.buffer.schedule_post",
+        "mediahub.publishing.scheduler.schedule_post",
         lambda **kw: (published.append(kw["channel_id"]), {"ok": True, "update_id": "u1"})[1],
     )
     run_id = _seed_run(
@@ -534,12 +534,18 @@ class TestWebSurface:
         assert load_profile(ORG).autonomy_channel_ids == ["chan-1", "chan-2"]
 
     def test_settings_tab_renders_threshold_and_channel_controls(self, app_with_org):
+        # Post-restructure: confidence thresholds live on the operator-only
+        # Developer settings page; the autonomous-channel list lives on the
+        # Auto scheduling settings page.
         with app_with_org.test_client() as client:
             _with_org(client)
-            html = client.get("/settings").get_data(as_text=True)
-        assert "Auto-publish confidence" in html
-        assert 'name="threshold_meet_recap"' in html
-        assert "Autonomous channels" in html
+            with client.session_transaction() as sess:
+                sess["dev_operator"] = True
+            dev_html = client.get("/settings/developer").get_data(as_text=True)
+            sched_html = client.get("/settings/scheduling").get_data(as_text=True)
+        assert "Autopublish confidence" in dev_html
+        assert 'name="threshold_meet_recap"' in dev_html
+        assert "Autonomous channels" in sched_html
 
     def test_healthz_reports_publish_gate(self, app_with_org):
         with app_with_org.test_client() as client:
@@ -617,7 +623,7 @@ class TestApprovalSignalCadence:
         AuditLog().record(ORG, "s1", "auto_approve", tool="apply_approval_signal", result="ok")
         with app_with_org.test_client() as client:
             _with_org(client)
-            html = client.get("/settings").get_data(as_text=True)
+            html = client.get("/settings/autonomy").get_data(as_text=True)
         assert "Autonomy activity log" in html
         assert "auto_approve" in html
         assert "Run autonomy check now" in html

@@ -18,9 +18,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import traceback
 from pathlib import Path
 from typing import Any, Iterable, Optional
+
+_HEX_RE = re.compile(r"^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$")
+
+
+def _sanitise_hex(value) -> str:
+    """Return ``value`` if it is a 3/6-digit CSS hex colour, else ``""``.
+
+    Guards the UI 1.18 accent override: only a real hex colour reaches the
+    BrandKit / brief palette, so a junk value can never slip a ``;``/``}`` into
+    the injected ``:root{}`` CSS or bypass the brand-locked swatch contract.
+    """
+    s = str(value or "").strip()
+    return s if _HEX_RE.match(s) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +227,7 @@ def create_visual_for_item(
     forced_hero_asset_id: Optional[str] = None,
     forced_bg_asset_id: Optional[str] = None,
     design_spec=None,
+    user_overrides: Optional[dict] = None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
@@ -223,8 +238,18 @@ def create_visual_for_item(
     regenerate-variants worker pre-computes distinct specs in one batch call
     and pins one per variant). Applied via ``generator.apply_design_spec`` —
     the same mapping the candidate pool uses.
+
+    ``user_overrides`` (UI 1.18 inspector): explicit human tweaks layered on top
+    of the AI-directed brief, never AI-chosen and applied deterministically:
+      * ``accent``       — a brand-kit hex used as the card's accent colour
+                           (rendered via a BrandKit copy so the existing
+                           APCA legibility gate still runs);
+      * ``photo_pos``    — a CSS ``object-position`` manual crop;
+      * ``hide_sponsor`` — drop the sponsor strip for this render.
+    Omitted / empty keys leave the automatic behaviour byte-identical.
     """
     out: dict[str, Any] = {"errors": []}
+    overrides = user_overrides or {}
 
     # 1. Requirements evaluation
     try:
@@ -293,6 +318,23 @@ def create_visual_for_item(
             from mediahub.creative_brief.generator import apply_design_spec
 
             apply_design_spec(brief, design_spec)
+        # UI 1.18 — manual accent swatch. Re-point the card's accent at the
+        # chosen BRAND colour. Done on a BrandKit copy (not the shared object)
+        # and on the brief palette so the render's role resolver still applies
+        # the APCA legibility gate — an off-brand or illegible pick is repaired,
+        # never blindly painted.
+        _accent_override = _sanitise_hex(overrides.get("accent"))
+        if _accent_override:
+            try:
+                import dataclasses as _dc
+
+                brand_kit = _dc.replace(brand_kit, accent_colour=_accent_override)
+            except Exception:
+                pass
+            try:
+                brief.palette = {**(brief.palette or {}), "accent": _accent_override}
+            except Exception:
+                pass
         out["brief"] = brief.to_dict()
     except Exception as e:
         out["errors"].append(f"brief_failed: {e}")
@@ -340,6 +382,13 @@ def create_visual_for_item(
             skip_cutout_for_render = False
         athlete_for_render = None if skip_cutout_for_render else athlete_path
 
+        # UI 1.18 — element toggle: drop the sponsor strip for this render.
+        _hide_sponsor = bool(overrides.get("hide_sponsor"))
+        _render_sponsor_name = "" if _hide_sponsor else sponsor_name
+        _render_sponsor_logo = None if _hide_sponsor else sponsor_logo_path
+        # UI 1.18 — manual crop (validated to a safe object-position downstream).
+        _photo_pos = str(overrides.get("photo_pos") or "")
+
         results = render_all_formats(
             brief,
             output_dir=per_brief_dir,
@@ -349,9 +398,10 @@ def create_visual_for_item(
             logo_path=logo_path,
             bg_photo_path=bg_photo_path,
             brand_kit=brand_kit,
-            sponsor_name=sponsor_name,
-            sponsor_logo_path=sponsor_logo_path,
+            sponsor_name=_render_sponsor_name,
+            sponsor_logo_path=_render_sponsor_logo,
             watermark_text=watermark_text,
+            photo_pos_override=_photo_pos,
         )
     except Exception as e:
         out["errors"].append(f"render_failed: {e}")
@@ -582,6 +632,7 @@ def create_candidate_pool_for_item(
 
     # 3. Brief + render + compliance per candidate
     from mediahub.graphic_renderer.variants import render_all_formats
+    from mediahub.graphic_renderer.render import render_pool_session
 
     athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
         evaluation, media_assets, brand_kit, forced_hero_asset_id=forced_hero_asset_id
@@ -589,86 +640,90 @@ def create_candidate_pool_for_item(
     pool_formats = list(formats) if formats else list(POOL_FORMATS)
     candidates: list[dict] = []
     png_paths: list[str] = []
-    for idx, (spec, ai_directed) in enumerate(specs):
-        try:
-            # variation_seed=0 keeps the identity palette: Tier B candidates
-            # differ by DIRECTION (the spec's archetype / colour roles / hook),
-            # never by the v1 seed-permutation, which can rotate the brand
-            # primary into the accent slot and fail the compliance gate.
-            brief = gen_brief(
-                item,
-                evaluation,
-                brand_kit,
-                voice_profile=voice_profile,
-                profile_id=profile_id,
-                meet_name=_meet_name(item),
-                venue_name=item.get("venue_name") or "",
-                sponsor={"name": sponsor_name} if sponsor_name else None,
-                variation_seed=0,
-                use_ai_director=False,
-            )
-            apply_design_spec(brief, spec)
-            if not ai_directed:
-                brief.ai_directed = False
+    # Render the whole candidate pool against ONE warm Chromium pool (G1.23):
+    # every candidate × format reuses warm browsers instead of relaunching
+    # Chromium per render, which dominates the wall-clock of a batch render.
+    with render_pool_session():
+        for idx, (spec, ai_directed) in enumerate(specs):
             try:
-                (briefs_dir_for_run(run_id) / f"{brief.id}.json").write_text(
-                    json.dumps(brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                # variation_seed=0 keeps the identity palette: Tier B candidates
+                # differ by DIRECTION (the spec's archetype / colour roles / hook),
+                # never by the v1 seed-permutation, which can rotate the brand
+                # primary into the accent slot and fail the compliance gate.
+                brief = gen_brief(
+                    item,
+                    evaluation,
+                    brand_kit,
+                    voice_profile=voice_profile,
+                    profile_id=profile_id,
+                    meet_name=_meet_name(item),
+                    venue_name=item.get("venue_name") or "",
+                    sponsor={"name": sponsor_name} if sponsor_name else None,
+                    variation_seed=0,
+                    use_ai_director=False,
                 )
-            except Exception as e:
-                out["errors"].append(f"brief_persist_failed_{idx}: {e}")
-
-            per_brief_dir = visuals_dir_for_run(run_id) / brief.id
-            per_brief_dir.mkdir(parents=True, exist_ok=True)
-            skip_photo = brief.photo_treatment == "no-photo" and not forced_hero_asset_id
-            results = render_all_formats(
-                brief,
-                output_dir=per_brief_dir,
-                formats=pool_formats,
-                athlete_path=None if skip_photo else athlete_path,
-                venue_path=venue_path,
-                logo_path=logo_path,
-                bg_photo_path=bg_photo_path,
-                brand_kit=brand_kit,
-                sponsor_name=sponsor_name,
-                sponsor_logo_path=sponsor_logo_path,
-            )
-            visuals_summary: list[dict] = []
-            for r in results:
+                apply_design_spec(brief, spec)
+                if not ai_directed:
+                    brief.ai_directed = False
                 try:
-                    persist_visual(r.visual, run_id=run_id, brief=brief)
+                    (briefs_dir_for_run(run_id) / f"{brief.id}.json").write_text(
+                        json.dumps(brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                    )
                 except Exception as e:
-                    out["errors"].append(f"persist_failed_{r.visual.id}: {e}")
-                visuals_summary.append(
+                    out["errors"].append(f"brief_persist_failed_{idx}: {e}")
+
+                per_brief_dir = visuals_dir_for_run(run_id) / brief.id
+                per_brief_dir.mkdir(parents=True, exist_ok=True)
+                skip_photo = brief.photo_treatment == "no-photo" and not forced_hero_asset_id
+                results = render_all_formats(
+                    brief,
+                    output_dir=per_brief_dir,
+                    formats=pool_formats,
+                    athlete_path=None if skip_photo else athlete_path,
+                    venue_path=venue_path,
+                    logo_path=logo_path,
+                    bg_photo_path=bg_photo_path,
+                    brand_kit=brand_kit,
+                    sponsor_name=sponsor_name,
+                    sponsor_logo_path=sponsor_logo_path,
+                )
+                visuals_summary: list[dict] = []
+                for r in results:
+                    try:
+                        persist_visual(r.visual, run_id=run_id, brief=brief)
+                    except Exception as e:
+                        out["errors"].append(f"persist_failed_{r.visual.id}: {e}")
+                    visuals_summary.append(
+                        {
+                            "id": r.visual.id,
+                            "format_name": r.visual.format_name,
+                            "width": r.visual.width,
+                            "height": r.visual.height,
+                            "file_path": r.visual.file_path,
+                            "layout_template": r.visual.layout_template,
+                            "confidence_label": r.visual.confidence_label,
+                            "why_this_design": r.visual.why_this_design,
+                            "safety_notes": r.visual.safety_notes,
+                            "sourced_asset_ids": r.visual.sourced_asset_ids,
+                        }
+                    )
+                    if r.visual.file_path:
+                        png_paths.append(r.visual.file_path)
+                candidates.append(
                     {
-                        "id": r.visual.id,
-                        "format_name": r.visual.format_name,
-                        "width": r.visual.width,
-                        "height": r.visual.height,
-                        "file_path": r.visual.file_path,
-                        "layout_template": r.visual.layout_template,
-                        "confidence_label": r.visual.confidence_label,
-                        "why_this_design": r.visual.why_this_design,
-                        "safety_notes": r.visual.safety_notes,
-                        "sourced_asset_ids": r.visual.sourced_asset_ids,
+                        "archetype": spec.archetype,
+                        "ai_directed": ai_directed,
+                        "spec": spec.to_dict(),
+                        "brief": brief.to_dict(),
+                        "visuals": visuals_summary,
+                        "compliance": _candidate_compliance(
+                            brief, brand_kit, spec, lockups=lockups, sponsor_name=sponsor_name
+                        ),
                     }
                 )
-                if r.visual.file_path:
-                    png_paths.append(r.visual.file_path)
-            candidates.append(
-                {
-                    "archetype": spec.archetype,
-                    "ai_directed": ai_directed,
-                    "spec": spec.to_dict(),
-                    "brief": brief.to_dict(),
-                    "visuals": visuals_summary,
-                    "compliance": _candidate_compliance(
-                        brief, brand_kit, spec, lockups=lockups, sponsor_name=sponsor_name
-                    ),
-                }
-            )
-        except Exception as e:
-            out["errors"].append(f"candidate_failed_{idx}: {e}")
-            traceback.print_exc()
+            except Exception as e:
+                out["errors"].append(f"candidate_failed_{idx}: {e}")
+                traceback.print_exc()
 
     # 4. Rank: legibility first (gate pass, then score), stable on entry order.
     order = sorted(

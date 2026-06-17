@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   radial_competition_ring  (v2 archetype, PAR-7 — G1.1)
+
+   A radial DATA dial: the headline result sits at the centre of a
+   concentric ring assembly — an outer ring of clock-style tick marks, a
+   thick accent ring, and a punched-out core that frames the time/mark in
+   the accent role. A kicker pill caps the dial; the athlete name + event
+   sit beneath it, and the meet + club lockup anchor the foot.
+
+   Structural signature: concentric rings with radial tick rhythm and a
+   centred numeral — a competition dial / gauge. The hero is DATA, not a
+   photo, which sets it apart from the photo portal of spotlight_disc and
+   the centred medal/portrait of centered_medal_spotlight; the radial
+   symmetry sets it apart from every left/column-anchored layout. The
+   ticks are pure CSS (a repeating-conic-gradient in the outline role
+   masked to a thin band), so the dial is deterministic and uses only the
+   injected role tokens — no hex, no asset.
+
+   Overflow safety: the core is a fixed disc, far narrower than the
+   full-canvas result box the autofit var assumes (result fit ~= 52% of
+   canvas). So the result is scaled via calc(var * 0.5) AND allowed to
+   WRAP/break, and the surname (below the dial, full width) uses
+   calc(var * 0.62) and breaks too. Holds at 1080x1350 and 1080x1920: the
+   dial is centred and the foot stays bottom-anchored.
+   =================================================================== */
+
+.rr {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 110px 70px 80px;
+  text-align: center;
+}
+.rr *, .rr *::before, .rr *::after { box-sizing: border-box; }
+
+.rr__kicker {
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 12px 26px; border-radius: 999px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 800;
+  font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase;
+  margin-bottom: 56px; max-width: 100%; overflow-wrap: anywhere;
+}
+
+/* the concentric dial — fixed-size, children centred via inset+margin */
+.rr__dial { position: relative; width: 540px; height: 540px; max-width: 100%; flex: 0 0 auto; }
+.rr__dial > * { position: absolute; inset: 0; margin: auto; border-radius: 50%; }
+.rr__ticks {
+  width: 540px; height: 540px;
+  background: repeating-conic-gradient(
+    var(--mh-outline) 0deg 1.3deg, transparent 1.3deg 15deg);
+  opacity: 0.85;
+}
+.rr__tickmask { width: 492px; height: 492px; background: var(--mh-primary); }
+.rr__ring {
+  width: 452px; height: 452px;
+  border: 16px solid var(--mh-accent);
+  background: var(--mh-primary);
+}
+.rr__core {
+  width: 388px; height: 388px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 30px;
+}
+.rr__core-lab {
+  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-size: 18px; letter-spacing: 0.34em; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.7; margin-bottom: 12px;
+}
+.rr__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.5);
+  font-variation-settings: var(--mh-axes-result, normal);
+  line-height: 0.9; letter-spacing: -0.02em;
+  color: var(--mh-accent);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+
+.rr__below { margin-top: 52px; width: 100%; }
+.rr__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 36px; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+.rr__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.62);
+  line-height: 0.92; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+.rr__event {
+  margin-top: 16px; padding-top: 16px;
+  display: inline-block; border-top: 4px solid var(--mh-accent);
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 27px; line-height: 1.12; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.92;
+  overflow-wrap: anywhere;
+}
+.rr__hero { margin-top: 18px; }
+.rr__hero:has(.rr__hero-val:empty) { display: none; }
+.rr__hero-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 23px; letter-spacing: 0.04em; color: var(--mh-accent);
+  overflow-wrap: anywhere;
+}
+
+.rr__foot {
+  margin-top: auto; padding-top: 30px; width: 100%;
+  border-top: 2px solid var(--mh-outline);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  text-align: left;
+}
+.rr__logo { height: 54px; width: auto; }
+.rr__logo img, .rr__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.rr__meta { display: flex; flex-direction: column; min-width: 0; }
+.rr__meet {
+  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 20px;
+  color: var(--mh-on-primary); opacity: 0.85; overflow-wrap: anywhere;
+}
+.rr__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  text-transform: uppercase; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.rr__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="rr">
+  <div class="rr__kicker">{{ACHIEVEMENT_LABEL}}</div>
+
+  <div class="rr__dial">
+    <div class="rr__ticks"></div>
+    <div class="rr__tickmask"></div>
+    <div class="rr__ring"></div>
+    <div class="rr__core">
+      <div class="rr__core-lab">Result</div>
+      <div class="rr__result">{{RESULT_VALUE}}</div>
+    </div>
+  </div>
+
+  <div class="rr__below">
+    <div class="rr__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="rr__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="rr__event">{{EVENT_NAME}}</div>
+    <div class="rr__hero">
+      <div class="rr__hero-val">{{HERO_STAT}}</div>
+    </div>
+  </div>
+
+  <div class="rr__foot">
+    <div class="rr__logo">{{LOGO_BLOCK}}</div>
+    <div class="rr__meta">
+      <div class="rr__meet">{{MEET_NAME}}</div>
+      <div class="rr__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="rr__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

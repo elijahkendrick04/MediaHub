@@ -224,24 +224,34 @@ def test_markers_and_structure_survive_every_move():
 
 
 def test_live_roadmap_file_satisfies_the_list_contract():
-    """The real docs/ROADMAP.md must carry all three blocks with parseable items."""
+    """The real docs split: ROADMAP.md carries the two to-do blocks; the
+    Completed (DONE) block lives in ROADMAP_BUILT.md (split out 2026-06-13).
+    Moving an item across the two real files engages the transform."""
     import re
 
     text = ru.ROADMAP.read_text(encoding="utf-8")
+    built = ru.ROADMAP_BUILT.read_text(encoding="utf-8")
     todo = ru._block_re("TODO").search(text)
     founder = ru._block_re("TODO_FOUNDER").search(text)
     assert todo
     assert founder
-    assert ru._block_re("DONE").search(text)
-    # The first live item of each to-do list is movable: the transform engages
-    # on the real file. Resolved dynamically so this test doesn't go stale
-    # every time an item ships (a hardcoded id rotted the moment P0.1
-    # completed).
+    # the forward roadmap must NOT carry the Completed list any more …
+    assert not ru._block_re("DONE").search(text)
+    # … it lives in the built file.
+    assert ru._block_re("DONE").search(built)
+    # The first live item of each to-do list is movable across the two files.
     for block in (todo, founder):
         ids = re.findall(r"^- \*\*([^*]+)\*\*", block.group(1), re.MULTILINE)
         assert ids, "each to-do block must carry at least one parseable item"
-        moved, changed = ru.set_item_status(text, ids[0], "done", today="2026-01-01")
-        assert changed and f"- ✅ **{ids[0]}**" in moved
+        new_text, new_built, changed = ru.set_item_status(
+            text, ids[0], "done", today="2026-01-01", done_text=built
+        )
+        assert changed
+        assert f"- ✅ **{ids[0]}**" in new_built
+        origin_line = re.search(
+            r"^- \*\*" + re.escape(ids[0]) + r"\*\*.*$", block.group(1), re.MULTILINE
+        ).group(0)
+        assert origin_line not in new_text
 
 
 # --- sweep_completed (hand-marked ✅ items move to Completed) -----------------
@@ -364,16 +374,20 @@ def test_sweep_preserves_markers_and_bullet_shape():
 
 
 def test_live_roadmap_sweep_is_safe():
-    """The sweep must run cleanly over the real docs/ROADMAP.md: structure
-    intact, and anything it moves lands in Completed. (It does NOT assert a
-    no-op — hand-marking an item ✅ in a PR and letting the bot sweep it on
-    the next push to main is the supported flow.)"""
+    """The sweep must run cleanly over the real two-file split: ROADMAP.md keeps
+    its two to-do blocks, ROADMAP_BUILT.md keeps its DONE block, and anything it
+    moves lands in the built Completed list. (Not asserted a no-op — marking an
+    item ✅ in a PR and letting the bot sweep it is the supported flow.)"""
     text = ru.ROADMAP.read_text(encoding="utf-8")
-    out, moved = ru.sweep_completed(text, today="2026-01-01")
-    for name in ("TODO", "TODO_FOUNDER", "DONE"):
+    built = ru.ROADMAP_BUILT.read_text(encoding="utf-8")
+    out, out_built, moved = ru.sweep_completed(text, done_text=built, today="2026-01-01")
+    for name in ("TODO", "TODO_FOUNDER"):
         assert out.count(f"<!-- ROADMAP:{name} -->") == 1
         assert out.count(f"<!-- /ROADMAP:{name} -->") == 1
-    done = _done_block(out)
+    assert out.count("<!-- ROADMAP:DONE -->") == 0          # never re-appears on the roadmap
+    assert out_built.count("<!-- ROADMAP:DONE -->") == 1
+    assert out_built.count("<!-- /ROADMAP:DONE -->") == 1
+    done = _done_block(out_built)
     for ident in moved:
         assert f"- ✅ **{ident}**" in done
 
@@ -459,3 +473,145 @@ def test_fetch_sentinel_issues_inert_without_env(monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     assert ru._fetch_sentinel_issues() is None
+
+
+# --- two-file mode (to-do blocks in ROADMAP.md, DONE in ROADMAP_BUILT.md) ----
+
+CF_TODO = (
+    "<!-- ROADMAP:TODO_FOUNDER -->\n"
+    "- **F.2** · Register with the ICO · ❌ **NOT STARTED**\n"
+    "<!-- /ROADMAP:TODO_FOUNDER -->\n\n"
+    "<!-- ROADMAP:TODO -->\n"
+    "- **U.1** · Phase 1 — Core-flow polish · ❌ **NOT STARTED**\n"
+    "- **P4.1** · Phase 2 — Bluesky + Mastodon · ❌ **NOT STARTED**\n"
+    "<!-- /ROADMAP:TODO -->\n"
+)
+CF_BUILT = (
+    "# Built\n\n<!-- ROADMAP:DONE -->\n"
+    "- ✅ **PC.1** · Self-serve signup *(completed 2026-06-09)*\n"
+    "<!-- /ROADMAP:DONE -->\n"
+)
+
+
+def test_cross_file_done_moves_todo_item_into_the_built_file():
+    new_todo, new_built, changed = ru.set_item_status(
+        CF_TODO, "P4.1", "done", today="2026-06-13", done_text=CF_BUILT
+    )
+    assert changed
+    assert "P4.1" not in _todo_block(new_todo)        # gone from ROADMAP.md
+    assert "<!-- ROADMAP:DONE -->" not in new_todo    # no DONE block leaks onto the roadmap
+    assert (
+        "- ✅ **P4.1** · Phase 2 — Bluesky + Mastodon *(completed 2026-06-13)*"
+        in new_built
+    )
+    assert "PC.1" in new_built                         # the pre-existing built item is intact
+
+
+def test_cross_file_demote_returns_built_item_to_the_right_todo_block():
+    new_todo, new_built, changed = ru.set_item_status(
+        CF_TODO, "PC.1", "wip", today="2026-06-13", done_text=CF_BUILT
+    )
+    assert changed
+    assert "PC.1" not in _done_block(new_built)        # left the built file
+    line = next(l for l in _todo_block(new_todo).splitlines() if "**PC.1**" in l)
+    assert line.endswith("· \U0001F535 **IN PROGRESS**")  # back on the main build list
+
+
+def test_cross_file_sweep_moves_marked_item_into_the_built_file():
+    doc = CF_TODO.replace(
+        "- **U.1** · Phase 1 — Core-flow polish · ❌ **NOT STARTED**",
+        "- **U.1** · Phase 1 — Core-flow polish · ✅ **DONE (2026-06-13)**: shipped",
+    )
+    new_todo, new_built, moved = ru.sweep_completed(doc, done_text=CF_BUILT)
+    assert moved == ["U.1"]
+    assert "U.1" not in _todo_block(new_todo)
+    assert (
+        "- ✅ **U.1** · Phase 1 — Core-flow polish *(completed 2026-06-13)*"
+        in new_built
+    )
+    assert "<!-- ROADMAP:DONE -->" not in new_todo
+    assert new_built.count("<!-- ROADMAP:DONE -->") == 1
+
+
+def test_cross_file_unknown_id_returns_both_unchanged():
+    new_todo, new_built, changed = ru.set_item_status(
+        CF_TODO, "ZZ-9", "done", done_text=CF_BUILT
+    )
+    assert not changed and new_todo == CF_TODO and new_built == CF_BUILT
+
+
+# --- _directive_messages (self-healing directive scan) ----------------------
+# Regression cover for the concurrency drop: the roadmap lands via a SHARED bot
+# branch on an async auto-merge, so a later run can force-overwrite an earlier
+# run's pending delta before its PR merges. Collecting directives from a bounded
+# recent window (not just this push's narrow range) makes a dropped directive
+# self-heal on the next push.
+
+import subprocess as _sp  # noqa: E402
+
+
+def _init_repo(tmp_path):
+    def g(*args):
+        _sp.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    g("init", "-q")
+    g("config", "user.email", "t@example.com")
+    g("config", "user.name", "Test")
+    g("config", "commit.gpgsign", "false")
+
+    def commit(text, message):
+        (tmp_path / "f.txt").write_text(text, encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-q", "-m", message)
+        return _sp.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    return commit
+
+
+def test_directive_messages_self_heals_a_dropped_directive(tmp_path, monkeypatch):
+    commit = _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    commit("0", "base")
+    # A feature commit whose `done` directive a *later* run's narrow push range
+    # never sees — the exact shape that stranded G1.2 / G1.22 / G1.30.
+    dropped = commit("1", "feat G1.30\n\nroadmap: G1.30 done")
+    after = commit("2", "feat G1.99\n\nroadmap: G1.99 done")
+
+    # The bug: the narrow (dropped, after] range carries only the later directive.
+    narrow = dict(ru.parse_directives(ru._commits_in_range(dropped, after)))
+    assert "G1.30" not in narrow
+    assert narrow == {"G1.99": "done"}
+
+    # The fix: the backstop window re-includes the stranded directive, so this
+    # push reinstates it (and still applies the new one).
+    healed = dict(ru.parse_directives(ru._directive_messages(dropped, after)))
+    assert healed["G1.30"] == "done"
+    assert healed["G1.99"] == "done"
+
+
+def test_directive_messages_newest_directive_for_an_id_wins(tmp_path, monkeypatch):
+    commit = _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    commit("0", "base")
+    commit("1", "mark wip\n\nroadmap: P1.2 wip")
+    after = commit("2", "later mark done\n\nroadmap: P1.2 done")
+    # Even with the wide scan, the latest directive for an id is authoritative.
+    healed = dict(ru.parse_directives(ru._directive_messages("", after)))
+    assert healed["P1.2"] == "done"
+
+
+def test_directive_messages_lookback_zero_is_push_range_only(tmp_path, monkeypatch):
+    commit = _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    base = commit("0", "base")
+    commit("1", "old\n\nroadmap: G1.30 done")
+    after = commit("2", "new\n\nroadmap: G1.99 done")
+    # lookback=0 disables the backstop → behaviour collapses to the explicit range.
+    got = dict(ru.parse_directives(ru._directive_messages(base, after, lookback=0)))
+    assert got == {"G1.30": "done", "G1.99": "done"}
