@@ -7021,7 +7021,15 @@ a.card:hover, .card[data-interactive]:hover {
   margin-bottom: var(--sp-4);
   position: relative;
   transition: border-color var(--transition), background var(--transition);
+  /* A big meet stacks many of these in one scroll — skip layout+paint for the
+     cards still well off-screen. `auto` makes the browser remember each card's
+     real height after its first render, so the reserved estimate never causes a
+     scroll jump on the way back. Unknown to old engines, which ignore it. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
 }
+/* Belt-and-braces: never let an off-screen card be skipped when printing. */
+@media print { .mh-content-card { content-visibility: visible; } }
 .mh-content-card:hover { background: var(--surface-2); border-left-color: var(--lane-h); }
 .mh-content-card .mh-card-platform {
   display: inline-flex; align-items: center; gap: 8px;
@@ -7204,7 +7212,10 @@ a.card:hover, .card[data-interactive]:hover {
   min-height: 32px;
   border-radius: 2px;
   cursor: pointer;
-  transition: all var(--transition);
+  /* Explicit properties (house rule: never `transition: all`) — these buttons
+     only change colour / border / fill across their hover + primary states. */
+  transition: color var(--transition), border-color var(--transition),
+              background-color var(--transition);
 }
 .mh-card-actions button:hover { color: var(--ink); border-color: var(--rule); }
 .mh-card-actions button.primary { color: var(--lane); border-color: color-mix(in oklab, var(--lane) 30%, transparent); }
@@ -8406,6 +8417,20 @@ BASE_CSS = (
     + _MH_CAD_CSS
     + _MH_RG_CSS
 )
+
+
+# Content-hash fingerprint for the progressive-enhancement UI kit. It rides the
+# <script> URL as `?v=…` so the long SEND_FILE_MAX_AGE_DEFAULT browser cache can
+# hold ui-kit.js across navigations, yet a deploy that changes the file ships a
+# new URL and busts that cache immediately. A content hash (not file mtime)
+# means every replica computes the same value, so a load-balanced fleet agrees
+# on the URL. Falls back to a constant only if the file is unreadable at import.
+try:
+    _UI_KIT_VER = hashlib.sha256(
+        (Path(__file__).resolve().parent / "static" / "js" / "ui-kit.js").read_bytes()
+    ).hexdigest()[:10]
+except OSError:
+    _UI_KIT_VER = "static"
 
 
 # U.9 — cycling hero accent word. The content types MediaHub makes, in the
@@ -9864,7 +9889,7 @@ def _layout(
      effect layer (theme-motion.css). Deferred: runs after parse, in order,
      before DOMContentLoaded. Self-hosted (no CDN); a load failure leaves every
      page fully usable (effects are decorative). -->
-<script defer src="{{ url_for('static', filename='js/ui-kit.js') }}"></script>
+<script defer src="{{ ui_kit_js_url }}"></script>
 </head>
 <body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
@@ -12050,6 +12075,7 @@ def _layout(
         body=body,
         active=active,
         render_progress_js=_RENDER_PROGRESS_JS,
+        ui_kit_js_url=url_for("static", filename="js/ui-kit.js", v=_UI_KIT_VER),
         dock=dock,
         chapter_nav_html=chapter_nav_html,
         health_url=url_for("healthz"),
@@ -12785,6 +12811,13 @@ def create_app() -> Flask:
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+    # Let the browser hold static assets (self-hosted fonts, fonts.css, the UI
+    # kit) instead of revalidating each with a conditional GET on every single
+    # navigation. The one mutable asset, ui-kit.js, carries a content-hash `?v=`
+    # cache-buster (see _UI_KIT_VER) so a deploy still lands instantly; the woff2
+    # faces are effectively immutable. Routes that must stay fresh (sw.js,
+    # generated previews) set their own Cache-Control, which overrides this.
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800  # 7 days
     app.url_map.strict_slashes = False
 
     # ---- Web hardening (security/web-hardening, THREAT_MODEL §6) --------
