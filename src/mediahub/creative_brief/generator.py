@@ -674,15 +674,19 @@ def generate(
     # not one repeated look. Mirrors the archetype floor's contract — an
     # explicit seed (incl. 0, the ?stable path) is an exact, reproducible pick;
     # no seed derives a stable-per-card pack that spreads across the pack and
-    # walks past this card's recently-used packs. v2-only and additive: under
-    # the kill switch the pack stays empty (bare) and the legacy render is
-    # byte-identical.
+    # walks past this card's recently-used packs. When the design-spec director
+    # gave this card a mood, the pick is scoped to that mood's curated preset
+    # bundle (``style_packs.mood_preset_packs``) so the decoration matches the
+    # feeling, not just a seed; an empty/unknown mood (every legacy / non-AI
+    # brief) falls straight through to the full-catalog pick — byte-identical.
+    # v2-only and additive: under the kill switch the pack stays empty (bare).
     try:
         if _v2_on:
             from mediahub.graphic_renderer import style_packs as _sp
 
+            _mood = (brief.mood or "").strip()
             if variation_seed is not None:
-                _pack = _sp.pick_style_pack(variation_seed)
+                _pack = _sp.pick_mood_pack(_mood, variation_seed)
             else:
                 _recent_packs = [
                     s.split("sp:", 1)[1] for s in (recent_signatures or []) if "sp:" in s
@@ -693,7 +697,7 @@ def generate(
                     or ach.get("swim_id")
                     or ""
                 )
-                _pack = _sp.pick_style_pack_for_card(_pack_key or None, _recent_packs)
+                _pack = _sp.pick_mood_pack_for_card(_mood, _pack_key or None, _recent_packs)
             brief.style_pack = _pack.id
     except Exception:
         log.debug("gen-v2 style-pack selection skipped", exc_info=True)
@@ -728,8 +732,10 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
     two can never drift. Honest by construction: the hero-stat slot is filled
     only when the named fact was actually measured (``hero_stat_options``),
     and the colour-role assignment is recorded for the renderer's APCA-gated
-    application — never painted unconditionally. Re-stamps the variation
-    signature so dedupe/audit reflects the applied direction.
+    application — never painted unconditionally. When a pack was already
+    selected, the decorative style pack is re-keyed to the spec mood's curated
+    preset bundle (G1.28) so the decoration matches the chosen feeling. Re-stamps
+    the variation signature so dedupe/audit reflects the applied direction.
     """
     brief.layout_template = spec.archetype
     if spec.headline_hook:
@@ -748,6 +754,25 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.colour_role_assignment = dict(spec.colour_roles.to_dict())
     except Exception:
         brief.colour_role_assignment = {}
+    # Mood-keyed style pack (G1.28): re-key the decorative pack to the mood's
+    # curated preset bundle so the decoration matches the feeling the director
+    # chose. This is the same selection ``generate()``'s v2 pack block makes for
+    # an AI-directed card, applied to the pre-computed-spec paths (candidate
+    # pool, regenerate-variants) that set the mood *after* generate() already
+    # picked. Guarded to a no-op when no pack was selected (a bare brief, or the
+    # v2 kill switch left ``style_pack`` empty) or the mood has no bundle — so
+    # direct callers and the legacy engine are byte-identical. The archetype is
+    # folded into the key so distinct candidates for one card spread across the
+    # bundle rather than sharing a single pack.
+    try:
+        if brief.style_pack:
+            from mediahub.graphic_renderer import style_packs as _sp
+
+            if _sp.mood_preset_packs(brief.mood):
+                _key = f"{brief.content_item_id}|{brief.layout_template}"
+                brief.style_pack = _sp.pick_mood_pack_for_card(brief.mood, _key).id
+    except Exception:
+        log.debug("gen-v2 mood style-pack re-key skipped", exc_info=True)
     _stamp_signature(brief)
     return brief
 
