@@ -678,7 +678,7 @@ def render_gallery_body(
             f'<a class="mh-arch-gallery-link" href="{_e(studio_url)}">'
             '<span class="mh-agl-text">'
             '<span class="mh-agl-title">See live preview thumbnails &rarr;</span>'
-            "<span class=\"mh-agl-sub\">Browse every archetype &times; style pack as a "
+            '<span class="mh-agl-sub">Browse every archetype &times; style pack as a '
             "real rendered card — filter by ground, texture, accent and density.</span>"
             "</span>"
             '<span class="mh-agl-cta">Open the studio</span>'
