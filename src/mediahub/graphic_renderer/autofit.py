@@ -54,6 +54,9 @@ __all__ = [
     "measure_line_px",
     "em_width",
     "kern_ligature_em",
+    "balance_lines",
+    "fit_balanced",
+    "fit_balanced_px",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -719,3 +722,184 @@ def fit_text(
     )
     lines = wrap_text(text, box_w, size, font_family=font_family, weight=weight)
     return size, lines
+
+
+# --------------------------------------------------------------------------- #
+# Balanced multi-line fitting (G1.12)
+# --------------------------------------------------------------------------- #
+# The fitters above shrink a long *atomic* headline — a double-barrelled surname
+# ("WOLAJIMI-ABUBAKARI") or a split-time result ("1:45.23 / 50.12") — until the
+# whole run fits a single forced line, which can drive a hero name/numeral down
+# to a thin strip. Balanced fitting instead BREAKS such a value at its natural
+# seams (spaces, hyphens, the split slash) into a small number of lines whose
+# widths are as even as possible, then sizes to the widest of those lines.
+#
+# Fewer-but-wider vs more-but-shorter lines is a real trade-off — more lines
+# relax the width bound but tighten the height bound — so the fitter evaluates
+# each line count and keeps whichever yields the LARGEST size, ties preferring
+# fewer lines. One line is always a candidate, so the result is never smaller
+# than (and for an unbreakable token, identical to) the single-line fit. Line
+# widths reuse :func:`em_width`, so the G1.11 kerning/ligature correction flows
+# through for free. Like the rest of this module it is pure, deterministic
+# layout maths — no judgement.
+
+import re as _re
+
+# A zero-width break *after* a hyphen: "SMITH-JOHNSON" -> "SMITH-", "JOHNSON".
+# The hyphen stays on the left piece, the way real hyphenation signals that the
+# word continues on the next line.
+_HYPHEN_BREAK_RE = _re.compile(r"(?<=-)(?=.)")
+# A slash optionally padded by spaces — the separator between split / relay
+# times ("1:45.23 / 50.12", "49.81/50.12/51.04").
+_SLASH_SEP_RE = _re.compile(r"\s*/\s*")
+
+
+def _hero_units(text: str, mode: str) -> list[tuple[str, str]]:
+    """Tokenise ``text`` into ordered ``(glyphs, glue)`` break units.
+
+    ``glue`` is what renders *before* a unit when it shares a line with its
+    predecessor, and is dropped when a line break falls before it — so a space
+    or slash separator vanishes cleanly at a wrap while a hyphen (part of the
+    glyphs, never the glue) stays visible at the line end. The first unit always
+    carries glue ``""``: it can only begin a line.
+
+    * ``mode="name"`` breaks at whitespace (glue ``" "``) and after hyphens
+      (glue ``""``) — compound and double-barrelled surnames.
+    * ``mode="split"`` breaks at the time-split slash (glue ``" / "``).
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if mode == "split":
+        parts = [p for p in _SLASH_SEP_RE.split(text) if p]
+        return [(p, "" if i == 0 else " / ") for i, p in enumerate(parts)]
+    units: list[tuple[str, str]] = []
+    for word in text.split():
+        pieces = [p for p in _HYPHEN_BREAK_RE.split(word) if p]
+        for j, piece in enumerate(pieces):
+            units.append((piece, " " if (units and j == 0) else ""))
+    return units
+
+
+def _join_units(units: list[tuple[str, str]]) -> str:
+    """Reconstruct the line a slice of units renders as (its first glue drops)."""
+    if not units:
+        return ""
+    out = units[0][0]
+    for glyphs, glue in units[1:]:
+        out += glue + glyphs
+    return out
+
+
+def _balanced_spans(units, n_lines, measure) -> list[tuple[int, int]]:
+    """``[(start, end), …]`` splitting ``units`` into ``n_lines`` contiguous
+    groups whose widest line (per ``measure(a, b)``) is minimal — the balanced
+    wrap. Exhaustive over the ``C(len-1, n_lines-1)`` cut placements; ``units``
+    is a handful of name parts / splits, so this is a few dozen evaluations.
+    """
+    import itertools
+
+    n = len(units)
+    n_lines = max(1, min(n_lines, n))
+    if n_lines == 1:
+        return [(0, n)]
+    best_bounds: tuple[int, ...] | None = None
+    best_width: float | None = None
+    for cuts in itertools.combinations(range(1, n), n_lines - 1):
+        bounds = (0, *cuts, n)
+        width = max(measure(bounds[i], bounds[i + 1]) for i in range(n_lines))
+        if best_width is None or width < best_width:
+            best_width, best_bounds = width, bounds
+    assert best_bounds is not None
+    return [(best_bounds[i], best_bounds[i + 1]) for i in range(n_lines)]
+
+
+def balance_lines(
+    text: str,
+    *,
+    n_lines: int = 2,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    mode: str = "name",
+) -> list[str]:
+    """Split ``text`` into up to ``n_lines`` width-balanced lines.
+
+    Breaks only at the seams ``mode`` allows (see :func:`_hero_units`) and
+    returns the grouping whose lines are as even as possible. Yields at most
+    ``min(n_lines, break-units)`` lines (so an unbreakable token stays one
+    line), and ``[]`` for empty / whitespace-only input. The lines always
+    re-join to the original text.
+    """
+    units = _hero_units(text, mode)
+    if not units:
+        return []
+
+    def measure(a: int, b: int) -> float:
+        return em_width(_join_units(units[a:b]), font_family=font_family, weight=weight)
+
+    return [_join_units(units[a:b]) for a, b in _balanced_spans(units, n_lines, measure)]
+
+
+def fit_balanced(
+    text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    max_lines: int = 2,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    min_px: int = 8,
+    max_px: int = 240,
+    line_height: float = 1.0,
+    mode: str = "name",
+) -> tuple[int, list[str]]:
+    """Largest **integer** px — and the line layout — at which ``text`` fits in
+    ``box_w x box_h`` when balanced across ``1..max_lines`` lines.
+
+    For each candidate line count the value is balanced (:func:`balance_lines`)
+    and sized to the tighter of its width bound (widest line ≤ ``box_w``) and
+    height bound (``n * size * line_height`` ≤ ``box_h``); the count giving the
+    biggest size wins, ties preferring fewer lines. Because one line is always
+    a candidate, the size is never smaller than the single-line
+    :func:`fit_font_px` result, and for an unbreakable token it is identical.
+
+    Returns ``(size, lines)`` — the size to set and the balanced lines to emit
+    (joined with ``<br>`` by the caller). ``line_height`` is the CSS multiplier,
+    as in :func:`fit_font_px`. Geometry/bounds errors raise like
+    :func:`fit_font_px`.
+    """
+    if box_w <= 0 or box_h <= 0:
+        raise ValueError("box_w and box_h must be positive")
+    if min_px < 1:
+        raise ValueError("min_px must be >= 1")
+    if min_px > max_px:
+        raise ValueError("min_px must be <= max_px")
+
+    units = _hero_units(text, mode)
+    if not units:
+        return max_px, []
+
+    def measure(a: int, b: int) -> float:
+        return em_width(_join_units(units[a:b]), font_family=font_family, weight=weight)
+
+    best_size, best_lines = -1, [_join_units(units)]
+    for k in range(1, min(max_lines, len(units)) + 1):
+        spans = _balanced_spans(units, k, measure)
+        widest = max((measure(a, b) for a, b in spans), default=0.0)
+        if widest <= 0:
+            continue
+        # Clamp to [min_px, max_px] BEFORE comparing line counts, so once two
+        # layouts both reach the cap the earlier (fewer-line) one wins — a name
+        # that already fits one line at the cap is never split needlessly.
+        size = max(min_px, min(max_px, int(min(box_w / widest, box_h / (k * line_height)))))
+        if size > best_size:
+            best_size = size
+            best_lines = [_join_units(units[a:b]) for a, b in spans]
+    if best_size < 0:  # no measurable unit (defensive; non-empty units always size)
+        return max_px, [_join_units(units)]
+    return best_size, best_lines
+
+
+def fit_balanced_px(text: str, box_w: float, box_h: float, **kwargs) -> int:
+    """The fitted size from :func:`fit_balanced`, dropping the line layout."""
+    return fit_balanced(text, box_w, box_h, **kwargs)[0]

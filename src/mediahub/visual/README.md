@@ -63,10 +63,15 @@ clear error) instead of using a fake robot voice. Audio is only made for a card 
 human has **approved**.
 
 Which voice engine speaks is picked by `MEDIAHUB_TTS_PROVIDER`: `edge` (the
-default, streams from a Microsoft endpoint) or `piper` — the reserved **local**
-slot, so no cloud service is ever *required* by this interface. Piper's actual
-implementation arrives with roadmap P5.2; until then choosing it returns an
-honest error.
+default, streams from a Microsoft endpoint) or `piper` — the **zero-cost,
+fully-offline local** backend, so no cloud service is ever *required* by this
+interface. For Piper the operator points `MEDIAHUB_PIPER_MODEL` at a Piper
+`.onnx` voice file (or sets `MEDIAHUB_PIPER_VOICE` + `MEDIAHUB_PIPER_VOICE_DIR`);
+MediaHub loads it with the `piper-tts` package, synthesises the audio on the
+box, and transcodes it to the same MP3 the rest of the pipeline uses. If the
+package or the model file is missing it returns an honest error — never a fake
+robot voice. (Piper has no word-level timestamps, so its subtitle *timings* are
+a deterministic estimate; the spoken words are still the verbatim caption.)
 
 ## narration.py + audio_mux.py — sound on the videos (off by default)
 

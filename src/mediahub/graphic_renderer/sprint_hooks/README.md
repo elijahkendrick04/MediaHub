@@ -23,8 +23,10 @@ def apply(html: str, ctx: RenderHookCtx) -> str:
 ```
 
 `apply` must be **deterministic** and should opt out (return `html` unchanged)
-unless `ctx.brief` requests the effect. A hook that raises is skipped, never fatal.
-A hook that no brief opts into is a no-op, so renders stay byte-identical.
+unless `ctx.brief` (or an explicit operator toggle) requests the effect. A hook
+that raises is skipped, never fatal. A hook that nothing opts into — no brief
+request and no operator toggle — is a no-op, so renders stay byte-identical and
+the modules here are safe to ship in the always-loaded registry.
 
 ## Implemented hooks
 
@@ -56,8 +58,15 @@ A hook that no brief opts into is a no-op, so renders stay byte-identical.
   phrase in `brief.mood` / `style_pack`, or operator-wide via the
   `MEDIAHUB_MONO_MODE` env flag (`MEDIAHUB_MONO_CONTRAST` optionally trims the B/W
   photo pass; default `1.0`). Runs last, so it desaturates earlier hooks' output too.
+- `inspect_overlay.py` (**G1.30**, `ORDER = 95`) — render debug / inspection
+  overlay + design-explainability sidecar (`graphic_renderer/inspect.py`). When
+  `MEDIAHUB_INSPECT_OVERLAY` is set (or a brief carries a truthy `inspect_overlay`
+  attribute), it injects a `pointer-events:none` HUD — rule-of-thirds grid,
+  content safe-area, saliency-focus crosshair, a why-this-design panel and the
+  same facts embedded as a machine-readable JSON sidecar. Runs late so it
+  observes the finished card; opt-in, byte-identical when off.
 
 Capabilities that also fit this seam include **G1.8** (gradient-mesh
-backgrounds), **G1.22** (icon/badge overlays) and **G1.30** (inspection
-overlay). Capabilities that change formats, encoding, fonts, palettes or
-text-fitting edit their own dedicated module/region instead.
+backgrounds) and **G1.22** (icon/badge overlays). Capabilities that change
+formats, encoding, fonts, palettes or text-fitting edit their own dedicated
+module/region instead.

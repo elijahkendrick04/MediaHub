@@ -47,6 +47,13 @@ export const cardSchema = z.object({
   // the still renderer's --mh-photo-pos) so faces stay in frame. Empty =
   // the safe "center 28%" default.
   photoPos: z.string().default(""),
+  // R1.9: the athlete cut out from their photo (background removed to alpha),
+  // inlined by motion.py as a PNG data URI. The cutout sprint layer
+  // (sprint/layers/cutout.tsx) composites this as a parallax FOREGROUND plane
+  // over the scrimmed full-bleed background photo, giving the card real depth.
+  // Empty = no prepared cutout (no sourced photo, or no background remover
+  // available), and the layer no-ops — byte-identical to the pre-R1.9 render.
+  cutoutSrc: z.string().default(""),
   // Gen v2 (SEQ-4): the still graphic's archetype + measured emphasis line,
   // so the motion render of a card visually matches its still. Empty keeps
   // the pre-v2 behaviour for cards rendered by older callers.

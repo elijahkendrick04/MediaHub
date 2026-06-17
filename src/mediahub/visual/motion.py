@@ -282,6 +282,72 @@ def _photo_focus_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
+# Alpha cutouts are PNGs (heavier than the JPEG background photo) so the long
+# edge is capped a touch tighter to keep the inlined data URI reasonable.
+_CUTOUT_MAX_EDGE = 1100
+
+
+def _cutout_cache_dir() -> Path:
+    d = _cache_dir() / "cutouts"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """Resolve the brief's sourced photo into an alpha-cutout PNG data URI (R1.9).
+
+    The motion render's foreground cutout layer (``sprint/layers/cutout.tsx``)
+    composites the athlete with their background removed as a parallax
+    foreground plane. The cut is produced by the same configured background
+    remover the still renderer uses (``media_ai.providers.get_bg_remover``), so
+    motion and still isolate the subject identically. The result is cached as a
+    PNG under ``motion_cache/cutouts/`` keyed by the source photo's identity, so
+    the (~300 ms+) remover runs at most once per photo, then is downscaled and
+    inlined — Remotion's headless Chromium only sees what the props carry.
+
+    Honest by construction: only a *real* remover is used (``is_available()``),
+    never rembg's passthrough alpha, so the foreground plane is never a flat
+    rectangular photo masquerading as a cutout. Empty string on any miss (no
+    brief, ``no-photo`` treatment, asset gone, no usable remover, decode or
+    synthesis failure) — a missing or failed cutout must never fail a motion
+    render; the TSX layer simply no-ops.
+    """
+    src = _photo_asset_path_for_brief(brief)
+    if src is None:
+        return ""
+    try:
+        import io
+
+        from PIL import Image
+
+        # Cache the alpha cut keyed by the source's identity (path/mtime/size)
+        # so repeat renders of the same photo skip the remover entirely.
+        st = src.stat()
+        key = hashlib.sha256(
+            f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")
+        ).hexdigest()[:24]
+        cut_path = _cutout_cache_dir() / f"{key}.png"
+        if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+            from mediahub.media_ai.providers import get_bg_remover
+
+            remover = get_bg_remover()
+            # Only composite a genuine cut — a provider that can't actually
+            # remove the background would passthrough the whole rectangle.
+            if remover is None or not remover.is_available():
+                return ""
+            remover.remove(str(src), str(cut_path))
+        if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+            return ""
+        with Image.open(cut_path) as im:
+            im = im.convert("RGBA")
+            im.thumbnail((_CUTOUT_MAX_EDGE, _CUTOUT_MAX_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+
+
 def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
     """The exact colour roles the card's STILL graphic paints, for motion.
 
@@ -417,6 +483,10 @@ def _card_to_props(
         "photoTreatment": str(b.get("photo_treatment") or ""),
         "photoSrc": _photo_data_uri_for_brief(b),
         "photoPos": _photo_focus_for_brief(b),
+        # R1.9: the athlete cut out to alpha, composited by the cutout sprint
+        # layer as a parallax foreground plane. "" = no prepared cut (no photo
+        # or no usable remover) and the layer no-ops.
+        "cutoutSrc": _cutout_data_uri_for_brief(b),
         "archetype": str(b.get("layout_template") or ""),
         # The still's style pack id (graphic_renderer.style_packs): the motion
         # render layers the same ground/texture/accent-geometry overlay so a
@@ -485,6 +555,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         if card_props.get("roleGround")
         else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
+        "has_cutout": bool(card_props.get("cutoutSrc")),
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",
     }
@@ -495,7 +566,25 @@ def _card_manifest_axes(card_props: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _story_audio_plan(card_props: dict, brand_dict: dict):
+def _card_mix_profile(card: Any, brief: Optional[dict] = None) -> Optional[str]:
+    """The per-card audio-mix profile a card (or its brief) names, else None.
+
+    Read straight from the payload — the mix balance (voice_lead / balanced /
+    music_forward) is a deterministic production knob, not a creative AI
+    judgement, so it is never inferred by a model. ``audio_mux`` validates the
+    string; ``None`` lets the operator env default
+    (``MEDIAHUB_REEL_MIX_PROFILE``) and then ``balanced`` decide. A card field
+    wins over the brief's.
+    """
+    for src in (card, brief):
+        if isinstance(src, dict):
+            val = src.get("audio_mix_profile") or src.get("audioMixProfile")
+            if val:
+                return str(val)
+    return None
+
+
+def _story_audio_plan(card_props: dict, brand_dict: dict, *, mix_profile: Optional[str] = None):
     """The audio plan for one story render, or None for today's silent path.
 
     Built from the same props the composition displays (zero invention; see
@@ -503,6 +592,9 @@ def _story_audio_plan(card_props: dict, brand_dict: dict):
     also keeps the cache payload, and therefore every existing cache key,
     byte-identical to the pre-audio behaviour. The story line is one
     sentence; the mux's trim-to-video-length is the overrun guarantee.
+
+    ``mix_profile`` is the per-card voice/music balance; it only changes the
+    cache key when it is not the default ``balanced`` (see audio_mux).
     """
     try:
         from mediahub.visual import audio_mux, narration
@@ -517,15 +609,25 @@ def _story_audio_plan(card_props: dict, brand_dict: dict):
             card_props.get("eventName") or "",
             card_props.get("resultValue") or "",
         )
-        return audio_mux.build_audio_plan(script=script, content_key=key)
+        return audio_mux.build_audio_plan(script=script, content_key=key, mix_profile=mix_profile)
     except Exception:
         return None
 
 
 def _reel_audio_plan(
-    cards_props: list[dict], brand_dict: dict, meet_name: str, *, duration_sec: float
+    cards_props: list[dict],
+    brand_dict: dict,
+    meet_name: str,
+    *,
+    duration_sec: float,
+    mix_profile: Optional[str] = None,
 ):
-    """The audio plan for a reel render, or None for today's silent path."""
+    """The audio plan for a reel render, or None for today's silent path.
+
+    ``mix_profile`` is the reel's voice/music balance (the headline card's
+    choice; see render_meet_reel) and only shifts the cache key off the
+    default when it is not ``balanced``.
+    """
     try:
         from mediahub.visual import audio_mux, narration
 
@@ -540,7 +642,7 @@ def _reel_audio_plan(
         key = "reel:{}:{}:{}".format(
             meet_name or "", len(cards_props), first.get("athleteFullName") or ""
         )
-        return audio_mux.build_audio_plan(script=script, content_key=key)
+        return audio_mux.build_audio_plan(script=script, content_key=key, mix_profile=mix_profile)
     except Exception:
         return None
 
@@ -667,6 +769,36 @@ def _audio_record_path(cached: Path) -> Path:
     return Path(cached).with_suffix(".audio.json")
 
 
+def _ensure_poster_sidecar(cached: Path, *, kind: str, duration_sec: float) -> str:
+    """Guarantee a poster-frame PNG beside ``cached``; report where it came from.
+
+    R1.29: the poster is normally captured *in-render* by ``remotion/render.js``
+    — a Remotion ``renderStill`` that waits on the fonts ``delayRender`` hook, so
+    the thumbnail is a frame-exact, real-font PNG straight from Chromium (no
+    H.264 round-trip, no keyframe-seek approximation). When that sidecar is
+    present and non-empty we keep it and **skip the post-hoc ffmpeg frame grab
+    entirely** — the R1.29 win. We fall back to the ffmpeg extraction only when
+    the in-render poster is absent or empty: the free ffmpeg reel engine (which
+    never runs ``render.js``), a ``render.js`` poster-capture failure, or a video
+    cached before R1.29 being re-finished on a cache hit.
+
+    Returns the provenance for the explainability manifest — ``"in-render"`` /
+    ``"ffmpeg"`` / ``""`` (no poster could be written). Never raises.
+    """
+    from mediahub.visual import audio_mux
+
+    poster = audio_mux.poster_path_for(cached)
+    try:
+        if poster.exists() and poster.stat().st_size > 0:
+            return "in-render"
+    except OSError:
+        pass
+    ok = audio_mux.write_poster(
+        cached, poster, at_sec=audio_mux.poster_time_for(kind, duration_sec)
+    )
+    return "ffmpeg" if ok else ""
+
+
 def _finish_cached_video(
     cached: Path, *, kind: str, plan, duration_sec: float, n_cards: int = 0
 ) -> dict:
@@ -677,6 +809,12 @@ def _finish_cached_video(
 
     ``n_cards`` (reels only) yields the card-cut beat grid the music accents
     align to; stories have no internal cuts and leave it at 0.
+
+    R1.29: the poster is normally captured *in-render* by ``render.js`` (a
+    Remotion ``renderStill`` that honours the fonts ``delayRender`` hook), so the
+    common path skips the ffmpeg/ffprobe extraction entirely — see
+    :func:`_ensure_poster_sidecar`, which falls back to the ffmpeg frame grab
+    only when that in-render poster is absent or empty.
     """
     try:
         from mediahub.visual import audio_mux
@@ -705,11 +843,7 @@ def _finish_cached_video(
                     pass
         else:
             audio_rec = {"status": "off"}
-        poster = audio_mux.poster_path_for(cached)
-        if not poster.exists():
-            audio_mux.write_poster(
-                cached, poster, at_sec=audio_mux.poster_time_for(kind, duration_sec)
-            )
+        _ensure_poster_sidecar(cached, kind=kind, duration_sec=duration_sec)
         return audio_rec
     except Exception as e:
         return {"status": "silent_fallback", "reason": str(e)}
@@ -881,7 +1015,9 @@ def render_story_card(
         brief=brief,
         brand_kit=brand_kit,
     )
-    audio_plan = _story_audio_plan(card_dict, brand_dict)
+    audio_plan = _story_audio_plan(
+        card_dict, brand_dict, mix_profile=_card_mix_profile(card_payload, brief)
+    )
 
     # Burn-in captions (R1.3): only attach the prop when a track exists so the
     # captions-off path keeps the historic cache key byte-identical.
@@ -968,6 +1104,15 @@ def render_story_card(
 REEL_COVER_SEC = 2.0
 REEL_PER_CARD_SEC = 4.0
 REEL_OUTRO_SEC = 1.0
+
+# Reel composition revision — folded into the reel cache key. Bump it whenever
+# MeetReel.tsx's deterministic output changes for an *unchanged* payload, so
+# reels cached against the previous render are retired and the upgrade reaches
+# re-requested meets instead of serving a stale cut. Story renders are keyed
+# separately and stay byte-identical, so this is reel-only.
+#   "2" — R1.14: expanded transition library (glitch / slide-stack /
+#         light-sweep) + per-card transition timing.
+REEL_COMPOSITION_REVISION = "2"
 
 
 def reel_duration_for(n_cards: int) -> float:
@@ -1108,7 +1253,17 @@ def render_meet_reel(
     if next_meet:
         cta_props["nextMeet"] = next_meet
 
-    audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
+    # One reel, one mix: the headline (first card to name one) drives the
+    # voice/music balance; absent that, the operator env default decides.
+    reel_mix = None
+    for idx, c in enumerate(top_cards or []):
+        b = briefs_list[idx] if idx < len(briefs_list) else None
+        reel_mix = _card_mix_profile(c, b)
+        if reel_mix:
+            break
+    audio_plan = _reel_audio_plan(
+        cards_props, brand_dict, meet_name, duration_sec=duration_sec, mix_profile=reel_mix
+    )
 
     # Burn-in captions (R1.3): caption each beat from its own verified line when
     # the reel has a voice plan and the operator opted in. Only set when a track
@@ -1148,6 +1303,7 @@ def render_meet_reel(
         "meet": meet_name,
         "duration": duration_sec,
         "size": list(size),
+        "rev": REEL_COMPOSITION_REVISION,
     }
     if cta_props:
         cache_payload["cta"] = cta_props
@@ -1212,6 +1368,7 @@ def render_meet_reel(
             "engine": engine,
             "render_strategy": render_strategy,
             "format": format_name,
+            "composition_revision": REEL_COMPOSITION_REVISION,
             "size": list(size),
             "duration_sec": duration_sec,
             "meet_name": meet_name,

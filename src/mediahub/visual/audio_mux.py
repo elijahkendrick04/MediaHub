@@ -26,9 +26,11 @@ Rules (the same honesty contract as the rest of the renderer):
   stays silent and the manifest records why — never a placeholder track.
 - **Deterministic.** The music track for a given render is picked by
   content hash from the sorted directory listing; the beat grid the accents
-  align to is the reel's own structure; ducking, stings, accents, and fades
-  are all fixed constants (one optional knob: an operator-declared tempo in
-  the filename tunes accent width). Same inputs → same audio.
+  align to is the reel's own structure; the bed's resting balance follows the
+  render's fixed audio-mix profile (voice_lead / balanced / music_forward);
+  ducking, stings, accents, and fades are all fixed constants (one optional
+  knob: an operator-declared tempo in the filename tunes accent width). Same
+  inputs → same audio.
 - **Video bits untouched.** The mux stream-copies the video track; only an
   audio track is added.
 """
@@ -81,6 +83,72 @@ _BPM_RE = re.compile(r"(?:^|[^0-9])(\d{2,3})\s*bpm", re.IGNORECASE)
 _BPM_MIN, _BPM_MAX = 40.0, 300.0
 
 _TRUTHY = {"1", "true", "yes", "on"}
+
+
+# ---------------------------------------------------------------------------
+# Per-card audio-mix profiles (R1.19)
+#
+# A render chooses how the narration and the music bed sit against each other.
+# Each profile is a fixed, deterministic level set folded into the audio plan
+# (and therefore the motion cache key), so a voice-lead and a music-forward cut
+# of the same card can never serve each other from cache. The profile sets the
+# bed's RESTING level (the base the R1.20 sidechain ducking, stings and accents
+# then act on) and how hard the bed ducks under speech — it does not replace the
+# dynamics, only the balance they work from. ``balanced`` *is* the historic mix:
+# it reuses the module constants above, so the default path stays byte-for-byte
+# identical and no existing cache is orphaned. The bed always ducks under the
+# voice, so the narration stays intelligible under every profile (it is fact
+# narration, never decoration).
+# ---------------------------------------------------------------------------
+
+DEFAULT_MIX_PROFILE = "balanced"
+
+AUDIO_MIX_PROFILES: dict[str, dict[str, float]] = {
+    # Narration is the star: a low resting bed that ducks hard under speech.
+    "voice_lead": {
+        "music_under_voice_weight": 0.18,
+        "music_bed_volume": 0.32,
+        "duck_ratio": 9.0,
+    },
+    # The historic fixed mix (references the constants so it can never drift).
+    "balanced": {
+        "music_under_voice_weight": MUSIC_UNDER_VOICE_WEIGHT,
+        "music_bed_volume": MUSIC_BED_VOLUME,
+        "duck_ratio": DUCK_RATIO,
+    },
+    # Music carries the piece: a higher resting bed that ducks more gently, so
+    # the bed stays present under the (still fully intelligible) narration.
+    "music_forward": {
+        "music_under_voice_weight": 0.50,
+        "music_bed_volume": 0.60,
+        "duck_ratio": 3.5,
+    },
+}
+
+
+def resolve_mix_profile(name: Any) -> str:
+    """Canonical mix-profile name; unknown / empty / ``None`` → the default."""
+    key = str(name or "").strip().lower()
+    return key if key in AUDIO_MIX_PROFILES else DEFAULT_MIX_PROFILE
+
+
+def env_mix_profile() -> str:
+    """Operator-wide default mix profile (``MEDIAHUB_REEL_MIX_PROFILE``)."""
+    return resolve_mix_profile(os.environ.get("MEDIAHUB_REEL_MIX_PROFILE", ""))
+
+
+def mix_profile_levels(name: Any) -> dict[str, float]:
+    """The fixed level set for a profile (validated). Always a fresh dict."""
+    return dict(AUDIO_MIX_PROFILES[resolve_mix_profile(name)])
+
+
+def _coalesce_profile(explicit: Any) -> str:
+    """Precedence for a render's mix profile: a known per-card override wins,
+    else the operator env default, else ``balanced``."""
+    key = str(explicit or "").strip().lower()
+    if key in AUDIO_MIX_PROFILES:
+        return key
+    return env_mix_profile()
 
 
 def voice_active() -> bool:
@@ -173,13 +241,21 @@ def audio_active() -> bool:
     return voice_active() or bool(music_candidates())
 
 
-def build_audio_plan(*, script: str, content_key: str) -> Optional[dict]:
+def build_audio_plan(*, script: str, content_key: str, mix_profile: Any = None) -> Optional[dict]:
     """The cache-identity description of a render's audio, or None for silent.
 
     Only identity fields live here (voice name, the exact script, the music
-    file's name + size) — the plan is folded into the motion cache hash, so
-    a changed script, voice, or track can never serve a stale mix. ``None``
-    keeps the silent path's cache keys byte-identical to the pre-audio era.
+    file's name + size, and the non-default mix profile) — the plan is folded
+    into the motion cache hash, so a changed script, voice, track, or mix can
+    never serve a stale render. ``None`` keeps the silent path's cache keys
+    byte-identical to the pre-audio era.
+
+    ``mix_profile`` picks the voice/music balance (``voice_lead`` /
+    ``balanced`` / ``music_forward``); an unknown or absent value falls back
+    to the operator env default (``MEDIAHUB_REEL_MIX_PROFILE``) and then to
+    ``balanced``. The profile is recorded here — and so in the cache key —
+    *only* when it is not the default, so a balanced render keeps the
+    pre-profile cache key byte-for-byte (no cache is orphaned).
     """
     plan: dict[str, Any] = {}
     if voice_active() and (script or "").strip():
@@ -192,7 +268,12 @@ def build_audio_plan(*, script: str, content_key: str) -> Optional[dict]:
             plan["music_bytes"] = track.stat().st_size
         except OSError:
             pass
-    return plan or None
+    if not plan:
+        return None
+    profile = _coalesce_profile(mix_profile)
+    if profile != DEFAULT_MIX_PROFILE:
+        plan["mix"] = profile
+    return plan
 
 
 def _resolve_music_path(plan: dict) -> Optional[Path]:
@@ -296,6 +377,7 @@ def mux_args(
     *,
     duration_sec: float,
     cut_times: Optional[list[float]] = None,
+    profile: Any = DEFAULT_MIX_PROFILE,
 ) -> list[str]:
     """Argument list (after the binary) for the audio mux. Pure + testable.
 
@@ -305,9 +387,18 @@ def mux_args(
     ``music_filterchain`` (intro/outro stings + beat-aware cut accents) and,
     under narration, ducked dynamically by a voice-keyed sidechain compressor
     rather than held at one static level.
+
+    The audio-mix ``profile`` (R1.19) sets the bed's resting level — the base
+    the stings/accents/ducking then act on — and how hard it ducks under
+    speech: ``voice_lead`` keeps a low bed that ducks hard, ``music_forward`` a
+    higher bed that ducks gently, and ``balanced`` (the default) reproduces the
+    historic levels byte-for-byte. The bed always ducks under the voice, so the
+    narration stays intelligible under every profile.
     """
     if voice is None and music is None:
         raise ValueError("at least one audio source is required")
+    levels = mix_profile_levels(profile)
+    duck_ratio = levels["duck_ratio"]
     d = max(0.1, float(duration_sec))
     fade_start = max(0.0, d - AUDIO_FADE_OUT_SEC)
     args: list[str] = ["-i", str(video)]
@@ -321,7 +412,10 @@ def mux_args(
     if voice is not None and music is not None:
         bpm = track_bpm(music)
         chain = music_filterchain(
-            base_vol=MUSIC_UNDER_VOICE_WEIGHT, duration_sec=d, cut_times=cut_times, bpm=bpm
+            base_vol=levels["music_under_voice_weight"],
+            duration_sec=d,
+            cut_times=cut_times,
+            bpm=bpm,
         )
         # Voice is split: one copy mixes, one keys the sidechain that ducks the
         # bed only while there's speech (refined automatic ducking).
@@ -329,7 +423,7 @@ def mux_args(
             f"[1:a]apad,asplit=2[vmain][vkey];"
             f"[2:a]{chain}[mraw];"
             f"[mraw][vkey]sidechaincompress="
-            f"threshold={DUCK_THRESHOLD:g}:ratio={DUCK_RATIO:g}:"
+            f"threshold={DUCK_THRESHOLD:g}:ratio={duck_ratio:g}:"
             f"attack={DUCK_ATTACK_MS:g}:release={DUCK_RELEASE_MS:g}[mduck];"
             f"[vmain][mduck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
             f"{tail}"
@@ -339,7 +433,7 @@ def mux_args(
     else:
         bpm = track_bpm(music)
         chain = music_filterchain(
-            base_vol=MUSIC_BED_VOLUME, duration_sec=d, cut_times=cut_times, bpm=bpm
+            base_vol=levels["music_bed_volume"], duration_sec=d, cut_times=cut_times, bpm=bpm
         )
         graph = f"[1:a]{chain},{tail}"
 
@@ -404,6 +498,7 @@ def apply_audio(
     if not plan:
         return {"status": "off"}
     video = Path(video)
+    profile = resolve_mix_profile(plan.get("mix"))
     voice_path: Optional[Path] = None
     transcript = ""
     voice_error = ""
@@ -437,6 +532,7 @@ def apply_audio(
                     tmp_out,
                     duration_sec=duration_sec,
                     cut_times=cut_times,
+                    profile=profile,
                 )
             )
             if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
@@ -452,6 +548,7 @@ def apply_audio(
         "status": "mixed",
         "voice": str(plan.get("voice") or "") if voice_path is not None else "",
         "music": str(plan.get("music") or "") if music_path is not None else "",
+        "mix": profile,
         "transcript": transcript,
     }
     if voice_path is not None and music_path is not None:
@@ -475,7 +572,13 @@ def apply_audio(
 
 def poster_time_for(kind: str, duration_sec: float) -> float:
     """Deterministic poster timestamp: stories late enough that the layers
-    have animated in; reels on the brand cover."""
+    have animated in; reels on the brand cover.
+
+    Mirrored by ``remotion/render.js``'s ``posterTimeFor`` for the in-render
+    poster capture (R1.29) — keep the two formulas in sync. This is still the
+    timestamp used for the ffmpeg fallback grab when the in-render poster is
+    absent (the free ffmpeg engine, or a render.js capture failure).
+    """
     d = max(0.1, float(duration_sec))
     if kind == "reel":
         return min(1.5, max(0.0, d - 0.2))
@@ -532,6 +635,11 @@ __all__ = [
     "STING_GAIN",
     "CUT_ACCENT_SEC",
     "CUT_ACCENT_GAIN",
+    "DEFAULT_MIX_PROFILE",
+    "AUDIO_MIX_PROFILES",
+    "resolve_mix_profile",
+    "env_mix_profile",
+    "mix_profile_levels",
     "voice_active",
     "voice_name",
     "music_dir",

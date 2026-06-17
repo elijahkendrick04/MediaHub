@@ -538,3 +538,80 @@ def test_cross_file_unknown_id_returns_both_unchanged():
         CF_TODO, "ZZ-9", "done", done_text=CF_BUILT
     )
     assert not changed and new_todo == CF_TODO and new_built == CF_BUILT
+
+
+# --- _directive_messages (self-healing directive scan) ----------------------
+# Regression cover for the concurrency drop: the roadmap lands via a SHARED bot
+# branch on an async auto-merge, so a later run can force-overwrite an earlier
+# run's pending delta before its PR merges. Collecting directives from a bounded
+# recent window (not just this push's narrow range) makes a dropped directive
+# self-heal on the next push.
+
+import subprocess as _sp  # noqa: E402
+
+
+def _init_repo(tmp_path):
+    def g(*args):
+        _sp.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    g("init", "-q")
+    g("config", "user.email", "t@example.com")
+    g("config", "user.name", "Test")
+    g("config", "commit.gpgsign", "false")
+
+    def commit(text, message):
+        (tmp_path / "f.txt").write_text(text, encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-q", "-m", message)
+        return _sp.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    return commit
+
+
+def test_directive_messages_self_heals_a_dropped_directive(tmp_path, monkeypatch):
+    commit = _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    commit("0", "base")
+    # A feature commit whose `done` directive a *later* run's narrow push range
+    # never sees — the exact shape that stranded G1.2 / G1.22 / G1.30.
+    dropped = commit("1", "feat G1.30\n\nroadmap: G1.30 done")
+    after = commit("2", "feat G1.99\n\nroadmap: G1.99 done")
+
+    # The bug: the narrow (dropped, after] range carries only the later directive.
+    narrow = dict(ru.parse_directives(ru._commits_in_range(dropped, after)))
+    assert "G1.30" not in narrow
+    assert narrow == {"G1.99": "done"}
+
+    # The fix: the backstop window re-includes the stranded directive, so this
+    # push reinstates it (and still applies the new one).
+    healed = dict(ru.parse_directives(ru._directive_messages(dropped, after)))
+    assert healed["G1.30"] == "done"
+    assert healed["G1.99"] == "done"
+
+
+def test_directive_messages_newest_directive_for_an_id_wins(tmp_path, monkeypatch):
+    commit = _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    commit("0", "base")
+    commit("1", "mark wip\n\nroadmap: P1.2 wip")
+    after = commit("2", "later mark done\n\nroadmap: P1.2 done")
+    # Even with the wide scan, the latest directive for an id is authoritative.
+    healed = dict(ru.parse_directives(ru._directive_messages("", after)))
+    assert healed["P1.2"] == "done"
+
+
+def test_directive_messages_lookback_zero_is_push_range_only(tmp_path, monkeypatch):
+    commit = _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    base = commit("0", "base")
+    commit("1", "old\n\nroadmap: G1.30 done")
+    after = commit("2", "new\n\nroadmap: G1.99 done")
+    # lookback=0 disables the backstop → behaviour collapses to the explicit range.
+    got = dict(ru.parse_directives(ru._directive_messages(base, after, lookback=0)))
+    assert got == {"G1.30": "done", "G1.99": "done"}

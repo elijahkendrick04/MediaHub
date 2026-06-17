@@ -1719,6 +1719,12 @@ _research_jobs: BoundedCache = BoundedCache(max_size=32)
 # Club-data Q&A jobs ("Ask the data"). Same lifecycle as the research
 # console: background thread, memory + disk record, org-scoped polls.
 _club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
+# G1.27 design-studio render cache: signature(brief levers) -> the JSON render
+# payload (a base64 data-URI preview + its explainability sidecar). Lets the
+# interactive editor re-show a previously-seen combination instantly and caps
+# repeated Playwright renders. Entries are a few hundred KB each; 48 × keeps it
+# well under the worker's memory ceiling.
+_studio_render_cache: BoundedCache = BoundedCache(max_size=48)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -2752,6 +2758,74 @@ def _load_run(run_id: str) -> Optional[dict]:
         # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
         log.warning("run %s on disk but unreadable: %s", run_id, e)
         return None
+
+
+def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
+    """UI2.8 — assemble the curated, machine-readable JSON shown inline on the
+    review page's Recognition-summary card (rendered through the first-party
+    Codeblock highlighter, ``code_highlight.code_block`` — the "raw parsed-data
+    view" host surface the kit's Codeblock effect was waiting for).
+
+    This is the *explainability* payload: meet context, the parsed/matched swim
+    counts, and the ranked achievements the engine decided on — each with its
+    confidence and suggested post type — in the same JSON shape the export and
+    the downstream content steps consume. It is built from an explicit field
+    **whitelist**, so no filesystem path under ``DATA_DIR``, provider key or
+    internal blob can leak onto the page, and the achievements list is capped so
+    a large meet can't render a multi-megabyte block. Never raises: on any error
+    it returns a small, honest error document instead of breaking the review
+    page.
+    """
+    try:
+        data = data or {}
+        meet = data.get("meet") or {}
+        rr = data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        total = len(ranked)
+        shown = ranked[: max(0, int(max_achievements))]
+        achievements = []
+        for ra in shown:
+            ra = ra if isinstance(ra, dict) else {}
+            a = ra.get("achievement") or {}
+            achievements.append(
+                {
+                    "rank": ra.get("rank"),
+                    "type": a.get("type"),
+                    "swimmer": a.get("swimmer_name"),
+                    "event": a.get("event"),
+                    "time": a.get("time") or a.get("swim_time") or a.get("result_time"),
+                    "quality_band": ra.get("quality_band"),
+                    "confidence": a.get("confidence_label"),
+                    "suggested_post_type": ra.get("suggested_post_type"),
+                }
+            )
+        doc = {
+            "run_id": run_id,
+            "meet": {
+                "name": meet.get("name"),
+                "date": meet.get("date"),
+                "course": meet.get("course"),
+                "venue": meet.get("venue"),
+            },
+            "counts": {
+                "parsed_swims": data.get("parsed_swim_count"),
+                "club_swims": data.get("our_swim_count"),
+                "achievements": rr.get("n_achievements", total),
+            },
+            "achievements": achievements,
+            "parse_warnings": [str(w) for w in (data.get("parse_warnings") or [])][:50],
+        }
+        if total > len(shown):
+            doc["achievements_truncated"] = {"shown": len(shown), "total": total}
+        return json.dumps(doc, indent=2, ensure_ascii=False, default=str)
+    except Exception as exc:  # noqa: BLE001 — a preview must never 500 /review
+        return json.dumps(
+            {
+                "error": "could not assemble machine-readable view",
+                "detail": str(exc)[:200],
+            },
+            indent=2,
+        )
 
 
 def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
@@ -10115,6 +10189,7 @@ def _layout(
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
+    <a href="{{ url_for('design_studio') }}" class="{{ 'active' if active=='studio' else '' }}">Studio</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
@@ -17396,7 +17471,7 @@ def create_app() -> Flask:
             )
 
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
@@ -17693,6 +17768,17 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
       <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
       <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+    <!-- UI2.8 — Codeblock raw parsed-data view. The machine-readable JSON the
+         recognition engine produced, shown inline through the first-party
+         server-side highlighter (no CDN), syntax-coloured and copyable, so a
+         volunteer never has to leave the page or read an unstyled browser tab
+         to see exactly what the engine decided. Whitelisted fields only; the
+         block is server-rendered so it works with JavaScript disabled (only the
+         copy button is a progressive enhancement). -->
+    <div class="mh-machine-readable" id="mh-machine-readable" style="margin-top:var(--sp-4)">
+      <p class="muted" style="font-size:12px;margin:0 0 8px">The machine-readable data the recognition engine produced for this run &mdash; meet context, the parsed and club-matched swim counts and the ranked achievements, in the same JSON shape the export and the downstream content steps consume. Read-only; copy it straight from here.</p>
+      {_code_hl.code_block(_machine_readable_run(data, run_id), "json", label="Recognition data")}
     </div>
   </details>
 </div>
@@ -24334,6 +24420,126 @@ function mhPlanGenerate(btn) {{
             active_category=active,
         )
         return _layout("Templates", body, active="templates")
+
+    # ---- /studio &mdash; G1.27 interactive brief/design editor ---------------
+    @app.route("/studio")
+    def design_studio():
+        # The interactive design editor: tweak text layers, palette, archetype
+        # and style pack and watch the card re-render live on the *real* engine
+        # (creative_brief → graphic_renderer.render_brief), distinct from the
+        # browse-only /templates gallery. All page logic lives in the Flask-free
+        # ``design_editor`` helper so it unit-tests without a request; the route
+        # only resolves url_for() links + the active org's palette and wraps the
+        # body with _layout.
+        from mediahub.web import design_editor as _studio
+
+        # Seed the colour controls from the signed-in org's brand kit when
+        # available; the helper re-validates every value, so a missing/odd
+        # colour falls back to the neutral default.
+        seed_palette = None
+        try:
+            _prof = _active_profile()
+            if _prof is not None:
+                _bk = _prof.get_brand_kit()
+                seed_palette = {
+                    "primary": getattr(_bk, "primary_colour", "") or "",
+                    "secondary": getattr(_bk, "secondary_colour", "") or "",
+                    "accent": getattr(_bk, "accent_colour", "") or "",
+                }
+        except Exception:
+            seed_palette = None
+
+        body = _studio.render_editor_body(
+            render_url=url_for("api_studio_render"),
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            palette=seed_palette,
+        )
+        return _layout("Studio", body, active="studio")
+
+    @app.route("/api/studio/render", methods=["POST"])
+    def api_studio_render():
+        # Render one studio brief to a PNG and return it as a base64 data URI
+        # plus its explainability sidecar (resolved --mh-* roles, pack why,
+        # archetype signature, honest legibility/taste notices). JSON-bodied, so
+        # it is CSRF-exempt by content-type. No tenant data is read or written —
+        # the brief is built entirely from the (coerced, renderer-safe) request.
+        import base64 as _b64
+        import tempfile as _tempfile
+        import time as _time
+
+        from mediahub.web import design_editor as _studio
+
+        payload = request.get_json(silent=True)
+        params = _studio.coerce_params(payload if isinstance(payload, dict) else {})
+
+        sig = params.signature()
+        cached = _studio_render_cache.get(sig)
+        if cached is not None:
+            return jsonify(cached)
+
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+        except Exception:  # pragma: no cover - renderer module import failure
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "renderer_unavailable",
+                        "message": "The graphics renderer is unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+
+        brief = _studio.build_brief_from_params(params)
+        brand_kit = _studio.brand_kit_for_params(params)
+        t0 = _time.time()
+        try:
+            with _tempfile.TemporaryDirectory() as _d:
+                result = render_brief(
+                    brief,
+                    output_dir=_d,
+                    size=params.size,
+                    format_name=params.format_id,
+                    brand_kit=brand_kit,
+                )
+                png_bytes = Path(result.visual.file_path).read_bytes()
+        except RuntimeError as exc:
+            # Playwright/Chromium not installed — surface an honest error rather
+            # than ever fabricating a preview image (CLAUDE.md honest-error rule).
+            log.warning("studio render unavailable: %s", exc)
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_unavailable",
+                        "message": "Live rendering is temporarily unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+        except Exception:
+            log.exception("studio render failed")
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_failed",
+                        "message": "Could not render this design — try a different combination.",
+                    }
+                ),
+                500,
+            )
+
+        out = {
+            "ok": True,
+            "image": "data:image/png;base64," + _b64.b64encode(png_bytes).decode("ascii"),
+            "meta": _studio.explain(params),
+            "render_ms": int((_time.time() - t0) * 1000),
+        }
+        _studio_render_cache[sig] = out
+        return jsonify(out)
 
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
@@ -33193,6 +33399,7 @@ function mhSetupMode(mode) {{
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _export_zip_url = url_for("pack_export_zip", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
@@ -33289,6 +33496,8 @@ function mhSetupMode(mode) {{
 {cards_html}
 
 <div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <a class="btn" href="{_export_zip_url}"
+     title="Every approved card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
   <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
@@ -39168,6 +39377,124 @@ voice, and queues them for one-click approval.</p>
             buf,
             as_attachment=True,
             download_name=f"content-pack-{run_id}.zip",
+            mimetype="application/zip",
+        )
+
+    @app.route("/pack/<run_id>/export.zip")
+    def pack_export_zip(run_id: str):
+        """G1.15 — batch ZIP of a pack's EVERY rendered format + a metadata.json manifest.
+
+        Distinct from ``content_pack_zip`` (which groups PNGs by destination
+        bucket + an approval-summary.json): this export groups by card with
+        every size together (square / portrait / story), writes a real
+        ``metadata.json`` manifest (layout, palette, dimensions, per-format
+        sha256, confidence, design reasoning, and honest format-coverage), and
+        a plain-English README. Built by ``graphic_renderer.pack_export``.
+
+        Packaging only — it bundles what the generation pipeline already
+        rendered; it never re-renders (no Chromium in the request path).
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        from mediahub.graphic_renderer import pack_export as _pack_export
+
+        visuals_dir = RUNS_DIR / run_id / "visuals"
+        if not visuals_dir.is_dir() or not any(visuals_dir.iterdir()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        run_data = run_data or {}
+        meet = run_data.get("meet") or {}
+        run_meta = {
+            "name": meet.get("name") or run_data.get("profile_display") or "",
+            "venue": meet.get("venue") or run_data.get("venue") or "",
+            "date": meet.get("date") or meet.get("start_date") or "",
+        }
+
+        profile_id = run_data.get("profile_id") or _active_profile_id() or ""
+        club: dict = {}
+        try:
+            from mediahub.brand.store import load_brand
+
+            kit, _tone, _tpl = load_brand(profile_id)
+            if kit is not None:
+                club = {
+                    "name": getattr(kit, "display_name", "") or "",
+                    "primary_colour": getattr(kit, "primary_colour", "") or "",
+                    "secondary_colour": getattr(kit, "secondary_colour", "") or "",
+                }
+        except Exception:
+            club = {}
+
+        # Real approved captions + ranking from the content pack (the manifest's
+        # caption source — the visual sidecar carries none). Keyed by card id,
+        # which matches the visual's content_item_id in the normal flow.
+        captions: dict[str, str] = {}
+        order: list[str] = []
+        try:
+            from mediahub.workflow.pack import build_content_pack as _bcp
+
+            for _card in _bcp(run_id, profile_id, RUNS_DIR):
+                _cid = str(_card.get("_card_id") or "")
+                if not _cid:
+                    continue
+                order.append(_cid)
+                _active = _card.get("active_caption") or {}
+                if isinstance(_active, dict):
+                    captions[_cid] = " ".join(
+                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
+                    )
+        except Exception:
+            captions, order = {}, []
+
+        # Approver-edited alt text + approval status from the workflow sidecar.
+        alt_texts: dict[str, str] = {}
+        statuses: dict[str, str] = {}
+        try:
+            _ws = _get_wf_store()
+            if _ws is not None:
+                for _cid, _st in (_ws.load(run_id) or {}).items():
+                    if not _st:
+                        continue
+                    _alt = (_st.edited_captions or {}).get("alt_text", "")
+                    if _alt:
+                        alt_texts[_cid] = _alt
+                    try:
+                        statuses[_cid] = _st.status.value
+                    except Exception:
+                        statuses[_cid] = str(getattr(_st, "status", ""))
+        except Exception:
+            alt_texts, statuses = {}, {}
+
+        result = _pack_export.build_pack_export(
+            run_id,
+            visuals_dir=visuals_dir,
+            run_meta=run_meta,
+            club=club,
+            captions=captions,
+            alt_texts=alt_texts,
+            statuses=statuses,
+            order=order,
+        )
+
+        from flask import send_file
+        import io as _io
+
+        return send_file(
+            _io.BytesIO(result.zip_bytes),
+            as_attachment=True,
+            download_name=f"content-pack-{run_id}-all-formats.zip",
             mimetype="application/zip",
         )
 
