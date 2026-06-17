@@ -113,3 +113,26 @@ top of `MEDIAHUB_VOICEOVER=1` (captions ride on the narration). With it off,
 nothing changes — the renders are byte-identical. (The still+FFmpeg fallback
 burns captions on the **story** cut only; reel captions there are a known gap —
 the Remotion engine captions reels too.)
+
+## motion_regression.py — the frame-by-frame "did the video still look right?" check
+
+The MP4 path proves two different cards make two *different* videos, but it
+can't tell you a code change quietly *broke* a scene (wrong colour, a layer
+that stopped painting, a transition that collapsed). `motion_regression.py` is
+that safety net — the motion twin of `autotest/visual_regression.py`, which does
+the same for the still web surfaces.
+
+How it works: it renders a small, fixed set of **reference frames** from the
+real StoryCard / MeetReel compositions (via `remotion/render_frame.js`, which
+asks Remotion for single still frames as PNGs) and **pixel-diffs** each one
+against a committed "this is what it should look like" picture under
+`tests/baseline/motion_frames/`. A frame that drifts more than a small tolerance
+(to ignore sub-pixel fuzz) is a regression; a frame with no baseline yet is an
+honest *skip*, never a made-up failure. The baselines are only ever written on
+purpose by a person — the check never rewrites its own answer key.
+
+Run it by hand with `python scripts/motion_vr.py` (`list` / `capture` /
+`check`). The logic is covered everywhere by `tests/test_motion_regression.py`;
+the heavier real-render diffs are opt-in via `MEDIAHUB_MOTION_VR=1` so the
+everyday test run stays fast. In CI the diff runs as its own workflow
+(`.github/workflows/motion-visual-regression.yml`) whenever motion code changes.
