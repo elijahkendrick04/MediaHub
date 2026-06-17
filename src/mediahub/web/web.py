@@ -7486,22 +7486,6 @@ textarea, select { max-width: 100%; }
 
 /* Section heading — centred: titles sit on the page's centre line so the
    page reads tidy on wide screens (body content below stays left-aligned). */
-.mh-section-eyebrow {
-  display: flex; align-items: center; justify-content: center;
-  gap: 14px;
-  font-family: var(--font-mono);
-  font-size: 11px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.22em;
-  color: var(--lane);
-  margin: var(--sp-9) 0 var(--sp-3);
-  text-align: center;
-}
-.mh-section-eyebrow::before {
-  content: '';
-  height: 1px; width: 36px;
-  background: var(--lane);
-}
-.mh-section-eyebrow::after { content: none; }
 .mh-section-title {
   font-family: var(--font-display);
   font-size: clamp(36px, 4.2vw, 56px);
@@ -7601,6 +7585,12 @@ textarea, select { max-width: 100%; }
   animation: mh-pulse 1.6s ease-in-out infinite;
   margin-left: 4px;
 }
+/* Home masthead kicker: the default navy brand seed makes --lane vanish on
+   the dark hero, so on the landing page only, paint the kicker in muted ink
+   with a gold rule + live dot so the strap (and its pulse) actually read. */
+body[data-page="home"] .mh-hero-eyebrow { color: var(--ink-muted); }
+body[data-page="home"] .mh-hero-eyebrow::before { background: var(--medal); }
+body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
 .mh-hero h1 {
   font-family: var(--font-display);
   font-size: clamp(56px, 9vw, 132px);
@@ -8391,15 +8381,16 @@ from mediahub.web import code_highlight as _code_hl  # noqa: E402
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
-# only shows up if .mh-audience-icon carries a visible `color`. Pin it to
-# the lane accent. It rides with the components layer (a class + descendant
-# selector out-specifies the bare `svg` reset in the guardrails, which set
-# no colour outside @media print), so the icons stay legible against the
-# dark --surface card background while RESPONSIVE_GUARDRAILS_CSS remains the
-# cascade's final layer (see test_theme_tokens::test_guardrails_appended_last).
-_MH_AUDIENCE_ICON_CSS = (
-    "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
-)
+# only shows up if .mh-audience-icon carries a visible `color`. Paint it in
+# neutral ink, NOT --lane: the default house brand seed resolves --lane to a
+# dark navy that vanishes on the dark card, so the affordance must not depend
+# on the accent's lightness (same rule as .mh-faq-icon). It rides with the
+# components layer (a class + descendant selector out-specifies the bare
+# `svg` reset in the guardrails, which set no colour outside @media print),
+# so the icons stay legible against the dark --surface card background while
+# RESPONSIVE_GUARDRAILS_CSS remains the cascade's final layer (see
+# test_theme_tokens::test_guardrails_appended_last).
+_MH_AUDIENCE_ICON_CSS = "\n.mh-audience-icon { color: var(--ink-dim); }\n.mh-audience-icon svg { color: var(--ink-dim); }\n"
 # Motion / effect kit + the U.8 pipeline-diagram CSS + the UI 1.17
 # cadence-heatmap CSS ride AFTER the components layer (so they can elevate
 # existing component primitives) but BEFORE the guardrails, which must stay the
@@ -13674,7 +13665,7 @@ def create_app() -> Flask:
             '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
             "</div>"
             '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></span>'
+            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></svg></span>'
             '<span class="mh-audience-role">Coach · Performance · Selection</span>'
             '<h3 class="mh-audience-title">Coaches</h3>'
             '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
