@@ -9890,6 +9890,7 @@ def _layout(
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
       <a href="{{ url_for('logout') }}">Log out</a>
     {% else %}
+      <a href="{{ url_for('signup_page') }}">Sign up</a>
       <a href="{{ url_for('login_page') }}">Log in</a>
       <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
     {% endif %}

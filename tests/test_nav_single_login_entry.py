@@ -56,3 +56,18 @@ def test_unauthenticated_visitor_sees_only_one_auth_cta(client):
         "this causes UX confusion (no explanation of the difference). "
         "Exactly one auth entry point should be shown."
     )
+
+
+def test_unauthenticated_visitor_sees_signup_link(client):
+    """Nav must offer a 'Sign up' link so new users know how to create an account."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    nav = _nav_section(resp.data.decode("utf-8", errors="replace"))
+
+    # A visitor with no session should see a clear signup path in the nav bar.
+    # Previously no such link existed, leaving first-time users with no route
+    # to account creation other than guessing at 'Log in' vs 'Sign in'.
+    assert ">Sign up<" in nav, (
+        "Nav bar shows no 'Sign up' entry point for unauthenticated visitors. "
+        "New users cannot discover how to create an account from the navigation."
+    )
