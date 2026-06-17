@@ -82,8 +82,7 @@ _MONO_TOKENS = frozenset(
 # Searched against a blob whose id separators (``_`` ``-`` ``/``) are normalised
 # to spaces first, so "mono_press" and "b/w" both reach these alternatives.
 _MONO_PHRASE = re.compile(
-    r"\b(mono|monochrome|gray\s*scale|grey\s*scale|"
-    r"black\s+and\s+white|b\s*[&/]?\s*w)\b"
+    r"\b(mono|monochrome|gray\s*scale|grey\s*scale|black\s+and\s+white|b\s*[&/]?\s*w)\b"
 )
 
 
