@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `102e340a7` · G1.1 — eight new v2 archetype families (still + motion + gallery) (#759)
+**Last updated:** 2026-06-17 · `78abe01ed` · G1.26 — Live archetype × style-pack preview gallery (#716)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -173,7 +173,6 @@ UI motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) rather than 
 an effect. This epic is closed; new UI follow-on work would be filed as fresh `UI 1.*` items.
 
 <!-- ROADMAP:TODO -->
-- **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1522,7 +1521,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `a71353d0d` | Re-trigger CI |
 | 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
+| 2026-06-17 | `c3c846f0c` | Fix pre-existing CI red: ffmpeg reel engine now renders all formats (R1.16) |
 | 2026-06-17 | `96d200249` | fix: make font_intake.subset_to_woff2 truly deterministic (pin head.modified) |
 | 2026-06-17 | `880493a59` | Add R1.22 colour-role transition motion overlay (fade/gradient/pulse) |
 | 2026-06-17 | `6489b74df` | Fix non-deterministic font intake (head timestamp flake) |
@@ -1530,5 +1531,5 @@ list and the auto table below, not here.
 | 2026-06-17 | `e8792b384` | test: update stale ffmpeg-engine reel test for R1.16 multi-format |
 | 2026-06-17 | `35dbe58c8` | Apply ruff-format to the R1.12 reel call-sites |
 | 2026-06-17 | `a1206eaaa` | G1.13: SVG vector export path (outlined fonts, no raster) |
-| 2026-06-17 | `50dc3a6c9` | G1.14: WebP/AVIF output + render quality profiles (fast/standard/high) |
+| 2026-06-17 | `a544a7961` | Fix CI: ruff-format the studio cross-link in template_gallery.py |
 <!-- /ROADMAP:ACTIVITY -->
