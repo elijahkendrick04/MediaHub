@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `1ac15de4f` · Merge pull request #711: Parallelise the free FFmpeg reel engine's beat rendering
+**Last updated:** 2026-06-17 · `3100b9c7d` · Merge pull request #639 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1530,5 +1530,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `6489b74df` | Fix non-deterministic font intake (head timestamp flake) |
 | 2026-06-17 | `88c6088ce` | Fix stale ffmpeg-engine batch test after R1.16 multi-format support |
 | 2026-06-17 | `e8792b384` | test: update stale ffmpeg-engine reel test for R1.16 multi-format |
-| 2026-06-17 | `35dbe58c8` | Apply ruff-format to the R1.12 reel call-sites |
 <!-- /ROADMAP:ACTIVITY -->
