@@ -258,7 +258,12 @@ server:
 - **Story cards** — 6 seconds, one card per swimmer/achievement
 - **Meet reels** — data-driven length (`reel_duration_for`: 1 card → 7s …
   5 cards → 23s; 3 cards keep the historic 15s): branded cover with honest
-  label-derived stat chips → rank-weighted card beats → club outro
+  label-derived stat chips → rank-weighted card beats → club outro. The beat
+  rhythm is customisable (R1.12): `reel_duration_for` / `normalise_reel_rhythm`
+  take optional per-card beat weights + custom cover/outro seconds (mirrored
+  into `MeetReel.tsx`'s carve and the ffmpeg fallback, folded into the cache
+  key); a weighted card earns proportionally more seconds and an uncustomised
+  reel stays byte-identical
 - **Formats** — story 1080×1920 (default), portrait 1080×1350, square
   1080×1080, landscape 1920×1080 from the same compositions
   (`render.js --width/--height`)

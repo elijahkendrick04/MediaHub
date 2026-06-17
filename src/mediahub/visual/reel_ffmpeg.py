@@ -333,7 +333,9 @@ def story_ffmpeg_args(still: Path, out_path: Path, duration_sec: float) -> list[
     ]
 
 
-def reel_segment_durations(n_cards: int, total_sec: float) -> list[float]:
+def reel_segment_durations(
+    n_cards: int, total_sec: float, *, rhythm: Optional[dict] = None
+) -> list[float]:
     """Per-segment input durations (cover + one per card) whose xfade-chained
     total is exactly ``total_sec``.
 
@@ -341,18 +343,47 @@ def reel_segment_durations(n_cards: int, total_sec: float) -> list[float]:
     card, and a 1s outro tail absorbed by the last card — scaled
     proportionally when the caller overrides the total. Every segment except
     the last is extended by the crossfade it loses to the following overlap.
+
+    R1.12 — when ``rhythm`` (a canonical dict from
+    ``motion.normalise_reel_rhythm``) is supplied, the cover/outro seconds and
+    the explicit per-card beat weights are mirrored from the Remotion carving
+    so the free engine produces the same rhythm. ``None`` keeps the original
+    flat-beat split byte-identical.
     """
     from mediahub.visual.motion import (
         REEL_COVER_SEC,
         REEL_OUTRO_SEC,
         REEL_PER_CARD_SEC,
+        _fit_beat_weights,
         reel_duration_for,
     )
 
     n = max(1, int(n_cards))
-    base = [REEL_COVER_SEC] + [REEL_PER_CARD_SEC] * n
-    base[-1] += REEL_OUTRO_SEC
-    factor = float(total_sec) / reel_duration_for(n)
+    if rhythm:
+        cover = float(rhythm.get("coverSec", REEL_COVER_SEC))
+        outro = float(rhythm.get("outroSec", REEL_OUTRO_SEC))
+        per_card = float(rhythm.get("perCardSec", REEL_PER_CARD_SEC))
+        weights = list(rhythm.get("beatWeights") or [])
+    else:
+        cover, outro, per_card, weights = REEL_COVER_SEC, REEL_OUTRO_SEC, REEL_PER_CARD_SEC, []
+
+    if weights:
+        card_secs = [per_card * w for w in _fit_beat_weights(weights, n)]
+    else:
+        # No explicit weights → flat per-card beats (the free engine's original
+        # carve; the Remotion path layers a top-card emphasis on top, a
+        # long-standing per-engine nuance left untouched here).
+        card_secs = [per_card] * n
+    base = [cover] + card_secs
+    base[-1] += outro
+    ref_total = reel_duration_for(
+        n,
+        cover_sec=cover,
+        outro_sec=outro,
+        per_card_sec=per_card,
+        beat_weights=(weights or None),
+    )
+    factor = float(total_sec) / ref_total if ref_total else 1.0
     visible = [b * factor for b in base]
     return [v + (CROSSFADE_SEC if i < len(visible) - 1 else 0.0) for i, v in enumerate(visible)]
 
@@ -523,19 +554,22 @@ def render_meet_reel_from_props(
     duration_sec: Optional[float] = None,
     brief_dicts: Optional[list[Optional[dict]]] = None,
     audio_plan: Optional[dict] = None,
+    rhythm: Optional[dict] = None,
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
     ``duration_sec=None`` (the default) is data-driven — the same
-    ``reel_duration_for`` arithmetic the Remotion path uses. ``audio_plan``
-    behaves exactly as on the story path (cache-key folded; honest silent
-    fallback).
+    ``reel_duration_for`` arithmetic the Remotion path uses, folded with the
+    optional ``rhythm`` (R1.12) so the free engine honours custom cover/outro
+    seconds and per-card beat weights too. ``audio_plan`` behaves exactly as on
+    the story path (cache-key folded; honest silent fallback).
     """
     from mediahub.visual.motion import (
         _cache_dir,
         _content_hash,
         _finish_cached_video,
         _publish,
+        _reel_duration_kwargs,
         reel_duration_for,
     )
 
@@ -543,7 +577,9 @@ def render_meet_reel_from_props(
     if not cards_props:
         raise ValueError("at least one card is required for a reel")
     if duration_sec is None:
-        duration_sec = reel_duration_for(len(cards_props))
+        duration_sec = reel_duration_for(
+            len(cards_props), **_reel_duration_kwargs(rhythm)
+        )
     out_path = Path(out_path)
     briefs = list(brief_dicts or [])
     cache_payload = {
@@ -554,6 +590,8 @@ def render_meet_reel_from_props(
         "engine": "ffmpeg",
         "briefs": [b or {} for b in briefs] or [{}] * len(cards_props),
     }
+    if rhythm:
+        cache_payload["rhythm"] = rhythm
     if audio_plan:
         cache_payload["audio"] = audio_plan
     cache_key = _content_hash(cache_payload, kind="reel")
@@ -577,7 +615,7 @@ def render_meet_reel_from_props(
             brief = _frame_brief(props, brand_dict, brand_kit, bd)
             stills.append(_render_still(brief, brand_kit, work, name=f"card{idx}"))
 
-        seg_durations = reel_segment_durations(len(cards_props), duration_sec)
+        seg_durations = reel_segment_durations(len(cards_props), duration_sec, rhythm=rhythm)
         tmp_mp4 = work / "reel.mp4"
         _run_ffmpeg(reel_ffmpeg_args(stills, tmp_mp4, seg_durations))
         return _finalise(
