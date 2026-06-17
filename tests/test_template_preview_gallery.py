@@ -190,9 +190,9 @@ def test_filter_packs_narrows_by_each_lever():
 def test_filter_packs_impossible_combo_is_empty():
     # A heavy ground + heavy texture + heavy accent + bold exceeds the coherence
     # cap, so the catalog never contains it.
-    assert G.filter_packs(
-        ground="edge_frame", texture="carbon", accent="frame", density="bold"
-    ) == []
+    assert (
+        G.filter_packs(ground="edge_frame", texture="carbon", accent="frame", density="bold") == []
+    )
 
 
 def test_filters_active():
@@ -340,7 +340,7 @@ def test_body_pack_rail_paginates():
     assert "Page 2 of" in html
     # Prev is a live link on page 2; the pager is present.
     assert "mh-tpv-pager" in html
-    assert "rel=\"prev\"" in html
+    assert 'rel="prev"' in html
 
 
 def test_body_lever_filter_renders_selects_with_current_value():

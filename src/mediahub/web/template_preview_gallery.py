@@ -338,7 +338,7 @@ def _featured(state: StudioState, *, thumb_url, make_url: str) -> str:
         '<span class="mh-tpv-eyebrow">Pinned template</span>'
         f'<h2 class="mh-tpv-featured-title">{_e(arch_title)}</h2>'
         f'<p class="mh-tpv-featured-sub"><span class="mh-arch-tag" data-cat="{_e(cat)}">'
-        f'{_e(_ui110.category_label(cat))}</span> <code>{_e(state.archetype)}</code></p>'
+        f"{_e(_ui110.category_label(cat))}</span> <code>{_e(state.archetype)}</code></p>"
         f'<p class="mh-tpv-pack-name">{_e(pack_name)}</p>'
         f'<p class="mh-tpv-pack-why">{_e(pack_why)}</p>'
         f'<code class="mh-tpv-pack-id">{_e(state.pack)}</code>'
@@ -403,14 +403,13 @@ def _archetype_rail(state: StudioState, *, studio_url: str, thumb_url, entries: 
             '<span class="mh-tpv-tile-body">'
             f'<span class="mh-tpv-tile-title">{_e(e["title"])}</span>'
             f'<span class="mh-arch-tag" data-cat="{_e(e["category"])}">'
-            f'{_e(e["category_label"])}</span>'
+            f"{_e(e['category_label'])}</span>"
             "</span>"
             f'<code class="mh-tpv-tile-slug">{_e(name)}</code>'
             "</a>"
         )
     empty = (
-        '<p class="mh-arch-empty" id="mh-tpv-arch-empty" hidden>'
-        "No archetypes in this category.</p>"
+        '<p class="mh-arch-empty" id="mh-tpv-arch-empty" hidden>No archetypes in this category.</p>'
     )
     return (
         '<section class="mh-tpv-section" id="mh-tpv-archetypes" '
@@ -432,7 +431,9 @@ def _lever_form(state: StudioState, *, studio_url: str) -> str:
     selects = []
     for key, label, vocab in LEVERS:
         cur = getattr(state, key)
-        opts = [f'<option value="{ANY}"{" selected" if cur == ANY else ""}>Any {label.lower()}</option>']
+        opts = [
+            f'<option value="{ANY}"{" selected" if cur == ANY else ""}>Any {label.lower()}</option>'
+        ]
         for v in vocab:
             sel = " selected" if v == cur else ""
             opts.append(f'<option value="{_e(v)}"{sel}>{_e(lever_label(v))}</option>')
@@ -449,7 +450,9 @@ def _lever_form(state: StudioState, *, studio_url: str) -> str:
     )
     if state.category != "all":
         hidden += f'<input type="hidden" name="category" value="{_e(state.category)}"/>'
-    reset_href = studio_url + _query(state, ground=ANY, texture=ANY, accent=ANY, density=ANY, page=1)
+    reset_href = studio_url + _query(
+        state, ground=ANY, texture=ANY, accent=ANY, density=ANY, page=1
+    )
     reset = (
         f'<a class="mh-tpv-reset" href="{_e(reset_href)}">Clear filters</a>'
         if filters_active(state.ground, state.texture, state.accent, state.density)
@@ -539,9 +542,11 @@ def _pack_rail(state: StudioState, *, studio_url: str, thumb_url) -> str:
         body = f'<div class="mh-tpv-grid">{"".join(tiles)}</div>' + _pager(
             state, page, studio_url=studio_url
         )
-        suffix = " (filtered)" if filters_active(
-            state.ground, state.texture, state.accent, state.density
-        ) else ""
+        suffix = (
+            " (filtered)"
+            if filters_active(state.ground, state.texture, state.accent, state.density)
+            else ""
+        )
         count_line = (
             f"Showing {page.start}&ndash;{page.end} of {page.total:,} packs{suffix}, "
             f"each on the <strong>{_e(arch_title)}</strong> archetype."
@@ -581,9 +586,7 @@ def render_studio_body(
 
     hero = _hero(n_arch, n_packs, n_templates)
     featured = _featured(state, thumb_url=thumb_url, make_url=make_url)
-    arch_rail = _archetype_rail(
-        state, studio_url=studio_url, thumb_url=thumb_url, entries=entries
-    )
+    arch_rail = _archetype_rail(state, studio_url=studio_url, thumb_url=thumb_url, entries=entries)
     pack_rail = _pack_rail(state, studio_url=studio_url, thumb_url=thumb_url)
 
     schematic_link = (

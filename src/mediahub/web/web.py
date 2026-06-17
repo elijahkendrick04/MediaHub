@@ -24569,9 +24569,7 @@ function mhPlanGenerate(btn) {{
     # (brand resolution + the disk-cached live render) are the only request-bound
     # parts. Thumbnails degrade to an honest self-contained schematic when a live
     # render is unavailable, so the gallery is never broken.
-    _PREVIEW_RENDER_TIMEOUT = float(
-        os.environ.get("MEDIAHUB_PREVIEW_RENDER_TIMEOUT", "20") or "20"
-    )
+    _PREVIEW_RENDER_TIMEOUT = float(os.environ.get("MEDIAHUB_PREVIEW_RENDER_TIMEOUT", "20") or "20")
     # Fixed, representative sample so previews are honest and comparable tile to
     # tile (only the template changes, never the data). variation_seed is pinned
     # so the brief is fully deterministic — no LLM, no network.
@@ -24601,7 +24599,7 @@ function mhPlanGenerate(btn) {{
                 "display_name",
             )
         )
-        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
     def _preview_brand_kit():
         """The brand previews render in: the signed-in org's kit, else a neutral
@@ -24698,9 +24696,7 @@ function mhPlanGenerate(btn) {{
         size = (560, 700) if request.args.get("hero") == "1" else (384, 480)
 
         def _schematic_response():
-            resp = Response(
-                _studio.standalone_schematic_svg(archetype), mimetype="image/svg+xml"
-            )
+            resp = Response(_studio.standalone_schematic_svg(archetype), mimetype="image/svg+xml")
             resp.headers["Cache-Control"] = "public, max-age=300"
             return resp
 
