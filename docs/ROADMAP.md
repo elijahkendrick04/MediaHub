@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `382fe7343` · Merge pull request #724 from elijahkendrick04/claude/affectionate-pasteur-omfhgs
+**Last updated:** 2026-06-17 · `de2c27e80` · Merge pull request #735 from elijahkendrick04/claude/optimistic-brown-70jxel
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -179,7 +179,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.14** · Reel generator sprint — Transition library expansion + per-card timing — new transitions (glitch, slide-stack, light-sweep) + a duration field. *Build: `MeetReel.tsx` `transitionFor` + `TransitionWrap` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1538,9 +1537,8 @@ list and the auto table below, not here.
 | 2026-06-17 | `874fef97f` | fix(roadmap-bot): self-heal directives dropped by the concurrent-merge race |
 | 2026-06-17 | `d24d6f461` | feat(reel): in-render poster capture via Remotion renderStill (R1.29) |
 | 2026-06-17 | `b7161ab8b` | G1.12 — Multi-line hero & split-result fitting |
+| 2026-06-17 | `4b6f00e18` | Add G1.27 interactive brief/design editor (Studio) |
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
 | 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
 | 2026-06-17 | `955c40af4` | Add motion photo filter stack overlay (R1.10) |
-| 2026-06-17 | `eecc5a7a1` | G1.8: gradient-mesh background engine |
-| 2026-06-17 | `194070927` | R1.21: local Piper TTS backend behind the voiceover seam |
 <!-- /ROADMAP:ACTIVITY -->
