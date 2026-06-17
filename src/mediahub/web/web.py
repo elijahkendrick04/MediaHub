@@ -39212,9 +39212,7 @@ voice, and queues them for one-click approval.</p>
                 _active = _card.get("active_caption") or {}
                 if isinstance(_active, dict):
                     captions[_cid] = " ".join(
-                        str(v).strip()
-                        for v in _active.values()
-                        if isinstance(v, str) and v.strip()
+                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
                     )
         except Exception:
             captions, order = {}, []

@@ -379,9 +379,9 @@ def _readme_text(manifest: dict) -> str:
     """A plain-English guide to the archive, generated from the manifest."""
     summary = manifest.get("summary") or {}
     fmts = summary.get("formats_present") or []
-    fmt_lines = "\n".join(
-        f"  - {FORMAT_LABELS.get(f, f)}  ({f}.png)" for f in fmts
-    ) or "  - (no images)"
+    fmt_lines = (
+        "\n".join(f"  - {FORMAT_LABELS.get(f, f)}  ({f}.png)" for f in fmts) or "  - (no images)"
+    )
     meet = (manifest.get("meet") or {}).get("name") or manifest.get("run_id")
     return (
         "MediaHub content pack export\n"
