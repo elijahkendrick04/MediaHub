@@ -3965,6 +3965,18 @@ def render_brief(
         encode_kwargs["quality"] = quality
     bytes_written = render_html_to_png(html, out_path, (width, height), **encode_kwargs)
 
+    # G1.13: optionally drop an editable, outlined-font SVG beside the PNG. Off
+    # by default (the SVG needs a second Chromium pass), so default renders stay
+    # byte-identical and fast; opt in with MEDIAHUB_SVG_SIDECAR=1. A failure here
+    # never sinks the render — the PNG is the deliverable.
+    if _flag("MEDIAHUB_SVG_SIDECAR", "0"):
+        try:
+            from mediahub.graphic_renderer.svg_export import export_svg_alongside
+
+            export_svg_alongside(out_path, html, (width, height), title=family)
+        except Exception as e:  # pragma: no cover - opt-in, environment-dependent
+            log.warning("SVG sidecar export skipped: %s", e)
+
     visual = GeneratedVisual(
         id=visual_id,
         brief_id=brief.id,
