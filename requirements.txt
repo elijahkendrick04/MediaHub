@@ -39,6 +39,12 @@ sqlite-vec>=0.1.9,<0.2
 # CPU-only text-to-speech of the already-approved caption. When absent the
 # voiceover route honest-errors (503) rather than degrading to a fake voice.
 edge-tts>=7.2.8
+# Local, zero-cost TTS backend (R1.21), selected with MEDIAHUB_TTS_PROVIDER=piper
+# + a Piper '.onnx' voice (MEDIAHUB_PIPER_MODEL). Left OPTIONAL on purpose: the
+# default is edge, and onnxruntime/ffmpeg (its only heavy deps) already ship
+# above. Install it only when you want fully-offline narration:
+#   pip install piper-tts
+# Absent → an honest VoiceoverError, never a fabricated voice.
 
 # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
 # materialyoucolor is the maintained Python port of Google's
@@ -58,6 +64,14 @@ numpy>=2.4.6
 # data/sport_profiles/*.yaml files. PyYAML is MIT-licensed and free; the loader is
 # inert scaffolding (not yet wired into the runtime pipeline).
 PyYAML>=6.0.3
+
+# G1.10 club custom-font upload pipeline (mediahub.typography.font_intake):
+# validates, subsets to MediaHub's Latin set, and re-packs an uploaded brand
+# typeface as a first-party self-hosted WOFF2 (never the Google Fonts CDN). The
+# [woff] extra pulls in brotli (+ zopfli) for WOFF2 (de)compression. fontTools is
+# MIT-licensed. The module honest-errors (FontToolingUnavailable) if it's absent;
+# its pure-Python security validation still rejects unsafe uploads with no deps.
+fonttools[woff]>=4.56.0
 
 # Scheduler (mediahub.scheduler / mediahub.workflow.schedule) uses croniter to
 # compute cron / daily / weekly / monthly fire-times. croniter is MIT-licensed,

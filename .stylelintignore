@@ -1,0 +1,7 @@
+# Runtime-substituted print-production template (G1.17): it carries
+# {{PLACEHOLDER}} tokens in value/selector positions (filled by
+# print_export._print_css at render time), so it is not standalone CSS and
+# the stylelint "standalone .css" sweep would only see CssSyntaxError on the
+# placeholders. The static rules it does carry are exercised by
+# tests/test_print_pipeline_g117.py via real Playwright renders.
+src/mediahub/graphic_renderer/layouts/_print.css

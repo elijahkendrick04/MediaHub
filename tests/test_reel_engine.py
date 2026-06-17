@@ -295,3 +295,83 @@ def test_render_meet_reel_dispatches_to_ffmpeg_engine(tmp_path, monkeypatch):
     assert len(calls["cards"]) == 1
     # The data-driven duration arithmetic must flow through to the fallback.
     assert calls["duration"] == motion.reel_duration_for(1)
+
+
+# ---------------------------------------------------------------------------
+# ffmpeg engine multi-format (R1.16) — the free fallback now renders every
+# cut (portrait / square / landscape), not only story, and the chosen format
+# flows through to reel_ffmpeg. It must never fall back to Remotion.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fmt", ["portrait", "square", "landscape"])
+def test_render_story_card_ffmpeg_engine_renders_nonstory_cut(tmp_path, monkeypatch, fmt):
+    from mediahub.visual import reel_ffmpeg
+
+    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    calls: dict = {}
+
+    def _fake_ffmpeg_story(card_props, brand_dict, brand_kit, out_path, **kw):
+        calls["format_name"] = kw.get("format_name")
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_story_card_from_props", _fake_ffmpeg_story)
+    with patch.object(motion, "_run_remotion") as mock_remotion:
+        out = tmp_path / f"story_{fmt}.mp4"
+        # Pre-R1.16 this raised ReelEngineUnavailable for any non-story cut.
+        result = motion.render_story_card(_fake_card(), _fake_brand(), out, format_name=fmt)
+        assert not mock_remotion.called, "remotion must not run under the ffmpeg engine"
+    assert Path(result).exists()
+    assert calls["format_name"] == fmt
+
+
+@pytest.mark.parametrize("fmt", ["portrait", "square", "landscape"])
+def test_render_meet_reel_ffmpeg_engine_renders_nonstory_cut(tmp_path, monkeypatch, fmt):
+    from mediahub.visual import reel_ffmpeg
+
+    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    calls: dict = {}
+
+    def _fake_ffmpeg_reel(cards_props, brand_dict, brand_kit, out_path, **kw):
+        calls["format_name"] = kw.get("format_name")
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_meet_reel_from_props", _fake_ffmpeg_reel)
+    with patch.object(motion, "_run_remotion") as mock_remotion:
+        out = tmp_path / f"reel_{fmt}.mp4"
+        result = motion.render_meet_reel([_fake_card()], _fake_brand(), out, format_name=fmt)
+        assert not mock_remotion.called
+    assert Path(result).exists()
+    assert calls["format_name"] == fmt
+
+
+def test_ffmpeg_engine_no_longer_raises_for_nonstory_cut(tmp_path, monkeypatch):
+    """Regression guard: the story-only ReelEngineUnavailable gate is gone.
+
+    The render must reach reel_ffmpeg (here stubbed) rather than raising.
+    """
+    from mediahub.visual import reel_ffmpeg
+
+    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    def _stub(card_props, brand_dict, brand_kit, out_path, **kw):
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_story_card_from_props", _stub)
+    out = tmp_path / "square.mp4"
+    result = motion.render_story_card(_fake_card(), _fake_brand(), out, format_name="square")
+    assert Path(result).exists()
