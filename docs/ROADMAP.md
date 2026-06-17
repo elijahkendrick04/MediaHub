@@ -79,7 +79,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `9a0b555e9` · Merge pull request #779: Remove auto social scheduling/publishing; show "Coming soon"
+**Last updated:** 2026-06-17 · `fd79698cc` · Merge pull request #782 from elijahkendrick04/claude/admiring-cannon-0yex0b
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1318,6 +1318,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `55e398e62` | Tidy the home-page pipeline diagram engine block |
 | 2026-06-17 | `c1dccf9a7` | Fix tests that referenced removed schedule/autonomy surfaces |
 | 2026-06-17 | `c2a0dc1f0` | Apply ruff-format (double-quote the Coming soon card close tag) |
 | 2026-06-17 | `44d87b45c` | Remove auto social scheduling/publishing; show "Coming soon" |
