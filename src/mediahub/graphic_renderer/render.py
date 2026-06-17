@@ -896,6 +896,18 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
 _LOGO_PREP_CACHE: dict[tuple, tuple[str, Optional[str]]] = {}
 
 
+def clear_logo_prep_cache() -> int:
+    """Drop the in-process preprocessed-logo cache; returns the entry count removed.
+
+    Re-derivable (each entry is pure trim/knockout pixel work keyed by the logo
+    file's path+mtime+size), so a site-wide cache purge clears it to actually
+    free the worker's memory rather than leave the encoded logos resident.
+    """
+    n = len(_LOGO_PREP_CACHE)
+    _LOGO_PREP_CACHE.clear()
+    return n
+
+
 def _knockout_uniform_background(img):
     """Flood-fill a connected, near-uniform border background to transparent.
 

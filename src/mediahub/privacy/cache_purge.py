@@ -2,15 +2,18 @@
 
 This is the deployment-level "clear the cache for the entire site, for all
 runs" operation. It wipes every *performance* cache MediaHub writes under
-``DATA_DIR``, for the whole deployment and across every organisation and run.
+``DATA_DIR``, for the whole deployment and across every organisation and run,
+**and** drops the matching in-process caches so the running worker stops
+serving them from memory — a disk-only purge would leave the cache effectively
+intact in RAM.
 
 Nothing here is a source of truth: each directory is a cache the engine
-rebuilds on demand — re-fetched PB-lookup pages, re-rendered motion/graphics,
-re-captured brand DNA, re-synthesised narration, re-run web research. Source
-data is deliberately **untouched**: runs (``runs_v4``), uploads
-(``uploads_v4``), the SQLite databases (``data.db``, ``memory.db``), the media
-library originals, and the JSONL ledgers all survive a purge. The only cost of
-clearing is that the next request re-derives what it needs.
+rebuilds on demand — re-fetched PB-lookup pages, re-rendered motion, re-shot
+graphic-card PNGs, re-captured brand DNA, re-synthesised narration, re-run web
+research. Source data is deliberately **untouched**: runs (``runs_v4``),
+uploads (``uploads_v4``), the SQLite databases (``data.db``, ``memory.db``),
+the media library originals, and the JSONL ledgers all survive a purge. The
+only cost of clearing is that the next request re-derives what it needs.
 
 Each cache root is resolved through the owning module's own resolver where one
 exists, so this follows path changes rather than duplicating them. All
@@ -55,6 +58,11 @@ def cache_roots() -> List[Tuple[str, Path]]:
         ("voice_cache", data / "voice_cache"),
         ("social_dna_cache", data / "social_dna_cache"),
         ("brand_dna_cache", data / "brand_dna_cache"),
+        # Still-graphic renderer's HTML→PNG screenshot cache (G1.24). A pure
+        # function of its inputs and disposable at any time, so it belongs in
+        # the site-wide purge — without it "clear all caches" left every
+        # rendered card PNG on disk despite the UI promising graphic renders.
+        ("graphic_render_cache", data / "render_cache"),
     ]
 
     # PB-discovery tree (pbs / swimmers / search_cache / meets). The resolver
@@ -108,12 +116,16 @@ def _purge_dir(path: Path) -> Tuple[int, int]:
 def purge_all_caches() -> dict:
     """Permanently delete every re-derivable cache, site-wide.
 
+    Clears both the on-disk cache roots and the matching in-process module
+    caches (so the running worker stops serving them from memory).
+
     Returns a report::
 
         {
           "files_deleted": <int>,
           "bytes_reclaimed": <int>,
           "sections": {<label>: {"path", "files_deleted", "bytes_reclaimed"}},
+          "inprocess_cleared": [<label>, ...],  # in-memory caches dropped
         }
     """
     sections: dict = {}
@@ -136,14 +148,42 @@ def purge_all_caches() -> dict:
         }
         total_files += files
         total_bytes += size
+
+    # In-process caches that mirror the on-disk caches just purged. A disk-only
+    # purge leaves the running worker serving these from memory and its RSS
+    # unchanged, so "clear all caches" must drop them too — otherwise the cache
+    # is not, in fact, cleared. Best-effort: a missing or broken module never
+    # fails the purge. (web.py's own BoundedCaches live in the request process
+    # and are cleared by the operator route — importing them here would cycle.)
+    inprocess_cleared: List[str] = []
+    try:
+        from mediahub.graphic_renderer import render_cache as _render_cache
+
+        # Drops the in-memory base64 asset-URI cache + hit/miss stats. The PNG
+        # dir was already removed above, so clear()'s disk pass is a no-op.
+        _render_cache.clear()
+        inprocess_cleared.append("graphic_render_asset_cache")
+    except Exception:
+        log.debug("cache purge: could not clear render_cache in-memory cache", exc_info=True)
+    try:
+        from mediahub.graphic_renderer.render import clear_logo_prep_cache
+
+        clear_logo_prep_cache()
+        inprocess_cleared.append("logo_prep_cache")
+    except Exception:
+        log.debug("cache purge: could not clear logo-prep cache", exc_info=True)
+
     log.info(
-        "site-wide cache purge: removed %d files, reclaimed %d bytes across %d roots",
+        "site-wide cache purge: removed %d files, reclaimed %d bytes across %d roots; "
+        "dropped in-process caches: %s",
         total_files,
         total_bytes,
         len(sections),
+        ", ".join(inprocess_cleared) or "none",
     )
     return {
         "files_deleted": total_files,
         "bytes_reclaimed": total_bytes,
         "sections": sections,
+        "inprocess_cleared": inprocess_cleared,
     }

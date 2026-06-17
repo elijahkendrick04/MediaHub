@@ -23355,10 +23355,11 @@ window.mhSchedulerDisconnect = function(btn) {
             '<p class="dim" style="font-size:13px;margin-bottom:10px">'
             "Permanently deletes every <strong>re-derivable</strong> cache for the whole "
             "deployment — all organisations, all runs: PB lookups, motion &amp; graphic "
-            "renders, brand-DNA captures, narration, and web research. Runs, uploads, the "
-            "databases, the media library and the ledgers are <strong>not</strong> touched; "
-            "the engine re-derives what it needs on the next request. Operator-only."
-            "</p>"
+            "renders, brand-DNA captures, narration, and web research — and drops the "
+            "matching in-process caches from this worker's <strong>memory</strong> so "
+            "nothing is served stale. Runs, uploads, the databases, the media library and "
+            "the ledgers are <strong>not</strong> touched; the engine re-derives what it "
+            "needs on the next request. Operator-only.</p>"
             '<p class="dim" style="font-size:13px;margin-bottom:12px">'
             f"Currently caching <strong>{total_files:,}</strong> file(s) "
             f"(<strong>{size_mb:.1f} MB</strong>).</p>"
@@ -29606,18 +29607,23 @@ what you're doing, what they should do.</p>
             _flash_toast(f"Cache purge failed: {e}", "error")
             return redirect(url_for("settings_section", section="developer"))
 
-        # Drop the in-process derived caches too, so a purge doesn't leave the
-        # running worker serving stale "why this card" / perf-context strings.
+        # Drop this process's own derived caches too, so a purge doesn't leave
+        # the worker serving "why this card" / perf-context strings or
+        # design-studio render previews from memory. (The graphic-renderer
+        # module caches are dropped inside purge_all_caches; these BoundedCaches
+        # live in web.py and can't be imported there without a cycle.)
         try:
             _perf_context_cache.clear()
             _explanation_cache.clear()
+            _studio_render_cache.clear()
         except Exception:
             pass
 
         files = int(report.get("files_deleted") or 0)
         mb = (report.get("bytes_reclaimed") or 0) / (1024 * 1024)
         _flash_toast(
-            f"Site-wide cache cleared — {files:,} file(s) deleted, {mb:.1f} MB reclaimed.",
+            f"Site-wide cache cleared — {files:,} file(s) deleted, {mb:.1f} MB "
+            "reclaimed; in-process caches dropped from memory.",
             "success",
         )
         return redirect(url_for("settings_section", section="developer"))
