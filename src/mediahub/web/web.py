@@ -131,14 +131,24 @@ except ImportError:
     _voiceover = None
 
 
+# Query-arg parsing helpers (shared by the print-production routes below).
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _clamp_float(value, *, default: float, lo: float, hi: float) -> float:
+    """Parse a query-arg float, clamped to ``[lo, hi]``; ``default`` on failure."""
+    try:
+        v = float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return lo if v < lo else hi if v > hi else v
+
+
 def _voiceover_enabled() -> bool:
     """True only when the module imported AND the operator opted in."""
-    return bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return (
+        bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in _TRUTHY
+    )
 
 
 # V7.3 imports
@@ -33183,7 +33193,9 @@ function mhSetupMode(mode) {{
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _export_zip_url = url_for("pack_export_zip", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
+        _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
 
         # W.14: what this club's own approval history says it prefers —
@@ -33266,7 +33278,10 @@ function mhSetupMode(mode) {{
     <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
   </div>
-  <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_print_url)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+  </div>
 </div>
 
 <div class="no-print">{_turn_into_html}</div>
@@ -33275,6 +33290,8 @@ function mhSetupMode(mode) {{
 {cards_html}
 
 <div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <a class="btn" href="{_export_zip_url}"
+     title="Every approved card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
   <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
@@ -38403,6 +38420,24 @@ voice, and queues them for one-click approval.</p>
         except Exception:
             brand_kit = None
 
+        # R1.30 — honest sponsor for the reel's outro close: the club's active
+        # sponsor (registry first, then the legacy single sponsor_name field),
+        # or "" when none is configured. Never fabricated — a club with no
+        # sponsor simply gets the follow-the-club close.
+        sponsor_name = ""
+        try:
+            prof = load_profile(profile_id)
+            if prof is not None:
+                from mediahub.club_platform.sponsors import active_sponsors
+
+                actives = active_sponsors(prof)
+                if actives:
+                    sponsor_name = str(actives[0].get("name") or "").strip()
+                if not sponsor_name:
+                    sponsor_name = str(getattr(prof, "sponsor_name", "") or "").strip()
+        except Exception:
+            sponsor_name = ""
+
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
         # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
@@ -38425,6 +38460,7 @@ voice, and queues them for one-click approval.</p>
                 "out_path": out_path,
                 "meet_name": meet_name,
                 "briefs": brief_list,
+                "sponsor": sponsor_name,
             },
             None,
         )
@@ -38456,6 +38492,7 @@ voice, and queues them for one-click approval.</p>
                     meet_name=inputs["meet_name"],
                     briefs=inputs["briefs"],
                     format_name=inputs["format"],
+                    sponsor=inputs.get("sponsor", ""),
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -38532,6 +38569,7 @@ voice, and queues them for one-click approval.</p>
                         meet_name=inputs["meet_name"],
                         briefs=inputs["briefs"],
                         format_name=inputs["format"],
+                        sponsor=inputs.get("sponsor", ""),
                     )
                 if not Path(mp4).exists():
                     raise RuntimeError("mp4 missing after render")
@@ -39133,6 +39171,124 @@ voice, and queues them for one-click approval.</p>
             buf,
             as_attachment=True,
             download_name=f"content-pack-{run_id}.zip",
+            mimetype="application/zip",
+        )
+
+    @app.route("/pack/<run_id>/export.zip")
+    def pack_export_zip(run_id: str):
+        """G1.15 — batch ZIP of a pack's EVERY rendered format + a metadata.json manifest.
+
+        Distinct from ``content_pack_zip`` (which groups PNGs by destination
+        bucket + an approval-summary.json): this export groups by card with
+        every size together (square / portrait / story), writes a real
+        ``metadata.json`` manifest (layout, palette, dimensions, per-format
+        sha256, confidence, design reasoning, and honest format-coverage), and
+        a plain-English README. Built by ``graphic_renderer.pack_export``.
+
+        Packaging only — it bundles what the generation pipeline already
+        rendered; it never re-renders (no Chromium in the request path).
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        from mediahub.graphic_renderer import pack_export as _pack_export
+
+        visuals_dir = RUNS_DIR / run_id / "visuals"
+        if not visuals_dir.is_dir() or not any(visuals_dir.iterdir()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        run_data = run_data or {}
+        meet = run_data.get("meet") or {}
+        run_meta = {
+            "name": meet.get("name") or run_data.get("profile_display") or "",
+            "venue": meet.get("venue") or run_data.get("venue") or "",
+            "date": meet.get("date") or meet.get("start_date") or "",
+        }
+
+        profile_id = run_data.get("profile_id") or _active_profile_id() or ""
+        club: dict = {}
+        try:
+            from mediahub.brand.store import load_brand
+
+            kit, _tone, _tpl = load_brand(profile_id)
+            if kit is not None:
+                club = {
+                    "name": getattr(kit, "display_name", "") or "",
+                    "primary_colour": getattr(kit, "primary_colour", "") or "",
+                    "secondary_colour": getattr(kit, "secondary_colour", "") or "",
+                }
+        except Exception:
+            club = {}
+
+        # Real approved captions + ranking from the content pack (the manifest's
+        # caption source — the visual sidecar carries none). Keyed by card id,
+        # which matches the visual's content_item_id in the normal flow.
+        captions: dict[str, str] = {}
+        order: list[str] = []
+        try:
+            from mediahub.workflow.pack import build_content_pack as _bcp
+
+            for _card in _bcp(run_id, profile_id, RUNS_DIR):
+                _cid = str(_card.get("_card_id") or "")
+                if not _cid:
+                    continue
+                order.append(_cid)
+                _active = _card.get("active_caption") or {}
+                if isinstance(_active, dict):
+                    captions[_cid] = " ".join(
+                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
+                    )
+        except Exception:
+            captions, order = {}, []
+
+        # Approver-edited alt text + approval status from the workflow sidecar.
+        alt_texts: dict[str, str] = {}
+        statuses: dict[str, str] = {}
+        try:
+            _ws = _get_wf_store()
+            if _ws is not None:
+                for _cid, _st in (_ws.load(run_id) or {}).items():
+                    if not _st:
+                        continue
+                    _alt = (_st.edited_captions or {}).get("alt_text", "")
+                    if _alt:
+                        alt_texts[_cid] = _alt
+                    try:
+                        statuses[_cid] = _st.status.value
+                    except Exception:
+                        statuses[_cid] = str(getattr(_st, "status", ""))
+        except Exception:
+            alt_texts, statuses = {}, {}
+
+        result = _pack_export.build_pack_export(
+            run_id,
+            visuals_dir=visuals_dir,
+            run_meta=run_meta,
+            club=club,
+            captions=captions,
+            alt_texts=alt_texts,
+            statuses=statuses,
+            order=order,
+        )
+
+        from flask import send_file
+        import io as _io
+
+        return send_file(
+            _io.BytesIO(result.zip_bytes),
+            as_attachment=True,
+            download_name=f"content-pack-{run_id}-all-formats.zip",
             mimetype="application/zip",
         )
 
@@ -39817,8 +39973,9 @@ voice, and queues them for one-click approval.</p>
   noticeboard poster, or use the highlights to build posts.</p>
 </section>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">{chips}</div>
-<div class="card" style="margin-bottom:16px">
+<div class="card" style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
   <a class="btn" href="{url_for("season_wrap_poster", draft_id=draft_id)}">Print A4 noticeboard poster (PDF)</a>
+  <a class="btn secondary" href="{url_for("season_wrap_poster", draft_id=draft_id, print=1)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop version (bleed + crop marks)</a>
 </div>
 <div class="card">
   <h2 style="margin-top:0">Highlights</h2>
@@ -39837,6 +39994,7 @@ voice, and queues them for one-click approval.</p>
             abort(403)
         from mediahub.graphic_renderer.print_export import (
             build_poster_html,
+            export_poster_print_pdf,
             render_html_to_pdf,
         )
         from mediahub.season_wrap import load_draft
@@ -39860,7 +40018,7 @@ voice, and queues them for one-click approval.</p>
             }
             for h in (draft.get("highlights") or [])[:10]
         ]
-        html = build_poster_html(
+        poster_kwargs = dict(
             title=draft.get("title", "Club wrap"),
             meet_name=", ".join((draft.get("stats") or {}).get("meet_names", [])[:3]),
             stat_lines=[(str(k), str(v)) for k, v in (draft.get("stat_chips") or [])],
@@ -39868,14 +40026,21 @@ voice, and queues them for one-click approval.</p>
             club_name=(prof.display_name if prof else pid),
             brand=brand,
         )
+        # G1.17: ?print=1 emits a print-shop-ready poster (bleed + crop marks).
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
         out = DATA_DIR / "print_exports" / f"wrap-{pid}-{draft_id}.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
-        render_html_to_pdf(html, out)
+        if print_mode:
+            bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+            crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+            export_poster_print_pdf(out, bleed_mm=bleed_mm, crop_marks=crop_marks, **poster_kwargs)
+        else:
+            render_html_to_pdf(build_poster_html(**poster_kwargs), out)
         return send_file(
             out,
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"{draft_id}-poster.pdf",
+            download_name=f"{draft_id}-poster{'-print' if print_mode else ''}.pdf",
         )
 
     # ---- W.9: magic-link mobile approvals -----------------------------------
@@ -40253,6 +40418,8 @@ and can be revoked by the club.</p>
         from mediahub.content_pack.builder import build_grouped_pack
         from mediahub.graphic_renderer.print_export import (
             build_certificate_html,
+            export_certificate_print_pdf,
+            ghostscript_available,
             render_html_to_pdf,
         )
 
@@ -40285,6 +40452,25 @@ and can be revoked by the club.</p>
         meet = data.get("meet") or {}
         meet_name = meet.get("name") or data.get("file_name") or run_id
         meet_date = str(meet.get("start_date") or "")
+        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
+        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
+        do_cmyk = print_mode and want_cmyk and ghostscript_available()
+        cmyk_note = None
+        if print_mode and want_cmyk and not do_cmyk:
+            cmyk_note = (
+                "CMYK conversion was requested but Ghostscript is not installed on "
+                "the server, so these PDFs are RGB (the 3mm bleed and crop marks are "
+                "intact). Most digital print shops convert RGB to CMYK with their own "
+                "press/paper ICC profile, which is more accurate than a generic "
+                "conversion would be.\n"
+            )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
         buf = _io.BytesIO()
@@ -40294,7 +40480,7 @@ and can be revoked by the club.</p>
                 name = a.get("swimmer_name") or "Swimmer"
                 facts = a.get("raw_facts") or {}
                 time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
-                html = build_certificate_html(
+                cert_kwargs = dict(
                     swimmer_name=name,
                     event_label=a.get("event", ""),
                     time_str=str(time_str),
@@ -40306,15 +40492,67 @@ and can be revoked by the club.</p>
                     detail_line=a.get("angle_hint", ""),
                 )
                 pdf_path = out_dir / f"cert-{i:02d}.pdf"
-                render_html_to_pdf(html, pdf_path)
+                if print_mode:
+                    export_certificate_print_pdf(
+                        pdf_path,
+                        bleed_mm=bleed_mm,
+                        crop_marks=crop_marks,
+                        colour_bar=colour_bar,
+                        cmyk=do_cmyk,
+                        **cert_kwargs,
+                    )
+                else:
+                    render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
                 safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
                 zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+            if cmyk_note:
+                zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
         buf.seek(0)
+        kind = "print" if print_mode else "certificates"
         return send_file(
             buf,
             mimetype="application/zip",
             as_attachment=True,
-            download_name=f"certificates-{run_id}.zip",
+            download_name=f"{kind}-{run_id}.zip",
+        )
+
+    @app.route("/pack/<run_id>/print/separations.json")
+    def pack_print_separations(run_id: str):
+        """G1.17: the CMYK separations report for a run's brand colours.
+
+        Machine-readable breakdown a club can hand to a print shop: each brand
+        role's hex + uncalibrated CMYK percentages, the default print geometry,
+        and whether the server can do a true DeviceCMYK conversion.
+        """
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.graphic_renderer.print_export import (
+            cmyk_separations,
+            geometry_for,
+            ghostscript_available,
+        )
+
+        pid = _run_owner_profile_id(run_id) or ""
+        prof = load_profile(pid) if pid else None
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        geom = geometry_for("A4")
+        return jsonify(
+            {
+                "run_id": run_id,
+                "colour_mode": "CMYK (uncalibrated device preview)",
+                "ghostscript_available": ghostscript_available(),
+                "geometry": {
+                    "paper": "A4",
+                    "trim_mm": [geom.trim_w_mm, geom.trim_h_mm],
+                    "bleed_mm": geom.bleed_mm,
+                    "crop_mark_mm": geom.mark_len_mm,
+                    "media_mm": [geom.media_w_mm, geom.media_h_mm],
+                },
+                "separations": cmyk_separations(brand),
+            }
         )
 
     # ---- W.6: entry-file parsing for the event preview -----------------------

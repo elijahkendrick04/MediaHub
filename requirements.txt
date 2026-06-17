@@ -59,6 +59,14 @@ numpy>=2.4.6
 # inert scaffolding (not yet wired into the runtime pipeline).
 PyYAML>=6.0.3
 
+# G1.10 club custom-font upload pipeline (mediahub.typography.font_intake):
+# validates, subsets to MediaHub's Latin set, and re-packs an uploaded brand
+# typeface as a first-party self-hosted WOFF2 (never the Google Fonts CDN). The
+# [woff] extra pulls in brotli (+ zopfli) for WOFF2 (de)compression. fontTools is
+# MIT-licensed. The module honest-errors (FontToolingUnavailable) if it's absent;
+# its pure-Python security validation still rejects unsafe uploads with no deps.
+fonttools[woff]>=4.56.0
+
 # Scheduler (mediahub.scheduler / mediahub.workflow.schedule) uses croniter to
 # compute cron / daily / weekly / monthly fire-times. croniter is MIT-licensed,
 # maintained under the Pallets-Eco (Flask) org; deps python-dateutil + pytz.

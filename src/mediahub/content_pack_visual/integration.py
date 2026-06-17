@@ -632,6 +632,7 @@ def create_candidate_pool_for_item(
 
     # 3. Brief + render + compliance per candidate
     from mediahub.graphic_renderer.variants import render_all_formats
+    from mediahub.graphic_renderer.render import render_pool_session
 
     athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
         evaluation, media_assets, brand_kit, forced_hero_asset_id=forced_hero_asset_id
@@ -639,86 +640,90 @@ def create_candidate_pool_for_item(
     pool_formats = list(formats) if formats else list(POOL_FORMATS)
     candidates: list[dict] = []
     png_paths: list[str] = []
-    for idx, (spec, ai_directed) in enumerate(specs):
-        try:
-            # variation_seed=0 keeps the identity palette: Tier B candidates
-            # differ by DIRECTION (the spec's archetype / colour roles / hook),
-            # never by the v1 seed-permutation, which can rotate the brand
-            # primary into the accent slot and fail the compliance gate.
-            brief = gen_brief(
-                item,
-                evaluation,
-                brand_kit,
-                voice_profile=voice_profile,
-                profile_id=profile_id,
-                meet_name=_meet_name(item),
-                venue_name=item.get("venue_name") or "",
-                sponsor={"name": sponsor_name} if sponsor_name else None,
-                variation_seed=0,
-                use_ai_director=False,
-            )
-            apply_design_spec(brief, spec)
-            if not ai_directed:
-                brief.ai_directed = False
+    # Render the whole candidate pool against ONE warm Chromium pool (G1.23):
+    # every candidate × format reuses warm browsers instead of relaunching
+    # Chromium per render, which dominates the wall-clock of a batch render.
+    with render_pool_session():
+        for idx, (spec, ai_directed) in enumerate(specs):
             try:
-                (briefs_dir_for_run(run_id) / f"{brief.id}.json").write_text(
-                    json.dumps(brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                # variation_seed=0 keeps the identity palette: Tier B candidates
+                # differ by DIRECTION (the spec's archetype / colour roles / hook),
+                # never by the v1 seed-permutation, which can rotate the brand
+                # primary into the accent slot and fail the compliance gate.
+                brief = gen_brief(
+                    item,
+                    evaluation,
+                    brand_kit,
+                    voice_profile=voice_profile,
+                    profile_id=profile_id,
+                    meet_name=_meet_name(item),
+                    venue_name=item.get("venue_name") or "",
+                    sponsor={"name": sponsor_name} if sponsor_name else None,
+                    variation_seed=0,
+                    use_ai_director=False,
                 )
-            except Exception as e:
-                out["errors"].append(f"brief_persist_failed_{idx}: {e}")
-
-            per_brief_dir = visuals_dir_for_run(run_id) / brief.id
-            per_brief_dir.mkdir(parents=True, exist_ok=True)
-            skip_photo = brief.photo_treatment == "no-photo" and not forced_hero_asset_id
-            results = render_all_formats(
-                brief,
-                output_dir=per_brief_dir,
-                formats=pool_formats,
-                athlete_path=None if skip_photo else athlete_path,
-                venue_path=venue_path,
-                logo_path=logo_path,
-                bg_photo_path=bg_photo_path,
-                brand_kit=brand_kit,
-                sponsor_name=sponsor_name,
-                sponsor_logo_path=sponsor_logo_path,
-            )
-            visuals_summary: list[dict] = []
-            for r in results:
+                apply_design_spec(brief, spec)
+                if not ai_directed:
+                    brief.ai_directed = False
                 try:
-                    persist_visual(r.visual, run_id=run_id, brief=brief)
+                    (briefs_dir_for_run(run_id) / f"{brief.id}.json").write_text(
+                        json.dumps(brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                    )
                 except Exception as e:
-                    out["errors"].append(f"persist_failed_{r.visual.id}: {e}")
-                visuals_summary.append(
+                    out["errors"].append(f"brief_persist_failed_{idx}: {e}")
+
+                per_brief_dir = visuals_dir_for_run(run_id) / brief.id
+                per_brief_dir.mkdir(parents=True, exist_ok=True)
+                skip_photo = brief.photo_treatment == "no-photo" and not forced_hero_asset_id
+                results = render_all_formats(
+                    brief,
+                    output_dir=per_brief_dir,
+                    formats=pool_formats,
+                    athlete_path=None if skip_photo else athlete_path,
+                    venue_path=venue_path,
+                    logo_path=logo_path,
+                    bg_photo_path=bg_photo_path,
+                    brand_kit=brand_kit,
+                    sponsor_name=sponsor_name,
+                    sponsor_logo_path=sponsor_logo_path,
+                )
+                visuals_summary: list[dict] = []
+                for r in results:
+                    try:
+                        persist_visual(r.visual, run_id=run_id, brief=brief)
+                    except Exception as e:
+                        out["errors"].append(f"persist_failed_{r.visual.id}: {e}")
+                    visuals_summary.append(
+                        {
+                            "id": r.visual.id,
+                            "format_name": r.visual.format_name,
+                            "width": r.visual.width,
+                            "height": r.visual.height,
+                            "file_path": r.visual.file_path,
+                            "layout_template": r.visual.layout_template,
+                            "confidence_label": r.visual.confidence_label,
+                            "why_this_design": r.visual.why_this_design,
+                            "safety_notes": r.visual.safety_notes,
+                            "sourced_asset_ids": r.visual.sourced_asset_ids,
+                        }
+                    )
+                    if r.visual.file_path:
+                        png_paths.append(r.visual.file_path)
+                candidates.append(
                     {
-                        "id": r.visual.id,
-                        "format_name": r.visual.format_name,
-                        "width": r.visual.width,
-                        "height": r.visual.height,
-                        "file_path": r.visual.file_path,
-                        "layout_template": r.visual.layout_template,
-                        "confidence_label": r.visual.confidence_label,
-                        "why_this_design": r.visual.why_this_design,
-                        "safety_notes": r.visual.safety_notes,
-                        "sourced_asset_ids": r.visual.sourced_asset_ids,
+                        "archetype": spec.archetype,
+                        "ai_directed": ai_directed,
+                        "spec": spec.to_dict(),
+                        "brief": brief.to_dict(),
+                        "visuals": visuals_summary,
+                        "compliance": _candidate_compliance(
+                            brief, brand_kit, spec, lockups=lockups, sponsor_name=sponsor_name
+                        ),
                     }
                 )
-                if r.visual.file_path:
-                    png_paths.append(r.visual.file_path)
-            candidates.append(
-                {
-                    "archetype": spec.archetype,
-                    "ai_directed": ai_directed,
-                    "spec": spec.to_dict(),
-                    "brief": brief.to_dict(),
-                    "visuals": visuals_summary,
-                    "compliance": _candidate_compliance(
-                        brief, brand_kit, spec, lockups=lockups, sponsor_name=sponsor_name
-                    ),
-                }
-            )
-        except Exception as e:
-            out["errors"].append(f"candidate_failed_{idx}: {e}")
-            traceback.print_exc()
+            except Exception as e:
+                out["errors"].append(f"candidate_failed_{idx}: {e}")
+                traceback.print_exc()
 
     # 4. Rank: legibility first (gate pass, then score), stable on entry order.
     order = sorted(
