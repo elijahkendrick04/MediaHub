@@ -58,7 +58,10 @@ class TestStatusPageReachableWithoutOrg:
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert "Status" in body
-        assert "Backend" in body
+        # The public status indicator. (Previously this asserted "Backend",
+        # which was only ever present via the header "online" status pill's
+        # title; that pill was removed, so assert on the real status card.)
+        assert "Website operational" in body
 
     def test_status_page_is_simple_operational_or_down(self, fresh_app):
         # The public status page is now the simple "Website operational" /
@@ -209,9 +212,10 @@ class TestStatusPageWithSeededHeartbeats:
             )
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
-        # The 2-hour window should be ~100% uptime — page renders "100%"
-        # or a high-90s number for the 24h window.
-        assert "Backend" in body
+        # Recent all-ok heartbeats → the public status card reads operational.
+        # (Previously this asserted "Backend", which was only present via the
+        # header "online" status pill's title; that pill was removed.)
+        assert "Website operational" in body
         # Some uptime number must be present.
         assert "%" in body
 

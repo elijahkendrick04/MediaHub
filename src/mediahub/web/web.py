@@ -5927,33 +5927,12 @@ header.topnav nav a.live::before {
   margin-right: 8px;
   animation: mh-pulse 1.6s ease-in-out infinite;
 }
-#backend-pill {
-  margin-left: auto;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10.5px;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  padding: 5px 12px;
-  border-radius: 2px;
-  background: transparent;
-  border: 1px solid var(--chrome);
-  color: var(--ink-muted);
-  text-decoration: none;
-  transition: border-color var(--transition), color var(--transition);
-  flex-shrink: 0;
-}
-#backend-pill:hover { border-color: var(--lane); color: var(--ink); text-decoration: none; }
-#backend-pill-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--ink-faint);
-  flex-shrink: 0;
-  transition: background 0.3s, box-shadow 0.3s;
-}
+/* Invisible flex spacer — absorbs the free space between the primary nav links
+   and the right-hand utility / account cluster (notifications + active-org
+   menu, or the signed-out auth links), pushing the cluster to the right edge.
+   This replaces the old backend "online" pill's margin-left:auto, which used
+   to carry that role before the pill was removed. */
+.mh-nav-spacer { margin-left: auto; }
 /* === UI 1.14 — Notifications inbox (bell + unread badge + dropdown) ===
    Masthead-consistent: mono labels, --chrome rule, --lane accent. The panel
    is position:fixed and JS-anchored under the bell so the scrollable /
@@ -6080,6 +6059,65 @@ header.topnav nav a.live::before {
 .mh-notif-empty-t { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
 .mh-notif-empty-s { font-size: 11.5px; color: var(--ink-faint); max-width: 220px; line-height: 1.4; }
 
+/* === Active-org account menu (signed-in) — the chip is a dropdown trigger ===
+   Replaces the old chip's "review brand setup" shortcut. Mirrors the
+   notifications dropdown: a JS-anchored position:fixed panel the scrollable /
+   hamburger nav can never clip. Progressive enhancement — with no JS the menu
+   items render inline (never hidden); .mh-js collapses them into the dropdown. */
+.mh-orgmenu {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 8px;
+}
+.mh-orgmenu-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--chrome, var(--border, rgba(245,242,232,0.14)));
+  border-radius: 999px; color: var(--ink); cursor: pointer;
+  font: inherit; background: rgba(245,242,232,0.03);
+  transition: border-color var(--transition), color var(--transition);
+}
+.mh-orgmenu-btn:hover,
+.mh-orgmenu-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-orgmenu-name {
+  font-weight: 600; letter-spacing: 0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The caret only makes sense as a dropdown affordance, so it ships only when
+   JS can actually open the menu. */
+.mh-orgmenu-caret { display: none; flex-shrink: 0; opacity: 0.7; transition: transform var(--transition); }
+.mh-js .mh-orgmenu-caret { display: block; }
+.mh-orgmenu-btn[aria-expanded="true"] .mh-orgmenu-caret { transform: rotate(180deg); }
+/* No-JS fallback: the items sit inline as a small run of mono nav links. */
+.mh-orgmenu-panel { display: inline-flex; align-items: center; }
+.mh-orgmenu-item {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted);
+  padding: 0 var(--sp-4); white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center;
+  transition: color var(--transition), background var(--transition);
+}
+.mh-orgmenu-item:hover { color: var(--ink); }
+.mh-orgmenu-item.active { color: var(--lane); }
+/* JS present: collapse into a real dropdown anchored under the chip. */
+.mh-js .mh-orgmenu-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  display: none;                       /* shown on .is-open */
+  flex-direction: column; align-items: stretch;
+  width: 220px; max-width: calc(100vw - 24px);
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200; overflow: hidden; padding: 6px;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-js .mh-orgmenu-panel.is-open { display: flex; }
+.mh-js .mh-orgmenu-item {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.10em;
+  padding: 9px 12px; border-radius: 4px;
+}
+.mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
+
 /* MAIN */
 /* Width comes from --mh-wrap-max (responsive_guardrails.py), which scales the
    reading column up per viewport tier so the layout fills large monitors
@@ -6175,11 +6213,12 @@ main.wrap { max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto; pa
 }
 
 /* HUD READOUT — live local time + deployment/system status rail (UI 1.5).
-   A mono blueprint strip at the foot of the masthead that extends the header
-   ONLINE pill: a live local clock on the left, a deployment status line
-   (reachability · build · UTC reference) on the right. Fed by the same
-   /healthz poll the pill already runs plus a client-side clock — no new
-   backend surface. Sits inside .mh-footer so the print rule hides it too. */
+   A mono blueprint strip at the foot of the masthead: a live local clock on
+   the left, a deployment status line (reachability · build · UTC reference)
+   on the right. Fed by the /healthz reachability poll plus a client-side
+   clock — no new backend surface. Since the header "online" pill was removed,
+   this is now the sole reachability indicator. Sits inside .mh-footer so the
+   print rule hides it too. */
 .mh-hud {
   border-top: 1px solid var(--chrome);
   background: var(--bg-deep);
@@ -6223,8 +6262,8 @@ main.wrap { max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto; pa
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
-/* Reachability states — toggled on .mh-hud by the shared /healthz poll,
-   mirroring the header pill so the two status indicators never disagree. */
+/* Reachability states — toggled on .mh-hud by the /healthz poll. (This is the
+   sole reachability indicator now that the header "online" pill was removed.) */
 .mh-hud--online  .mh-hud-dot { background: #5EE39A; box-shadow: 0 0 8px rgba(94,227,154,0.55); }
 .mh-hud--offline .mh-hud-dot { background: #FF6B6B; box-shadow: 0 0 8px rgba(255,107,107,0.55); }
 .mh-hud--offline .mh-hud-status { color: #FF6B6B; }
@@ -7269,7 +7308,7 @@ a.card:hover, .card[data-interactive]:hover {
    edge). The base rule must come BEFORE the media query so source order
    doesn't reverse the precedence at narrow widths. */
 #active-org-chip { font-size: 12px; line-height: 1; padding: 5px 10px; }
-#active-org-chip > span:last-child { max-width: 140px; }
+#active-org-chip .mh-orgmenu-name { max-width: 140px; }
 
 /* === Responsive: nav scrollable, hide backend pill on narrow widths ===
    Audit found the topnav overflowed on every viewport between 721 and
@@ -7292,30 +7331,28 @@ a.card:hover, .card[data-interactive]:hover {
     padding: 8px 12px; font-size: 11px;
     flex-shrink: 0;
   }
-  /* Hide the backend pill on narrow widths — it's available on /status */
-  #backend-pill { display: none; }
-  /* Active-org chip shrinks on narrow widths so the brand chip + nav
-     items both fit on one line under iPad / small-laptop viewports.
-     `position: sticky; right: 8px` pins it to the right edge of the
-     scrollable nav viewport — at 1024 px the chip used to render at
-     `right=1052` (off-screen by 28 px); sticky keeps it glued to the
-     visible nav edge so the active organisation is always readable
-     regardless of horizontal scroll position. The opaque background
-     stops other nav items showing through as they scroll under.
-     `!important` is required because the chip's inline `style=` block
-     sets font-size / padding / background directly, and PR #106's
-     responsive shrink had no effect without it. */
-  #active-org-chip {
-    font-size: 11px !important;
-    padding: 4px 8px !important;
+  /* Active-org menu shrinks on narrow widths so the brand chip + nav items
+     both fit on one line under iPad / small-laptop viewports. `position:
+     sticky; right: 8px` on the menu wrapper pins it to the right edge of the
+     scrollable nav viewport — at 1024 px it used to render off-screen; sticky
+     keeps it glued to the visible nav edge so the active organisation is always
+     readable regardless of horizontal scroll position. The opaque background
+     stops other nav items showing through as they scroll under. `!important`
+     on the button is required because PR #106's responsive shrink had no
+     effect against the base #active-org-chip rule without it. */
+  .mh-orgmenu {
     position: sticky; right: 8px;
-    background: var(--bg, #0A0B11) !important;
+    background: var(--bg, #0A0B11);
     z-index: 2;
-    /* Subtle shadow on the left so the chip reads as foreground when
+    /* Subtle shadow on the left so the menu reads as foreground when
        nav items scroll underneath. */
     box-shadow: -8px 0 12px -8px rgba(10,11,17,0.85);
   }
-  #active-org-chip > span:last-child { max-width: 92px !important; }
+  #active-org-chip {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+  }
+  #active-org-chip .mh-orgmenu-name { max-width: 92px !important; }
 }
 /* Phone / tablet (≤860px): every interactive control needs the full
    44px tap area. Card-action utility buttons (Copy caption, etc.) and
@@ -9866,23 +9903,27 @@ def _layout(
        (and stays on the g→p keyboard shortcut). #}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
-    <a href="{{ url_for('design_studio') }}" class="{{ 'active' if active=='studio' else '' }}">Studio</a>
+    {# Studio moved out of the top bar and under Create — it's a design tool
+       (the live brief editor), so it sits alongside the template gallery on the
+       Create page rather than as a standalone top-bar tab. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
-    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
-    {# Pricing is a top-bar item only for signed-out visitors (prospects).
-       Once signed into a club profile it moves into Settings (the "Pricing &
-       plans" tile) so the signed-in chrome stays operations-focused, not
-       sales-focused. #}
+    {# Spacer — pushes the utility / account cluster to the right edge (it used
+       to be the backend "online" pill's margin-left:auto; the pill is gone). #}
+    <span class="mh-nav-spacer" aria-hidden="true"></span>
+    {# Settings, Switch organisation and Sign out moved into the active-org
+       account menu (the dropdown on the far right) for signed-in users. Signed-
+       out visitors keep a plain Settings + Pricing link here. Pricing is a
+       top-bar item only for signed-out visitors (prospects) — once signed into
+       a club profile it lives in Settings ("Pricing & plans") so the signed-in
+       chrome stays operations-focused, not sales-focused. #}
     {% if not signed_in %}
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
+    {% if account_email %}
+    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
     {% endif %}
-    {% if signed_in %}
-      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
-      <a href="{{ url_for('sign_out') }}">Sign out</a>
-    {% elif account_email %}
-      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
     {% endif %}
     {% if dev_operator %}
       <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Developer &check;</a>
@@ -9891,13 +9932,11 @@ def _layout(
       <a href="{{ url_for('logout') }}">Log out</a>
     {% else %}
       <a href="{{ url_for('login_page') }}">Log in</a>
-      <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
+      {# "Developer" sign-in link removed from the top bar — operator sign-in
+         lives in the footer ("Developer access") on the home page. The header
+         "online" status pill was removed too; reachability now lives only in
+         the footer status HUD. #}
     {% endif %}
-    <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
-       title="Backend status (click for full health JSON)">
-      <span id="backend-pill-dot"></span>
-      <span id="backend-pill-text">checking&hellip;</span>
-    </a>
     {% if signed_in %}
     {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
        render-complete, pack-ready and error events for the active org, backed
@@ -9936,40 +9975,54 @@ def _layout(
       </div>
     </div>
     {% endif %}
-    {% if signed_in and signed_in_name %}
-    <a id="active-org-chip"
-       href="{{ url_for('organisation_setup') }}"
-       title="Active organisation — click to review brand setup"
-       style="display:inline-flex;align-items:center;gap:8px;
-              border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
-              border-radius:999px;text-decoration:none;color:var(--ink);
-              background:rgba(245,242,232,0.03);margin-left:8px">
-      {% if signed_in_logo %}
-      <span aria-hidden="true"
-            style="display:inline-flex;align-items:center;justify-content:center;
-                   width:20px;height:20px;border-radius:5px;overflow:hidden;
-                   background:#fff;border:1px solid rgba(245,242,232,0.20)">
-        <img src="{{ signed_in_logo }}" alt=""
-             style="width:100%;height:100%;object-fit:contain" />
-      </span>
-      {% endif %}
-      {% if signed_in_primary %}
-      <span aria-hidden="true"
-            style="display:inline-block;width:10px;height:10px;border-radius:50%;
-                   background:{{ signed_in_primary }};
-                   border:1px solid rgba(245,242,232,0.20)"></span>
-      {% endif %}
-      {% if signed_in_secondary %}
-      <span aria-hidden="true"
-            style="display:inline-block;width:10px;height:10px;border-radius:50%;
-                   background:{{ signed_in_secondary }};
-                   border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
-      {% endif %}
-      <span style="font-weight:600;letter-spacing:0.01em;
-                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        {{ signed_in_name }}
-      </span>
-    </a>
+    {% if signed_in %}
+    {# Active-organisation account menu. The chip itself no longer navigates
+       (its old "review brand setup" shortcut was removed); clicking it opens a
+       dropdown with Settings / Switch organisation / Sign out. Progressive
+       enhancement (mirrors the notifications dropdown): with JS the panel
+       collapses under the chip and is JS-anchored so the scrollable / hamburger
+       nav can never clip it; with no JS the items stay inline so they're never
+       hidden. The id stays "active-org-chip" so the per-profile logo/colours
+       still surface here. #}
+    <div id="mh-orgmenu" class="mh-orgmenu">
+      <button id="active-org-chip" class="mh-orgmenu-btn" type="button"
+              aria-haspopup="menu" aria-expanded="false" aria-controls="mh-orgmenu-panel"
+              title="Account &amp; organisation">
+        {% if signed_in_logo %}
+        <span aria-hidden="true"
+              style="display:inline-flex;align-items:center;justify-content:center;
+                     width:20px;height:20px;border-radius:5px;overflow:hidden;
+                     background:#fff;border:1px solid rgba(245,242,232,0.20)">
+          <img src="{{ signed_in_logo }}" alt=""
+               style="width:100%;height:100%;object-fit:contain" />
+        </span>
+        {% endif %}
+        {% if signed_in_primary %}
+        <span aria-hidden="true"
+              style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                     background:{{ signed_in_primary }};
+                     border:1px solid rgba(245,242,232,0.20)"></span>
+        {% endif %}
+        {% if signed_in_secondary %}
+        <span aria-hidden="true"
+              style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                     background:{{ signed_in_secondary }};
+                     border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
+        {% endif %}
+        <span class="mh-orgmenu-name">{{ signed_in_name or 'Account' }}</span>
+        <svg class="mh-orgmenu-caret" width="12" height="12" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="mh-orgmenu-panel" class="mh-orgmenu-panel" role="menu"
+           aria-label="Account and organisation">
+        <a href="{{ url_for('settings_page') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">Settings</a>
+        <a href="{{ url_for('sign_in_page') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">Switch organisation</a>
+        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">Sign out</a>
+      </div>
+    </div>
     {% endif %}
   </nav>
 </header>
@@ -10012,9 +10065,10 @@ def _layout(
     </div>
   </div>
   {# UI 1.5 — Live local-time + system-status HUD readout. A mono blueprint
-     strip extending the header ONLINE pill: a live local clock + a deployment
+     strip at the foot of the masthead: a live local clock + a deployment
      status line (reachability · build · UTC), driven by the existing /healthz
-     poll and a client-side clock. No new backend surface. Decorative dot and
+     poll and a client-side clock. The sole reachability indicator now that the
+     header "online" pill was removed. No new backend surface. Decorative dot and
      separators are aria-hidden; the status word carries the meaning, and the
      clocks are <time> elements that update without a noisy aria-live region. #}
   <div id="mh-hud" class="mh-hud">
@@ -10140,18 +10194,10 @@ def _layout(
 <script>
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
-  /* Shared reachability poll — drives BOTH the header ONLINE pill and the
-     footer HUD readout (UI 1.5) from one /healthz fetch so the two status
-     indicators can never disagree. No new backend surface. */
+  /* Reachability poll — drives the footer status HUD readout (UI 1.5) from one
+     /healthz fetch. (The header "online" status pill was removed; the HUD is
+     now the sole reachability indicator.) No new backend surface. */
   function paint(online, version){
-    var dot = document.getElementById('backend-pill-dot');
-    var txt = document.getElementById('backend-pill-text');
-    if (dot && txt) {
-      dot.style.background = online ? '#5EE39A' : '#FF6B6B';
-      dot.style.boxShadow  = online ? '0 0 8px rgba(94,227,154,0.55)'
-                                    : '0 0 8px rgba(255,107,107,0.55)';
-      txt.textContent = online ? 'online' : 'offline';
-    }
     var hud = document.getElementById('mh-hud');
     if (hud) {
       hud.classList.toggle('mh-hud--online', online);
@@ -10173,7 +10219,7 @@ def _layout(
 </script>
 <script>
 /* UI 1.14 — Notifications inbox. Polls /api/notifications on the same light
-   cadence as the health pill, paints the unread badge, and renders the bell
+   cadence as the health poll, paints the unread badge, and renders the bell
    dropdown. The panel is position:fixed and anchored under the bell in JS so
    the scrollable / hamburger nav can never clip it. All notification text is
    written with textContent (never innerHTML), so a caption or error string can
@@ -10319,6 +10365,46 @@ def _layout(
 
   poll();
   setInterval(poll, POLL_MS);
+})();
+</script>
+<script>
+/* Active-org account menu — the chip opens a dropdown (Settings / Switch
+   organisation / Sign out). Mirrors the notifications dropdown: a position:
+   fixed panel JS-anchored under the chip so the scrollable / hamburger nav can
+   never clip it, with click-outside + Escape to close. Progressive
+   enhancement — the menu links are real <a> elements that work inline with no
+   JS; this only adds the collapse-to-dropdown behaviour. */
+(function(){
+  var btn = document.getElementById('active-org-chip');
+  if (!btn) return;  // signed out — no chip rendered
+  var panel = document.getElementById('mh-orgmenu-panel');
+  if (!panel) return;
+  var open = false;
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.classList.add('is-open');
+      position();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.classList.remove('is-open');
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
 })();
 </script>
 <script>
@@ -23491,6 +23577,22 @@ function mhPlanGenerate(btn) {{
             "</a>"
         )
 
+        # Studio moved here from the top bar — it's the live design editor
+        # (tweak text / palette / archetype / style pack and watch the card
+        # re-render), a sibling of the browse-only template gallery, so the two
+        # design tools sit together on Create rather than as a top-bar tab.
+        studio_link_html = (
+            f'<a class="mh-arch-gallery-link" href="{_h(url_for("design_studio"))}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">Open the design studio</span>'
+            '<span class="mh-agl-sub">Tweak the text, palette, archetype and '
+            "style pack and watch the card re-render live &mdash; your starting "
+            "point for a custom look.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">Open studio &rarr;</span>'
+            "</a>"
+        )
+
         # Plan moved here from the top bar — it answers this page's own hero
         # question ("what should we make?"), so it sits at the top of Create as
         # the strategic entry point into the ranked, explainable content plan.
@@ -23526,6 +23628,7 @@ function mhPlanGenerate(btn) {{
             f"{brand_strip_html}"
             f"{first_run_cta}"
             f"{gallery_link_html}"
+            f"{studio_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
