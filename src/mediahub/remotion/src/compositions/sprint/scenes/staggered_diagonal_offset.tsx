@@ -8,7 +8,7 @@
  * in as the accent beat.
  */
 import { Easing, interpolate, useCurrentFrame } from "remotion";
-import { Footer, KineticWords, Logo, fitLine } from "../sceneKit";
+import { MetaFooter, KineticWords, ClubLogo, fitLine } from "../sceneKit";
 import type { SceneComponent } from "../registry";
 
 const Scene: SceneComponent = ({ ctx }) => {
@@ -85,7 +85,7 @@ const Scene: SceneComponent = ({ ctx }) => {
           </div>
           <KineticWords
             text={ctx.surnameText}
-            anim={anim}
+            ctx={ctx}
             style={{
               fontSize: fitLine(ctx.surnameText, Math.round(96 * ts), width * 0.7),
               fontWeight: 900,
@@ -143,8 +143,8 @@ const Scene: SceneComponent = ({ ctx }) => {
         </div>
       </div>
 
-      <Logo ctx={ctx} size={92} corner="tr" />
-      <Footer ctx={ctx} />
+      <ClubLogo ctx={ctx} size={92} />
+      <MetaFooter ctx={ctx} />
     </>
   );
 };

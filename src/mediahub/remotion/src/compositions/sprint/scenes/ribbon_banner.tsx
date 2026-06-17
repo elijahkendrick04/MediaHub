@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { Easing, interpolate, useCurrentFrame } from "remotion";
-import { Footer, Logo, fitLine } from "../sceneKit";
+import { MetaFooter, ClubLogo, fitLine } from "../sceneKit";
 import type { SceneComponent } from "../registry";
 
 const Scene: SceneComponent = ({ ctx }) => {
@@ -123,8 +123,8 @@ const Scene: SceneComponent = ({ ctx }) => {
         {ctx.event}
       </div>
 
-      <Logo ctx={ctx} size={88} corner="tr" />
-      <Footer ctx={ctx} />
+      <ClubLogo ctx={ctx} size={88} />
+      <MetaFooter ctx={ctx} />
     </div>
   );
 };

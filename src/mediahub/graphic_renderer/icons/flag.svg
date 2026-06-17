@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120" role="img" aria-label="__LABEL__">
+  <defs>
+    <clipPath id="flagCloth__UID__">
+      <path d="M24 20 L120 20 L106 54 L120 88 L24 88 Z"/>
+    </clipPath>
+    <linearGradient id="flagSheen__UID__" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.16"/>
+    </linearGradient>
+  </defs>
+  <!-- pole -->
+  <circle cx="19" cy="18" r="6.5" fill="#C9CDD4"/>
+  <rect x="15.5" y="18" width="7" height="92" rx="3.5" fill="#9AA0AA"/>
+  <!-- cloth: three colour bands clipped to a swallowtail -->
+  <g clip-path="url(#flagCloth__UID__)">
+    <rect x="24" y="20" width="96" height="22.7" fill="__BAND1__"/>
+    <rect x="24" y="42.7" width="96" height="22.6" fill="__BAND2__"/>
+    <rect x="24" y="65.3" width="96" height="22.7" fill="__BAND3__"/>
+    <rect x="24" y="20" width="96" height="68" fill="url(#flagSheen__UID__)"/>
+  </g>
+  <path d="M24 20 L120 20 L106 54 L120 88 L24 88 Z" fill="none"
+        stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="1.5"/>
+  <!-- ISO code chip — always shown so the nation is never ambiguous -->
+  <rect x="46" y="42" width="50" height="24" rx="6" fill="#0B0E13" fill-opacity="0.74"/>
+  <rect x="46" y="42" width="50" height="24" rx="6" fill="none" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="1.2"/>
+  <text x="71" y="54.5" text-anchor="middle" dominant-baseline="central"
+        font-family="Anton, Arial, sans-serif" font-size="16" letter-spacing="1.5"
+        fill="#FFFFFF">__CODE__</text>
+</svg>

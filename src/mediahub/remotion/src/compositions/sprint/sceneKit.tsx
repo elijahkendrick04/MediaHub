@@ -1,24 +1,34 @@
 /**
- * Shared scene kit for the G1.1 motion scenes (sprint/scenes/*.tsx).
+ * Scene kit — shared, self-contained helpers for sprint scene modes (R1.2).
  *
- * The built-in StoryCard scenes share private helpers (PhotoLayer, LogoChip,
- * BottomStrip, KineticLine, fitLinePx, placeDisplay) that are NOT exported, and
- * G1.1 is "new files only" — so rather than edit StoryCard.tsx we re-home the
- * same small presentational helpers here for the sprint scenes to import. They
- * are deliberately faithful to the built-ins (same scrim maths, same fit
- * heuristic, same per-word stagger) so a sprint scene reads on-brand and stays
- * in lock-step with the still + the rest of the reel.
+ * This file lives directly under `sprint/` (NOT inside a `require.context`-scanned
+ * subfolder), so it is shared by the scene drops in `sprint/scenes/` without ever
+ * being mistaken for a scene module and without one line of edit to
+ * `StoryCard.tsx`. Every scene built on this kit stays:
  *
- * This file sits directly under sprint/ (NOT inside a require.context'd
- * subfolder), so the registry never auto-loads it; only the scene files import
- * it explicitly. Everything is a pure function of ctx + the frame — no
- * wallclock, no randomness — so renders stay deterministic.
+ *   • frame-pure      — animation is a pure function of `ctx.frame` / `ctx.fps`;
+ *                        no `Math.random`, no `Date.now`, no wallclock.
+ *   • brand-locked     — colour comes only from the resolved `ctx.roles`
+ *                        (ground/surface/accent/onGround); never an invented hex
+ *                        beyond ground-derived alpha scrims (the PhotoLayer
+ *                        precedent in StoryCard.tsx).
+ *   • fact-exact       — text is rendered from the pre-computed `ctx` fields; a
+ *                        marquee/crawl carries `ctx.resultFinal` (the verified
+ *                        value), never a mid-count number a viewer could screenshot.
+ *
+ * The helpers mirror the private cousins in `StoryCard.tsx` (`fitLinePx`,
+ * `placeDisplay`, `LogoChip`, `BottomStrip`, `KineticLine`) so a sprint scene
+ * reads like a built-in one — they are duplicated here only because those are
+ * not exported, and the scene seam's whole point is to add capability without
+ * touching the shared composition file.
  */
 import React from "react";
-import type { AnimChannels, Roles, SceneCtx } from "./registry";
+import type { SceneCtx } from "./registry";
 
 // Append an 8-bit alpha to a #rrggbb role hex (the StoryCard scrim precedent,
-// e.g. `${roles.ground}B0`). Clamped; pass-through for already-aliased values.
+// e.g. `${roles.ground}B0`) — a named helper for scenes that build their own
+// ground-tinted scrims (a split panel, a seam edge) where PhotoFill's
+// full-frame gradients don't fit. Pass-through for an already-aliased value.
 export function withAlpha(hex: string, a: number): string {
   const h = (hex || "").trim();
   if (!h.startsWith("#") || h.length < 7) {
@@ -28,8 +38,10 @@ export function withAlpha(hex: string, a: number): string {
   return `${h.slice(0, 7)}${v.toString(16).padStart(2, "0")}`;
 }
 
-// Single-line fit heuristic (mirrors StoryCard.fitLinePx): shrink basePx so a
-// long name/result never overflows its box. Coarse but deterministic.
+// Deterministic single-line fit: shrink a base size until the estimated line
+// width (chars × an average heavy-display glyph ratio) fits the box. The cheap
+// TSX cousin of the still renderer's measured autofit — long surnames shrink
+// instead of bleeding off-frame.
 export function fitLine(
   text: string,
   basePx: number,
@@ -41,8 +53,13 @@ export function fitLine(
   return Math.max(36, Math.min(basePx, fitted));
 }
 
-// Display ordinal for a numeric placing ("1" → "1ST"); non-numeric passes
-// through untouched — never invent a placing that wasn't detected.
+// Split into whitespace words for per-word staggered reveals.
+export function splitWords(text: string): string[] {
+  return (text || "").split(/\s+/).filter(Boolean);
+}
+
+// Display ordinal for a real numeric placing ("1" → "1ST"); any non-numeric
+// value passes through uppercased — never invent a placing that was not detected.
 export function placeOrdinal(place: string): string {
   const m = (place || "").trim().match(/^(\d+)$/);
   if (!m) {
@@ -63,58 +80,23 @@ export function placeOrdinal(place: string): string {
   return `${n}${suffix}`;
 }
 
-// Full-frame photo layer with a brand-ground scrim (the same gradient shapes
-// StoryCard.PhotoLayer paints). Returns null with no sourced photo, so a
-// data/editorial scene stays bare. Ken Burns rides on anim.photoScale.
-export const Photo: React.FC<{
-  ctx: SceneCtx;
-  scrim?: "none" | "bottom" | "full" | "left";
-}> = ({ ctx, scrim = "full" }) => {
-  const { card, roles, anim } = ctx;
-  if (!card.photoSrc) {
-    return null;
-  }
-  const g = roles.ground;
-  const scrimBg =
-    scrim === "bottom"
-      ? `linear-gradient(180deg, ${withAlpha(g, 0.06)} 0%, ${withAlpha(g, 0.19)} 55%, ${withAlpha(g, 0.91)} 88%)`
-      : scrim === "left"
-        ? `linear-gradient(90deg, ${withAlpha(g, 0.0)} 50%, ${withAlpha(g, 0.7)} 100%)`
-        : `linear-gradient(180deg, ${withAlpha(g, 0.25)} 0%, ${withAlpha(g, 0.69)} 55%, ${withAlpha(g, 0.94)} 100%)`;
-  return (
-    <>
-      <img
-        src={card.photoSrc}
-        alt=""
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          objectPosition: card.photoPos || "center 28%",
-          transform: `scale(${anim.photoScale})`,
-        }}
-      />
-      {scrim === "none" ? null : (
-        <div style={{ position: "absolute", inset: 0, background: scrimBg }} />
-      )}
-    </>
-  );
-};
+// A small, bounded, deterministic integer from the card's variation seed — the
+// only sanctioned source of per-card variety (keeps parity with the still).
+export function seedPick(ctx: SceneCtx, mod: number): number {
+  const v = ctx.card.variationSeed | 0;
+  return ((v % mod) + mod) % mod;
+}
 
-// Brand logo chip pinned to a corner. Null with no logo.
-export const Logo: React.FC<{
-  ctx: SceneCtx;
-  size?: number;
-  corner?: "tr" | "tl";
-}> = ({ ctx, size = 120, corner = "tr" }) => {
+// Club logo, top-right — mirrors StoryCard's LogoChip (chip-channel fade).
+export const ClubLogo: React.FC<{ ctx: SceneCtx; size?: number }> = ({
+  ctx,
+  size = 128,
+}) => {
   const { brand, anim, width, ts } = ctx;
   if (!brand.logoDataUri) {
     return null;
   }
   const s = Math.round(size * ts);
-  const edge = Math.min(80, width * 0.06);
   return (
     <img
       src={brand.logoDataUri}
@@ -122,7 +104,7 @@ export const Logo: React.FC<{
       style={{
         position: "absolute",
         top: Math.round(96 * ts),
-        ...(corner === "tr" ? { right: edge } : { left: edge }),
+        right: Math.min(80, width * 0.06),
         width: s,
         height: s,
         objectFit: "contain",
@@ -132,8 +114,11 @@ export const Logo: React.FC<{
   );
 };
 
-// Bottom strip: meet (left) • club (right), on the chip channel.
-export const Footer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+// Meet • club footer — mirrors StoryCard's BottomStrip.
+export const MetaFooter: React.FC<{ ctx: SceneCtx; tint?: string }> = ({
+  ctx,
+  tint,
+}) => {
   const { roles, anim, ts, meet, club } = ctx;
   return (
     <div
@@ -141,13 +126,13 @@ export const Footer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         position: "absolute",
         left: 80,
         right: 80,
-        bottom: Math.round(80 * ts),
+        bottom: Math.round(76 * ts),
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
         fontSize: Math.round(28 * ts),
         letterSpacing: "0.08em",
-        color: roles.onGround,
+        color: tint || roles.onGround,
         opacity: anim.chipOpacity * 0.85,
         textTransform: "uppercase",
       }}
@@ -158,22 +143,23 @@ export const Footer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   );
 };
 
-// Per-word staggered row (mirrors StoryCard.KineticLine) — kinetic_type reveals
-// word-by-word; identity under every other intent.
+// Per-word staggered line driven by the active intent's `anim.wordAt` channel —
+// identity reveal for non-kinetic intents (the parent owns the motion), real
+// per-word stagger for `kinetic_type`.
 export const KineticWords: React.FC<{
+  ctx: SceneCtx;
   text: string;
-  anim: AnimChannels;
   style: React.CSSProperties;
   startIndex?: number;
-}> = ({ text, anim, style, startIndex = 0 }) => {
-  const parts = (text || "").split(/\s+/).filter(Boolean);
+}> = ({ ctx, text, style, startIndex = 0 }) => {
+  const parts = splitWords(text);
   if (parts.length === 0) {
     return null;
   }
   return (
     <div style={style}>
       {parts.map((w, i) => {
-        const a = anim.wordAt(startIndex + i);
+        const a = ctx.anim.wordAt(startIndex + i);
         return (
           <span
             key={`${w}-${i}`}
@@ -192,4 +178,54 @@ export const KineticWords: React.FC<{
   );
 };
 
-export type { Roles, SceneCtx, AnimChannels };
+type ScrimMode = "full" | "bottom" | "top" | "radial" | "none";
+
+// Scrimmed photo fill — the card's real photo behind the scene, never warped or
+// recoloured beyond a ground-tinted legibility scrim (alpha hex on the ground
+// role, exactly the PhotoLayer precedent). Returns null with no photo, so the
+// scene falls back to its solid colour field.
+export const PhotoFill: React.FC<{
+  ctx: SceneCtx;
+  scrim?: ScrimMode;
+  strength?: number; // 0..1 extra darkening for busy compositions
+}> = ({ ctx, scrim = "full", strength = 0 }) => {
+  const { card, roles, anim } = ctx;
+  if (!card.photoSrc) {
+    return null;
+  }
+  const g = roles.ground;
+  const boost = Math.round(Math.max(0, Math.min(1, strength)) * 40)
+    .toString(16)
+    .padStart(2, "0");
+  const gradient =
+    scrim === "bottom"
+      ? `linear-gradient(180deg, ${g}10 0%, ${g}30 55%, ${g}E8 90%)`
+      : scrim === "top"
+        ? `linear-gradient(180deg, ${g}E8 0%, ${g}40 45%, ${g}10 100%)`
+        : scrim === "radial"
+          ? `radial-gradient(circle at 50% 42%, ${g}30 0%, ${g}B0 58%, ${g}F2 100%)`
+          : scrim === "none"
+            ? `${g}${boost}`
+            : `linear-gradient(180deg, ${g}40 0%, ${g}B0 55%, ${g}F0 100%)`;
+  return (
+    <>
+      <img
+        src={card.photoSrc}
+        alt=""
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: card.photoPos || "center 28%",
+          transform: `scale(${anim.photoScale})`,
+        }}
+      />
+      <div style={{ position: "absolute", inset: 0, background: gradient }} />
+      {boost !== "00" ? (
+        <div style={{ position: "absolute", inset: 0, background: `${g}${boost}` }} />
+      ) : null}
+    </>
+  );
+};

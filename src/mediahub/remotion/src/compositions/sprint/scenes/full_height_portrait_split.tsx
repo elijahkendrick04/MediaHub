@@ -8,7 +8,7 @@
  * right — name, event, then the result.
  */
 import { Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
-import { Footer, KineticWords, Logo, fitLine, withAlpha } from "../sceneKit";
+import { MetaFooter, KineticWords, ClubLogo, fitLine, withAlpha } from "../sceneKit";
 import type { SceneComponent } from "../registry";
 
 const Scene: SceneComponent = ({ ctx }) => {
@@ -121,7 +121,7 @@ const Scene: SceneComponent = ({ ctx }) => {
         <div style={{ fontSize: Math.round(34 * ts), fontWeight: 700, textTransform: "uppercase", color: roles.accent }}>{ctx.firstName}</div>
         <KineticWords
           text={ctx.surnameText}
-          anim={anim}
+          ctx={ctx}
           style={{
             fontSize: surnamePx,
             fontWeight: 900,
@@ -159,8 +159,8 @@ const Scene: SceneComponent = ({ ctx }) => {
         ) : null}
       </div>
 
-      <Logo ctx={ctx} size={88} corner="tr" />
-      <Footer ctx={ctx} />
+      <ClubLogo ctx={ctx} size={88} />
+      <MetaFooter ctx={ctx} />
     </>
   );
 };

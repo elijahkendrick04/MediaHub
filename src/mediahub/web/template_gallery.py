@@ -64,6 +64,7 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "full_bleed_photo_lower_third": "photo",
     "centered_medal_spotlight": "photo",
     "duo_athlete_split": "photo",
+    "relay_collage": "photo",
     "broadcast_scorebug": "photo",
     "photo_passepartout": "photo",
     "spotlight_disc": "photo",
@@ -110,6 +111,7 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "ticker_strip",
     "triptych_progression",
     "duo_athlete_split",
+    "relay_collage",
     "stat_stack_sidebar",
     "minimal_type_poster",
     "broadcast_scorebug",
@@ -142,6 +144,7 @@ _TITLE: dict[str, str] = {
     "magazine_cover": "Magazine Cover",
     "minimal_type_poster": "Minimal Poster",
     "quote_led_recap": "Quote Recap",
+    "relay_collage": "Relay Collage",
     "split_diagonal_hero": "Diagonal Hero",
     "stat_stack_sidebar": "Stat Sidebar",
     "ticker_strip": "Ticker Strip",
@@ -180,6 +183,7 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "ticker_strip": "Stacked broadcast bands with a fenced event-to-result scoreline.",
     "triptych_progression": "Three vertical bays read who → result → context.",
     "duo_athlete_split": "A 50/50 photo-vs-scoreline duel crossed by one name band.",
+    "relay_collage": "Two to four athlete cutouts stand balanced on one baseline above a name band and data panel.",
     "broadcast_scorebug": "A full-bleed photo with a live-TV corner scorebug and top ribbon.",
     "cornerstone_numeral": "A mega numeral cornerstoned into the bottom-left of a brand ground.",
     "horizon_band": "One full-width accent horizon carries the result; name above, meta below.",
@@ -247,6 +251,24 @@ _SVG: dict[str, str] = {
         '<rect class="sf" x="0" y="66" width="120" height="18"/>'
         '<rect class="ik2" x="10" y="72" width="84" height="6" rx="1"/>'
         '<line class="acln" x1="60" y1="0" x2="60" y2="150"/>'
+    ),
+    # Photo-led — 2-4 cutouts balanced on one baseline; name band; data panel.
+    "relay_collage": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="8" y="10" width="20" height="6" rx="1"/>'
+        '<rect class="ik" x="92" y="10" width="16" height="6" rx="1"/>'
+        '<rect class="ph" x="13" y="36" width="17" height="50" rx="2"/>'
+        '<rect class="ph" x="36" y="28" width="19" height="58" rx="2"/>'
+        '<rect class="ph" x="63" y="28" width="19" height="58" rx="2"/>'
+        '<rect class="ph" x="89" y="36" width="17" height="50" rx="2"/>'
+        '<rect class="ac" x="0" y="88" width="120" height="16"/>'
+        '<rect class="onac" x="10" y="93" width="64" height="7" rx="1"/>'
+        '<rect class="sf" x="0" y="104" width="120" height="46"/>'
+        '<rect class="ik" x="10" y="112" width="18" height="3" rx="1"/>'
+        '<rect class="ik2" x="10" y="118" width="48" height="8" rx="1"/>'
+        '<rect class="ac" x="82" y="112" width="28" height="14" rx="1"/>'
+        '<line class="ln" x1="10" y1="136" x2="110" y2="136"/>'
+        '<rect class="ik" x="10" y="140" width="40" height="4" rx="1"/>'
     ),
     # Data-led — masthead over a ruled grid of stat cells.
     "editorial_numbers_grid": (

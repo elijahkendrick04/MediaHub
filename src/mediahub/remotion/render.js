@@ -41,6 +41,31 @@ function parseArgs(argv) {
   return out;
 }
 
+// Poster-frame policy (R1.29). Kept in byte-parity with Python's
+// audio_mux.poster_time_for / poster_path_for (src/mediahub/visual/audio_mux.py):
+// the in-render poster capture below uses these so the thumbnail timestamp and
+// sidecar path match exactly what the Python finishing pass expects. If you
+// change one formula, change the other — tests/test_motion_poster_in_render.py
+// asserts the two stay in sync.
+function posterTimeFor(kind, durationSec) {
+  const d = Math.max(0.1, Number(durationSec) || 0.1);
+  if (kind === "reel") {
+    // Reels: land on the brand cover.
+    return Math.min(1.5, Math.max(0.0, d - 0.2));
+  }
+  // Stories: late enough that the layers have animated in.
+  return Math.max(0.0, Math.min(d * 0.55, d - 0.2));
+}
+
+function posterPathFor(outputPath) {
+  // Mirror pathlib's Path(video).with_suffix(".poster.png").
+  const ext = path.extname(outputPath);
+  const base = ext
+    ? outputPath.slice(0, outputPath.length - ext.length)
+    : outputPath;
+  return base + ".poster.png";
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const compositionId = args.composition;
@@ -67,10 +92,10 @@ async function main() {
 
   // Lazy require so a missing Remotion install fails cleanly (and surfaces
   // via the Python wrapper as a 503 rather than crashing the web process).
-  let bundle, getCompositions, renderMedia;
+  let bundle, getCompositions, renderMedia, renderStill;
   try {
     ({ bundle } = require("@remotion/bundler"));
-    ({ selectComposition: getCompositions, renderMedia } = require(
+    ({ selectComposition: getCompositions, renderMedia, renderStill } = require(
       "@remotion/renderer",
     ));
   } catch (e) {
@@ -131,11 +156,58 @@ async function main() {
     timeoutInMilliseconds: 120000,
     pixelFormat: "yuv420p",
   });
+  const renderElapsed = ((Date.now() - start) / 1000).toFixed(1);
+  console.error(`[remotion] rendered → ${outputPath} (${renderElapsed}s)`);
+
+  // R1.29 — progressive in-render poster capture. Snap the poster frame with a
+  // Remotion renderStill, reusing the warm serveUrl (no re-bundle). renderStill
+  // waits on the same delayRender hook the video did (the fonts hold in
+  // src/index.ts), so the thumbnail is a frame-exact, real-font PNG straight
+  // from Chromium — no H.264 round-trip and no keyframe-seek approximation. This
+  // replaces the post-hoc ffmpeg/ffprobe frame grab the Python side used to run
+  // on every render. A poster failure is non-fatal: the video already
+  // succeeded, and visual/motion._finish_cached_video falls back to the ffmpeg
+  // grab whenever this sidecar is absent or empty.
+  const kind = compositionId === "MeetReel" ? "reel" : "story";
+  const posterPath = posterPathFor(outputPath);
+  const posterFrame = Math.min(
+    Math.max(
+      0,
+      Math.round(posterTimeFor(kind, durationInFrames / composition.fps) * composition.fps),
+    ),
+    durationInFrames - 1,
+  );
+  try {
+    await renderStill({
+      composition: { ...composition, durationInFrames, width, height },
+      serveUrl,
+      output: posterPath,
+      frame: posterFrame,
+      inputProps,
+      imageFormat: "png",
+      chromiumOptions: { disableWebSecurity: true },
+      timeoutInMilliseconds: 120000,
+      overwrite: true,
+    });
+    console.error(`[remotion] poster → ${posterPath} (frame ${posterFrame})`);
+  } catch (e) {
+    console.error(
+      `[remotion] poster capture failed (non-fatal): ${e && e.message ? e.message : e}`,
+    );
+  }
+
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.error(`[remotion] done → ${outputPath} (${elapsed}s)`);
 }
 
-main().catch((err) => {
-  console.error(`[remotion] failed: ${err && err.stack ? err.stack : err}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`[remotion] failed: ${err && err.stack ? err.stack : err}`);
+    process.exit(1);
+  });
+}
+
+// Exported for cross-language parity testing — the poster-frame policy above is
+// mirrored in Python's visual/audio_mux.py. Requiring this file does not start
+// a render thanks to the require.main guard.
+module.exports = { posterTimeFor, posterPathFor };

@@ -93,9 +93,14 @@ def test_all_eight_families_registered():
 
 
 def test_library_grew_by_the_eight_families():
-    # The eight lift the library to 28 (the prior 20 + G1.1's 8). A bare count
-    # guards against a family silently dropping out of the scan.
-    assert len(archetypes.list_archetypes()) == 28
+    # The eight lift the library well past the pre-sprint floor of 20 (their own
+    # eight + the originals; sibling sprint items add more concurrently). A
+    # floor guard catches a family silently dropping out of the scan without
+    # being brittle to the rest of the G1/R1 sprint landing alongside.
+    lib = archetypes.list_archetypes()
+    assert len(lib) >= 28
+    assert len(lib) == len(set(lib))  # no duplicate archetype ids
+    assert set(NAMES) <= set(lib)  # all eight present
 
 
 # --------------------------------------------------------------------------- #

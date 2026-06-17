@@ -10,7 +10,7 @@
  */
 import React from "react";
 import { Easing, interpolate, useCurrentFrame } from "remotion";
-import { Footer, Logo, fitLine } from "../sceneKit";
+import { MetaFooter, ClubLogo, fitLine } from "../sceneKit";
 import type { SceneComponent } from "../registry";
 
 const FRAME_POS = ["center 18%", "left 30%", "right 26%", "center 50%", "", "right 60%"];
@@ -137,8 +137,8 @@ const Scene: SceneComponent = ({ ctx }) => {
         </div>
       </div>
 
-      <Logo ctx={ctx} size={84} corner="tr" />
-      <Footer ctx={ctx} />
+      <ClubLogo ctx={ctx} size={84} />
+      <MetaFooter ctx={ctx} />
     </div>
   );
 };

@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
-import { Footer, KineticWords, Logo, fitLine } from "../sceneKit";
+import { MetaFooter, KineticWords, ClubLogo, fitLine } from "../sceneKit";
 import type { SceneComponent } from "../registry";
 
 const Scene: SceneComponent = ({ ctx }) => {
@@ -113,7 +113,7 @@ const Scene: SceneComponent = ({ ctx }) => {
         </div>
         <KineticWords
           text={ctx.surnameText}
-          anim={anim}
+          ctx={ctx}
           style={{
             marginTop: Math.round(4 * ts),
             fontSize: surnamePx,
@@ -187,8 +187,8 @@ const Scene: SceneComponent = ({ ctx }) => {
         ) : null}
       </div>
 
-      <Logo ctx={ctx} size={104} />
-      <Footer ctx={ctx} />
+      <ClubLogo ctx={ctx} size={104} />
+      <MetaFooter ctx={ctx} />
     </>
   );
 };

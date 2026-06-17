@@ -386,11 +386,15 @@ the number of ranked moments).
   archetype must consciously pick its scene group.
 - **`motion_intent` executed** — the design-spec director's motion language
   (`fade_in`, `snap_in_then_settle`, `slide_up`, `scale_in`, `crossfade`,
-  `kinetic_type`, `parallax`, `count_up`, `static`) flows spec → brief →
-  props and is executed as a frame-pure animation programme; a drift test
-  holds the TSX to the full `design_spec.MOTION_INTENTS` vocabulary.
-  `count_up` is the sports-graphic staple: the result digit-counts up
-  (formatting-preserving) and settles on the exact verified value.
+  `kinetic_type`, `parallax`, `count_up`, `static`, plus the R1.1 program pack
+  `bounce_in`, `flip_reveal`, `swirl`, `reveal_from_sides`, `cascade`) flows
+  spec → brief → props and is executed as a frame-pure animation programme; a
+  drift test holds the TSX to the full `design_spec.MOTION_INTENTS` vocabulary.
+  The nine built-ins live in `StoryCard.tsx`'s `animProgram` switch; the R1.1
+  pack lives as one auto-discovered file each under
+  `remotion/.../sprint/intents/<name>.ts` (registered via `EXTRA_INTENTS`, no
+  switch edit). `count_up` is the sports-graphic staple: the result digit-counts
+  up (formatting-preserving) and settles on the exact verified value.
 - **Colour-role parity** — motion consumes the *same* resolved role set the
   still painted (`resolved_role_vars_for_brief`: Tier A baseline → APCA-gated
   director assignment → medal tint) via `roleGround/roleSurface/roleAccent/
