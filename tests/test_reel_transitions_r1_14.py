@@ -85,12 +85,18 @@ def test_every_new_kind_has_a_frame_pure_branch():
 
 
 def test_new_branches_are_deterministic_no_wallclock_or_random():
-    """Same props → byte-identical render: no Math.random / Date.now anywhere
-    (the glitch jolt derives its jitter from the frame, not randomness)."""
+    """Same props → byte-identical render: no Math.random() / Date.now() /
+    new Date() *calls* (the glitch jolt derives its jitter from the frame, not
+    randomness).
+
+    Checks for actual invocations, not the bare names — a sibling scene may
+    legitimately carry a comment documenting the contract ("no Math.random /
+    Date.now here"), and that prose must not trip the guard.
+    """
     src = _reel_src()
-    assert "Math.random" not in src
-    assert "Date.now" not in src
-    assert "Date(" not in src
+    assert "Math.random(" not in src
+    assert "Date.now(" not in src
+    assert "new Date(" not in src
 
 
 # --------------------------------------------------------------------------- #
