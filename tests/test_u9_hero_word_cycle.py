@@ -293,8 +293,9 @@ def test_signed_out_hero_cycles_even_when_an_org_exists(orgs_present_client):
     # The prospective-customer hero, not the returning-user "Ready to file." one.
     assert "Results in." in h1
     assert "<em class=\"editorial\">Ready</em>" not in h1
-    # "Sign in" leads the actions only on the n_orgs > 0 signed-out branch — it
-    # proves this is the with-orgs path, distinct from the zero-org fixture.
+    # "Sign in" is still present on the n_orgs > 0 signed-out branch (as a
+    # secondary CTA) — it proves this is the with-orgs path, distinct from
+    # the zero-org fixture.
     assert "Sign in" in body
     # …and the full rotator + its one script still ship.
     assert "data-mh-word-cycle" in h1
