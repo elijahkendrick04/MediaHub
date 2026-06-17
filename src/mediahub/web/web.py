@@ -33183,6 +33183,7 @@ function mhSetupMode(mode) {{
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _export_zip_url = url_for("pack_export_zip", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _turn_into_html = _render_turn_into_card(run_id)
 
@@ -33275,6 +33276,8 @@ function mhSetupMode(mode) {{
 {cards_html}
 
 <div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <a class="btn" href="{_export_zip_url}"
+     title="Every approved card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
   <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
@@ -39133,6 +39136,126 @@ voice, and queues them for one-click approval.</p>
             buf,
             as_attachment=True,
             download_name=f"content-pack-{run_id}.zip",
+            mimetype="application/zip",
+        )
+
+    @app.route("/pack/<run_id>/export.zip")
+    def pack_export_zip(run_id: str):
+        """G1.15 — batch ZIP of a pack's EVERY rendered format + a metadata.json manifest.
+
+        Distinct from ``content_pack_zip`` (which groups PNGs by destination
+        bucket + an approval-summary.json): this export groups by card with
+        every size together (square / portrait / story), writes a real
+        ``metadata.json`` manifest (layout, palette, dimensions, per-format
+        sha256, confidence, design reasoning, and honest format-coverage), and
+        a plain-English README. Built by ``graphic_renderer.pack_export``.
+
+        Packaging only — it bundles what the generation pipeline already
+        rendered; it never re-renders (no Chromium in the request path).
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        from mediahub.graphic_renderer import pack_export as _pack_export
+
+        visuals_dir = RUNS_DIR / run_id / "visuals"
+        if not visuals_dir.is_dir() or not any(visuals_dir.iterdir()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        run_data = run_data or {}
+        meet = run_data.get("meet") or {}
+        run_meta = {
+            "name": meet.get("name") or run_data.get("profile_display") or "",
+            "venue": meet.get("venue") or run_data.get("venue") or "",
+            "date": meet.get("date") or meet.get("start_date") or "",
+        }
+
+        profile_id = run_data.get("profile_id") or _active_profile_id() or ""
+        club: dict = {}
+        try:
+            from mediahub.brand.store import load_brand
+
+            kit, _tone, _tpl = load_brand(profile_id)
+            if kit is not None:
+                club = {
+                    "name": getattr(kit, "display_name", "") or "",
+                    "primary_colour": getattr(kit, "primary_colour", "") or "",
+                    "secondary_colour": getattr(kit, "secondary_colour", "") or "",
+                }
+        except Exception:
+            club = {}
+
+        # Real approved captions + ranking from the content pack (the manifest's
+        # caption source — the visual sidecar carries none). Keyed by card id,
+        # which matches the visual's content_item_id in the normal flow.
+        captions: dict[str, str] = {}
+        order: list[str] = []
+        try:
+            from mediahub.workflow.pack import build_content_pack as _bcp
+
+            for _card in _bcp(run_id, profile_id, RUNS_DIR):
+                _cid = str(_card.get("_card_id") or "")
+                if not _cid:
+                    continue
+                order.append(_cid)
+                _active = _card.get("active_caption") or {}
+                if isinstance(_active, dict):
+                    captions[_cid] = " ".join(
+                        str(v).strip()
+                        for v in _active.values()
+                        if isinstance(v, str) and v.strip()
+                    )
+        except Exception:
+            captions, order = {}, []
+
+        # Approver-edited alt text + approval status from the workflow sidecar.
+        alt_texts: dict[str, str] = {}
+        statuses: dict[str, str] = {}
+        try:
+            _ws = _get_wf_store()
+            if _ws is not None:
+                for _cid, _st in (_ws.load(run_id) or {}).items():
+                    if not _st:
+                        continue
+                    _alt = (_st.edited_captions or {}).get("alt_text", "")
+                    if _alt:
+                        alt_texts[_cid] = _alt
+                    try:
+                        statuses[_cid] = _st.status.value
+                    except Exception:
+                        statuses[_cid] = str(getattr(_st, "status", ""))
+        except Exception:
+            alt_texts, statuses = {}, {}
+
+        result = _pack_export.build_pack_export(
+            run_id,
+            visuals_dir=visuals_dir,
+            run_meta=run_meta,
+            club=club,
+            captions=captions,
+            alt_texts=alt_texts,
+            statuses=statuses,
+            order=order,
+        )
+
+        from flask import send_file
+        import io as _io
+
+        return send_file(
+            _io.BytesIO(result.zip_bytes),
+            as_attachment=True,
+            download_name=f"content-pack-{run_id}-all-formats.zip",
             mimetype="application/zip",
         )
 
