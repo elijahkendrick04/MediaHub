@@ -96,13 +96,15 @@ def _attr(obj, name: str, default: str = "") -> object:
     return getattr(obj, name, default)
 
 
-def _env_flag(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def mono_requested(brief) -> bool:
     """True when this brief (or the operator env) asks for the mono render mode."""
-    if _env_flag("MEDIAHUB_MONO_MODE"):
+    # Read the literal name inline so the env-inventory grep (docs/ENV_INVENTORY.md)
+    # registers MEDIAHUB_MONO_MODE as a var the source reads.
+    if _truthy(os.environ.get("MEDIAHUB_MONO_MODE", "")):
         return True
     if brief is None:
         return False
