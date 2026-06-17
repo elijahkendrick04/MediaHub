@@ -32,13 +32,21 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 _ctx = ssl.create_default_context(); _ctx.check_hostname = False; _ctx.verify_mode = ssl.CERT_NONE
 
 # family name (as written in _shared.css) -> (css2 query, local slug)
+#
+# G1.9 — the three text/data families that have a genuine variable cut on Google
+# Fonts are queried with an axis RANGE (`@<lo>..<hi>`), which makes the CSS2 API
+# return the VARIABLE woff2 (one file, all weights + Inter's optical axis)
+# instead of a pinned static instance. _shared.css declares them as range faces
+# (`font-weight: <lo> <hi>`); tests/test_variable_font_axes.py verifies the
+# downloaded files actually carry these axes. The three display faces (Bebas
+# Neue, Anton, Bowlby One) have no variable cut, so they stay static.
 FAMILIES = {
     "Bebas Neue":    ("Bebas+Neue", "bebas-neue"),
     "Anton":         ("Anton", "anton"),
     "Bowlby One":    ("Bowlby+One", "bowlby-one"),
-    "Space Grotesk": ("Space+Grotesk:wght@500;600;700", "space-grotesk"),
-    "Inter":         ("Inter:wght@400;500;600;700;800", "inter"),
-    "JetBrains Mono": ("JetBrains+Mono:wght@500;700", "jetbrains-mono"),
+    "Space Grotesk": ("Space+Grotesk:wght@300..700", "space-grotesk"),
+    "Inter":         ("Inter:opsz,wght@14..32,100..900", "inter"),
+    "JetBrains Mono": ("JetBrains+Mono:wght@100..800", "jetbrains-mono"),
 }
 _LATIN = ("U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, "
           "U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, "

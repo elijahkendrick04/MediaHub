@@ -386,11 +386,15 @@ the number of ranked moments).
   archetype must consciously pick its scene group.
 - **`motion_intent` executed** — the design-spec director's motion language
   (`fade_in`, `snap_in_then_settle`, `slide_up`, `scale_in`, `crossfade`,
-  `kinetic_type`, `parallax`, `count_up`, `static`) flows spec → brief →
-  props and is executed as a frame-pure animation programme; a drift test
-  holds the TSX to the full `design_spec.MOTION_INTENTS` vocabulary.
-  `count_up` is the sports-graphic staple: the result digit-counts up
-  (formatting-preserving) and settles on the exact verified value.
+  `kinetic_type`, `parallax`, `count_up`, `static`, plus the R1.1 program pack
+  `bounce_in`, `flip_reveal`, `swirl`, `reveal_from_sides`, `cascade`) flows
+  spec → brief → props and is executed as a frame-pure animation programme; a
+  drift test holds the TSX to the full `design_spec.MOTION_INTENTS` vocabulary.
+  The nine built-ins live in `StoryCard.tsx`'s `animProgram` switch; the R1.1
+  pack lives as one auto-discovered file each under
+  `remotion/.../sprint/intents/<name>.ts` (registered via `EXTRA_INTENTS`, no
+  switch edit). `count_up` is the sports-graphic staple: the result digit-counts
+  up (formatting-preserving) and settles on the exact verified value.
 - **Colour-role parity** — motion consumes the *same* resolved role set the
   still painted (`resolved_role_vars_for_brief`: Tier A baseline → APCA-gated
   director assignment → medal tint) via `roleGround/roleSurface/roleAccent/
@@ -404,10 +408,17 @@ the number of ranked moments).
   raises an honest error otherwise.
 - **Reel narrative** — branded cover with honest stat chips (PB/medal counts
   derived only from card labels, counting up to their totals as the cover
-  plays), rank-weighted beats (the top moment breathes ~25% longer),
+  plays), rank-weighted beats (the top moment breathes ~25% longer by default),
   deterministic per-beat transitions (crossfade/push/wipe from the variation
-  seed), and a club outro scene inside the unchanged `reel_duration_for`
-  budget.
+  seed), and a club outro scene.
+- **Reel beat-rhythm & duration customisation (R1.12)** — the beat skeleton is
+  customisable: `reel_duration_for` / `normalise_reel_rhythm` accept optional
+  per-card beat weights and custom cover/outro seconds (`?cover=&outro=&weights=`
+  on the reel route), mirrored into the Remotion carve (`MeetReel.tsx`) and the
+  ffmpeg fallback (`reel_segment_durations`) and folded into the cache key. A
+  weighted card earns proportionally more seconds (the reel lengthens honestly
+  rather than squeezing the others), all inputs clamp to render-safe bounds, and
+  an uncustomised reel is byte-identical to before.
 - **Audio (opt-in, both engines)** — `MEDIAHUB_VOICEOVER=1` narrates the
   video with a deterministic fact-only script (`visual/narration.py`: fixed
   template over the same verified facts on screen, spoken-form times, no

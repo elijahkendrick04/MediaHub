@@ -13,6 +13,22 @@
  *
  * Fonts: Bebas Neue, Anton, Bowlby One, Space Grotesk, Inter, JetBrains Mono.
  * Refresh with: python scripts/fetch_renderer_fonts.py
+ *
+ * G1.9 — variable-font support. The three text/data families that ship a
+ * genuine variable woff2 (their fvar `wght`/`opsz` axes verified at fetch time)
+ * are declared as SINGLE faces over a continuous axis RANGE instead of one
+ * pinned face per weight:
+ *   • Inter         — wght 100–900 + opsz 14–32 (optical size)
+ *   • Space Grotesk — wght 300–700
+ *   • JetBrains Mono — wght 100–800
+ * A range face lets the renderer instance any weight continuously (e.g. the
+ * autofit axis optimiser asking for `'wght' 612`) instead of snapping to the
+ * nearest pinned cut, and Inter's optical axis is tracked to the rendered size
+ * via font-optical-sizing (set explicitly on :root below). The three display
+ * faces (Bebas Neue, Anton, Bowlby One) have no variable cut on Google Fonts,
+ * so they stay single static faces. Per-slot axis tuning lives in
+ * graphic_renderer.autofit.optimise_axes; tests/test_variable_font_axes.py
+ * verifies the shipped woff2 really carry these axes.
  */
 
 /* Bebas Neue — condensed display, used for surnames + giant labels. */
@@ -45,66 +61,27 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Space Grotesk — geometric humanist, used for kickers + small caps. */
+/* Space Grotesk — geometric humanist, used for kickers + small caps.
+ * VARIABLE: one face over the wght 300–700 axis. */
 @font-face {
   font-family: 'Space Grotesk';
   font-style: normal;
-  font-weight: 500;
+  font-weight: 300 700;
   font-display: swap;
   src: url(fonts/space-grotesk.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url(fonts/space-grotesk.woff2) format('woff2');
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url(fonts/space-grotesk.woff2) format('woff2');
 }
 
-/* Inter — body + UI text. Multiple weights from one variable file. */
+/* Inter — body + UI text. VARIABLE: one face over the wght 100–900 axis with
+ * the opsz 14–32 optical-size axis; font-optical-sizing (:root, below) tracks
+ * opsz to the rendered size automatically. */
 @font-face {
   font-family: 'Inter';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 100 900;
   font-display: swap;
   src: url(fonts/inter.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url(fonts/inter.woff2) format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url(fonts/inter.woff2) format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url(fonts/inter.woff2) format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url(fonts/inter.woff2) format('woff2');
 }
 
 /* ------------------------------------------------------------------
@@ -149,19 +126,18 @@
   background-color: transparent;
 }
 
+/* JetBrains Mono — data / splits / timestamps. VARIABLE: one face over the
+ * wght 100–800 axis. */
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
-  font-weight: 500;
+  font-weight: 100 800;
   font-display: swap;
   src: url(fonts/jetbrains-mono.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url(fonts/jetbrains-mono.woff2) format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
+
+/* Optical sizing on for the variable faces (Inter's opsz axis). This is the CSS
+ * initial value — set explicitly so a global reset on the render page can't
+ * silently disable the optical axis. Inherits to every element. */
+:root { font-optical-sizing: auto; }

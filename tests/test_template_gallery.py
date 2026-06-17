@@ -188,7 +188,7 @@ def test_gallery_entries_shape():
 
 def test_render_body_structure():
     html = G.render_gallery_body(gallery_url="/templates", make_url="/make")
-    assert _cards(html) == len(A.list_archetypes()) == 20
+    assert _cards(html) == len(A.list_archetypes()) == 29
     assert _hidden_cards(html) == 0  # the default "all" view hides nothing
     # Chips for All + every category, with counts.
     assert 'aria-label="Filter templates by category"' in html
@@ -308,3 +308,30 @@ def test_make_gallery_link_is_not_a_hover_preview_tile(client):
     html = client.get("/make").get_data(as_text=True)
     m = re.search(r'<a class="mh-arch-gallery-link"[^>]*>', html)
     assert m and "mh-template" not in m.group(0)
+
+
+# ---------------------------------------------------------------------------
+# G1.26 cross-link — schematic gallery → live preview studio
+# ---------------------------------------------------------------------------
+
+
+def test_body_without_studio_url_has_no_cta():
+    # Back-compat: omitting studio_url renders the gallery exactly as before.
+    html = G.render_gallery_body(gallery_url="/templates", make_url="/make")
+    assert "See live preview thumbnails" not in html
+
+
+def test_body_with_studio_url_renders_cta():
+    html = G.render_gallery_body(
+        gallery_url="/templates", make_url="/make", studio_url="/templates/preview"
+    )
+    assert "See live preview thumbnails" in html
+    assert 'href="/templates/preview"' in html
+    # Card count + heading order are unaffected by the extra link.
+    assert _cards(html) == len(A.list_archetypes())
+    assert html.count("<h1") == 1
+
+
+def test_route_links_to_live_studio(client):
+    html = client.get("/templates").get_data(as_text=True)
+    assert 'href="/templates/preview"' in html

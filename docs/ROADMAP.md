@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-15 · `cf6b41179` · Merge pull request #643 from elijahkendrick04/claude/graphic-reel-generation-upgrade-ktyu25
+**Last updated:** 2026-06-17 · `1ac15de4f` · Merge pull request #711: Parallelise the free FFmpeg reel engine's beat rendering
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -124,19 +124,55 @@ deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
 final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
-**UI2 — design-system-uplift follow-on surfaces (current no.1 priority).** The UI
-motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) is built and wired into
-nine screens in PR #473. These items build the *purpose-built surfaces* the remaining
-adopt-listed kit effects still need — rather than force-fitting them — and sit at the very
-top of this list. Each reuses the already-built kit classes and is a discrete, dispatchable
-build. **Parallelism:** 🟢 = independent surface, safe to build/merge in a **separate
-parallel session**; 🟡 = touches a shared file (the `.btn` system or a list filter), so
-sequence it or merge with care.
+**Generator Upgrade Sprint — 60 parallel builds (CURRENT TOP PRIORITY, added 2026-06-16).**
+The graphic still-renderer and the Remotion/ffmpeg reel engine each get a 30-item
+deep-upgrade sprint — **30 graphic builds (`G1.*`)** and **30 reel builds (`R1.*`)**,
+listed *first* in the build queue below. Every item is deliberately sized to be a
+**whole session's work on its own** (too large to safely co-build with another — it
+would time out or each half would land weaker) and no two items build the same
+feature. They are engineered to be dispatched as **simultaneous parallel sessions on
+their own branches with no merge conflicts to worry about** — see the protocol below.
+The **deterministic-engine boundary stays untouched** (parsers, detectors, ranker,
+colour-science); these are renderer / compositor / audio builds only.
+
+### Generator sprint — parallel-dispatch merge protocol (read before dispatching)
+
+The merge-safety is built into the code, not left to session discipline. Two
+auto-discovery seams shipped with this list so a new capability is added as its **own
+new file** and wired automatically — **zero edits to the big shared composition files**:
+
+- **Motion (reels):** `src/mediahub/remotion/src/compositions/sprint/` — drop a file in
+  `intents/`, `scenes/`, `patterns/`, `accents/`, `springs/`, `layers/` (additive
+  overlays) or `reel/`, and webpack's build-time `require.context` registers it. The old
+  14-items-on-one-`switch` hot spot in `StoryCard.tsx` is **gone** — those are now
+  independent file drops. (Each folder's `README.md` states the drop-in contract; the
+  motion-parity test scans these folders, so a registered intent/scene counts as covered.)
+- **Graphics (stills):** `src/mediahub/graphic_renderer/sprint_hooks/` — drop a module
+  exposing `apply(html, ctx)` and it runs in the render pipeline automatically (no
+  `render.py` edit). Both seams are no-ops while empty, so today's renders are
+  byte-identical.
+
+Every item below is tagged:
+
+- **🟢 ISOLATED** — creates only new files (a seam drop or a brand-new module). *Cannot*
+  conflict with any other item; dispatch with zero thought.
+- **🟡 DISTINCT-REGION** — edits a shared file (`style_packs.py`, `autofit.py`,
+  `render.py`, `MeetReel.tsx`, `visual/*.py`, `web.py`) but only in its **own distinct
+  function/region**. No two items touch the same function, so git auto-merges them; the
+  worst case is a one-line import nudge resolved in seconds. Sibling sets that share a
+  file are named on the line so you can eyeball them.
+
+So: fire all 60 at once. The 🟢 items are unconditionally safe; the 🟡 items auto-merge
+because their edit regions don't overlap.
+
+**UI2 — design-system-uplift follow-on surfaces · ✅ COMPLETE (nothing to build here).**
+The seven original UI2 surfaces (UI2.1–UI2.7) and the UI2.8 follow-on — an inline,
+machine-readable *Codeblock* view of a run's recognition data on the review page — are all
+shipped and recorded in [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). Each reused the already-built
+UI motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) rather than force-fitting
+an effect. This epic is closed; new UI follow-on work would be filed as fresh `UI 1.*` items.
 
 <!-- ROADMAP:TODO -->
-- **UI 1.10** · Phase 1 (Product polish) — Visual template/archetype gallery (from Chronicle): browse the 12 content archetypes with preview thumbnails + category filters before creating a pack; renders existing archetype data, no new API · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.20** · Phase 1 (Product polish) — Polished pricing page (from Resend): tier cards with check/cross feature lists + recommended-plan highlight + a billing-period toggle + a feature comparison table; server-rendered, matches existing CSS variables · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
-- **UI 1.24** · Phase 1 (Product polish) — Moment-type marquee/ticker (from SavoirFaire/SuperHi): a continuous horizontal scrolling ticker of moment types (PBs · medals · comebacks · finals · club records) or club names as a section divider on the landing; pure CSS animation · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1485,14 +1521,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-15 | `366625757` | style: apply ruff-format to style_packs.py (CI hygiene hook) |
-| 2026-06-15 | `19192bde0` | Graphic + reel generation upgrade: wider style-pack catalog, richer reel transitions |
-| 2026-06-15 | `af3d75272` | autotest: rebaseline ground-truth golden after multi-column PDF fix |
-| 2026-06-15 | `b7cbc227e` | UI2.5: primary-CTA motion variant (Moving-Border + Stateful-Button) |
-| 2026-06-15 | `eb35ee68a` | Format cache-purge card line per ruff |
-| 2026-06-15 | `2dca30d47` | Add operator site-wide cache purge |
-| 2026-06-15 | `975f99a5d` | Fix multi-column PDF extraction dropping rows and scrambling events |
-| 2026-06-15 | `20dc0d308` | Read multi-column result PDFs correctly: full-width lines + time-anchored record parser |
-| 2026-06-15 | `2d6318c73` | Reframe the homepage around the engine diagram, in a human voice |
-| 2026-06-15 | `7ae96a16d` | feat(motion): mirror still style packs into Remotion reels |
+| 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
+| 2026-06-17 | `a71353d0d` | Re-trigger CI |
+| 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
+| 2026-06-17 | `c3c846f0c` | Fix pre-existing CI red: ffmpeg reel engine now renders all formats (R1.16) |
+| 2026-06-17 | `96d200249` | fix: make font_intake.subset_to_woff2 truly deterministic (pin head.modified) |
+| 2026-06-17 | `880493a59` | Add R1.22 colour-role transition motion overlay (fade/gradient/pulse) |
+| 2026-06-17 | `6489b74df` | Fix non-deterministic font intake (head timestamp flake) |
+| 2026-06-17 | `88c6088ce` | Fix stale ffmpeg-engine batch test after R1.16 multi-format support |
+| 2026-06-17 | `e8792b384` | test: update stale ffmpeg-engine reel test for R1.16 multi-format |
+| 2026-06-17 | `35dbe58c8` | Apply ruff-format to the R1.12 reel call-sites |
 <!-- /ROADMAP:ACTIVITY -->

@@ -5,12 +5,20 @@ card) so each one is a *moment*, not a slide. Adapted from HyperFrames'
 beat-direction (Apache-2.0, `vendor/hyperframes-skills-main/`), re-aimed at
 MediaHub's computed-duration, ranked-card reels.
 
-## The reel's fixed skeleton (don't fight it — direct within it)
+## The reel's skeleton (direct within it)
 
 `MeetReel.tsx` assembles: **cover (2.0s) → one beat per card (4.0s each,
 top-N by rank, capped at 5) → outro (1.0s)**, with total duration computed
 by `reel_duration_for`. The skeleton is deterministic; the direction — what
 each beat feels like, how it hands off — is where craft lives.
+
+Those numbers are the *default*: the bookend seconds and the per-card beat
+weights are caller-customisable (R1.12, `normalise_reel_rhythm` →
+`MeetReel.tsx`'s beat-carving region). An explicit weight makes a card breathe
+proportionally longer and lengthens the reel honestly (Python mirrors the same
+weights into `reel_duration_for`), rather than stealing seconds from its
+neighbours. Default rhythm = the exact skeleton above, byte-identical. Direct
+within whatever rhythm you're handed — don't fight it.
 
 - **Cover** — meet name + honest label-derived stat chips ("TOP 3 SWIMS",
   "2 PBS"). Job: establish the motion language and the brand. It is the
@@ -96,9 +104,12 @@ the club's character, not from a template:
 - Does the cover promise what the beats deliver? A percussive cover into
   meditative beats reads as broken.
 
-The 4s-per-card timing is fixed; rhythm lives in how much of each 4s is
+The per-card timing defaults to 4s but is customisable (R1.12 beat weights);
+most reels keep the default, where rhythm lives in how much of each 4s is
 build vs breathe, how hard the entrance hits, and which transition kind
-carries each handoff.
+carries each handoff. Reach for explicit weights only when the ranking
+genuinely calls for it (a single dominant moment, or a flat all-equal recap) —
+the default top-card emphasis already serves the common case.
 
 ## Narration and SFX cues are facts, not vibes
 

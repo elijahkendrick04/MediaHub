@@ -206,7 +206,7 @@
   font-feature-settings: "tnum"; font-weight: 700;
   /* result autofit box is ~52% of canvas; the burst is ~274px, so scale
      to 0.30 and let it break rather than clip the circle. */
-  font-size: calc(var(--mh-fit-result-px, 92px) * 0.30);
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.30); font-variation-settings: var(--mh-axes-result, normal);
   line-height: 0.9; letter-spacing: -0.01em; color: var(--mh-primary);
   white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   max-width: 100%;

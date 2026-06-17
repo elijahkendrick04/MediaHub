@@ -64,9 +64,12 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "full_bleed_photo_lower_third": "photo",
     "centered_medal_spotlight": "photo",
     "duo_athlete_split": "photo",
+    "relay_collage": "photo",
     "broadcast_scorebug": "photo",
     "photo_passepartout": "photo",
     "spotlight_disc": "photo",
+    "full_height_portrait_split": "photo",  # G1.1
+    "contact_sheet": "photo",  # G1.1
     # Data-led — the figures are the structural hero; no photo needed.
     "big_number_dominant": "data",
     "editorial_numbers_grid": "data",
@@ -75,6 +78,9 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "cornerstone_numeral": "data",
     "horizon_band": "data",
     "scoreline_versus": "data",
+    "timeline_progression": "data",  # G1.1
+    "radial_competition_ring": "data",  # G1.1
+    "vertical_stat_tower": "data",  # G1.1
     # Editorial — type / quote / narrative leads; no photo needed.
     "magazine_cover": "editorial",
     "quote_led_recap": "editorial",
@@ -82,6 +88,9 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "triptych_progression": "editorial",
     "index_card": "editorial",
     "mega_surname_bleed": "editorial",
+    "three_card_editorial_grid": "editorial",  # G1.1
+    "staggered_diagonal_offset": "editorial",  # G1.1
+    "ribbon_banner": "editorial",  # G1.1
 }
 
 # Default for any future archetype with no explicit mapping yet (a test guards
@@ -102,6 +111,7 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "ticker_strip",
     "triptych_progression",
     "duo_athlete_split",
+    "relay_collage",
     "stat_stack_sidebar",
     "minimal_type_poster",
     "broadcast_scorebug",
@@ -112,6 +122,15 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "mega_surname_bleed",
     "spotlight_disc",
     "scoreline_versus",
+    # G1.1 — eight new families, interleaved by category for a varied "All" view.
+    "timeline_progression",
+    "three_card_editorial_grid",
+    "full_height_portrait_split",
+    "radial_competition_ring",
+    "staggered_diagonal_offset",
+    "contact_sheet",
+    "vertical_stat_tower",
+    "ribbon_banner",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -125,6 +144,7 @@ _TITLE: dict[str, str] = {
     "magazine_cover": "Magazine Cover",
     "minimal_type_poster": "Minimal Poster",
     "quote_led_recap": "Quote Recap",
+    "relay_collage": "Relay Collage",
     "split_diagonal_hero": "Diagonal Hero",
     "stat_stack_sidebar": "Stat Sidebar",
     "ticker_strip": "Ticker Strip",
@@ -137,6 +157,14 @@ _TITLE: dict[str, str] = {
     "photo_passepartout": "Framed Print",
     "scoreline_versus": "Scoreline",
     "spotlight_disc": "Spotlight Disc",
+    "timeline_progression": "Timeline",
+    "radial_competition_ring": "Competition Ring",
+    "vertical_stat_tower": "Stat Tower",
+    "three_card_editorial_grid": "Three-Card Grid",
+    "staggered_diagonal_offset": "Staggered Diagonal",
+    "full_height_portrait_split": "Portrait Split",
+    "ribbon_banner": "Ribbon Banner",
+    "contact_sheet": "Contact Sheet",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -155,6 +183,7 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "ticker_strip": "Stacked broadcast bands with a fenced event-to-result scoreline.",
     "triptych_progression": "Three vertical bays read who → result → context.",
     "duo_athlete_split": "A 50/50 photo-vs-scoreline duel crossed by one name band.",
+    "relay_collage": "Two to four athlete cutouts stand balanced on one baseline above a name band and data panel.",
     "broadcast_scorebug": "A full-bleed photo with a live-TV corner scorebug and top ribbon.",
     "cornerstone_numeral": "A mega numeral cornerstoned into the bottom-left of a brand ground.",
     "horizon_band": "One full-width accent horizon carries the result; name above, meta below.",
@@ -163,6 +192,14 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "photo_passepartout": "A matted, framed-print window over a gallery caption plate.",
     "scoreline_versus": "Event versus result across a bold central fence, like a scoreline.",
     "spotlight_disc": "A circular photo portal ringed by the accent, radially centred.",
+    "timeline_progression": "A connected accent spine threads milestone nodes who → result → context.",
+    "radial_competition_ring": "A concentric dial with tick ring; the result reads at its centre.",
+    "vertical_stat_tower": "Full-width tiers stacked vertically, the result tier dominant.",
+    "three_card_editorial_grid": "Three inset editorial cards — who, result, context — under a masthead.",
+    "staggered_diagonal_offset": "Type blocks stepped down a diagonal, no photo or seam.",
+    "full_height_portrait_split": "A full-height portrait beside a full-height info column.",
+    "ribbon_banner": "An award ribbon with chevron ends and tails carries the achievement.",
+    "contact_sheet": "A film contact sheet of one shot; one keeper frame carries the result.",
 }
 
 _CARD_SUMMARY_MAX = 180
@@ -214,6 +251,24 @@ _SVG: dict[str, str] = {
         '<rect class="sf" x="0" y="66" width="120" height="18"/>'
         '<rect class="ik2" x="10" y="72" width="84" height="6" rx="1"/>'
         '<line class="acln" x1="60" y1="0" x2="60" y2="150"/>'
+    ),
+    # Photo-led — 2-4 cutouts balanced on one baseline; name band; data panel.
+    "relay_collage": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="8" y="10" width="20" height="6" rx="1"/>'
+        '<rect class="ik" x="92" y="10" width="16" height="6" rx="1"/>'
+        '<rect class="ph" x="13" y="36" width="17" height="50" rx="2"/>'
+        '<rect class="ph" x="36" y="28" width="19" height="58" rx="2"/>'
+        '<rect class="ph" x="63" y="28" width="19" height="58" rx="2"/>'
+        '<rect class="ph" x="89" y="36" width="17" height="50" rx="2"/>'
+        '<rect class="ac" x="0" y="88" width="120" height="16"/>'
+        '<rect class="onac" x="10" y="93" width="64" height="7" rx="1"/>'
+        '<rect class="sf" x="0" y="104" width="120" height="46"/>'
+        '<rect class="ik" x="10" y="112" width="18" height="3" rx="1"/>'
+        '<rect class="ik2" x="10" y="118" width="48" height="8" rx="1"/>'
+        '<rect class="ac" x="82" y="112" width="28" height="14" rx="1"/>'
+        '<line class="ln" x1="10" y1="136" x2="110" y2="136"/>'
+        '<rect class="ik" x="10" y="140" width="40" height="4" rx="1"/>'
     ),
     # Data-led — masthead over a ruled grid of stat cells.
     "editorial_numbers_grid": (
@@ -445,6 +500,132 @@ _SVG: dict[str, str] = {
         '<rect class="ac" x="10" y="118" width="34" height="14" rx="1"/>'
         '<rect class="ik" x="10" y="138" width="40" height="4" rx="1"/>'
     ),
+    # ----- G1.1 — eight new families -----
+    # Data-led — a connected spine threaded through milestone nodes.
+    "timeline_progression": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<line class="acln" x1="24" y1="24" x2="24" y2="128"/>'
+        '<circle class="ac" cx="24" cy="28" r="5"/>'
+        '<rect class="ik" x="36" y="25" width="34" height="5" rx="1"/>'
+        '<circle class="gd" cx="24" cy="56" r="5"/>'
+        '<circle class="acln" cx="24" cy="56" r="5"/>'
+        '<rect class="ik2" x="36" y="50" width="46" height="9" rx="1"/>'
+        '<circle class="ac" cx="24" cy="92" r="8"/>'
+        '<rect class="ac" x="36" y="80" width="68" height="28" rx="2"/>'
+        '<rect class="onac" x="42" y="87" width="44" height="13" rx="1"/>'
+        '<circle class="ac" cx="24" cy="122" r="5"/>'
+        '<rect class="ik" x="36" y="119" width="38" height="5" rx="1"/>'
+        '<rect class="ik" x="12" y="140" width="30" height="4" rx="1"/>'
+    ),
+    # Data-led — concentric competition dial with a centred result.
+    "radial_competition_ring": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="40" y="12" width="40" height="10" rx="5"/>'
+        '<circle class="acln" cx="60" cy="72" r="40"/>'
+        '<circle class="ac" cx="60" cy="72" r="33"/>'
+        '<circle class="gd" cx="60" cy="72" r="24"/>'
+        '<rect class="ac" x="46" y="67" width="28" height="11" rx="1"/>'
+        '<rect class="ik2" x="36" y="120" width="48" height="9" rx="1"/>'
+        '<rect class="ik" x="42" y="134" width="36" height="4" rx="1"/>'
+    ),
+    # Data-led — full-width tiers stacked vertically, dominant accent tier.
+    "vertical_stat_tower": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="12" y="12" width="9" height="4" rx="1"/>'
+        '<rect class="ik2" x="12" y="22" width="56" height="10" rx="1"/>'
+        '<rect class="sf" x="12" y="40" width="96" height="20" rx="2"/>'
+        '<rect class="ik" x="18" y="47" width="30" height="6" rx="1"/>'
+        '<rect class="ac" x="12" y="64" width="96" height="44" rx="2"/>'
+        '<rect class="onac" x="18" y="78" width="62" height="18" rx="1"/>'
+        '<rect class="sf" x="12" y="112" width="96" height="18" rx="2"/>'
+        '<rect class="ik" x="18" y="118" width="40" height="6" rx="1"/>'
+        '<rect class="ik" x="12" y="140" width="30" height="4" rx="1"/>'
+    ),
+    # Editorial — three inset cards under a masthead, lifted accent middle.
+    "three_card_editorial_grid": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ik2" x="12" y="14" width="46" height="10" rx="1"/>'
+        '<rect class="ik" x="86" y="15" width="22" height="5" rx="1"/>'
+        '<rect class="ac" x="12" y="28" width="96" height="2"/>'
+        '<rect class="sf" x="12" y="40" width="28" height="70" rx="3"/>'
+        '<rect class="ac" x="46" y="36" width="28" height="74" rx="3"/>'
+        '<rect class="sf" x="80" y="40" width="28" height="70" rx="3"/>'
+        '<rect class="ik" x="16" y="48" width="16" height="3" rx="1"/>'
+        '<rect class="ik2" x="16" y="56" width="20" height="8" rx="1"/>'
+        '<rect class="onac" x="50" y="62" width="20" height="12" rx="1"/>'
+        '<rect class="ik" x="84" y="48" width="16" height="3" rx="1"/>'
+        '<rect class="ik2" x="84" y="56" width="20" height="6" rx="1"/>'
+        '<rect class="ik" x="12" y="124" width="30" height="6" rx="1"/>'
+        '<rect class="ik" x="48" y="126" width="40" height="4" rx="1"/>'
+    ),
+    # Editorial — type blocks stepped down a diagonal, thin diagonal rule.
+    "staggered_diagonal_offset": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<line class="acln" x1="8" y1="112" x2="112" y2="40"/>'
+        '<rect class="ac" x="12" y="24" width="24" height="5" rx="1"/>'
+        '<rect class="ik" x="30" y="44" width="28" height="5" rx="1"/>'
+        '<rect class="ik2" x="30" y="52" width="44" height="11" rx="1"/>'
+        '<rect class="ac" x="54" y="74" width="42" height="18" rx="2"/>'
+        '<rect class="onac" x="58" y="79" width="28" height="8" rx="1"/>'
+        '<rect class="ik" x="36" y="102" width="42" height="5" rx="1"/>'
+        '<rect class="ik" x="12" y="138" width="30" height="4" rx="1"/>'
+    ),
+    # Photo-led — full-height portrait beside a full-height info column.
+    "full_height_portrait_split": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ph" x="0" y="0" width="67" height="150"/>'
+        '<line class="acln" x1="67" y1="0" x2="67" y2="150"/>'
+        '<rect class="ac" x="75" y="20" width="20" height="5" rx="1"/>'
+        '<rect class="ik" x="75" y="32" width="24" height="5" rx="1"/>'
+        '<rect class="ik2" x="75" y="40" width="38" height="11" rx="1"/>'
+        '<rect class="ik" x="75" y="58" width="34" height="4" rx="1"/>'
+        '<rect class="ac" x="75" y="74" width="14" height="4" rx="1"/>'
+        '<rect class="ik2" x="75" y="82" width="40" height="14" rx="1"/>'
+        '<rect class="ik" x="75" y="128" width="20" height="6" rx="1"/>'
+        '<rect class="ik" x="75" y="138" width="34" height="4" rx="1"/>'
+    ),
+    # Editorial — award ribbon with chevron ends + tails, result beneath.
+    "ribbon_banner": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<polygon class="ac" points="34,50 46,50 46,68 40,62 34,68"/>'
+        '<polygon class="ac" points="74,50 86,50 86,68 80,62 74,68"/>'
+        '<polygon class="ac" points="20,28 100,28 94,40 100,52 20,52 26,40"/>'
+        '<rect class="onac" x="40" y="36" width="40" height="7" rx="1"/>'
+        '<rect class="ik2" x="30" y="84" width="60" height="11" rx="1"/>'
+        '<rect class="ik2" x="34" y="102" width="52" height="14" rx="1"/>'
+        '<rect class="ik" x="40" y="122" width="40" height="4" rx="1"/>'
+        '<rect class="ik" x="44" y="138" width="32" height="4" rx="1"/>'
+    ),
+    # Photo-led — sprocket-bracketed grid of film frames; one accent keeper.
+    "contact_sheet": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ik" x="10" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="24" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="38" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="52" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="66" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="80" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="94" y="12" width="7" height="6" rx="1"/>'
+        '<rect class="ph" x="10" y="24" width="31" height="34" rx="1"/>'
+        '<rect class="ph" x="44" y="24" width="32" height="34" rx="1"/>'
+        '<rect class="ph" x="79" y="24" width="31" height="34" rx="1"/>'
+        '<rect class="ph" x="10" y="62" width="31" height="34" rx="1"/>'
+        '<rect class="ac" x="43" y="61" width="34" height="36" rx="1"/>'
+        '<rect class="ph" x="46" y="64" width="28" height="30" rx="1"/>'
+        '<rect class="onac" x="48" y="84" width="22" height="7" rx="1"/>'
+        '<rect class="ph" x="79" y="62" width="31" height="34" rx="1"/>'
+        '<rect class="ik" x="10" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="24" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="38" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="52" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="66" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="80" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="ik" x="94" y="100" width="7" height="6" rx="1"/>'
+        '<rect class="sf" x="10" y="114" width="100" height="28" rx="2"/>'
+        '<rect class="ik" x="16" y="120" width="18" height="4" rx="1"/>'
+        '<rect class="ik2" x="16" y="127" width="42" height="9" rx="1"/>'
+        '<rect class="ac" x="90" y="120" width="14" height="6" rx="1"/>'
+    ),
 }
 
 # Generic placeholder schematic for any future archetype that has no bespoke
@@ -607,12 +788,16 @@ def _card(entry: dict, *, active: str) -> str:
     )
 
 
-def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str = "all") -> str:
+def render_gallery_body(
+    *, gallery_url: str, make_url: str, active_category: str = "all", studio_url: str = ""
+) -> str:
     """Render the full gallery page body (hero + filters + grid + CTA + JS).
 
     Pure string builder: ``gallery_url`` and ``make_url`` are pre-resolved
-    ``url_for`` strings, ``active_category`` is already validated. The returned
-    string is handed to ``_layout`` by the route.
+    ``url_for`` strings, ``active_category`` is already validated. When
+    ``studio_url`` is given (the G1.26 live preview gallery), a prominent link to
+    it is rendered after the intro. The returned string is handed to ``_layout``
+    by the route.
     """
     active = active_category if active_category in _CATEGORY_LABELS else "all"
     entries = gallery_entries()
@@ -644,6 +829,21 @@ def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str
         "colours, type and logo, with your athletes&rsquo; photos.</p>"
     )
 
+    # G1.26 cross-link: from the schematic wireframes to the live, rendered
+    # preview studio (every archetype × pack as a real card, with filters).
+    studio_cta = ""
+    if studio_url:
+        studio_cta = (
+            f'<a class="mh-arch-gallery-link" href="{_e(studio_url)}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">See live preview thumbnails &rarr;</span>'
+            '<span class="mh-agl-sub">Browse every archetype &times; style pack as a '
+            "real rendered card — filter by ground, texture, accent and density.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">Open the studio</span>'
+            "</a>"
+        )
+
     # Section heading keeps the heading order valid (hero h1 → h2 → card h3);
     # visually hidden because the hero already titles the page.
     section_h2 = '<h2 class="mh-arch-sr">Template library</h2>'
@@ -671,7 +871,7 @@ def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str
 
     return (
         f'<section id="mh-arch-gallery" class="mh-arch-gallery" data-active="{active}">'
-        f"{hero}{intro}{section_h2}{chips}{grid}{empty}{cta}"
+        f"{hero}{intro}{studio_cta}{section_h2}{chips}{grid}{empty}{cta}"
         "</section>"
         f"{script}"
     )
