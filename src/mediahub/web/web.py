@@ -9902,12 +9902,12 @@ def _layout(
        we make?", so it lives as the strategic entry point on the Create page
        (and stays on the g→p keyboard shortcut). #}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
-    <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
-    {# Studio moved out of the top bar and under Create — it's a design tool
-       (the live brief editor), so it sits alongside the template gallery on the
-       Create page rather than as a standalone top-bar tab. #}
+    {# Templates and the design studio are reached from the Create page, not the
+       top bar: the template gallery stays a "browse the card styles" link and
+       the studio is a full Create tile (the live design editor). Keeping both
+       off the top bar leaves the signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
        to be the backend "online" pill's margin-left:auto; the pill is gone). #}
@@ -23424,6 +23424,39 @@ function mhPlanGenerate(btn) {{
                 "</a>"
             )
 
+        # Design studio — a full, first-class Create tile, not the old slim
+        # gallery-link strip. The live design editor (tweak text / palette /
+        # archetype / style pack and watch the card re-render on the real
+        # engine) is a function MediaHub offers in its own right, equal-billing
+        # with the content types, so it earns a tile. Live/Ready, sitting after
+        # the content types and ahead of the disabled coming-soon tiles.
+        _studio_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>'
+            '<line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>'
+            '<line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>'
+            '<line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>'
+            '<line x1="17" y1="16" x2="23" y2="16"/></svg>'
+        )
+        tiles_html += (
+            f'<a href="{_h(url_for("design_studio"))}" class="mh-template mh-glow-border">'
+            f'<div class="mh-template-icon">{_studio_svg}</div>'
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+            '<h3 style="margin:0">Design studio</h3>'
+            '<span class="tag live">Ready</span>'
+            "</div>"
+            "<p>Tweak the text, palette, archetype and style pack and watch the "
+            "card re-render live on the real engine &mdash; your starting point "
+            "for a custom look.</p>"
+            '<div class="mh-template-formats">'
+            '<span class="mh-template-fmt">Live editor</span>'
+            '<span class="mh-template-fmt">Graphic</span>'
+            "</div>"
+            '<span class="mh-template-cta">Open studio</span>'
+            "</a>"
+        )
+
         # Coming-soon surfaces relocated here from the old Club-data tab —
         # presented as Create tiles so the whole "what can I make?" catalogue
         # lives in one place. Disabled until they ship.
@@ -23577,22 +23610,6 @@ function mhPlanGenerate(btn) {{
             "</a>"
         )
 
-        # Studio moved here from the top bar — it's the live design editor
-        # (tweak text / palette / archetype / style pack and watch the card
-        # re-render), a sibling of the browse-only template gallery, so the two
-        # design tools sit together on Create rather than as a top-bar tab.
-        studio_link_html = (
-            f'<a class="mh-arch-gallery-link" href="{_h(url_for("design_studio"))}">'
-            '<span class="mh-agl-text">'
-            '<span class="mh-agl-title">Open the design studio</span>'
-            '<span class="mh-agl-sub">Tweak the text, palette, archetype and '
-            "style pack and watch the card re-render live &mdash; your starting "
-            "point for a custom look.</span>"
-            "</span>"
-            '<span class="mh-agl-cta">Open studio &rarr;</span>'
-            "</a>"
-        )
-
         # Plan moved here from the top bar — it answers this page's own hero
         # question ("what should we make?"), so it sits at the top of Create as
         # the strategic entry point into the ranked, explainable content plan.
@@ -23628,7 +23645,6 @@ function mhPlanGenerate(btn) {{
             f"{brand_strip_html}"
             f"{first_run_cta}"
             f"{gallery_link_html}"
-            f"{studio_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")

@@ -427,9 +427,16 @@ def test_studio_route_renders(client):
     assert _tiles(html) == len(A.list_archetypes()) + G.PER_DEFAULT
 
 
-def test_studio_route_nav_highlights_templates(client):
+def test_preview_gallery_not_in_top_bar_nav(client):
+    # Templates (and its preview gallery) left the top bar — both are reached
+    # from the Create page now. The route still serves and renders the layout,
+    # but the top-bar nav no longer carries a Templates link to highlight.
     html = client.get("/templates/preview").get_data(as_text=True)
-    assert re.search(r'href="/templates"[^>]*class="active"', html)
+    nav_start = html.find('id="mh-primary-nav"')
+    assert nav_start != -1, "top bar primary nav missing"
+    nav = html[nav_start : html.find("</nav>", nav_start)]
+    assert "Templates</a>" not in nav
+    assert 'href="/templates"' not in nav
 
 
 def test_studio_route_honours_pins_and_filters(client):
