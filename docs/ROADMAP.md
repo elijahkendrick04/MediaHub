@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `6568410ff` · Merge pull request #797 from elijahkendrick04/claude/zealous-hypatia-2e4ju3
+**Last updated:** 2026-06-18 · `c1d12bb7a` · Redesign hero demo chrome as an authentic Chrome browser frame (#799)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1173,6 +1173,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `381bb633d` | Redesign hero demo chrome as an authentic Chrome browser frame |
 | 2026-06-17 | `f9260f6e3` | Perf: cache static assets, coalesce scroll handler, skip off-screen card paint |
 | 2026-06-17 | `a4d470ec4` | Apply ruff-format (collapse single-line audience-icon CSS string) |
 | 2026-06-17 | `3f29519c1` | Tidy up the home page: fix invisible navy elements, wrong icon, unstyled kickers |
@@ -1182,6 +1183,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `aac0efef2` | Fix dock-class regression: carry mh-signed-in on <html>, not <body> |
 | 2026-06-17 | `dee74b698` | Brand colours: signed-in follows the club everywhere; logo stays fixed |
 | 2026-06-17 | `fa42eed2e` | Brand colours: club graphics follow the profile brand, site-wide |
-| 2026-06-17 | `3d58e0bd9` | Reorganise top nav: Studio under Create, org account dropdown, drop online/Developer tabs |
-| 2026-06-17 | `9414408a2` | ROADMAP: drop stray F.8 from the phase registry |
 <!-- /ROADMAP:ACTIVITY -->
