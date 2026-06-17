@@ -339,6 +339,7 @@ def test_v1_card_without_role_tokens_still_desaturates():
 def test_hook_never_raises_on_garbage():
     for junk in ("", "<html></html>", "no tags at all", "{:root malformed"):
         assert isinstance(MM.apply(junk, _ctx(_Brief(render_mode="mono"))), str)
+
     # a brief that explodes on attribute access is swallowed, not propagated
     class Boom:
         def __getattr__(self, _):

@@ -211,6 +211,7 @@ def mono_role_vars(ground_hex: str, surface_hex: str) -> dict[str, str]:
 # HTML transforms
 # ---------------------------------------------------------------------------
 
+
 # Read a painted ground/surface hex. The lookbehind keeps ``--mh-primary`` from
 # matching inside ``--mh-on-primary``; the form is a *declaration* (``name:#hex``),
 # never a ``var(--mh-primary)`` usage (no colon follows those).
@@ -252,12 +253,7 @@ def _inject_desaturation(html: str, contrast: float) -> str:
     if 'id="mh-mono-mode"' in html:
         return html
     filt = "grayscale(1)" if contrast == 1.0 else f"grayscale(1) contrast({contrast:g})"
-    style = (
-        '<style id="mh-mono-mode">'
-        ":root{--mh-mono:1;}"
-        f"html{{filter:{filt};}}"
-        "</style>"
-    )
+    style = f'<style id="mh-mono-mode">:root{{--mh-mono:1;}}html{{filter:{filt};}}</style>'
     if "</head>" in html:
         return html.replace("</head>", style + "</head>", 1)
     if "</body>" in html:
