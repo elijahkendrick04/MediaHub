@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `eface0743` · Merge pull request #740: fix(roadmap-bot) self-heal dropped directives
+**Last updated:** 2026-06-17 · `382fe7343` · Merge pull request #724 from elijahkendrick04/claude/affectionate-pasteur-omfhgs
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -187,7 +187,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
@@ -1537,6 +1536,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-17 | `874fef97f` | fix(roadmap-bot): self-heal directives dropped by the concurrent-merge race |
+| 2026-06-17 | `d24d6f461` | feat(reel): in-render poster capture via Remotion renderStill (R1.29) |
 | 2026-06-17 | `b7161ab8b` | G1.12 — Multi-line hero & split-result fitting |
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
 | 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
