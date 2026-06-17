@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `ad9820fb3` · Tidy up the home page (#795)
+**Last updated:** 2026-06-17 · `6568410ff` · Merge pull request #797 from elijahkendrick04/claude/zealous-hypatia-2e4ju3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1173,6 +1173,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `f9260f6e3` | Perf: cache static assets, coalesce scroll handler, skip off-screen card paint |
 | 2026-06-17 | `a4d470ec4` | Apply ruff-format (collapse single-line audience-icon CSS string) |
 | 2026-06-17 | `3f29519c1` | Tidy up the home page: fix invisible navy elements, wrong icon, unstyled kickers |
 | 2026-06-17 | `8844c7a45` | Apply ruff-format to sample_graphics |
@@ -1183,6 +1184,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `fa42eed2e` | Brand colours: club graphics follow the profile brand, site-wide |
 | 2026-06-17 | `3d58e0bd9` | Reorganise top nav: Studio under Create, org account dropdown, drop online/Developer tabs |
 | 2026-06-17 | `9414408a2` | ROADMAP: drop stray F.8 from the phase registry |
-| 2026-06-17 | `12d2b5128` | Scrub all remaining traces of the removed social scheduling/publishing |
-| 2026-06-17 | `7b6506894` | Create: integrate PR #782 engine-block redesign into the how-it-works slides |
 <!-- /ROADMAP:ACTIVITY -->
