@@ -24,10 +24,22 @@ def apply(html: str, ctx: RenderHookCtx) -> str:
 
 `apply` must be **deterministic** and should opt out (return `html` unchanged)
 unless `ctx.brief` requests the effect. A hook that raises is skipped, never fatal.
-With no modules here (today) the registry is a no-op and renders are byte-identical.
+A hook that no brief requests is a no-op, so flag-off renders stay byte-identical.
 
 Capabilities that fit this seam include **G1.8** (gradient-mesh backgrounds),
 **G1.19** (mono mode), **G1.21** (depth-of-field blur), **G1.22** (icon/badge
 overlays), **G1.29** (animated-still loops) and **G1.30** (inspection overlay).
 Capabilities that change formats, encoding, fonts, palettes or text-fitting edit
 their own dedicated module/region instead.
+
+## Shipped hooks
+
+- **`mono_mode.py`** (G1.19) — grayscale / mono accessibility render. Deterministic
+  B/W with a colour-**role remap**: the painted `--mh-*` tokens are rewritten to a
+  contrast-preserving neutral-grey ramp (accent ↔ ground at opposite extremes, so the
+  inverted chip and hero still pop and every APCA pair clears its gate), then a page-level
+  `filter: grayscale(1)` flattens photos / logos / overlays / v1 grounds too. Opt in per
+  card via `brief.render_mode` / `background_style` (`mono`/`monochrome`/`grayscale`/`b&w`…)
+  or a mono phrase in `brief.mood` / `style_pack`, or operator-wide via the
+  `MEDIAHUB_MONO_MODE` env flag (`MEDIAHUB_MONO_CONTRAST` optionally trims the B/W photo
+  pass; default `1.0`). `ORDER = 90` so it desaturates earlier hooks' output too.
