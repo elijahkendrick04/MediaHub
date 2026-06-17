@@ -944,14 +944,22 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 }
 /* Ambient glow — a slow, low-amplitude breathe (no position shift). */
 @keyframes mh-demo-breathe {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(1.04); }
+  /* Opacity only. The glow carries a static filter: blur(46px); animating its
+     scale would force the browser to re-rasterise that large blur every frame.
+     Pulsing alpha alone composites the already-cached blurred texture — the same
+     "breathing" read with zero per-frame repaint. */
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.85; }
 }
 
 /* --- per-scene micro-motion --------------------------------------------
    Each is a 12s track so it stays locked to the cross-fade cycle and only
-   "plays" while its scene owns the frame. transform / opacity / filter only
-   (GPU-friendly), and every one is neutralised under prefers-reduced-motion. */
+   "plays" while its scene owns the frame. The large/continuous motion is
+   transform + opacity only (GPU-composited — an animated filter: blur repaints
+   every frame, so it is deliberately avoided here); the only paint-touching
+   accents are a tiny highlighter wipe (mh-demo-mark) and the SVG tick draw
+   (mh-demo-check), both small. Every one is neutralised under
+   prefers-reduced-motion. */
 /* Scene 1 — a scan line reads down the raw results sheet, then clears. */
 @keyframes mh-demo-scan {
   0% { transform: translateY(-22px); opacity: 0; }
@@ -960,13 +968,15 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   26% { transform: translateY(102px); opacity: 0; }
   100% { transform: translateY(102px); opacity: 0; }
 }
-/* Scene 2 — the headline stat lands (settles from a soft, slightly-larger
-   blur), the PB sticker pops in, the grounded facts wipe a highlighter across
-   in turn, and the confidence meter fills. */
+/* Scene 2 — the headline stat lands (settles in from slightly larger + below),
+   the PB sticker pops in, the grounded facts wipe a highlighter across in turn,
+   and the confidence meter fills. */
 @keyframes mh-demo-land {
-  0%, 29% { opacity: 0; transform: translateY(6px) scale(1.06); filter: blur(5px); }
-  37% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
-  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  /* Settle via transform + opacity (composited). The scale-down already reads as
+     the stat "landing"; an animated filter: blur would repaint it every frame. */
+  0%, 29% { opacity: 0; transform: translateY(6px) scale(1.06); }
+  37% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes mh-demo-pop {
   0%, 33% { opacity: 0; transform: scale(0.6); }

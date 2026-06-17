@@ -7192,14 +7192,18 @@ body:not([data-page="home"]) main.wrap .mh-hero > .lede { animation-delay: 0.20s
   body:not([data-page="home"]) main.wrap .mh-hero > .lede { animation: none; }
 }
 
-/* Single static lane-yellow wash at the top edge — broadcast lower-third feel */
+/* Single static lane-yellow wash at the top edge — broadcast lower-third feel.
+   The softness is baked into the radial gradient itself (centre lifted above the
+   viewport with a generous falloff) instead of an 80px `filter: blur()`. A blur
+   that large over a fixed, full-width layer is a heavy raster that the browser
+   pays on first paint of EVERY page — and keeps as a needless extra GPU layer —
+   for a glow a soft gradient already gives. Paint-once, no perceptible change. */
 body::before {
   content: ''; position: fixed;
-  top: 0; left: 0; right: 0; height: 320px;
+  top: 0; left: 0; right: 0; height: 360px;
   background:
-    radial-gradient(ellipse 60% 100% at 50% 0%, var(--lane-glow), transparent 70%);
-  opacity: 0.20;
-  filter: blur(80px);
+    radial-gradient(ellipse 78% 118% at 50% -22%, var(--lane-glow), transparent 72%);
+  opacity: 0.18;
   pointer-events: none; z-index: 0;
 }
 
