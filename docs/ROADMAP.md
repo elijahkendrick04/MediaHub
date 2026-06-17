@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `de2bb9ccf` · Merge pull request #729: G1.8 gradient-mesh background engine
+**Last updated:** 2026-06-17 · `7e1f628da` · Merge pull request #736 from elijahkendrick04/claude/adoring-ritchie-gcu65d
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -177,7 +177,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.2** · Graphic generator sprint — Multi-athlete collage / relay layout engine compositing 2–4 cutouts into one balanced frame with deterministic multi-subject placement. *Build: new `graphic_renderer/collage.py` + `layouts/v2/relay_collage.html`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.12** · Graphic generator sprint — Multi-line hero & split-result fitting — wrap/balance compound surnames and split times (`1:45.23 / 50.12`). *Build: `autofit.py` (file-sibling G1.11) + v2 hero slots.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1548,6 +1547,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `b7161ab8b` | G1.12 — Multi-line hero & split-result fitting |
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
 | 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
 | 2026-06-17 | `955c40af4` | Add motion photo filter stack overlay (R1.10) |
