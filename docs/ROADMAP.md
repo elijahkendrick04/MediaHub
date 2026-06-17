@@ -165,14 +165,12 @@ Every item below is tagged:
 So: fire all 60 at once. The 🟢 items are unconditionally safe; the 🟡 items auto-merge
 because their edit regions don't overlap.
 
-**UI2 — design-system-uplift follow-on surfaces (UI follow-on, after the generator sprint).** The UI
-motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) is built and wired into
-nine screens in PR #473. These items build the *purpose-built surfaces* the remaining
-adopt-listed kit effects still need — rather than force-fitting them — and sit at the very
-top of this list. Each reuses the already-built kit classes and is a discrete, dispatchable
-build. **Parallelism:** 🟢 = independent surface, safe to build/merge in a **separate
-parallel session**; 🟡 = touches a shared file (the `.btn` system or a list filter), so
-sequence it or merge with care.
+**UI2 — design-system-uplift follow-on surfaces · ✅ COMPLETE (nothing to build here).**
+The seven original UI2 surfaces (UI2.1–UI2.7) and the UI2.8 follow-on — an inline,
+machine-readable *Codeblock* view of a run's recognition data on the review page — are all
+shipped and recorded in [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). Each reused the already-built
+UI motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) rather than force-fitting
+an effect. This epic is closed; new UI follow-on work would be filed as fresh `UI 1.*` items.
 
 <!-- ROADMAP:TODO -->
 - **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED
