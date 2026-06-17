@@ -143,6 +143,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **R1.10** · Reel generator sprint — Motion photo filter stack — deterministic frame-pure brightness/contrast/saturation/blur from brief fields. *Build: `sprint/layers/photo_filters.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
 - ✅ **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
 - ✅ **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
+- ✅ **G1.12** · Graphic generator sprint — Multi-line hero & split-result fitting — wrap/balance compound surnames and split times (`1:45.23 / 50.12`). *Build: `autofit.py` (file-sibling G1.11) + v2 hero slots.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
