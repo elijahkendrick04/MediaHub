@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `8b7615078` · Merge pull request #723 from elijahkendrick04/claude/busy-shannon-ukifaz
+**Last updated:** 2026-06-17 · `c4f420d37` · Merge pull request #755: G1.14 WebP/AVIF output + render quality profiles
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -176,7 +176,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1529,9 +1528,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `50dc3a6c9` | G1.14: WebP/AVIF output + render quality profiles (fast/standard/high) |
 | 2026-06-17 | `f5ff1b3af` | style: ruff-format R1.15 additions (web.py reel-batch worker, tests) |
 | 2026-06-17 | `399de1f30` | R1.27: frame-by-frame motion visual-regression harness |
 | 2026-06-17 | `f68e655a3` | R1.14: determinism guard checks for calls, not the bare name |
 | 2026-06-17 | `874fef97f` | fix(roadmap-bot): self-heal directives dropped by the concurrent-merge race |
-| 2026-06-17 | `bff8696d9` | G1.19: format _MONO_PHRASE for the pinned ruff (pre-commit gate) |
 <!-- /ROADMAP:ACTIVITY -->
