@@ -96,14 +96,21 @@ class BrandKit:
         if self.derived_palette is not None and not force:
             return self.derived_palette
         # Local import to avoid circular dep (theming → kit would loop).
-        from mediahub.theming import derive_theme
+        from mediahub.theming import derive_theme_multi
 
         seed_source = (
             source
             if source is not None
             else (self.logo_svg if self.logo_svg else self.safe_primary())
         )
-        theme = derive_theme(seed_source)
+        # G1.20 — the club's secondary / accent colours are threaded into the
+        # palette as additional brand-role candidates. The theming engine
+        # filters them to brandable, distinct colours and APCA-gates the role
+        # assignment, so a kit whose extras are absent / non-brandable (e.g.
+        # the default ``secondary_colour="#000000"``) derives byte-identically
+        # to the pre-G1.20 single-seed engine.
+        extra_colours = [self.secondary_colour, self.accent_colour]
+        theme = derive_theme_multi(seed_source, extra_colours)
         self.derived_palette = theme.to_json()
         # Phase 1.6 Stage G — mirror the palette to the on-disk theme
         # store at DATA_DIR/themes/<profile_id>.json so the motion,

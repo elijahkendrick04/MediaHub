@@ -292,3 +292,59 @@ def test_manifest_axes_record_photo_focus(tmp_path):
     assert axes["photo_focus"] == props["photoPos"]
     assert axes["photo_focus"] == saliency.focus_position_for_format(str(p), "landscape")
     assert axes["has_photo"] is True
+
+
+# --------------------------------------------------------------------------- #
+# _apply_format_photo_focus — per-cut re-resolution shared by both reel paths
+# --------------------------------------------------------------------------- #
+# The reel assembler (R1.15) embeds photos + resolves roles ONCE with the
+# story-focus base and reuses that across every cut; R1.7 re-steers only the
+# cheap photoPos per cut at the render chokepoint. These cover that helper.
+
+
+def _reel_base(p: Path, n: int = 2):
+    """The format-independent (story-focus) card props + matching briefs the
+    reel assembler produces, with the photo path resolver mocked to ``p``."""
+    briefs = [_brief() for _ in range(n)]
+    with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
+        cards = [motion._card_to_props(_card(i), brief=briefs[i]) for i in range(n)]
+    return cards, briefs
+
+
+def test_apply_format_photo_focus_story_is_identity(tmp_path):
+    p = _corner_subject(tmp_path)
+    cards, briefs = _reel_base(p)
+    # The story cut returns the very same list object — no work, byte-identical
+    # cache key, embedded photoSrc/cutoutSrc bytes untouched.
+    assert motion._apply_format_photo_focus(cards, briefs, "story") is cards
+
+
+def test_apply_format_photo_focus_resolves_per_cut(tmp_path):
+    p = _corner_subject(tmp_path)
+    cards, briefs = _reel_base(p)
+    with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
+        out = motion._apply_format_photo_focus(cards, briefs, "landscape")
+    expected = saliency.focus_position_for_format(str(p), "landscape")
+    assert [c["photoPos"] for c in out] == [expected, expected]
+    # Story base differed → the cards were re-resolved for the landscape cut …
+    assert out[0]["photoPos"] != cards[0]["photoPos"]
+    # … but the expensive embedded photo bytes ride through unchanged.
+    assert out[0]["photoSrc"] == cards[0]["photoSrc"]
+
+
+def test_apply_format_photo_focus_does_not_mutate_input(tmp_path):
+    p = _corner_subject(tmp_path)
+    cards, briefs = _reel_base(p)
+    before = [c["photoPos"] for c in cards]
+    with mock.patch.object(motion, "_photo_asset_path_for_brief", return_value=p):
+        motion._apply_format_photo_focus(cards, briefs, "landscape")
+    assert [c["photoPos"] for c in cards] == before  # originals untouched
+
+
+def test_apply_format_photo_focus_leaves_photoless_cards():
+    # No photo → "" in the base and "" for every cut; the card object is reused.
+    nb = {"photo_treatment": "no-photo"}
+    cards = [motion._card_to_props(_card(1), brief=nb)]
+    out = motion._apply_format_photo_focus(cards, [nb], "square")
+    assert out[0]["photoPos"] == ""
+    assert out[0] is cards[0]  # unchanged → not copied

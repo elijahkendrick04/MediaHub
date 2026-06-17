@@ -507,6 +507,54 @@ def _commits_in_range(before: str, after: str):
     return [c.strip() for c in out.split("\x1e") if c.strip()]
 
 
+# How many recent non-merge commits to re-scan for `roadmap:` directives on
+# every run, on top of this push's own range. The narrow push range alone is
+# not enough: `main` is updated by a SHARED bot branch landed via async
+# auto-merge, and under concurrent feature merges a later run rebuilds that
+# branch from the freshest main — which still lacks an earlier run's *un-merged*
+# roadmap delta — and force-overwrites it, applying only its own range's
+# directives. Any directive whose commit sat solely in the overwritten run's
+# range is then silently lost (this is how G1.2 / G1.22 / G1.30 stalled at
+# NOT-STARTED despite shipping). Re-applying the directives found in a bounded
+# recent window every run makes the apply self-healing: a `done` is idempotent
+# (re-applying it to an already-moved item is a no-op), so a re-scan can only
+# converge the lists toward the directives' intent, never corrupt them — the
+# next push to land reinstates anything a force-overwrite dropped.
+_DIRECTIVE_LOOKBACK = int(os.environ.get("ROADMAP_DIRECTIVE_LOOKBACK", "400"))
+
+
+def _directive_messages(before: str, after: str, lookback: int | None = None):
+    """Commit bodies to scan for directives, ordered oldest->newest.
+
+    The union of this push's explicit range ``(before, after]`` and a bounded
+    recent backstop (the last ``lookback`` non-merge commits ending at
+    ``after``). The backstop is the self-heal; the explicit range guarantees a
+    directive is never *less* likely to apply than before. Returned oldest-first
+    so that — via :func:`parse_directives`' last-write-wins — the **newest**
+    directive for any id is the one that takes effect.
+    """
+    if lookback is None:
+        lookback = _DIRECTIVE_LOOKBACK
+    bodies = list(_commits_in_range(before, after))  # newest-first
+    if lookback > 0:
+        try:
+            out = _git("log", "--no-merges", f"-{int(lookback)}", "--format=%B%x1e", after)
+            bodies += [c.strip() for c in out.split("\x1e") if c.strip()]
+        except subprocess.CalledProcessError:
+            pass
+    # De-dup identical bodies (the range is a subset of the backstop), keeping
+    # the first — newest — occurrence, then reverse to hand parse_directives an
+    # oldest->newest stream so the latest directive for an id wins.
+    seen = set()
+    uniq = []
+    for body in bodies:
+        if body not in seen:
+            seen.add(body)
+            uniq.append(body)
+    uniq.reverse()
+    return uniq
+
+
 def _recent_commits(n: int = 12):
     out = _git("log", "--no-merges", f"-{n + 5}", "--format=%cs%x1f%H%x1f%s%x1e")
     items = []
@@ -537,9 +585,11 @@ def main() -> int:
     text, built, swept = sweep_completed(text, done_text=built)
     applied = [f"{ident}=done(sweep)" for ident in swept]
 
-    # 2. status directives from this push → update/move list items (after the
-    #    sweep, so an explicit directive in this push wins over it)
-    directives = parse_directives(_commits_in_range(before, after))
+    # 2. status directives → update/move list items (after the sweep, so an
+    #    explicit directive wins over it). Scanned from this push's range PLUS a
+    #    bounded recent backstop so a directive force-dropped by the concurrent
+    #    bot-branch race (see _DIRECTIVE_LOOKBACK) self-heals on the next push.
+    directives = parse_directives(_directive_messages(before, after))
     for ident, status_kw in directives:
         text, built, changed = set_item_status(text, ident, status_kw, done_text=built)
         if changed:

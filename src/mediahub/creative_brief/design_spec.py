@@ -121,6 +121,14 @@ MOTION_INTENTS: tuple[str, ...] = (
     "parallax",
     "count_up",
     "static",
+    # R1.1 motion-intent program pack — each executed by its own auto-discovered
+    # file under remotion/.../sprint/intents/<name>.ts (no StoryCard.tsx switch
+    # edit); the default branch of animProgram() looks them up via EXTRA_INTENTS.
+    "bounce_in",
+    "flip_reveal",
+    "swirl",
+    "reveal_from_sides",
+    "cascade",
 )
 
 # Safe defaults — each MUST be a member of its vocabulary above. These are the
