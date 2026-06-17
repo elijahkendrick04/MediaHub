@@ -960,35 +960,56 @@ def render_meet_reel_from_props(
 
     with tempfile.TemporaryDirectory(prefix="mh_reel_ffmpeg_") as td:
         work = Path(td)
-        stills: list[Path] = [
-            _render_still(
-                _cover_brief(
-                    cards_props,
-                    brand_dict,
+        # Build the beat list — the meet-name cover plus one still per card —
+        # then render the stills concurrently. The beats are independent and
+        # their Chromium renders dominate the reel's wall-clock cost;
+        # render_beats preserves beat order, so the FFmpeg transition chain
+        # still composites cover, card0, card1, … and the output bytes (and
+        # cache key) are unchanged — only the wall-clock shrinks. (This extends
+        # R1.28's parallel-composition win — which sped up the Remotion reel via
+        # reel_parallel.py — to the free FFmpeg fallback engine, whose beats
+        # still rendered serially.) Each closure binds its own brief/name via
+        # default args so it doesn't capture the loop's final value.
+        from mediahub.visual.reel_ffmpeg_parallel import Beat, render_beats
+
+        cover_brief = _cover_brief(
+            cards_props,
+            brand_dict,
+            brand_kit,
+            meet_name,
+            format_name=format_name,
+        )
+        beats: list[Beat] = [
+            Beat(
+                "cover",
+                lambda b=cover_brief: _render_still(
+                    b,
                     brand_kit,
-                    meet_name,
+                    work,
+                    name="cover",
+                    size=(width, height),
                     format_name=format_name,
                 ),
-                brand_kit,
-                work,
-                name="cover",
-                size=(width, height),
-                format_name=format_name,
             )
         ]
         for idx, props in enumerate(cards_props):
             bd = briefs[idx] if idx < len(briefs) else None
             brief = _frame_brief(props, brand_dict, brand_kit, bd, format_name=format_name)
-            stills.append(
-                _render_still(
-                    brief,
-                    brand_kit,
-                    work,
-                    name=f"card{idx}",
-                    size=(width, height),
-                    format_name=format_name,
+            name = f"card{idx}"
+            beats.append(
+                Beat(
+                    name,
+                    lambda b=brief, n=name: _render_still(
+                        b,
+                        brand_kit,
+                        work,
+                        name=n,
+                        size=(width, height),
+                        format_name=format_name,
+                    ),
                 )
             )
+        stills = render_beats(beats)
 
         seg_durations = reel_segment_durations(len(cards_props), duration_sec)
         tmp_mp4 = work / "reel.mp4"
