@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `b7624610e` · Merge pull request #727: Build UI2.8 — inline machine-readable Codeblock view on the review page
+**Last updated:** 2026-06-17 · `5af8b0077` · Merge pull request #722 from elijahkendrick04/claude/nice-clarke-brwhla
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -196,7 +196,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **R1.14** · Reel generator sprint — Transition library expansion + per-card timing — new transitions (glitch, slide-stack, light-sweep) + a duration field. *Build: `MeetReel.tsx` `transitionFor` + `TransitionWrap` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.15** · Reel generator sprint — Multi-format batch reel render — one request renders + caches all four cuts in a single pass. *Build: `visual/motion.py` `render_meet_reel` + a new web route (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1554,12 +1553,11 @@ list and the auto table below, not here.
 |---|---|---|
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
 | 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
+| 2026-06-17 | `955c40af4` | Add motion photo filter stack overlay (R1.10) |
+| 2026-06-17 | `194070927` | R1.21: local Piper TTS backend behind the voiceover seam |
 | 2026-06-17 | `e6a0c475d` | Build UI2.8 — inline machine-readable Codeblock view on the review page |
 | 2026-06-17 | `89373a184` | R1.9: cutout-layer compositing in motion (parallax foreground) |
 | 2026-06-17 | `c1e71c990` | Apply ruff-format to G1.15 files |
 | 2026-06-17 | `47b2451f9` | R1.23: dynamic logo sizing + scene-aware animated logo reveal |
 | 2026-06-17 | `ed770aa11` | Batch ZIP pack export — every format + metadata.json manifest (G1.15) |
-| 2026-06-17 | `3a897d3c8` | Add club custom-font upload pipeline (G1.10) |
-| 2026-06-17 | `872fdd9f7` | R1.5: motion accent-decoration expansion pack |
-| 2026-06-17 | `16b02fead` | G1.30: apply ruff-format to inspection overlay module + tests |
 <!-- /ROADMAP:ACTIVITY -->
