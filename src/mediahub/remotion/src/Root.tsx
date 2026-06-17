@@ -37,6 +37,7 @@ const defaultCard = {
   photoTreatment: "",
   photoSrc: "",
   photoPos: "",
+  cutoutSrc: "",
   archetype: "",
   heroStat: "",
   // A valid sample pack so the studio preview demonstrates the style-pack
@@ -47,6 +48,7 @@ const defaultCard = {
   roleSurface: "",
   roleAccent: "",
   roleOnGround: "",
+  captionsJson: "",
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -74,6 +76,11 @@ export const RemotionRoot: React.FC = () => {
           cards: [defaultCard, defaultCard, defaultCard],
           brand: defaultBrand,
           meetName: "MediaHub Open",
+          // R1.30 outro-CTA inputs. Blank by default → the Studio preview
+          // shows the universal "follow the club" close; production passes a
+          // real sponsor / next-meet label when the club has one.
+          sponsor: "",
+          nextMeet: "",
         }}
       />
     </>

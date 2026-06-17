@@ -38,7 +38,7 @@ Loader wiring: `theme_tokens.py` exports `THEME_MOTION_CSS`; `web.py` appends it
 | **Home / landing** | Spotlight (hero ambient), Infinite-Moving-Cards (sport marquee), Card-Spotlight (sample cards + the 4 step cards), split-flap Flapboard (PB time), gradient-text (marquee label), reveal (final CTA via `.mh-reveal`) |
 | **Upload** | Aurora ambient (entry hero) |
 | **Processing** | Multi-Step Loader (real pipeline log → live step checklist via `MH.renderLogSteps`) |
-| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars), Animated-Tooltip (athlete avatar on every card → name · club · meet haul, via `.mh-tooltip`), client-side workflow Tabs (`.mh-tabs` — Queue/Approved filter switches in place, no reload, UI2.4) |
+| **Review** | Count-up (recognition stats, via the existing `data-mh-count`), bar-fill (priority bars), Animated-Tooltip (athlete avatar on every card → name · club · meet haul, via `.mh-tooltip`), client-side workflow Tabs (`.mh-tabs` — Queue/Approved filter switches in place, no reload, UI2.4), inline machine-readable **Codeblock** (the run's recognition data, syntax-highlighted + copyable on the Recognition-summary card, UI2.8) |
 | **Make** | Glow-border (live content-type tiles) |
 | **Settings** | Glow-border (category tiles) + reveal-group (tile grid) |
 | **Sign-in** | Card-Spotlight (org profile cards) |
@@ -172,12 +172,12 @@ MediaHub's UI guide: *avoid generic AI-SaaS patterns; no over-animation*).
 | GitHub Globe / World Map / 3D Globe | SKIP | not relevant to a club |
 | Timeline | ADOPT | `.mh-timeline` (recap / audit) |
 | Compare | ADOPT | `.mh-compare` (cutout A/B) |
-| Codeblock | PARTIAL | raw parsed-data view |
+| Codeblock | ADOPT | `code_highlight` first-party server-side highlighter (`.mh-cs-*`/`.mh-tok-*`); wired to the review page's inline machine-readable raw parsed-data view (UI2.8) |
 | Following Pointer / Pointer Highlight | SKIP | gimmick |
 | Lens | ADOPT | `.mh-lens` (media library) |
 | 3D Pin / 3D Marquee | PARTIAL | |
 
-**Tally:** ~40 ADOPT, ~25 PARTIAL (idea taken; restrained or awaiting a host surface),
+**Tally:** ~41 ADOPT, ~24 PARTIAL (idea taken; restrained or awaiting a host surface),
 ~25 SKIP. Every one of the 108 has a verdict.
 
 ---
