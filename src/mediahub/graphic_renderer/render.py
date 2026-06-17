@@ -3199,14 +3199,20 @@ def _fill_v2_archetype(
     from mediahub.graphic_renderer.autofit import optimise_axes as _optimise_axes
 
     result_axes = _optimise_axes(
-        result or "", width * _rw, font_family="JetBrains Mono",
-        weight=700, fitted_px=fit_result_px,
+        result or "",
+        width * _rw,
+        font_family="JetBrains Mono",
+        weight=700,
+        fitted_px=fit_result_px,
     )
     if result_axes.css:
         root_vars["--mh-axes-result"] = result_axes.css
     mega_result_axes = _optimise_axes(
-        result or "", width * _mw, font_family="JetBrains Mono",
-        weight=700, fitted_px=fit_mega_result_px,
+        result or "",
+        width * _mw,
+        font_family="JetBrains Mono",
+        weight=700,
+        fitted_px=fit_mega_result_px,
     )
     if mega_result_axes.css:
         root_vars["--mh-axes-mega-result"] = mega_result_axes.css

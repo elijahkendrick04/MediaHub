@@ -836,8 +836,9 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
-def axis_css(*, wght: float | None = None, wdth: float | None = None,
-             opsz: float | None = None) -> str:
+def axis_css(
+    *, wght: float | None = None, wdth: float | None = None, opsz: float | None = None
+) -> str:
     """Format a CSS ``font-variation-settings`` value from axis values.
 
     Tags are emitted in the canonical ``wght, wdth, opsz`` order; ``None`` axes
@@ -928,15 +929,12 @@ def optimise_axes(
                         wght = float(lighter)
                         deviated = True
                         measured = (
-                            em_width(text, font_family=font_family, weight=int(wght))
-                            * fitted_px
+                            em_width(text, font_family=font_family, weight=int(wght)) * fitted_px
                         )
                         ratio = box_w / measured if measured > 0 else 1.0
             # 2) condense width toward the face minimum for any residual overflow.
             if axes.wdth is not None and ratio < 1.0 - 1e-6:
-                wdth = round(
-                    _clamp(100.0 * ratio, axes.wdth[0], min(100.0, axes.wdth[1])), 1
-                )
+                wdth = round(_clamp(100.0 * ratio, axes.wdth[0], min(100.0, axes.wdth[1])), 1)
                 deviated = True
 
     css = axis_css(wght=wght, wdth=wdth) if deviated else ""
