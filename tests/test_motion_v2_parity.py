@@ -12,8 +12,7 @@ Covers the reel-side catch-up with the Gen v2 still engine:
   * every v2 still archetype maps to a motion scene (no archetype silently
     collapses back into the one hero layout);
   * output formats: story / portrait / square / landscape sizes, cache-key
-    sensitivity,
-    and an honest error from the ffmpeg fallback engine for non-story cuts;
+    sensitivity, and the ffmpeg fallback engine rendering every cut too (R1.16);
   * the explainability manifest written next to each cached MP4;
   * the reel's outro scene, honest cover stats, and deterministic per-beat
     transitions exist in the composition.
@@ -34,7 +33,6 @@ from mediahub.brand.kit import BrandKit
 from mediahub.creative_brief import design_spec as ds
 from mediahub.creative_brief.generator import CreativeBrief, apply_design_spec, generate
 from mediahub.visual import motion
-from mediahub.visual.reel_engine import ReelEngineUnavailable
 
 
 BRAND = BrandKit(
@@ -265,21 +263,48 @@ def test_cache_key_varies_with_format(tmp_path, monkeypatch):
     assert len(list(cache.glob("*.mp4"))) == len(motion.MOTION_FORMATS)
 
 
-def test_ffmpeg_engine_rejects_non_story_formats_honestly(tmp_path, monkeypatch):
+def test_ffmpeg_engine_renders_non_story_formats(tmp_path, monkeypatch):
+    """R1.16: the free ffmpeg fallback renders every cut (story / portrait /
+    square / landscape), not only story — parity with the Remotion path. The
+    chosen format flows through to reel_ffmpeg and Node is never invoked."""
+    from mediahub.visual import reel_ffmpeg
+
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
-    with pytest.raises(ReelEngineUnavailable, match="story"):
-        motion.render_story_card(
-            _card(1), BRAND, tmp_path / "x.mp4", format_name="square"
+
+    seen: dict = {}
+
+    def _fake_story(card_props, brand_dict, brand_kit, out_path, **kw):
+        seen.setdefault("story", []).append(kw.get("format_name"))
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"0" * 2048)
+        return out
+
+    def _fake_reel(cards_props, brand_dict, brand_kit, out_path, **kw):
+        seen.setdefault("reel", []).append(kw.get("format_name"))
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"0" * 2048)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_story_card_from_props", _fake_story)
+    monkeypatch.setattr(reel_ffmpeg, "render_meet_reel_from_props", _fake_reel)
+
+    with mock.patch.object(motion, "_run_remotion") as remotion:
+        for fmt in ("portrait", "square", "landscape"):
+            out = motion.render_story_card(
+                _card(1), BRAND, tmp_path / f"s_{fmt}.mp4", format_name=fmt
+            )
+            assert Path(out).exists()
+        reel = motion.render_meet_reel(
+            [_card(1)], BRAND, tmp_path / "reel.mp4", format_name="landscape"
         )
-    with pytest.raises(ReelEngineUnavailable, match="story"):
-        motion.render_meet_reel(
-            [_card(1)], BRAND, tmp_path / "y.mp4", format_name="landscape"
-        )
-    with pytest.raises(ReelEngineUnavailable, match="story"):
-        motion.render_story_card(
-            _card(1), BRAND, tmp_path / "z.mp4", format_name="portrait"
-        )
+        assert Path(reel).exists()
+        assert not remotion.called  # the ffmpeg engine never falls back to Node
+
+    assert seen["story"] == ["portrait", "square", "landscape"]
+    assert seen["reel"] == ["landscape"]
 
 
 # ---------------------------------------------------------------------------

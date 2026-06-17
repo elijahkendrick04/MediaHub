@@ -765,12 +765,6 @@ def render_story_card(
     audio_plan = _story_audio_plan(card_dict, brand_dict)
 
     if engine == "ffmpeg":
-        if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
-            raise ReelEngineUnavailable(
-                "The 'ffmpeg' reel engine currently renders the story "
-                "(1080×1920) format only. Use the Remotion engine for "
-                f"the {format_name!r} cut, or request format=story."
-            )
         from mediahub.visual import reel_ffmpeg
 
         return reel_ffmpeg.render_story_card_from_props(
@@ -781,6 +775,7 @@ def render_story_card(
             duration_sec=duration_sec,
             brief_dict=brief,
             audio_plan=audio_plan,
+            format_name=format_name,
         )
 
     cache_payload = {
@@ -936,12 +931,6 @@ def render_meet_reel(
     audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
 
     if engine == "ffmpeg":
-        if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
-            raise ReelEngineUnavailable(
-                "The 'ffmpeg' reel engine currently renders the story "
-                "(1080×1920) format only. Use the Remotion engine for "
-                f"the {format_name!r} cut, or request format=story."
-            )
         from mediahub.visual import reel_ffmpeg
 
         return reel_ffmpeg.render_meet_reel_from_props(
@@ -953,6 +942,7 @@ def render_meet_reel(
             duration_sec=duration_sec,
             brief_dicts=briefs_list,
             audio_plan=audio_plan,
+            format_name=format_name,
         )
 
     cache_payload = {

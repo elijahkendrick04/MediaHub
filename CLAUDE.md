@@ -292,8 +292,11 @@ synthetic AI-generated people unless explicitly requested.
 Both accept `?format=story|portrait|square|landscape` (default `story`) and
 serve the rendered MP4 directly with `Content-Type: video/mp4`. Cache hits
 return the existing file (< 30s wall-clock); cold renders take 30–90s on the
-deployment's worker. The free ffmpeg fallback engine renders the story format
-only and raises an honest `ReelEngineUnavailable` for the other cuts.
+deployment's worker. The free ffmpeg fallback engine renders all four cuts too
+(story/portrait/square/landscape): it renders the card's own still at the
+requested geometry and threads that `(width, height)` through every FFmpeg
+filter, folding the non-story cut into the cache key while keeping the story
+path's cache keys byte-identical.
 
 ### Brand consistency (motion ↔ still parity)
 
