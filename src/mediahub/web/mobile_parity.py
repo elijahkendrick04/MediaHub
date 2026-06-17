@@ -41,10 +41,24 @@ import json
 # flagged ``default`` is the width the audit runs at; the others drive the
 # preview pane and the optional multi-width sweep.
 MOBILE_PARITY_DEVICES: list[dict] = [
-    {"id": "iphone-se", "label": "iPhone SE", "w": 375, "h": 667, "kind": "phone", "default": False},
+    {
+        "id": "iphone-se",
+        "label": "iPhone SE",
+        "w": 375,
+        "h": 667,
+        "kind": "phone",
+        "default": False,
+    },
     {"id": "iphone-14", "label": "iPhone 14", "w": 390, "h": 844, "kind": "phone", "default": True},
     {"id": "pixel-7", "label": "Pixel 7", "w": 412, "h": 915, "kind": "phone", "default": False},
-    {"id": "ipad-mini", "label": "iPad mini", "w": 768, "h": 1024, "kind": "tablet", "default": False},
+    {
+        "id": "ipad-mini",
+        "label": "iPad mini",
+        "w": 768,
+        "h": 1024,
+        "kind": "tablet",
+        "default": False,
+    },
     {"id": "desktop", "label": "Desktop", "w": 1280, "h": 800, "kind": "desktop", "default": False},
 ]
 

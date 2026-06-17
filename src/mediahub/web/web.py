@@ -13927,15 +13927,41 @@ def create_app() -> Flask:
         # downloads / auth round-trips / the tool itself). This keeps the audit
         # honest as routes come and go — nothing to hand-maintain.
         _SKIP_PREFIX = (
-            "/api", "/webhooks", "/static", "/healthz", "/sw.js", "/robots",
-            "/.well-known", "/tools/mobile-parity", "/logout", "/sign-out",
-            "/auth", "/oauth", "/magic", "/r/", "/embed/",
+            "/api",
+            "/webhooks",
+            "/static",
+            "/healthz",
+            "/sw.js",
+            "/robots",
+            "/.well-known",
+            "/tools/mobile-parity",
+            "/logout",
+            "/sign-out",
+            "/auth",
+            "/oauth",
+            "/magic",
+            "/r/",
+            "/embed/",
         )
         _SKIP_SUBSTR = (
-            "download", "export", "raw", "render", "motion", "reel", "poster",
-            "preview_image", "thumbnail", "favicon", "manifest", "feed.xml",
+            "download",
+            "export",
+            "raw",
+            "render",
+            "motion",
+            "reel",
+            "poster",
+            "preview_image",
+            "thumbnail",
+            "favicon",
+            "manifest",
+            "feed.xml",
             # Mutation-ish GET endpoints the audit must not trigger by loading.
-            "confirm", "claim", "delete", "checkout", "portal",
+            "confirm",
+            "claim",
+            "delete",
+            "checkout",
+            "portal",
         )
         seen: set[str] = set()
         targets: list[dict] = []
@@ -13958,10 +13984,7 @@ def create_app() -> Flask:
             if path in seen:
                 continue
             seen.add(path)
-            label = (
-                rule.endpoint.replace("_page", "").replace("_", " ").strip().title()
-                or path
-            )
+            label = rule.endpoint.replace("_page", "").replace("_", " ").strip().title() or path
             targets.append({"label": label, "url": path, "group": ""})
         targets.sort(key=lambda t: (t["url"] != "/", t["label"]))
 
