@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `83e3c2c7c` · Merge pull request #715 from elijahkendrick04/claude/wizardly-archimedes-5jv6e0
+**Last updated:** 2026-06-17 · `6ea73c6d3` · Merge pull request #720 from elijahkendrick04/claude/amazing-knuth-usor58
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -192,7 +192,6 @@ sequence it or merge with care.
 - **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.10** · Reel generator sprint — Motion photo filter stack — deterministic frame-pure brightness/contrast/saturation/blur from brief fields. *Build: `sprint/layers/photo_filters.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.13** · Reel generator sprint — Custom reel stat chips — configurable honest stat labels (top splits, season records, relay wins) from card facts. *Build: `MeetReel.tsx` `reelStats`/`StatChips` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1556,6 +1555,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `89373a184` | R1.9: cutout-layer compositing in motion (parallax foreground) |
 | 2026-06-17 | `c1e71c990` | Apply ruff-format to G1.15 files |
 | 2026-06-17 | `47b2451f9` | R1.23: dynamic logo sizing + scene-aware animated logo reveal |
 | 2026-06-17 | `ed770aa11` | Batch ZIP pack export — every format + metadata.json manifest (G1.15) |
@@ -1564,5 +1564,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `16b02fead` | G1.30: apply ruff-format to inspection overlay module + tests |
 | 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 | 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
-| 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
 <!-- /ROADMAP:ACTIVITY -->
