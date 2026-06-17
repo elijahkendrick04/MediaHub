@@ -79,7 +79,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `f9b216fe4` · Merge pull request #774 from elijahkendrick04/claude/wizardly-hopper-wjwvdl
+**Last updated:** 2026-06-17 · `8b107fde7` · Merge pull request #777: Move Plan under Create; add Free-Text NL input + goals to the planner
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1318,12 +1318,12 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `7a3e5a86b` | Fix flaky planner-interpret test under full-suite ordering |
+| 2026-06-17 | `16a8cade2` | Move Plan under Create; add Free-Text NL input + goals to the planner |
 | 2026-06-17 | `cbe5dd7b5` | Auto-maintain the whole roadmap, not just the to-do list |
 | 2026-06-17 | `7c5148927` | Make the developer "Clear all caches" button fully clear disk + memory |
 | 2026-06-17 | `9603e8877` | Fix sitewide FPS: stop animating non-compositable paint properties |
 | 2026-06-17 | `27968b58d` | autotest: stop the fixer rewriting the golden oracle and opening no-op PRs |
 | 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
 | 2026-06-17 | `a71353d0d` | Re-trigger CI |
-| 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
-| 2026-06-17 | `c3c846f0c` | Fix pre-existing CI red: ffmpeg reel engine now renders all formats (R1.16) |
 <!-- /ROADMAP:ACTIVITY -->

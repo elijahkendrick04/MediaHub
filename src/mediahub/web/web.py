@@ -10285,7 +10285,9 @@ def _layout(
   </button>
   <nav id="mh-primary-nav">
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
-    <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
+    {# Plan moved out of the top bar and under Create — it answers "what should
+       we make?", so it lives as the strategic entry point on the Create page
+       (and stays on the g→p keyboard shortcut). #}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
     <a href="{{ url_for('design_studio') }}" class="{{ 'active' if active=='studio' else '' }}">Studio</a>
@@ -23589,6 +23591,55 @@ window.mhSchedulerDisconnect = function(btn) {
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid, "inputs": saved})
 
+    @app.route("/api/plan/interpret", methods=["POST"])
+    def api_plan_interpret():
+        # Free-text → STRUCTURED direct inputs (the Free-Text feature's NL
+        # interpretation + web research, brought to the planner). The AI only
+        # PROPOSES inputs the operator reviews + saves; the deterministic
+        # ranker is untouched. Honest provider errors, no heuristic fallback.
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "Tell the planner what's coming up first."}), 400
+
+        # Resolve the org's sport the same way the page does, so goals can only
+        # ever target a post type this sport actually enables.
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import list_sport_profiles, load_sport_profile
+
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        _avail = {p.sport for p in list_sport_profiles()}
+        _prof = _active_profile()
+        sport = _ORG_TYPE_TO_SPORT.get(getattr(_prof, "org_type", "") or "")
+        if sport not in _avail:
+            sport = str(body.get("sport") or "swimming").strip().lower()
+        try:
+            profile = load_sport_profile(sport)
+            goal_choices = [(spt.slug, spt.title) for spt in post_types_for(profile)]
+        except Exception:
+            goal_choices = []
+
+        from mediahub.ai_core import ProviderError, ProviderNotConfigured
+        from mediahub.content_engine.nl_inputs import interpret_planner_inputs
+
+        try:
+            parsed = interpret_planner_inputs(text, goal_choices=goal_choices)
+        except ProviderNotConfigured as exc:
+            return jsonify({"error": str(exc)}), 503
+        except ProviderError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except Exception as exc:
+            app.logger.exception("plan interpret failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "org_id": pid, "parsed": parsed})
+
     @app.route("/plan")
     def plan_page():
         pid = _active_profile_id()
@@ -23716,13 +23767,70 @@ window.mhSchedulerDisconnect = function(btn) {
   discovered context and anything you tell it below into a ranked list of what to post next, with the reasoning shown for every item.</p>
 </div>"""
 
-        events_rows = "".join(
-            f'<div class="mh-plan-ev" data-name="{_h(e["name"])}" data-date="{_h(e["date"])}" style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
-            f'<span style="font-variant-numeric:tabular-nums">{_h(e["date"])}</span><span style="flex:1">{_h(e["name"])}</span>'
-            f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button></div>'
-            for e in inputs.get("upcoming_events") or []
-        )
+        def _ev_row(e: dict) -> str:
+            venue = str(e.get("venue") or "")
+            venue_html = (
+                f'<span class="dim" style="font-size:11.5px">{_h(venue)}</span>' if venue else ""
+            )
+            return (
+                f'<div class="mh-plan-ev" data-name="{_h(e["name"])}" data-date="{_h(e["date"])}" '
+                f'data-venue="{_h(venue)}" style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
+                f'<span style="font-variant-numeric:tabular-nums">{_h(e["date"])}</span>'
+                f'<span style="flex:1">{_h(e["name"])}{(" — " + venue_html) if venue else ""}</span>'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button></div>'
+            )
+
+        events_rows = "".join(_ev_row(e) for e in inputs.get("upcoming_events") or [])
         blackout_val = _h(", ".join(inputs.get("blackout_dates") or []))
+
+        # Goals are a real planning lever (the ranker rewards a post type the
+        # operator says they want to push), but the form never surfaced them —
+        # and the old save dropped them on every write. Surface them now, keyed
+        # to the post types this sport actually enables.
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import load_sport_profile
+
+        try:
+            _sport_pts = post_types_for(load_sport_profile(current_sport))
+        except Exception:
+            _sport_pts = []
+        _goal_titles = {spt.slug: spt.title for spt in _sport_pts}
+        goal_opts = "".join(
+            f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in _sport_pts
+        )
+
+        def _goal_row(g: dict) -> str:
+            slug = str(g.get("post_type") or "")
+            title = _goal_titles.get(slug, slug.replace("_", " ").title())
+            note = str(g.get("note") or "")
+            note_html = (
+                f'<span style="flex:1;color:var(--ink-muted)">{_h(note)}</span>'
+                if note
+                else '<span style="flex:1"></span>'
+            )
+            return (
+                f'<div class="mh-plan-goal" data-slug="{_h(slug)}" data-note="{_h(note)}" '
+                f'style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
+                f'<span style="flex:0 0 auto;font-weight:600">{_h(title)}</span>{note_html}'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveGoal(this)">remove</button></div>'
+            )
+
+        goals_rows = "".join(_goal_row(g) for g in inputs.get("goals") or [])
+
+        if goal_opts:
+            goals_add_html = (
+                '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
+                f'<select id="mh-plan-goal-type" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
+                '<input type="text" id="mh-plan-goal-note" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
+                '<button type="button" class="btn" onclick="mhPlanAddGoal()">Add goal</button>'
+                "</div>"
+            )
+        else:
+            goals_add_html = (
+                '<p class="dim" style="font-size:11.5px;margin:6px 0 0 0">'
+                "No post types are enabled for this sport yet.</p>"
+            )
+        goal_titles_json = json.dumps(_goal_titles)
 
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
@@ -23752,14 +23860,30 @@ window.mhSchedulerDisconnect = function(btn) {
 
 <div class="card" style="margin-top:18px">
   <h2 style="margin-top:0">Tell the planner (direct signals)</h2>
-  <p class="dim" style="font-size:12.5px;margin-top:0">Upcoming events boost previews and announcements; blackout dates hold them back. Saved per organisation.</p>
+  <p class="dim" style="font-size:12.5px;margin-top:0">Upcoming events boost previews and announcements; blackout dates hold them back; goals nudge a type you want to push. Saved per organisation.</p>
+
+  <div style="border:1px solid var(--lane);border-radius:10px;padding:14px;background:rgba(212,255,58,0.04);margin:4px 0 18px 0">
+    <label for="mh-plan-nl" style="font-weight:600;display:flex;align-items:center;gap:8px">
+      <span class="tag live" style="font-size:10px">AI</span>Describe what&rsquo;s coming up
+    </label>
+    <p class="dim" style="font-size:12px;margin:4px 0 8px 0">Type it in your own words and MediaHub turns it into events, blackout dates and goals below &mdash; checking the web for an event&rsquo;s date when it needs to. You review everything before it saves.</p>
+    <textarea id="mh-plan-nl" rows="3" placeholder="e.g. County Champs at Ponds Forge on the 12th, we&rsquo;re shut the bank holiday weekend, and I want to get behind our new sponsor this month."
+      style="width:100%;font-size:13px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <button type="button" class="btn primary" id="mh-plan-nl-btn" onclick="mhPlanInterpret(this)" data-loader-text="Reading your note">Interpret &amp; fill in &rarr;</button>
+      <span class="dim" id="mh-plan-nl-status" style="font-size:12.5px"></span>
+    </div>
+    <div id="mh-plan-nl-result" style="margin-top:10px"></div>
+  </div>
+
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px">
     <div>
       <label style="font-weight:600">Upcoming events</label>
       <div id="mh-plan-events">{events_rows}</div>
-      <div style="display:flex;gap:6px;margin-top:6px">
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
         <input type="date" id="mh-plan-ev-date" style="flex:0 0 auto"/>
-        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1"/>
+        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
+        <input type="text" id="mh-plan-ev-venue" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
         <button type="button" class="btn" onclick="mhPlanAddEvent()">Add</button>
       </div>
     </div>
@@ -23769,33 +23893,80 @@ window.mhSchedulerDisconnect = function(btn) {
       <p class="dim" style="font-size:11.5px;margin:4px 0 0 0">Comma-separated ISO dates nothing should be scheduled on.</p>
     </div>
   </div>
-  <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+
+  <div style="margin-top:18px">
+    <label style="font-weight:600">Goals &mdash; a type you want to push</label>
+    <p class="dim" style="font-size:11.5px;margin:2px 0 0 0">Each goal gives its post type a ranking nudge, with your note shown as the reason.</p>
+    <div id="mh-plan-goals" style="margin-top:6px">{goals_rows}</div>
+    {goals_add_html}
+  </div>
+
+  <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
     <button type="button" class="btn" onclick="mhPlanSaveInputs(this)">Save inputs</button>
     <span class="dim" id="mh-plan-inputs-status" style="font-size:12.5px"></span>
   </div>
 </div>
 
 <script>
+var MH_GOAL_TITLES = {goal_titles_json};
+function mhPlanEventRow(name, date, venue) {{
+  var row = document.createElement('div');
+  row.className = 'mh-plan-ev';
+  row.dataset.name = name; row.dataset.date = date; row.dataset.venue = venue || '';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
+  var dEl = document.createElement('span'); dEl.style.cssText = 'font-variant-numeric:tabular-nums'; dEl.textContent = date;
+  var label = document.createElement('span'); label.style.flex = '1';
+  label.textContent = venue ? (name + ' — ' + venue) : name;
+  var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn';
+  rm.style.cssText = 'font-size:11px;padding:2px 8px'; rm.textContent = 'remove';
+  rm.setAttribute('onclick', 'mhPlanRemoveEvent(this)');
+  row.appendChild(dEl); row.appendChild(label); row.appendChild(rm);
+  return row;
+}}
 function mhPlanCollectEvents() {{
   return Array.from(document.querySelectorAll('#mh-plan-events .mh-plan-ev')).map(function (el) {{
-    return {{ name: el.dataset.name, date: el.dataset.date }};
+    return {{ name: el.dataset.name, date: el.dataset.date, venue: el.dataset.venue || '' }};
   }});
 }}
 function mhPlanAddEvent() {{
   var d = document.getElementById('mh-plan-ev-date').value;
   var n = document.getElementById('mh-plan-ev-name').value.trim();
+  var v = document.getElementById('mh-plan-ev-venue').value.trim();
   if (!d || !n) return;
-  var row = document.createElement('div');
-  row.className = 'mh-plan-ev';
-  row.dataset.name = n; row.dataset.date = d;
-  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
-  row.innerHTML = '<span style="font-variant-numeric:tabular-nums"></span><span style="flex:1"></span>' +
-    '<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button>';
-  row.children[0].textContent = d; row.children[1].textContent = n;
-  document.getElementById('mh-plan-events').appendChild(row);
+  document.getElementById('mh-plan-events').appendChild(mhPlanEventRow(n, d, v));
   document.getElementById('mh-plan-ev-name').value = '';
+  document.getElementById('mh-plan-ev-venue').value = '';
 }}
 function mhPlanRemoveEvent(btn) {{ btn.closest('.mh-plan-ev').remove(); }}
+function mhPlanGoalRow(slug, title, note) {{
+  var row = document.createElement('div');
+  row.className = 'mh-plan-goal';
+  row.dataset.slug = slug; row.dataset.note = note || '';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
+  var t = document.createElement('span'); t.style.cssText = 'flex:0 0 auto;font-weight:600'; t.textContent = title || slug;
+  var nt = document.createElement('span'); nt.style.cssText = 'flex:1;color:var(--ink-muted)'; nt.textContent = note || '';
+  var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn';
+  rm.style.cssText = 'font-size:11px;padding:2px 8px'; rm.textContent = 'remove';
+  rm.setAttribute('onclick', 'mhPlanRemoveGoal(this)');
+  row.appendChild(t); row.appendChild(nt); row.appendChild(rm);
+  return row;
+}}
+function mhPlanCollectGoals() {{
+  return Array.from(document.querySelectorAll('#mh-plan-goals .mh-plan-goal')).map(function (el) {{
+    return {{ post_type: el.dataset.slug, note: el.dataset.note || '' }};
+  }});
+}}
+function mhPlanAddGoal() {{
+  var sel = document.getElementById('mh-plan-goal-type');
+  if (!sel || !sel.value) return;
+  var slug = sel.value;
+  if (document.querySelector('#mh-plan-goals .mh-plan-goal[data-slug="' + slug + '"]')) return;
+  var note = document.getElementById('mh-plan-goal-note').value.trim();
+  var title = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : slug;
+  document.getElementById('mh-plan-goals').appendChild(mhPlanGoalRow(slug, title, note));
+  document.getElementById('mh-plan-goal-note').value = '';
+}}
+function mhPlanRemoveGoal(btn) {{ btn.closest('.mh-plan-goal').remove(); }}
 function mhPlanSaveInputs(btn) {{
   var status = document.getElementById('mh-plan-inputs-status');
   status.textContent = 'Saving…';
@@ -23803,11 +23974,91 @@ function mhPlanSaveInputs(btn) {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{
       upcoming_events: mhPlanCollectEvents(),
-      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean)
+      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean),
+      goals: mhPlanCollectGoals()
     }})
   }}).then(function(r){{ return r.json(); }}).then(function(j){{
     status.textContent = j.ok ? 'Saved. Regenerate the plan to apply.' : (j.error || 'Save failed');
   }}).catch(function(){{ status.textContent = 'Save failed'; }});
+}}
+function mhPlanMergeParsed(p) {{
+  var added = 0;
+  var have = {{}};
+  Array.from(document.querySelectorAll('#mh-plan-events .mh-plan-ev')).forEach(function (el) {{
+    have[(el.dataset.date || '') + '|' + (el.dataset.name || '').toLowerCase()] = true;
+  }});
+  (p.upcoming_events || []).forEach(function (ev) {{
+    var key = (ev.date || '') + '|' + (ev.name || '').toLowerCase();
+    if (!ev.name || !ev.date || have[key]) return;
+    have[key] = true;
+    document.getElementById('mh-plan-events').appendChild(mhPlanEventRow(ev.name, ev.date, ev.venue || ''));
+    added++;
+  }});
+  var bf = document.getElementById('mh-plan-blackouts');
+  var existing = bf.value.split(',').map(function (s) {{ return s.trim(); }}).filter(Boolean);
+  var seen = {{}}; existing.forEach(function (d) {{ seen[d] = true; }});
+  (p.blackout_dates || []).forEach(function (d) {{ if (d && !seen[d]) {{ existing.push(d); seen[d] = true; added++; }} }});
+  bf.value = existing.join(', ');
+  var haveG = {{}};
+  Array.from(document.querySelectorAll('#mh-plan-goals .mh-plan-goal')).forEach(function (el) {{ haveG[el.dataset.slug] = true; }});
+  (p.goals || []).forEach(function (g) {{
+    if (!g.post_type || haveG[g.post_type]) return;
+    haveG[g.post_type] = true;
+    document.getElementById('mh-plan-goals').appendChild(mhPlanGoalRow(g.post_type, MH_GOAL_TITLES[g.post_type] || g.post_type, g.note || ''));
+    added++;
+  }});
+  return added;
+}}
+function mhPlanRenderNote(p, added) {{
+  var box = document.getElementById('mh-plan-nl-result');
+  box.innerHTML = '';
+  if (p.summary) {{
+    var s = document.createElement('p'); s.className = 'dim'; s.style.cssText = 'font-size:12px;margin:0 0 6px 0';
+    s.textContent = p.summary; box.appendChild(s);
+  }}
+  if (added === 0) {{
+    var none = document.createElement('p'); none.className = 'dim'; none.style.cssText = 'font-size:12px;margin:0';
+    none.textContent = 'Nothing new to add from that — try naming an event and a date, or what you want to push.';
+    box.appendChild(none);
+  }}
+  var research = p.research || [];
+  var hitCount = research.reduce(function (a, r) {{ return a + ((r.hits || []).length); }}, 0);
+  if (hitCount) {{
+    var det = document.createElement('details'); det.style.cssText = 'margin-top:4px';
+    var sum = document.createElement('summary'); sum.style.cssText = 'cursor:pointer;font-size:11.5px;color:var(--ink-muted)';
+    sum.textContent = 'Checked the web (' + hitCount + ' source' + (hitCount === 1 ? '' : 's') + ')';
+    det.appendChild(sum);
+    research.forEach(function (r) {{
+      (r.hits || []).forEach(function (h) {{
+        if (!h.url || String(h.url).slice(0, 4).toLowerCase() !== 'http') return;
+        var a = document.createElement('a'); a.href = h.url; a.target = '_blank'; a.rel = 'noopener';
+        a.style.cssText = 'display:block;font-size:11.5px;margin:3px 0;color:var(--accent);text-decoration:none';
+        a.textContent = (h.title || h.domain || h.url);
+        det.appendChild(a);
+      }});
+    }});
+    box.appendChild(det);
+  }}
+}}
+function mhPlanInterpret(btn) {{
+  var status = document.getElementById('mh-plan-nl-status');
+  var text = document.getElementById('mh-plan-nl').value.trim();
+  if (!text) {{ status.textContent = 'Type a note first.'; return; }}
+  btn.disabled = true; status.textContent = 'Reading your note…';
+  document.getElementById('mh-plan-nl-result').innerHTML = '';
+  fetch({json.dumps(url_for("api_plan_interpret"))}, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ text: text }})
+  }}).then(function (r) {{ return r.json().then(function (j) {{ return {{ ok: r.ok, j: j }}; }}); }})
+    .then(function (res) {{
+      btn.disabled = false;
+      var j = res.j || {{}};
+      if (!res.ok || !j.ok) {{ status.textContent = j.error || 'Could not interpret that.'; return; }}
+      var p = j.parsed || {{}};
+      var added = mhPlanMergeParsed(p);
+      status.textContent = 'Filled in ' + added + ' item' + (added === 1 ? '' : 's') + ' below — review, then Save inputs.';
+      mhPlanRenderNote(p, added);
+    }}).catch(function () {{ btn.disabled = false; status.textContent = 'Could not interpret that.'; }});
 }}
 function mhPlanGenerate(btn) {{
   var status = document.getElementById('mh-plan-status');
@@ -23822,7 +24073,7 @@ function mhPlanGenerate(btn) {{
 }}
 </script>
 """
-        return _layout("Content plan", body, active="plan")
+        return _layout("Content plan", body, active="create")
 
     # ---- the scheduler publishing -------------------------------------------
     #
@@ -25142,6 +25393,30 @@ function mhPlanGenerate(btn) {{
             "</a>"
         )
 
+        # Plan moved here from the top bar — it answers this page's own hero
+        # question ("what should we make?"), so it sits at the top of Create as
+        # the strategic entry point into the ranked, explainable content plan.
+        plan_entry_html = (
+            f'<a href="{_h(url_for("plan_page"))}" '
+            "style=\"display:flex;align-items:center;gap:18px;flex-wrap:wrap;"
+            "margin-bottom:var(--sp-5);padding:18px 20px;border:1px solid var(--lane);"
+            'border-radius:12px;background:rgba(212,255,58,0.05);text-decoration:none;color:var(--ink)">'
+            '<div style="flex:1;min-width:240px">'
+            '<span style="font-family:var(--font-mono,monospace);font-size:10.5px;'
+            'text-transform:uppercase;letter-spacing:0.14em;color:var(--lane)">Plan</span>'
+            '<div style="font-size:18px;font-weight:700;margin:4px 0 6px 0">'
+            'Not sure what to post? <em class="editorial" style="color:var(--lane)">Plan your next posts.</em></div>'
+            '<p style="margin:0;font-size:13px;color:var(--ink-dim);max-width:62ch">'
+            "MediaHub ranks what to post next from your results, the calendar and what you tell it "
+            "&mdash; with the reasoning shown for every item. Describe what&rsquo;s coming up in your own "
+            "words and it fills in the calendar for you, then jump straight into making the top idea.</p>"
+            "</div>"
+            '<span style="flex:0 0 auto;font-weight:600;border:1px solid var(--lane);'
+            'border-radius:999px;padding:8px 16px;font-size:13px;color:var(--lane);white-space:nowrap">'
+            "Open Plan &rarr;</span>"
+            "</a>"
+        )
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
@@ -25149,6 +25424,7 @@ function mhPlanGenerate(btn) {{
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
             f"{_free_tier_banner_html()}"
+            f"{plan_entry_html}"
             f"{brand_strip_html}"
             f"{first_run_cta}"
             f"{gallery_link_html}"
