@@ -310,7 +310,10 @@ def test_ffmpeg_engine_renders_every_cut(tmp_path, monkeypatch):
 
     from mediahub.visual import reel_ffmpeg
 
-    def _fake_ffmpeg_reel(cards_props, brand_dict, brand_kit, out_path, **_kw):
+    dispatched: list[str] = []
+
+    def _fake_ffmpeg_reel(cards_props, brand_dict, brand_kit, out_path, **kw):
+        dispatched.append(kw.get("format_name", "story"))
         p = Path(out_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"0" * 2048)
@@ -321,11 +324,14 @@ def test_ffmpeg_engine_renders_every_cut(tmp_path, monkeypatch):
     result = motion.render_meet_reel_all_formats(
         [_card()], _brand(), tmp_path / "motion", base_name="reel_3"
     )
+    # R1.16 — the free engine renders every cut, so the batch produces all
+    # four and records no per-cut errors (the pre-R1.16 story-only restriction
+    # is gone). Each cut is dispatched to the ffmpeg engine at its own geometry.
     assert result["engine"] == "ffmpeg"
-    # R1.16: the ffmpeg fallback now renders every cut, so the batch produces
-    # all four formats and records no capability-gap errors.
     assert set(result["rendered"]) == set(motion.MOTION_FORMATS)
     assert result["errors"] == {}
+    # …and each cut was dispatched to the ffmpeg engine at its own geometry.
+    assert set(dispatched) == set(motion.MOTION_FORMATS)
 
 
 # ===========================================================================

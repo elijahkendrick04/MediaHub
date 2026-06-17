@@ -25,6 +25,23 @@ const brandSchema = z.object({
   logoDataUri: z.string().default(""),
 });
 
+// R1.12 — beat-rhythm & duration customisation. Every field is optional with a
+// default that reproduces the reel's original skeleton, so a reel rendered with
+// no `rhythm` prop (the common case) carves byte-identically to before.
+//   coverSec / outroSec — bookend scene seconds (Python mirrors these into the
+//     total via reel_duration_for, so the carving here always sums to the total).
+//   perCardSec — the per-card base; consumed Python-side to size the total,
+//     carried here only for schema parity (the carving works off the total).
+//   beatWeights — explicit per-card weights. Empty = keep the default emphasis
+//     (top-ranked moment breathes ~25% longer); non-empty overrides it, padding
+//     to 1.0 for any card past the supplied list.
+const reelRhythmSchema = z.object({
+  coverSec: z.number().default(2.0),
+  outroSec: z.number().default(1.0),
+  perCardSec: z.number().default(4.0),
+  beatWeights: z.array(z.number()).default([]),
+});
+
 // R1.13 — custom reel stat chips. The honest stat vocabulary the cover can
 // surface plus the operator config that selects / orders / renames them. Every
 // value is counted from real card facts (see reelStats); the config only
@@ -57,9 +74,14 @@ export const meetReelSchema = z.object({
   cards: z.array(cardSchema),
   brand: brandSchema,
   meetName: z.string().default(""),
-  // Optional — omitting it keeps the byte-identical default cover (TOP-N
-  // SWIMS / PBS / MEDALS). This is the configurable seam; the renderer derives
-  // every value from the cards' own facts regardless of config.
+  // R1.12 — optional beat-rhythm & duration customisation. Absent = the default
+  // skeleton (the component fills 2.0/1.0 and the top-card emphasis), so a reel
+  // rendered without a rhythm prop is byte-identical. Present = caller
+  // customisation, with each inner field defaulted by the schema above.
+  rhythm: reelRhythmSchema.optional(),
+  // R1.13 — optional stat-chip config. Omitting it keeps the byte-identical
+  // default cover (TOP-N SWIMS / PBS / MEDALS). This is the configurable seam;
+  // the renderer derives every value from the cards' own facts regardless.
   reelStatConfig: reelStatConfigSchema.optional(),
   // R1.30 — data-driven outro CTA inputs. Both optional; when both are blank
   // the outro falls back to the universal "follow the club" close, so every
@@ -1179,6 +1201,7 @@ export const MeetReel: React.FC<Props> = ({
   cards,
   brand,
   meetName,
+  rhythm,
   reelStatConfig,
   sponsor,
   nextMeet,
@@ -1186,7 +1209,7 @@ export const MeetReel: React.FC<Props> = ({
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const rootFrame = useCurrentFrame();
 
-  // Allocate the reel: 2s cover + rank-weighted card beats + 1s outro.
+  // Allocate the reel: cover + rank/weight-carved card beats + outro.
   const safeCards = (cards || []).slice(0, 5);
   // R1.13 chips (configurable display) + R1.30 cover counts (config-independent
   // honest totals the variant SELECTION + spotlight numeral read from).
@@ -1204,16 +1227,33 @@ export const MeetReel: React.FC<Props> = ({
     );
   }
 
-  const coverFrames = Math.round(fps * 2.0);
-  const outroFrames = Math.round(fps * 1.0);
+  // R1.12 — beat-rhythm & duration customisation. The bookend seconds and the
+  // per-card beat weights are caller-customisable via the `rhythm` prop; the
+  // defaults below reproduce the original 2s cover / 1s outro / top-card-1.25
+  // emphasis exactly, so a brief-less (rhythm-less) reel is byte-identical.
+  const coverSec = rhythm && rhythm.coverSec > 0 ? rhythm.coverSec : 2.0;
+  const outroSec = rhythm && rhythm.outroSec > 0 ? rhythm.outroSec : 1.0;
+  const coverFrames = Math.round(fps * coverSec);
+  const outroFrames = Math.round(fps * outroSec);
   const transitionFrames = Math.round(fps * 0.35);
   const remaining = Math.max(0, durationInFrames - coverFrames - outroFrames);
 
-  // Rank-weighted beats: the top-ranked moment breathes ~25% longer than
-  // the rest (cards arrive ranked from the Python side). Deterministic
-  // arithmetic — the same card list always yields the same allocation.
-  const weights = safeCards.map((_, i) => (i === 0 && safeCards.length > 1 ? 1.25 : 1.0));
-  const weightSum = weights.reduce((a, b) => a + b, 0);
+  // Per-card beat weights. With no explicit weights the reel keeps its default
+  // emphasis: the top-ranked moment (cards arrive ranked from the Python side)
+  // breathes ~25% longer than the connective beats. Explicit caller weights are
+  // authoritative and pad to 1.0 for any card beyond the supplied list — Python
+  // mirrors the same weights into the total (reel_duration_for), so a card
+  // weighted 2× genuinely earns twice the seconds rather than squeezing the
+  // others. Deterministic arithmetic — same inputs, same allocation.
+  const explicitWeights = (rhythm && rhythm.beatWeights) || [];
+  const weights = safeCards.map((_, i) => {
+    if (explicitWeights.length > 0) {
+      const w = explicitWeights[i];
+      return typeof w === "number" && w > 0 ? w : 1.0;
+    }
+    return i === 0 && safeCards.length > 1 ? 1.25 : 1.0;
+  });
+  const weightSum = weights.reduce((a, b) => a + b, 0) || 1;
   const minBeat = transitionFrames * 2 + Math.round(fps * 0.5);
   const beatFrames = weights.map((w) =>
     Math.max(minBeat, Math.floor((remaining * w) / weightSum) + transitionFrames),

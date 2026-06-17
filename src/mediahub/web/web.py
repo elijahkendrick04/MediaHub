@@ -19953,6 +19953,20 @@ Relay team broke club record"></textarea>
                         "no",
                         "How many top cards to include &mdash; 1&ndash;5 (default 3).",
                     ),
+                    (
+                        "cover / outro",
+                        "no",
+                        "Custom cover / outro scene length in seconds (clamped to a "
+                        "readable, render-safe range). Default 2.0 / 1.0.",
+                    ),
+                    (
+                        "weights",
+                        "no",
+                        "Comma-separated per-card beat weights (e.g. "
+                        "<code>2,1,1</code>) &mdash; a weighted card breathes "
+                        "proportionally longer and lengthens the reel honestly. "
+                        "Default: the top card breathes ~25% longer.",
+                    ),
                 ],
                 curl=(
                     'curl -X POST "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3" \\\n'
@@ -38728,6 +38742,40 @@ voice, and queues them for one-click approval.</p>
                 400,
             )
 
+        # R1.12 — optional beat-rhythm & duration customisation. Bad numbers are
+        # an honest 400 rather than a silently-ignored param; absent params keep
+        # the default skeleton (normalise_reel_rhythm returns None).
+        rhythm_raw: dict = {}
+
+        def _arg_float(key: str):
+            raw = request.args.get(key)
+            if raw is None or not str(raw).strip():
+                return None
+            return float(raw)  # ValueError caught below
+
+        try:
+            for key in ("cover", "outro", "beat"):
+                val = _arg_float(key)
+                if val is not None:
+                    rhythm_raw[key] = val
+            weights_arg = (request.args.get("weights") or "").strip()
+            if weights_arg:
+                rhythm_raw["weights"] = [float(w) for w in weights_arg.split(",") if w.strip()]
+        except (TypeError, ValueError):
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_rhythm",
+                        "detail": (
+                            "cover/outro/beat must be numbers and weights a "
+                            "comma-separated list of numbers"
+                        ),
+                    }
+                ),
+                400,
+            )
+        rhythm = _motion.normalise_reel_rhythm(rhythm_raw, n)
+
         rr = run_data.get("recognition_report") or {}
         ranked = rr.get("ranked_achievements") or []
         # ranked_achievements is generally already sorted; sort defensively.
@@ -38805,6 +38853,7 @@ voice, and queues them for one-click approval.</p>
                 "out_path": out_path,
                 "meet_name": meet_name,
                 "briefs": brief_list,
+                "rhythm": rhythm,
                 "sponsor": sponsor_name,
             },
             None,
@@ -38837,6 +38886,7 @@ voice, and queues them for one-click approval.</p>
                     meet_name=inputs["meet_name"],
                     briefs=inputs["briefs"],
                     format_name=inputs["format"],
+                    rhythm=inputs["rhythm"],
                     sponsor=inputs.get("sponsor", ""),
                 )
         except _RenderBusy:
@@ -38914,6 +38964,7 @@ voice, and queues them for one-click approval.</p>
                         meet_name=inputs["meet_name"],
                         briefs=inputs["briefs"],
                         format_name=inputs["format"],
+                        rhythm=inputs["rhythm"],
                         sponsor=inputs.get("sponsor", ""),
                     )
                 if not Path(mp4).exists():

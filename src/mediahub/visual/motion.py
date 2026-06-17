@@ -1115,6 +1115,16 @@ REEL_COVER_SEC = 2.0
 REEL_PER_CARD_SEC = 4.0
 REEL_OUTRO_SEC = 1.0
 
+# Reel beat-rhythm & duration customisation (R1.12). The default skeleton above
+# stays the contract; these bounds keep a *customised* reel readable and the
+# render inside the worker/delayRender timeout. A reel can never be shorter than
+# the floor or longer than the ceiling no matter what a caller asks for.
+REEL_COVER_RANGE = (1.0, 6.0)
+REEL_OUTRO_RANGE = (0.75, 6.0)
+REEL_PER_CARD_RANGE = (1.5, 10.0)
+REEL_WEIGHT_RANGE = (0.25, 4.0)
+REEL_TOTAL_RANGE = (3.0, 60.0)
+
 # Reel composition revision — folded into the reel cache key. Bump it whenever
 # MeetReel.tsx's deterministic output changes for an *unchanged* payload, so
 # reels cached against the previous render are retired and the upgrade reaches
@@ -1125,16 +1135,147 @@ REEL_OUTRO_SEC = 1.0
 REEL_COMPOSITION_REVISION = "2"
 
 
-def reel_duration_for(n_cards: int) -> float:
+def _clamp(value: float, lo: float, hi: float) -> float:
+    """Pin ``value`` into ``[lo, hi]`` (no surprises on NaN — treated as lo)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return lo
+    if v != v:  # NaN
+        return lo
+    return lo if v < lo else hi if v > hi else v
+
+
+def _fit_beat_weights(weights: list, n: int) -> list[float]:
+    """Clamp + fit a caller's per-card weights to exactly ``n`` cards.
+
+    Too few → padded with 1.0 (a normal beat); too many → truncated. Each
+    weight is clamped into ``REEL_WEIGHT_RANGE`` and a non-numeric entry
+    falls back to 1.0, so junk input degrades to a plain beat rather than a
+    crash.
+    """
+    out: list[float] = []
+    for i in range(max(0, int(n))):
+        if i < len(weights):
+            try:
+                out.append(round(_clamp(float(weights[i]), *REEL_WEIGHT_RANGE), 4))
+            except (TypeError, ValueError):
+                out.append(1.0)
+        else:
+            out.append(1.0)
+    return out
+
+
+def reel_duration_for(
+    n_cards: int,
+    *,
+    cover_sec: Optional[float] = None,
+    outro_sec: Optional[float] = None,
+    per_card_sec: Optional[float] = None,
+    beat_weights: Optional[list] = None,
+) -> float:
     """Total reel seconds for ``n_cards`` ranked moments.
 
     Deterministic structure maths (cover + per-card beats + outro), capped to
     the same 1..5 card range the route and the TSX composition enforce. Three
     cards land on the historic 15s default, so existing three-card reels keep
     their cached duration.
+
+    R1.12 — beat-rhythm & duration customisation. With every keyword left
+    ``None`` the result is byte-identical to the original ``2 + 4·n + 1``
+    formula. A caller may stretch the bookends (``cover_sec`` / ``outro_sec``),
+    re-scale the per-card base (``per_card_sec``), and/or pass explicit
+    ``beat_weights`` — in which case the card budget grows with the weight sum
+    (a weight-2 card earns twice a weight-1 card's seconds), so emphasising a
+    moment lengthens the reel honestly rather than silently squeezing the
+    others. All inputs are clamped to readable, render-safe bounds and the
+    grand total is pinned to ``REEL_TOTAL_RANGE``.
     """
     n = max(1, min(int(n_cards or 1), 5))
-    return REEL_COVER_SEC + REEL_PER_CARD_SEC * n + REEL_OUTRO_SEC
+    cover = REEL_COVER_SEC if cover_sec is None else _clamp(cover_sec, *REEL_COVER_RANGE)
+    outro = REEL_OUTRO_SEC if outro_sec is None else _clamp(outro_sec, *REEL_OUTRO_RANGE)
+    per_card = (
+        REEL_PER_CARD_SEC if per_card_sec is None else _clamp(per_card_sec, *REEL_PER_CARD_RANGE)
+    )
+    if beat_weights:
+        weight_total = sum(_fit_beat_weights(beat_weights, n))
+    else:
+        weight_total = float(n)
+    total = cover + per_card * weight_total + outro
+    return round(_clamp(total, *REEL_TOTAL_RANGE), 3)
+
+
+def normalise_reel_rhythm(raw: Any, n_cards: int) -> Optional[dict]:
+    """Resolve a caller's reel-rhythm request into a canonical dict — or
+    ``None`` when it asks for nothing the default skeleton doesn't already do.
+
+    Accepts snake_case, camelCase, and the obvious aliases
+    (``cover``/``outro``/``weights``) so the web query string, a Python caller,
+    and the persisted manifest can all speak the same shape. The returned dict
+    is camelCase to match the Remotion props verbatim::
+
+        {"coverSec": float, "outroSec": float, "perCardSec": float,
+         "beatWeights": [float, …]}
+
+    ``beatWeights`` is the explicit per-card list (fitted to ``n_cards``) when
+    the caller supplied one, otherwise ``[]`` — meaning "keep the reel's
+    default top-card emphasis". Returning ``None`` for an effectively-default
+    request is what guarantees today's reels keep their exact cached output.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    n = max(1, min(int(n_cards or 1), 5))
+
+    def _pick(*keys: str):
+        for k in keys:
+            if k in raw and raw[k] is not None:
+                return raw[k]
+        return None
+
+    cover_raw = _pick("cover_sec", "coverSec", "cover")
+    outro_raw = _pick("outro_sec", "outroSec", "outro")
+    per_card_raw = _pick("per_card_sec", "perCardSec", "perCard", "beat_sec", "beatSec")
+    weights_raw = _pick("beat_weights", "beatWeights", "weights")
+
+    cover = REEL_COVER_SEC if cover_raw is None else _clamp(cover_raw, *REEL_COVER_RANGE)
+    outro = REEL_OUTRO_SEC if outro_raw is None else _clamp(outro_raw, *REEL_OUTRO_RANGE)
+    per_card = (
+        REEL_PER_CARD_SEC if per_card_raw is None else _clamp(per_card_raw, *REEL_PER_CARD_RANGE)
+    )
+
+    weights: list[float] = []
+    if weights_raw is not None:
+        seq = weights_raw if isinstance(weights_raw, (list, tuple)) else [weights_raw]
+        weights = _fit_beat_weights(list(seq), n)
+
+    is_default = (
+        abs(cover - REEL_COVER_SEC) < 1e-9
+        and abs(outro - REEL_OUTRO_SEC) < 1e-9
+        and abs(per_card - REEL_PER_CARD_SEC) < 1e-9
+        and not weights
+    )
+    if is_default:
+        return None
+    return {
+        "coverSec": round(cover, 3),
+        "outroSec": round(outro, 3),
+        "perCardSec": round(per_card, 3),
+        "beatWeights": weights,
+    }
+
+
+def _reel_duration_kwargs(rhythm: Optional[dict]) -> dict:
+    """The ``reel_duration_for`` keyword args implied by a canonical rhythm."""
+    if not rhythm:
+        return {}
+    kw = {
+        "cover_sec": rhythm.get("coverSec"),
+        "outro_sec": rhythm.get("outroSec"),
+        "per_card_sec": rhythm.get("perCardSec"),
+    }
+    if rhythm.get("beatWeights"):
+        kw["beat_weights"] = rhythm["beatWeights"]
+    return kw
 
 
 def _render_reel_parallel_or_none(
@@ -1171,7 +1312,8 @@ def _assemble_reel_props(
     meet_name: str,
     duration_sec: Optional[float],
     briefs: Optional[list[Optional[dict]]],
-) -> tuple[list[dict], dict, str, float, Any, list]:
+    rhythm: Optional[dict] = None,
+) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict]]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
 
@@ -1182,8 +1324,15 @@ def _assemble_reel_props(
     ``render_meet_reel_all_formats`` do this once and reuse it across every
     cut, instead of re-embedding photos and re-resolving roles per format.
 
+    R1.12 — the optional ``rhythm`` (a dict understood by
+    ``normalise_reel_rhythm``: custom ``cover``/``outro``/``per_card`` seconds
+    and/or per-card ``weights``) folds into the data-driven duration here and is
+    returned normalised so each per-format render carries the same rhythm into
+    its props + cache key. ``None`` or an effectively-default request keeps the
+    historic skeleton and byte-identical cache key.
+
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
-    briefs_list)``.
+    briefs_list, rhythm_norm)``.
     """
     brand_dict = _brand_to_dict(brand_kit)
 
@@ -1226,8 +1375,13 @@ def _assemble_reel_props(
                 meet_name = cp["meetName"]
                 break
 
+    # R1.12 — resolve the (optional) beat-rhythm customisation. ``None`` for a
+    # default request, so the duration maths, cache key, and render props below
+    # all stay byte-identical to a reel rendered before this feature landed.
+    rhythm_norm = normalise_reel_rhythm(rhythm, len(cards_props))
+
     if duration_sec is None:
-        duration_sec = reel_duration_for(len(cards_props))
+        duration_sec = reel_duration_for(len(cards_props), **_reel_duration_kwargs(rhythm_norm))
 
     # One reel, one mix (R1.19): the headline (first card to name one) drives
     # the voice/music balance; absent that, the operator env default decides.
@@ -1255,7 +1409,7 @@ def _assemble_reel_props(
             if cj:
                 cp["captionsJson"] = cj
 
-    return cards_props, brand_dict, meet_name, duration_sec, audio_plan, briefs_list
+    return cards_props, brand_dict, meet_name, duration_sec, audio_plan, briefs_list, rhythm_norm
 
 
 def _reel_cta_props(sponsor: str, next_meet: str) -> dict[str, str]:
@@ -1314,6 +1468,7 @@ def _render_reel_one_format(
     engine: str,
     format_name: str,
     out_path: Path,
+    rhythm: Optional[dict] = None,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -1344,6 +1499,7 @@ def _render_reel_one_format(
             brief_dicts=briefs_list,
             audio_plan=audio_plan,
             format_name=format_name,
+            rhythm=rhythm,
         )
 
     cache_payload = {
@@ -1354,6 +1510,8 @@ def _render_reel_one_format(
         "size": list(size),
         "rev": REEL_COMPOSITION_REVISION,
     }
+    if rhythm:
+        cache_payload["rhythm"] = rhythm
     if cta_props:
         cache_payload["cta"] = cta_props
     if audio_plan:
@@ -1373,13 +1531,17 @@ def _render_reel_one_format(
         return _publish(cached, out_path)
 
     # R1.30 outro-CTA props (sponsor / next meet) ride into reel_props so BOTH
-    # the parallel (R1.28) and the serial render path carry them.
+    # the parallel (R1.28) and the serial render path carry them. R1.12 — the
+    # rhythm is attached ONLY when customised, so the default render's props
+    # (and thus the bundle hash) stay byte-identical to before either feature.
     reel_props = {
         "cards": cards_props,
         "brand": brand_dict,
         "meetName": meet_name,
         **cta_props,
     }
+    if rhythm:
+        reel_props["rhythm"] = rhythm
     # Cold render. Try the opt-in parallel composition path (R1.28) first: it
     # splits the reel's frames across concurrent segment renders and composites
     # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
@@ -1421,6 +1583,7 @@ def _render_reel_one_format(
             "size": list(size),
             "duration_sec": duration_sec,
             "meet_name": meet_name,
+            "rhythm": rhythm or "default",
             "cta": cta_props,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "audio": audio_rec,
@@ -1443,6 +1606,7 @@ def render_meet_reel(
     format_name: str = DEFAULT_MOTION_FORMAT,
     sponsor: str = "",
     next_meet: str = "",
+    rhythm: Optional[dict] = None,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -1455,9 +1619,10 @@ def render_meet_reel(
       meet_name   meet headline used on the reel cover. Defaults to the
                   first card's ``meet_name`` if blank.
       duration_sec explicit total reel duration. Default ``None`` =
-                  data-driven: ``reel_duration_for(len(top_cards))``, so the
-                  reel's structure follows the number of ranked moments
-                  (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
+                  data-driven: ``reel_duration_for(len(top_cards))`` folded with
+                  ``rhythm``, so the reel's structure follows the number of
+                  ranked moments (1 card → 7s … 5 cards → 23s; 3 cards keep the
+                  historic 15s) unless customised.
       format_name  output cut: ``story`` (default) / ``portrait`` /
                   ``square`` / ``landscape``.
       sponsor     optional sponsor name for the reel's outro close (R1.30).
@@ -1467,6 +1632,11 @@ def render_meet_reel(
       next_meet   optional next-meet label for the outro "next up" close
                   (R1.30). Sponsor wins when both are given; the next meet
                   then rides along as the outro's secondary line.
+      rhythm      optional beat-rhythm & duration customisation (R1.12) — a
+                  dict understood by ``normalise_reel_rhythm`` (custom
+                  ``cover``/``outro``/``per_card`` seconds and/or per-card
+                  ``weights``). ``None`` or an effectively-default request keeps
+                  today's exact skeleton and cache key.
 
     Audio + poster behaviour matches ``render_story_card``: opt-in narration
     (built only from the cards' own facts) and/or the operator's music bed
@@ -1483,8 +1653,14 @@ def render_meet_reel(
         duration_sec,
         audio_plan,
         briefs_list,
+        rhythm_norm,
     ) = _assemble_reel_props(
-        top_cards, brand_kit, meet_name=meet_name, duration_sec=duration_sec, briefs=briefs
+        top_cards,
+        brand_kit,
+        meet_name=meet_name,
+        duration_sec=duration_sec,
+        briefs=briefs,
+        rhythm=rhythm,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -1499,6 +1675,7 @@ def render_meet_reel(
         engine=engine,
         format_name=format_name,
         out_path=out_path,
+        rhythm=rhythm_norm,
     )
 
 
@@ -1529,6 +1706,7 @@ def render_meet_reel_all_formats(
     render_slot: Optional[Callable[[str], ContextManager]] = None,
     sponsor: str = "",
     next_meet: str = "",
+    rhythm: Optional[dict] = None,
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -1586,8 +1764,14 @@ def render_meet_reel_all_formats(
         duration_sec,
         audio_plan,
         briefs_list,
+        rhythm_norm,
     ) = _assemble_reel_props(
-        top_cards, brand_kit, meet_name=meet_name, duration_sec=duration_sec, briefs=briefs
+        top_cards,
+        brand_kit,
+        meet_name=meet_name,
+        duration_sec=duration_sec,
+        briefs=briefs,
+        rhythm=rhythm,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 
@@ -1611,6 +1795,7 @@ def render_meet_reel_all_formats(
                     engine=engine,
                     format_name=fmt,
                     out_path=out_path,
+                    rhythm=rhythm_norm,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —
@@ -1689,6 +1874,7 @@ __all__ = [
     "render_meet_reel_all_formats",
     "reel_format_out_path",
     "reel_duration_for",
+    "normalise_reel_rhythm",
     "motion_format_size",
     "MOTION_FORMATS",
     "DEFAULT_MOTION_FORMAT",
