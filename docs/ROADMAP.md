@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `7615b11b4` · Merge pull request #733 from elijahkendrick04/claude/sweet-franklin-q6c3in
+**Last updated:** 2026-06-17 · `1ffb9a87f` · Merge pull request #728 from elijahkendrick04/claude/affectionate-ptolemy-n55xv1
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -187,7 +187,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.30** · Graphic generator sprint — Render debug/inspection overlay + design-explainability sidecar (crop box, saliency centroid, fitted sizes, why-this-design JSON). *Build: new `sprint_hooks/inspect_overlay.py` + new `graphic_renderer/inspect.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1553,10 +1552,9 @@ list and the auto table below, not here.
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
 | 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
 | 2026-06-17 | `955c40af4` | Add motion photo filter stack overlay (R1.10) |
+| 2026-06-17 | `eecc5a7a1` | G1.8: gradient-mesh background engine |
 | 2026-06-17 | `194070927` | R1.21: local Piper TTS backend behind the voiceover seam |
+| 2026-06-17 | `20aa28cfe` | R1.1: motion-intent program pack (5 new reel/story intents) |
 | 2026-06-17 | `e6a0c475d` | Build UI2.8 — inline machine-readable Codeblock view on the review page |
 | 2026-06-17 | `89373a184` | R1.9: cutout-layer compositing in motion (parallax foreground) |
-| 2026-06-17 | `c1e71c990` | Apply ruff-format to G1.15 files |
-| 2026-06-17 | `47b2451f9` | R1.23: dynamic logo sizing + scene-aware animated logo reveal |
-| 2026-06-17 | `ed770aa11` | Batch ZIP pack export — every format + metadata.json manifest (G1.15) |
 <!-- /ROADMAP:ACTIVITY -->
