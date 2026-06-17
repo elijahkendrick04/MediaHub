@@ -362,10 +362,10 @@ class TestNavigation:
         c, _, _ = gated_client
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
-        assert ">Season<" in body
+        assert ">My Season<" in body
 
     def test_season_nav_marked_active_on_page(self, gated_client):
         c, _, _ = gated_client
         _pin(c, "club-a")
         body = c.get("/season").get_data(as_text=True)
-        assert 'class="active">Season<' in body
+        assert 'class="active">My Season<' in body

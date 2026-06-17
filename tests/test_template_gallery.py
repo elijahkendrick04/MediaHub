@@ -3,7 +3,7 @@
 Covers the pure ``mediahub.web.template_gallery`` helper (categories, schematic
 previews, catalog assembly, the body renderer), the ``archetype_summary``
 catalog line it leans on, and the ``/templates`` route + its wiring into the
-nav and the Create page. The gallery renders *existing* archetype data only —
+Create page (reached from there, not the top bar). The gallery renders *existing* archetype data only —
 these tests pin that contract: every registered archetype is represented,
 categorised, and given a distinct schematic, and category filtering works both
 server-side (the no-JS path) and via the client-side enhancement.
@@ -287,12 +287,17 @@ def test_route_works_with_gen_v2_enabled(client, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_nav_has_templates_link_and_highlights(client):
+def test_templates_not_in_top_bar_nav(client):
+    # Templates was removed from the top bar — it's reached from the Create
+    # page's "browse the card styles" link instead, keeping the signed-in
+    # chrome focused on the core workflow. The /templates route still serves
+    # (the request below renders the full layout, nav included).
     html = client.get("/templates").get_data(as_text=True)
-    assert "/templates" in html
-    assert "Templates</a>" in html
-    # The nav item is marked active on the gallery page.
-    assert re.search(r'href="/templates"[^>]*class="active"', html)
+    nav_start = html.find('id="mh-primary-nav"')
+    assert nav_start != -1, "top bar primary nav missing"
+    nav = html[nav_start : html.find("</nav>", nav_start)]
+    assert "Templates</a>" not in nav
+    assert 'href="/templates"' not in nav
 
 
 def test_make_page_links_to_gallery(client):

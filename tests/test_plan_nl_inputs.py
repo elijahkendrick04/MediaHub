@@ -303,9 +303,11 @@ def test_create_page_surfaces_studio_entry(app_with_org):
     with app_with_org.test_client() as client:
         _with_org(client)
         html = client.get("/make").get_data(as_text=True)
-        # Studio moved under Create as a design-tool entry point.
-        assert "Open the design studio" in html
+        # The design studio is now a full Create tile (a function in its own
+        # right), not the old slim gallery-link strip.
+        assert "Design studio" in html
         assert 'href="/studio"' in html
+        assert "Open studio" in html
 
 
 def test_plan_page_lives_under_create_with_nl_and_goals(app_with_org):
