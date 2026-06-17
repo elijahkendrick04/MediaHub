@@ -49,6 +49,18 @@ made the slow way are interchangeable. If anything is missing (Node, Remotion,
 or FFmpeg) or any chunk fails, it quietly falls back to the normal one-pass
 render — never a half-made or broken reel.
 
+`reel_ffmpeg_parallel.py` does the same kind of speed-up for the **free FFmpeg
+reel** — but in a different way, because that reel is built from *separate
+pictures* (the cover plus one per card), not one long video. Those pictures
+don't depend on each other, so this helper draws them **all at the same time**
+instead of one after another, then hands them to FFmpeg in the right order
+(cover, card 1, card 2, …). Same pictures, same finished reel — just a shorter
+wait. It draws three at once by default (each one uses a chunk of memory); set
+`MEDIAHUB_RENDER_PARALLEL=0` to go back to one-at-a-time, or
+`MEDIAHUB_REEL_RENDER_WORKERS` to change how many run together. If any picture
+fails to draw, the whole reel stops with an honest error — never a reel with a
+missing or fake beat.
+
 ## voiceover.py + pronunciation.py
 
 `voiceover.py` reads a card's **already-approved caption out loud** and saves it as

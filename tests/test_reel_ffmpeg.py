@@ -419,7 +419,10 @@ def test_reel_assembly_hits_data_driven_duration_and_caches(tmp_path, monkeypatc
 
     def _fake_still(brief, brand_kit, out_dir, name, **kw):
         renders.append(name)
-        shade = 40 + 40 * len(renders)
+        # Deterministic shade per beat name — beats render concurrently now, so
+        # this must not read the shared list length across threads. The colour
+        # is irrelevant to the duration/cache assertions either way.
+        shade = 40 + 40 * (sum(map(ord, name)) % 4)
         return _write_synthetic_still(
             out_dir / name / "story.png",
             (shade, shade, 90),
@@ -432,7 +435,12 @@ def test_reel_assembly_hits_data_driven_duration_and_caches(tmp_path, monkeypatc
     result = reel_ffmpeg.render_meet_reel_from_props(
         cards, _brand_dict(), _brand_kit(), out, meet_name="Test Meet"
     )
-    assert renders == ["cover", "card0", "card1"]
+    # The cover + one beat per card all render, but concurrently
+    # (reel_ffmpeg_parallel), so invocation order is non-deterministic; assert
+    # on the set. Composite order is preserved — see test_reel_ffmpeg_parallel's
+    # test_reel_beats_composite_in_order, which captures the stills handed to
+    # FFmpeg.
+    assert sorted(renders) == ["card0", "card1", "cover"]
     duration = reel_ffmpeg.media_duration_seconds(Path(result))
     assert duration == pytest.approx(reel_duration_for(2), abs=0.25)
 
