@@ -1719,6 +1719,12 @@ _research_jobs: BoundedCache = BoundedCache(max_size=32)
 # Club-data Q&A jobs ("Ask the data"). Same lifecycle as the research
 # console: background thread, memory + disk record, org-scoped polls.
 _club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
+# G1.27 design-studio render cache: signature(brief levers) -> the JSON render
+# payload (a base64 data-URI preview + its explainability sidecar). Lets the
+# interactive editor re-show a previously-seen combination instantly and caps
+# repeated Playwright renders. Entries are a few hundred KB each; 48 × keeps it
+# well under the worker's memory ceiling.
+_studio_render_cache: BoundedCache = BoundedCache(max_size=48)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -10183,6 +10189,7 @@ def _layout(
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
+    <a href="{{ url_for('design_studio') }}" class="{{ 'active' if active=='studio' else '' }}">Studio</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
@@ -24413,6 +24420,126 @@ function mhPlanGenerate(btn) {{
             active_category=active,
         )
         return _layout("Templates", body, active="templates")
+
+    # ---- /studio &mdash; G1.27 interactive brief/design editor ---------------
+    @app.route("/studio")
+    def design_studio():
+        # The interactive design editor: tweak text layers, palette, archetype
+        # and style pack and watch the card re-render live on the *real* engine
+        # (creative_brief → graphic_renderer.render_brief), distinct from the
+        # browse-only /templates gallery. All page logic lives in the Flask-free
+        # ``design_editor`` helper so it unit-tests without a request; the route
+        # only resolves url_for() links + the active org's palette and wraps the
+        # body with _layout.
+        from mediahub.web import design_editor as _studio
+
+        # Seed the colour controls from the signed-in org's brand kit when
+        # available; the helper re-validates every value, so a missing/odd
+        # colour falls back to the neutral default.
+        seed_palette = None
+        try:
+            _prof = _active_profile()
+            if _prof is not None:
+                _bk = _prof.get_brand_kit()
+                seed_palette = {
+                    "primary": getattr(_bk, "primary_colour", "") or "",
+                    "secondary": getattr(_bk, "secondary_colour", "") or "",
+                    "accent": getattr(_bk, "accent_colour", "") or "",
+                }
+        except Exception:
+            seed_palette = None
+
+        body = _studio.render_editor_body(
+            render_url=url_for("api_studio_render"),
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            palette=seed_palette,
+        )
+        return _layout("Studio", body, active="studio")
+
+    @app.route("/api/studio/render", methods=["POST"])
+    def api_studio_render():
+        # Render one studio brief to a PNG and return it as a base64 data URI
+        # plus its explainability sidecar (resolved --mh-* roles, pack why,
+        # archetype signature, honest legibility/taste notices). JSON-bodied, so
+        # it is CSRF-exempt by content-type. No tenant data is read or written —
+        # the brief is built entirely from the (coerced, renderer-safe) request.
+        import base64 as _b64
+        import tempfile as _tempfile
+        import time as _time
+
+        from mediahub.web import design_editor as _studio
+
+        payload = request.get_json(silent=True)
+        params = _studio.coerce_params(payload if isinstance(payload, dict) else {})
+
+        sig = params.signature()
+        cached = _studio_render_cache.get(sig)
+        if cached is not None:
+            return jsonify(cached)
+
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+        except Exception:  # pragma: no cover - renderer module import failure
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "renderer_unavailable",
+                        "message": "The graphics renderer is unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+
+        brief = _studio.build_brief_from_params(params)
+        brand_kit = _studio.brand_kit_for_params(params)
+        t0 = _time.time()
+        try:
+            with _tempfile.TemporaryDirectory() as _d:
+                result = render_brief(
+                    brief,
+                    output_dir=_d,
+                    size=params.size,
+                    format_name=params.format_id,
+                    brand_kit=brand_kit,
+                )
+                png_bytes = Path(result.visual.file_path).read_bytes()
+        except RuntimeError as exc:
+            # Playwright/Chromium not installed — surface an honest error rather
+            # than ever fabricating a preview image (CLAUDE.md honest-error rule).
+            log.warning("studio render unavailable: %s", exc)
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_unavailable",
+                        "message": "Live rendering is temporarily unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+        except Exception:
+            log.exception("studio render failed")
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_failed",
+                        "message": "Could not render this design — try a different combination.",
+                    }
+                ),
+                500,
+            )
+
+        out = {
+            "ok": True,
+            "image": "data:image/png;base64," + _b64.b64encode(png_bytes).decode("ascii"),
+            "meta": _studio.explain(params),
+            "render_ms": int((_time.time() - t0) * 1000),
+        }
+        _studio_render_cache[sig] = out
+        return jsonify(out)
 
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
