@@ -271,12 +271,8 @@ def design_explainability(
             if focus
             else None
         ),
-        "crop_box": (
-            {"x": crop[0], "y": crop[1], "w": crop[2], "h": crop[3]} if crop else None
-        ),
-        "fitted_sizes": [
-            {"px": f.px, "count": f.count, "sample": f.sample} for f in fitted
-        ],
+        "crop_box": ({"x": crop[0], "y": crop[1], "w": crop[2], "h": crop[3]} if crop else None),
+        "fitted_sizes": [{"px": f.px, "count": f.count, "sample": f.sample} for f in fitted],
         "fitted_size_range": (
             {"min": min(sizes_px), "max": max(sizes_px), "count": len(sizes_px)}
             if sizes_px
@@ -420,17 +416,13 @@ def _panel(data: dict, scale: float) -> str:
         )
 
     fmt = card.get("format", "")
-    dims = f'{card.get("width", 0)}×{card.get("height", 0)}'
+    dims = f"{card.get('width', 0)}×{card.get('height', 0)}"
     focus = layout.get("focus_position")
-    focus_txt = (
-        f'{focus["x_pct"]:.0f}% {focus["y_pct"]:.0f}%' if focus else "—"
-    )
+    focus_txt = f"{focus['x_pct']:.0f}% {focus['y_pct']:.0f}%" if focus else "—"
     rng = layout.get("fitted_size_range")
-    fitted_txt = (
-        f'{rng["min"]:.0f}–{rng["max"]:.0f}px · {rng["count"]} sizes' if rng else "—"
-    )
+    fitted_txt = f"{rng['min']:.0f}–{rng['max']:.0f}px · {rng['count']} sizes" if rng else "—"
     crop = layout.get("crop_box")
-    crop_txt = f'{crop["w"]}×{crop["h"]} @ {crop["x"]},{crop["y"]}' if crop else ""
+    crop_txt = f"{crop['w']}×{crop['h']} @ {crop['x']},{crop['y']}" if crop else ""
     why = (data.get("why_this_design") or "").strip()
     if len(why) > 220:
         why = why[:217].rstrip() + "…"
@@ -438,7 +430,7 @@ def _panel(data: dict, scale: float) -> str:
     rows = "".join(
         [
             row("archetype", str(card.get("archetype", ""))),
-            row("format", f'{fmt}  {dims}' if fmt else dims),
+            row("format", f"{fmt}  {dims}" if fmt else dims),
             row("style", str(design.get("style_pack", "")) or "—"),
             row("ground", str(design.get("background_style", ""))),
             row("accent", str(design.get("accent_style", ""))),

@@ -128,8 +128,16 @@ def test_brief_attribute_enables_overlay_without_env():
 
 @pytest.mark.parametrize(
     "value,expected",
-    [("1", True), ("true", True), ("YES", True), ("on", True),
-     ("0", False), ("false", False), ("", False), ("nope", False)],
+    [
+        ("1", True),
+        ("true", True),
+        ("YES", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+        ("nope", False),
+    ],
 )
 def test_env_truthiness_matrix(monkeypatch, value, expected):
     monkeypatch.setenv(ins.INSPECT_ENV, value)
@@ -304,15 +312,11 @@ def test_overlay_is_non_interactive_and_on_top():
 
 
 def test_overlay_draws_focus_crosshair_only_when_photo_present():
-    with_focus = ins.build_overlay_html(
-        ins.design_explainability(SAMPLE_HTML, _ctx()), _ctx()
-    )
+    with_focus = ins.build_overlay_html(ins.design_explainability(SAMPLE_HTML, _ctx()), _ctx())
     assert ins._MARK in with_focus  # amber crosshair stroke
 
     no_photo_html = "<body><div style='font-size:40px'>x</div></body>"
-    without = ins.build_overlay_html(
-        ins.design_explainability(no_photo_html, _ctx()), _ctx()
-    )
+    without = ins.build_overlay_html(ins.design_explainability(no_photo_html, _ctx()), _ctx())
     assert ins._MARK not in without  # no focus → no crosshair
 
 
