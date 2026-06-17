@@ -130,6 +130,62 @@ def test_render_is_deterministic():
 
 
 # =========================================================================== #
+# Per-tile contract — adding a tile MEANS authoring its own specific slide
+# =========================================================================== #
+# The renderer has a graceful default (see below) so a half-built type never
+# breaks, but that default is a safety net only: every *surfaced* Create tile
+# must carry its OWN tile-specific HowItWorks. These guards turn "each tile has
+# its own how it works" into an enforced contract — a new tile added to the
+# REGISTRY fails the suite until a new, specific slide is written for it.
+@pytest.mark.parametrize(
+    "ct", [c for c, m in REGISTRY.items() if m.is_implemented], ids=lambda c: c.value
+)
+def test_every_implemented_tile_authors_its_own_how_it_works(ct):
+    meta = REGISTRY[ct]
+    hiw = meta.how_it_works
+    assert hiw is not None, (
+        f"{ct.value}: every implemented Create tile must author its OWN HowItWorks "
+        "(a tile-specific first slide) — it must not rely on the generic default. "
+        "Add a how_it_works=HowItWorks(...) to its REGISTRY entry."
+    )
+    assert hiw.tagline.strip(), f"{ct.value}: how_it_works.tagline is empty"
+    assert len(hiw.inputs) >= 1, f"{ct.value}: how_it_works needs at least one input chip"
+    assert len(hiw.steps) >= 2, f"{ct.value}: how_it_works needs at least two steps"
+    for label, icon_key in hiw.inputs:
+        assert label.strip(), f"{ct.value}: blank input label"
+        assert icon_key.strip(), f"{ct.value}: blank input icon key"
+    for step in hiw.steps:
+        assert step.strip(), f"{ct.value}: blank step"
+
+
+def test_each_tile_how_it_works_is_specific_to_that_tile():
+    """No two tiles may share a how-it-works — each must be specific to its own
+    tile, not a copy of a sibling's."""
+    seen_tagline: dict[str, str] = {}
+    seen_steps: dict[tuple, str] = {}
+    for ct, meta in REGISTRY.items():
+        if not meta.is_implemented or meta.how_it_works is None:
+            continue
+        hiw = meta.how_it_works
+        # A tile that just echoes its one-line description hasn't really authored
+        # a slide — the generic default already does that.
+        assert hiw.tagline.strip() != meta.description.strip(), (
+            f"{ct.value}: how_it_works.tagline merely repeats the tile description — "
+            "write a slide-specific promise"
+        )
+        assert hiw.tagline not in seen_tagline, (
+            f"{ct.value} shares its tagline with {seen_tagline.get(hiw.tagline)} — "
+            "each tile needs its own"
+        )
+        assert hiw.steps not in seen_steps, (
+            f"{ct.value} shares its steps with {seen_steps.get(hiw.steps)} — "
+            "each tile needs its own"
+        )
+        seen_tagline[hiw.tagline] = ct.value
+        seen_steps[hiw.steps] = ct.value
+
+
+# =========================================================================== #
 # Graceful default — a heading with no authored how_it_works still works
 # =========================================================================== #
 def test_unauthored_heading_falls_back_to_a_derived_slide():

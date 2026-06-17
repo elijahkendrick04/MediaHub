@@ -42,10 +42,14 @@ class HowItWorks:
     presentation copy + icon *keys* (resolved to glyphs by the web renderer);
     it touches no engine, AI or data surface.
 
-    Optional on :class:`ContentTypeMeta`. When a new content type omits it, the
+    Optional on :class:`ContentTypeMeta`. When a content type omits it, the
     intro renderer derives a sensible default from the existing ``description``
-    and ``title`` — so **every** heading automatically gets a first slide the
-    moment it is added to the REGISTRY, with no extra wiring.
+    and ``title`` — so a half-built tile never renders broken. That default is
+    a **safety net only**: every tile surfaced under Create MUST author its own
+    tile-specific ``HowItWorks``. Adding a new tile therefore means authoring a
+    new "how it works" for it — a contract enforced by
+    ``tests/test_content_intro.py`` (the suite fails until the new tile has its
+    own non-empty, distinct slide).
     """
 
     tagline: str  # one-line promise shown under the title
