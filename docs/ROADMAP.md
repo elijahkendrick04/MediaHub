@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `de2c27e80` · Merge pull request #735 from elijahkendrick04/claude/optimistic-brown-70jxel
+**Last updated:** 2026-06-17 · `d2dcb9bb5` · Merge pull request #732 from elijahkendrick04/claude/eloquent-shannon-oifro2
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -181,7 +181,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.14** · Reel generator sprint — Transition library expansion + per-card timing — new transitions (glitch, slide-stack, light-sweep) + a duration field. *Build: `MeetReel.tsx` `transitionFor` + `TransitionWrap` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.15** · Reel generator sprint — Multi-format batch reel render — one request renders + caches all four cuts in a single pass. *Build: `visual/motion.py` `render_meet_reel` + a new web route (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1534,11 +1533,11 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `f68e655a3` | R1.14: determinism guard checks for calls, not the bare name |
 | 2026-06-17 | `874fef97f` | fix(roadmap-bot): self-heal directives dropped by the concurrent-merge race |
 | 2026-06-17 | `d24d6f461` | feat(reel): in-render poster capture via Remotion renderStill (R1.29) |
 | 2026-06-17 | `b7161ab8b` | G1.12 — Multi-line hero & split-result fitting |
 | 2026-06-17 | `4b6f00e18` | Add G1.27 interactive brief/design editor (Studio) |
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
 | 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
-| 2026-06-17 | `955c40af4` | Add motion photo filter stack overlay (R1.10) |
 <!-- /ROADMAP:ACTIVITY -->
