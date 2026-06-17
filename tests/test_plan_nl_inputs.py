@@ -290,6 +290,24 @@ def test_create_page_surfaces_plan_entry(app_with_org):
         assert 'href="/plan"' in html
 
 
+def test_studio_removed_from_top_bar_but_create_present(app_with_org):
+    with app_with_org.test_client() as client:
+        _with_org(client)
+        html = client.get("/make").get_data(as_text=True)
+        nav = _primary_nav(html)
+        assert ">Create</a>" in nav
+        assert ">Studio</a>" not in nav, "Studio must be gone from the desktop top bar"
+
+
+def test_create_page_surfaces_studio_entry(app_with_org):
+    with app_with_org.test_client() as client:
+        _with_org(client)
+        html = client.get("/make").get_data(as_text=True)
+        # Studio moved under Create as a design-tool entry point.
+        assert "Open the design studio" in html
+        assert 'href="/studio"' in html
+
+
 def test_plan_page_lives_under_create_with_nl_and_goals(app_with_org):
     with app_with_org.test_client() as client:
         _with_org(client)

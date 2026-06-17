@@ -608,8 +608,10 @@ input[type=color]:hover { border-color: var(--lane); }
     left: var(--sp-3); right: auto;
     width: 3px; top: 8px; bottom: 8px; height: auto;
   }
-  #backend-pill { margin-left: 0; margin-top: var(--sp-3); align-self: flex-start; }
-  #active-org-chip { margin-left: 0 !important; margin-top: var(--sp-3); }
+  /* The invisible right-edge spacer is pointless in the stacked column menu. */
+  .mh-nav-spacer { display: none; }
+  .mh-orgmenu { margin-left: 0 !important; margin-top: var(--sp-3); align-self: flex-start; }
+  #active-org-chip { margin-left: 0 !important; }
 }
 
 /* ---------------------------------------------------------------------

@@ -431,7 +431,9 @@ def test_get_studio_page_ok(client):
     html = r.get_data(as_text=True)
     assert 'id="mh-studio"' in html
     assert "/api/studio/render" in html
-    assert ">Studio<" in html  # nav link
+    # Studio is no longer a top-bar nav link (it moved under Create); the page
+    # is identified by its editor heading instead.
+    assert "Design studio" in html  # studio editor heading
 
 
 def test_render_api_returns_png_and_explainability(client, stub_render):

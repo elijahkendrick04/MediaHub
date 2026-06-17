@@ -1,10 +1,11 @@
 """tests/test_hud_readout.py — UI 1.5: live local-time + system-status HUD readout.
 
-The footer carries a small mono "blueprint/HUD" strip that extends the header
-ONLINE pill: a live local clock (+ a UTC reference) on the left, and a
-deployment/system status line (reachability · build · UTC) on the right. It is
-fed by the *existing* ``/healthz`` poll the pill already runs plus a pure
-client-side clock — there is **no new backend surface**.
+The footer carries a small mono "blueprint/HUD" strip: a live local clock
+(+ a UTC reference) on the left, and a deployment/system status line
+(reachability · build · UTC) on the right. It is fed by the *existing*
+``/healthz`` poll plus a pure client-side clock — there is **no new backend
+surface**. Since the header "online" pill was removed, this HUD is now the sole
+reachability indicator.
 
 Two layers of assertion:
 
@@ -15,8 +16,8 @@ Two layers of assertion:
   2. Browser-side (Playwright, skips when absent): against a real live server —
      the clocks populate + tick, the timezone label resolves, local ≠ UTC under
      a fixed non-UTC zone, the status/build resolve from the real ``/healthz``
-     poll (Online), the offline path flips Online→Offline in lockstep with the
-     header pill, and the clock keeps ticking with the network down.
+     poll (Online), the offline path flips Online→Offline, and the clock keeps
+     ticking with the network down.
 
 Mirrors the skip/launch pattern in tests/test_activity_count_up.py.
 """
@@ -204,21 +205,22 @@ class TestHudCss:
         clock = re.search(r"\.mh-hud-clock \{(.*?)\}", hud_html, re.S)
         assert clock and "tabular-nums" in clock.group(1)
 
-    def test_reachability_colours_mirror_pill(self, hud_html):
-        """Online green / offline red match the header pill so the two
-        indicators can never look like they disagree."""
-        assert "#5EE39A" in hud_html  # online green (pill + HUD)
-        assert "#FF6B6B" in hud_html  # offline red (pill + HUD)
+    def test_reachability_colours_present(self, hud_html):
+        """The HUD's own online green / offline red. (The header status pill
+        was removed; the HUD is the sole reachability indicator, so these
+        colours now live only in the HUD's CSS.)"""
+        assert "#5EE39A" in hud_html  # online green (HUD)
+        assert "#FF6B6B" in hud_html  # offline red (HUD)
 
 
 class TestHudWiring:
     """The HUD reuses the existing /healthz poll + a client clock. No new
-    backend surface, and the two status indicators share one fetch."""
+    backend surface — one fetch drives the single status indicator."""
 
-    def test_shared_health_poll_paints_both(self, hud_html):
-        # One paint() drives both the pill and the HUD from a single response.
+    def test_health_poll_paints_hud(self, hud_html):
+        # One paint() drives the HUD from a single /healthz response. (The
+        # header pill it used to also paint was removed.)
         assert "function paint(online, version)" in hud_html
-        assert "backend-pill-text" in hud_html  # still paints the pill
         assert "mh-hud--online" in hud_html and "mh-hud--offline" in hud_html
 
     def test_build_comes_from_health_version(self, hud_html):
@@ -267,15 +269,13 @@ class TestHudBrowserBehaviour:
                 status: document.getElementById('mh-hud-status').textContent,
                 build: document.getElementById('mh-hud-build').textContent,
                 cls: document.getElementById('mh-hud').className,
-                pill: (document.getElementById('backend-pill-text') || {}).textContent,
                 datetime: document.getElementById('mh-hud-clock').getAttribute('datetime'),
             })"""
         )
 
     def test_clock_and_status_go_live(self, hud_server):
         """Clocks populate + tick, the zone label resolves, and the status/
-        build resolve Online from the real /healthz poll — in lockstep with
-        the header pill."""
+        build resolve Online from the real /healthz poll."""
         pw, browser = _launch_browser()
         try:
             ctx = browser.new_context(timezone_id="America/New_York")
@@ -306,14 +306,13 @@ class TestHudBrowserBehaviour:
         assert snap1["status"] == "Online"
         assert re.match(r"^v\d", snap1["build"]), snap1["build"]
         assert "mh-hud--online" in snap1["cls"]
-        assert snap1["pill"] == "online"  # header pill stays in sync
         assert snap1["datetime"] and "T" in snap1["datetime"]
         # The clock advanced over ~1.2 s.
         assert snap1["local"] != snap2["local"] or snap1["utc"] != snap2["utc"]
 
-    def test_offline_path_mirrors_pill_and_clock_survives(self, hud_server):
-        """With /healthz unreachable the HUD + pill both read Offline, yet the
-        client clock keeps ticking (it never depended on the network)."""
+    def test_offline_path_and_clock_survives(self, hud_server):
+        """With /healthz unreachable the HUD reads Offline, yet the client
+        clock keeps ticking (it never depended on the network)."""
         pw, browser = _launch_browser()
         try:
             page = browser.new_page()
@@ -338,7 +337,6 @@ class TestHudBrowserBehaviour:
 
         assert snap1["status"] == "Offline"
         assert "mh-hud--offline" in snap1["cls"]
-        assert snap1["pill"] == "offline"  # pill agrees
         # Clock is network-independent — it keeps advancing while offline.
         assert _HHMMSS.match(snap1["local"]), snap1["local"]
         assert snap1["local"] != snap2["local"] or snap1["utc"] != snap2["utc"]
