@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `807f3ff08` · Merge pull request #719 from elijahkendrick04/claude/pensive-brown-cx6s6y
+**Last updated:** 2026-06-17 · `102e340a7` · G1.1 — eight new v2 archetype families (still + motion + gallery) (#759)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -173,7 +173,6 @@ UI motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) rather than 
 an effect. This epic is closed; new UI follow-on work would be filed as fresh `UI 1.*` items.
 
 <!-- ROADMAP:TODO -->
-- **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
@@ -1523,12 +1522,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
 | 2026-06-17 | `96d200249` | fix: make font_intake.subset_to_woff2 truly deterministic (pin head.modified) |
 | 2026-06-17 | `880493a59` | Add R1.22 colour-role transition motion overlay (fade/gradient/pulse) |
 | 2026-06-17 | `6489b74df` | Fix non-deterministic font intake (head timestamp flake) |
+| 2026-06-17 | `88c6088ce` | Fix stale ffmpeg-engine batch test after R1.16 multi-format support |
 | 2026-06-17 | `e8792b384` | test: update stale ffmpeg-engine reel test for R1.16 multi-format |
 | 2026-06-17 | `35dbe58c8` | Apply ruff-format to the R1.12 reel call-sites |
 | 2026-06-17 | `a1206eaaa` | G1.13: SVG vector export path (outlined fonts, no raster) |
 | 2026-06-17 | `50dc3a6c9` | G1.14: WebP/AVIF output + render quality profiles (fast/standard/high) |
-| 2026-06-17 | `d77921661` | style: ruff-format the G1.9 axis code (autofit.py, render.py) |
 <!-- /ROADMAP:ACTIVITY -->
