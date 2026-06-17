@@ -770,7 +770,13 @@ def subset_to_woff2(
     from fontTools import subset as ft_subset
 
     try:
-        font = TTFont(BytesIO(data), fontNumber=0, lazy=True)
+        # recalcTimestamp=False so the final save() does NOT re-stamp head.modified
+        # to the current time — without it, two subsets of the same input that
+        # straddle a 1-second tick produce different woff2 bytes (the flaky
+        # TestSubset.test_deterministic). This makes the function honour its
+        # documented byte-for-byte deterministic contract; the subsetter's own
+        # recalc_timestamp=False (below) only covers the subset step, not save().
+        font = TTFont(BytesIO(data), fontNumber=0, lazy=True, recalcTimestamp=False)
     except Exception as exc:
         raise FontValidationError(f"font failed to parse under fontTools: {exc}") from exc
 
