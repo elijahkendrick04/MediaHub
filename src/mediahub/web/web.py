@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hashlib
 import json
 import logging
 import mimetypes
@@ -24322,8 +24323,180 @@ function mhPlanGenerate(btn) {{
             gallery_url=url_for("template_gallery"),
             make_url=url_for("make_page"),
             active_category=active,
+            studio_url=url_for("template_preview_gallery"),
         )
         return _layout("Templates", body, active="templates")
+
+    # ---- /templates/preview &mdash; G1.26 live archetype × style-pack studio ---
+    #
+    # Where /templates (UI 1.10) shows schematic wireframes, this surface shows
+    # *live, rendered* preview thumbnails of the full template space (every
+    # archetype × every style pack). It is a two-axis explorer: browse every
+    # archetype against a pinned pack, and every pack (filtered + paginated)
+    # against a pinned archetype. Pure gallery logic lives in the Flask-free
+    # ``template_preview_gallery`` helper; the two render-path closures below
+    # (brand resolution + the disk-cached live render) are the only request-bound
+    # parts. Thumbnails degrade to an honest self-contained schematic when a live
+    # render is unavailable, so the gallery is never broken.
+    _PREVIEW_RENDER_TIMEOUT = float(
+        os.environ.get("MEDIAHUB_PREVIEW_RENDER_TIMEOUT", "20") or "20"
+    )
+    # Fixed, representative sample so previews are honest and comparable tile to
+    # tile (only the template changes, never the data). variation_seed is pinned
+    # so the brief is fully deterministic — no LLM, no network.
+    _PREVIEW_ITEM = {
+        "id": "preview",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+        },
+    }
+
+    def _preview_brand_signature(brand_kit) -> str:
+        """Short stable hash of a brand kit's resolved colours — the cache key.
+
+        Keyed on the colours (not the org id) so re-branding invalidates stale
+        previews and two orgs never share a cache entry by accident.
+        """
+        raw = "|".join(
+            str(getattr(brand_kit, attr, "") or "")
+            for attr in (
+                "primary_colour",
+                "secondary_colour",
+                "accent_colour",
+                "short_name",
+                "display_name",
+            )
+        )
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+    def _preview_brand_kit():
+        """The brand previews render in: the signed-in org's kit, else a neutral
+        demo brand. Returns ``(brand_kit, signature)``."""
+        prof = _active_profile()
+        if prof is not None:
+            try:
+                bk = prof.get_brand_kit()
+                return bk, _preview_brand_signature(bk)
+            except Exception:
+                pass
+        from mediahub.brand.kit import BrandKit
+
+        bk = BrandKit(
+            profile_id="_preview",
+            display_name="MediaHub",
+            primary_colour="#0E2A47",
+            secondary_colour="#C9A227",
+            accent_colour="#FFFFFF",
+            short_name="MH",
+        )
+        return bk, "demo-" + _preview_brand_signature(bk)
+
+    def _render_template_preview(archetype, pack_id, brand_kit, size, cache_path):
+        """Render one (archetype × pack) sample to ``cache_path`` and return it.
+
+        Deterministic: the same fixed sample brief, with the layout + pack
+        overridden, rendered with no athlete cutout. Holds a render slot so it
+        never thrashes the single-CPU box.
+        """
+        from mediahub.creative_brief.generator import generate
+        from mediahub.graphic_renderer.render import render_brief
+
+        brief = generate(
+            dict(_PREVIEW_ITEM),
+            None,
+            brand_kit,
+            profile_id="_preview",
+            meet_name="Manchester Open",
+            variation_seed=0,
+        )
+        brief.layout_template = archetype
+        brief.style_pack = pack_id
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with _render_slot("preview", f"{archetype}/{pack_id}", timeout=_PREVIEW_RENDER_TIMEOUT):
+            res = render_brief(
+                brief,
+                output_dir=str(cache_path.parent),
+                size=size,
+                brand_kit=brand_kit,
+                skip_cutout=True,
+            )
+        src = Path(res.visual.file_path)
+        if src.exists() and src.resolve() != cache_path.resolve():
+            try:
+                src.replace(cache_path)
+            except OSError:
+                import shutil
+
+                shutil.copyfile(src, cache_path)
+        if cache_path.exists():
+            return cache_path
+        return src if src.exists() else None
+
+    @app.route("/templates/preview")
+    def template_preview_gallery():
+        from mediahub.web import template_preview_gallery as _studio
+
+        state = _studio.normalise_state(request.args)
+
+        def _thumb_url(archetype, pack_id, hero=False):
+            url = url_for("template_preview_thumb", archetype=archetype, pack_id=pack_id)
+            return url + "?hero=1" if hero else url
+
+        body = _studio.render_studio_body(
+            studio_url=url_for("template_preview_gallery"),
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            thumb_url=_thumb_url,
+            state=state,
+        )
+        return _layout("Template studio", body, active="templates")
+
+    @app.route("/templates/preview/thumb/<archetype>/<pack_id>")
+    def template_preview_thumb(archetype: str, pack_id: str):
+        from flask import Response, send_file
+
+        from mediahub.web import template_preview_gallery as _studio
+
+        # Coerce to known catalog members — junk can never render an unknown
+        # layout, 500, or escape the cache dir (no path traversal).
+        archetype = _studio.valid_archetype(archetype)
+        pack_id = _studio.valid_pack(pack_id)
+        size = (560, 700) if request.args.get("hero") == "1" else (384, 480)
+
+        def _schematic_response():
+            resp = Response(
+                _studio.standalone_schematic_svg(archetype), mimetype="image/svg+xml"
+            )
+            resp.headers["Cache-Control"] = "public, max-age=300"
+            return resp
+
+        brand_kit, brand_sig = _preview_brand_kit()
+        w, h = size
+        cache_path = (
+            DATA_DIR / "template_previews" / brand_sig / f"{archetype}__{pack_id}__{w}x{h}.png"
+        )
+        if cache_path.exists() and cache_path.stat().st_size > 100:
+            resp = send_file(str(cache_path), mimetype="image/png")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+
+        try:
+            png_path = _render_template_preview(archetype, pack_id, brand_kit, size, cache_path)
+        except _RenderBusy:
+            return _schematic_response()
+        except Exception:
+            log.warning(
+                "template preview render failed for %s/%s", archetype, pack_id, exc_info=True
+            )
+            return _schematic_response()
+        if not png_path or not Path(png_path).exists():
+            return _schematic_response()
+        resp = send_file(str(png_path), mimetype="image/png")
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
