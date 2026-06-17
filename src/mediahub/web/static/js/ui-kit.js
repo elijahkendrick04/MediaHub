@@ -648,11 +648,20 @@
   }
   MH.ui = { init: init };
 
+  // Coalesce scroll/resize bursts into at most one beam update per frame.
+  // A fast scroll fires several events between paints; without this guard each
+  // one would queue its own rAF — and its own getBoundingClientRect reflow.
+  // One pending frame is enough to stay current.
+  var beamRaf = 0;
+  function scheduleBeams() {
+    if (beamRaf) return;
+    beamRaf = requestAnimationFrame(function () { beamRaf = 0; updateBeams(); });
+  }
   function boot() {
     init(document);
     if (beams.length) {
-      window.addEventListener("scroll", function () { requestAnimationFrame(updateBeams); }, { passive: true });
-      window.addEventListener("resize", function () { requestAnimationFrame(updateBeams); }, { passive: true });
+      window.addEventListener("scroll", scheduleBeams, { passive: true });
+      window.addEventListener("resize", scheduleBeams, { passive: true });
     }
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
