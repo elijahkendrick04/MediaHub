@@ -209,7 +209,7 @@ The future data model should handle: organisations / clubs / societies / teams; 
 
 ## External integrations
 
-- **MediaHub does not publish or schedule content onto external social channels.** The social-scheduling tool (the Buffer-backed "Schedule…" action and "Auto scheduling" settings) and the autonomous publish-to-social path (`fully_autonomous` opt-in, the publish gate, the per-type policy, the publish kill switch, the posting log) have all been **removed** (the `publishing/` package and `workflow/approval.py` are gone). The Settings "Auto scheduling" and "Autonomy" surfaces now render a "Coming soon" placeholder. Approved cards are reviewed by a human and then exported/downloaded for manual posting — there is no machine path that places content on a social account. Do NOT reintroduce a social-publishing/auto-scheduling integration without explicit user sign-off; if rebuilt, human approval before external publishing is the default, always.
+- **MediaHub does not publish or schedule content onto external social channels.** Approved cards are reviewed by a human and then exported or downloaded for manual posting — there is no machine path that places content on a social account. The Settings "Auto scheduling" and "Autonomy" surfaces are "Coming soon" placeholders. Do NOT add a social-publishing or auto-scheduling integration without explicit user sign-off; if one is ever built, human approval before external publishing is the default, always.
 - Use least privilege for every integration; never connect external accounts without explicit approval
 - Keep credentials out of source control — `.env` only
 
@@ -373,5 +373,4 @@ The intelligence layer is the moat:
 - Every step should be explainable and auditable
 - Human approval before external publishing — always, with no exception.
   MediaHub does not place content on a social account; approved cards are
-  exported/downloaded for manual posting (the auto-scheduling and autonomous
-  publish-to-social features were removed — see "External integrations")
+  exported/downloaded for manual posting (see "External integrations")

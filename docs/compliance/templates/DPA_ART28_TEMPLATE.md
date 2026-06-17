@@ -13,8 +13,9 @@ name], providing the MediaHub service at [URL].
 
 Processing of athlete and member personal data to generate club social
 content (results ingestion, achievement detection, optional PB-history
-enrichment, card rendering, AI-assisted captioning, scheduling/export for
-publication) for the duration of the service agreement.
+enrichment, card rendering, AI-assisted captioning, and export/download of
+approved content for the club to post manually) for the duration of the
+service agreement. The Processor does not publish to social platforms.
 
 ## 2. Personal data and data subjects
 
@@ -47,9 +48,8 @@ General written authorisation for the sub-processors listed at
 **[/legal/subprocessors URL]** (mirrored in `docs/compliance/SUBPROCESSORS.md`).
 The Processor gives **[30]** days' notice of additions/replacements; the
 Controller may object on reasonable grounds. Equivalent Art 28(3)
-obligations flow down. Optional services (cloud photo cutout, Buffer
-publishing) engage their sub-processor **only if the Controller enables
-them**.
+obligations flow down. Optional services (cloud photo cutout) engage their
+sub-processor **only if the Controller enables them**.
 
 ## 6. Data subject rights assistance (Art 28(3)(e))
 

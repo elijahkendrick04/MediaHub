@@ -13,8 +13,7 @@
 This taxonomy is part of the multi-sport, autonomy-first roadmap rebuild. Evidence
 base: [`research/ROADMAP_RESEARCH_2026.md`](research/ROADMAP_RESEARCH_2026.md) §A.2.
 Related docs: [`SPORT_PROFILES.md`](SPORT_PROFILES.md) (how a sport selects post
-types), [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md) (the autonomy column),
-[`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md) (where this sits).
+types), [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md) (where this sits).
 
 ---
 
@@ -35,7 +34,7 @@ post type along four axes:
 | **enabled** | Does this sport produce this post type? |
 | **data inputs** | Which ingestion inputs feed it (keys, not files). |
 | **template set** | Which graphic/reel template namespace renders it. |
-| **default autonomy** | Starting [`AutonomyLevel`](AUTONOMY_MODEL.md): `draft_only` · `approval_required` · `fully_autonomous`. Gated by default. |
+| **default autonomy** | Starting review disposition (`AutonomyLevel`): `draft_only` · `approval_required`. A human approves before content is used. |
 
 ## 2. How this maps onto today's code (realised — ADR-0013)
 
@@ -47,7 +46,7 @@ layer**, in `club_platform.post_types`:
 - **The slug is the canonical post-type identity.** The universal slugs below
   are declared in code (`post_types.UNIVERSAL_POST_TYPES`); sport-specific
   slugs live in the sport-profile YAML. The planner, plan persistence and the
-  publish gate all key on slugs.
+  per-type review policy all key on slugs.
 - **`ContentType` is the implemented-surface badge**, not a parallel
   vocabulary: a small enum naming the slugs that have a real clickable
   product surface (`REGISTRY` carries titles, input contracts and route
@@ -88,9 +87,8 @@ Post-type keys in this doc are the canonical slugs used in the sport-profile YAM
 ## 4. Sport-specific tables
 
 Each table lists the **divergent** post types for that sport (universal types from
-§3 also apply). "Autonomy (default)" shows a sensible shipped default — **gated by
-default** ([`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md)); a workspace may flip a
-low-risk, source-grounded type (e.g. final scores) to `fully_autonomous` itself.
+§3 also apply). "Autonomy (default)" shows the shipped review disposition each
+type starts with; a human approves before any content is used.
 
 ### 4.1 Swimming  *(shipped reference sport)*
 

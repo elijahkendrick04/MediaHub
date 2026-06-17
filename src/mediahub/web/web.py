@@ -13633,7 +13633,7 @@ def create_app() -> Flask:
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
             "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't auto-post</b><span>No scheduled feed pushes without you saying so. The auto scheduling connection is opt-in per-card.</span></div></li>"
+            "<div><b>We don't auto-post</b><span>MediaHub never posts to your social channels. You approve, then export or download and post it yourself.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
             "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
@@ -28918,7 +28918,7 @@ what you're doing, what they should do.</p>
             manage_html = (
                 f'<a class="btn" href="{url_for("pricing_page")}">See plans &rarr;</a>'
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
-                "Upgrade to unlock unlimited runs and auto scheduling.</div>"
+                "Upgrade to unlock unlimited runs and more brand profiles.</div>"
             )
 
         body = (

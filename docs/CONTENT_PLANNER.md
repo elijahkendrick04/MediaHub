@@ -27,7 +27,7 @@ interpretation + optional web research, applied to planning. The AI only
 
 | Source | What it reads | Where from |
 |---|---|---|
-| **own** | Processed runs + their card workflow state (queued / approved / posted), saved draft packs per type, posting recency | `DATA_DIR/runs_v4/`, `stub_packs/`, `publishing.posting_log` |
+| **own** | Processed runs + their card workflow state (queued / approved / posted), saved draft packs per type, draft recency | `DATA_DIR/runs_v4/`, `stub_packs/` |
 | **external** | Meet identities the context engine has discovered; calendar anniversaries of the club's own past meets | `data/discovered/meets/`, calendar × run history |
 | **direct** | Operator-entered upcoming events, **structured goals** (each goal targets a post type picked from the profile — no free-text guessing), blackout dates; sponsor-configured fact from the org profile | `DATA_DIR/planner_inputs/<org>.json`, `ClubProfile` |
 
@@ -72,9 +72,10 @@ honest `notes`. Plans persist per org under
 
 ## 4. Boundaries
 
-- **Planner ≠ publisher.** Autonomy stays with the per-type policy + publish
-  gate (P2.4, [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md)); the plan shows each
-  type's default level for context only.
+- **Planner ≠ publisher.** The plan only recommends; nothing publishes from it.
+  Approved content is exported or downloaded for manual posting. The plan shows
+  each type's default review disposition (`draft_only` / `approval_required`)
+  for context only.
 - **Planner ≠ detector.** "Is this a PB?" and card ranking inside a run stay
   with the deterministic recognition engine; the planner reads its outputs
   (achievement counts, queue states) and never overrides them.

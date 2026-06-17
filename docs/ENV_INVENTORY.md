@@ -159,7 +159,6 @@ each key to the minimum the deployment uses:
 | `ANTHROPIC_API_KEY` | Standard API key; per-workspace key recommended so usage is attributable; spend cap in console | Same as Gemini (failover payloads) | `.env` only |
 | `REPLICATE_API_TOKEN` | Only set when `MEDIAHUB_CUTOUT_PROVIDER=replicate`; default `server` needs no key | Photo-processing quota; photos of athletes transit only when enabled | `.env` only |
 | `PHOTOROOM_API_KEY` | Only when `MEDIAHUB_CUTOUT_PROVIDER=photoroom` | As Replicate | `.env` only |
-| `BUFFER_ACCESS_TOKEN` | Per-club token scoped to that club's channels (stored per-profile); never a master token in env on multi-tenant deployments | Posting to the connected channels | Revoke in Buffer, re-connect |
 | `STRIPE_SECRET_KEY` | Restricted key: Checkout + Customer Portal + webhooks only | Billing actions (card data never touches MediaHub) | Stripe dashboard |
 | `MEDIAHUB_NTFY_TOKEN` / webhook URLs | Notification payloads carry no athlete personal data by policy (tested) | Noise/spoofed ops alerts | `.env` only |
 | `app.secret_key` (`DATA_DIR/.secret_key`, 0600) | Auto-generated per deployment; signs sessions | Session forgery → full account takeover: protect the data volume, rotate after any suspected exposure (logs everyone out) | Delete the file, restart |

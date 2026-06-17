@@ -16,7 +16,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 
 <!-- ROADMAP:DONE -->
 - ✅ **W.1** · Phase W — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
-- ✅ **W.2** · Phase W — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.2** · Phase W — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation and again before content is exported *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
 - ✅ **W.3** · Phase W — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
 - ✅ **W.4** · Phase W — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
 - ✅ **W.5** · Phase W — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
@@ -28,7 +28,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **W.11** · Phase W — Result-grounded alt-text on every exported/published card *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
 - ✅ **W.12** · Phase W — Print exports: per-swimmer PB certificates + A4 noticeboard posters *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
 - ✅ **W.13** · Phase W — Bilingual captions (Welsh first) per-workspace language setting *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
-- ✅ **W.14** · Phase W — Engagement feedback loop: approval telemetry now; platform metrics after P4.2 *(phase 1 completed 2026-06-12 — Phase W integration pass, ADR-0016; phase 2 waits for P4.2)*
+- ✅ **W.14** · Phase W — Engagement feedback loop: approval/edit/reject telemetry feeding the caption few-shot store, memory and the planner *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
 - ✅ **P0.2** · Phase 0 — Cutout free-by-default: in-process rembg is the default (`MEDIAHUB_CUTOUT_PROVIDER=server`); Replicate/PhotoRoom opt-in *(completed pre-2026-06 — detail in the phase sections below)*
 - ✅ **P5.5** · Phase 5 — rembg cutout shipped as the default (MODNet noted as optional upgrade) *(completed pre-2026-06 — detail in the phase sections below)*
 - ✅ **P1.1** · Phase 1 — Sport-profile schema + loader + `AutonomyLevel` + swimming/football YAML profiles (inert scaffolding) *(completed pre-2026-06 — detail in the phase sections below)*
@@ -36,7 +36,6 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **PC.1** · Phase C — Self-serve signup + auth: `/signup` `/login` `/logout`, bcrypt, signed session cookie, `users.jsonl` ledger *(completed 2026-06-09, PR #267)*
 - ✅ **PC.2** · Phase C — Stripe billing + subscription lifecycle: Checkout, Customer Portal, signed webhook; honest-503 until the operator sets `STRIPE_*` keys *(completed 2026-06-09, PR #267)*
 - ✅ **PC.5** · Phase C — Free-self-host tension resolved: **hosted-only**, no customer self-host tier (maintainer decision; ADR-0011) *(completed 2026-06-09)*
-- ✅ **P2.4** · Phase 2 — Per-type autonomy controls in the workspace: Settings → Autonomy tab, per-profile per-type policy defaulting to approval_required, publish gate + global kill switch *(completed 2026-06-09, PR #297)*
 - ✅ **P1.4** · Phase 1 — Generative Content Engine v2, complete: Appendix A spine SEQ-0→4 (tokens, Tier B director/pool/APCA compliance ranking, gated SEQ-3 cutover with the A/B review approved, data-driven video) + the full PAR-1→8 bucket (12/12 archetype catalog); v2 is the default engine, `MEDIAHUB_GEN_V2=0` is the kill switch; evidence in `build_reports/SEQ_SPINE_2026-06-10.md` and `build_reports/GEN_QUALITY_BASELINE.md` *(completed 2026-06-10, PRs #259/#300/#301)*
 - ✅ **P0.1** · Phase 0 — Free reel fallback shipped: `MEDIAHUB_REEL_ENGINE=ffmpeg` renders story cards + meet reels from the cards' own still graphics via FFmpeg (`visual/reel_ffmpeg.py`) — no Node, no Remotion license *(completed 2026-06-10)*
 - ✅ **P0.3** · Phase 0 — Every paid dependency provably optional behind a flag with a free default wired — pinned by `tests/test_paid_deps_optional.py` against the DEPENDENCY_LICENSING §2 register *(completed 2026-06-10)*
@@ -45,8 +44,6 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **P1.2** · Phase 1 — Realise the post-type taxonomy in code (extend vs layer on `club_platform.content_types` — Council-gated data-model call) *(completed 2026-06-11)*
 - ✅ **P1.3** · Phase 1 — Cross-source planner (the strategy brain): fuse own/external/direct signals into a ranked plan keyed by sport profile *(completed 2026-06-11)*
 - ✅ **P1.5** · Phase 1 — Brand-DNA-from-URL with no paid API (local scrape + local model + material-color-utilities) *(completed 2026-06-11)*
-- ✅ **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) *(completed 2026-06-11)*
-- ✅ **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums *(completed 2026-06-11)*
 - ✅ **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs); Council-pressure-tested + operator-signed-off schema, ADR-0014 *(completed 2026-06-11)*
 - ✅ **PC.7** · Phase C 🥇 — Instant try-before-signup demo: paste a results file, get a watermarked 3-card preview, no account *(completed 2026-06-12)*
 - ✅ **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) *(completed 2026-06-12)*
@@ -184,7 +181,7 @@ product polish — are tracked as Phase 7 and Phase 1 in
 | Multi-tenancy: org → workspace | ✅ shipped | PC.3 (ADR-0014) on top of the ADR-0003 invariant; pinned by `tests/test_workspace_membership_invariant.py`. |
 | Go-to-market / distribution | 🔵 selling open | The #1 risk. Tooling + drafted NGB application live on `/operator/commercial`; the founder's motion (PC.6) and the ≥10-club gate remain open. |
 | Safeguarding / minors' data | ✅ locked | ADR-0003 isolation invariant + W.2 consent registry; PC.12 finished the public-surface half (2026-06-12, Children's-Code pass recorded). |
-| Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions land in the immutable per-org ledger. |
+| Explainability & audit trail | ✅ | Every step explainable; generation and approval decisions land in the immutable per-org ledger. |
 | Product design / UI polish | ❌ open | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
 | Test-suite stability | ✅ | Full suite green (~3,576 passed / 1 skipped, 2026-06-09 — see CLAUDE.md "Running Tests"). Keep green. |
 | Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. F.12/PC.16 add a cheaper-VPS target on the same Dockerfile (decision pending — see the F.12 guide). |
@@ -197,16 +194,15 @@ product polish — are tracked as Phase 7 and Phase 1 in
   deterministic ranker → branded stills (`graphic_renderer`, 12-archetype
   catalog + design-spec director) and reels (Remotion or the free ffmpeg
   engine) → captions (Gemini→Anthropic, honest errors; Welsh bilingual;
-  result-grounded alt text) → approval workflow → export / Buffer / public
+  result-grounded alt text) → approval workflow → export / download / public
   wall / print certificates.
 - **Brand intelligence:** brand-DNA-from-URL (SSRF-hardened, evidence-
   grounded), guidelines ingestion, voice imitation, the Adaptive Theming
   Engine (APCA/CIEDE2000-gated, single DTCG palette across web + motion +
   email + graphic), self-hosted fonts on every surface.
 - **Platform:** self-serve signup/auth + Stripe billing code, org → workspace
-  multi-tenancy (ADR-0014) on the ADR-0003 isolation invariant, per-type
-  autonomy + the publish gate + global kill switch, the exactly-once
-  scheduler, ntfy/webhook notifications, LLM-usage + uptime observability,
+  multi-tenancy (ADR-0014) on the ADR-0003 isolation invariant, the
+  exactly-once scheduler, ntfy/webhook notifications, LLM-usage + uptime observability,
   semantic caption memory, bounded web research, the `/try` demo, sponsor
   manager + exposure reports, the public achievements wall, magic-link mobile
   approvals, live meet mode, season wraps, and the UK legal-compliance
@@ -247,7 +243,7 @@ product polish — are tracked as Phase 7 and Phase 1 in
   registry on `ClubProfile` + `/sponsors` page; deterministic per-card
   sponsor rotation (`club_platform/sponsors.py`) consistent across stills,
   motion and re-renders; exposure ledger + branded monthly per-sponsor report
-  joining approvals and the posting log. Pinned by `tests/test_sponsors.py`.
+  joining the approval/export history. Pinned by `tests/test_sponsors.py`.
 - **PC.10 — Public achievements wall + embed/RSS** *(2026-06-12)*:
   `/wall/<token>` + iframe embed + RSS/JSON feeds, approved-only and
   side-effect-free, initials-first by default, per-card hide/show, token
@@ -304,8 +300,8 @@ The product's core output is *publishing children's achievements*; consent
 handling stops being optional the day money changes hands. **Shipped:** W.2
 itself — the per-athlete consent registry (photo OK / full name / initials-
 only / do-not-feature; most-restrictive default; CSV import) enforced
-deterministically at generation, in photo scoring and at the publish gate
-(see "Done" → W.2) — plus workspace-setup parental-consent attestation
+deterministically at generation, in photo scoring and again before content is
+exported (see "Done" → W.2) — plus workspace-setup parental-consent attestation
 (PR #352). **Shipped (2026-06-12, code remainder):** W.2 consent is enforced
 on every public-wall exit — wall text, embed, JSON/RSS feeds and the card
 PNG route. A blocked athlete (do-not-feature, or no consent on file under an
@@ -484,7 +480,7 @@ What each item shipped:
   the honest no-engine path).
 - **W.11 — Result-grounded alt text:** an `alt_text` field produced in the
   same caption LLM call, threaded through pack ZIP, newsletter, public wall
-  and publish payloads; editable in review; honest-error when no provider.
+  and exports; editable in review; honest-error when no provider.
 - **W.12 — Print exports:** A4 certificate + noticeboard-poster layouts in
   `graphic_renderer/layouts/` (Playwright prints PDF natively); per-swimmer
   batch export on the pack; BrandKit tokens reused; W.2 consent honoured.
@@ -493,37 +489,20 @@ What each item shipped:
   edits both; gate length checks account for doubled text. *Generalised
   2026-06-12 (PR #363): registry-driven, now covering the top-10 world
   languages + Irish.*
-- **W.14 — Engagement feedback loop, phase 1:** per-club approval/edit/reject
+- **W.14 — Engagement feedback loop:** per-club approval/edit/reject
   telemetry feeding the caption few-shot store, `memory/` and the planner's
-  explainable reasons. *Phase 2 (platform metrics) waits for P4.2.*
+  explainable reasons.
 
-### Phase 2 — Autonomy toggles + orchestration backbone · ✅ **COMPLETE (2026-06-11)**
+### Phase 2 — Orchestration backbone · ✅ **COMPLETE (2026-06-11)**
 
-Exit met: a content type can be set to any `AutonomyLevel`;
-`fully_autonomous` publishes only when every guardrail + the confidence gate
-pass; the kill switch halts instantly; every decision audited. Pinned
-end-to-end by
-`tests/test_autonomous_publishing.py::test_phase2_exit_criterion_end_to_end`.
-Full model: [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
+Exit met: the in-process orchestration substrate runs scheduled jobs
+exactly-once and drives the bounded review-prep runner, which queues content
+for human approval and structurally cannot publish; every decision audited.
 
 - **P2.1 — In-process scheduler + bounded runner** (instead of Temporal —
   council decision): `scheduler/` atomic-claim SQLite runner + the
   `autonomy/` bounded narrow-tool loop on `ai_core.ask_with_tools`;
   quality-reviewed with five hardening fixes.
-- **P2.2 — Approval signal:** `workflow/approval.py::apply_approval_signal`
-  on the QUEUE → APPROVED → POSTED transition; gated types pause for a human;
-  `fully_autonomous` cards run the gate against the exact caption that would
-  ship; autonomy degrades to approval, never the reverse.
-- **P2.3 — The publish gate:** `publishing/publish_gate.py` — kill switch →
-  per-type policy → provenance (fail-closed) → per-type confidence threshold
-  → deterministic brand-safety → safeguarding (minors never auto-publish) →
-  per-org rate caps. The two same-named enums reconciled: the runner's reach
-  axis renamed `autonomy.tools.RunnerReach`, leaving
-  `sport_profiles.autonomy.AutonomyLevel` as the single publishing-policy
-  enum.
-- **P2.4 — Workspace controls** (PR #297): Settings → Autonomy tab,
-  per-profile per-type policy defaulting to `approval_required`, plus the
-  per-type confidence threshold and autonomous-channel list.
 
 ### Phase 1 — Strategy brain + post-type taxonomy + sport profiles · ✅ **COMPLETE (2026-06-10/11)**
 
@@ -533,7 +512,7 @@ plan for ≥2 sport profiles, grounded in three signal sources. Pinned by
 
 - **P1.1 — Sport-profile schema + loader:** `mediahub.sport_profiles`
   (`SportProfile`/`PostTypeConfig`, `AutonomyLevel`),
-  swimming + football YAML profiles — now live through the planner and P2.4.
+  swimming + football YAML profiles — now live through the planner.
   See [`SPORT_PROFILES.md`](SPORT_PROFILES.md).
 - **P1.2 — Post-type taxonomy in code** (Council-decided: layer on a
   slug-canonical spine,
@@ -1221,9 +1200,8 @@ FILES TO MODIFY:
   Do not introduce SQLAlchemy.
 - environment: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
   STRIPE_PRICE_CLUB, STRIPE_PRICE_FEDERATION.
-- Free tier limits: 3 runs/month, single brand profile, no Buffer
-  scheduling. Soft limit (a banner) — never lock the user out
-  permanently on free.
+- Free tier limits: 3 runs/month, single brand profile. Soft limit
+  (a banner) — never lock the user out permanently on free.
 
 ACCEPTANCE CRITERIA:
 - /signup creates a user, hashes the password, logs them in.
@@ -1283,11 +1261,7 @@ Verify Step 7 (Commercial layer) end-to-end.
    - On a Free account, create 3 runs. Create a 4th. Confirm a banner
      appears (NOT a hard lock).
 
-6. Buffer scheduling guarded:
-   - On Free, the Schedule button must show "Upgrade to schedule
-     posts" instead of opening the modal.
-
-7. Security checks:
+6. Security checks:
    - Try to access /billing without a session. Confirm redirect to
      /login.
    - Inspect the session cookie — must be HttpOnly + Secure (when
@@ -1295,7 +1269,7 @@ Verify Step 7 (Commercial layer) end-to-end.
    - Grep the codebase for STRIPE_SECRET_KEY — must only appear in
      billing.py and never logged.
 
-8. Regression sweep: all features from Steps 1-6 still work.
+7. Regression sweep: all features from Steps 1-5 still work.
 
 OUTPUT: single report.
 ```
@@ -1357,7 +1331,7 @@ DON'T BREAK:
   visual, caption) still passes.
 - pytest at 253+ (new athletics tests added).
 - All Phase 1 features (Brand DNA, voice, visible intelligence,
-  Turn-Into, motion, Buffer publishing) work for athletics output.
+  Turn-Into, motion, export) work for athletics output.
 
 TESTS:
 - tests/test_athletics_parser.py: parse a sample athletics CSV,
@@ -1689,97 +1663,6 @@ Verify Step 11 (Football + Rugby) end-to-end.
    - Same voice_profile applied to a football caption and a swimming
      caption — the stylistic signature (sentence length, hashtag
      count) should match across both.
-
-7. Regression sweep: all earlier features still work.
-
-OUTPUT: single report.
-```
-
----
-
-#### Step 12: Native Publishing APIs (Replace Buffer Dependency)
-
-##### Context
-Step 6 shipped Buffer integration to close the publishing gap fast. This step builds direct integrations to Instagram Graph API, Facebook Pages, X (v2), LinkedIn Marketing, and TikTok Business so MediaHub no longer depends on Buffer for the core publishing path.
-
-##### Implementation Prompt
-
-```
-Replace Buffer dependency with native publishing APIs.
-
-GOAL: a user can connect Instagram Business, Facebook Pages, X,
-LinkedIn (Company Page), and TikTok Business directly. Scheduling
-no longer requires a Buffer account.
-
-FILES TO MODIFY:
-- src/mediahub/publishing/instagram.py: Graph API; OAuth via
-  Facebook Login. Single-image + reels upload + caption.
-- src/mediahub/publishing/facebook.py: Pages API; OAuth via
-  Facebook Login.
-- src/mediahub/publishing/x_twitter.py: v2 API; OAuth 2.0 with PKCE.
-- src/mediahub/publishing/linkedin.py: Marketing Developer Platform;
-  OAuth 2.0.
-- src/mediahub/publishing/tiktok.py: TikTok Business API; OAuth 2.0.
-- src/mediahub/publishing/scheduler.py: a unified Scheduler interface
-  (queue, schedule_at, dispatch_now) so the UI calls one API
-  regardless of platform.
-- A background worker (lightweight — Flask-APScheduler or a simple
-  cron-style polling thread) that dispatches scheduled posts at
-  their scheduled_at time.
-- /settings: native "Connect Instagram", "Connect Facebook" etc.
-  buttons (in addition to the existing Buffer field, which remains
-  as a fallback).
-
-ACCEPTANCE CRITERIA:
-- A user can complete the OAuth flow for each platform and the
-  resulting access tokens are stored encrypted (Fernet) in
-  DATA_DIR / "secrets" / <user_id>.json.
-- Scheduling a post via the UI dispatches to the right platform at
-  the right time.
-- Token refresh is handled before each dispatch.
-- Buffer remains available as a fallback channel; users can choose
-  per-card whether to dispatch direct or via Buffer.
-
-DON'T BREAK:
-- pytest at the new baseline (target 290+ with publishing tests).
-- All earlier features still work.
-
-TESTS:
-- tests/test_native_publishing.py: mocked OAuth + dispatch, token
-  refresh, dispatcher worker.
-
-landscape closing), §6 Workstream 3.x.
-```
-
-##### Verification Prompt
-
-```
-Verify Step 12 (Native publishing) end-to-end.
-
-1. Tests: full pytest + tests/test_native_publishing.py -v.
-
-2. OAuth flows (mocked):
-   - For each of the 5 platforms, simulate the OAuth callback with a
-     fixed test token. Confirm the token is stored encrypted (not
-     plaintext) in the per-user secrets file.
-
-3. Dispatch (mocked):
-   - Schedule a post with scheduled_at = now + 30s.
-   - Wait 45s. Confirm the post was dispatched via the mocked API.
-   - Confirm the workflow state shows schedule_status=published.
-
-4. Token refresh:
-   - Set an expired-token scenario. Confirm the dispatcher refreshes
-     the token before dispatching, or surfaces a clear "re-connect"
-     error if refresh fails.
-
-5. Buffer fallback:
-   - Confirm Buffer is still selectable per-card and the Buffer
-     dispatch path still works.
-
-6. Security:
-   - grep the codebase for any access_token logging — must be zero.
-   - Confirm the encrypted secrets file mode is 0600.
 
 7. Regression sweep: all earlier features still work.
 
@@ -2156,8 +2039,8 @@ FILES TO MODIFY:
 
 ACCEPTANCE CRITERIA:
 - A sponsor can only see content produced by clubs they sponsor.
-- Engagement metrics are pulled from the publishing layer's
-  post-success records (Step 12).
+- Exposure is counted from the club's approved/exported content
+  (the approval/export history).
 - The brand-exposure value calculation is documented and auditable
   (open the value calculation in a tooltip).
 - The PDF export is reproducible and includes citations to every
@@ -2243,13 +2126,12 @@ PHASE C — Critical user journeys, for each completed step:
 - Visible intelligence: open any run, confirm "Why this card?" works.
 - Motion: render a story card; render a reel.
 - Turn-Into: produce 6-7 artefacts from a meet.
-- Buffer or native publishing: schedule a mocked post.
+- Export: approve a card, download/export the content pack.
 - Commercial: signup, login, upgrade (Stripe test mode).
 - Athletics: upload athletics sample, confirm pipeline.
 - Athlete page: generate a token, fetch /a/<token>.
 - Sponsor mode: toggle on a card, confirm variant.
 - Football/Rugby: upload sample, confirm hat-trick / clean sheet.
-- Native publishing OAuth: complete one platform's mock flow.
 - Integrations: TeamUnify mocked auto-ingest.
 - Enterprise: multi-club orchestration.
 - Agent: 5 edit commands all hit tools correctly.

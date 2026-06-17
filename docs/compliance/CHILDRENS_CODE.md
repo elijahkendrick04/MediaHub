@@ -16,12 +16,12 @@ builds.
 
 | # | Standard | MediaHub's answer |
 |---|---|---|
-| 1 | **Best interests of the child** | Publication of a child requires a recorded basis (consent registry; opt-in mode for youth squads); minors can **never** be auto-published (safeguarding gate, ADR-0003 — every minor card is a human decision); identity controls reduce identifiability by default. |
+| 1 | **Best interests of the child** | Featuring a child requires a recorded basis (consent registry; opt-in mode for youth squads); MediaHub **never** publishes to social — every minor card is a human decision and is only ever exported/downloaded for a human to post; identity controls reduce identifiability by default. |
 | 2 | **DPIAs** | [`DPIA.md`](DPIA.md) (children + AI + social publication makes one effectively mandatory). |
-| 3 | **Age appropriate application** | Age (age-at-day) is parsed from results and rides every card's internal facts; under-18 status drives the consent rules, the safeguarding gate and the content controls. Unknown age is treated as under-18 by the consent opt-in mode and the photo control (fail-safe). |
+| 3 | **Age appropriate application** | Age (age-at-day) is parsed from results and rides every card's internal facts; under-18 status drives the consent rules and the content controls. Unknown age is treated as under-18 by the consent opt-in mode and the photo control (fail-safe). |
 | 4 | **Transparency** | Child-readable athlete/parent notice ([`templates/PRIVACY_NOTICE_ATHLETE_ART14.md`](templates/PRIVACY_NOTICE_ATHLETE_ART14.md)) covering the rankings enrichment, the AI captioning, and the right to say no. |
 | 5 | **Detrimental use** | Content celebrates achievement only; the brand-safety gate blocks banned phrasing; no advertising/profiling use of children's data; LLM payloads are minimised (no DOB-level data leaves the platform). |
-| 6 | **Policies & community standards** | This document set + the publish gate enforce what the notices promise. |
+| 6 | **Policies & community standards** | This document set + the approval and consent gates enforce what the notices promise. |
 | 7 | **Default settings (high privacy by default)** | **New organisations default to surname initialisation + age suppression ON** for under-18s ("Eira H.", no age shown). Photo exclusion is per-club opt-in (photos enter only via the club's own permission-tracked media library). Legacy organisations keep prior behaviour until they visit the settings — flagged honestly as a migration decision for the operator. |
 | 8 | **Data minimisation** | Art 5(1)(c) work in `compliance/retention-and-minimisation`: caption payloads carry only what the caption needs; ASA IDs/DOB never leave; notifications carry no athlete data. |
 | 9 | **Data sharing** | Sub-processor disclosure page (`/legal/subprocessors`); social platforms flagged as independent controllers in the notices; consent gate stands between every child and every share. |
@@ -42,9 +42,9 @@ builds.
 
 Enforcement points: pipeline (achievements transformed **before** cards are
 persisted, so stills/captions/reels inherit), the LLM caption boundary
-(backstop for legacy runs), and media selection (photo exclusion). The
-autonomous publish path cannot carry a minor at all (safeguarding gate), so
-these controls govern the human-approved surface.
+(backstop for legacy runs), and media selection (photo exclusion). MediaHub
+does not publish to social at all, so these controls govern every approved
+card before it is exported for a human to post.
 
 ## Honest limitations
 

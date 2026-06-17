@@ -57,10 +57,9 @@ policy ([`../CLAUDE.md`](../CLAUDE.md)) plus one explicit maintainer steer
    code; new *judgement* (which photo, which tone, which layout, which copy)
    goes through `media_ai.llm` / `ai_core.llm` with honest
    `ProviderNotConfigured` errors — never a heuristic fake.
-4. **Approval before anything leaves the building.** Every publishing/scheduling
-   feature inherits the P2.3 publish gate, the per-type `AutonomyLevel`
-   defaults, the kill switch, and the audit ledger. Nothing in Phase 6 widens
-   the autonomy exception.
+4. **Approval before anything leaves the building.** Every surface requires a
+   human to review and approve before content is exported; MediaHub never posts
+   to a social channel on its own.
 5. **Hosted-only.** "Desktop app", "works offline", "self-host" features map to
    browser/PWA surfaces of the hosted SaaS — never a customer install
    (ADR-0011).
@@ -1681,7 +1680,7 @@ shapes our own design — we are building our versions, not tracking theirs.
 ## Relationship to standing decisions
 
 - Phase 6 never overrides: hosted-only (ADR-0011) · approval-first
-  publishing + autonomy guardrails (P2.3, AUTONOMY_MODEL) · deterministic
+  (human approval before any external use) · deterministic
   engine boundary · Gemini-first honest-error AI · self-hosted fonts ·
   GWS + 9router exclusions (CLAUDE.md, ADR-0007) · the ADR-0003 isolation
   invariant (forms/share-links/sites are new outward surfaces and inherit

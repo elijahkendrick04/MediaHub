@@ -126,9 +126,9 @@ class TestFromDict:
         assert loaded.notes is None
         assert loaded.posted_at is None
 
-    def test_legacy_dict_with_obsolete_schedule_fields_loads(self) -> None:
-        # Older workflow sidecars carried schedule_* fields that have since
-        # been removed; from_dict must ignore the extras and still load.
+    def test_legacy_dict_with_obsolete_fields_loads(self) -> None:
+        # Older workflow sidecars may carry fields that have since been removed;
+        # from_dict must ignore unknown extras and still load.
         legacy = {
             "card_id": "card:99",
             "status": "approved",
@@ -136,10 +136,8 @@ class TestFromDict:
             "notes": "old card",
             "posted_at": None,
             "last_changed_at": "2023-01-01T00:00:00Z",
-            "schedule_status": "scheduled",
-            "scheduler_update_id": "buf-1",
-            "scheduled_at": "2023-01-01T00:00:00Z",
-            "schedule_error": None,
+            "some_removed_field": "x",
+            "another_old_key": 7,
         }
         loaded = CardWorkflowState.from_dict(legacy)
         assert loaded.card_id == "card:99"

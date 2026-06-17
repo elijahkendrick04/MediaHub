@@ -15,7 +15,7 @@ Later roadmap phases will use it.
 
 | File | What it does |
 |---|---|
-| `autonomy.py` | `AutonomyLevel` — the three settings for "how much a post type can do by itself": `draft_only`, `approval_required` (the default), `fully_autonomous`. |
+| `autonomy.py` | `AutonomyLevel` — how a post type enters review: `draft_only` or `approval_required` (the default). |
 | `schema.py` | `SportProfile` + `PostTypeConfig` — the typed shape of a profile. |
 | `loader.py` | `load_sport_profile("swimming")` / `list_sport_profiles()` — read the YAML files. |
 
@@ -32,5 +32,4 @@ Later roadmap phases will use it.
 
 - Authoring guide & schema: [`docs/SPORT_PROFILES.md`](../../../docs/SPORT_PROFILES.md)
 - Post types: [`docs/POST_TYPE_TAXONOMY.md`](../../../docs/POST_TYPE_TAXONOMY.md)
-- Autonomy model: [`docs/AUTONOMY_MODEL.md`](../../../docs/AUTONOMY_MODEL.md)
 - Target architecture: [`docs/ARCHITECTURE_TARGET.md`](../../../docs/ARCHITECTURE_TARGET.md)

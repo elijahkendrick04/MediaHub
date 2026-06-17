@@ -1,27 +1,24 @@
 """
-Autonomy levels for per-content-type posting control.
+Content-disposition levels for per-content-type review control.
 
-``AutonomyLevel`` is the three-state toggle that the roadmap's autonomy model
-hangs off (see ``docs/AUTONOMY_MODEL.md``). Each *post type* in a sport profile
-carries a default autonomy level; a workspace may later override it per type.
+``AutonomyLevel`` is the per-post-type setting for how a draft of that type
+enters review. Each *post type* in a sport profile carries a default level; a
+workspace may later override it per type.
 
 The level decides one thing only: **how much human involvement a post of that
-type needs before it can be published.**
+type needs before it is ready to use.**
 
-  - ``draft_only``         — generate a draft and stop. Never schedules or
-                             publishes on its own; a human exports or hand-posts.
-  - ``approval_required``  — the product default. Generate a draft, then wait for
-                             a human to approve before it can be scheduled/published.
-                             This is the QUEUE -> APPROVED step in
+  - ``draft_only``         — generate a draft and stop. A human exports or
+                             hand-posts it; it never enters the approval queue.
+  - ``approval_required``  — the product default. Generate a draft, then wait
+                             for a human to approve it. This is the
+                             QUEUE -> APPROVED step in
                              ``mediahub.workflow.status.CardStatus``.
-  - ``fully_autonomous``   — may publish without a human approval step, *provided*
-                             every guardrail passes (provenance/trust, brand-safety,
-                             rate limit, kill switch). See ``docs/AUTONOMY_MODEL.md``.
 
-This module is deliberately pure and free of any I/O or publishing side effects:
-it describes the policy, it does not enforce it. Enforcement is a later roadmap
-phase (Phase 2 — autonomy toggles + orchestration). Nothing in the shipped
-product imports this yet; it is inert scaffolding.
+This module is deliberately pure and free of any I/O side effects: it describes
+the disposition, it does not enforce it. MediaHub never publishes to a social
+channel on its own — approved content is exported or downloaded for manual
+posting.
 """
 
 from __future__ import annotations
@@ -31,7 +28,7 @@ from typing import Optional
 
 
 class AutonomyLevel(str, Enum):
-    """How autonomously a single content/post type may be published.
+    """How a single content/post type enters review.
 
     ``str``-backed so it serialises straight to/from YAML and JSON as the bare
     string value (matching ``mediahub.club_platform.content_types.ContentType``).
@@ -39,11 +36,10 @@ class AutonomyLevel(str, Enum):
 
     DRAFT_ONLY = "draft_only"
     APPROVAL_REQUIRED = "approval_required"
-    FULLY_AUTONOMOUS = "fully_autonomous"
 
     @classmethod
     def default(cls) -> "AutonomyLevel":
-        """The product-wide default: gated behind human approval."""
+        """The product-wide default: a human approves before content is used."""
         return cls.APPROVAL_REQUIRED
 
     @classmethod
@@ -52,7 +48,7 @@ class AutonomyLevel(str, Enum):
 
         Unknown or empty values fall back to ``default`` (or the product default
         when ``default`` is None). This mirrors ``brand.tone.tone_from_str`` —
-        config typos degrade to the safe gated level rather than raising.
+        config typos degrade to the safe approval-required level rather than raising.
         """
         fallback = default if default is not None else cls.default()
         if isinstance(value, cls):
@@ -64,16 +60,6 @@ class AutonomyLevel(str, Enum):
             if level.value == key:
                 return level
         return fallback
-
-    @property
-    def requires_human_approval(self) -> bool:
-        """True when a human approval step must run before publishing."""
-        return self is not AutonomyLevel.FULLY_AUTONOMOUS
-
-    @property
-    def can_auto_publish(self) -> bool:
-        """True only for the fully-autonomous level (still guardrail-gated)."""
-        return self is AutonomyLevel.FULLY_AUTONOMOUS
 
 
 __all__ = ["AutonomyLevel"]

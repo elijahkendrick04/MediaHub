@@ -11,11 +11,10 @@
 #
 #   Schema ............ docs/SPORT_PROFILES.md
 #   Post-type taxonomy  docs/POST_TYPE_TAXONOMY.md
-#   Autonomy levels ... docs/AUTONOMY_MODEL.md   (draft_only | approval_required | fully_autonomous)
+#   Disposition ....... draft_only | approval_required (the default)
 #
-# Autonomy is GATED BY DEFAULT: no post type ships as `fully_autonomous`. A
-# workspace may later flip a low-risk, source-grounded type (e.g. fixtures,
-# final scores) to `fully_autonomous` itself — see AUTONOMY_MODEL.md.
+# Every post type defaults to human approval before its content is used;
+# MediaHub never posts to a social channel on its own.
 
 sport: swimming
 display_name: Swimming
@@ -65,7 +64,7 @@ post_types:
     template_namespace: universal/athlete_spotlight
     default_autonomy: approval_required
 
-  fixture_announcement:           # prime candidate to flip to fully_autonomous
+  fixture_announcement:
     enabled: true
     data_inputs: [fixtures, manual_entry]
     template_namespace: universal/fixture

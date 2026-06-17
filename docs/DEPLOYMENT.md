@@ -23,7 +23,6 @@ Set the secrets in Render's dashboard, in roughly this order of importance:
   surfaces (captions, brand operating profile, creative direction) return
   a clear "AI unavailable" error instead of silently producing low-quality
   output.
-- `BUFFER_ACCESS_TOKEN` — required for the `/activity` scheduling surface.
 - `ANTHROPIC_API_KEY` — optional Anthropic alternative (set
   `MEDIAHUB_LLM_PROVIDER=anthropic` to prefer it).
 - `REPLICATE_API_TOKEN` — optional cloud image / cutout provider.

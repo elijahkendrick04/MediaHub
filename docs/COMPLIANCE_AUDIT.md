@@ -13,9 +13,9 @@ CANNOT VERIFY.
 ## 1. Executive verdict
 
 **No — MediaHub cannot lawfully be sold to UK consumers today.** The engineering
-fundamentals (security, tenant isolation, human approval, safeguarding gate, polite
-scraping) are unusually strong, but the legal wrapper is almost entirely absent and one
-user-facing statement is materially false:
+fundamentals (security, tenant isolation, human approval, consent gating, export-only
+output with no social publishing, polite scraping) are unusually strong, but the legal
+wrapper is almost entirely absent and one user-facing statement is materially false:
 
 1. **The live privacy page states "No data is sent to third parties beyond fetching
    public PB-lookup pages"** (`src/mediahub/web/web.py` privacy_page, ~12468–12535) while
@@ -24,8 +24,7 @@ user-facing statement is materially false:
    photos to Photoroom/Replicate (`src/mediahub/media_ai/providers/`), names + birth
    years to DuckDuckGo in plaintext query URLs
    (`src/mediahub/pb_discovery/discover.py:142–143`,
-   `src/mediahub/web_research/search.py:11–12`), captions to Buffer
-   (`src/mediahub/publishing/buffer.py`), and emails to Stripe
+   `src/mediahub/web_research/search.py:11–12`), and emails to Stripe
    (`src/mediahub/web/billing.py`). A false privacy notice is worse than none —
    UK GDPR Art. 13/14 breach plus a CPUT/consumer-law misleading-statement exposure.
 2. **There is no Terms of Service, no Article 28 DPA with clubs, no lawful-basis or
@@ -49,16 +48,16 @@ are completed outside the repo.
 |---|------|--------|----------|----------|-------------|
 | 1.1 | Controller/processor analysis & Art. 28 DPA | NON-COMPLIANT | Critical | No DPA anywhere; clubs upload athlete data with no processing terms. PB discovery cache (`pb_discovery/cache.py:76–113`) is arguably independent-controller activity | Draft DPA, present at onboarding, record acceptance (build item B4) |
 | 1.2 | Lawful basis per processing activity | NON-COMPLIANT | Critical | No lawful basis identified or recorded anywhere in code or docs | Lawful-basis register in Privacy Notice + club attestation at onboarding (B2, C8) |
-| 1.3 | Children's data safeguards | PARTIAL | Critical | Strong: minors never auto-publish (`publishing/publish_gate.py:313–322`); media assets carry `needs_parental_consent` (`media_library/models.py:32,63`). Missing: no parental-consent capture/attestation, field unenforced, no children's section in privacy notice | Consent attestation at onboarding (C8); children's section in Privacy Notice (B2) |
+| 1.3 | Children's data safeguards | PARTIAL | Critical | Strong: MediaHub does not publish to social — minors' content is only ever exported for a human to post; media assets carry `needs_parental_consent` (`media_library/models.py:32,63`). Missing: no parental-consent capture/attestation, field unenforced, no children's section in privacy notice | Consent attestation at onboarding (C8); children's section in Privacy Notice (B2) |
 | 1.4 | Special category data (para classification) | NOT APPLICABLE (today) | Low | No S1–S14/SB/SM/para/disability handling anywhere in `recognition/`, `interpreter/`, `web/canonical.py` | Note in DPIA as a future-risk trigger before any para-swimming support ships |
 | 1.5 | Privacy notice accuracy (Art. 13/14) | NON-COMPLIANT | Critical | `/privacy` page exists but materially misstates third-party flows (web.py privacy_page ~12468–12535) vs. actual egress in §3 of the data-flow map | Rewrite as full Art. 13/14 notice describing real flows (B2) |
-| 1.6 | Right to erasure | PARTIAL | High | Per-run delete exists (`web.py:12537–12580` → `web.py:1831–1860`) but misses: `memory.db` caption store (`memory/store.py` — no delete API), PB warm cache (`pb_discovery/cache.py:76`), research cache, posting-log caption excerpts (`publishing/posting_log.py:92`), and there is no account deletion at all (`users.jsonl`, `auth.py:133–150`) | Cascading erasure + account deletion + athlete-level erasure (C1) |
+| 1.6 | Right to erasure | PARTIAL | High | Per-run delete exists (`web.py:12537–12580` → `web.py:1831–1860`) but misses: `memory.db` caption store (`memory/store.py` — no delete API), PB warm cache (`pb_discovery/cache.py:76`), research cache, and there is no account deletion at all (`users.jsonl`, `auth.py:133–150`) | Cascading erasure + account deletion + athlete-level erasure (C1) |
 | 1.7 | Right of access / portability | PARTIAL | High | Per-run JSON export exists (`web.py:12328–12450`); no per-account or per-athlete export | Account/athlete data export (C2) |
-| 1.8 | Rectification + post-publication correction | NON-COMPLIANT | High | No rectification or takedown workflow; once posted via Buffer there is no correction path in code | Correction/takedown workflow (C3) |
-| 1.9 | Retention limits & deletion jobs | PARTIAL | High | TTLs exist only for caches (7d warm PB `pb_discovery/cache.py:82`, 30d research `web_research/search.py:36`) and ring-buffer prunes (`observability/llm_usage.py:481`, `publishing/posting_log.py:379`, demo runs `web/demo_try.py:20`). Runs, uploads (`input.bin`), packs, `memory.db`: indefinite | Configurable retention + scheduled deletion job (C4) |
+| 1.8 | Rectification + post-publication correction | NON-COMPLIANT | High | No rectification or takedown workflow; once a club has exported and posted content manually there is no correction path in code | Correction/takedown workflow (C3) |
+| 1.9 | Retention limits & deletion jobs | PARTIAL | High | TTLs exist only for caches (7d warm PB `pb_discovery/cache.py:82`, 30d research `web_research/search.py:36`) and ring-buffer prunes (`observability/llm_usage.py:481`, demo runs `web/demo_try.py:20`). Runs, uploads (`input.bin`), packs, `memory.db`: indefinite | Configurable retention + scheduled deletion job (C4) |
 | 1.10 | Security (Art. 32) | PARTIAL | Medium | Strong: bcrypt-12 (`auth.py:117`), constant-time verify + dummy hash (`auth.py:128,220`), HttpOnly/SameSite/Secure cookies (`web.py:7920–7934`), 0600 secret files (`web.py:7896`), parameterised SQL throughout, `_h()` escaping, ZIP-bomb guards (`interpreter/_zip_safety.py:24–26`), tenant isolation per ADR-0014 (`web.py:1643–1686`, invariant tests). Gaps: no rate limiting on `/login` `/signup` `/developer` (`web.py:18633,18694,18790`); no HSTS/forced HTTPS in app; SQLite unencrypted at rest | Auth rate limiting + security headers (C5); disk encryption = operational |
 | 1.11 | International transfers | NON-COMPLIANT | High | Gemini/Anthropic/Photoroom/Replicate/Stripe/ntfy are US-based processors; `render.yaml` sets no region (Render default = US/Oregon); `fly.toml:6` = lhr (UK). No transfer mechanism (IDTA/Addendum) referenced anywhere | Document transfers + mechanisms in Privacy Notice/DPA (B2, B4); executing the mechanisms is operational (D) |
-| 1.12 | Breach readiness (72h) | PARTIAL | Medium | Posting log + autonomy audit ledger are queryable (`posting_log.py:95–98`, `workflow/autonomy.py` AuditLog); no breach-response procedure | Breach procedure section in DPA + ops checklist (B4, D) |
+| 1.12 | Breach readiness (72h) | PARTIAL | Medium | Autonomy audit ledger is queryable (`workflow/autonomy.py` AuditLog); no breach-response procedure | Breach procedure section in DPA + ops checklist (B4, D) |
 | 1.13 | DPIA | NON-COMPLIANT | Critical | Mandatory here (children's data at scale + public dissemination + third-country AI processing — ICO DPIA screening criteria squarely met); none exists | Draft DPIA (B5) |
 | 2.1 | PECR — cookies | PARTIAL | Low | Only cookie set is the strictly-necessary Flask session cookie (`web.py:7908–7934`); no analytics/tracking anywhere (no Sentry/GA/PostHog — verified by sweep). Missing: any cookie disclosure | Cookie policy page + consent gate for future non-essential cookies (B3) |
 | 2.2 | PECR — marketing email | NOT APPLICABLE | — | No marketing/newsletter email functionality exists (verified: email used only for auth + Stripe) | Note in BILLING/ops docs if ever added |
@@ -71,9 +70,9 @@ are completed outside the repo.
 | 7.3 | Fonts & visual assets | PARTIAL | Low | All bundled fonts are Google-Fonts OFL, self-hosted (`web/static/fonts/README.md`); attribution implicit, no consolidated notice | FONT/THIRD_PARTY notices file (C9) |
 | 7.4 | Scraping behaviour | COMPLIANT (behaviour) / CANNOT VERIFY (target ToS) | Medium | robots.txt respected by default (`results_fetch/crawl.py:363–408,449`), 0.3 s politeness delay (`crawl.py:454`), identified UAs ("SwimPBDiscovery/7.5" `pb_discovery/fetch_profile.py:65–73`; "MediaHubResults/1.0" `results_fetch/fetch.py:312+`), 7-day warm cache (`pb_discovery/cache.py:82`), hard budgets (400 pages/50 MiB/180 s, `crawl.py:122–142`). swimmingresults.org ToS/database-right position cannot be assessed from code | Document scraper conduct (C9); ToS/database-right review = solicitor (D) |
 | 7.5 | Club logos / athlete photo rights | NON-COMPLIANT | High | No warranty or consent basis captured anywhere for uploaded logos/photos; `permission_status` field exists but nothing requires it (`media_library/models.py:63`) | Club warranty in ToS/DPA (B1, B4) + onboarding attestation (C8) |
-| 7.6 | Platform policies (IG/FB/TikTok) | PARTIAL | Medium | Publishing is exclusively via Buffer's official API (`publishing/buffer.py` — no direct platform automation, no scraping of platforms). Autonomy roadmap must stay within platform automation policies; nothing in code enforces this | Note in ToS + AUTONOMY_MODEL cross-reference; ongoing operational duty (D) |
+| 7.6 | Platform policies (IG/FB/TikTok) | NOT APPLICABLE | — | MediaHub does not publish to or automate any social platform: approved content is exported/downloaded and the club posts it manually. No platform API integration and no scraping of platforms exists in code | Documented here; revisit if any platform integration is ever added |
 | 8 | Online Safety Act 2023 | NOT APPLICABLE | — | No user-to-user functionality: the public wall is one-way, club-curated, token-scoped, approved-cards-only output (`web/public_wall.py:14,133–146`); no comments, uploads, or interaction between service users | Documented here; revisit if any U2U feature ships |
-| 9 | Accuracy / defamation / publication risk | PARTIAL | High | Strong: deterministic parsers/detectors, confidence scores, fail-closed safe-to-post verdicts (`publish_gate.py:201–236`), human approval default, kill switch, minors gate, per-org rate caps (`publish_gate.py:341–380`), immutable audit ledger (`publish_gate.py:454–471`). Missing: post-publication correction/takedown workflow (1.8) | Correction/takedown workflow (C3) |
+| 9 | Accuracy / defamation / publication risk | PARTIAL | High | Strong: deterministic parsers/detectors, confidence scores, human approval before any content is used, consent gate at approval/pack build, immutable audit ledger; MediaHub does not publish to social — approved content is only exported for a human to post. Missing: post-publication correction/takedown workflow (1.8) | Correction/takedown workflow (C3) |
 | 10.1 | Sponsored content / advertising (CAP code) | PARTIAL | Medium | Sponsor manager exists (`club_platform/sponsors.py`, PC.8) — sponsored output is advertising; no ad-disclosure (#ad) handling in captions | Disclosure note in ToS + sponsor docs (B1) |
 | 10.2 | Accessibility (Equality Act good practice) | PARTIAL | Low | axe-core is a dependency (`package.json`) and used in tests; no formal accessibility statement | Good practice; note in handover |
 
@@ -106,9 +105,9 @@ recorded in the Privacy Notice and DPA:
 online services *likely to be accessed by children*; MediaHub's users are adult club
 volunteers, so the Code is engaged only weakly, but the *processing* of children's data
 at scale plus public dissemination makes the DPIA mandatory and the
-parental-consent attestation essential. The code's strongest safeguard — minors' content
-never auto-publishes (`publish_gate.py:313–322`) — must never be weakened (already a
-standing rule in CLAUDE.md / ADR-0003).
+parental-consent attestation essential. The code's strongest safeguard — MediaHub does
+not publish to social at all, so minors' content (like all approved content) is only
+ever exported for a human to post — must never be weakened.
 
 **Special category.** No para-swimming classification, disability, or health data is
 parsed, stored, or rendered today (verified sweep of `recognition/`, `interpreter/`,
@@ -119,11 +118,11 @@ trigger.
 **Data subject rights — code reality.**
 - Erasure: per-run delete cascades DB row + run JSON + run dir + turn-into packs +
   workflow file (`web.py:1831–1860`) but **not** `memory.db` captions (no delete API in
-  `memory/store.py`), PB warm cache keyed by swimmer, research cache, or posting-log
-  caption excerpts. No account deletion exists.
+  `memory/store.py`), PB warm cache keyed by swimmer, or research cache. No account
+  deletion exists.
 - Access/export: per-run JSON export only (`web.py:12328–12450`).
-- Rectification: nothing. A wrong result published about a named child has no in-product
-  correction or takedown path.
+- Rectification: nothing. A wrong result about a named child that a club has exported and
+  posted has no in-product correction or takedown path.
 
 **Transfers.** Gemini (Google, US), Anthropic (US), Photoroom (FR/US — CANNOT VERIFY
 region from code), Replicate (US), Stripe (US), ntfy.sh (default server, EU/US —
@@ -175,12 +174,12 @@ read-only, token-scoped showcase of club-approved cards (initials-only by defaul
 any interactive feature ships.
 
 ### 3.7 Accuracy, defamation & publication risk
-The deterministic engine + confidence scores + fail-closed publish gate + human approval
-are a strong pre-publication control set. Under the autonomy toggle the gate **degrades
-safely**: autonomy is per-type opt-in, minors' content always falls back to a human, and
-unknown/unsafe provenance fails closed (`publish_gate.py:201–236, 313–322`). The genuine
-gap is **post-publication**: no correction or takedown workflow once content has left
-via Buffer or download. Remediation C3.
+The deterministic engine + confidence scores + consent gate + human approval are a
+strong control set before any content is used. MediaHub does not publish to social —
+approved content is only exported/downloaded and the club posts it manually — so a
+human decision always stands between the engine and any external use. The genuine
+gap is **post-export**: no correction or takedown workflow once a club has downloaded
+and posted content. Remediation C3.
 
 ---
 
@@ -193,7 +192,7 @@ via Buffer or download. Remediation C3.
 | C7 | Provider-identity block ([PLACEHOLDERS]) in footer + legal pages (E-Commerce Regs) | High |
 | C8 | Onboarding lawful-basis + parental-consent attestation, timestamped & versioned | Critical |
 | —  | ToS/DPA acceptance recording at signup + re-acceptance on version change (with B1/B4) | Critical |
-| C1 | Erasure that cascades: account deletion; athlete-level erasure across runs, PB caches, research cache, `memory.db`, posting-log excerpts, rendered assets, packs | High |
+| C1 | Erasure that cascades: account deletion; athlete-level erasure across runs, PB caches, research cache, `memory.db`, rendered assets, packs | High |
 | C2 | Data export per account (and per run, existing) | High |
 | C3 | Rectification + post-publication correction/takedown workflow | High |
 | C4 | Configurable retention periods + scheduled deletion job (runs, uploads, packs, memory) | High |
@@ -215,7 +214,7 @@ via Buffer or download. Remediation C3.
 1. Pay the ICO data protection fee / register as a controller.
 2. Pin the Render deployment region (or move to Fly lhr) and enable disk encryption.
 3. Accept/execute processor terms + transfer mechanisms with: Google (Gemini API),
-   Anthropic, Photoroom, Replicate, Stripe, Buffer, ntfy (or self-host), hosting
+   Anthropic, Photoroom, Replicate, Stripe, ntfy (or self-host), hosting
    provider. Verify UK–US Data Bridge certification or execute IDTA/Addendum per vendor.
 4. Configure Stripe renewal-reminder emails + receipts; verify portal cancellation flow.
 5. Obtain a Remotion company licence (or pin `MEDIAHUB_REEL_ENGINE=ffmpeg`).
@@ -236,7 +235,7 @@ via Buffer or download. Remediation C3.
 ---
 
 ## 5. Cannot verify from code alone
-1. Whether Google/Anthropic/Photoroom/Replicate/Buffer/Stripe retain or train on
+1. Whether Google/Anthropic/Photoroom/Replicate/Stripe retain or train on
    submitted data — depends on their terms, not this repo.
 2. Each vendor's UK transfer mechanism status (Data Bridge certification, IDTA).
 3. The actual Render deployment region and disk-encryption state of production.
