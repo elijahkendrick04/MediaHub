@@ -338,9 +338,3 @@ def test_flash_message_is_json_encoded_safe():
         html = webmod._layout("T", "<p>body</p>")
     assert "</script><b>x</b>" not in html         # never raw in the document
     assert "MH.toast(" in html
-
-
-def test_autonomy_save_js_surfaces_errors():
-    """The autonomy save used to swallow failures silently; it now toasts."""
-    src = Path(webmod.__file__).read_text(encoding="utf-8")
-    assert "Could not save autonomy settings" in src

@@ -20,11 +20,10 @@ Design rules (CLAUDE.md):
 * **Source-grounded.** A modifier only ever fires off a gathered
   :class:`~mediahub.content_engine.signals.Signal`; nothing is invented.
 * **Tenant-isolated.** Signals are gathered per ``profile_id``; plans persist
-  one directory per org (sanitised, mirroring ``per_type_policy``).
+  one directory per org (sanitised, one file per org).
 
-The plan is *advice for the human*, not a publish decision: per-type
-publishing autonomy stays with ``publishing.type_gate`` (P2.4) and the
-profile's ``default_autonomy``.
+The plan is *advice for the human*, not a publish decision: a human always
+reviews and approves before any content leaves the system.
 """
 
 from __future__ import annotations

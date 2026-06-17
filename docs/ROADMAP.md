@@ -79,7 +79,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `8b107fde7` · Merge pull request #777: Move Plan under Create; add Free-Text NL input + goals to the planner
+**Last updated:** 2026-06-17 · `fd79698cc` · Merge pull request #782 from elijahkendrick04/claude/admiring-cannon-0yex0b
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1318,12 +1318,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `55e398e62` | Tidy the home-page pipeline diagram engine block |
+| 2026-06-17 | `c1dccf9a7` | Fix tests that referenced removed schedule/autonomy surfaces |
+| 2026-06-17 | `c2a0dc1f0` | Apply ruff-format (double-quote the Coming soon card close tag) |
+| 2026-06-17 | `44d87b45c` | Remove auto social scheduling/publishing; show "Coming soon" |
 | 2026-06-17 | `7a3e5a86b` | Fix flaky planner-interpret test under full-suite ordering |
 | 2026-06-17 | `16a8cade2` | Move Plan under Create; add Free-Text NL input + goals to the planner |
 | 2026-06-17 | `cbe5dd7b5` | Auto-maintain the whole roadmap, not just the to-do list |
 | 2026-06-17 | `7c5148927` | Make the developer "Clear all caches" button fully clear disk + memory |
 | 2026-06-17 | `9603e8877` | Fix sitewide FPS: stop animating non-compositable paint properties |
 | 2026-06-17 | `27968b58d` | autotest: stop the fixer rewriting the golden oracle and opening no-op PRs |
-| 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
-| 2026-06-17 | `a71353d0d` | Re-trigger CI |
 <!-- /ROADMAP:ACTIVITY -->

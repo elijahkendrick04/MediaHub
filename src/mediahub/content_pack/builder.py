@@ -125,17 +125,10 @@ def _enrich_item(ra: dict, wf_states: dict = None, consent_policy=None) -> dict:
         if wf:
             wf_status = wf.status.value if hasattr(wf, "status") else str(wf)
             item["wf_status"] = wf_status
-            sched = getattr(wf, "schedule_status", None)
-            item["schedule_status"] = (
-                sched.value if sched is not None and hasattr(sched, "value") else "queued"
-            )
-            item["scheduler_update_id"] = getattr(wf, "scheduler_update_id", None)
         else:
             item["wf_status"] = "queue"
-            item["schedule_status"] = "queued"
     else:
         item["wf_status"] = item.get("wf_status", "queue")
-        item["schedule_status"] = item.get("schedule_status", "queued")
 
     return item
 
@@ -160,12 +153,11 @@ def build_grouped_pack(
       "rejected": [...],              # NOT_WORTHY or workflow REJECTED
     }
 
-    Workflow state (status + schedule_status + scheduler_update_id) is read
-    from the sidecar JSON in ``runs_dir`` so the pill the pack template
-    paints on reload reflects what the schedule endpoint actually wrote.
-    ``runs_dir`` falls back to the web layer's RUNS_DIR (DATA_DIR-derived)
-    so single-tenant deployments and test fixtures with a custom DATA_DIR
-    both resolve to the right sidecar location.
+    Workflow state (the human approval status) is read from the sidecar JSON
+    in ``runs_dir`` so the pill the pack template paints on reload reflects
+    the review decision. ``runs_dir`` falls back to the web layer's RUNS_DIR
+    (DATA_DIR-derived) so single-tenant deployments and test fixtures with a
+    custom DATA_DIR both resolve to the right sidecar location.
     """
     # Load workflow states if available. WorkflowStore requires runs_dir;
     # honour an explicit override, otherwise resolve it the same way the

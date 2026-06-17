@@ -15,8 +15,8 @@ sport profile's enabled list. That keeps the planner deterministic: no
 free-text interpretation happens outside ``media_ai.llm``, and a goal can
 never be silently mis-routed by a keyword heuristic.
 
-Storage mirrors ``publishing/per_type_policy.py``: sanitised org filename,
-one file per org, never mixed, honest I/O errors on save.
+Storage uses a sanitised org filename, one file per org, never mixed, with
+honest I/O errors on save.
 """
 
 from __future__ import annotations

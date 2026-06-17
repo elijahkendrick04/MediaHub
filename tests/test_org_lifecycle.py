@@ -223,7 +223,6 @@ def test_org_export_zip_contents_are_tenant_scoped(org_world, tmp_path):
             "media_assets.json",
             "consent_registry.csv",
             "athletes.json",
-            "posting_log.json",
             "club_records.json",
             "corrections.json",
             "sponsor_exposure.jsonl",

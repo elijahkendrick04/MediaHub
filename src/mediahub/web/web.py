@@ -2425,11 +2425,13 @@ def _cadence_activity_counts(profile_id: str, end):
 
     Returns ``(generated, posted)`` — two ``{YYYY-MM-DD: count}`` dicts scoped
     to ``profile_id``: ``generated`` is pipeline runs created that day (the
-    run history that grounds UI 1.17), ``posted`` is successful publish
-    attempts that day (the posting log). ISO-8601 timestamps sort lexically,
-    so a ``>= start`` prefix compare bounds the scan to the rendered year and
-    ``substr(...,1,10)`` buckets by date in-engine. Fail-soft: any DB trouble
-    yields empty dicts so the Activity page never 500s over its decoration.
+    run history that grounds UI 1.17). ``posted`` is always empty now that
+    MediaHub no longer schedules posts onto social channels; the second slot
+    is kept so the heatmap renderer's shape is unchanged. ISO-8601 timestamps
+    sort lexically, so a ``>= start`` prefix compare bounds the scan to the
+    rendered year and ``substr(...,1,10)`` buckets by date in-engine.
+    Fail-soft: any DB trouble yields empty dicts so the Activity page never
+    500s over its decoration.
     """
     generated: dict[str, int] = {}
     posted: dict[str, int] = {}
@@ -2446,20 +2448,6 @@ def _cadence_activity_counts(profile_id: str, end):
             ).fetchall():
                 if r["d"]:
                     generated[r["d"]] = int(r["n"] or 0)
-            # The posting_attempts table only exists once the posting log has
-            # been touched; tolerate its absence on publish-free deployments.
-            try:
-                for r in conn.execute(
-                    "SELECT substr(attempted_at, 1, 10) AS d, COUNT(*) AS n "
-                    "FROM posting_attempts "
-                    "WHERE profile_id = ? AND status = 'ok' AND attempted_at >= ? "
-                    "GROUP BY d",
-                    (profile_id, start_iso),
-                ).fetchall():
-                    if r["d"]:
-                        posted[r["d"]] = int(r["n"] or 0)
-            except sqlite3.Error:
-                pass
         finally:
             conn.close()
     except Exception as e:  # pragma: no cover - defensive
@@ -3185,402 +3173,6 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
         return None
     pid = row[0] if not hasattr(row, "keys") else row["profile_id"]
     return pid or ""
-
-
-# ---------------------------------------------------------------------
-# Schedule (the scheduler) modal &mdash; shared between classic + grouped pack pages
-# ---------------------------------------------------------------------
-
-
-def _schedule_modal_html() -> str:
-    """Return the hidden the scheduler schedule modal markup.
-
-    The modal is populated by mhScheduleOpen() with channel checkboxes
-    fetched from /api/scheduler/channels. When the token is missing the
-    fetch returns 401 and the open-handler shows an alert directing the
-    user to contact their administrator, then closes the dialog.
-    """
-    return """
-<div id="mh-sched-modal" class="no-print"
-     style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(8,12,20,0.72);
-            align-items:center;justify-content:center;padding:20px"
-     onclick="if(event.target===this) mhScheduleClose()">
-  <div role="dialog" aria-modal="true" aria-labelledby="mh-sched-title"
-       style="background:var(--panel,#10141d);border:1px solid var(--border,#252a36);
-              border-radius:12px;max-width:560px;width:100%;max-height:90vh;
-              overflow:auto;padding:22px;color:var(--ink,#e9eef5)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 id="mh-sched-title" style="margin:0;font-size:18px">Schedule this post</h2>
-      <button class="btn secondary" style="font-size:14px;padding:4px 10px"
-              onclick="mhScheduleClose()" aria-label="Close">&times;</button>
-    </div>
-    <div id="mh-sched-error" style="display:none;color:var(--mh-prim-error-600);margin-bottom:10px"></div>
-    <div id="mh-sched-channels-wrap" style="margin-bottom:12px">
-      <div style="font-weight:600;margin-bottom:6px">Channels</div>
-      <div id="mh-sched-channels" style="display:flex;flex-direction:column;gap:6px;
-           max-height:180px;overflow:auto;border:1px solid var(--border,#252a36);
-           border-radius:8px;padding:8px">
-        <p class="muted" style="margin:0">Loading channels&hellip;</p>
-      </div>
-    </div>
-    <div style="margin-bottom:12px">
-      <label for="mh-sched-caption" style="font-weight:600;display:block;margin-bottom:4px">Caption</label>
-      <textarea id="mh-sched-caption" rows="6"
-        style="width:100%;padding:8px;border:1px solid var(--border,#252a36);
-               border-radius:8px;background:rgba(255,255,255,0.04);
-               color:inherit;font-family:inherit;resize:vertical"></textarea>
-    </div>
-    <div style="margin-bottom:12px">
-      <label for="mh-sched-when" style="font-weight:600;display:block;margin-bottom:4px">
-        Schedule for <span class="muted" style="font-weight:400">(leave blank for next queue slot)</span>
-      </label>
-      <input id="mh-sched-when" type="datetime-local"
-             style="padding:8px;border:1px solid var(--border,#252a36);border-radius:8px;
-                    background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>
-      <div id="mh-sched-when-hint" class="muted"
-           style="font-size:11px;margin-top:4px;line-height:1.4"></div>
-    </div>
-    <input type="hidden" id="mh-sched-media-url"/>
-    <input type="hidden" id="mh-sched-run-id"/>
-    <input type="hidden" id="mh-sched-card-id"/>
-    <input type="hidden" id="mh-sched-pill-id"/>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
-      <button class="btn secondary" onclick="mhScheduleClose()">Cancel</button>
-      <button id="mh-sched-send" class="btn" onclick="mhScheduleSend()">Schedule</button>
-    </div>
-  </div>
-</div>
-"""
-
-
-def _schedule_modal_js() -> str:
-    """Return the JS that drives the the scheduler schedule modal.
-
-    Pulls channels from /api/scheduler/channels (401 or not-connected
-    surfaces a "contact administrator" alert and closes the modal —
-    Auto scheduling credentials are env-var configured at deploy time, no
-    in-app redirect to a settings page exists), POSTs to
-    /api/runs/<id>/card/<cid>/schedule, and preserves the user's
-    edited caption when the scheduler returns an error.
-    """
-    return """
-<script>
-(function(){
-  var API_BASE = window._API_BASE || '';
-
-  // Monotonic counter so a slow channel-list fetch can't clobber a
-  // newer one when the modal is re-opened on a different card before
-  // the first request settles. We compare on resolution and bail out
-  // if this isn't the most recent open call.
-  var _openSeq = 0;
-
-  function fmtDt(d) {
-    function pad(n) { return n < 10 ? '0' + n : '' + n; }
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
-      + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  }
-  function localToIso(local) {
-    if (!local) return '';
-    var d = new Date(local);
-    if (isNaN(d.getTime())) return '';
-    return d.toISOString();
-  }
-
-  // Resolve the user-visible label for the local timezone. Falls back
-  // to a UTC-offset string when Intl isn't available so the hint stays
-  // useful in older browsers.
-  function localTzLabel() {
-    try {
-      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (tz) return tz;
-    } catch (e) {}
-    var off = -new Date().getTimezoneOffset();
-    var sign = off >= 0 ? '+' : '-';
-    var abs = Math.abs(off);
-    var h = Math.floor(abs / 60), m = abs % 60;
-    return 'UTC' + sign + (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
-  }
-
-  function pickActiveCaption(cardEl) {
-    if (!cardEl) return '';
-    var activePanel = cardEl.querySelector('.tone-panel:not([style*="display:none"]) textarea');
-    if (activePanel && activePanel.value && activePanel.value.trim()) return activePanel.value.trim();
-    var firstPanel = cardEl.querySelector('.tone-panel textarea');
-    if (firstPanel && firstPanel.value && firstPanel.value.trim()) return firstPanel.value.trim();
-    var ta = cardEl.querySelector('textarea[id^="cap-text-"], textarea[id^="cap-"]');
-    if (ta && ta.value) return ta.value.trim();
-    var fallback = cardEl.textContent || '';
-    return fallback.trim().slice(0, 480);
-  }
-
-  function pickMediaUrl(cardEl) {
-    if (!cardEl) return '';
-    var img = cardEl.querySelector('img[src]');
-    if (img && img.getAttribute('src')) {
-      var src = img.getAttribute('src');
-      if (/^https?:/i.test(src)) return src;
-      try { return new URL(src, window.location.href).toString(); }
-      catch (e) { return ''; }
-    }
-    return '';
-  }
-
-  // Refresh the live hint under the datetime-local input. Reads the
-  // current value, parses it as local time (matching localToIso's
-  // semantics), and shows a UTC echo + a past-time warning when
-  // appropriate. Called on input and after the modal opens. We use
-  // textContent throughout to keep it XSS-safe (a the scheduler error message
-  // never reaches this code path, but the tz string in pathological
-  // locales could).
-  function refreshWhenHint() {
-    var hint = document.getElementById('mh-sched-when-hint');
-    if (!hint) return;
-    var raw = (document.getElementById('mh-sched-when') || {}).value || '';
-    var tz = localTzLabel();
-    if (!raw) {
-      hint.style.color = '';
-      hint.textContent = 'Times use your local timezone (' + tz + '). '
-        + 'Leave blank to use the next available auto scheduling slot.';
-      return;
-    }
-    var d = new Date(raw);
-    if (isNaN(d.getTime())) {
-      hint.style.color = 'var(--bad)';
-      hint.textContent = 'Could not read that date/time.';
-      return;
-    }
-    var now = new Date();
-    // 1 minute grace for clock skew so picking "now" doesn't false-positive.
-    if (d.getTime() < now.getTime() - 60000) {
-      hint.style.color = 'var(--bad)';
-      hint.textContent = 'That time is in the past (' + tz
-        + '). Auto scheduling will reject it — pick a future time or clear the field.';
-      return;
-    }
-    hint.style.color = '';
-    hint.textContent = tz + ' → schedules as '
-      + d.toISOString() + ' (UTC).';
-  }
-
-  window.mhScheduleOpen = function(runId, cardId, cardElId) {
-    var modal = document.getElementById('mh-sched-modal');
-    if (!modal) return;
-    var seq = ++_openSeq;
-    var cardEl = document.getElementById(cardElId);
-    document.getElementById('mh-sched-run-id').value = runId || '';
-    document.getElementById('mh-sched-card-id').value = cardId || '';
-    document.getElementById('mh-sched-pill-id').value = cardElId || '';
-    document.getElementById('mh-sched-caption').value = pickActiveCaption(cardEl);
-    var whenEl = document.getElementById('mh-sched-when');
-    whenEl.value = '';
-    // Bind the live hint refresher once. Marker attribute keeps us
-    // idempotent across multiple modal opens on the same page.
-    if (!whenEl.dataset.mhHintBound) {
-      whenEl.addEventListener('input', refreshWhenHint);
-      whenEl.addEventListener('change', refreshWhenHint);
-      whenEl.dataset.mhHintBound = '1';
-    }
-    refreshWhenHint();
-    document.getElementById('mh-sched-media-url').value = pickMediaUrl(cardEl);
-    var err = document.getElementById('mh-sched-error');
-    err.style.display = 'none'; err.textContent = '';
-
-    var chWrap = document.getElementById('mh-sched-channels');
-    chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels&hellip;</p>';
-
-    fetch(API_BASE + '/api/scheduler/channels', {cache:'no-store'}).then(function(r){
-      return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){
-        // Non-JSON response (e.g. a proxy returned HTML). Return a synthetic
-        // body so the downstream branches can still surface a clear error.
-        return {status:r.status, body:{message:'Server returned an unreadable response.'}};
-      });
-    }).then(function(o){
-      // Stale-response guard: a newer mhScheduleOpen has fired while
-      // this fetch was in flight, so discard our result rather than
-      // overwriting the channel list / error UI for the new card.
-      if (seq !== _openSeq) return;
-      // 401 = no token configured OR token rejected by the scheduler. Both
-      // cases want the inline Connect-the scheduler form so the user can paste
-      // a (fresh) personal token without leaving the modal. The download
-      // fallback is always offered so a club with no the scheduler at all
-      // isn't blocked from getting their content out.
-      if (o.status === 401) {
-        var runIdForDl = document.getElementById('mh-sched-run-id').value;
-        var cardIdForDl = document.getElementById('mh-sched-card-id').value;
-        var capForDl = encodeURIComponent(
-          document.getElementById('mh-sched-caption').value || ''
-        );
-        var dlUrl = API_BASE + '/api/runs/' + encodeURIComponent(runIdForDl)
-          + '/card/' + encodeURIComponent(cardIdForDl)
-          + '/download?caption=' + capForDl;
-        chWrap.innerHTML =
-          '<div style="font-size:13px;line-height:1.5;margin-bottom:10px">'
-          + ((o.body && o.body.message) || 'Auto scheduling is not connected for this organisation.')
-          + '</div>'
-          + '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">'
-          +   '<label for="mh-buf-token" style="font-size:12px;font-weight:600">Auto scheduling access token</label>'
-          +   '<input id="mh-buf-token" type="password" '
-          +     'placeholder="1/..." autocomplete="off" '
-          +     'style="padding:8px;border:1px solid var(--border,#252a36);'
-          +     'border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>'
-          +   '<button id="mh-buf-connect" class="btn" style="font-size:13px;padding:6px 12px;align-self:flex-start"'
-          +     ' onclick="mhConnectSchedulerFromModal()">Connect auto scheduling for this org</button>'
-          +   '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener" '
-          +     'style="font-size:11px;color:var(--accent)">Where do I get an access token? &rarr;</a>'
-          + '</div>'
-          + '<div style="border-top:1px solid var(--border,#252a36);padding-top:10px;margin-top:10px">'
-          +   '<div style="font-size:12px;color:var(--muted,#7a8597);margin-bottom:6px">Not connected? Download the post for manual sharing:</div>'
-          +   '<a class="btn secondary" style="font-size:13px;padding:6px 12px" href="'
-          +     dlUrl + '">Download caption + visual (.zip)</a>'
-          + '</div>';
-        modal.style.display = 'flex';
-        return;
-      }
-      if (o.status >= 400) {
-        chWrap.innerHTML = '<p style="color:var(--bad);margin:0">' +
-          ((o.body && o.body.message) || ('Scheduling error ' + o.status)) + '</p>';
-        modal.style.display = 'flex';
-        return;
-      }
-      var channels = (o.body && o.body.channels) || [];
-      if (!channels.length) {
-        chWrap.innerHTML = '<p class="muted" style="margin:0">No channels connected to this auto scheduling account.</p>';
-      } else {
-        chWrap.innerHTML = '';
-        channels.forEach(function(c, i){
-          var lbl = document.createElement('label');
-          lbl.style.display = 'flex';
-          lbl.style.alignItems = 'center';
-          lbl.style.gap = '8px';
-          lbl.style.cursor = 'pointer';
-          var cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.value = c.id;
-          cb.dataset.mhChannel = '1';
-          cb.checked = !!c.default || (i === 0 && channels.length === 1);
-          var name = c.formatted_username || c.service_username || c.id;
-          var service = c.service ? ' (' + c.service + ')' : '';
-          lbl.appendChild(cb);
-          var span = document.createElement('span');
-          span.textContent = name + service;
-          lbl.appendChild(span);
-          chWrap.appendChild(lbl);
-        });
-      }
-      modal.style.display = 'flex';
-    }).catch(function(e){
-      if (seq !== _openSeq) return;
-      chWrap.innerHTML = '<p style="color:var(--bad);margin:0">Network error: ' + (e && e.message || e) + '</p>';
-      modal.style.display = 'flex';
-    });
-  };
-
-  window.mhScheduleClose = function() {
-    var modal = document.getElementById('mh-sched-modal');
-    if (modal) modal.style.display = 'none';
-  };
-
-  // NOTE: mhWorkflowSet + the data-mh-wf delegated click handler now live
-  // globally in _layout() so every page (Review triage, Content builder)
-  // shares one handler. Defining them here too would double-bind the click
-  // listener and fire two POSTs per Approve/Reject.
-
-  window.mhScheduleSend = function() {
-    var runId  = document.getElementById('mh-sched-run-id').value;
-    var cardId = document.getElementById('mh-sched-card-id').value;
-    var pillId = document.getElementById('mh-sched-pill-id').value;
-    var caption = (document.getElementById('mh-sched-caption').value || '').trim();
-    var whenLocal = document.getElementById('mh-sched-when').value;
-    var mediaUrl = document.getElementById('mh-sched-media-url').value;
-    var err = document.getElementById('mh-sched-error');
-    err.style.display = 'none'; err.textContent = '';
-
-    var cbs = document.querySelectorAll('#mh-sched-channels input[data-mh-channel]:checked');
-    var ids = Array.prototype.map.call(cbs, function(cb){ return cb.value; });
-    if (!ids.length) { err.style.display = 'block'; err.textContent = 'Pick at least one channel.'; return; }
-    if (!caption) { err.style.display = 'block'; err.textContent = 'Caption is required.'; return; }
-
-    // Past-date guard: a `datetime-local` input has no min and the
-    // server / the scheduler would surface a cryptic 4xx if we sent yesterday.
-    // 1-minute grace so picking "now" doesn't false-positive on clock skew.
-    if (whenLocal) {
-      var pickedTs = new Date(whenLocal).getTime();
-      if (isNaN(pickedTs)) {
-        err.style.display = 'block';
-        err.textContent = 'Could not read the scheduled time.';
-        return;
-      }
-      if (pickedTs < Date.now() - 60000) {
-        err.style.display = 'block';
-        err.textContent = 'Scheduled time is in the past. Pick a future time or clear the field to use the next queue slot.';
-        return;
-      }
-    }
-
-    var btn = document.getElementById('mh-sched-send');
-    var orig = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Sending\u2026';
-
-    fetch(API_BASE + '/api/runs/' + encodeURIComponent(runId)
-            + '/card/' + encodeURIComponent(cardId) + '/schedule', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        channel_ids: ids,
-        caption: caption,
-        scheduled_at: localToIso(whenLocal) || null,
-        media_url: mediaUrl || null
-      })
-    }).then(function(r){
-      return r.json().then(function(j){ return {status:r.status, body:j}; });
-    }).then(function(o){
-      btn.disabled = false; btn.textContent = orig;
-      if (o.body && typeof o.body.caption === 'string') {
-        document.getElementById('mh-sched-caption').value = o.body.caption;
-      }
-      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) {
-        var pill = document.querySelector('[data-schedule-pill="' + pillId + '"]');
-        if (pill) {
-          pill.style.display = '';
-          pill.textContent = 'scheduled';
-          pill.classList.remove('bad'); pill.classList.add('good');
-        }
-        var warn = o.body.warning ? (' Warning: ' + o.body.warning) : '';
-        if (window.MH && typeof window.MH.toast === 'function') {
-          window.MH.toast('Scheduled.' + warn, warn ? 'info' : 'success');
-        } else if (window.console && console.log) {
-          // Quiet fallback for pathological host pages that lack
-          // MH.toast — log to console so a successful schedule never
-          // blocks the user with a synchronous browser dialog.
-          console.log('Scheduled.' + warn);
-        }
-        mhScheduleClose();
-      } else {
-        var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
-        err.style.display = 'block'; err.textContent = msg;
-        var pill = document.querySelector('[data-schedule-pill="' + pillId + '"]');
-        if (pill) {
-          pill.style.display = '';
-          pill.textContent = 'failed';
-          pill.classList.remove('good'); pill.classList.add('bad');
-        }
-      }
-    }).catch(function(e){
-      btn.disabled = false; btn.textContent = orig;
-      err.style.display = 'block';
-      err.textContent = 'Network error: ' + (e && e.message || e);
-    });
-  };
-
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape') {
-      var m = document.getElementById('mh-sched-modal');
-      if (m && m.style.display !== 'none') mhScheduleClose();
-    }
-  });
-})();
-</script>
-"""
 
 
 def _card_creative_js() -> str:
@@ -4761,28 +4353,18 @@ function addGraphicToPack(btn, visualId) {
 
 
 def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
-    """Render the per-card "Schedule" affordance, plan-gated.
-
-    PC.4 free-tier soft limit: Auto scheduling is a paid feature. On a Free
-    plan (or signed-out, which resolves to Free) the button is swapped for a
-    non-functional "Upgrade to schedule" link to /pricing — a soft nudge, not a
-    hard lock (the card itself, its caption, graphics and motion all stay
-    usable; only the the scheduler hand-off is gated). Premium plans get the live
-    button that opens the schedule modal. Reads the plan from the session via
-    ``auth.current_plan`` so the gate is consistent everywhere a card renders.
+    """Render the per-card "Schedule" affordance as a disabled "Coming soon"
+    chip. Auto scheduling content straight onto a social page has been
+    withdrawn; approved cards are still fully exportable/downloadable for
+    manual posting. The chip keeps the toolbar's shape so the feature can be
+    reintroduced later without a layout change.
     """
     if not card_id_raw:
         return ""
-    if _auth.is_premium(_auth.current_plan()):
-        return (
-            '<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
-            f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, {json.dumps(el_id)})'>"
-            "Schedule&hellip;</button>"
-        )
     return (
-        f'<a class="btn secondary" href="{url_for("pricing_page")}" '
-        'style="font-size:11px;padding:4px 10px" '
-        'title="Auto scheduling is on the Club plan">Upgrade to schedule</a>'
+        '<span class="btn secondary" aria-disabled="true" '
+        'style="font-size:11px;padding:4px 10px;opacity:0.6;cursor:default" '
+        'title="Auto scheduling to social is coming soon">Schedule &middot; Coming soon</span>'
     )
 
 
@@ -10864,74 +10446,6 @@ def _layout(
   };
 
   // Phase 1.4 — "Use in next caption". Re-runs the caption LLM with
-  // Multi-tenant the scheduler connect — called from the inline form that
-  // the schedule modal renders when /api/scheduler/channels returns 401.
-  // POSTs the pasted access token to /api/organisation/connect-scheduler
-  // which validates against the scheduler and persists on the active org's
-  // ClubProfile. On success, the modal silently retries the channel
-  // listing so the user lands in the normal schedule flow.
-  window.mhConnectSchedulerFromModal = function() {
-    var API_BASE = window._API_BASE || '';
-    var input = document.getElementById('mh-buf-token');
-    var btn = document.getElementById('mh-buf-connect');
-    if (!input || !btn) return;
-    // Helper to surface an error inline. Falls back to MH.toast when the
-    // modal's dedicated error div has been ripped out (e.g. the user
-    // closed the modal mid-request and we still resolved). We deliberately
-    // avoid alert() here — it's jarring relative to the rest of the
-    // modal's UX and steals focus from the connect form.
-    function showError(msg) {
-      var err = document.getElementById('mh-sched-error');
-      if (err) {
-        err.style.display = 'block';
-        err.textContent = msg;
-      } else if (window.MH && typeof window.MH.toast === 'function') {
-        window.MH.toast(msg, 'error');
-      }
-    }
-    // Clear any prior error so the user can tell a retry produced a
-    // fresh outcome rather than staring at a stale message.
-    var errEl = document.getElementById('mh-sched-error');
-    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    var token = (input.value || '').trim();
-    if (!token) {
-      input.focus();
-      showError('Paste your auto scheduling access token to connect.');
-      return;
-    }
-    var origLabel = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Connecting…';
-    fetch(API_BASE + '/api/organisation/connect-scheduler', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({scheduler_access_token: token}),
-    }).then(function(r){
-      return r.json().then(function(j){ return {status: r.status, body: j}; }, function(){
-        return {status: r.status, body: {message: 'Server returned an unreadable response.'}};
-      });
-    }).then(function(o){
-      btn.disabled = false;
-      btn.textContent = origLabel;
-      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) {
-        // Token saved. Re-run the channel listing — it'll succeed now.
-        var runId = document.getElementById('mh-sched-run-id').value;
-        var cardId = document.getElementById('mh-sched-card-id').value;
-        var pillId = document.getElementById('mh-sched-pill-id').value;
-        if (typeof window.mhScheduleOpen === 'function') {
-          window.mhScheduleOpen(runId, cardId, pillId);
-        }
-        return;
-      }
-      var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
-      showError(msg);
-    }).catch(function(e){
-      btn.disabled = false;
-      btn.textContent = origLabel;
-      showError('Network error: ' + (e && e.message || e));
-    });
-  };
-
   // the visible explainer text injected as a required content
   // instruction. The result lands in a small panel below the
   // explainer (panel_id), preserving the user's reading flow rather
@@ -14397,46 +13911,6 @@ def create_app() -> Flask:
             log.warning("activity: runs DB unreachable: %s", e)
             db_failed = True
 
-        # Phase 1.3 — Recent posting activity. Last 20 the scheduler attempts for
-        # this organisation. Fail-soft: if the log module isn't available
-        # or the DB lookup errors, the rest of the page still renders.
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
-        except Exception:
-            recent_attempts = []
-
-        # Per-run schedule summary — pulled from the workflow store on
-        # demand. Bounded by len(rows) ≤ 100 so the cost is fine.
-        summaries: dict[str, dict] = {}
-        try:
-            ws = _get_wf_store()
-        except Exception:
-            ws = None
-        if ws is not None:
-            try:
-                from mediahub.workflow.status import ScheduleStatus
-            except Exception:
-                ScheduleStatus = None
-            for r in rows:
-                run_id = r["id"]
-                summary = {"scheduled": 0, "published": 0, "failed": 0}
-                try:
-                    states = ws.load(run_id) or {}
-                    for cs in states.values():
-                        s = getattr(cs, "schedule_status", None)
-                        val = s.value if hasattr(s, "value") else (s or "queued")
-                        if val == "scheduled":
-                            summary["scheduled"] += 1
-                        elif val == "published":
-                            summary["published"] += 1
-                        elif val == "failed":
-                            summary["failed"] += 1
-                except Exception:
-                    pass
-                summaries[run_id] = summary
-
         if not rows:
             if db_failed:
                 # DB on disk but unreadable — surface honestly so the user
@@ -14475,27 +13949,6 @@ def create_app() -> Flask:
                 "</section>"
             )
             return _layout("Activity", empty_body, active="activity")
-
-        def _schedule_summary_html(rid: str) -> str:
-            s = summaries.get(rid) or {}
-            if not (s.get("scheduled") or s.get("published") or s.get("failed")):
-                return '<span class="muted" style="font-size:11px">&mdash;</span>'
-            parts = []
-            if s.get("scheduled"):
-                parts.append(
-                    f'<span class="tag info" style="font-size:11px">'
-                    f"{s['scheduled']} scheduled</span>"
-                )
-            if s.get("published"):
-                parts.append(
-                    f'<span class="tag good" style="font-size:11px">'
-                    f"{s['published']} published</span>"
-                )
-            if s.get("failed"):
-                parts.append(
-                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
-                )
-            return " ".join(parts)
 
         # Phase 5 — group rows by date bucket so the table reads as a
         # newsroom log instead of an undifferentiated 100-row dump.
@@ -14571,7 +14024,6 @@ def create_app() -> Flask:
                     f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                     f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
-                    f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                     f'<td><form method="post" action="{delete_href}" '
                     f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
@@ -14596,46 +14048,6 @@ def create_app() -> Flask:
                         "</details>"
                         "</td></tr>"
                     )
-
-        # Recent posting activity panel — bottom-of-page, collapsed by
-        # default when empty; expanded when there's something to see so
-        # failures aren't hidden behind a click.
-        posting_panel_html = ""
-        if recent_attempts:
-            attempts_rows = ""
-            for a in recent_attempts:
-                status = a.get("status") or ""
-                kind = a.get("error_kind") or ""
-                if status == "ok":
-                    badge_html = '<span class="tag good" style="font-size:11px">ok</span>'
-                else:
-                    label = kind or "failed"
-                    badge_html = f'<span class="tag bad" style="font-size:11px">{_h(label)}</span>'
-                excerpt = (a.get("caption_excerpt") or "")[:120]
-                when = (a.get("attempted_at") or "")[:19]
-                channel = a.get("channel_name") or a.get("channel_id") or "&mdash;"
-                err = a.get("error_message") or ""
-                attempts_rows += (
-                    f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
-                    f'<td style="font-size:12px">{_h(channel)}</td>'
-                    f"<td>{badge_html}</td>"
-                    f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
-                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
-                    f"</tr>"
-                )
-            posting_panel_html = (
-                '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
-                "Recent posting activity</h2>"
-                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f"Last {len(recent_attempts)} scheduling attempts for this organisation. "
-                "Failures stay listed here so you can see what went wrong without "
-                "digging through individual runs.</p>"
-                '<div class="card"><table>'
-                "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
-                "<th>Caption excerpt</th><th>Error</th></tr></thead>"
-                f"<tbody>{attempts_rows}</tbody>"
-                "</table></div>"
-            )
 
         # Phase 1.5 — surface the number of failed runs at the top of the
         # page so an operator triaging issues sees the scope before reading
@@ -14774,11 +14186,10 @@ def create_app() -> Flask:
             f"{toolbar_html}"
             '<div class="card"><table class="mh-table-stack">'
             "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Achievements</th><th>Schedule</th>"
+            "<th>Matched</th><th>Achievements</th>"
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
-            f"{posting_panel_html}"
             f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
@@ -15008,19 +14419,10 @@ def create_app() -> Flask:
                 if states:
                     workflow_by_run[d["id"]] = states
 
-        # 3. Publish attempts (the export/publishing lane).
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            posting_attempts = _plog.recent_attempts(prof.profile_id, limit=40)
-        except Exception:
-            posting_attempts = []
-
         # --- Build the merged feed (all lanes) for accurate chip counts -----
         all_events = _af.build_activity_feed(
             runs=run_dicts,
             workflow_by_run=workflow_by_run,
-            posting_attempts=posting_attempts,
             limit=200,
         )
         counts = _af.feed_counts(all_events)
@@ -21456,30 +20858,6 @@ Relay team broke club record"></textarea>
             deps["tts_provider"] = tts_provider_status()
         except Exception as _tts_err:
             deps["tts_provider"] = {"error": str(_tts_err)[:200]}
-        try:
-            from mediahub.publishing.kill_switch import kill_switch_status
-
-            deps["publish_kill_switch"] = kill_switch_status()
-        except Exception as _ks_err:
-            deps["publish_kill_switch"] = {"error": str(_ks_err)[:200]}
-        # Per-type autonomy summary — additive, never affects the ok flag.
-        try:
-            from mediahub.publishing.per_type_policy import policy_summary as _pt_summary
-
-            _active_pid = _active_profile_id()
-            if _active_pid:
-                deps["per_type_autonomy"] = _pt_summary(_active_pid)
-            else:
-                deps["per_type_autonomy"] = {"note": "no active org"}
-        except Exception as _pt_err:
-            deps["per_type_autonomy"] = {"error": str(_pt_err)[:200]}
-        # P2.3 publish-gate summary (thresholds + caps + switch) — additive.
-        try:
-            from mediahub.publishing.publish_gate import publish_gate_status as _pg_status
-
-            deps["publish_gate"] = _pg_status(_active_profile_id() or "")
-        except Exception as _pg_err:
-            deps["publish_gate"] = {"error": str(_pg_err)[:200]}
         # Motion is healthy when the *active* reel engine can render:
         # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
         # makes both optional.
@@ -21982,37 +21360,6 @@ Relay team broke club record"></textarea>
         else:
             err_html = ""
 
-        # 7-day posting log roll-up.
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            # We don't have a profile-scoped count here because /healthz/usage
-            # is operator-facing across all tenants on this instance. For a
-            # single-org deploy that's the right answer. For a future
-            # multi-tenant deploy, expand into per-tenant rows.
-            conn = sqlite3.connect(str(_plog.DB_PATH))
-            cur = conn.execute(
-                "SELECT status, COUNT(*) AS n FROM posting_attempts "
-                "WHERE attempted_at >= datetime('now', '-7 days') "
-                "GROUP BY status"
-            )
-            counts = {r[0]: int(r[1]) for r in cur.fetchall()}
-            conn.close()
-        except Exception:
-            counts = {}
-        post_ok = int(counts.get("ok", 0))
-        post_fail = int(counts.get("failed", 0))
-        post_total = post_ok + post_fail
-        post_html = (
-            '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
-            f'<div style="font-weight:600;margin-bottom:6px">'
-            f"Publishing (7d) &mdash; {post_total} attempts</div>"
-            f'<div style="display:flex;gap:18px;font-size:13px">'
-            f'<span><span class="tag good" style="font-size:11px">{post_ok} ok</span></span>'
-            f'<span><span class="tag bad" style="font-size:11px">{post_fail} failed</span></span>'
-            "</div></div>"
-        )
-
         # 30-day daily breakdown.
         if thirty_d:
             day_rows = ""
@@ -22045,11 +21392,10 @@ Relay team broke club record"></textarea>
         body = (
             '<h1 style="margin-bottom:6px">Usage</h1>'
             '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
-            "LLM call counts, free-tier headroom, recent provider errors, "
-            "and publishing roll-up for this MediaHub deployment.</p>"
+            "LLM call counts, free-tier headroom, and recent provider errors "
+            "for this MediaHub deployment.</p>"
             f"{err_html}"
             f"{headroom_html}"
-            f"{post_html}"
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
             "Today (last 24h)</h2>"
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
@@ -22143,13 +21489,13 @@ Relay team broke club record"></textarea>
             ),
             (
                 "Auto scheduling",
-                "Connect a scheduling account so approved cards can be queued to your channels.",
+                "Queueing approved cards straight onto your social channels — coming soon.",
                 "schedule",
                 url_for("settings_section", section="scheduling"),
             ),
             (
                 "Autonomy",
-                "Per-content-type publishing levels — what may post without a human, and the audit trail.",
+                "Per-content-type publishing levels — what may post without a human — coming soon.",
                 "autonomy",
                 url_for("settings_section", section="autonomy"),
             ),
@@ -22208,7 +21554,7 @@ Relay team broke club record"></textarea>
             cards.append(
                 (
                     "Developer",
-                    "Deployment health, operator dashboards, uptime detail and autopublish confidence.",
+                    "Deployment health, operator dashboards, and uptime detail.",
                     "dev",
                     url_for("settings_section", section="developer"),
                 )
@@ -22314,37 +21660,6 @@ Relay team broke club record"></textarea>
         except Exception:
             rows = []
 
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
-        except Exception:
-            recent_attempts = []
-
-        summaries: dict[str, dict] = {}
-        try:
-            ws = _get_wf_store()
-        except Exception:
-            ws = None
-        if ws is not None:
-            for r in rows:
-                run_id = r["id"]
-                summary = {"scheduled": 0, "published": 0, "failed": 0}
-                try:
-                    states = ws.load(run_id) or {}
-                    for cs in states.values():
-                        s = getattr(cs, "schedule_status", None)
-                        val = s.value if hasattr(s, "value") else (s or "queued")
-                        if val == "scheduled":
-                            summary["scheduled"] += 1
-                        elif val == "published":
-                            summary["published"] += 1
-                        elif val == "failed":
-                            summary["failed"] += 1
-                except Exception:
-                    pass
-                summaries[run_id] = summary
-
         section_intro = (
             f'<p class="dim" style="margin-bottom:14px">Recent runs for '
             f"<b>{_h(prof.display_name)}</b>.</p>"
@@ -22358,27 +21673,6 @@ Relay team broke club record"></textarea>
                 f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
                 "</div>"
             )
-
-        def _schedule_summary_html(rid: str) -> str:
-            s = summaries.get(rid) or {}
-            if not (s.get("scheduled") or s.get("published") or s.get("failed")):
-                return '<span class="muted" style="font-size:11px">&mdash;</span>'
-            parts = []
-            if s.get("scheduled"):
-                parts.append(
-                    f'<span class="tag info" style="font-size:11px">'
-                    f"{s['scheduled']} scheduled</span>"
-                )
-            if s.get("published"):
-                parts.append(
-                    f'<span class="tag good" style="font-size:11px">'
-                    f"{s['published']} published</span>"
-                )
-            if s.get("failed"):
-                parts.append(
-                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
-                )
-            return " ".join(parts)
 
         rows_html = ""
         n_errored = 0
@@ -22395,7 +21689,6 @@ Relay team broke club record"></textarea>
                 f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                 f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                 f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
                 f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
                 f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
@@ -22433,41 +21726,6 @@ Relay team broke club record"></textarea>
                 f"<b>{_h(label)}</b> in the last 100 runs. "
                 "Expand <i>Why did this run fail?</i> on each row below to "
                 "see the pipeline error.</div>"
-            )
-
-        posting_panel_html = ""
-        if recent_attempts:
-            attempts_rows = ""
-            for a in recent_attempts:
-                status = a.get("status") or ""
-                kind = a.get("error_kind") or ""
-                if status == "ok":
-                    badge_html = '<span class="tag good" style="font-size:11px">ok</span>'
-                else:
-                    label = kind or "failed"
-                    badge_html = f'<span class="tag bad" style="font-size:11px">{_h(label)}</span>'
-                excerpt = (a.get("caption_excerpt") or "")[:120]
-                when = (a.get("attempted_at") or "")[:19]
-                channel = a.get("channel_name") or a.get("channel_id") or "&mdash;"
-                err = a.get("error_message") or ""
-                attempts_rows += (
-                    f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
-                    f'<td style="font-size:12px">{_h(channel)}</td>'
-                    f"<td>{badge_html}</td>"
-                    f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
-                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
-                    f"</tr>"
-                )
-            posting_panel_html = (
-                '<h3 style="margin-top:24px;margin-bottom:6px;font-size:16px">'
-                "Recent posting activity</h3>"
-                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f"Last {len(recent_attempts)} scheduling attempts for this organisation.</p>"
-                '<div class="card"><table>'
-                "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
-                "<th>Caption excerpt</th><th>Error</th></tr></thead>"
-                f"<tbody>{attempts_rows}</tbody>"
-                "</table></div>"
             )
 
         # Delete in place: a run row's Delete posts via fetch() and is removed
@@ -22510,11 +21768,10 @@ Relay team broke club record"></textarea>
             f"{failure_callout}"
             '<div class="card"><table class="mh-table-stack">'
             "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th><th>Schedule</th>"
+            "<th>Matched</th><th>Queue / Total</th>"
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
-            f"{posting_panel_html}"
             f"{run_delete_js}"
         )
 
@@ -22617,387 +21874,47 @@ Relay team broke club record"></textarea>
             f"{last_incident_html}</div>"
         )
 
-    _AUTONOMY_LEVEL_OPTS = [
-        ("approval_required", "Approval required", "A human must approve before publishing."),
-        ("draft_only", "Draft only", "Generate drafts; never schedule or publish automatically."),
-        (
-            "fully_autonomous",
-            "Fully autonomous",
-            "May publish without human approval when all guardrails pass.",
-        ),
-    ]
+    def _coming_soon_card(title: str, body: str) -> str:
+        """A consistent "Coming soon" placeholder for a withdrawn surface."""
+        return (
+            '<div class="card" style="padding:22px 20px;max-width:640px">'
+            '<div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:10px">'
+            '<span class="tag" style="background:var(--accent);color:#0b0f17;'
+            'font-weight:700;letter-spacing:0.02em">Coming soon</span></div>'
+            f'<h2 style="margin:0 0 6px 0;font-size:18px">{_h(title)}</h2>'
+            f'<p class="dim" style="margin:0;line-height:1.55">{_h(body)}</p>'
+            "</div>"
+        )
 
     def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
-        """Autonomy — per-type publishing levels + cadence + audit (P2.4).
+        """Autonomy settings — a Coming soon placeholder.
 
-        Confidence thresholds moved to the operator-only Developer page; the
-        auto-scheduling connection + channel list moved to Auto scheduling.
+        Letting MediaHub publish approved content straight onto a social channel
+        without a human (per-type autonomy levels, the publish gate, and the
+        hourly cadence) has been withdrawn. Cards stay under human approval and
+        export/download for manual posting; the controls return here when the
+        capability is rebuilt.
         """
-        if prof is None:
-            return (
-                '<p class="dim" style="margin-bottom:14px">'
-                "Sign in to an organisation to manage its publishing autonomy controls.</p>"
-                '<div class="card empty">No organisation pinned.</div>'
-            )
-        try:
-            from mediahub.publishing.per_type_policy import load_policy as _load_policy
-            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
-
-            current_policy = _load_policy(prof.profile_id)
-        except Exception as _e:
-            return f'<div class="card empty">Could not load autonomy policy: {_h(str(_e))}</div>'
-
-        save_url = url_for("api_autonomy_policy_save")
-        rows_html = ""
-        for ct_str, ct_meta in _CT_REGISTRY.items():
-            current_val = current_policy.get(ct_str.value, "approval_required")
-            select_opts = ""
-            for val, label, _ in _AUTONOMY_LEVEL_OPTS:
-                sel = " selected" if current_val == val else ""
-                select_opts += f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
-            rows_html += (
-                f"<tr>"
-                f'<td style="font-weight:500">{_h(ct_meta.title)}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted);max-width:260px">{_h(ct_meta.description)}</td>'
-                f"<td>"
-                f'<select name="{_h(ct_str.value)}" '
-                f'style="background:var(--bg);color:var(--ink);'
-                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px">'
-                f"{select_opts}"
-                f"</select>"
-                f"</td>"
-                f"</tr>"
-            )
-
-        # --- Posture summary — the page's lead state. Make the safe default
-        # legible and reassuring, and surface clearly when any type has been
-        # opted into autonomy. Counts read straight off the resolved policy.
-        _levels = [current_policy.get(ct.value, "approval_required") for ct in _CT_REGISTRY]
-        _n_types = len(_levels)
-        _n_auto = sum(1 for v in _levels if v == "fully_autonomous")
-        _n_draft = sum(1 for v in _levels if v == "draft_only")
-        _n_gated = _n_types - _n_auto
-        if _n_auto == 0:
-            _posture_accent = "var(--good)"
-            _posture_bg = "var(--good-bg)"
-            _posture_title = "Every content type requires your approval"
-            _posture_sub = (
-                f"All {_n_types} content types are gated &mdash; nothing publishes "
-                "without an explicit human approval."
-                + (
-                    f" {_n_draft} {'is' if _n_draft == 1 else 'are'} draft-only."
-                    if _n_draft
-                    else ""
-                )
-            )
-        else:
-            _posture_accent = "var(--warn)"
-            _posture_bg = "var(--warn-bg)"
-            _posture_title = f"{_n_auto} of {_n_types} content types may auto-publish"
-            _posture_sub = (
-                f"{_n_auto} type{'s' if _n_auto != 1 else ''} can publish without a human "
-                "when every publish-gate guardrail passes; the other "
-                f"{_n_gated} still require approval."
-            )
-        posture_html = (
-            f'<div style="margin-bottom:18px;padding:14px 18px;background:{_posture_bg};'
-            f"border:1px solid {_posture_accent};border-left:3px solid {_posture_accent};"
-            f'border-radius:0 var(--radius-sm) var(--radius-sm) 0">'
-            f'<div style="font-weight:700;font-size:14px;margin-bottom:2px">{_h(_posture_title)}</div>'
-            f'<div style="font-size:13px;color:var(--ink-dim)">{_posture_sub}</div>'
-            f"</div>"
-        )
-
-        warning_html = (
-            '<div id="mh-autonomy-warn" style="display:none;margin-top:12px;padding:12px 18px;'
-            "background:rgba(255,170,58,0.10);border-left:3px solid var(--mh-prim-warning-500);"
-            'border-radius:0 6px 6px 0">'
-            "<b>Warning:</b> Setting any type to <em>Fully autonomous</em> allows MediaHub to "
-            "publish that content without a human approval step, subject to guardrails. "
-            "All other types remain gated. You can revert to <em>Approval required</em> at any time."
-            "</div>"
-        )
-        confidence_note = (
-            '<p class="dim" style="font-size:12px;margin:10px 0 0 0">The minimum recognition '
-            "confidence a card must clear before it can auto-publish is set by the operator in "
-            "Developer settings.</p>"
-        )
-        form_html = (
-            f'<form id="mh-autonomy-form" method="post" action="{save_url}" data-no-loader="1">'
-            f'<div class="card" style="padding:0;overflow:hidden">'
-            f'<table class="mh-table-stack" style="width:100%">'
-            f"<thead><tr><th>Content type</th><th>Description</th><th>Publishing level</th></tr></thead>"
-            f"<tbody>{rows_html}</tbody>"
-            f"</table></div>"
-            f"{warning_html}"
-            f'<div style="margin-top:14px">'
-            f'<button type="submit" class="btn primary">Save autonomy settings</button>'
-            f'<span id="mh-autonomy-saved" style="margin-left:12px;font-size:13px;'
-            f'color:var(--mh-prim-success-400);display:none">Saved.</span>'
-            f"</div></form>"
-            f"{confidence_note}"
-        )
-
-        js_html = """
-<script>
-(function(){
-  var form = document.getElementById('mh-autonomy-form');
-  var warn = document.getElementById('mh-autonomy-warn');
-  var saved = document.getElementById('mh-autonomy-saved');
-  if (!form) return;
-  function checkWarn() {
-    var selects = form.querySelectorAll('select');
-    var hasAuto = false;
-    for (var i = 0; i < selects.length; i++) {
-      if (selects[i].value === 'fully_autonomous') { hasAuto = true; break; }
-    }
-    warn.style.display = hasAuto ? '' : 'none';
-  }
-  form.addEventListener('change', checkWarn);
-  checkWarn();
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    saved.style.display = 'none';
-    var data = new FormData(form);
-    fetch(form.action, {method: 'POST', body: data, headers: {'X-Requested-With': 'XMLHttpRequest'}})
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (j && j.ok) { saved.style.display = ''; setTimeout(function(){ saved.style.display='none'; }, 3000); }
-        else if (window.MH) { MH.toast((j && j.error) || 'Could not save autonomy settings.', 'error'); }
-      })
-      .catch(function(){ if (window.MH) MH.toast('Could not save autonomy settings — check your connection and try again.', 'error'); });
-  });
-})();
-window.mhAutonomySweepNow = function(btn) {
-  var out = document.getElementById('mh-sweep-result');
-  btn.disabled = true; out.textContent = 'Checking recent runs against the publish gate…';
-  fetch('REPLACE_SWEEP_URL', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      btn.disabled = false;
-      if (j && j.ok) {
-        out.textContent = 'Swept ' + (j.swept_runs || 0) + ' recent run(s) · ' + (j.published || 0) + ' card(s) published. Details land in the activity log below after a refresh.';
-      } else { out.textContent = (j && j.error) || 'Sweep failed.'; }
-    })
-    .catch(function(){ btn.disabled = false; out.textContent = 'Sweep failed.'; });
-};
-</script>"""
-        js_html = js_html.replace("REPLACE_SWEEP_URL", url_for("api_autonomy_sweep"))
-
-        cadence_on = False
-        try:
-            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
-
-            cadence_on = any(
-                t.task_type == "approval_signal"
-                and (t.params or {}).get("org_id") == prof.profile_id
-                and t.enabled
-                for t in _sched_list_tasks2()
-            )
-        except Exception:
-            pass
-        has_scheduler = bool((getattr(prof, "scheduler_access_token", "") or "").strip())
-        sched_link = url_for("settings_section", section="scheduling")
-        scheduler_status = (
-            '<span style="color:var(--mh-prim-success-400)">Auto scheduling connected.</span> '
-            f'<a href="{sched_link}" style="font-size:12px">Manage &rarr;</a>'
-            if has_scheduler
-            else f'<span class="dim">Auto scheduling not connected.</span> '
-            f'<a href="{sched_link}" style="font-size:12px">Connect &rarr;</a>'
-        )
-        cadence_status = (
-            '<span style="color:var(--mh-prim-success-400)">active</span> — recent runs are '
-            "checked against the publish gate every hour"
-            if cadence_on
-            else '<span class="dim">off</span> — turns on automatically while any type above '
-            "is <em>Fully autonomous</em>"
-        )
-        ops_html = (
-            '<div class="card" style="margin-top:14px;padding:16px 18px">'
-            '<div style="font-weight:600;margin-bottom:6px">Autonomy operations</div>'
-            f'<p style="font-size:13px;margin:0 0 6px 0">{scheduler_status}</p>'
-            f'<p style="font-size:13px;margin:0 0 10px 0">Hourly cadence: {cadence_status}.</p>'
-            '<button type="button" class="btn secondary" onclick="mhAutonomySweepNow(this)" '
-            'style="font-size:12px">Run autonomy check now</button>'
-            '<div id="mh-sweep-result" class="dim" style="font-size:12px;margin-top:8px"></div>'
-            "</div>"
-        )
-
-        audit_rows = ""
-        try:
-            from mediahub.workflow.autonomy import AuditLog as _AuditLog
-
-            entries = _AuditLog().read(prof.profile_id, limit=12)
-            for e in reversed(entries):
-                ts = _h(_humanize_when(str(e.get("ts") or "")))
-                kind = _h(str(e.get("kind") or ""))
-                tool = _h(str(e.get("tool") or ""))
-                result = _h(str(e.get("result") or ""))
-                audit_rows += (
-                    f"<tr><td style='white-space:nowrap;font-size:12px'>{ts}</td>"
-                    f"<td style='font-size:12px'><code>{kind}</code></td>"
-                    f"<td style='font-size:12px'>{tool}</td>"
-                    f"<td style='font-size:12px;color:var(--ink-dim)'>{result}</td></tr>"
-                )
-        except Exception:
-            audit_rows = ""
-        audit_html = (
-            '<div class="card" style="margin-top:14px;padding:16px 18px">'
-            '<div style="font-weight:600;margin-bottom:6px">Autonomy activity log</div>'
-            '<p class="dim" style="font-size:12px;margin:0 0 10px 0">The immutable audit trail '
-            "behind every autonomous decision for this organisation: gate verdicts, "
-            "auto-approvals, publish attempts and blocked actions.</p>"
-            + (
-                f'<div style="overflow-x:auto"><table class="mh-table-stack" style="width:100%">'
-                f"<thead><tr><th>When</th><th>Event</th><th>Tool</th><th>Detail</th></tr></thead>"
-                f"<tbody>{audit_rows}</tbody></table></div>"
-                if audit_rows
-                else '<div class="card empty" style="margin:0">No autonomous activity yet — '
-                "entries appear here once the approval signal runs.</div>"
-            )
-            + "</div>"
-        )
-
-        return (
-            f"{posture_html}"
-            f'<p class="dim" style="margin-bottom:14px">Set a publishing level per content type '
-            f"for <b>{_h(prof.display_name)}</b>. Everything defaults to "
-            f"<em>Approval required</em> &mdash; a type only publishes on its own once you "
-            f"opt it in below, and even then every publish-gate guardrail still applies.</p>"
-            f"{form_html}{ops_html}{audit_html}{js_html}"
+        return _coming_soon_card(
+            "Autonomy",
+            "Per-content-type publishing levels — letting MediaHub post approved "
+            "cards to your channels without a human — are being rebuilt. For now "
+            "every card stays under human approval; export or download to post manually.",
         )
 
     def _render_settings_scheduling_section(prof: Optional[ClubProfile]) -> str:
-        """Auto scheduling — connect a scheduling account + pick channels.
+        """Auto scheduling settings — a Coming soon placeholder.
 
-        This is the page the Settings "Auto scheduling" card opens. It replaces
-        the old per-card "Buffer" wording entirely; the only place the upstream
-        provider name still appears is the GDPR sub-processor record.
+        Connecting a scheduling account and queueing approved cards straight
+        onto social channels has been withdrawn. Approved cards stay fully
+        exportable/downloadable for manual posting.
         """
-        if prof is None:
-            return (
-                '<p class="dim" style="margin-bottom:14px">'
-                "Sign in to an organisation to connect auto scheduling.</p>"
-                '<div class="card empty">No organisation pinned.</div>'
-            )
-        has_scheduler = bool((getattr(prof, "scheduler_access_token", "") or "").strip())
-        channels_val = _h(", ".join(getattr(prof, "autonomy_channel_ids", []) or []))
-        connect_url = url_for("api_connect_scheduler")
-        disconnect_url = url_for("api_disconnect_scheduler")
-        save_url = url_for("api_autonomy_policy_save")
-
-        explainer = (
-            '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
-            '<p style="margin:0 0 8px 0">Auto scheduling queues your <b>approved</b> cards to '
-            "your social channels at the times you choose, so a volunteer doesn't have to be at "
-            "a keyboard to post. Nothing is ever scheduled without approval (unless you opt a "
-            "content type into full autonomy under "
-            f'<a href="{url_for("settings_section", section="autonomy")}">Autonomy</a>). '
-            "Not connected? You can always download a caption + visual ZIP from any card and "
-            "post by hand.</p></div>"
+        return _coming_soon_card(
+            "Auto scheduling",
+            "Connecting a scheduling account to queue approved cards straight onto "
+            "your social channels is being rebuilt. For now, approve a card and use "
+            "Export or Download to post it manually.",
         )
-
-        if has_scheduler:
-            status_block = (
-                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
-                '<div style="font-weight:600;margin-bottom:6px">Connection</div>'
-                '<p style="font-size:13px;margin:0 0 10px 0">'
-                '<span style="color:var(--mh-prim-success-400)">Auto scheduling is connected</span> '
-                "for this organisation.</p>"
-                '<button type="button" class="btn secondary" onclick="mhSchedulerDisconnect(this)" '
-                'style="font-size:12px">Disconnect</button>'
-                "</div>"
-            )
-        else:
-            status_block = (
-                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
-                '<div style="font-weight:600;margin-bottom:6px">Connect</div>'
-                '<p class="dim" style="font-size:13px;margin:0 0 8px 0">Paste your scheduling '
-                "access token to connect this organisation.</p>"
-                '<div style="display:flex;flex-direction:column;gap:8px;max-width:520px">'
-                '<input id="mh-sched-token" type="text" placeholder="Access token" '
-                'style="width:100%;font-family:var(--font-mono,monospace);font-size:13px;'
-                "padding:8px 10px;border:1px solid var(--panel);border-radius:6px;"
-                'background:var(--bg);color:var(--ink)"/>'
-                '<button type="button" id="mh-sched-connect" class="btn" '
-                'style="align-self:flex-start;font-size:13px" '
-                'onclick="mhConnectSchedulerFromSettings()">Connect auto scheduling</button>'
-                '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener" '
-                'style="font-size:11px;color:var(--accent)">Where do I get an access token? &rarr;</a>'
-                '<div id="mh-sched-connect-msg" class="dim" style="font-size:12px"></div>'
-                "</div></div>"
-            )
-
-        channels_note = (
-            "Channel ids autonomous posts may go to (comma-separated — ids appear in the "
-            "schedule modal's channel list). Leave empty to let autonomy approve gate-passing "
-            "cards while a human still does all scheduling."
-            if has_scheduler
-            else "Connect auto scheduling first, then choose which channels autonomous posts may "
-            "go to."
-        )
-        channels_block = (
-            f'<form id="mh-sched-channels-form" method="post" action="{save_url}" data-no-loader="1">'
-            '<div class="card" style="padding:16px 18px">'
-            '<label for="mh-autonomy-channels" style="font-weight:600">Autonomous channels</label>'
-            f'<p class="dim" style="font-size:12px;margin:4px 0 8px 0">{channels_note}</p>'
-            f'<input id="mh-autonomy-channels" type="text" name="autonomy_channel_ids" '
-            f'value="{channels_val}" placeholder="e.g. 5f1a…, 5f1b…" '
-            f'style="width:100%;max-width:520px"{"" if has_scheduler else " disabled"}/>'
-            '<div style="margin-top:12px">'
-            f'<button type="submit" class="btn primary"{"" if has_scheduler else " disabled"} '
-            'style="font-size:13px">Save channels</button>'
-            '<span id="mh-sched-saved" style="margin-left:12px;font-size:13px;'
-            'color:var(--mh-prim-success-400);display:none">Saved.</span>'
-            "</div></div></form>"
-        )
-
-        js_html = """
-<script>
-window.mhConnectSchedulerFromSettings = function() {
-  var inp = document.getElementById('mh-sched-token');
-  var msg = document.getElementById('mh-sched-connect-msg');
-  var btn = document.getElementById('mh-sched-connect');
-  var token = (inp && inp.value || '').trim();
-  if (!token) { if (msg) msg.textContent = 'Paste your access token to connect.'; return; }
-  btn.disabled = true; if (msg) msg.textContent = 'Connecting…';
-  fetch('REPLACE_CONNECT_URL', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({scheduler_access_token: token})})
-    .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); })
-    .then(function(o){
-      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) { window.location.reload(); }
-      else { btn.disabled = false; if (msg) msg.textContent = (o.body && o.body.message) || 'Could not connect.'; }
-    })
-    .catch(function(){ btn.disabled = false; if (msg) msg.textContent = 'Could not connect.'; });
-};
-window.mhSchedulerDisconnect = function(btn) {
-  if (!window.confirm('Disconnect auto scheduling for this organisation? Autonomous and one-click scheduling will stop until a new token is connected.')) return;
-  btn.disabled = true;
-  fetch('REPLACE_DISCONNECT_URL', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      if (j && j.ok) { window.location.reload(); }
-      else { btn.disabled = false; if (window.MH) MH.toast((j && j.error) || 'Could not disconnect auto scheduling.', 'error'); }
-    })
-    .catch(function(){ btn.disabled = false; if (window.MH) MH.toast('Could not disconnect auto scheduling.', 'error'); });
-};
-(function(){
-  var form = document.getElementById('mh-sched-channels-form');
-  if (!form) return;
-  var saved = document.getElementById('mh-sched-saved');
-  form.addEventListener('submit', function(e){
-    e.preventDefault();
-    fetch(form.action, {method:'POST', body:new FormData(form), headers:{'X-Requested-With':'XMLHttpRequest'}})
-      .then(function(r){ return r.json(); })
-      .then(function(j){ if (j && j.ok && saved){ saved.style.display=''; setTimeout(function(){saved.style.display='none';},3000);} })
-      .catch(function(){});
-  });
-})();
-</script>"""
-        js_html = js_html.replace("REPLACE_CONNECT_URL", connect_url).replace(
-            "REPLACE_DISCONNECT_URL", disconnect_url
-        )
-        return explainer + status_block + channels_block + js_html
 
     def _render_settings_clubdata_section() -> str:
         """Club data — club records + ask-the-data, relocated from the
@@ -23101,68 +22018,8 @@ window.mhSchedulerDisconnect = function(btn) {
         )
 
     def _render_settings_developer_section() -> str:
-        """Operator-only — deployment health, dashboards, detailed status, and
-        the autopublish confidence thresholds (moved out of the public UI)."""
-        return (
-            _render_settings_confidence_section()
-            + _render_settings_status_section()
-            + _render_settings_deployment_section()
-        )
-
-    def _render_settings_confidence_section() -> str:
-        """Operator-only per-type autopublish confidence thresholds."""
-        prof = _active_profile()
-        if prof is None:
-            return (
-                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
-                '<h3 style="margin-top:0;font-size:16px">Autopublish confidence</h3>'
-                '<p class="dim">Sign in to an organisation to set its thresholds.</p></div>'
-            )
-        try:
-            from mediahub.publishing.publish_gate import (
-                DEFAULT_CONFIDENCE_THRESHOLD as _DEF_THRESH,
-            )
-            from mediahub.publishing.publish_gate import load_thresholds as _load_thresholds
-            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
-
-            current_thresholds = _load_thresholds(prof.profile_id)
-        except Exception as _e:
-            return f'<div class="card empty">Could not load thresholds: {_h(str(_e))}</div>'
-        save_url = url_for("api_autonomy_policy_save")
-        rows = ""
-        for ct_str, ct_meta in _CT_REGISTRY.items():
-            thresh_val = current_thresholds.get(ct_str.value, _DEF_THRESH)
-            rows += (
-                f'<tr><td style="font-weight:500">{_h(ct_meta.title)}</td>'
-                f'<td><input type="number" name="threshold_{_h(ct_str.value)}" '
-                f'value="{thresh_val:.2f}" min="0.5" max="1" step="0.05" '
-                f'style="width:84px;background:var(--bg);color:var(--ink);'
-                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px"/></td></tr>'
-            )
-        js = (
-            "<script>(function(){var f=document.getElementById('mh-conf-form');if(!f)return;"
-            "var s=document.getElementById('mh-conf-saved');"
-            "f.addEventListener('submit',function(e){e.preventDefault();"
-            "fetch(f.action,{method:'POST',body:new FormData(f),headers:{'X-Requested-With':'XMLHttpRequest'}})"
-            ".then(function(r){return r.json();}).then(function(j){if(j&&j.ok&&s){s.style.display='';"
-            "setTimeout(function(){s.style.display='none';},3000);}}).catch(function(){});});})();</script>"
-        )
-        return (
-            '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
-            '<h3 style="margin-top:0;font-size:16px">Autopublish confidence</h3>'
-            '<p class="dim" style="font-size:13px;margin-bottom:10px">Minimum recognition '
-            "confidence a card must clear before a <em>Fully autonomous</em> type can publish it. "
-            f"The standard is {_DEF_THRESH:.0%}. Operator-only.</p>"
-            f'<form id="mh-conf-form" method="post" action="{save_url}" data-no-loader="1">'
-            '<table class="mh-table-stack" style="width:100%"><thead><tr>'
-            "<th>Content type</th><th>Confidence ≥</th></tr></thead>"
-            f"<tbody>{rows}</tbody></table>"
-            '<div style="margin-top:12px">'
-            '<button type="submit" class="btn primary" style="font-size:13px">Save thresholds</button>'
-            '<span id="mh-conf-saved" style="margin-left:12px;font-size:13px;'
-            'color:var(--mh-prim-success-400);display:none">Saved.</span>'
-            "</div></form></div>" + js
-        )
+        """Operator-only — deployment health, dashboards, and detailed status."""
+        return _render_settings_status_section() + _render_settings_deployment_section()
 
     def _render_settings_privacy_section() -> str:
         """Privacy section — inventory, athletes & consent, cache-clear, deletion."""
@@ -23419,125 +22276,6 @@ window.mhSchedulerDisconnect = function(btn) {
                 "provider_label": provider_label,
             }
         )
-
-    # ---- Per-type autonomy policy API (P2.4) -------------------------
-    #
-    # GET  /api/autonomy/policy  — load the active org's per-type policy
-    # POST /api/autonomy/policy  — save the active org's per-type policy
-    #
-    # Both routes require an active (signed-in) org.  Cross-tenant
-    # isolation is enforced by scoping reads/writes to _active_profile_id()
-    # — a session can only ever see or alter its own org's policy.
-
-    @app.route("/api/autonomy/policy", methods=["GET"])
-    def api_autonomy_policy_load():
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "No organisation active."}), 403
-        try:
-            from mediahub.publishing.per_type_policy import load_policy as _load_policy
-
-            policy = _load_policy(pid)
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
-        return jsonify({"ok": True, "org_id": pid, "policy": policy})
-
-    @app.route("/api/autonomy/policy", methods=["POST"])
-    def api_autonomy_policy_save():
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "No organisation active."}), 403
-        try:
-            from mediahub.publishing.per_type_policy import (
-                load_policy as _load_policy,
-                save_policy as _save_policy,
-            )
-
-            existing = _load_policy(pid)
-            # Accept both JSON body and form data.
-            if request.is_json:
-                incoming = request.get_json(silent=True) or {}
-            else:
-                incoming = dict(request.form)
-            # Split out the P2.3 controls the same form carries: per-type
-            # confidence thresholds (threshold_<slug>) and the autonomous
-            # channel list. What remains is the per-type level policy.
-            thresholds: dict[str, str] = {}
-            channels_raw = None
-            levels: dict[str, str] = {}
-            for k, v in incoming.items():
-                if isinstance(v, list):
-                    v = v[0] if v else ""
-                if k == "autonomy_channel_ids":
-                    channels_raw = str(v)
-                elif k.startswith("threshold_"):
-                    thresholds[k[len("threshold_") :]] = str(v)
-                else:
-                    levels[k] = str(v)
-            # Merge: start from existing (all keys present), override with incoming.
-            merged = dict(existing)
-            merged.update(levels)
-            _save_policy(pid, merged)
-            # Reconcile the org's approval-signal cadence with the new policy:
-            # any fully_autonomous type gets the hourly scheduled sweep that
-            # actually drives auto-approval; reverting to fully gated removes it.
-            try:
-                from mediahub.workflow.approval import ensure_approval_signal_cadence
-
-                ensure_approval_signal_cadence(pid)
-            except Exception:
-                app.logger.exception("approval-signal cadence reconciliation failed")
-            if thresholds:
-                from mediahub.publishing.publish_gate import save_thresholds as _save_thresholds
-
-                _save_thresholds(pid, thresholds)
-            if channels_raw is not None:
-                from mediahub.web.club_profile import load_profile as _lp
-                from mediahub.web.club_profile import save_profile as _sp
-
-                prof = _lp(pid)
-                if prof is not None:
-                    prof.autonomy_channel_ids = [
-                        c.strip() for c in channels_raw.split(",") if c.strip()
-                    ]
-                    _sp(prof)
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
-        return jsonify({"ok": True, "org_id": pid})
-
-    # P2.2 — run the human-approval signal over one run NOW: gated types
-    # report "awaiting human"; a fully_autonomous type's cards go through
-    # the full publish gate and, where allowed, auto-approve (+ publish via
-    # the org's autonomous channels). Org-scoped; everything audited.
-    @app.route("/api/autonomy/sweep", methods=["POST"])
-    def api_autonomy_sweep():
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "No organisation active."}), 403
-        body = request.get_json(silent=True) or {}
-        run_id = str(body.get("run_id") or request.form.get("run_id") or "").strip()
-        try:
-            from mediahub.workflow.approval import _recent_run_ids, apply_approval_signal
-
-            if run_id:
-                summary = apply_approval_signal(pid, run_id)
-                status = 200 if summary.get("ok") else 404
-                return jsonify(summary), status
-            # No run_id: sweep the org's recent finished runs — the same
-            # scope the scheduled cadence covers, triggered on demand.
-            run_ids = _recent_run_ids(pid)
-            summaries = [apply_approval_signal(pid, rid) for rid in run_ids]
-            return jsonify(
-                {
-                    "ok": True,
-                    "swept_runs": len(summaries),
-                    "published": sum(int(s.get("published") or 0) for s in summaries),
-                    "runs": summaries,
-                }
-            )
-        except Exception as exc:
-            app.logger.exception("autonomy sweep failed")
-            return jsonify({"error": str(exc)}), 500
 
     # ---- Content plan (P1.3 cross-source planner) ---------------------
     #
@@ -24076,201 +22814,6 @@ function mhPlanGenerate(btn) {{
 """
         return _layout("Content plan", body, active="create")
 
-    # ---- the scheduler publishing -------------------------------------------
-    #
-    # Multi-tenant publishing model (post-rewrite):
-    #
-    #   1. **Per-profile the scheduler token** — each ClubProfile carries its
-    #      own optional `scheduler_access_token`. Set via /api/organisation/
-    #      connect-scheduler (inline in the publishing flow, no settings
-    #      page). This is the safe multi-tenant pattern: each club
-    #      authenticates with their own the scheduler account; content never
-    #      flows through a shared account.
-    #
-    #   2. **Env-var fallback** — `SCHEDULER_ACCESS_TOKEN` env var is
-    #      consulted only when the active profile has no token. This
-    #      stays as a convenience for single-tenant self-hosted
-    #      deployments where operator IS the user (one club running
-    #      MediaHub on their own infra). It is NOT the multi-tenant
-    #      story.
-    #
-    #   3. **No-the scheduler path** — clubs that don't have the scheduler can fall
-    #      through to /api/runs/<run>/card/<id>/download which packages
-    #      the caption + visual as a ZIP for manual posting.
-    #
-    # This resolver picks 1 → 2 in priority order. Returns "" when no
-    # token is reachable for the active org; callers surface the
-    # connect-or-download choice.
-    def _resolve_scheduler_token() -> str:
-        prof = _active_profile()
-        if prof is not None:
-            tok = (getattr(prof, "scheduler_access_token", "") or "").strip()
-            if tok:
-                return tok
-        # Env fallback for single-tenant self-hosted operators.
-        from mediahub.web.secrets_store import get_scheduler_access_token
-
-        return (get_scheduler_access_token() or "").strip()
-
-    @app.route("/api/scheduler/channels")
-    def api_scheduler_channels():
-        """List the user's connected the scheduler channels.
-
-        Returns 401 when neither the active profile nor the env var
-        has a token, so the UI can show the inline Connect the scheduler +
-        Copy/Download alternative instead of opening the schedule modal.
-        """
-        from mediahub.publishing.scheduler import (
-            list_channels as _chan_list,
-            SchedulerAuthError,
-            SchedulerAPIError,
-        )
-
-        token = _resolve_scheduler_token()
-        if not token:
-            return jsonify(
-                {
-                    "connected": False,
-                    "channels": [],
-                    "error": "no_token",
-                    "message": (
-                        "Auto scheduling isn't connected for this organisation. Paste "
-                        "your auto scheduling access token to enable scheduling, or "
-                        "use the download option to post manually."
-                    ),
-                    "connect_url": url_for("api_connect_scheduler"),
-                }
-            ), 401
-        try:
-            channels = _chan_list(token)
-        except SchedulerAuthError as exc:
-            return jsonify(
-                {
-                    "connected": False,
-                    "channels": [],
-                    "error": "auth",
-                    "message": str(exc),
-                }
-            ), 401
-        except SchedulerAPIError as exc:
-            return jsonify(
-                {
-                    "connected": True,
-                    "channels": [],
-                    "error": "api",
-                    "message": str(exc),
-                }
-            ), 502
-        return jsonify(
-            {
-                "connected": True,
-                "channels": channels,
-                "count": len(channels),
-            }
-        )
-
-    @app.route("/api/organisation/connect-scheduler", methods=["POST"])
-    def api_connect_scheduler():
-        """Save a the scheduler access token onto the **active organisation**.
-
-        This is the multi-tenant-safe the scheduler connection path: each club
-        pastes their own personal access token, which is persisted on
-        their ClubProfile (not in a shared env var, not in a shared
-        secrets file). Their content then flows through THEIR the scheduler
-        account, never a shared operator account.
-
-        The token is validated by attempting a `list_channels` probe
-        before saving — a token that the scheduler rejects is not persisted,
-        so the user gets immediate feedback rather than a silent fail
-        at schedule time.
-
-        POST body (form or JSON):
-            { "scheduler_access_token": "1/..." }
-
-        Returns 200 on success with the connected channel count, or
-        4xx on validation / auth failures.
-        """
-        prof = _active_profile()
-        if prof is None:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_active_profile",
-                    "message": "Set up your organisation before connecting auto scheduling.",
-                }
-            ), 409
-        # Accept both form-data and JSON for browser-form + fetch use.
-        token = ""
-        if request.is_json:
-            body = request.get_json(silent=True) or {}
-            token = str(body.get("scheduler_access_token") or "").strip()
-        if not token:
-            token = (request.form.get("scheduler_access_token") or "").strip()
-        if not token:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "missing_token",
-                    "message": "Paste your auto scheduling access token to connect.",
-                }
-            ), 400
-        if len(token) < 10:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "short_token",
-                    "message": "That doesn't look like a the scheduler access token (too short).",
-                }
-            ), 400
-
-        # Validate by probing the scheduler for the connected channels. If the scheduler
-        # rejects the token we never persist it.
-        from mediahub.publishing.scheduler import (
-            list_channels as _chan_list,
-            SchedulerAuthError,
-            SchedulerAPIError,
-        )
-
-        try:
-            channels = _chan_list(token)
-        except SchedulerAuthError as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "auth",
-                    "message": str(exc),
-                }
-            ), 401
-        except SchedulerAPIError as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "api",
-                    "message": str(exc),
-                }
-            ), 502
-
-        # Persist on the profile.
-        prof.scheduler_access_token = token
-        save_profile(prof)
-        return jsonify(
-            {
-                "ok": True,
-                "channel_count": len(channels),
-                "profile_id": prof.profile_id,
-            }
-        )
-
-    @app.route("/api/organisation/disconnect-scheduler", methods=["POST"])
-    def api_disconnect_scheduler():
-        """Clear the the scheduler access token on the active organisation."""
-        prof = _active_profile()
-        if prof is None:
-            return jsonify({"ok": False, "error": "no_active_profile"}), 409
-        prof.scheduler_access_token = ""
-        save_profile(prof)
-        return jsonify({"ok": True})
-
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
         methods=["GET"],
@@ -24278,12 +22821,10 @@ function mhPlanGenerate(btn) {{
     def api_card_download(run_id, card_id):
         """Download a card's caption + visual as a ZIP for manual posting.
 
-        The the scheduler-free path: clubs that don't have the scheduler (or don't
-        want to use it) can grab a ZIP containing the caption text
-        and the generated visual, then post manually to whatever
-        platform they like. This is the always-safe option — no
-        third-party API touched, no TOS to violate, no scheduler
-        dependency.
+        Clubs grab a ZIP containing the caption text and the generated
+        visual, then post manually to whatever platform they like. This is
+        the always-safe option — no third-party API touched, no TOS to
+        violate.
         """
         from flask import send_file
         import io
@@ -24366,448 +22907,6 @@ function mhPlanGenerate(btn) {{
             mimetype="application/zip",
             as_attachment=True,
             download_name=f"{slug}.zip",
-        )
-
-    @app.route(
-        "/api/runs/<run_id>/card/<path:card_id>/schedule",
-        methods=["POST"],
-    )
-    def api_card_schedule(run_id, card_id):
-        """Schedule a card to one or more the scheduler channels.
-
-        Body JSON:
-            {
-              "channel_ids":  ["...", ...],   # required, non-empty
-              "scheduled_at": "2026-06-01T10:00:00Z" | null,
-              "caption":      "the edited caption text",
-              "media_url":    "https://..." | null
-            }
-
-        Returns 200 with the per-channel results on success, 4xx on bad
-        input / missing token, 502 if the scheduler rejects the call. The
-        user's edited caption is echoed back in `caption` so the UI
-        can preserve it even after a failure.
-        """
-        from mediahub.publishing.scheduler import (
-            schedule_post as _buf_schedule,
-            SchedulerAuthError,
-            SchedulerAPIError,
-            SchedulerRateLimitError,
-        )
-        from mediahub.publishing import posting_log as _plog
-
-        # ---- The unbypassable publish gate (THREAT_MODEL §8) ----
-        # This is the route that makes content public. Three server-side
-        # checks no client (human, script, or LLM-authored payload) can
-        # skip: tenant ownership, recorded human APPROVAL, and consent.
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"ok": False, "error": "not_found"}), 404
-        ws = _get_wf_store()
-        state = ws.load(run_id).get(card_id) if ws is not None else None
-        approved = state is not None and state.status in (CardStatus.APPROVED, CardStatus.POSTED)
-        if not approved:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "not_approved",
-                    "message": "This card hasn't been approved. Approve it on the review page first — publishing always follows a human decision.",
-                }
-            ), 409
-        from mediahub.compliance.gate import (
-            consent_block_reason_for_card,
-            find_card_in_run,
-        )
-
-        _card = find_card_in_run(run_data or {}, card_id)
-        _consent_reason = consent_block_reason_for_card(
-            (run_data or {}).get("profile_id", ""), _card
-        )
-        if _consent_reason:
-            from mediahub.compliance.security_log import record_event as _sec_event
-
-            _sec_event(
-                "publish_blocked_consent",
-                profile_id=(run_data or {}).get("profile_id", ""),
-                detail=f"run={run_id} card={card_id}",
-                outcome="blocked",
-            )
-            return jsonify(
-                {"ok": False, "error": "consent_blocked", "reason": _consent_reason}
-            ), 403
-
-        payload = request.get_json(silent=True) or {}
-        channel_ids = payload.get("channel_ids") or []
-        if not isinstance(channel_ids, list) or not channel_ids:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_channels",
-                    "message": "Pick at least one auto scheduling channel.",
-                    "caption": payload.get("caption", ""),
-                }
-            ), 400
-
-        caption = (payload.get("caption") or "").strip()
-        if not caption:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_caption",
-                    "message": "Caption is required.",
-                    "caption": "",
-                }
-            ), 400
-
-        media_url = (payload.get("media_url") or "").strip()
-        if media_url:
-            # Defence-in-depth: only allow http/https URLs to be passed
-            # through to the scheduler. Anything else (file://, javascript:,
-            # data:, internal ips by raw IP) is rejected up front so a
-            # malicious or accidental relative-href can't reach the
-            # upstream API.
-            from urllib.parse import urlparse as _urlparse
-
-            try:
-                parsed = _urlparse(media_url)
-            except Exception:
-                parsed = None
-            scheme_ok = bool(parsed) and parsed.scheme.lower() in ("http", "https")
-            netloc_ok = bool(parsed) and bool((parsed.netloc or "").strip())
-            if not (scheme_ok and netloc_ok):
-                return jsonify(
-                    {
-                        "ok": False,
-                        "error": "bad_media_url",
-                        "message": "Media URL must be a full http/https URL.",
-                        "caption": caption,
-                    }
-                ), 400
-        media_urls = [media_url] if media_url else None
-
-        scheduled_at_iso = (payload.get("scheduled_at") or "").strip()
-        scheduled_at_dt: Optional[datetime] = None
-        if scheduled_at_iso:
-            try:
-                normalised = scheduled_at_iso.replace("Z", "+00:00")
-                scheduled_at_dt = datetime.fromisoformat(normalised)
-                if scheduled_at_dt.tzinfo is None:
-                    scheduled_at_dt = scheduled_at_dt.replace(tzinfo=timezone.utc)
-            except ValueError:
-                return jsonify(
-                    {
-                        "ok": False,
-                        "error": "bad_time",
-                        "message": "Scheduled time was not a valid ISO 8601 datetime.",
-                        "caption": caption,
-                    }
-                ), 400
-
-        token = _resolve_scheduler_token()
-        if not token:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_token",
-                    "message": (
-                        "Auto scheduling isn't connected for this organisation. Paste "
-                        "your auto scheduling access token to enable scheduling, or "
-                        "use the download option to post manually."
-                    ),
-                    "caption": caption,
-                    "connect_url": url_for("api_connect_scheduler"),
-                }
-            ), 401
-
-        ws = _get_wf_store()
-        results: list[dict] = []
-        update_ids: list[str] = []
-        failure: Optional[str] = None
-
-        # Resolve profile_id so every posting-log row is scoped to the
-        # right org. Prefer the run's stored profile_id; fall back to
-        # the session-pinned active profile so logs aren't anonymous
-        # when a run pre-dates the profile system.
-        try:
-            run_data = _load_run(run_id) or {}
-        except Exception:
-            run_data = {}
-        profile_id_for_log = (
-            run_data.get("profile_id")
-            or (_active_profile_id() or "")
-            # Sentinel so a scheduled-but-orphaned post still leaves an
-            # audit trail in the posting log. Without this fallback, a
-            # run with no profile_id silently no-ops the log row because
-            # record_attempt rejects empty profile_id.
-            or "_orphaned"
-        )
-        scheduled_at_iso_for_log = scheduled_at_dt.isoformat() if scheduled_at_dt else None
-
-        # Pre-filter empty channel ids so they don't reach _buf_schedule
-        # and produce a per-channel "channel id is required" failure.
-        # Cast every value to str up front for a consistent shape.
-        channel_ids = [str(c).strip() for c in channel_ids if str(c).strip()]
-
-        from mediahub.publishing.kill_switch import publish_kill_switch_engaged
-
-        if publish_kill_switch_engaged():
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "publishing_halted",
-                    "message": (
-                        "Publishing is currently halted by the operator kill switch."
-                        " No post was sent."
-                    ),
-                    "caption": caption,
-                }
-            ), 503
-
-        # W.11: alt text rides the publish payload — the request's value
-        # wins, else the alt the approver saved in review.
-        _sched_alt = (payload.get("alt_text") or "").strip()
-        if not _sched_alt:
-            try:
-                _ws_sched = _get_wf_store()
-                _st_sched = _ws_sched.load(run_id).get(card_id) if _ws_sched is not None else None
-                _sched_alt = ((_st_sched.edited_captions or {}) if _st_sched else {}).get(
-                    "alt_text", ""
-                )
-            except Exception:
-                _sched_alt = ""
-
-        for cid in channel_ids:
-            try:
-                res = _buf_schedule(
-                    token=token,
-                    channel_id=str(cid),
-                    text=caption,
-                    media_urls=media_urls,
-                    scheduled_at=scheduled_at_dt,
-                    alt_text=_sched_alt,
-                )
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": True,
-                        "update_id": res.get("update_id", ""),
-                    }
-                )
-                if res.get("update_id"):
-                    update_ids.append(res["update_id"])
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="ok",
-                    update_id=res.get("update_id", ""),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-                try:
-                    from mediahub.compliance.security_log import record_event as _sec_event
-
-                    _actor = ""
-                    try:
-                        _actor = _auth.current_user_email() or ""
-                    except Exception:
-                        pass
-                    _sec_event(
-                        "publish_scheduled",
-                        actor=_actor,
-                        profile_id=profile_id_for_log or "",
-                        detail=f"run={run_id} card={card_id} channel={cid}",
-                    )
-                except Exception:
-                    pass
-            except SchedulerAuthError as exc:
-                failure = str(exc)
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": False,
-                        "error": "auth",
-                        "message": str(exc),
-                    }
-                )
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="failed",
-                    error_kind="auth",
-                    error_message=str(exc),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-                break  # Stop early &mdash; token is the same for every channel.
-            except SchedulerRateLimitError as exc:
-                # Rate-limit is per-account, not per-channel — once we
-                # hit it for one channel we will hit it for every
-                # subsequent one in the loop. Surface the retry hint
-                # to the user and stop early.
-                failure = str(exc)
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": False,
-                        "error": "rate_limited",
-                        "message": str(exc),
-                        "retry_after": exc.retry_after,
-                    }
-                )
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="failed",
-                    error_kind="rate_limited",
-                    error_message=str(exc),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-                break
-            except SchedulerAPIError as exc:
-                failure = str(exc)
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": False,
-                        "error": "api",
-                        "message": str(exc),
-                    }
-                )
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="failed",
-                    error_kind="api",
-                    error_message=str(exc),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-
-        any_ok = any(r.get("ok") for r in results)
-        try:
-            from mediahub.workflow.status import ScheduleStatus
-        except Exception:
-            ScheduleStatus = None  # type: ignore
-
-        if ws is not None and ScheduleStatus is not None:
-            if any_ok and not failure:
-                ws.set_schedule(
-                    run_id,
-                    card_id,
-                    schedule_status=ScheduleStatus.SCHEDULED,
-                    scheduler_update_id=";".join(update_ids) or None,
-                    scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-                    schedule_error=None,
-                )
-            elif any_ok and failure:
-                # Partial success: at least one channel went through but
-                # another failed. Record the success and surface the
-                # failure to the user.
-                ws.set_schedule(
-                    run_id,
-                    card_id,
-                    schedule_status=ScheduleStatus.SCHEDULED,
-                    scheduler_update_id=";".join(update_ids) or None,
-                    scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-                    schedule_error=failure,
-                )
-            else:
-                ws.set_schedule(
-                    run_id,
-                    card_id,
-                    schedule_status=ScheduleStatus.FAILED,
-                    scheduler_update_id=None,
-                    scheduled_at=None,
-                    schedule_error=failure or "Scheduling failed.",
-                )
-
-        if not any_ok:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "scheduling_failed",
-                    "message": failure or "Auto scheduling rejected the request.",
-                    "results": results,
-                    "caption": caption,
-                }
-            ), 502
-
-        return jsonify(
-            {
-                "ok": True,
-                "schedule_status": "scheduled",
-                "scheduler_update_ids": update_ids,
-                "scheduled_at": scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-                "results": results,
-                "caption": caption,
-                "warning": failure,  # non-empty if a partial failure occurred
-            }
-        )
-
-    # ------------------------------------------------------------------
-    # Posting log — Phase 1.3 observability
-    # ------------------------------------------------------------------
-    #
-    # JSON access to the same log surfaced on /activity. Useful for
-    # tests and for any SPA-style UI that wants to poll for fresh
-    # attempts without re-rendering the whole page. Scoped to the
-    # active organisation, never returns a globally-mixed view.
-    @app.route("/api/posting/log", methods=["GET"])
-    def api_posting_log():
-        from mediahub.publishing import posting_log as _plog
-
-        prof = _active_profile()
-        if prof is None:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_active_profile",
-                    "attempts": [],
-                }
-            ), 409
-        try:
-            limit_raw = (request.args.get("limit") or "20").strip()
-            limit = max(1, min(200, int(limit_raw)))
-        except (TypeError, ValueError):
-            limit = 20
-        run_id = (request.args.get("run_id") or "").strip() or None
-        card_id = (request.args.get("card_id") or "").strip() or None
-        try:
-            attempts = _plog.recent_attempts(
-                prof.profile_id,
-                limit=limit,
-                run_id=run_id,
-                card_id=card_id,
-            )
-        except Exception as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "log_unavailable",
-                    "message": str(exc),
-                    "attempts": [],
-                }
-            ), 500
-        return jsonify(
-            {
-                "ok": True,
-                "profile_id": prof.profile_id,
-                "count": len(attempts),
-                "attempts": attempts,
-            }
         )
 
     # ====================================================================
@@ -27395,10 +25494,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _graphic_api_base = url_for(
             "api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0
         ).rsplit("/", 2)[0]
-        # Per-card Schedule (plan-gated; free tier sees the upgrade nudge).
-        # Spotlight packs schedule against their source run; pure drafts
-        # (event preview, sponsor, free text) use a synthetic stub run id —
-        # the schedule API only needs the caption + the scheduler channels.
+        # Per-card Schedule chip — auto scheduling to social is withdrawn, so
+        # this renders a disabled "Coming soon" affordance that keeps the
+        # toolbar's shape. Drafts stay fully exportable for manual posting.
         _pack_cards = rec.get("cards") or []
         _pack_fd = rec.get("form_data") or {}
         _sched_run_id = str(_pack_fd.get("run_id") or f"_stub_{pack_id}")
@@ -27445,9 +25543,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<span class="tag info">{_h(type_label)}</span> '
             f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
         )
-        # Every saved pack page carries the schedule modal — the per-card
-        # Schedule buttons above need it.
-        spotlight_modal_html = _schedule_modal_html() + _schedule_modal_js()
         # Athlete-spotlight drafts additionally get the meet-recap caption
         # tone rewrite (same approved moments, different register).
         spotlight_tools_html = ""
@@ -27513,7 +25608,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             + spotlight_tools_html
             + attached_html
             + cards_html
-            + spotlight_modal_html
             + _VISUAL_PANEL_JS
             + _DRAFT_REGEN_JS
             + auto_js
@@ -28955,7 +27049,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f"<strong>{headline}</strong> "
             "Free includes 3 content runs a month and a single brand profile. "
             "You can keep working &mdash; nothing is locked &mdash; but for "
-            "unlimited runs and Auto scheduling, "
+            "unlimited runs and more brand profiles, "
             f'<a href="{pricing_url}" style="color:var(--accent);font-weight:600">'
             "see plans</a>."
             "</div>"
@@ -34014,7 +32108,7 @@ function mhSetupMode(mode) {{
             return _layout("Content builder", body, active="home")
 
         # Per-card builder rows: header + the live creative toolbar (caption
-        # tones, create graphic, motion, schedule) + a the scheduler-free download.
+        # tones, create graphic, motion) + a download for manual posting.
         cards_html = ""
         for card in approved:
             ach = card.get("achievement") or {}
@@ -34023,15 +32117,6 @@ function mhSetupMode(mode) {{
             headline = _h(ach.get("headline", ""))
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
-            wf = card.get("workflow") or {}
-            sched_state = (wf.get("schedule_status") or "queued").lower()
-            sched_pill_class = {"scheduled": "good", "published": "good", "failed": "bad"}.get(
-                sched_state, ""
-            )
-            sched_pill = (
-                f'<span class="tag {sched_pill_class}" data-schedule-pill="wf-{card_uuid}" '
-                f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
-            )
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
             cards_html += f"""
 <div class="card" id="pc-{_h(card_id_raw)}" style="margin-bottom:14px;page-break-inside:avoid">
@@ -34041,15 +32126,14 @@ function mhSetupMode(mode) {{
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      {sched_pill}
       <span class="tag good">approved</span>
     </div>
   </div>
   {_render_card_creative_toolbar(run_id, card_id_raw)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
-       title="Download caption + visual as a .zip for manual posting (no scheduler needed)">&#x2B07; Download .zip</a>
-    <span class="muted" style="font-size:11px">Pick a tone, create a graphic or motion, then schedule or download.</span>
+       title="Download caption + visual as a .zip for manual posting">&#x2B07; Download .zip</a>
+    <span class="muted" style="font-size:11px">Pick a tone, then create a graphic or motion and download.</span>
   </div>
 </div>"""
 
@@ -34168,7 +32252,6 @@ function mhSetupMode(mode) {{
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
 
-{_schedule_modal_html()}
 <script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
 {_card_creative_js()}
 <script>
@@ -34193,7 +32276,6 @@ function mhSetupMode(mode) {{
     .catch(function(){{}});
 }})();
 </script>
-{_schedule_modal_js()}
 """
         return _layout(f"Content builder — {meet_name}", body, active="home")
 
@@ -35423,22 +33505,6 @@ function tiRegenerate() {{
                     wf_status = _card_wf.status.value
                 else:
                     wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
-                # Schedule state pill (queued|scheduled|published|failed).
-                sched_state_raw = (
-                    item.get("schedule_status")
-                    or (item.get("workflow") or {}).get("schedule_status")
-                    or "queued"
-                )
-                sched_state = str(sched_state_raw).lower()
-                sched_pill_class = {
-                    "scheduled": "good",
-                    "published": "good",
-                    "failed": "bad",
-                }.get(sched_state, "")
-                sched_pill_html = (
-                    f'<span class="tag {sched_pill_class}" data-schedule-pill="g-{card_uuid}" '
-                    f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
-                )
                 schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
                 # Per-card motion download — the endpoint renders (or
                 # serves cached) MP4. New tab so the user lands on the
@@ -35512,7 +33578,6 @@ function tiRegenerate() {{
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      {sched_pill_html}
       {f'<span class="tag">{angle}</span>' if angle else ""}
       <span class="tag {s2p_cls}" title="{s2p_reason}">{s2p_level}</span>
       {f'<span class="tag">{band}</span>' if band else ""}
@@ -35678,8 +33743,6 @@ function tiRegenerate() {{
 {_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
 {_section_html("Not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
-{_schedule_modal_html()}
-
 <script>
 function copyText(btn, taId) {{
   var ta = document.getElementById(taId);
@@ -35804,7 +33867,6 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   }});
 }};
 </script>
-{_schedule_modal_js()}
 """
         return _layout(f"All recommendations — {meet_name}", body, active="home")
 
@@ -37780,7 +35842,6 @@ where they appeared, ready to forward.</p>
     <div><div style="font-size:26px;font-weight:800">{s["cards"]}</div><div class="dim">cards carried the slot</div></div>
     <div><div style="font-size:26px;font-weight:800">{s["approved"]}</div><div class="dim">approved</div></div>
     <div><div style="font-size:26px;font-weight:800">{s["posted"]}</div><div class="dim">posted</div></div>
-    <div><div style="font-size:26px;font-weight:800">{s["publish_attempts_ok"]}</div><div class="dim">publish attempts OK</div></div>
   </div>
   <p class="dim" style="font-size:12px;margin-bottom:0">Runs: {runs_list}</p>
 </div>"""
@@ -41669,21 +39730,10 @@ and can be revoked by the club.</p>
     try:
         from mediahub.autonomy.app_env import register_autonomy_task
         from mediahub.scheduler import start_scheduler
-        from mediahub.workflow.approval import register_approval_signal_task
 
         # Register the (off-by-default) autonomy task type before the tick loop
         # starts, so a scheduled "prepare my pack for review" run can fire.
         register_autonomy_task()
-        # P2.2: the approval-signal task — inert for fully-gated orgs (every
-        # card just reports awaiting_human); a fully_autonomous type's cards
-        # ride the publish gate on a cadence.
-        register_approval_signal_task()
-        # Make each org's cadence task match its saved policy (covers orgs
-        # that opted into fully_autonomous before policy-save reconciliation
-        # existed; policy saves keep it in sync from here on).
-        from mediahub.workflow.approval import reconcile_all_approval_signal_cadences
-
-        reconcile_all_approval_signal_cadences()
         # W.7: live-meet watch polling — cards queue for approval only;
         # the runner re-runs the pipeline into the watch's fixed run id.
         try:
