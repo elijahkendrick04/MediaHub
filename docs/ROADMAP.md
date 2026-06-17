@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `ed7686408` · Merge pull request #768 from elijahkendrick04/claude/dazzling-clarke-1lo7to
+**Last updated:** 2026-06-17 · `3db80d546` · Merge pull request #771 from elijahkendrick04/claude/adoring-allen-789shf
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1521,6 +1521,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `9603e8877` | Fix sitewide FPS: stop animating non-compositable paint properties |
 | 2026-06-17 | `27968b58d` | autotest: stop the fixer rewriting the golden oracle and opening no-op PRs |
 | 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
 | 2026-06-17 | `a71353d0d` | Re-trigger CI |
