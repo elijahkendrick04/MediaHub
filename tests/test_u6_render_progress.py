@@ -50,11 +50,14 @@ from mediahub.web import web as webmod  # noqa: E402
 _NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(_NODE is None, reason="node not on PATH")
 
-# The six render/generation panels U.6 upgrades, by a unique fragment of each.
+# The render/generation panels U.6 upgrades, by a unique fragment of each.
+# generateReelBatch is the R1.15 multi-format batch panel — it follows the
+# same shared-controller contract, so it joins the guarded set.
 _RENDER_FUNCS = {
     "createGraphic": "function createGraphic(",
     "generateMotion": "function generateMotion(",
     "generateReel": "function generateReel(",
+    "generateReelBatch": "function generateReelBatch(",
     "regenerateGraphic": "function regenerateGraphic(",
     "mhGen (draft panel)": "function mhGen(panel)",
     "generateReelGrouped": "function generateReelGrouped(",
@@ -142,10 +145,11 @@ def test_css_for_loading_state_in_base_css():
 
 def test_generic_panel_spinner_removed_from_render_panels():
     src = _src()
-    # The 24px in-panel spinner markup is gone everywhere (all six panels).
+    # The 24px in-panel spinner markup is gone everywhere (all render panels).
     assert src.count("width:24px;height:24px;border:2px solid") == 0
     # Each upgraded panel now drives the shared controller and gates its result.
-    assert src.count("MH.renderProgress(panel") == 6
+    # 7 = the original six U.6 panels + R1.15's generateReelBatch panel.
+    assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS)
 
 
 @pytest.mark.parametrize("name,marker", list(_RENDER_FUNCS.items()))

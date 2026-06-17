@@ -26,6 +26,7 @@ Design notes
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -33,7 +34,7 @@ import shutil
 import subprocess
 from dataclasses import is_dataclass, asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, ContextManager, Optional
 
 
 from mediahub.visual.reel_engine import (
@@ -856,41 +857,26 @@ def reel_duration_for(n_cards: int) -> float:
     return REEL_COVER_SEC + REEL_PER_CARD_SEC * n + REEL_OUTRO_SEC
 
 
-def render_meet_reel(
+def _assemble_reel_props(
     top_cards: list[dict],
     brand_kit: Any,
-    out_path: Path,
     *,
-    meet_name: str = "",
-    duration_sec: Optional[float] = None,
-    briefs: Optional[list[Optional[dict]]] = None,
-    format_name: str = DEFAULT_MOTION_FORMAT,
-) -> Path:
-    """Render a multi-card reel from the top cards for a meet.
+    meet_name: str,
+    duration_sec: Optional[float],
+    briefs: Optional[list[Optional[dict]]],
+) -> tuple[list[dict], dict, str, float, Any, list]:
+    """Format-independent prop assembly shared by the single and batch reel
+    renders.
 
-    Inputs:
-      top_cards   list of card dicts (typically the top 3 from the content
-                  pack). Each card is shaped via ``_card_to_props``.
-      brand_kit   BrandKit or dict; applies palette, club name, logo hint.
-      out_path    where the final MP4 should land. Cached results may be
-                  copied here from the motion cache.
-      meet_name   meet headline used on the reel cover. Defaults to the
-                  first card's ``meet_name`` if blank.
-      duration_sec explicit total reel duration. Default ``None`` =
-                  data-driven: ``reel_duration_for(len(top_cards))``, so the
-                  reel's structure follows the number of ranked moments
-                  (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
-      format_name  output cut: ``story`` (default) / ``portrait`` /
-                  ``square`` / ``landscape``.
+    Embeds the cards' photos, resolves saliency + still-parity colour roles,
+    derives the data-driven duration, and builds the audio plan — none of
+    which depend on the output pixel size. Pulling it out lets
+    ``render_meet_reel_all_formats`` do this once and reuse it across every
+    cut, instead of re-embedding photos and re-resolving roles per format.
 
-    Audio + poster behaviour matches ``render_story_card``: opt-in narration
-    (built only from the cards' own facts) and/or the operator's music bed
-    are mixed in when configured, with an honest silent fallback, and a
-    poster-frame PNG sidecar lands beside the MP4.
+    Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
+    briefs_list)``.
     """
-    engine = _dispatch_engine()
-    size = motion_format_size(format_name)
-    out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
 
     cards_props: list[dict] = []
@@ -934,6 +920,32 @@ def render_meet_reel(
         duration_sec = reel_duration_for(len(cards_props))
 
     audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
+    return cards_props, brand_dict, meet_name, duration_sec, audio_plan, briefs_list
+
+
+def _render_reel_one_format(
+    *,
+    cards_props: list[dict],
+    brand_dict: dict,
+    brand_kit: Any,
+    meet_name: str,
+    duration_sec: float,
+    audio_plan: Any,
+    briefs_list: list,
+    engine: str,
+    format_name: str,
+    out_path: Path,
+) -> Path:
+    """Render (or serve cached) ONE reel cut from already-assembled props.
+
+    The cache payload folds in the format's pixel ``size``, so each cut
+    caches independently — and the ``story`` cut's key stays byte-identical
+    to the pre-multi-format render (same cards/brand/meet/duration/audio,
+    same size), so existing cached reels remain valid cache hits whether they
+    were produced by the single route or the batch.
+    """
+    size = motion_format_size(format_name)
+    out_path = Path(out_path)
 
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
@@ -1004,9 +1016,245 @@ def render_meet_reel(
     return published if published.exists() else cached
 
 
+def render_meet_reel(
+    top_cards: list[dict],
+    brand_kit: Any,
+    out_path: Path,
+    *,
+    meet_name: str = "",
+    duration_sec: Optional[float] = None,
+    briefs: Optional[list[Optional[dict]]] = None,
+    format_name: str = DEFAULT_MOTION_FORMAT,
+) -> Path:
+    """Render a multi-card reel from the top cards for a meet.
+
+    Inputs:
+      top_cards   list of card dicts (typically the top 3 from the content
+                  pack). Each card is shaped via ``_card_to_props``.
+      brand_kit   BrandKit or dict; applies palette, club name, logo hint.
+      out_path    where the final MP4 should land. Cached results may be
+                  copied here from the motion cache.
+      meet_name   meet headline used on the reel cover. Defaults to the
+                  first card's ``meet_name`` if blank.
+      duration_sec explicit total reel duration. Default ``None`` =
+                  data-driven: ``reel_duration_for(len(top_cards))``, so the
+                  reel's structure follows the number of ranked moments
+                  (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
+      format_name  output cut: ``story`` (default) / ``portrait`` /
+                  ``square`` / ``landscape``.
+
+    Audio + poster behaviour matches ``render_story_card``: opt-in narration
+    (built only from the cards' own facts) and/or the operator's music bed
+    are mixed in when configured, with an honest silent fallback, and a
+    poster-frame PNG sidecar lands beside the MP4.
+
+    For every cut in one request, see ``render_meet_reel_all_formats``.
+    """
+    engine = _dispatch_engine()
+    (
+        cards_props,
+        brand_dict,
+        meet_name,
+        duration_sec,
+        audio_plan,
+        briefs_list,
+    ) = _assemble_reel_props(
+        top_cards, brand_kit, meet_name=meet_name, duration_sec=duration_sec, briefs=briefs
+    )
+    return _render_reel_one_format(
+        cards_props=cards_props,
+        brand_dict=brand_dict,
+        brand_kit=brand_kit,
+        meet_name=meet_name,
+        duration_sec=duration_sec,
+        audio_plan=audio_plan,
+        briefs_list=briefs_list,
+        engine=engine,
+        format_name=format_name,
+        out_path=out_path,
+    )
+
+
+def reel_format_out_path(out_dir: Path, format_name: str, *, base_name: str = "reel") -> Path:
+    """Resolve one cut's output path under ``out_dir``.
+
+    The ``story`` cut keeps the bare ``<base_name>.mp4`` filename (so existing
+    links and cached artifacts stay valid); every other cut is suffixed
+    ``<base_name>_<format>.mp4``. Mirrors the naming the reel routes already
+    use (``reel_<n>.mp4`` / ``reel_<n>_<fmt>.mp4``), so the batch writes the
+    exact files the ``reel-file`` route serves.
+    """
+    motion_format_size(format_name)  # validate the name (raises on unknown)
+    stem = base_name if format_name == DEFAULT_MOTION_FORMAT else f"{base_name}_{format_name}"
+    return Path(out_dir) / f"{stem}.mp4"
+
+
+def render_meet_reel_all_formats(
+    top_cards: list[dict],
+    brand_kit: Any,
+    out_dir: Path,
+    *,
+    meet_name: str = "",
+    duration_sec: Optional[float] = None,
+    briefs: Optional[list[Optional[dict]]] = None,
+    formats: Optional[list[str]] = None,
+    base_name: str = "reel",
+    render_slot: Optional[Callable[[str], ContextManager]] = None,
+) -> dict[str, Any]:
+    """Render + cache every requested reel format in a single pass (R1.15).
+
+    One call shapes the cards' props once (photos embedded, saliency + colour
+    roles resolved, audio plan built — the expensive, format-independent work)
+    and then renders each cut from those shared props. Cuts already in the
+    motion cache are reused, so a story reel rendered earlier by the single
+    route is a cache hit here and only the missing cuts cost a render.
+
+    Inputs mirror ``render_meet_reel`` plus:
+      out_dir     directory the cuts are written into; each format's filename
+                  comes from ``reel_format_out_path`` (story keeps the bare
+                  ``<base_name>.mp4``; others are ``<base_name>_<fmt>.mp4``).
+      formats     which cuts to produce; defaults to all of ``MOTION_FORMATS``
+                  in declaration order. Unknown names raise ``ValueError``.
+      base_name   filename stem (the route passes ``reel_<n>`` so the cuts land
+                  exactly where the ``reel-file`` route looks).
+      render_slot optional ``fmt -> context manager`` factory entered around
+                  each cut's render, so a long batch on a single-slot box
+                  yields the render gate between cuts instead of hogging it
+                  for the whole multi-minute run.
+
+    Returns a structured result so the caller can report honestly per cut::
+
+        {
+          "engine":   "remotion" | "ffmpeg",
+          "rendered": {fmt: Path, ...},     # cuts produced, MOTION_FORMATS order
+          "errors":   {fmt: reason, ...},   # cuts that could not be produced
+        }
+
+    A cut that the active engine cannot produce (e.g. the ffmpeg fallback's
+    non-story cuts) is recorded in ``errors`` with the honest reason and never
+    fakes an output; it does not abort the cuts that *can* render. A genuine
+    render failure on one cut is likewise captured per-cut so a partial batch
+    still ships what succeeded. The order of ``rendered`` follows
+    ``MOTION_FORMATS`` for stable, predictable output.
+    """
+    engine = _dispatch_engine()
+
+    requested = list(formats) if formats else list(MOTION_FORMATS)
+    # Validate up front so a typo fails loudly before any render work.
+    for fmt in requested:
+        motion_format_size(fmt)
+    # Render in canonical MOTION_FORMATS order regardless of request order,
+    # de-duplicated, so the result is stable and story (the cheapest reuse) is
+    # produced first.
+    ordered = [f for f in MOTION_FORMATS if f in set(requested)]
+
+    (
+        cards_props,
+        brand_dict,
+        meet_name,
+        duration_sec,
+        audio_plan,
+        briefs_list,
+    ) = _assemble_reel_props(
+        top_cards, brand_kit, meet_name=meet_name, duration_sec=duration_sec, briefs=briefs
+    )
+
+    out_dir = Path(out_dir)
+    rendered: dict[str, Path] = {}
+    errors: dict[str, str] = {}
+    for fmt in ordered:
+        out_path = reel_format_out_path(out_dir, fmt, base_name=base_name)
+        slot_cm: ContextManager = render_slot(fmt) if render_slot else contextlib.nullcontext()
+        try:
+            with slot_cm:
+                rendered[fmt] = _render_reel_one_format(
+                    cards_props=cards_props,
+                    brand_dict=brand_dict,
+                    brand_kit=brand_kit,
+                    meet_name=meet_name,
+                    duration_sec=duration_sec,
+                    audio_plan=audio_plan,
+                    briefs_list=briefs_list,
+                    engine=engine,
+                    format_name=fmt,
+                    out_path=out_path,
+                )
+        except ReelEngineUnavailable as e:
+            # Expected capability gap (e.g. ffmpeg can't do non-story) —
+            # record the honest reason, keep producing the cuts that can run.
+            errors[fmt] = str(e)
+        except Exception as e:
+            # A genuine render failure on one cut must not lose the cuts that
+            # already succeeded — capture it and carry on.
+            errors[fmt] = str(e)
+
+    _write_batch_manifest(
+        out_dir,
+        base_name=base_name,
+        engine=engine,
+        meet_name=meet_name,
+        duration_sec=duration_sec,
+        n_cards=len(cards_props),
+        rendered=rendered,
+        errors=errors,
+    )
+
+    return {"engine": engine, "rendered": rendered, "errors": errors}
+
+
+def _write_batch_manifest(
+    out_dir: Path,
+    *,
+    base_name: str,
+    engine: str,
+    meet_name: str,
+    duration_sec: float,
+    n_cards: int,
+    rendered: dict[str, Path],
+    errors: dict[str, str],
+) -> None:
+    """Persist the batch's explainability record beside the cuts it produced.
+
+    A small ``<base_name>.batch.json`` sidecar answering "which cuts did this
+    one request produce, and why is any cut missing?" — best-effort, never
+    fails (or follows) the renders it summarises.
+    """
+    try:
+        formats: dict[str, dict] = {}
+        for fmt in MOTION_FORMATS:
+            if fmt in rendered:
+                w, h = motion_format_size(fmt)
+                formats[fmt] = {
+                    "status": "ok",
+                    "file": Path(rendered[fmt]).name,
+                    "size": [w, h],
+                }
+            elif fmt in errors:
+                formats[fmt] = {"status": "unavailable", "reason": errors[fmt]}
+        manifest = {
+            "kind": "reel-batch",
+            "engine": engine,
+            "meet_name": meet_name,
+            "duration_sec": duration_sec,
+            "n_cards": n_cards,
+            "rendered": [f for f in MOTION_FORMATS if f in rendered],
+            "formats": formats,
+        }
+        sidecar = Path(out_dir) / f"{base_name}.batch.json"
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 __all__ = [
     "render_story_card",
     "render_meet_reel",
+    "render_meet_reel_all_formats",
+    "reel_format_out_path",
     "reel_duration_for",
     "motion_format_size",
     "MOTION_FORMATS",
