@@ -155,6 +155,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **R1.13** · Reel generator sprint — Custom reel stat chips — configurable honest stat labels (top splits, season records, relay wins) from card facts. *Build: `MeetReel.tsx` `reelStats`/`StatChips` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
+- ✅ **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
