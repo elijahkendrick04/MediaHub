@@ -8390,9 +8390,7 @@ from mediahub.web import code_highlight as _code_hl  # noqa: E402
 # so the icons stay legible against the dark --surface card background while
 # RESPONSIVE_GUARDRAILS_CSS remains the cascade's final layer (see
 # test_theme_tokens::test_guardrails_appended_last).
-_MH_AUDIENCE_ICON_CSS = (
-    "\n.mh-audience-icon { color: var(--ink-dim); }\n.mh-audience-icon svg { color: var(--ink-dim); }\n"
-)
+_MH_AUDIENCE_ICON_CSS = "\n.mh-audience-icon { color: var(--ink-dim); }\n.mh-audience-icon svg { color: var(--ink-dim); }\n"
 # Motion / effect kit + the U.8 pipeline-diagram CSS + the UI 1.17
 # cadence-heatmap CSS ride AFTER the components layer (so they can elevate
 # existing component primitives) but BEFORE the guardrails, which must stay the
