@@ -1140,16 +1140,24 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   text-align: left;
 }
 
-/* ---- browser chrome bar ---- */
+/* ---- Chrome browser chrome (tab strip + toolbar) ----
+   An authentic two-row Chrome frame — traffic lights and a tab on top, the
+   nav buttons + a secure omnibox parked on the real deployed URL below — so
+   the mockup reads as the live hosted product open in a real browser. Every
+   glyph is drawn in CSS (no icon assets / no extra <svg>). */
 .mh-demo-bar {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: 10px var(--sp-4);
-  border-bottom: 1px solid var(--hairline);
-  background: color-mix(in oklab, var(--surface) 78%, var(--bg-deep));
+  flex-direction: column;
+  background: color-mix(in oklab, var(--surface) 80%, var(--bg-deep));
 }
-.mh-demo-dots { display: inline-flex; gap: 6px; flex: none; }
+/* row 1 — traffic lights + the active tab, sitting on the toolbar below it */
+.mh-demo-tabstrip {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  padding: 9px var(--sp-4) 0;
+}
+.mh-demo-dots { display: inline-flex; gap: 6px; flex: none; padding-bottom: 9px; }
 .mh-demo-dots i {
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--ink-faint);
@@ -1160,32 +1168,143 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 .mh-demo-tab {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  margin: 0 auto;
-  padding: 4px 14px;
+  gap: 8px;
+  max-width: 240px;
+  padding: 8px 12px;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-pill);
-  background: var(--bg-deep);
-  font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  background: var(--surface);
+  font-size: var(--fs-sm);
   color: var(--ink-dim);
 }
 .mh-demo-tab-logo {
-  width: 10px; height: 10px;
-  border-radius: 2px;
+  width: 13px; height: 13px; flex: none;
+  border-radius: 3px;
   background: var(--lane);
   box-shadow: 0 0 8px var(--lane-glow);
 }
-.mh-demo-flag {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: var(--fs-9);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
+.mh-demo-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
+.mh-demo-tab-x { position: relative; width: 13px; height: 13px; flex: none; }
+.mh-demo-tab-x::before, .mh-demo-tab-x::after {
+  content: "";
+  position: absolute;
+  left: 2px; top: 6px;
+  width: 9px; height: 1.4px;
+  background: var(--ink-faint);
+  border-radius: 1px;
+}
+.mh-demo-tab-x::before { transform: rotate(45deg); }
+.mh-demo-tab-x::after  { transform: rotate(-45deg); }
+.mh-demo-tab-add { position: relative; width: 16px; height: 16px; flex: none; margin-bottom: 7px; }
+.mh-demo-tab-add::before, .mh-demo-tab-add::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  background: var(--ink-faint);
+  border-radius: 1px;
+  transform: translate(-50%, -50%);
+}
+.mh-demo-tab-add::before { width: 10px; height: 1.6px; }
+.mh-demo-tab-add::after  { width: 1.6px; height: 10px; }
+/* row 2 — nav buttons, the omnibox, the overflow menu */
+.mh-demo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 7px var(--sp-4);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--surface) 90%, var(--bg-deep));
+}
+.mh-demo-nav { position: relative; width: 22px; height: 22px; flex: none; border-radius: 50%; }
+.mh-demo-nav.back::before, .mh-demo-nav.fwd::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  width: 6px; height: 6px;
+}
+.mh-demo-nav.back::before {
+  left: 9px;
+  border-left: 1.7px solid var(--ink-dim);
+  border-bottom: 1.7px solid var(--ink-dim);
+  transform: rotate(45deg);
+}
+.mh-demo-nav.fwd::before {
+  left: 7px;
+  border-right: 1.7px solid var(--ink-faint);
+  border-top: 1.7px solid var(--ink-faint);
+  transform: rotate(45deg);
+}
+.mh-demo-nav.reload::before {
+  content: "";
+  position: absolute;
+  left: 5px; top: 5px;
+  width: 11px; height: 11px;
+  border: 1.7px solid var(--ink-dim);
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+.mh-demo-nav.reload::after {
+  content: "";
+  position: absolute;
+  left: 4px; top: 3px;
+  border: 3px solid transparent;
+  border-right-color: var(--ink-dim);
+}
+.mh-demo-omni {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--bg-deep);
+}
+.mh-demo-lock { position: relative; width: 9px; height: 11px; flex: none; }
+.mh-demo-lock::before {
+  content: "";
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 9px; height: 6.5px;
+  border-radius: 1.5px;
+  background: var(--ink-dim);
+}
+.mh-demo-lock::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 2px;
+  width: 5px; height: 5px;
+  border: 1.4px solid var(--ink-dim);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+}
+.mh-demo-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.01em;
+  color: var(--ink-dim);
+}
+.mh-demo-menu {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2.5px;
+  flex: none;
+  padding: 4px;
+}
+.mh-demo-menu i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); }
 
 /* ---- screen + cross-fading stage ---- */
 .mh-demo-screen {
@@ -1659,7 +1778,10 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   .mh-demo-thumb { min-height: 140px; padding: var(--sp-3); }
   .mh-demo-thumb .tm { font-size: 34px; }
   .mh-demo-thumb .ev { margin-top: 18px; }
-  .mh-demo-flag { display: none; }
+  /* Drop the tab title on very narrow screens; the favicon + URL still read
+     as a browser tab. */
+  .mh-demo-tab-title { display: none; }
+  .mh-demo-tab { max-width: none; }
 }
 
 /* No motion at all: drop the entrance + glow breathe + scene loop and every
