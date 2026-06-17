@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `b24310675` · Merge pull request #717: R1.23 dynamic logo sizing + scene-aware animated logo reveal
+**Last updated:** 2026-06-17 · `83e3c2c7c` · Merge pull request #715 from elijahkendrick04/claude/wizardly-archimedes-5jv6e0
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -183,7 +183,6 @@ sequence it or merge with care.
 - **G1.12** · Graphic generator sprint — Multi-line hero & split-result fitting — wrap/balance compound surnames and split times (`1:45.23 / 50.12`). *Build: `autofit.py` (file-sibling G1.11) + v2 hero slots.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.15** · Graphic generator sprint — Batch ZIP export of a pack's every format + a `metadata.json` manifest. *Build: new `graphic_renderer/pack_export.py` + a new download route.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.20** · Graphic generator sprint — Brand-palette expansion to N custom club colours with APCA-gated automatic role assignment. *Build: `theming/` roles + palette (sole owner of that region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.22** · Graphic generator sprint — Icon/badge overlay system — deterministic medal / flag / club-record / ribbon SVG placement. *Build: new `sprint_hooks/icon_overlay.py` + `graphic_renderer/icons/` asset set.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1557,12 +1556,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `c1e71c990` | Apply ruff-format to G1.15 files |
 | 2026-06-17 | `47b2451f9` | R1.23: dynamic logo sizing + scene-aware animated logo reveal |
+| 2026-06-17 | `ed770aa11` | Batch ZIP pack export — every format + metadata.json manifest (G1.15) |
 | 2026-06-17 | `3a897d3c8` | Add club custom-font upload pipeline (G1.10) |
 | 2026-06-17 | `872fdd9f7` | R1.5: motion accent-decoration expansion pack |
 | 2026-06-17 | `16b02fead` | G1.30: apply ruff-format to inspection overlay module + tests |
 | 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 | 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
 | 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
-| 2026-06-16 | `2b0691b5b` | Add subtitle/caption burn-in engine (R1.3) |
 <!-- /ROADMAP:ACTIVITY -->
