@@ -139,6 +139,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.15** · Graphic generator sprint — Batch ZIP export of a pack's every format + a `metadata.json` manifest. *Build: new `graphic_renderer/pack_export.py` + a new download route.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **R1.19** · Reel generator sprint — Per-card audio-mix profiles (voice_lead / balanced / music_forward) folded into the audio plan + cache key. *Build: `visual/audio_mux.py` (file-sibling R1.20 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
+- ✅ **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
