@@ -13085,6 +13085,10 @@ def create_app() -> Flask:
             "operator_commercial_lead_update",
             "operator_commercial_ngb",
             "operator_commercial_bind",
+            # Operator-only mobile-parity audit tool — org-independent (it
+            # crawls the app's own pages in a hidden frame), so it bypasses
+            # the org gate exactly like the operator console above.
+            "mobile_parity_tool",
             # /settings now redirects to / so doesn't actually need exempting,
             # but we keep the endpoint name in the allow-list so a directly-
             # hit /settings URL doesn't get caught by the gate before reaching
@@ -13907,6 +13911,62 @@ def create_app() -> Flask:
             active="home",
             chapters=home_chapters,
         )
+
+    # ---- MOBILE PARITY &mdash; operator diagnostic: is the phone as good as PC? ----
+    @app.route("/tools/mobile-parity")
+    def mobile_parity_tool():
+        # Operator-only: the audit crawls every in-app page in a hidden frame,
+        # so it stays behind the developer-operator gate like the other
+        # internal diagnostics.
+        if not _auth.is_dev_operator():
+            abort(404)
+        from mediahub.web.mobile_parity import build_mobile_parity_body
+
+        # Auto-discover the auditable surface from the live URL map: GET pages
+        # with no path parameters, minus machinery (api / webhooks / static /
+        # downloads / auth round-trips / the tool itself). This keeps the audit
+        # honest as routes come and go — nothing to hand-maintain.
+        _SKIP_PREFIX = (
+            "/api", "/webhooks", "/static", "/healthz", "/sw.js", "/robots",
+            "/.well-known", "/tools/mobile-parity", "/logout", "/sign-out",
+            "/auth", "/oauth", "/magic", "/r/", "/embed/",
+        )
+        _SKIP_SUBSTR = (
+            "download", "export", "raw", "render", "motion", "reel", "poster",
+            "preview_image", "thumbnail", "favicon", "manifest", "feed.xml",
+            # Mutation-ish GET endpoints the audit must not trigger by loading.
+            "confirm", "claim", "delete", "checkout", "portal",
+        )
+        seen: set[str] = set()
+        targets: list[dict] = []
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == "static" or rule.arguments:
+                continue
+            methods = rule.methods or set()
+            if "GET" not in methods:
+                continue
+            path = str(rule.rule)
+            if any(path.startswith(p) for p in _SKIP_PREFIX):
+                continue
+            if any(s in rule.endpoint.lower() or s in path.lower() for s in _SKIP_SUBSTR):
+                continue
+            # /health is the deep dependency probe — it returns JSON, not an
+            # HTML page, so it has no place in a UI parity sweep. (The client
+            # audit also skips non-HTML responses defensively.)
+            if path == "/health":
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            label = (
+                rule.endpoint.replace("_page", "").replace("_", " ").strip().title()
+                or path
+            )
+            targets.append({"label": label, "url": path, "group": ""})
+        targets.sort(key=lambda t: (t["url"] != "/", t["label"]))
+
+        body = build_mobile_parity_body(targets)
+        return _layout("Mobile parity audit", body, active="settings")
 
     # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----
     @app.route("/activity")
@@ -22280,6 +22340,9 @@ Relay team broke club record"></textarea>
             " &mdash; Playwright / Node / Remotion availability.</li>"
             f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
             " &mdash; process RSS and active-run counters.</li>"
+            f'<li><a href="{url_for("mobile_parity_tool")}">Mobile parity audit</a>'
+            " &mdash; every page scored for phone usability (overflow, tap "
+            "targets, nav reachability) at real device widths.</li>"
             "</ul></div>" + _render_settings_cache_purge_card()
         )
 
