@@ -40,6 +40,7 @@ default, and every legacy/flag-off caller) renders exactly as before.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import product
@@ -118,6 +119,11 @@ ACCENT_GEOS: tuple[str, ...] = (
     "dot_row",
     "cross_ticks",
     "corner_arc",
+    "hexagons",
+    "deco_corners",
+    "wave_rule",
+    "spiral_flourish",
+    "glitch_divider",
 )
 
 # Intensity tier — scales the alphas / weights / sizes of the levers above.
@@ -182,6 +188,11 @@ _ACCENT_W = {
     "dot_row": 1,
     "cross_ticks": 1,
     "corner_arc": 2,
+    "hexagons": 2,
+    "deco_corners": 2,
+    "wave_rule": 1,
+    "spiral_flourish": 2,
+    "glitch_divider": 1,
 }
 
 # Coherence caps: standard density tolerates a little more stacking than bold
@@ -242,6 +253,11 @@ _ACCENT_LABEL = {
     "dot_row": "dot row",
     "cross_ticks": "register marks",
     "corner_arc": "corner arcs",
+    "hexagons": "hexagons",
+    "deco_corners": "deco corners",
+    "wave_rule": "wave rule",
+    "spiral_flourish": "spiral",
+    "glitch_divider": "glitch divider",
 }
 
 
@@ -1097,7 +1113,134 @@ def _accent_geometry_html(style: str, width: int, height: int, bold: bool) -> st
             f"border-bottom:{weight}px solid {acc};border-right:{weight}px solid {acc};"
             f'border-bottom-right-radius:100%;{z}"></div>'
         )
+    # --- G1.5 accent-geometry expansion pack -------------------------------
+    # The shapes below are genuinely curved/ornamental (a hexagon, a tiered
+    # art-deco bracket, a sine rule, a spiral, a glitched divider), so they are
+    # drawn as stroked inline SVG rather than the div-border tricks above. The
+    # stroke paints the resolved accent via ``style="stroke:var(--mh-accent)"``
+    # (CSS custom properties resolve in inline-SVG style; the role token is
+    # defined on ``:root`` by the renderer), ``vector-effect:non-scaling-stroke``
+    # keeps the stroke a true ``weight`` px regardless of the viewBox scale, and
+    # every ``<svg>`` carries ``position:absolute`` + ``pointer-events:none`` so
+    # an accent-only pack stays clipped, inert and in the safe margins.
+    if style == "hexagons":
+        # A flat-top hexagon outline in two opposite corners — the corner-pair
+        # motif shared with corner_ticks / corner_arc, in a fresh silhouette.
+        size = int(min(width, height) * 0.16 * mult)
+        off = int(min(width, height) * 0.05)
+        shape = (
+            '<polygon points="92,50 71,86 29,86 8,50 29,14 71,14" fill="none" '
+            'vector-effect="non-scaling-stroke" '
+            f'style="stroke:{acc};stroke-width:{weight}px;stroke-linejoin:round;"/>'
+        )
+        return (
+            f'<svg viewBox="0 0 100 100" style="position:absolute;left:{off}px;top:{off}px;'
+            f'width:{size}px;height:{size}px;{z}">{shape}</svg>'
+            f'<svg viewBox="0 0 100 100" style="position:absolute;right:{off}px;bottom:{off}px;'
+            f'width:{size}px;height:{size}px;{z}">{shape}</svg>'
+        )
+    if style == "deco_corners":
+        # Three nested right-angle brackets — an art-deco corner ornament —
+        # mirrored into the opposite corner via a 180° rotation.
+        size = int(min(width, height) * 0.15 * mult)
+        off = int(min(width, height) * 0.045)
+        d = "M 64 8 L 8 8 L 8 64 M 50 21 L 21 21 L 21 50 M 38 31 L 31 31 L 31 38"
+        shape = (
+            f'<path d="{d}" fill="none" vector-effect="non-scaling-stroke" '
+            f'style="stroke:{acc};stroke-width:{weight}px;stroke-linecap:square;"/>'
+        )
+        return (
+            f'<svg viewBox="0 0 100 100" style="position:absolute;left:{off}px;top:{off}px;'
+            f'width:{size}px;height:{size}px;{z}">{shape}</svg>'
+            f'<svg viewBox="0 0 100 100" style="position:absolute;right:{off}px;bottom:{off}px;'
+            f'width:{size}px;height:{size}px;transform:rotate(180deg);{z}">{shape}</svg>'
+        )
+    if style == "wave_rule":
+        # A smooth sine rule (the baseline_rule, made wavy) low in the card.
+        inset = int(width * 0.08)
+        inner = max(1, width - 2 * inset)
+        band = max(12, int(height * 0.022 * mult))
+        bottom = int(height * 0.06)
+        return (
+            f'<svg viewBox="0 0 {inner} {band}" preserveAspectRatio="none" '
+            f'style="position:absolute;left:{inset}px;width:{inner}px;bottom:{bottom}px;'
+            f'height:{band}px;{z}">'
+            f'<path d="{_wave_path(inner, band)}" fill="none" '
+            f'style="stroke:{acc};stroke-width:{weight}px;stroke-linecap:round;"/></svg>'
+        )
+    if style == "spiral_flourish":
+        # An Archimedean spiral flourish in two opposite corners.
+        size = int(min(width, height) * 0.15 * mult)
+        off = int(min(width, height) * 0.05)
+        shape = (
+            f'<polyline points="{_spiral_points()}" fill="none" '
+            'vector-effect="non-scaling-stroke" '
+            f'style="stroke:{acc};stroke-width:{weight}px;stroke-linecap:round;'
+            'stroke-linejoin:round;"/>'
+        )
+        return (
+            f'<svg viewBox="0 0 100 100" style="position:absolute;left:{off}px;top:{off}px;'
+            f'width:{size}px;height:{size}px;{z}">{shape}</svg>'
+            f'<svg viewBox="0 0 100 100" style="position:absolute;right:{off}px;bottom:{off}px;'
+            f'width:{size}px;height:{size}px;transform:rotate(180deg);{z}">{shape}</svg>'
+        )
+    if style == "glitch_divider":
+        # A baseline rule torn into horizontally-displaced, fading slivers —
+        # a mono-accent "glitch" (no second colour invented).
+        bh = max(4, int(height * 0.006 * mult))
+        inset = int(width * 0.08)
+        inner = max(1, width - 2 * inset)
+        bottom = int(height * 0.06)
+        gap = max(2, bh)
+        return (
+            f'<div style="position:absolute;left:{inset}px;width:{inner}px;bottom:{bottom}px;'
+            f'height:{bh}px;background:{acc};{z}"></div>'
+            f'<div style="position:absolute;left:{inset + int(inner * 0.12)}px;'
+            f"width:{int(inner * 0.55)}px;bottom:{bottom + bh + gap}px;height:{bh}px;"
+            f'background:{acc};opacity:0.7;{z}"></div>'
+            f'<div style="position:absolute;left:{inset}px;width:{int(inner * 0.34)}px;'
+            f'bottom:{bottom + 2 * (bh + gap)}px;height:{bh}px;background:{acc};opacity:0.45;{z}"></div>'
+        )
     return ""
+
+
+def _wave_path(inner: int, band: int, *, humps: int = 7) -> str:
+    """A smooth horizontal sine as alternating cubic-bézier humps (px units).
+
+    Mirrors ``packAccentGeometry`` in ``StoryCard.tsx`` so the still and the
+    motion render draw the same wave; the SVG viewBox is the px region itself
+    (1:1), so the stroke needs no scale compensation.
+    """
+    amp = band * 0.30
+    mid = band / 2
+    half = inner / humps  # one half-wavelength
+    parts = [f"M 0 {mid:.1f}"]
+    x = 0.0
+    up = True
+    while x < inner - 0.5:
+        nx = min(x + half, float(inner))
+        cy = mid - amp if up else mid + amp
+        c1 = x + half * 0.36
+        c2 = x + half * 0.64
+        parts.append(f"C {c1:.1f} {cy:.1f} {c2:.1f} {cy:.1f} {nx:.1f} {mid:.1f}")
+        x = nx
+        up = not up
+    return " ".join(parts)
+
+
+def _spiral_points(*, steps: int = 72, turns: float = 2.4, max_r: float = 44.0) -> str:
+    """An Archimedean spiral sampled as a polyline in a 0–100 viewBox.
+
+    Centred at (50, 50); radius grows linearly with the turn fraction. Mirrors
+    the same loop in ``StoryCard.tsx`` so still and motion match.
+    """
+    pts: list[str] = []
+    for i in range(steps + 1):
+        t = i / steps
+        ang = t * turns * 2 * math.pi
+        r = max_r * t
+        pts.append(f"{50 + r * math.cos(ang):.1f},{50 + r * math.sin(ang):.1f}")
+    return " ".join(pts)
 
 
 __all__ = [
