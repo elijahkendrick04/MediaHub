@@ -204,14 +204,17 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
-        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static",\n'
+        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade",\n'
         '  "rationale": <one sentence: why this composition fits THIS result>\n'
         "}\n\n"
         "colour_roles values must be one of: " + ", ".join(token_roles) + ".\n"
         "Choose the archetype that fits the moment (a medal → spotlight; a standout "
         "time with no photo → big_number or minimal poster; a great photo → "
         "full-bleed or diagonal). Lead with the most newsworthy hero_stat. Pick "
-        "motion_intent count_up when the time or number itself is the story."
+        "motion_intent count_up when the time or number itself is the story. Reach "
+        "for the livelier languages only when the moment earns it: bounce_in or "
+        "swirl for a celebratory win, flip_reveal or reveal_from_sides for a single "
+        "standout stat, cascade when several facts share the card."
     )
 
 

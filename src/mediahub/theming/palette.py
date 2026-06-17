@@ -42,7 +42,13 @@ from materialyoucolor.scheme.scheme_tonal_spot import SchemeTonalSpot
 from materialyoucolor.palettes.tonal_palette import TonalPalette
 
 
-__all__ = ["TonalRamp", "DerivedPalette", "derive_palette", "TONE_STOPS"]
+__all__ = [
+    "TonalRamp",
+    "DerivedPalette",
+    "derive_palette",
+    "derive_palette_multi",
+    "TONE_STOPS",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -211,3 +217,74 @@ def derive_palette(seed_hex: str) -> DerivedPalette:
         info=info,
         decision_trace=trace,
     )
+
+
+# ---------------------------------------------------------------------------
+# G1.20 — Brand-palette expansion to N custom club colours
+# ---------------------------------------------------------------------------
+# The single-seed engine derives `secondary` (muted, same hue) and `tertiary`
+# (hue + 60°) from the one seed. When a club supplies their *own* secondary /
+# accent colours, `derive_palette_multi` keeps the MD3-derived primary, neutral,
+# neutral_variant and the four locked status ramps, but replaces the secondary
+# and tertiary ramps with tonal ramps built from the club's real colours. The
+# APCA-gated mapping of colour → slot lives in `roles.assign_brand_roles`.
+#
+# Back-compatibility is exact: with one (or zero) brandable colour the function
+# returns `derive_palette(primary)` unchanged — same ramps, same trace — so a
+# single-seed kit is byte-identical to the pre-G1.20 engine.
+
+
+def _custom_ramp(name: str, seed_hex: str) -> TonalRamp:
+    """Materialise a 13-tone ramp from a club colour's own HCT.
+
+    Uses the colour's actual hue *and* chroma (gamut-mapped per tone by
+    materialyoucolor), so the club's vivid gold stays vivid — unlike the
+    MD3 scheme's deliberately-muted derived secondary. Mirrors the
+    ``_status_ramp`` construction so the tone geometry is identical.
+    """
+    argb = _hex_to_argb(seed_hex)
+    hct = Hct.from_int(argb)
+    palette = TonalPalette.from_hue_and_chroma(hct.hue, hct.chroma)
+    return _materialise(palette, name)
+
+
+def derive_palette_multi(seeds: list[str]) -> DerivedPalette:
+    """Build a DerivedPalette from N custom club colours.
+
+    The first brandable colour (APCA-gated) anchors the palette exactly as a
+    single seed would — primary / neutral / neutral_variant / status ramps are
+    all derived from it via :func:`derive_palette`. Any additional distinct
+    brandable colours replace the ``secondary`` / ``tertiary`` ramps with the
+    club's real colours.
+
+    With ≤ 1 brandable colour this returns :func:`derive_palette` output
+    unchanged (byte-identical single-seed behaviour). Never raises.
+    """
+    # Local import: `roles` imports from `palette`, so importing it at module
+    # load time would create a cycle. Deferring to call time keeps `palette` a
+    # leaf module (the established BrandKit pattern).
+    from .roles import assign_brand_roles
+
+    assignment = assign_brand_roles(seeds)
+    # ``primary`` is only None when no parseable hex was supplied at all; fall
+    # back to the generic-default navy (matches seed_extract's fallback) so
+    # this never feeds garbage into derive_palette.
+    primary_hex = assignment.primary or "#0E2A47"
+
+    base = derive_palette(primary_hex)
+
+    # ≤ 1 brandable colour → nothing to expand; identical to single-seed.
+    if not assignment.secondary and not assignment.tertiary:
+        return base
+
+    if assignment.secondary:
+        base.secondary = _custom_ramp("secondary", assignment.secondary)
+    if assignment.tertiary:
+        base.tertiary = _custom_ramp("tertiary", assignment.tertiary)
+
+    base.decision_trace.append(
+        "multi-colour expansion: "
+        + ", ".join(f"{role}={hexv}" for role, hexv in assignment.slots().items())
+    )
+    base.decision_trace.extend(assignment.trace)
+    return base

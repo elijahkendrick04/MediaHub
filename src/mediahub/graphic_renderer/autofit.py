@@ -28,12 +28,19 @@ Measurement strategy (deterministic by construction)
   on very old Pillow). Still deterministic for a given file — used for
   pixel-accurate fitting where the font ships with the deployment.
 
-The table is an **approximation, by design**: no kerning, ligatures, optical
-sizing, or complex-script shaping. For Latin display/headline text in
-fixed-width boxes it is accurate to within a few percent — more than enough to
-choose a font size that will not overflow. When in doubt it errs slightly *wide*
-(via the unlisted-glyph default), so it prefers a smaller, safe size over an
-overflowing one.
+The table is an **approximation, by design**: it models advance widths plus
+**kerning-pair corrections and common f-ligatures** (G1.11) but not optical
+sizing or complex-script shaping. Those two corrections only ever make a
+measured line *narrower* — real type sets pairs like ``VA``/``To``/``W.`` and
+ligatures like ``fi``/``ffl`` tighter than the bare advance sum — and they are
+kept deliberately *conservative* (smaller in magnitude than a real face's
+kerning), so the estimate stays a safe upper bound on the rendered width. A
+global cap (``_MAX_TIGHTEN_FRACTION``) bounds the total tightening so no
+pathological all-kerning string can collapse the estimate below reality. For
+Latin display/headline text in fixed-width boxes the result is accurate to
+within a couple of percent — and still errs slightly *wide* (via the
+unlisted-glyph default and the conservative corrections), so it prefers a
+smaller, safe size over an overflowing one.
 """
 
 from __future__ import annotations
@@ -46,6 +53,10 @@ __all__ = [
     "wrap_text",
     "measure_line_px",
     "em_width",
+    "kern_ligature_em",
+    "balance_lines",
+    "fit_balanced",
+    "fit_balanced_px",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -315,19 +326,228 @@ def _char_em(ch: str, profile: str, scale: float) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# Kerning + ligature corrections (G1.11) — "truer measured fits"
+# --------------------------------------------------------------------------- #
+# A bare advance-sum over-states the width of real type: the face's kerning pulls
+# diagonal/round/punctuation pairs (``VA``, ``To``, ``W.``) closer, and the
+# default ``liga`` feature folds ``fi``/``fl``/``ff`` into a single narrower
+# glyph. Both corrections only ever *narrow* the estimate, so they are applied
+# in em units (scaled per family) and kept deliberately **conservative** — every
+# value is smaller in magnitude than a real face's, so the corrected width stays
+# a safe upper bound on the rendered advance (the never-overflow contract). The
+# Helvetica/Arial metrics underpinning ``_AFM_1000`` are the source these are
+# calibrated against; values are 1/1000 em, all negative (a tightening).
+
+# Kerning pairs (left+right glyph -> 1/1000 em adjustment, always negative).
+# Curated from the high-impact Helvetica/Arial pairs that actually occur in
+# names, event titles and result lines — caps↔caps display pairs (the dominant
+# case for MediaHub's upper-cased hero surnames), caps↔lowercase, and glyph↔
+# punctuation (the largest, safest kerns). Pairs not listed contribute nothing.
+_KERN_1000: dict[str, int] = {
+    # A before tall / round / diagonal caps and its lowercase reflexes.
+    "AC": -20,
+    "AG": -20,
+    "AO": -20,
+    "AQ": -20,
+    "AU": -20,
+    "AT": -55,
+    "AV": -65,
+    "AW": -45,
+    "AY": -65,
+    "Av": -25,
+    "Aw": -20,
+    "Ay": -25,
+    # F before A, common lowercase, and the very tight punctuation kerns.
+    "FA": -65,
+    "Fa": -20,
+    "Fe": -10,
+    "Fi": -10,
+    "Fo": -20,
+    "Fr": -10,
+    "Fu": -10,
+    "F.": -90,
+    "F,": -90,
+    # L before tall caps / Y and a leading apostrophe.
+    "LT": -55,
+    "LV": -55,
+    "LW": -45,
+    "LY": -55,
+    "L'": -90,
+    # P before A and punctuation.
+    "PA": -65,
+    "Pa": -10,
+    "Pe": -10,
+    "Po": -10,
+    "P.": -100,
+    "P,": -100,
+    # R before tall caps.
+    "RT": -20,
+    "RV": -25,
+    "RW": -20,
+    "RY": -30,
+    # T before caps, lowercase and punctuation (Taylor / Turner / Tomlin …).
+    "TA": -65,
+    "Ta": -65,
+    "Tc": -50,
+    "Te": -50,
+    "Ti": -15,
+    "To": -55,
+    "Tr": -45,
+    "Ts": -50,
+    "Tu": -50,
+    "Tw": -45,
+    "Ty": -50,
+    "T.": -65,
+    "T,": -65,
+    "T-": -90,
+    "T:": -40,
+    "T;": -40,
+    # V before caps, lowercase and punctuation (Vance / Vega / Vo …).
+    "VA": -65,
+    "Va": -55,
+    "Ve": -45,
+    "Vi": -15,
+    "Vo": -45,
+    "Vr": -35,
+    "Vu": -35,
+    "Vy": -35,
+    "V.": -90,
+    "V,": -90,
+    "V-": -65,
+    "V:": -40,
+    # W before caps, lowercase and punctuation (Walsh / Wong / Webb …).
+    "WA": -45,
+    "Wa": -35,
+    "We": -25,
+    "Wi": -10,
+    "Wo": -35,
+    "Wr": -25,
+    "Wu": -25,
+    "Wy": -20,
+    "W.": -65,
+    "W,": -65,
+    "W-": -40,
+    # Y before caps, lowercase and punctuation (Young / Yates / Yeo …).
+    "YA": -65,
+    "Ya": -65,
+    "Ye": -55,
+    "Yi": -15,
+    "Yo": -65,
+    "Yp": -55,
+    "Yu": -55,
+    "Yv": -55,
+    "Y.": -90,
+    "Y,": -90,
+    "Y-": -85,
+    "Y:": -45,
+    # Lowercase tails before a full stop / comma (caption sign-offs).
+    "r.": -25,
+    "r,": -25,
+    "v.": -25,
+    "v,": -25,
+    "w.": -25,
+    "w,": -25,
+    "y.": -25,
+    "y,": -25,
+}
+_KERN_EM: dict[str, float] = {pair: v / 1000.0 for pair, v in _KERN_1000.items()}
+
+# Common Latin ligatures the browser's default ``liga`` feature folds into one
+# glyph, narrower than its parts. Width *saved* in 1/1000 em (negative). Matched
+# longest-first (``ffi``/``ffl`` before ``ff``/``fi``/``fl``); lowercase only,
+# since a capital ``F`` does not ligate. Savings are conservative — a real face
+# usually folds at least this much, so the estimate stays a safe upper bound.
+_LIGATURE_1000: dict[str, int] = {
+    "ffi": -45,
+    "ffl": -45,
+    "ff": -25,
+    "fi": -18,
+    "fl": -18,
+}
+_LIGATURE_EM: dict[str, float] = {seq: v / 1000.0 for seq, v in _LIGATURE_1000.items()}
+
+# Safety backstop: the net kern+ligature tightening can never remove more than
+# this fraction of the raw advance width. Real Latin text tightens ~1–4% (a
+# dense all-caps ``AVAW…`` run tops out near this), so on realistic input the
+# cap never binds — it exists only so a synthetic worst case cannot collapse the
+# estimate below the real rendered width and break the never-overflow contract.
+_MAX_TIGHTEN_FRACTION = 0.10
+
+
+def _kern_ligature_em(text: str, profile: str, scale: float, advance_em: float) -> float:
+    """Net width correction (em, ``<= 0``) from kerning pairs + common ligatures.
+
+    Returns ``0.0`` for monospace (fixed advance — no kerning or ligatures) and
+    for text shorter than two characters. Ligatures are consumed longest-first so
+    ``ffi`` is not double-counted as ``ff`` + ``fi``; kerning is summed over every
+    adjacent character pair (the ligature components are absent from the kern
+    table, so the two passes never overlap). The result is scaled by the family
+    table scale — condensed/serif faces tighten proportionally to their advances
+    — then floored at ``-_MAX_TIGHTEN_FRACTION`` of the raw advance width.
+    """
+    n = len(text)
+    if profile == "mono" or n < 2:
+        return 0.0
+    # Ligatures: longest-match, non-overlapping.
+    liga = 0.0
+    i = 0
+    while i < n - 1:
+        seg3 = text[i : i + 3]
+        if seg3 in _LIGATURE_EM:
+            liga += _LIGATURE_EM[seg3]
+            i += 3
+            continue
+        seg2 = text[i : i + 2]
+        if seg2 in _LIGATURE_EM:
+            liga += _LIGATURE_EM[seg2]
+            i += 2
+            continue
+        i += 1
+    # Kerning: every adjacent pair in the original string.
+    kern = 0.0
+    for j in range(n - 1):
+        kern += _KERN_EM.get(text[j : j + 2], 0.0)
+    correction = (liga + kern) * scale
+    floor = -advance_em * _MAX_TIGHTEN_FRACTION
+    return correction if correction > floor else floor
+
+
+# --------------------------------------------------------------------------- #
 # Public measurement primitives
 # --------------------------------------------------------------------------- #
 def em_width(text: str, *, font_family: str = "Inter", weight: int | str = 400) -> float:
     """Width of ``text`` in **em units** (multiply by the px size to get px).
 
-    Deterministic and font-file-free: this is the char-width-table estimate.
+    Deterministic and font-file-free: the char-width-table advance sum, made
+    *truer* by conservative kerning-pair and common-ligature corrections (G1.11)
+    that only ever narrow the line. The corrections satisfy the identity
+    ``em_width(t) == raw_advance_em(t) + kern_ligature_em(t)`` and never push the
+    estimate below the real rendered width.
     """
     if not text:
         return 0.0
     profile = _classify_family(font_family)
     scale = _table_scale(font_family)
     factor = _weight_factor(weight)
-    return sum(_char_em(ch, profile, scale) for ch in text) * factor
+    advance = sum(_char_em(ch, profile, scale) for ch in text)
+    correction = _kern_ligature_em(text, profile, scale, advance)
+    return (advance + correction) * factor
+
+
+def kern_ligature_em(text: str, *, font_family: str = "Inter", weight: int | str = 400) -> float:
+    """The em width that kerning + ligature folding removes from ``text`` (``<= 0``).
+
+    Explainability handle for the G1.11 correction: ``em_width(t)`` equals the
+    bare advance sum **plus** this value (both already including the weight
+    factor). ``0.0`` for monospace, empty or single-character input.
+    """
+    if not text:
+        return 0.0
+    profile = _classify_family(font_family)
+    scale = _table_scale(font_family)
+    factor = _weight_factor(weight)
+    advance = sum(_char_em(ch, profile, scale) for ch in text)
+    return _kern_ligature_em(text, profile, scale, advance) * factor
 
 
 @lru_cache(maxsize=256)
@@ -502,3 +722,184 @@ def fit_text(
     )
     lines = wrap_text(text, box_w, size, font_family=font_family, weight=weight)
     return size, lines
+
+
+# --------------------------------------------------------------------------- #
+# Balanced multi-line fitting (G1.12)
+# --------------------------------------------------------------------------- #
+# The fitters above shrink a long *atomic* headline — a double-barrelled surname
+# ("WOLAJIMI-ABUBAKARI") or a split-time result ("1:45.23 / 50.12") — until the
+# whole run fits a single forced line, which can drive a hero name/numeral down
+# to a thin strip. Balanced fitting instead BREAKS such a value at its natural
+# seams (spaces, hyphens, the split slash) into a small number of lines whose
+# widths are as even as possible, then sizes to the widest of those lines.
+#
+# Fewer-but-wider vs more-but-shorter lines is a real trade-off — more lines
+# relax the width bound but tighten the height bound — so the fitter evaluates
+# each line count and keeps whichever yields the LARGEST size, ties preferring
+# fewer lines. One line is always a candidate, so the result is never smaller
+# than (and for an unbreakable token, identical to) the single-line fit. Line
+# widths reuse :func:`em_width`, so the G1.11 kerning/ligature correction flows
+# through for free. Like the rest of this module it is pure, deterministic
+# layout maths — no judgement.
+
+import re as _re
+
+# A zero-width break *after* a hyphen: "SMITH-JOHNSON" -> "SMITH-", "JOHNSON".
+# The hyphen stays on the left piece, the way real hyphenation signals that the
+# word continues on the next line.
+_HYPHEN_BREAK_RE = _re.compile(r"(?<=-)(?=.)")
+# A slash optionally padded by spaces — the separator between split / relay
+# times ("1:45.23 / 50.12", "49.81/50.12/51.04").
+_SLASH_SEP_RE = _re.compile(r"\s*/\s*")
+
+
+def _hero_units(text: str, mode: str) -> list[tuple[str, str]]:
+    """Tokenise ``text`` into ordered ``(glyphs, glue)`` break units.
+
+    ``glue`` is what renders *before* a unit when it shares a line with its
+    predecessor, and is dropped when a line break falls before it — so a space
+    or slash separator vanishes cleanly at a wrap while a hyphen (part of the
+    glyphs, never the glue) stays visible at the line end. The first unit always
+    carries glue ``""``: it can only begin a line.
+
+    * ``mode="name"`` breaks at whitespace (glue ``" "``) and after hyphens
+      (glue ``""``) — compound and double-barrelled surnames.
+    * ``mode="split"`` breaks at the time-split slash (glue ``" / "``).
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if mode == "split":
+        parts = [p for p in _SLASH_SEP_RE.split(text) if p]
+        return [(p, "" if i == 0 else " / ") for i, p in enumerate(parts)]
+    units: list[tuple[str, str]] = []
+    for word in text.split():
+        pieces = [p for p in _HYPHEN_BREAK_RE.split(word) if p]
+        for j, piece in enumerate(pieces):
+            units.append((piece, " " if (units and j == 0) else ""))
+    return units
+
+
+def _join_units(units: list[tuple[str, str]]) -> str:
+    """Reconstruct the line a slice of units renders as (its first glue drops)."""
+    if not units:
+        return ""
+    out = units[0][0]
+    for glyphs, glue in units[1:]:
+        out += glue + glyphs
+    return out
+
+
+def _balanced_spans(units, n_lines, measure) -> list[tuple[int, int]]:
+    """``[(start, end), …]`` splitting ``units`` into ``n_lines`` contiguous
+    groups whose widest line (per ``measure(a, b)``) is minimal — the balanced
+    wrap. Exhaustive over the ``C(len-1, n_lines-1)`` cut placements; ``units``
+    is a handful of name parts / splits, so this is a few dozen evaluations.
+    """
+    import itertools
+
+    n = len(units)
+    n_lines = max(1, min(n_lines, n))
+    if n_lines == 1:
+        return [(0, n)]
+    best_bounds: tuple[int, ...] | None = None
+    best_width: float | None = None
+    for cuts in itertools.combinations(range(1, n), n_lines - 1):
+        bounds = (0, *cuts, n)
+        width = max(measure(bounds[i], bounds[i + 1]) for i in range(n_lines))
+        if best_width is None or width < best_width:
+            best_width, best_bounds = width, bounds
+    assert best_bounds is not None
+    return [(best_bounds[i], best_bounds[i + 1]) for i in range(n_lines)]
+
+
+def balance_lines(
+    text: str,
+    *,
+    n_lines: int = 2,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    mode: str = "name",
+) -> list[str]:
+    """Split ``text`` into up to ``n_lines`` width-balanced lines.
+
+    Breaks only at the seams ``mode`` allows (see :func:`_hero_units`) and
+    returns the grouping whose lines are as even as possible. Yields at most
+    ``min(n_lines, break-units)`` lines (so an unbreakable token stays one
+    line), and ``[]`` for empty / whitespace-only input. The lines always
+    re-join to the original text.
+    """
+    units = _hero_units(text, mode)
+    if not units:
+        return []
+
+    def measure(a: int, b: int) -> float:
+        return em_width(_join_units(units[a:b]), font_family=font_family, weight=weight)
+
+    return [_join_units(units[a:b]) for a, b in _balanced_spans(units, n_lines, measure)]
+
+
+def fit_balanced(
+    text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    max_lines: int = 2,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    min_px: int = 8,
+    max_px: int = 240,
+    line_height: float = 1.0,
+    mode: str = "name",
+) -> tuple[int, list[str]]:
+    """Largest **integer** px — and the line layout — at which ``text`` fits in
+    ``box_w x box_h`` when balanced across ``1..max_lines`` lines.
+
+    For each candidate line count the value is balanced (:func:`balance_lines`)
+    and sized to the tighter of its width bound (widest line ≤ ``box_w``) and
+    height bound (``n * size * line_height`` ≤ ``box_h``); the count giving the
+    biggest size wins, ties preferring fewer lines. Because one line is always
+    a candidate, the size is never smaller than the single-line
+    :func:`fit_font_px` result, and for an unbreakable token it is identical.
+
+    Returns ``(size, lines)`` — the size to set and the balanced lines to emit
+    (joined with ``<br>`` by the caller). ``line_height`` is the CSS multiplier,
+    as in :func:`fit_font_px`. Geometry/bounds errors raise like
+    :func:`fit_font_px`.
+    """
+    if box_w <= 0 or box_h <= 0:
+        raise ValueError("box_w and box_h must be positive")
+    if min_px < 1:
+        raise ValueError("min_px must be >= 1")
+    if min_px > max_px:
+        raise ValueError("min_px must be <= max_px")
+
+    units = _hero_units(text, mode)
+    if not units:
+        return max_px, []
+
+    def measure(a: int, b: int) -> float:
+        return em_width(_join_units(units[a:b]), font_family=font_family, weight=weight)
+
+    best_size, best_lines = -1, [_join_units(units)]
+    for k in range(1, min(max_lines, len(units)) + 1):
+        spans = _balanced_spans(units, k, measure)
+        widest = max((measure(a, b) for a, b in spans), default=0.0)
+        if widest <= 0:
+            continue
+        # Clamp to [min_px, max_px] BEFORE comparing line counts, so once two
+        # layouts both reach the cap the earlier (fewer-line) one wins — a name
+        # that already fits one line at the cap is never split needlessly.
+        size = max(min_px, min(max_px, int(min(box_w / widest, box_h / (k * line_height)))))
+        if size > best_size:
+            best_size = size
+            best_lines = [_join_units(units[a:b]) for a, b in spans]
+    if best_size < 0:  # no measurable unit (defensive; non-empty units always size)
+        return max_px, [_join_units(units)]
+    return best_size, best_lines
+
+
+def fit_balanced_px(text: str, box_w: float, box_h: float, **kwargs) -> int:
+    """The fitted size from :func:`fit_balanced`, dropping the line layout."""
+    return fit_balanced(text, box_w, box_h, **kwargs)[0]

@@ -1,4 +1,7 @@
-"""G1.26 — the live archetype × style-pack preview gallery ("Template studio").
+"""G1.26 — the live archetype × style-pack preview gallery ("Template previews").
+
+Distinct from G1.27's ``/studio`` interactive design *editor* (``web.design_editor``):
+this is the browse-only catalog of the whole template space.
 
 Where UI 1.10's ``/templates`` gallery (``web.template_gallery``) shows *schematic*
 wireframes of the structural archetypes, this surface shows **live, rendered
@@ -304,7 +307,7 @@ def _hero(n_arch: int, n_packs: int, n_templates: int) -> str:
     return (
         '<section class="mh-hero" data-lane="04" '
         'style="padding-top:var(--sp-9);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
-        '<span class="mh-hero-eyebrow">Template studio · live preview</span>'
+        '<span class="mh-hero-eyebrow">Template previews · live render</span>'
         f'<h1>See every <em class="editorial">template</em><br>before you make one.</h1>'
         '<p class="lede">These are <strong>live renders</strong>, not wireframes — '
         f"every one of the {n_arch} structural archetypes crossed with every one of "
@@ -325,21 +328,21 @@ def _featured(state: StudioState, *, thumb_url, make_url: str) -> str:
     pack_why = pack.why() if pack else ""
     img = thumb_url(state.archetype, state.pack, hero=True)
     return (
-        '<section class="mh-studio-featured" aria-label="Pinned template preview">'
-        '<div class="mh-studio-featured-frame">'
-        f'<img class="mh-studio-featured-img" src="{_e(img)}" '
+        '<section class="mh-tpv-featured" aria-label="Pinned template preview">'
+        '<div class="mh-tpv-featured-frame">'
+        f'<img class="mh-tpv-featured-img" src="{_e(img)}" '
         f'width="560" height="700" loading="eager" decoding="async" '
         f'alt="Live preview of the {_e(arch_title)} archetype with the {_e(pack_name)} style pack"/>'
         "</div>"
-        '<div class="mh-studio-featured-meta">'
-        '<span class="mh-studio-eyebrow">Pinned template</span>'
-        f'<h2 class="mh-studio-featured-title">{_e(arch_title)}</h2>'
-        f'<p class="mh-studio-featured-sub"><span class="mh-arch-tag" data-cat="{_e(cat)}">'
+        '<div class="mh-tpv-featured-meta">'
+        '<span class="mh-tpv-eyebrow">Pinned template</span>'
+        f'<h2 class="mh-tpv-featured-title">{_e(arch_title)}</h2>'
+        f'<p class="mh-tpv-featured-sub"><span class="mh-arch-tag" data-cat="{_e(cat)}">'
         f'{_e(_ui110.category_label(cat))}</span> <code>{_e(state.archetype)}</code></p>'
-        f'<p class="mh-studio-pack-name">{_e(pack_name)}</p>'
-        f'<p class="mh-studio-pack-why">{_e(pack_why)}</p>'
-        f'<code class="mh-studio-pack-id">{_e(state.pack)}</code>'
-        '<div class="mh-studio-featured-cta">'
+        f'<p class="mh-tpv-pack-name">{_e(pack_name)}</p>'
+        f'<p class="mh-tpv-pack-why">{_e(pack_why)}</p>'
+        f'<code class="mh-tpv-pack-id">{_e(state.pack)}</code>'
+        '<div class="mh-tpv-featured-cta">'
         f'<a class="btn" href="{_e(make_url)}">Create a pack &rarr;</a>'
         '<span class="dim">The engine auto-selects per card — you don\'t pick by hand.</span>'
         "</div>"
@@ -380,45 +383,45 @@ def _archetype_rail(state: StudioState, *, studio_url: str, thumb_url, entries: 
         name = e["name"]
         hidden = state.category != "all" and e["category"] != state.category
         pinned = name == state.archetype
-        classes = "mh-studio-tile"
+        classes = "mh-tpv-tile"
         if pinned:
             classes += " is-pinned"
         if hidden:
             classes += " is-hidden"
         href = studio_url + _query(state, archetype=name)
         img = thumb_url(name, state.pack)
-        badge = '<span class="mh-studio-pin-badge">Pinned</span>' if pinned else ""
+        badge = '<span class="mh-tpv-pin-badge">Pinned</span>' if pinned else ""
         aria = ' aria-current="true"' if pinned else ""
         tiles.append(
             f'<a class="{classes}" href="{_e(href)}" data-category="{_e(e["category"])}"{aria}>'
-            '<span class="mh-studio-thumb">'
-            f'<img class="mh-studio-img" src="{_e(img)}" width="384" height="480" '
+            '<span class="mh-tpv-thumb">'
+            f'<img class="mh-tpv-img" src="{_e(img)}" width="384" height="480" '
             f'loading="lazy" decoding="async" '
             f'alt="Live preview of the {_e(e["title"])} archetype"/>'
             f"{badge}"
             "</span>"
-            '<span class="mh-studio-tile-body">'
-            f'<span class="mh-studio-tile-title">{_e(e["title"])}</span>'
+            '<span class="mh-tpv-tile-body">'
+            f'<span class="mh-tpv-tile-title">{_e(e["title"])}</span>'
             f'<span class="mh-arch-tag" data-cat="{_e(e["category"])}">'
             f'{_e(e["category_label"])}</span>'
             "</span>"
-            f'<code class="mh-studio-tile-slug">{_e(name)}</code>'
+            f'<code class="mh-tpv-tile-slug">{_e(name)}</code>'
             "</a>"
         )
     empty = (
-        '<p class="mh-arch-empty" id="mh-studio-arch-empty" hidden>'
+        '<p class="mh-arch-empty" id="mh-tpv-arch-empty" hidden>'
         "No archetypes in this category.</p>"
     )
     return (
-        '<section class="mh-studio-section" id="mh-studio-archetypes" '
+        '<section class="mh-tpv-section" id="mh-tpv-archetypes" '
         f'data-active="{_e(state.category)}">'
-        '<div class="mh-studio-section-head">'
-        '<h2 class="mh-studio-h2">Every archetype</h2>'
-        '<p class="mh-studio-section-sub">All structural layouts, each rendered with '
+        '<div class="mh-tpv-section-head">'
+        '<h2 class="mh-tpv-h2">Every archetype</h2>'
+        '<p class="mh-tpv-section-sub">All structural layouts, each rendered with '
         "the pinned style pack. Pick one to preview it across the pack catalog.</p>"
         "</div>"
         f"{chips}"
-        f'<div class="mh-studio-grid" id="mh-studio-arch-grid">{"".join(tiles)}</div>'
+        f'<div class="mh-tpv-grid" id="mh-tpv-arch-grid">{"".join(tiles)}</div>'
         f"{empty}"
         "</section>"
     )
@@ -434,9 +437,9 @@ def _lever_form(state: StudioState, *, studio_url: str) -> str:
             sel = " selected" if v == cur else ""
             opts.append(f'<option value="{_e(v)}"{sel}>{_e(lever_label(v))}</option>')
         selects.append(
-            '<label class="mh-studio-field">'
-            f'<span class="mh-studio-field-label">{_e(label)}</span>'
-            f'<select class="mh-studio-select" name="{key}">{"".join(opts)}</select>'
+            '<label class="mh-tpv-field">'
+            f'<span class="mh-tpv-field-label">{_e(label)}</span>'
+            f'<select class="mh-tpv-select" name="{key}">{"".join(opts)}</select>'
             "</label>"
         )
     # Preserve the pins across a filter submit; page resets (omitted → 1).
@@ -448,16 +451,16 @@ def _lever_form(state: StudioState, *, studio_url: str) -> str:
         hidden += f'<input type="hidden" name="category" value="{_e(state.category)}"/>'
     reset_href = studio_url + _query(state, ground=ANY, texture=ANY, accent=ANY, density=ANY, page=1)
     reset = (
-        f'<a class="mh-studio-reset" href="{_e(reset_href)}">Clear filters</a>'
+        f'<a class="mh-tpv-reset" href="{_e(reset_href)}">Clear filters</a>'
         if filters_active(state.ground, state.texture, state.accent, state.density)
         else ""
     )
     return (
-        f'<form class="mh-studio-filterform" method="get" action="{_e(studio_url)}" '
+        f'<form class="mh-tpv-filterform" method="get" action="{_e(studio_url)}" '
         'aria-label="Filter style packs">'
         f"{hidden}"
-        f'<div class="mh-studio-fields">{"".join(selects)}</div>'
-        '<div class="mh-studio-filteractions">'
+        f'<div class="mh-tpv-fields">{"".join(selects)}</div>'
+        '<div class="mh-tpv-filteractions">'
         '<button type="submit" class="btn secondary">Apply filters</button>'
         f"{reset}"
         "</div>"
@@ -469,21 +472,21 @@ def _pager(state: StudioState, page: Page, *, studio_url: str) -> str:
     if page.pages <= 1:
         return ""
     prev_link = (
-        f'<a class="mh-studio-page-btn" href="{_e(studio_url + _query(state, page=page.page - 1))}" '
+        f'<a class="mh-tpv-page-btn" href="{_e(studio_url + _query(state, page=page.page - 1))}" '
         'rel="prev">&larr; Prev</a>'
         if page.page > 1
-        else '<span class="mh-studio-page-btn is-disabled" aria-disabled="true">&larr; Prev</span>'
+        else '<span class="mh-tpv-page-btn is-disabled" aria-disabled="true">&larr; Prev</span>'
     )
     next_link = (
-        f'<a class="mh-studio-page-btn" href="{_e(studio_url + _query(state, page=page.page + 1))}" '
+        f'<a class="mh-tpv-page-btn" href="{_e(studio_url + _query(state, page=page.page + 1))}" '
         'rel="next">Next &rarr;</a>'
         if page.page < page.pages
-        else '<span class="mh-studio-page-btn is-disabled" aria-disabled="true">Next &rarr;</span>'
+        else '<span class="mh-tpv-page-btn is-disabled" aria-disabled="true">Next &rarr;</span>'
     )
     return (
-        '<nav class="mh-studio-pager" aria-label="Style pack pages">'
+        '<nav class="mh-tpv-pager" aria-label="Style pack pages">'
         f"{prev_link}"
-        f'<span class="mh-studio-page-status">Page {page.page} of {page.pages}</span>'
+        f'<span class="mh-tpv-page-status">Page {page.page} of {page.pages}</span>'
         f"{next_link}"
         "</nav>"
     )
@@ -508,32 +511,32 @@ def _pack_rail(state: StudioState, *, studio_url: str, thumb_url) -> str:
         tiles = []
         for pack in page.items:
             pinned = pack.id == state.pack
-            classes = "mh-studio-tile mh-studio-tile--pack"
+            classes = "mh-tpv-tile mh-tpv-tile--pack"
             if pinned:
                 classes += " is-pinned"
             href = studio_url + _query(state, pack=pack.id)
             img = thumb_url(state.archetype, pack.id)
-            badge = '<span class="mh-studio-pin-badge">Pinned</span>' if pinned else ""
+            badge = '<span class="mh-tpv-pin-badge">Pinned</span>' if pinned else ""
             aria = ' aria-current="true"' if pinned else ""
             density_tag = (
-                '<span class="mh-studio-density-tag">Bold</span>' if pack.density == "bold" else ""
+                '<span class="mh-tpv-density-tag">Bold</span>' if pack.density == "bold" else ""
             )
             tiles.append(
                 f'<a class="{classes}" href="{_e(href)}"{aria}>'
-                '<span class="mh-studio-thumb">'
-                f'<img class="mh-studio-img" src="{_e(img)}" width="384" height="480" '
+                '<span class="mh-tpv-thumb">'
+                f'<img class="mh-tpv-img" src="{_e(img)}" width="384" height="480" '
                 f'loading="lazy" decoding="async" '
                 f'alt="Live preview of the {_e(pack.name())} pack on the {_e(arch_title)} archetype"/>'
                 f"{badge}"
                 "</span>"
-                '<span class="mh-studio-tile-body">'
-                f'<span class="mh-studio-tile-title">{_e(pack.name())}</span>'
+                '<span class="mh-tpv-tile-body">'
+                f'<span class="mh-tpv-tile-title">{_e(pack.name())}</span>'
                 f"{density_tag}"
                 "</span>"
-                f'<code class="mh-studio-tile-slug">{_e(pack.id)}</code>'
+                f'<code class="mh-tpv-tile-slug">{_e(pack.id)}</code>'
                 "</a>"
             )
-        body = f'<div class="mh-studio-grid">{"".join(tiles)}</div>' + _pager(
+        body = f'<div class="mh-tpv-grid">{"".join(tiles)}</div>' + _pager(
             state, page, studio_url=studio_url
         )
         suffix = " (filtered)" if filters_active(
@@ -545,10 +548,10 @@ def _pack_rail(state: StudioState, *, studio_url: str, thumb_url) -> str:
         )
 
     return (
-        '<section class="mh-studio-section" id="mh-studio-packs">'
-        '<div class="mh-studio-section-head">'
-        '<h2 class="mh-studio-h2">Every style pack</h2>'
-        f'<p class="mh-studio-section-sub">{count_line}</p>'
+        '<section class="mh-tpv-section" id="mh-tpv-packs">'
+        '<div class="mh-tpv-section-head">'
+        '<h2 class="mh-tpv-h2">Every style pack</h2>'
+        f'<p class="mh-tpv-section-sub">{count_line}</p>'
         "</div>"
         f"{form}"
         f"{body}"
@@ -564,7 +567,7 @@ def render_studio_body(
     thumb_url,
     state: StudioState,
 ) -> str:
-    """Render the full studio page body.
+    """Render the full preview-gallery page body.
 
     Pure string builder. ``studio_url`` / ``gallery_url`` / ``make_url`` are
     pre-resolved ``url_for`` strings; ``thumb_url(archetype, pack_id, hero=False)``
@@ -592,7 +595,7 @@ def render_studio_body(
 
     return (
         f"{_STUDIO_CSS}"
-        '<section id="mh-studio" class="mh-studio">'
+        '<section id="mh-tpv" class="mh-tpv">'
         f"{hero}"
         f"{schematic_link}"
         f"{featured}"
@@ -607,121 +610,121 @@ def render_studio_body(
 # web.py's shared stylesheet, so G1.26 never collides with the UI 1.10 CSS block.
 # Reuses the global theme tokens + the .mh-arch-* chip/tag classes.
 _STUDIO_CSS = """<style>
-.mh-studio-eyebrow, .mh-studio-section-sub, .mh-studio-pack-why { font-family: var(--font-body); }
-.mh-studio-featured {
+.mh-tpv-eyebrow, .mh-tpv-section-sub, .mh-tpv-pack-why { font-family: var(--font-body); }
+.mh-tpv-featured {
   display: grid; grid-template-columns: minmax(220px, 320px) 1fr;
   gap: var(--sp-6); align-items: start;
   padding: var(--sp-5); margin-bottom: var(--sp-7);
   background: var(--surface); border: 1px solid var(--hairline);
   border-radius: var(--radius);
 }
-.mh-studio-featured-frame {
+.mh-tpv-featured-frame {
   border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden;
   background: var(--bg); aspect-ratio: 4 / 5;
 }
-.mh-studio-featured-img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.mh-studio-featured-meta { display: flex; flex-direction: column; gap: 6px; }
-.mh-studio-eyebrow {
+.mh-tpv-featured-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.mh-tpv-featured-meta { display: flex; flex-direction: column; gap: 6px; }
+.mh-tpv-eyebrow {
   font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
   letter-spacing: 0.14em; text-transform: uppercase; color: var(--lane);
 }
-.mh-studio-featured-title {
+.mh-tpv-featured-title {
   font-family: var(--font-display); font-size: 28px; font-weight: 800;
   text-transform: uppercase; letter-spacing: 0.01em; color: var(--ink); margin: 2px 0;
 }
-.mh-studio-featured-sub { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
-.mh-studio-featured-sub code, .mh-studio-pack-id {
+.mh-tpv-featured-sub { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+.mh-tpv-featured-sub code, .mh-tpv-pack-id {
   font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); opacity: 0.8;
 }
-.mh-studio-pack-name {
+.mh-tpv-pack-name {
   font-family: var(--font-display); font-size: 16px; font-weight: 700;
   color: var(--ink); margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.01em;
 }
-.mh-studio-pack-why { font-size: 13.5px; color: var(--ink-dim); line-height: 1.55; margin: 0; }
-.mh-studio-featured-cta {
+.mh-tpv-pack-why { font-size: 13.5px; color: var(--ink-dim); line-height: 1.55; margin: 0; }
+.mh-tpv-featured-cta {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: var(--sp-4);
 }
-.mh-studio-featured-cta .dim { font-size: 12px; color: var(--ink-dim); }
-.mh-studio-section { margin-bottom: var(--sp-8); }
-.mh-studio-section-head { margin-bottom: var(--sp-4); }
-.mh-studio-h2 {
+.mh-tpv-featured-cta .dim { font-size: 12px; color: var(--ink-dim); }
+.mh-tpv-section { margin-bottom: var(--sp-8); }
+.mh-tpv-section-head { margin-bottom: var(--sp-4); }
+.mh-tpv-h2 {
   font-family: var(--font-display); font-size: 20px; font-weight: 800;
   text-transform: uppercase; letter-spacing: 0.02em; color: var(--ink); margin: 0 0 4px;
 }
-.mh-studio-section-sub { font-size: 13px; color: var(--ink-dim); line-height: 1.55; margin: 0; max-width: 70ch; }
-.mh-studio-grid {
+.mh-tpv-section-sub { font-size: 13px; color: var(--ink-dim); line-height: 1.55; margin: 0; max-width: 70ch; }
+.mh-tpv-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--sp-4); margin: var(--sp-4) 0 var(--sp-5);
 }
-.mh-studio-tile {
+.mh-tpv-tile {
   display: flex; flex-direction: column;
   background: var(--surface); border: 1px solid var(--hairline);
   border-radius: var(--radius); overflow: hidden; text-decoration: none;
   transition: border-color var(--transition), background var(--transition), transform var(--transition);
 }
-.mh-studio-tile:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; transform: translateY(-2px); }
-.mh-studio-tile:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
-.mh-studio-tile.is-pinned { border-color: var(--lane); box-shadow: 0 0 0 1px var(--lane) inset; }
-.mh-studio-tile.is-hidden { display: none; }
-.mh-studio-thumb { position: relative; display: block; aspect-ratio: 4 / 5; background: var(--bg); }
-.mh-studio-img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.mh-studio-pin-badge {
+.mh-tpv-tile:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; transform: translateY(-2px); }
+.mh-tpv-tile:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-tpv-tile.is-pinned { border-color: var(--lane); box-shadow: 0 0 0 1px var(--lane) inset; }
+.mh-tpv-tile.is-hidden { display: none; }
+.mh-tpv-thumb { position: relative; display: block; aspect-ratio: 4 / 5; background: var(--bg); }
+.mh-tpv-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.mh-tpv-pin-badge {
   position: absolute; top: 8px; left: 8px;
   font-family: var(--font-mono); font-size: 9px; font-weight: 700;
   letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--lane-ink, #0A0B11); background: var(--lane);
   padding: 3px 7px; border-radius: 999px;
 }
-.mh-studio-density-tag {
+.mh-tpv-density-tag {
   font-family: var(--font-mono); font-size: 9px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim);
   border: 1px solid var(--rule); border-radius: 999px; padding: 2px 7px;
 }
-.mh-studio-tile-body {
+.mh-tpv-tile-body {
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px; padding: var(--sp-3) var(--sp-3) 2px;
 }
-.mh-studio-tile-title {
+.mh-tpv-tile-title {
   font-family: var(--font-display); font-size: 14px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.01em; color: var(--ink);
 }
-.mh-studio-tile-slug {
+.mh-tpv-tile-slug {
   font-family: var(--font-mono); font-size: 10px; color: var(--ink-dim);
   opacity: 0.7; padding: 0 var(--sp-3) var(--sp-3); word-break: break-all;
 }
-.mh-studio-filterform {
+.mh-tpv-filterform {
   display: flex; align-items: flex-end; gap: var(--sp-4); flex-wrap: wrap;
   padding: var(--sp-4); margin-bottom: var(--sp-4);
   background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius);
 }
-.mh-studio-fields { display: flex; gap: var(--sp-3); flex-wrap: wrap; flex: 1 1 auto; }
-.mh-studio-field { display: flex; flex-direction: column; gap: 4px; }
-.mh-studio-field-label {
+.mh-tpv-fields { display: flex; gap: var(--sp-3); flex-wrap: wrap; flex: 1 1 auto; }
+.mh-tpv-field { display: flex; flex-direction: column; gap: 4px; }
+.mh-tpv-field-label {
   font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
   letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-dim);
 }
-.mh-studio-select {
+.mh-tpv-select {
   font-family: var(--font-body); font-size: 13px; color: var(--ink);
   background: var(--bg); border: 1px solid var(--hairline); border-radius: 8px;
   padding: 8px 10px; min-width: 140px;
 }
-.mh-studio-select:focus-visible { outline: 2px solid var(--lane); outline-offset: 1px; }
-.mh-studio-filteractions { display: flex; align-items: center; gap: 14px; }
-.mh-studio-reset { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-dim); }
-.mh-studio-pager {
+.mh-tpv-select:focus-visible { outline: 2px solid var(--lane); outline-offset: 1px; }
+.mh-tpv-filteractions { display: flex; align-items: center; gap: 14px; }
+.mh-tpv-reset { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-dim); }
+.mh-tpv-pager {
   display: flex; align-items: center; justify-content: center; gap: var(--sp-4);
   margin-top: var(--sp-3);
 }
-.mh-studio-page-btn {
+.mh-tpv-page-btn {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
   letter-spacing: 0.06em; color: var(--ink); text-decoration: none;
   padding: 8px 14px; border: 1px solid var(--hairline); border-radius: 999px;
   background: var(--surface);
 }
-.mh-studio-page-btn:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; }
-.mh-studio-page-btn.is-disabled { opacity: 0.4; pointer-events: none; }
-.mh-studio-page-status { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
-@media (max-width: 640px) { .mh-studio-featured { grid-template-columns: 1fr; } }
+.mh-tpv-page-btn:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; }
+.mh-tpv-page-btn.is-disabled { opacity: 0.4; pointer-events: none; }
+.mh-tpv-page-status { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .mh-tpv-featured { grid-template-columns: 1fr; } }
 </style>"""
 
 # Progressive enhancement: instant client-side category filtering of the
@@ -730,12 +733,12 @@ _STUDIO_CSS = """<style>
 # All archetype tiles are always in the DOM, so any category is reachable.
 _STUDIO_JS = """<script>
 (function(){
-  var sec = document.getElementById('mh-studio-archetypes');
+  var sec = document.getElementById('mh-tpv-archetypes');
   if(sec){
-    var grid = document.getElementById('mh-studio-arch-grid');
-    var empty = document.getElementById('mh-studio-arch-empty');
+    var grid = document.getElementById('mh-tpv-arch-grid');
+    var empty = document.getElementById('mh-tpv-arch-empty');
     var chips = sec.querySelectorAll('.mh-arch-chip');
-    var tiles = grid ? grid.querySelectorAll('.mh-studio-tile') : [];
+    var tiles = grid ? grid.querySelectorAll('.mh-tpv-tile') : [];
     var apply = function(cat){
       cat = cat || 'all';
       var shown = 0;
@@ -769,9 +772,9 @@ _STUDIO_JS = """<script>
       })(chips[k]);
     }
   }
-  var form = document.querySelector('.mh-studio-filterform');
+  var form = document.querySelector('.mh-tpv-filterform');
   if(form){
-    var selects = form.querySelectorAll('.mh-studio-select');
+    var selects = form.querySelectorAll('.mh-tpv-select');
     for(var s=0;s<selects.length;s++){
       selects[s].addEventListener('change', function(){ form.submit(); });
     }

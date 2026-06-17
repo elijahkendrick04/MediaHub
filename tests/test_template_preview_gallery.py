@@ -106,7 +106,7 @@ def _default_state():
 
 
 # Count studio tiles via the anchor (so JS string refs can't inflate the count).
-_TILE_RE = re.compile(r'<a class="mh-studio-tile\b')
+_TILE_RE = re.compile(r'<a class="mh-tpv-tile\b')
 
 
 def _tiles(html: str) -> int:
@@ -316,7 +316,7 @@ def test_body_pins_are_marked():
     html = _body(st)
     # The pinned archetype + pinned pack tiles carry the pinned class + badge.
     assert "is-pinned" in html
-    assert html.count("mh-studio-pin-badge") >= 1
+    assert html.count("mh-tpv-pin-badge") >= 1
     # The featured panel shows the pinned slugs.
     assert f">{arch}</code>" in html or arch in html
     assert pack in html
@@ -330,7 +330,7 @@ def test_body_category_filter_hides_non_matching_archetypes():
     ).gallery_entries()
     n_photo = sum(1 for e in entries if e["category"] == "photo")
     # All archetype tiles stay in the DOM (client filter), non-photo hidden.
-    n_hidden = html.count("mh-studio-tile is-hidden")
+    n_hidden = html.count("mh-tpv-tile is-hidden")
     assert n_hidden == len(A.list_archetypes()) - n_photo
 
 
@@ -339,7 +339,7 @@ def test_body_pack_rail_paginates():
     html = _body(st)
     assert "Page 2 of" in html
     # Prev is a live link on page 2; the pager is present.
-    assert "mh-studio-pager" in html
+    assert "mh-tpv-pager" in html
     assert "rel=\"prev\"" in html
 
 
@@ -422,7 +422,7 @@ def test_studio_route_renders(client):
     assert r.status_code == 200
     assert r.mimetype == "text/html"
     html = r.get_data(as_text=True)
-    assert "Template studio" in html
+    assert "Template previews" in html
     assert "Every archetype" in html and "Every style pack" in html
     assert _tiles(html) == len(A.list_archetypes()) + G.PER_DEFAULT
 
