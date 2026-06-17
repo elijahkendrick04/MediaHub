@@ -695,7 +695,7 @@ in place when editing.
 3 = P5.
 4 = F.9, F.10, F.11, PC.15
 5 = P3.
-6 = PC.4, PC.6, PC.16, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.8, F.12, F.13
+6 = PC.4, PC.6, PC.16, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.12, F.13
 -->
 
 <!-- ROADMAP:PHASE 2 -->
