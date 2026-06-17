@@ -251,11 +251,28 @@ def test_no_smil_in_any_slide():
 def test_css_is_on_brand_and_balanced():
     css = ci.CONTENT_INTRO_CSS
     assert css.count("{") == css.count("}")
-    # Lane-yellow is the only accent; medal-gold is reserved for achievements.
+    # Lane is the accent token; medal-gold is reserved for achievements.
     assert "var(--lane)" in css
     assert "var(--medal" not in css and "var(--gold" not in css
     # Self-hosted fonts only.
     assert "googleapis" not in css and "gstatic" not in css
+
+
+def test_engine_colours_follow_the_club_brand_not_pinned_yellow():
+    """The how-it-works diagram is the club's surface, so its lit accent tracks
+    the same brand token the rest of the site themes from (--lane ← --mh-primary)
+    — change the club's colours and the engine recolours, like the website. No
+    hard-coded lane-yellow may pin it (that would ignore the brand)."""
+    css = ci.CONTENT_INTRO_CSS
+    # The stage re-points --lane at the brand seed and routes the glow through it.
+    assert "--lane: var(--mh-primary)" in css
+    assert "color-mix(in oklab, var(--mh-primary)" in css
+    # The engine box glow (hard-yellow in the landing CSS) is recoloured via the
+    # brand --lane-glow, scoped to the intro stage.
+    assert ".mh-ci-stage .mh-pl-engine-bg" in css
+    # Nothing in the feature's CSS may hard-code the lane-yellow literal.
+    assert "#D4FF3A" not in css.upper()
+    assert "212,255,58" not in css.replace(" ", "")
 
 
 def test_presentation_formats_cover_every_heading():

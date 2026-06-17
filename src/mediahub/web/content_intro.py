@@ -582,7 +582,33 @@ CONTENT_INTRO_CSS = """
 /* chips that sit beneath it.                                             */
 /* ===================================================================== */
 .mh-ci-head { margin-bottom: var(--sp-5); }
-.mh-ci-stage { margin-bottom: var(--sp-6); }
+/* The how-it-works diagram is the *club's* surface, so its lit traces take the
+   active profile's brand colour — overriding the home-page diagram's pinned
+   lane-yellow (PR #782, scoped to .mh-pl-stage for the unbranded marketing
+   home). It uses the SAME token the rest of the site themes from — --lane ←
+   --mh-primary, set per-profile by the <style id="mh-theme-seed"> injection — so
+   when a club changes its colours the engine recolours automatically, exactly
+   like every other accent on the site. No bespoke per-request colour: one
+   mechanism, no drift. (.mh-ci-stage is the same element as .mh-pl-stage and
+   comes later in the cascade, so this wins.) */
+.mh-ci-stage {
+  margin-bottom: var(--sp-6);
+  --lane: var(--mh-primary);
+  --lane-glow: color-mix(in oklab, var(--mh-primary) 42%, transparent);
+}
+/* The engine box glow is a hard-yellow drop-shadow in the landing-diagram CSS
+   (PR #782 bakes the literal for the unbranded home). On the club's surface,
+   recolour it to the brand via --lane-glow — otherwise a non-yellow club gets a
+   brand-coloured stroke ringed by a stale yellow halo. Scoped + higher
+   specificity than .mh-pl-engine-bg, so the home page is untouched. */
+.mh-ci-stage .mh-pl-engine-bg {
+  filter: drop-shadow(0 0 10px var(--lane-glow));
+  animation: mh-ci-breathe 3.4s ease-in-out infinite;
+}
+@keyframes mh-ci-breathe {
+  0%, 100% { filter: drop-shadow(0 0 10px var(--lane-glow)); }
+  50%      { filter: drop-shadow(0 0 20px var(--lane-glow)); }
+}
 
 .mh-ci-steps {
   list-style: none;
@@ -658,16 +684,16 @@ CONTENT_INTRO_CSS = """
   border: 1px solid var(--lane);
   border-radius: 14px;
   background:
-    radial-gradient(130% 170% at 0% 0%, rgba(212,255,58,0.10), transparent 60%),
+    radial-gradient(130% 170% at 0% 0%, color-mix(in oklab, var(--lane) 10%, transparent), transparent 60%),
     var(--surface);
-  box-shadow: 0 0 0 1px rgba(212,255,58,0.08), 0 10px 30px rgba(0,0,0,0.25);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--lane) 8%, transparent), 0 10px 30px rgba(0,0,0,0.25);
   text-decoration: none;
   color: var(--ink);
   transition: transform .15s ease, box-shadow .15s ease;
 }
 .mh-plan-tile:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 0 1px rgba(212,255,58,0.20), 0 16px 40px rgba(0,0,0,0.34);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--lane) 20%, transparent), 0 16px 40px rgba(0,0,0,0.34);
 }
 .mh-plan-tile-icon {
   flex: 0 0 auto;
@@ -677,7 +703,7 @@ CONTENT_INTRO_CSS = """
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  background: rgba(212,255,58,0.10);
+  background: color-mix(in oklab, var(--lane) 10%, transparent);
   color: var(--lane);
   border: 1px solid color-mix(in oklab, var(--lane) 30%, transparent);
 }
