@@ -10,10 +10,18 @@
 > publishes from the plan.
 
 Shipped as roadmap **P1.3**. Code: `src/mediahub/content_engine/`
-(`signals.py`, `planner.py`, `inputs.py`); surface: **Plan** in the nav
-(`/plan`) + `/api/plan/*`. Data-model spine: the slug-canonical post-type
-layer ([`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md), ADR-0013) over the
-sport profiles ([`SPORT_PROFILES.md`](SPORT_PROFILES.md)).
+(`signals.py`, `planner.py`, `inputs.py`, `nl_inputs.py`); surface: the
+**Plan** page (`/plan`) — reached from the **Create** tab (it answers "what
+should we make?"), not the top bar — plus `/api/plan/*`. Data-model spine: the
+slug-canonical post-type layer ([`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md),
+ADR-0013) over the sport profiles ([`SPORT_PROFILES.md`](SPORT_PROFILES.md)).
+
+Operators can fill the **direct** inputs by hand (events with dates + venues,
+blackout dates, goals targeting an enabled post type) or **describe them in
+plain language** and let `nl_inputs.interpret_planner_inputs` turn the note
+into the same structured inputs for review — the Free-Text feature's LLM
+interpretation + optional web research, applied to planning. The AI only
+*proposes* inputs; the deterministic ranker below is untouched.
 
 ## 1. The three signal sources
 
