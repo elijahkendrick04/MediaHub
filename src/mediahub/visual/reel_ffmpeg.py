@@ -32,6 +32,13 @@ Design rules
   kind everywhere else. No easing RNG; the same inputs produce the same
   MP4, cached under ``DATA_DIR/motion_cache`` keyed by content hash +
   engine + motion revision.
+- **Every cut, not just story.** Renders all four Remotion cuts — story
+  (1080×1920, default), portrait (1080×1350), square (1080×1080) and
+  landscape (1920×1080) — by rendering the card's still at the requested
+  geometry and threading that ``(width, height)`` through every FFmpeg
+  filter (Ken Burns, parallax, transitions). The cut is folded into the
+  cache key; the story path stays byte-identical to the pre-multiformat era
+  so existing caches survive.
 
 FFmpeg binary resolution order:
 
@@ -53,7 +60,12 @@ from typing import Any, Optional
 
 from mediahub.visual.reel_engine import ReelEngineUnavailable
 
-# Output geometry — matches the Remotion compositions exactly.
+# Default output geometry — the canonical 9:16 story cut, matching the
+# Remotion compositions exactly. WIDTH/HEIGHT are the story defaults every
+# builder falls back to; the public renders resolve the caller's chosen cut
+# (story / portrait / square / landscape) via _format_size and thread its
+# (width, height) through every filter, so the FFmpeg fallback mirrors the
+# four Remotion cuts one-for-one.
 WIDTH = 1080
 HEIGHT = 1920
 FPS = 30
@@ -165,6 +177,26 @@ def _require_available() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Output geometry — single source of truth is motion.MOTION_FORMATS
+# ---------------------------------------------------------------------------
+
+
+def _format_size(format_name: str) -> tuple[int, int]:
+    """Resolve a motion format name to ``(width, height)``.
+
+    Delegates to :func:`mediahub.visual.motion.motion_format_size` so the
+    four cuts (``story`` / ``portrait`` / ``square`` / ``landscape``) have a
+    single source of truth shared with the Remotion path. Imported lazily
+    because ``motion`` imports this module on its ffmpeg dispatch path, and
+    an unknown name raises ``ValueError`` there — an honest config error
+    rather than a silently wrong aspect ratio.
+    """
+    from mediahub.visual.motion import motion_format_size
+
+    return motion_format_size(format_name)
+
+
+# ---------------------------------------------------------------------------
 # Frame briefs — rehydrate the card's persisted brief, or build a
 # deterministic minimal one from the card facts (no AI involved).
 # ---------------------------------------------------------------------------
@@ -200,6 +232,7 @@ def _minimal_brief(
     layout_template: str = "story_card",
     text_layers: Optional[dict[str, str]] = None,
     confidence_label: Optional[str] = None,
+    format_name: str = "story",
 ):
     """A fully-deterministic CreativeBrief for one frame.
 
@@ -236,7 +269,7 @@ def _minimal_brief(
         ),
         text_layers=layers,
         palette=_palette_from_brand(brand_dict),
-        format_priority=["story"],
+        format_priority=[format_name],
     )
 
 
@@ -251,7 +284,14 @@ def _rehydrate_brief(brief_dict: dict):
     return CreativeBrief.from_dict(brief_dict)
 
 
-def _frame_brief(props: dict, brand_dict: dict, brand_kit: Any, brief_dict: Optional[dict]):
+def _frame_brief(
+    props: dict,
+    brand_dict: dict,
+    brand_kit: Any,
+    brief_dict: Optional[dict],
+    *,
+    format_name: str = "story",
+):
     profile_id = ""
     if brand_kit is not None:
         profile_id = str(
@@ -261,16 +301,24 @@ def _frame_brief(props: dict, brand_dict: dict, brand_kit: Any, brief_dict: Opti
     if isinstance(brief_dict, dict) and brief_dict:
         brief = _rehydrate_brief(brief_dict)
         if brief is not None:
-            # Story frames always render at story size; make sure the
-            # brief carries a palette (legacy briefs may have lost it).
+            # The frame renders at the requested cut's geometry; tag the
+            # brief with it and make sure it carries a palette (legacy
+            # briefs may have lost it).
             if not brief.palette:
                 brief.palette = _palette_from_brand(brand_dict)
-            brief.format_priority = ["story"]
+            brief.format_priority = [format_name]
             return brief
-    return _minimal_brief(props, brand_dict, profile_id=profile_id)
+    return _minimal_brief(props, brand_dict, profile_id=profile_id, format_name=format_name)
 
 
-def _cover_brief(cards_props: list[dict], brand_dict: dict, brand_kit: Any, meet_name: str):
+def _cover_brief(
+    cards_props: list[dict],
+    brand_dict: dict,
+    brand_kit: Any,
+    meet_name: str,
+    *,
+    format_name: str = "story",
+):
     """The reel's opening frame: meet name on the brand, ``reel_cover`` layout."""
     profile_id = ""
     if brand_kit is not None:
@@ -303,6 +351,7 @@ def _cover_brief(cards_props: list[dict], brand_dict: dict, brand_kit: Any, meet
         layout_template="reel_cover",
         text_layers=layers,
         confidence_label="MEET RECAP",
+        format_name=format_name,
     )
 
 
@@ -311,8 +360,21 @@ def _cover_brief(cards_props: list[dict], brand_dict: dict, brand_kit: Any, meet
 # ---------------------------------------------------------------------------
 
 
-def _render_still(brief, brand_kit: Any, out_dir: Path, *, name: str) -> Path:
-    """Render one 1080x1920 frame PNG for ``brief`` into ``out_dir``."""
+def _render_still(
+    brief,
+    brand_kit: Any,
+    out_dir: Path,
+    *,
+    name: str,
+    size: tuple[int, int] = (WIDTH, HEIGHT),
+    format_name: str = "story",
+) -> Path:
+    """Render one frame PNG for ``brief`` at ``size`` into ``out_dir``.
+
+    ``size`` is the resolved ``(width, height)`` of the requested cut; the
+    still layouts scale every dimension proportionally from it, so one brief
+    serves every aspect. ``format_name`` only labels the emitted PNG.
+    """
     from mediahub.graphic_renderer.render import render_brief
 
     frame_dir = out_dir / name
@@ -320,8 +382,8 @@ def _render_still(brief, brand_kit: Any, out_dir: Path, *, name: str) -> Path:
     result = render_brief(
         brief,
         output_dir=frame_dir,
-        size=(WIDTH, HEIGHT),
-        format_name="story",
+        size=size,
+        format_name=format_name,
         brand_kit=brand_kit,
         skip_cutout=True,
     )
@@ -336,7 +398,14 @@ def _render_still(brief, brand_kit: Any, out_dir: Path, *, name: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _ken_burns_filter(duration_sec: float, *, variant: str = "zoom_in", tag: str = "0") -> str:
+def _ken_burns_filter(
+    duration_sec: float,
+    *,
+    variant: str = "zoom_in",
+    tag: str = "0",
+    width: int = WIDTH,
+    height: int = HEIGHT,
+) -> str:
     """One beat's motion sub-graph — a Ken Burns variant, the 2.5D parallax
     composite, or an honest held frame.
 
@@ -351,24 +420,24 @@ def _ken_burns_filter(duration_sec: float, *, variant: str = "zoom_in", tag: str
     same inputs yield an identical fragment and a byte-identical MP4.
     """
     frames = max(1, round(duration_sec * FPS))
-    base = f"scale={WIDTH * 2}:{HEIGHT * 2}:flags=lanczos"
+    base = f"scale={width * 2}:{height * 2}:flags=lanczos"
     centre = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-    tail = f":s={WIDTH}x{HEIGHT}:fps={FPS}"
+    tail = f":s={width}x{height}:fps={FPS}"
 
     if variant == "hold":
         # Honest stillness for a `static` motion_intent — no camera move,
         # just the still rescaled to the beat geometry at the beat rate.
-        return f"scale={WIDTH}:{HEIGHT}:flags=lanczos,fps={FPS}"
+        return f"scale={width}:{height}:flags=lanczos,fps={FPS}"
 
     if variant == "parallax":
-        fg_w = int(round(WIDTH * _PARALLAX_FG_SCALE))
-        fg_h = int(round(HEIGHT * _PARALLAX_FG_SCALE))
+        fg_w = int(round(width * _PARALLAX_FG_SCALE))
+        fg_h = int(round(height * _PARALLAX_FG_SCALE))
         fg_rate = (_PARALLAX_FG_ZOOM - 1.0) / frames
         bg = (
-            f"[pbg{tag}]scale={WIDTH}:{HEIGHT},gblur=sigma={_PARALLAX_BG_BLUR},"
+            f"[pbg{tag}]scale={width}:{height},gblur=sigma={_PARALLAX_BG_BLUR},"
             f"zoompan=z='{_PARALLAX_BG_ZOOM}':d=1"
             f":x='(iw-iw/zoom)*(on/{frames})':y='ih/2-(ih/zoom/2)'"
-            f":s={WIDTH}x{HEIGHT}:fps={FPS}[pbgz{tag}]"
+            f":s={width}x{height}:fps={FPS}[pbgz{tag}]"
         )
         fg = (
             f"[pfg{tag}]scale={fg_w * 2}:{fg_h * 2}:flags=lanczos,"
@@ -408,7 +477,14 @@ def _ken_burns_filter(duration_sec: float, *, variant: str = "zoom_in", tag: str
     return f"{base},zoompan={z}:d=1:{pos}{tail}"
 
 
-def _write_caption_ass(caption_json: str, work_dir: Path, name: str) -> Optional[Path]:
+def _write_caption_ass(
+    caption_json: str,
+    work_dir: Path,
+    name: str,
+    *,
+    width: int = WIDTH,
+    height: int = HEIGHT,
+) -> Optional[Path]:
     """Write a card's caption track (R1.3) as an ASS file for burn-in, or None.
 
     Best-effort: a malformed/empty track yields None and the frame renders
@@ -422,7 +498,7 @@ def _write_caption_ass(caption_json: str, work_dir: Path, name: str) -> Optional
         track = json.loads(caption_json)
         if not isinstance(track, dict) or not track.get("cues"):
             return None
-        doc = subtitle_burn.ass_document(track, width=WIDTH, height=HEIGHT, fps=FPS)
+        doc = subtitle_burn.ass_document(track, width=width, height=height, fps=FPS)
         path = work_dir / f"{name}.ass"
         path.write_text(doc, encoding="utf-8")
         return path
@@ -513,6 +589,8 @@ def story_ffmpeg_args(
     *,
     variant: str = "zoom_in",
     ass_path: Optional[Path] = None,
+    width: int = WIDTH,
+    height: int = HEIGHT,
 ) -> list[str]:
     """Argument list (after the binary) for a single-card story MP4.
 
@@ -521,10 +599,12 @@ def story_ffmpeg_args(
     a caller that passes no variant renders exactly as before. ``ass_path``
     (R1.3) burns the card's caption track onto the final frame via FFmpeg's
     ``ass`` filter — engine parity with the Remotion captions overlay.
+    ``width``/``height`` select the cut (story / portrait / square /
+    landscape); they default to the story geometry.
     """
     fade_out = max(0.0, duration_sec - 0.6)
     vf = (
-        f"{_ken_burns_filter(duration_sec, variant=variant, tag='s')},"
+        f"{_ken_burns_filter(duration_sec, variant=variant, tag='s', width=width, height=height)},"
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=0.6,"
         f"format=yuv420p,setsar=1"
     )
@@ -589,6 +669,8 @@ def reel_ffmpeg_args(
     *,
     kb_variants: Optional[list[str]] = None,
     transitions: Optional[list[str]] = None,
+    width: int = WIDTH,
+    height: int = HEIGHT,
 ) -> list[str]:
     """Argument list (after the binary) for the multi-beat reel MP4.
 
@@ -596,6 +678,8 @@ def reel_ffmpeg_args(
     and ``transitions`` one FFmpeg xfade name per beat join; both default to
     the historic alternating zoom / plain crossfade, so the bare builder
     stays stable for callers and tests that don't pass the richer programme.
+    ``width``/``height`` select the cut (story / portrait / square /
+    landscape); they default to the story geometry.
     """
     if len(stills) != len(segment_durations):
         raise ValueError("one segment duration per still is required")
@@ -609,14 +693,22 @@ def reel_ffmpeg_args(
         raise ValueError("one transition per beat join is required")
     args: list[str] = []
     for dur, still in zip(segment_durations, stills):
-        args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{dur:.3f}", "-i", str(still)]
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            str(FPS),
+            "-t",
+            f"{dur:.3f}",
+            "-i",
+            str(still),
+        ]
 
     total = sum(segment_durations) - CROSSFADE_SEC * (len(stills) - 1)
     chains: list[str] = []
     for i, dur in enumerate(segment_durations):
-        chains.append(
-            f"[{i}:v]{_ken_burns_filter(dur, variant=kb_variants[i], tag=str(i))},setsar=1[v{i}]"
-        )
+        kb = _ken_burns_filter(dur, variant=kb_variants[i], tag=str(i), width=width, height=height)
+        chains.append(f"[{i}:v]{kb},setsar=1[v{i}]")
     last = "v0"
     elapsed = 0.0
     for i in range(1, len(stills)):
@@ -717,8 +809,9 @@ def render_story_card_from_props(
     duration_sec: float = 6.0,
     brief_dict: Optional[dict] = None,
     audio_plan: Optional[dict] = None,
+    format_name: str = "story",
 ) -> Path:
-    """Render one card's 1080x1920 story MP4 via the still+FFmpeg path.
+    """Render one card's story MP4 via the still+FFmpeg path.
 
     ``card_props`` / ``brand_dict`` are the exact prop dicts the Remotion
     composition would receive (built by motion's shapers), so both engines
@@ -726,11 +819,22 @@ def render_story_card_from_props(
     motion's audio helpers) is folded into the cache key when present and
     mixed onto the finished MP4 — None keeps the silent path's cache keys
     byte-identical to before.
+
+    ``format_name`` picks the cut — ``story`` (1080×1920, default),
+    ``portrait`` (1080×1350), ``square`` (1080×1080) or ``landscape``
+    (1920×1080). Only the non-story cuts fold the format into the cache key,
+    so a cached story render is never evicted or mis-served by a sibling cut.
     """
-    from mediahub.visual.motion import _cache_dir, _content_hash, _finish_cached_video, _publish
+    from mediahub.visual.motion import (
+        _cache_dir,
+        _content_hash,
+        _finish_cached_video,
+        _publish,
+    )
 
     _require_available()
     out_path = Path(out_path)
+    width, height = _format_size(format_name)
     cache_payload = {
         "card": card_props,
         "brand": brand_dict,
@@ -739,6 +843,8 @@ def render_story_card_from_props(
         "motion": _MOTION_REV,
         "brief": brief_dict or {},
     }
+    if format_name != "story":
+        cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
     cache_key = _content_hash(cache_payload, kind="story")
@@ -747,18 +853,35 @@ def render_story_card_from_props(
         _finish_cached_video(cached, kind="story", plan=audio_plan, duration_sec=duration_sec)
         return _publish(cached, out_path)
 
-    brief = _frame_brief(card_props, brand_dict, brand_kit, brief_dict)
+    brief = _frame_brief(card_props, brand_dict, brand_kit, brief_dict, format_name=format_name)
     variant = _ken_burns_variant_for(
         int(card_props.get("variationSeed") or 0),
         motion_intent=str(card_props.get("motionIntent") or ""),
     )
     with tempfile.TemporaryDirectory(prefix="mh_reel_ffmpeg_") as td:
         work = Path(td)
-        still = _render_still(brief, brand_kit, work, name="story")
+        still = _render_still(
+            brief,
+            brand_kit,
+            work,
+            name="story",
+            size=(width, height),
+            format_name=format_name,
+        )
         tmp_mp4 = work / "story.mp4"
-        ass_path = _write_caption_ass(str(card_props.get("captionsJson") or ""), work, "story")
+        ass_path = _write_caption_ass(
+            str(card_props.get("captionsJson") or ""), work, "story", width=width, height=height
+        )
         _run_ffmpeg(
-            story_ffmpeg_args(still, tmp_mp4, duration_sec, variant=variant, ass_path=ass_path)
+            story_ffmpeg_args(
+                still,
+                tmp_mp4,
+                duration_sec,
+                variant=variant,
+                ass_path=ass_path,
+                width=width,
+                height=height,
+            )
         )
         return _finalise(
             tmp_mp4,
@@ -780,6 +903,7 @@ def render_meet_reel_from_props(
     duration_sec: Optional[float] = None,
     brief_dicts: Optional[list[Optional[dict]]] = None,
     audio_plan: Optional[dict] = None,
+    format_name: str = "story",
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
@@ -787,6 +911,11 @@ def render_meet_reel_from_props(
     ``reel_duration_for`` arithmetic the Remotion path uses. ``audio_plan``
     behaves exactly as on the story path (cache-key folded; honest silent
     fallback).
+
+    ``format_name`` picks the cut — ``story`` (default), ``portrait``,
+    ``square`` or ``landscape``; every beat (cover + cards) renders at that
+    geometry. Only the non-story cuts fold the format into the cache key, so
+    a cached story reel is never evicted or mis-served by a sibling cut.
     """
     from mediahub.visual.motion import (
         _cache_dir,
@@ -802,6 +931,7 @@ def render_meet_reel_from_props(
     if duration_sec is None:
         duration_sec = reel_duration_for(len(cards_props))
     out_path = Path(out_path)
+    width, height = _format_size(format_name)
     briefs = list(brief_dicts or [])
     cache_payload = {
         "cards": cards_props,
@@ -812,6 +942,8 @@ def render_meet_reel_from_props(
         "motion": _MOTION_REV,
         "briefs": [b or {} for b in briefs] or [{}] * len(cards_props),
     }
+    if format_name != "story":
+        cache_payload["format"] = format_name
     if audio_plan:
         cache_payload["audio"] = audio_plan
     cache_key = _content_hash(cache_payload, kind="reel")
@@ -830,16 +962,33 @@ def render_meet_reel_from_props(
         work = Path(td)
         stills: list[Path] = [
             _render_still(
-                _cover_brief(cards_props, brand_dict, brand_kit, meet_name),
+                _cover_brief(
+                    cards_props,
+                    brand_dict,
+                    brand_kit,
+                    meet_name,
+                    format_name=format_name,
+                ),
                 brand_kit,
                 work,
                 name="cover",
+                size=(width, height),
+                format_name=format_name,
             )
         ]
         for idx, props in enumerate(cards_props):
             bd = briefs[idx] if idx < len(briefs) else None
-            brief = _frame_brief(props, brand_dict, brand_kit, bd)
-            stills.append(_render_still(brief, brand_kit, work, name=f"card{idx}"))
+            brief = _frame_brief(props, brand_dict, brand_kit, bd, format_name=format_name)
+            stills.append(
+                _render_still(
+                    brief,
+                    brand_kit,
+                    work,
+                    name=f"card{idx}",
+                    size=(width, height),
+                    format_name=format_name,
+                )
+            )
 
         seg_durations = reel_segment_durations(len(cards_props), duration_sec)
         tmp_mp4 = work / "reel.mp4"
@@ -850,6 +999,8 @@ def render_meet_reel_from_props(
                 seg_durations,
                 kb_variants=_reel_kb_variants(cards_props),
                 transitions=_reel_transition_names(cards_props),
+                width=width,
+                height=height,
             )
         )
         return _finalise(

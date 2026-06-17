@@ -23,3 +23,11 @@ What the videos can do:
   "3 PBS" taken straight from the card labels) → one beat per top card (the
   top-ranked moment gets a little longer) → a club outro with the logo and a
   follow message.
+
+Two entry scripts call into these compositions:
+
+- `render.js` — the production one: renders a whole composition to an **MP4**.
+- `render_frame.js` — the test one: renders a few **single frames** to PNG (via
+  Remotion's `renderStill`) so the Python side can pixel-diff them against
+  saved reference pictures and catch a video that quietly stopped looking right.
+  See `visual/motion_regression.py` and `scripts/motion_vr.py`.

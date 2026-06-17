@@ -1719,6 +1719,12 @@ _research_jobs: BoundedCache = BoundedCache(max_size=32)
 # Club-data Q&A jobs ("Ask the data"). Same lifecycle as the research
 # console: background thread, memory + disk record, org-scoped polls.
 _club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
+# G1.27 design-studio render cache: signature(brief levers) -> the JSON render
+# payload (a base64 data-URI preview + its explainability sidecar). Lets the
+# interactive editor re-show a previously-seen combination instantly and caps
+# repeated Playwright renders. Entries are a few hundred KB each; 48 × keeps it
+# well under the worker's memory ceiling.
+_studio_render_cache: BoundedCache = BoundedCache(max_size=48)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -2752,6 +2758,74 @@ def _load_run(run_id: str) -> Optional[dict]:
         # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
         log.warning("run %s on disk but unreadable: %s", run_id, e)
         return None
+
+
+def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
+    """UI2.8 — assemble the curated, machine-readable JSON shown inline on the
+    review page's Recognition-summary card (rendered through the first-party
+    Codeblock highlighter, ``code_highlight.code_block`` — the "raw parsed-data
+    view" host surface the kit's Codeblock effect was waiting for).
+
+    This is the *explainability* payload: meet context, the parsed/matched swim
+    counts, and the ranked achievements the engine decided on — each with its
+    confidence and suggested post type — in the same JSON shape the export and
+    the downstream content steps consume. It is built from an explicit field
+    **whitelist**, so no filesystem path under ``DATA_DIR``, provider key or
+    internal blob can leak onto the page, and the achievements list is capped so
+    a large meet can't render a multi-megabyte block. Never raises: on any error
+    it returns a small, honest error document instead of breaking the review
+    page.
+    """
+    try:
+        data = data or {}
+        meet = data.get("meet") or {}
+        rr = data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        total = len(ranked)
+        shown = ranked[: max(0, int(max_achievements))]
+        achievements = []
+        for ra in shown:
+            ra = ra if isinstance(ra, dict) else {}
+            a = ra.get("achievement") or {}
+            achievements.append(
+                {
+                    "rank": ra.get("rank"),
+                    "type": a.get("type"),
+                    "swimmer": a.get("swimmer_name"),
+                    "event": a.get("event"),
+                    "time": a.get("time") or a.get("swim_time") or a.get("result_time"),
+                    "quality_band": ra.get("quality_band"),
+                    "confidence": a.get("confidence_label"),
+                    "suggested_post_type": ra.get("suggested_post_type"),
+                }
+            )
+        doc = {
+            "run_id": run_id,
+            "meet": {
+                "name": meet.get("name"),
+                "date": meet.get("date"),
+                "course": meet.get("course"),
+                "venue": meet.get("venue"),
+            },
+            "counts": {
+                "parsed_swims": data.get("parsed_swim_count"),
+                "club_swims": data.get("our_swim_count"),
+                "achievements": rr.get("n_achievements", total),
+            },
+            "achievements": achievements,
+            "parse_warnings": [str(w) for w in (data.get("parse_warnings") or [])][:50],
+        }
+        if total > len(shown):
+            doc["achievements_truncated"] = {"shown": len(shown), "total": total}
+        return json.dumps(doc, indent=2, ensure_ascii=False, default=str)
+    except Exception as exc:  # noqa: BLE001 — a preview must never 500 /review
+        return json.dumps(
+            {
+                "error": "could not assemble machine-readable view",
+                "detail": str(exc)[:200],
+            },
+            indent=2,
+        )
 
 
 def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
@@ -4214,6 +4288,93 @@ function generateReel(btn, reelUrl, fmt) {
     .catch(function(err) { fail('Network error: ' + err); });
 }
 
+// R1.15 - render every reel cut (story/portrait/square/landscape) in one
+// background pass, then offer a download per produced cut. Reuses any cut
+// already cached, so running this after a single-format render only renders
+// the cuts still missing. Polls the same job-status route as generateReel.
+function generateReelBatch(btn, reelUrl) {
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering all formats…';
+  var prog = MH.renderProgress(panel, {label: 'Producing every reel format', sub: 'Story, portrait, square & landscape — up to a few minutes the first time', expectedMs: 150000, accent: 'medal'});
+  var fail = function(msg) {
+    prog.stop();
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+  };
+  var success = function(videoUrls, failed) {
+    prog.complete(function(){
+      btn.disabled = false; btn.textContent = origLabel;
+      mhRenderReelBatch(panel, reelUrl, videoUrls, failed);
+    });
+  };
+  fetch(reelUrl + '-batch', {method:'POST'})
+    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+    .then(function(res) {
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+        return;
+      }
+      var tries = 0;
+      var poll = function() {
+        tries++;
+        if (tries > 120) { fail('timed out waiting for the render — try again'); return; }
+        fetch(res.body.poll_url)
+          .then(function(r){ return r.json(); })
+          .then(function(j) {
+            if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) { success(j.video_urls, j.formats_failed || {}); return; }
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {
+              fail(j.user_message || j.error || 'render failed'); return;
+            }
+            setTimeout(poll, 3000);
+          })
+          .catch(function() { setTimeout(poll, 3000); });
+      };
+      setTimeout(poll, 3000);
+    })
+    .catch(function(err) { fail('Network error: ' + err); });
+}
+
+// R1.15 - the finished multi-format panel: the story cut (or first produced)
+// as the scrubbable preview plus a labelled download for every cut, and an
+// honest note for any cut the active engine couldn't produce.
+function mhRenderReelBatch(panel, reelUrl, videoUrls, failed) {
+  var order = ['story', 'portrait', 'square', 'landscape'];
+  var primary = videoUrls.story || '';
+  if (!primary) { for (var i = 0; i < order.length; i++) { if (videoUrls[order[i]]) { primary = videoUrls[order[i]]; break; } } }
+  var dl = '';
+  order.forEach(function(f) {
+    if (videoUrls[f]) {
+      dl += '<a class="btn secondary" href="' + videoUrls[f] + '" download="meet-reel-' + f + '.mp4" style="font-size:12px;padding:4px 12px">' +
+        f.charAt(0).toUpperCase() + f.slice(1) + ' &middot; ' + (_MOTION_FMT_DIMS[f] || '') + '</a>';
+    }
+  });
+  var failNote = '';
+  var failedKeys = failed ? Object.keys(failed) : [];
+  if (failedKeys.length) {
+    var names = failedKeys.map(function(f){ return f.charAt(0).toUpperCase() + f.slice(1); }).join(', ');
+    failNote = '<div style="font-size:12px;color:var(--ink-muted);margin-top:8px">Not produced by the active render engine: ' + names + '. Switch to the Remotion engine for those cuts.</div>';
+  }
+  panel.innerHTML =
+    '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="flex:0 0 min(240px,100%);max-width:260px">' +
+        (primary ? '<video class="mh-reel-video" src="' + primary + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"></video>' : '') +
+      '</div>' +
+      '<div style="flex:1;min-width:min(240px,100%)">' +
+        '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; every format</div>' +
+        '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">All cuts rendered in one pass from the same ranked moments — download the size each channel wants.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' + dl + '</div>' +
+        failNote +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:14px"></div>';
+  var mount = panel.querySelector('.mh-reel-comments');
+  if (mount) mhReelComments({mount: mount, video: panel.querySelector('video.mh-reel-video'), baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
 // UI 1.8 - render the finished reel panel (video + format chips + download)
 // plus the Frame.io-style timestamp comment surface beneath it. Used by both
 // generateReel's success path and the on-load restore of a cached reel.
@@ -4230,6 +4391,7 @@ function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
         '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' + _attrEsc('generateReelBatch(this, ' + JSON.stringify(reelUrl) + ')') + '>Render all formats</button>' +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -10115,6 +10277,7 @@ def _layout(
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
+    <a href="{{ url_for('design_studio') }}" class="{{ 'active' if active=='studio' else '' }}">Studio</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
@@ -17396,7 +17559,7 @@ def create_app() -> Flask:
             )
 
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
@@ -17693,6 +17856,17 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
       <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
       <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+    <!-- UI2.8 — Codeblock raw parsed-data view. The machine-readable JSON the
+         recognition engine produced, shown inline through the first-party
+         server-side highlighter (no CDN), syntax-coloured and copyable, so a
+         volunteer never has to leave the page or read an unstyled browser tab
+         to see exactly what the engine decided. Whitelisted fields only; the
+         block is server-rendered so it works with JavaScript disabled (only the
+         copy button is a progressive enhancement). -->
+    <div class="mh-machine-readable" id="mh-machine-readable" style="margin-top:var(--sp-4)">
+      <p class="muted" style="font-size:12px;margin:0 0 8px">The machine-readable data the recognition engine produced for this run &mdash; meet context, the parsed and club-matched swim counts and the ranked achievements, in the same JSON shape the export and the downstream content steps consume. Read-only; copy it straight from here.</p>
+      {_code_hl.code_block(_machine_readable_run(data, run_id), "json", label="Recognition data")}
     </div>
   </details>
 </div>
@@ -19804,6 +19978,53 @@ Relay team broke club record"></textarea>
                     '<p class="dim" style="margin-top:var(--sp-3)">The matching '
                     "<code>POST /api/runs/{run_id}/card/{card_id}/motion</code> route renders a "
                     "single story card with the same <code>format</code> options.</p>"
+                ),
+            ),
+            _endpoint(
+                "POST",
+                "/api/runs/{run_id}/reel-batch",
+                "run-reel-batch",
+                "Render <em>every</em> reel format in one pass &mdash; story, portrait, square "
+                "and landscape &mdash; from a single shaping of the cards, reusing any cut already "
+                "cached. Always asynchronous (four cold renders run several minutes): returns "
+                "<code>202</code> with a <code>job_id</code> and <code>poll_url</code>. Poll that "
+                "URL until <code>status</code> is <code>done</code>; the payload then carries "
+                "<code>video_urls</code> (a map of format &rarr; <code>reel-file</code> URL) and "
+                "<code>formats_failed</code> (the honest reason for any cut the active engine "
+                "could not produce). Stream each cut from its <code>video_urls</code> entry.",
+                params=[
+                    (
+                        "n",
+                        "no",
+                        "How many top cards to include &mdash; 1&ndash;5 (default 3).",
+                    ),
+                ],
+                curl='curl -X POST "__BASE__/api/runs/run_8f2c1a/reel-batch?n=3"\n',
+                python=(
+                    "import requests, time\n\n"
+                    "job = requests.post(\n"
+                    '    "__BASE__/api/runs/run_8f2c1a/reel-batch", params={"n": 3}\n'
+                    ").json()\n"
+                    'poll = "__BASE__" + job["poll_url"]\n'
+                    "while requests.get(poll).json()['status'] == 'running':\n"
+                    "    time.sleep(3)\n"
+                    'urls = requests.get(poll).json().get("video_urls", {})\n'
+                    "for fmt, url in urls.items():\n"
+                    '    print(fmt, "__BASE__" + url)\n'
+                ),
+                js=(
+                    "const job = await fetch(\n"
+                    '  "__BASE__/api/runs/run_8f2c1a/reel-batch?n=3",\n'
+                    '  { method: "POST", credentials: "include" },\n'
+                    ").then((r) => r.json());\n"
+                    "// poll job.poll_url until status === 'done', then read video_urls\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "ok": true,\n'
+                    '  "job_id": "9f2c1a…",\n'
+                    '  "poll_url": "/api/reel-jobs/9f2c1a…"\n'
+                    "}\n"
                 ),
             ),
         ]
@@ -24334,6 +24555,126 @@ function mhPlanGenerate(btn) {{
             active_category=active,
         )
         return _layout("Templates", body, active="templates")
+
+    # ---- /studio &mdash; G1.27 interactive brief/design editor ---------------
+    @app.route("/studio")
+    def design_studio():
+        # The interactive design editor: tweak text layers, palette, archetype
+        # and style pack and watch the card re-render live on the *real* engine
+        # (creative_brief → graphic_renderer.render_brief), distinct from the
+        # browse-only /templates gallery. All page logic lives in the Flask-free
+        # ``design_editor`` helper so it unit-tests without a request; the route
+        # only resolves url_for() links + the active org's palette and wraps the
+        # body with _layout.
+        from mediahub.web import design_editor as _studio
+
+        # Seed the colour controls from the signed-in org's brand kit when
+        # available; the helper re-validates every value, so a missing/odd
+        # colour falls back to the neutral default.
+        seed_palette = None
+        try:
+            _prof = _active_profile()
+            if _prof is not None:
+                _bk = _prof.get_brand_kit()
+                seed_palette = {
+                    "primary": getattr(_bk, "primary_colour", "") or "",
+                    "secondary": getattr(_bk, "secondary_colour", "") or "",
+                    "accent": getattr(_bk, "accent_colour", "") or "",
+                }
+        except Exception:
+            seed_palette = None
+
+        body = _studio.render_editor_body(
+            render_url=url_for("api_studio_render"),
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            palette=seed_palette,
+        )
+        return _layout("Studio", body, active="studio")
+
+    @app.route("/api/studio/render", methods=["POST"])
+    def api_studio_render():
+        # Render one studio brief to a PNG and return it as a base64 data URI
+        # plus its explainability sidecar (resolved --mh-* roles, pack why,
+        # archetype signature, honest legibility/taste notices). JSON-bodied, so
+        # it is CSRF-exempt by content-type. No tenant data is read or written —
+        # the brief is built entirely from the (coerced, renderer-safe) request.
+        import base64 as _b64
+        import tempfile as _tempfile
+        import time as _time
+
+        from mediahub.web import design_editor as _studio
+
+        payload = request.get_json(silent=True)
+        params = _studio.coerce_params(payload if isinstance(payload, dict) else {})
+
+        sig = params.signature()
+        cached = _studio_render_cache.get(sig)
+        if cached is not None:
+            return jsonify(cached)
+
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+        except Exception:  # pragma: no cover - renderer module import failure
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "renderer_unavailable",
+                        "message": "The graphics renderer is unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+
+        brief = _studio.build_brief_from_params(params)
+        brand_kit = _studio.brand_kit_for_params(params)
+        t0 = _time.time()
+        try:
+            with _tempfile.TemporaryDirectory() as _d:
+                result = render_brief(
+                    brief,
+                    output_dir=_d,
+                    size=params.size,
+                    format_name=params.format_id,
+                    brand_kit=brand_kit,
+                )
+                png_bytes = Path(result.visual.file_path).read_bytes()
+        except RuntimeError as exc:
+            # Playwright/Chromium not installed — surface an honest error rather
+            # than ever fabricating a preview image (CLAUDE.md honest-error rule).
+            log.warning("studio render unavailable: %s", exc)
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_unavailable",
+                        "message": "Live rendering is temporarily unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+        except Exception:
+            log.exception("studio render failed")
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_failed",
+                        "message": "Could not render this design — try a different combination.",
+                    }
+                ),
+                500,
+            )
+
+        out = {
+            "ok": True,
+            "image": "data:image/png;base64," + _b64.b64encode(png_bytes).decode("ascii"),
+            "meta": _studio.explain(params),
+            "render_ms": int((_time.time() - t0) * 1000),
+        }
+        _studio_render_cache[sig] = out
+        return jsonify(out)
 
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
@@ -33251,10 +33592,14 @@ function mhSetupMode(mode) {{
 <div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
     <div style="font-size:13px;font-weight:700">Meet reel</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a branded MP4 reel — one format, or every cut in a single pass.</div>
   </div>
-  <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-          onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
+            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+    <button class="btn secondary" style="font-size:12px;padding:6px 14px"
+            onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
+  </div>
 </div>
 <div id="reel-panel" class="no-print" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
 
@@ -38624,11 +38969,144 @@ voice, and queues them for one-click approval.</p>
             202,
         )
 
+    @app.route("/api/runs/<run_id>/reel-batch", methods=["POST"])
+    def api_run_reel_batch(run_id: str):
+        """Render + cache every reel format in one pass (R1.15); returns
+        ``{job_id, poll_url}``.
+
+        The single ``/reel`` / ``/reel-job`` routes produce one cut per
+        request. This kicks off one background job that shapes the cards once
+        and renders all four cuts (story / portrait / square / landscape),
+        reusing any cut already in the motion cache so only the missing ones
+        cost a render. Always async — four cold renders run several minutes —
+        and the finished cuts stream from the existing ``reel-file`` route per
+        format. Poll ``api_reel_job_status``: on ``done`` it carries
+        ``video_urls`` (one per produced cut) and ``formats_failed`` (the
+        honest reason for any cut the active engine couldn't produce — e.g.
+        the ffmpeg fallback's non-story cuts).
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_reel_inputs(run_id)
+        if err is not None:
+            return err
+
+        n = inputs["n"]
+        out_dir = Path(inputs["out_path"]).parent
+        base_name = f"reel_{n}"
+        # url_for needs the request context — resolve every cut's file URL now,
+        # before the worker thread (which has none).
+        file_urls = {
+            fmt: url_for("api_run_reel_file", run_id=run_id, n=n, format=fmt)
+            for fmt in _motion.MOTION_FORMATS
+        }
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "reel-batch",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "video_urls": {},
+            "formats_failed": {},
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                # Per-cut render slot: a multi-minute batch on a single-slot box
+                # yields the render gate between cuts instead of hogging it for
+                # the whole run, so a foreground single render can interleave.
+                result = _motion.render_meet_reel_all_formats(
+                    inputs["cards"],
+                    inputs["brand_kit"],
+                    out_dir,
+                    meet_name=inputs["meet_name"],
+                    briefs=inputs["briefs"],
+                    base_name=base_name,
+                    render_slot=lambda fmt: _render_slot(
+                        "reel", f"{run_id}:{fmt}", timeout=_RENDER_QUEUE_TIMEOUT
+                    ),
+                )
+                rendered = result.get("rendered") or {}
+                errors = result.get("errors") or {}
+                if not rendered:
+                    # Not one cut produced — surface an honest reason rather
+                    # than reporting a successful job with no video.
+                    reason = next(iter(errors.values()), "no reel formats could be rendered")
+                    raise RuntimeError(reason)
+                video_urls = {fmt: file_urls[fmt] for fmt in rendered if fmt in file_urls}
+                job["status"] = "done"
+                job["video_urls"] = video_urls
+                # Keep the legacy single field on the story cut (or the first
+                # produced) so a single-format poller still gets a video_url.
+                job["video_url"] = video_urls.get("story") or next(iter(video_urls.values()), "")
+                job["formats_failed"] = dict(errors)
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel (all formats)"
+                    )
+                except Exception:
+                    pass
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel batch render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"reelbatch-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
     @app.route("/api/reel-jobs/<job_id>", methods=["GET"])
     def api_reel_job_status(job_id: str):
-        """Progress + outcome for a background reel job (same gating as variants)."""
+        """Progress + outcome for a background reel job (same gating as variants).
+
+        Serves both the single-format ``reel`` job and the multi-format
+        ``reel-batch`` job (R1.15). For a batch, ``video_urls`` maps each
+        produced cut to its ``reel-file`` URL and ``formats_failed`` carries
+        the honest reason for any cut the active engine couldn't produce;
+        ``video_url`` stays populated (the story cut) so single-format
+        pollers keep working unchanged.
+        """
         job = _variant_job_load(job_id)
-        if job is None or job.get("kind") != "reel":
+        if job is None or job.get("kind") not in ("reel", "reel-batch"):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
             return jsonify({"error": "job_not_found"}), 404
@@ -38645,6 +39123,8 @@ voice, and queues them for one-click approval.</p>
                 "job_id": job_id,
                 "status": status,
                 "video_url": job.get("video_url") or "",
+                "video_urls": job.get("video_urls") or {},
+                "formats_failed": job.get("formats_failed") or {},
                 "error": error,
                 "user_message": job.get("user_message") or "",
             }

@@ -86,7 +86,7 @@ def test_llm_with_nothing_configured_errors_honestly(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TTS — the piper slot (implementation ships with P5.2)
+# TTS — the piper slot (zero-cost local backend implemented in R1.21)
 # ---------------------------------------------------------------------------
 
 

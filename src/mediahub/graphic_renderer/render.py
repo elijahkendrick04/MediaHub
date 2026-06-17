@@ -2872,6 +2872,19 @@ def _fit_one_line_px(
     return max(min_px, min(max_px, px))
 
 
+# v2 hero archetypes whose surname / result sits in ONE dominant autofit slot
+# that is tall enough to carry a balanced second line. For these, a compound
+# surname or a split-time result is wrapped + balanced (G1.12) instead of forced
+# onto a single shrinking line; every other archetype keeps the single-line fit.
+# (Surname slots: mega_surname_bleed/minimal_type_poster use the mega-name box,
+# split_diagonal_hero uses the surname box. Result slots: the two big-numeral
+# archetypes use the mega-result box.)
+_MULTILINE_SURNAME_ARCHETYPES = frozenset(
+    {"mega_surname_bleed", "minimal_type_poster", "split_diagonal_hero"}
+)
+_MULTILINE_RESULT_ARCHETYPES = frozenset({"big_number_dominant", "cornerstone_numeral"})
+
+
 def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     """Map the club's CANONICAL brand colours to the v2 ``--mh-*`` role tokens.
 
@@ -3188,6 +3201,59 @@ def _fill_v2_archetype(
         min_px=_nmin,
         max_px=_nmax,
     )
+    # G1.12 — Multi-line hero & split-result fitting. The archetypes below carry
+    # the surname / result in ONE dominant autofit slot. When a compound or
+    # double-barrelled surname, or a split-time result ("1:45.23 / 50.12"), will
+    # not fit one line at the slot's cap, balance it across two lines (break at
+    # spaces/hyphens for names, at the slash for splits) and size to the wider
+    # line — so the hero stays large instead of shrinking to a thin strip. A
+    # value that already fits one line keeps that line at the identical size and
+    # text, so every common single-line card is byte-identical to before. The
+    # balanced fit reuses the SAME (format-aware) box the single-line fit used,
+    # so the wrapped block lands in the footprint the layout already reserved.
+    from mediahub.graphic_renderer.autofit import fit_balanced
+
+    archetype = getattr(brief, "layout_template", "") or ""
+    if surname and archetype in _MULTILINE_SURNAME_ARCHETYPES:
+        if archetype == "split_diagonal_hero":
+            var = "--mh-fit-surname-px"
+            _bw, _bh, _bmin, _bmax = _boxes["surname"]
+        else:  # mega_surname_bleed / minimal_type_poster — the mega-name slot
+            var = "--mh-fit-mega-name-px"
+            _bw, _bh, _bmin, _bmax = _boxes["mega_name"]
+        size, lines = fit_balanced(
+            surname,
+            width * _bw,
+            height * _bh,
+            max_lines=2,
+            font_family="Anton",
+            weight=400,
+            min_px=_bmin,
+            max_px=_bmax,
+            line_height=1.0,
+            mode="name",
+        )
+        if len(lines) > 1:
+            root_vars[var] = "%dpx" % size
+            repl["ATHLETE_SURNAME_DISPLAY"] = "<br>".join(html_escape(ln) for ln in lines)
+    if result and "/" in result and archetype in _MULTILINE_RESULT_ARCHETYPES:
+        _grw, _grh, _grmin, _grmax = _boxes["mega_result"]
+        size, lines = fit_balanced(
+            result,
+            width * _grw,
+            height * _grh,
+            max_lines=2,
+            font_family="JetBrains Mono",
+            weight=700,
+            min_px=_grmin,
+            max_px=_grmax,
+            line_height=1.0,
+            mode="split",
+        )
+        if len(lines) > 1:
+            root_vars["--mh-fit-mega-result-px"] = "%dpx" % size
+            repl["RESULT_VALUE"] = "<br>".join(html_escape(ln) for ln in lines)
+
     # G1.9 — per-slot variable-font axis optimisation for the result numerals.
     # The result slots are JetBrains Mono, which carries a genuine weight axis;
     # ``optimise_axes`` returns a non-empty ``css`` ONLY when the fitted px has
@@ -3196,6 +3262,8 @@ def _fill_v2_archetype(
     # the slot already fits, ``css`` is "" and the var is omitted, so the layout
     # falls back to ``normal`` and renders byte-identically to before. The
     # surname slots are Anton (a static face, no axes), so they are not tuned.
+    # Runs AFTER the G1.12 balancer: a split result it spread onto two lines
+    # already fits, so the mega numeral is left untraded (guarded below).
     from mediahub.graphic_renderer.autofit import optimise_axes as _optimise_axes
 
     result_axes = _optimise_axes(
@@ -3207,15 +3275,16 @@ def _fill_v2_archetype(
     )
     if result_axes.css:
         root_vars["--mh-axes-result"] = result_axes.css
-    mega_result_axes = _optimise_axes(
-        result or "",
-        width * _mw,
-        font_family="JetBrains Mono",
-        weight=700,
-        fitted_px=fit_mega_result_px,
-    )
-    if mega_result_axes.css:
-        root_vars["--mh-axes-mega-result"] = mega_result_axes.css
+    if "<br>" not in (repl.get("RESULT_VALUE") or ""):
+        mega_result_axes = _optimise_axes(
+            result or "",
+            width * _mw,
+            font_family="JetBrains Mono",
+            weight=700,
+            fitted_px=fit_mega_result_px,
+        )
+        if mega_result_axes.css:
+            root_vars["--mh-axes-mega-result"] = mega_result_axes.css
     root_vars["--mh-photo-pos"] = _sanitise_photo_pos(photo_pos_override) or _v2_photo_position(
         athlete_path
     )

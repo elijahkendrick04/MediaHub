@@ -17,8 +17,9 @@ reels. There are two ways it can do that, picked by `MEDIAHUB_REEL_ENGINE`:
   otherwise) and one quiet, consistent cut everywhere else. Nothing about it
   costs money: no Node, no Remotion, no license. A reel is the meet-name cover
   plus one beat per top card, exactly the same length the Remotion reel would
-  be. (It renders the story size only; square and landscape cuts need the
-  Remotion engine and say so honestly.)
+  be. It renders all four sizes too — story (default), portrait, square and
+  landscape — by drawing the still at the chosen shape and keeping the camera
+  motion at that size.
 
 `motion.py` makes the video match the approved still card exactly: it resolves
 the same colour roles the still painted (medal tints included), reuses the
@@ -63,10 +64,15 @@ clear error) instead of using a fake robot voice. Audio is only made for a card 
 human has **approved**.
 
 Which voice engine speaks is picked by `MEDIAHUB_TTS_PROVIDER`: `edge` (the
-default, streams from a Microsoft endpoint) or `piper` — the reserved **local**
-slot, so no cloud service is ever *required* by this interface. Piper's actual
-implementation arrives with roadmap P5.2; until then choosing it returns an
-honest error.
+default, streams from a Microsoft endpoint) or `piper` — the **zero-cost,
+fully-offline local** backend, so no cloud service is ever *required* by this
+interface. For Piper the operator points `MEDIAHUB_PIPER_MODEL` at a Piper
+`.onnx` voice file (or sets `MEDIAHUB_PIPER_VOICE` + `MEDIAHUB_PIPER_VOICE_DIR`);
+MediaHub loads it with the `piper-tts` package, synthesises the audio on the
+box, and transcodes it to the same MP3 the rest of the pipeline uses. If the
+package or the model file is missing it returns an honest error — never a fake
+robot voice. (Piper has no word-level timestamps, so its subtitle *timings* are
+a deterministic estimate; the spoken words are still the verbatim caption.)
 
 ## narration.py + audio_mux.py — sound on the videos (off by default)
 
@@ -113,3 +119,26 @@ top of `MEDIAHUB_VOICEOVER=1` (captions ride on the narration). With it off,
 nothing changes — the renders are byte-identical. (The still+FFmpeg fallback
 burns captions on the **story** cut only; reel captions there are a known gap —
 the Remotion engine captions reels too.)
+
+## motion_regression.py — the frame-by-frame "did the video still look right?" check
+
+The MP4 path proves two different cards make two *different* videos, but it
+can't tell you a code change quietly *broke* a scene (wrong colour, a layer
+that stopped painting, a transition that collapsed). `motion_regression.py` is
+that safety net — the motion twin of `autotest/visual_regression.py`, which does
+the same for the still web surfaces.
+
+How it works: it renders a small, fixed set of **reference frames** from the
+real StoryCard / MeetReel compositions (via `remotion/render_frame.js`, which
+asks Remotion for single still frames as PNGs) and **pixel-diffs** each one
+against a committed "this is what it should look like" picture under
+`tests/baseline/motion_frames/`. A frame that drifts more than a small tolerance
+(to ignore sub-pixel fuzz) is a regression; a frame with no baseline yet is an
+honest *skip*, never a made-up failure. The baselines are only ever written on
+purpose by a person — the check never rewrites its own answer key.
+
+Run it by hand with `python scripts/motion_vr.py` (`list` / `capture` /
+`check`). The logic is covered everywhere by `tests/test_motion_regression.py`;
+the heavier real-render diffs are opt-in via `MEDIAHUB_MOTION_VR=1` so the
+everyday test run stays fast. In CI the diff runs as its own workflow
+(`.github/workflows/motion-visual-regression.yml`) whenever motion code changes.
