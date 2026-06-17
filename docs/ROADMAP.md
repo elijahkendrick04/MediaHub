@@ -79,7 +79,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `d84a0db85` · Merge pull request #772 from elijahkendrick04/claude/sharp-ramanujan-7ltbfp
+**Last updated:** 2026-06-17 · `f9b216fe4` · Merge pull request #774 from elijahkendrick04/claude/wizardly-hopper-wjwvdl
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1318,6 +1318,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `cbe5dd7b5` | Auto-maintain the whole roadmap, not just the to-do list |
 | 2026-06-17 | `7c5148927` | Make the developer "Clear all caches" button fully clear disk + memory |
 | 2026-06-17 | `9603e8877` | Fix sitewide FPS: stop animating non-compositable paint properties |
 | 2026-06-17 | `27968b58d` | autotest: stop the fixer rewriting the golden oracle and opening no-op PRs |
@@ -1325,5 +1326,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `a71353d0d` | Re-trigger CI |
 | 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
 | 2026-06-17 | `c3c846f0c` | Fix pre-existing CI red: ffmpeg reel engine now renders all formats (R1.16) |
-| 2026-06-17 | `96d200249` | fix: make font_intake.subset_to_woff2 truly deterministic (pin head.modified) |
 <!-- /ROADMAP:ACTIVITY -->
