@@ -1,0 +1,98 @@
+# Motion visual-regression — the frame-by-frame pixel-diff in CI (roadmap R1.27).
+#
+# Renders a fixed set of reference frames from the real StoryCard / MeetReel
+# Remotion compositions and pixel-diffs each one against the committed baselines
+# under tests/baseline/motion_frames/. A composition change that alters the look
+# of a card or reel turns this red; a benign change leaves it green.
+#
+# WHY ITS OWN WORKFLOW (and not part of unit-suite.yml): the diff needs the full
+# Node + Remotion + headless-Chrome toolchain, which the lightweight unit suite
+# deliberately doesn't install (there the harness's pure-Python logic tests run
+# and the real-render layer self-skips). This job carries that toolchain and runs
+# only when motion-affecting files change — so the expensive render happens
+# exactly when the pixels might have moved.
+#
+# NOT a required check (yet). Remotion is pinned only to ^4.0.0 and its
+# package-lock isn't committed, so a CI `npm install` can resolve a newer patch
+# that pins a different headless-Chrome build; the per-channel + ratio tolerances
+# absorb sub-pixel AA, but a genuine Chrome bump can still shift enough to redden
+# this. Treat a red as "look at the diff": a real regression → fix it; expected
+# churn (or a Chrome bump) → re-capture with `python scripts/motion_vr.py capture`
+# and commit the reviewed baselines. Promote to a required check via branch
+# protection once the toolchain is pinned.
+
+name: Motion visual-regression
+
+on:
+  pull_request:
+    paths:
+      - "src/mediahub/remotion/**"
+      - "src/mediahub/visual/motion.py"
+      - "src/mediahub/visual/motion_regression.py"
+      - "tests/baseline/motion_frames/**"
+      - "scripts/motion_vr.py"
+      - ".github/workflows/motion-visual-regression.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "src/mediahub/remotion/**"
+      - "src/mediahub/visual/motion.py"
+      - "src/mediahub/visual/motion_regression.py"
+      - "tests/baseline/motion_frames/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: motion-vr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pixel-diff:
+    name: Render reference frames + pixel-diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/mediahub/remotion/package.json
+
+      - name: Install Pillow (the only runtime dep the diff needs)
+        run: |
+          python -m pip install --upgrade pip
+          pip install pillow
+
+      - name: Install Remotion (Node side of the harness)
+        working-directory: src/mediahub/remotion
+        run: npm install --no-audit --no-fund
+
+      - name: Render reference frames and pixel-diff against committed baselines
+        env:
+          # The baselines are byte-reproducible on a pinned Remotion (it pins its
+          # own headless-Chrome; fonts are self-hosted; no RNG/clock). CI resolves
+          # Remotion via `npm install` (^4.0.0, no committed lock), so a patch bump
+          # can shift sub-pixel rasterisation a touch — give the cross-env check a
+          # wider margin than the local default (2%) while still tripping on a real
+          # scene break (a wrong fill / dropped layer / collapsed transition moves
+          # well into double digits).
+          MEDIAHUB_MOTION_VR_MAX_DIFF: "0.04"
+        run: python scripts/motion_vr.py check --write-diffs --out motion_vr_out
+
+      - name: Upload rendered frames + diff heatmaps on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: motion-vr-frames
+          path: motion_vr_out/
+          if-no-files-found: warn
+          retention-days: 14
