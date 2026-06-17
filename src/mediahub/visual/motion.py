@@ -738,6 +738,36 @@ def _audio_record_path(cached: Path) -> Path:
     return Path(cached).with_suffix(".audio.json")
 
 
+def _ensure_poster_sidecar(cached: Path, *, kind: str, duration_sec: float) -> str:
+    """Guarantee a poster-frame PNG beside ``cached``; report where it came from.
+
+    R1.29: the poster is normally captured *in-render* by ``remotion/render.js``
+    — a Remotion ``renderStill`` that waits on the fonts ``delayRender`` hook, so
+    the thumbnail is a frame-exact, real-font PNG straight from Chromium (no
+    H.264 round-trip, no keyframe-seek approximation). When that sidecar is
+    present and non-empty we keep it and **skip the post-hoc ffmpeg frame grab
+    entirely** — the R1.29 win. We fall back to the ffmpeg extraction only when
+    the in-render poster is absent or empty: the free ffmpeg reel engine (which
+    never runs ``render.js``), a ``render.js`` poster-capture failure, or a video
+    cached before R1.29 being re-finished on a cache hit.
+
+    Returns the provenance for the explainability manifest — ``"in-render"`` /
+    ``"ffmpeg"`` / ``""`` (no poster could be written). Never raises.
+    """
+    from mediahub.visual import audio_mux
+
+    poster = audio_mux.poster_path_for(cached)
+    try:
+        if poster.exists() and poster.stat().st_size > 0:
+            return "in-render"
+    except OSError:
+        pass
+    ok = audio_mux.write_poster(
+        cached, poster, at_sec=audio_mux.poster_time_for(kind, duration_sec)
+    )
+    return "ffmpeg" if ok else ""
+
+
 def _finish_cached_video(
     cached: Path, *, kind: str, plan, duration_sec: float, n_cards: int = 0
 ) -> dict:
@@ -748,6 +778,12 @@ def _finish_cached_video(
 
     ``n_cards`` (reels only) yields the card-cut beat grid the music accents
     align to; stories have no internal cuts and leave it at 0.
+
+    R1.29: the poster is normally captured *in-render* by ``render.js`` (a
+    Remotion ``renderStill`` that honours the fonts ``delayRender`` hook), so the
+    common path skips the ffmpeg/ffprobe extraction entirely — see
+    :func:`_ensure_poster_sidecar`, which falls back to the ffmpeg frame grab
+    only when that in-render poster is absent or empty.
     """
     try:
         from mediahub.visual import audio_mux
@@ -776,11 +812,7 @@ def _finish_cached_video(
                     pass
         else:
             audio_rec = {"status": "off"}
-        poster = audio_mux.poster_path_for(cached)
-        if not poster.exists():
-            audio_mux.write_poster(
-                cached, poster, at_sec=audio_mux.poster_time_for(kind, duration_sec)
-            )
+        _ensure_poster_sidecar(cached, kind=kind, duration_sec=duration_sec)
         return audio_rec
     except Exception as e:
         return {"status": "silent_fallback", "reason": str(e)}
