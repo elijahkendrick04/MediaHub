@@ -2606,7 +2606,7 @@ def _fill_v2_archetype(
         min_px=44,
         max_px=132,
     )
-    root_vars["--mh-fit-result-px"] = "%dpx" % _fit_one_line_px(
+    fit_result_px = _fit_one_line_px(
         result or "X",
         width * 0.52,
         height * 0.12,
@@ -2615,9 +2615,10 @@ def _fill_v2_archetype(
         min_px=40,
         max_px=104,
     )
+    root_vars["--mh-fit-result-px"] = "%dpx" % fit_result_px
     # "Mega" sizes for archetypes where the numeral or the name is THE hero
     # (big_number_dominant, minimal_type_poster) — fit to almost the full width.
-    root_vars["--mh-fit-mega-result-px"] = "%dpx" % _fit_one_line_px(
+    fit_mega_result_px = _fit_one_line_px(
         result or "X",
         width * 0.92,
         height * 0.34,
@@ -2626,6 +2627,7 @@ def _fill_v2_archetype(
         min_px=72,
         max_px=300,
     )
+    root_vars["--mh-fit-mega-result-px"] = "%dpx" % fit_mega_result_px
     root_vars["--mh-fit-mega-name-px"] = "%dpx" % _fit_one_line_px(
         surname or "X",
         width * 0.92,
@@ -2635,6 +2637,28 @@ def _fill_v2_archetype(
         min_px=64,
         max_px=220,
     )
+    # G1.9 — per-slot variable-font axis optimisation for the result numerals.
+    # The result slots are JetBrains Mono, which carries a genuine weight axis;
+    # ``optimise_axes`` returns a non-empty ``css`` ONLY when the fitted px has
+    # bottomed out and the line still overflows, in which case it trades the
+    # weight down to recover the last sliver of width instead of clipping. When
+    # the slot already fits, ``css`` is "" and the var is omitted, so the layout
+    # falls back to ``normal`` and renders byte-identically to before. The
+    # surname slots are Anton (a static face, no axes), so they are not tuned.
+    from mediahub.graphic_renderer.autofit import optimise_axes as _optimise_axes
+
+    result_axes = _optimise_axes(
+        result or "", width * 0.52, font_family="JetBrains Mono",
+        weight=700, fitted_px=fit_result_px,
+    )
+    if result_axes.css:
+        root_vars["--mh-axes-result"] = result_axes.css
+    mega_result_axes = _optimise_axes(
+        result or "", width * 0.92, font_family="JetBrains Mono",
+        weight=700, fitted_px=fit_mega_result_px,
+    )
+    if mega_result_axes.css:
+        root_vars["--mh-axes-mega-result"] = mega_result_axes.css
     root_vars["--mh-photo-pos"] = _sanitise_photo_pos(photo_pos_override) or _v2_photo_position(
         athlete_path
     )
