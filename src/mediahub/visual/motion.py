@@ -567,7 +567,25 @@ def _card_manifest_axes(card_props: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _story_audio_plan(card_props: dict, brand_dict: dict):
+def _card_mix_profile(card: Any, brief: Optional[dict] = None) -> Optional[str]:
+    """The per-card audio-mix profile a card (or its brief) names, else None.
+
+    Read straight from the payload — the mix balance (voice_lead / balanced /
+    music_forward) is a deterministic production knob, not a creative AI
+    judgement, so it is never inferred by a model. ``audio_mux`` validates the
+    string; ``None`` lets the operator env default
+    (``MEDIAHUB_REEL_MIX_PROFILE``) and then ``balanced`` decide. A card field
+    wins over the brief's.
+    """
+    for src in (card, brief):
+        if isinstance(src, dict):
+            val = src.get("audio_mix_profile") or src.get("audioMixProfile")
+            if val:
+                return str(val)
+    return None
+
+
+def _story_audio_plan(card_props: dict, brand_dict: dict, *, mix_profile: Optional[str] = None):
     """The audio plan for one story render, or None for today's silent path.
 
     Built from the same props the composition displays (zero invention; see
@@ -575,6 +593,9 @@ def _story_audio_plan(card_props: dict, brand_dict: dict):
     also keeps the cache payload, and therefore every existing cache key,
     byte-identical to the pre-audio behaviour. The story line is one
     sentence; the mux's trim-to-video-length is the overrun guarantee.
+
+    ``mix_profile`` is the per-card voice/music balance; it only changes the
+    cache key when it is not the default ``balanced`` (see audio_mux).
     """
     try:
         from mediahub.visual import audio_mux, narration
@@ -589,15 +610,25 @@ def _story_audio_plan(card_props: dict, brand_dict: dict):
             card_props.get("eventName") or "",
             card_props.get("resultValue") or "",
         )
-        return audio_mux.build_audio_plan(script=script, content_key=key)
+        return audio_mux.build_audio_plan(script=script, content_key=key, mix_profile=mix_profile)
     except Exception:
         return None
 
 
 def _reel_audio_plan(
-    cards_props: list[dict], brand_dict: dict, meet_name: str, *, duration_sec: float
+    cards_props: list[dict],
+    brand_dict: dict,
+    meet_name: str,
+    *,
+    duration_sec: float,
+    mix_profile: Optional[str] = None,
 ):
-    """The audio plan for a reel render, or None for today's silent path."""
+    """The audio plan for a reel render, or None for today's silent path.
+
+    ``mix_profile`` is the reel's voice/music balance (the headline card's
+    choice; see render_meet_reel) and only shifts the cache key off the
+    default when it is not ``balanced``.
+    """
     try:
         from mediahub.visual import audio_mux, narration
 
@@ -612,7 +643,7 @@ def _reel_audio_plan(
         key = "reel:{}:{}:{}".format(
             meet_name or "", len(cards_props), first.get("athleteFullName") or ""
         )
-        return audio_mux.build_audio_plan(script=script, content_key=key)
+        return audio_mux.build_audio_plan(script=script, content_key=key, mix_profile=mix_profile)
     except Exception:
         return None
 
@@ -953,7 +984,9 @@ def render_story_card(
         brief=brief,
         brand_kit=brand_kit,
     )
-    audio_plan = _story_audio_plan(card_dict, brand_dict)
+    audio_plan = _story_audio_plan(
+        card_dict, brand_dict, mix_profile=_card_mix_profile(card_payload, brief)
+    )
 
     # Burn-in captions (R1.3): only attach the prop when a track exists so the
     # captions-off path keeps the historic cache key byte-identical.
@@ -1093,11 +1126,11 @@ def _assemble_reel_props(
     renders.
 
     Embeds the cards' photos, resolves saliency + still-parity colour roles,
-    derives the data-driven duration, builds the audio plan, and bakes in the
-    R1.3 burn-in captions — none of which depend on the output pixel size.
-    Pulling it out lets ``render_meet_reel_all_formats`` do this once and reuse
-    it across every cut, instead of re-embedding photos and re-resolving roles
-    per format.
+    derives the data-driven duration, picks the reel's audio-mix profile
+    (R1.19), builds the audio plan, and bakes in the R1.3 burn-in captions —
+    none of which depend on the output pixel size. Pulling it out lets
+    ``render_meet_reel_all_formats`` do this once and reuse it across every
+    cut, instead of re-embedding photos and re-resolving roles per format.
 
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
     briefs_list)``.
@@ -1144,7 +1177,17 @@ def _assemble_reel_props(
     if duration_sec is None:
         duration_sec = reel_duration_for(len(cards_props))
 
-    audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
+    # One reel, one mix (R1.19): the headline (first card to name one) drives
+    # the voice/music balance; absent that, the operator env default decides.
+    reel_mix = None
+    for idx, c in enumerate(top_cards or []):
+        b = briefs_list[idx] if idx < len(briefs_list) else None
+        reel_mix = _card_mix_profile(c, b)
+        if reel_mix:
+            break
+    audio_plan = _reel_audio_plan(
+        cards_props, brand_dict, meet_name, duration_sec=duration_sec, mix_profile=reel_mix
+    )
 
     # Burn-in captions (R1.3): caption each beat from its own verified line when
     # the reel has a voice plan and the operator opted in. Only set when a track
@@ -1199,7 +1242,7 @@ def _render_reel_one_format(
     pre-multi-format render (same cards/brand/meet/duration/cta/audio, same
     size), so existing cached reels remain valid cache hits whether they were
     produced by the single route or the batch. Carries main's R1.28 parallel
-    path, R1.30 outro CTA, and R1.3 captions through unchanged.
+    path, R1.30 outro CTA, R1.19 audio-mix and R1.3 captions through unchanged.
     """
     size = motion_format_size(format_name)
     out_path = Path(out_path)
@@ -1413,8 +1456,8 @@ def render_meet_reel_all_formats(
     format-independent work) and then renders each cut from those shared props.
     Cuts already in the motion cache are reused, so a story reel rendered
     earlier by the single route is a cache hit here and only the missing cuts
-    cost a render. Each cut carries main's R1.28 parallel path, R1.30 outro CTA
-    and R1.3 captions identically to ``render_meet_reel``.
+    cost a render. Each cut carries main's R1.28 parallel path, R1.30 outro CTA,
+    R1.19 audio-mix and R1.3 captions identically to ``render_meet_reel``.
 
     Inputs mirror ``render_meet_reel`` plus:
       out_dir     directory the cuts are written into; each format's filename
