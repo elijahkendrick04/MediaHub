@@ -37,6 +37,7 @@ const defaultCard = {
   photoTreatment: "",
   photoSrc: "",
   photoPos: "",
+  cutoutSrc: "",
   archetype: "",
   heroStat: "",
   // A valid sample pack so the studio preview demonstrates the style-pack

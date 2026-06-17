@@ -282,6 +282,72 @@ def _photo_focus_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
+# Alpha cutouts are PNGs (heavier than the JPEG background photo) so the long
+# edge is capped a touch tighter to keep the inlined data URI reasonable.
+_CUTOUT_MAX_EDGE = 1100
+
+
+def _cutout_cache_dir() -> Path:
+    d = _cache_dir() / "cutouts"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """Resolve the brief's sourced photo into an alpha-cutout PNG data URI (R1.9).
+
+    The motion render's foreground cutout layer (``sprint/layers/cutout.tsx``)
+    composites the athlete with their background removed as a parallax
+    foreground plane. The cut is produced by the same configured background
+    remover the still renderer uses (``media_ai.providers.get_bg_remover``), so
+    motion and still isolate the subject identically. The result is cached as a
+    PNG under ``motion_cache/cutouts/`` keyed by the source photo's identity, so
+    the (~300 ms+) remover runs at most once per photo, then is downscaled and
+    inlined — Remotion's headless Chromium only sees what the props carry.
+
+    Honest by construction: only a *real* remover is used (``is_available()``),
+    never rembg's passthrough alpha, so the foreground plane is never a flat
+    rectangular photo masquerading as a cutout. Empty string on any miss (no
+    brief, ``no-photo`` treatment, asset gone, no usable remover, decode or
+    synthesis failure) — a missing or failed cutout must never fail a motion
+    render; the TSX layer simply no-ops.
+    """
+    src = _photo_asset_path_for_brief(brief)
+    if src is None:
+        return ""
+    try:
+        import io
+
+        from PIL import Image
+
+        # Cache the alpha cut keyed by the source's identity (path/mtime/size)
+        # so repeat renders of the same photo skip the remover entirely.
+        st = src.stat()
+        key = hashlib.sha256(
+            f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")
+        ).hexdigest()[:24]
+        cut_path = _cutout_cache_dir() / f"{key}.png"
+        if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+            from mediahub.media_ai.providers import get_bg_remover
+
+            remover = get_bg_remover()
+            # Only composite a genuine cut — a provider that can't actually
+            # remove the background would passthrough the whole rectangle.
+            if remover is None or not remover.is_available():
+                return ""
+            remover.remove(str(src), str(cut_path))
+        if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+            return ""
+        with Image.open(cut_path) as im:
+            im = im.convert("RGBA")
+            im.thumbnail((_CUTOUT_MAX_EDGE, _CUTOUT_MAX_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+
+
 def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
     """The exact colour roles the card's STILL graphic paints, for motion.
 
@@ -417,6 +483,10 @@ def _card_to_props(
         "photoTreatment": str(b.get("photo_treatment") or ""),
         "photoSrc": _photo_data_uri_for_brief(b),
         "photoPos": _photo_focus_for_brief(b),
+        # R1.9: the athlete cut out to alpha, composited by the cutout sprint
+        # layer as a parallax foreground plane. "" = no prepared cut (no photo
+        # or no usable remover) and the layer no-ops.
+        "cutoutSrc": _cutout_data_uri_for_brief(b),
         "archetype": str(b.get("layout_template") or ""),
         # The still's style pack id (graphic_renderer.style_packs): the motion
         # render layers the same ground/texture/accent-geometry overlay so a
@@ -485,6 +555,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         if card_props.get("roleGround")
         else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
+        "has_cutout": bool(card_props.get("cutoutSrc")),
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",
     }
