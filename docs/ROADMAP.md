@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `4562a5c39` · Merge pull request #709 from elijahkendrick04/claude/modest-brown-ya1sqz
+**Last updated:** 2026-06-17 · `f5504f7be` · Merge pull request #713 from elijahkendrick04/claude/jolly-bell-mlfo84
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -180,7 +180,6 @@ sequence it or merge with care.
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.10** · Graphic generator sprint — Club custom-font upload pipeline — security-sandboxed validation, subsetting, first-party self-hosting. *Build: new `typography/font_intake.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.12** · Graphic generator sprint — Multi-line hero & split-result fitting — wrap/balance compound surnames and split times (`1:45.23 / 50.12`). *Build: `autofit.py` (file-sibling G1.11) + v2 hero slots.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.14** · Graphic generator sprint — WebP/AVIF output + render quality profiles (fast/standard/high DPR). *Build: `render.py` `render_html_to_png` encode step (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1560,9 +1559,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `3a897d3c8` | Add club custom-font upload pipeline (G1.10) |
 | 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 | 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
 | 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
 | 2026-06-16 | `2b0691b5b` | Add subtitle/caption burn-in engine (R1.3) |
-| 2026-06-16 | `1abe2fd96` | G1.23: regenerate ENV_INVENTORY.md for the new render-pool env vars |
 <!-- /ROADMAP:ACTIVITY -->
