@@ -81,8 +81,15 @@ def _stub_finishing(monkeypatch, calls: list, *, outcomes: list | None = None):
     ``outcomes`` scripts each call's returned status (default: always mixed).
     """
 
-    def _apply(video, plan, *, duration_sec):
-        calls.append({"video": Path(video), "plan": plan, "duration": duration_sec})
+    def _apply(video, plan, *, duration_sec, cut_times=None):
+        calls.append(
+            {
+                "video": Path(video),
+                "plan": plan,
+                "duration": duration_sec,
+                "cut_times": cut_times,
+            }
+        )
         seq = outcomes or ["mixed"]
         status = seq[min(len(calls) - 1, len(seq) - 1)]
         if status == "mixed":
@@ -273,3 +280,33 @@ def test_reel_audio_plan_budgets_to_the_reel_duration(monkeypatch):
 
     assert "Audio Invitational" in plan["script"]
     assert estimate_seconds(plan["script"]) <= 15.0
+
+
+# ---------------------------------------------------------------------------
+# R1.20 — the reel's card-cut beat grid reaches the audio mux; stories don't
+# ---------------------------------------------------------------------------
+
+
+def test_reel_passes_the_beat_grid_to_the_mux(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _voice_on(monkeypatch)
+    calls: list = []
+    _stub_finishing(monkeypatch, calls)
+    cards = [_card(1), _card(2), _card(3)]
+    with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
+        motion.render_meet_reel(cards, BRAND, tmp_path / "out" / "reel.mp4")
+    assert len(calls) == 1
+    duration = motion.reel_duration_for(3)
+    assert calls[0]["cut_times"] == audio_mux.card_cut_times(duration, 3)
+    assert calls[0]["cut_times"], "a reel must carry card cuts for beat-aware accents"
+
+
+def test_story_passes_no_beat_grid(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _voice_on(monkeypatch)
+    calls: list = []
+    _stub_finishing(monkeypatch, calls)
+    with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
+        motion.render_story_card(_card(1), BRAND, tmp_path / "out" / "story.mp4")
+    assert len(calls) == 1
+    assert calls[0]["cut_times"] is None, "a single-scene story has no card cuts"

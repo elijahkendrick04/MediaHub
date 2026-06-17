@@ -87,6 +87,37 @@ If a new effect earns a name, add it here with its recipe so reels and
 story cards reuse it as one design system — that's what keeps a pack
 feeling art-directed instead of assembled.
 
+## Card-wide text-effect overlay (R1.11)
+
+The recipes above are per-element entrances you choreograph inside a scene. The
+**text-effect overlay** (`sprint/layers/text_fx.tsx`) is the complementary
+*card-wide* layer: it dresses every text node a scene already drew, without
+editing the scene, by injecting one scoped stylesheet rule that reaches the
+type through CSS inheritance (`text-shadow` is inherited; `filter` is set on the
+card root alone). It's chosen deterministically from the brief — expressive
+`mood` first, the still's `accentStyle` as the fallback — and the restraint
+moods (`neutral` / `minimal` / `stoic`) and brief-less callers resolve to
+*none*, so legacy motion is unchanged and only a directed card earns an effect.
+
+- **`glow`** — soft `roleAccent` halo (`text-shadow: 0 0 0.08em / 0.18em /
+  0.34em`, `em` so it scales per element). Fades in with the text's own opacity.
+  Moods: `electric`, `explosive`.
+- **`outline`** — a dark `roleGround` keyline (8-direction `em` `text-shadow`)
+  that *raises* legibility over busy photos and never hollows the fill (shadows
+  paint behind). Moods: `fierce`, `bold`; accent `stripe` / `frame`.
+- **`shadow3d`** (roadmap "3D-shadow") — stepped down-right extrude in
+  `roleGround`. Moods: `triumphant`, `celebratory`; accent `badge` / `ribbon`.
+- **`stroke_animate`** (roadmap "stroke-animate") — the keyline draws on:
+  width `0 → 0.026em` over ~0.5s, `Easing.out(Easing.cubic)`, then held. Mood:
+  `precise`; accent `underline` / `diagonal_underline`.
+- **`blur_to_focus`** (roadmap "blur-to-focus") — the whole card blooms:
+  `filter: blur(~15px → 0)` on the root over ~0.6s. The card-level cousin of
+  the per-element `blur-in` above. Moods: `calm`, `warm`.
+
+Like everything else here it's frame-pure (the rule is rebuilt each frame from
+`interpolate(frame, …)`, never a CSS `@keyframes`/`transition`) and brand-exact
+(colours only from the resolved roles).
+
 ## Count-up exactness (non-negotiable)
 
 `count_up` is a motion intent precisely because a swim time is the story.

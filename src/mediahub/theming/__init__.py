@@ -37,8 +37,14 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Optional, TypedDict
 
-from .palette import DerivedPalette, derive_palette
-from .roles import RoleScheme, ThemeRoles, derive_roles
+from .palette import DerivedPalette, derive_palette, derive_palette_multi
+from .roles import (
+    RoleScheme,
+    ThemeRoles,
+    derive_roles,
+    BrandRoleAssignment,
+    assign_brand_roles,
+)
 from .quality import PaletteQualityReport, audit_palette
 from .repair import repair_palette
 from .seed_extract import SeedResult, extract_seed
@@ -47,6 +53,7 @@ from .seed_extract import SeedResult, extract_seed
 __all__ = [
     "DerivedTheme",
     "derive_theme",
+    "derive_theme_multi",
     "extract_seed",
     "DerivedPalette",
     "RoleScheme",
@@ -54,6 +61,8 @@ __all__ = [
     "PaletteQualityReport",
     "SeedResult",
     "ThemeJSON",
+    "BrandRoleAssignment",
+    "assign_brand_roles",
 ]
 
 
@@ -177,6 +186,68 @@ def derive_theme(
     """
     seed_result = extract_seed(seed_or_source)
     palette = derive_palette(seed_result.hex)
+    return _assemble_theme(
+        palette,
+        seed_result,
+        force_repair=force_repair,
+        repair_max_iters=repair_max_iters,
+    )
+
+
+def derive_theme_multi(
+    primary_source: str | bytes,
+    extra_colours: "list[str] | tuple[str, ...]" = (),
+    *,
+    force_repair: bool = False,
+    repair_max_iters: int = 8,
+) -> DerivedTheme:
+    """Produce a DerivedTheme from a primary seed plus N extra club colours.
+
+    This is the G1.20 entry point — the multi-colour counterpart to
+    :func:`derive_theme`.
+
+    Parameters
+    ----------
+    primary_source : str | bytes
+        The primary brand seed — a hex, SVG markup, or raster bytes, exactly
+        as :func:`derive_theme` accepts. Run through ``extract_seed`` so a
+        logo upload keeps its ``svg`` / ``raster`` provenance in the report.
+    extra_colours : list[str] | tuple[str, ...]
+        The club's additional confirmed colours (secondary, accent, …) in
+        priority order. Non-hex, duplicate, or non-brandable entries are
+        ignored by the assignment, so passing a club's defaults that happen
+        to be a single brand colour reproduces :func:`derive_theme` exactly.
+
+    The seed report reflects the *primary* source; the palette's secondary /
+    tertiary ramps are replaced with the assigned extra colours (see
+    :func:`mediahub.theming.derive_palette_multi`). The same audit + repair
+    pipeline then validates the materialised palette.
+    """
+    seed_result = extract_seed(primary_source)
+    extras = [c for c in (extra_colours or []) if isinstance(c, str) and c.strip()]
+    palette = derive_palette_multi([seed_result.hex, *extras])
+    return _assemble_theme(
+        palette,
+        seed_result,
+        force_repair=force_repair,
+        repair_max_iters=repair_max_iters,
+    )
+
+
+def _assemble_theme(
+    palette: DerivedPalette,
+    seed_result: SeedResult,
+    *,
+    force_repair: bool,
+    repair_max_iters: int,
+) -> DerivedTheme:
+    """Run roles → audit → (optional) repair → assemble the DerivedTheme.
+
+    Shared by :func:`derive_theme` and :func:`derive_theme_multi` so the
+    audit/repair/assembly behaviour is defined exactly once. The decision
+    trace seeds from the seed report and the palette (which, for the
+    multi-colour path, already carries the role-assignment trace).
+    """
     roles = derive_roles(palette)
     report = audit_palette(palette, roles)
 

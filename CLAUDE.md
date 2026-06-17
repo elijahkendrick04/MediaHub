@@ -279,6 +279,15 @@ with a `<hash>.json` explainability manifest and a `<hash>.poster.png`
 poster-frame sidecar beside each MP4 (the poster also ships next to the
 published file; the reel file route serves it via `?poster=1`).
 
+**Parallel reel composition (opt-in, `MEDIAHUB_REEL_PARALLEL=1`)** — a cold
+reel render can split its frame timeline into contiguous ranges, render them
+concurrently as segments sharing one bundle (`remotion/render_segments.js`),
+and composite them with FFmpeg's lossless concat (`visual/reel_parallel.py`,
+called from `render_meet_reel`). Frame-purity makes this **byte-identical** to
+the serial render — same output, same content-cache key — so it only cuts
+wall-clock on multi-core workers; it falls back to the serial render whenever
+Node/Remotion/FFmpeg are missing or any segment/concat step fails.
+
 Outputs are programmatic and data-driven (never static templates), club-branded
 from the `BrandKit`, and use real athlete/team imagery where provided — no
 synthetic AI-generated people unless explicitly requested.

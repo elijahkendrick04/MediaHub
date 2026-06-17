@@ -68,6 +68,10 @@ export const cardSchema = z.object({
   roleSurface: z.string().default(""),
   roleAccent: z.string().default(""),
   roleOnGround: z.string().default(""),
+  // Subtitle/caption burn-in track (R1.3): a JSON string of the APCA-gated,
+  // frame-timed caption cues built by visual/subtitle_burn.py and painted by
+  // sprint/layers/captions.tsx. Empty = no captions (byte-identical render).
+  captionsJson: z.string().default(""),
 });
 
 const brandSchema = z.object({
@@ -870,14 +874,20 @@ const PatternLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 const PACK_GROUNDS = new Set([
   "flat", "top_fade", "bottom_fade", "corner_fade", "vignette", "spotlight", "twotone",
   "dual_fade", "top_corner_fade", "edge_frame", "diagonal_fade",
+  // Ground-treatment expansion pack (mirrors style_packs.GROUNDS).
+  "gradient_mesh", "bokeh", "light_ray", "paper_weave",
 ]);
 const PACK_TEXTURES = new Set([
   "none", "grain", "dots", "grid", "hatch", "halftone", "crosshatch",
   "weave", "scanline", "carbon", "chevron",
+  // Layered (two-texture) surfaces — G1.6, mirrors style_packs._TEXTURE_STACKS.
+  "grain_dots", "halftone_weave", "hatch_grid", "crosshatch_grain",
+  "dots_scanline", "carbon_hatch", "chevron_grain", "grid_dots",
 ]);
 const PACK_ACCENT_GEOS = new Set([
   "none", "corner_ticks", "side_rule", "baseline_rule", "frame", "wedge", "ring", "corner_blocks",
   "double_rule", "dot_row", "cross_ticks", "corner_arc",
+  "hexagons", "deco_corners", "wave_rule", "spiral_flourish", "glitch_divider",
 ]);
 
 type ParsedPack = { ground: string; texture: string; accentGeo: string; bold: boolean };
@@ -933,6 +943,33 @@ function packGroundGradient(ground: string, a: number): string | null {
       );
     case "diagonal_fade":
       return `linear-gradient(122deg, rgba(0,0,0,${a}) 8%, rgba(0,0,0,0) 54%)`;
+    // --- Ground-treatment expansion pack (mirrors style_packs._ground_layer) ---
+    case "gradient_mesh":
+      return (
+        `radial-gradient(62% 55% at 14% 12%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 60%),` +
+        `radial-gradient(58% 52% at 86% 18%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 60%),` +
+        `radial-gradient(85% 60% at 50% 104%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 58%)`
+      );
+    case "bokeh":
+      return (
+        `radial-gradient(20% 14% at 16% 82%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(14% 10% at 82% 14%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(11% 8% at 92% 70%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%),` +
+        `radial-gradient(9% 6% at 8% 30%, rgba(0,0,0,${a}) 0%, rgba(0,0,0,0) 72%)`
+      );
+    case "light_ray":
+      return (
+        `repeating-conic-gradient(from 192deg at 84% -8%, ` +
+        `rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 10deg, ` +
+        `rgba(0,0,0,${a}) 13deg, rgba(0,0,0,0) 16deg)`
+      );
+    case "paper_weave":
+      return (
+        `repeating-linear-gradient(90deg, rgba(0,0,0,${a}) 0, rgba(0,0,0,${a}) 2px, ` +
+        `rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px),` +
+        `repeating-linear-gradient(0deg, rgba(0,0,0,${a}) 0, rgba(0,0,0,${a}) 2px, ` +
+        `rgba(0,0,0,0) 2px, rgba(0,0,0,0) 14px)`
+      );
     default:
       return null;
   }
@@ -941,6 +978,20 @@ function packGroundGradient(ground: string, a: number): string | null {
 const PACK_TEX_SIZE: Record<string, number> = {
   grain: 160, dots: 18, grid: 32, hatch: 14, crosshatch: 16, halftone: 22,
   weave: 20, scanline: 6, carbon: 8, chevron: 24,
+};
+
+// Layered textures (G1.6) — a composite token fuses two base tiles with a
+// background-blend-mode, mirroring style_packs._TEXTURE_STACKS so a card's video
+// carries the same stacked surface as its still. [base_a, base_b, blend].
+const PACK_TEXTURE_STACKS: Record<string, [string, string, string]> = {
+  "grain_dots": ["grain", "dots", "soft-light"],
+  "halftone_weave": ["halftone", "weave", "overlay"],
+  "hatch_grid": ["hatch", "grid", "lighten"],
+  "crosshatch_grain": ["crosshatch", "grain", "screen"],
+  "dots_scanline": ["dots", "scanline", "screen"],
+  "carbon_hatch": ["carbon", "hatch", "overlay"],
+  "chevron_grain": ["chevron", "grain", "soft-light"],
+  "grid_dots": ["grid", "dots", "lighten"],
 };
 
 // White-on-transparent tiles (blended over the ground), mirroring style_packs.
@@ -1109,9 +1160,112 @@ function packAccentGeometry(
         </>
       );
     }
+    // --- G1.5 accent-geometry expansion pack (mirrors style_packs.py) ------
+    // Curved/ornamental shapes drawn as stroked inline SVG (the div-border
+    // tricks above can't express them); stroke paints the resolved accent,
+    // vector-effect keeps it a true `weight` px regardless of viewBox scale.
+    case "hexagons": {
+      const size = Math.round(m * 0.16 * mult);
+      const off = Math.round(m * 0.05);
+      const hex = (
+        <polygon points="92,50 71,86 29,86 8,50 29,14 71,14" fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinejoin: "round" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{hex}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size }}>{hex}</svg>
+        </>
+      );
+    }
+    case "deco_corners": {
+      const size = Math.round(m * 0.15 * mult);
+      const off = Math.round(m * 0.045);
+      const d = "M 64 8 L 8 8 L 8 64 M 50 21 L 21 21 L 21 50 M 38 31 L 31 31 L 31 38";
+      const bracket = (
+        <path d={d} fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "square" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{bracket}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size, transform: "rotate(180deg)" }}>{bracket}</svg>
+        </>
+      );
+    }
+    case "wave_rule": {
+      const inset = Math.round(width * 0.08);
+      const inner = Math.max(1, width - 2 * inset);
+      const band = Math.max(12, Math.round(height * 0.022 * mult));
+      const bottom = Math.round(height * 0.06);
+      return (
+        <svg viewBox={`0 0 ${inner} ${band}`} preserveAspectRatio="none" style={{ position: "absolute", left: inset, width: inner, bottom, height: band }}>
+          <path d={packWavePath(inner, band)} fill="none" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "round" }} />
+        </svg>
+      );
+    }
+    case "spiral_flourish": {
+      const size = Math.round(m * 0.15 * mult);
+      const off = Math.round(m * 0.05);
+      const spiral = (
+        <polyline points={packSpiralPoints()} fill="none" vectorEffect="non-scaling-stroke" style={{ stroke: accent, strokeWidth: weight, strokeLinecap: "round", strokeLinejoin: "round" }} />
+      );
+      return (
+        <>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", left: off, top: off, width: size, height: size }}>{spiral}</svg>
+          <svg viewBox="0 0 100 100" style={{ position: "absolute", right: off, bottom: off, width: size, height: size, transform: "rotate(180deg)" }}>{spiral}</svg>
+        </>
+      );
+    }
+    case "glitch_divider": {
+      const bh = Math.max(4, Math.round(height * 0.006 * mult));
+      const inset = Math.round(width * 0.08);
+      const inner = Math.max(1, width - 2 * inset);
+      const bottom = Math.round(height * 0.06);
+      const gap = Math.max(2, bh);
+      return (
+        <>
+          <div style={{ position: "absolute", left: inset, width: inner, bottom, height: bh, background: accent }} />
+          <div style={{ position: "absolute", left: inset + Math.round(inner * 0.12), width: Math.round(inner * 0.55), bottom: bottom + bh + gap, height: bh, background: accent, opacity: 0.7 }} />
+          <div style={{ position: "absolute", left: inset, width: Math.round(inner * 0.34), bottom: bottom + 2 * (bh + gap), height: bh, background: accent, opacity: 0.45 }} />
+        </>
+      );
+    }
     default:
       return null;
   }
+}
+
+// A smooth horizontal sine as alternating cubic-bézier humps, in px units
+// (the wave SVG's viewBox is the px region itself). Mirrors style_packs._wave_path.
+function packWavePath(inner: number, band: number, humps = 7): string {
+  const amp = band * 0.3;
+  const mid = band / 2;
+  const half = inner / humps;
+  let d = `M 0 ${mid.toFixed(1)}`;
+  let x = 0;
+  let up = true;
+  while (x < inner - 0.5) {
+    const nx = Math.min(x + half, inner);
+    const cy = up ? mid - amp : mid + amp;
+    const c1 = x + half * 0.36;
+    const c2 = x + half * 0.64;
+    d += ` C ${c1.toFixed(1)} ${cy.toFixed(1)} ${c2.toFixed(1)} ${cy.toFixed(1)} ${nx.toFixed(1)} ${mid.toFixed(1)}`;
+    x = nx;
+    up = !up;
+  }
+  return d;
+}
+
+// An Archimedean spiral sampled as a polyline in a 0–100 viewBox, centred at
+// (50, 50). Mirrors style_packs._spiral_points.
+function packSpiralPoints(steps = 72, turns = 2.4, maxR = 44): string {
+  const pts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const ang = t * turns * 2 * Math.PI;
+    const r = maxR * t;
+    pts.push(`${(50 + r * Math.cos(ang)).toFixed(1)},${(50 + r * Math.sin(ang)).toFixed(1)}`);
+  }
+  return pts.join(" ");
 }
 
 const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
@@ -1134,24 +1288,53 @@ const StylePackLayer: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
       <div key="ground" style={{ position: "absolute", inset: 0, background: ground }} />,
     );
   }
-  const tex = packTextureImage(pack.texture);
-  if (tex) {
-    const size = PACK_TEX_SIZE[pack.texture] || 20;
-    const op = pack.texture === "grain" ? (pack.bold ? 0.18 : 0.12) : pack.bold ? 0.16 : 0.1;
-    children.push(
-      <div
-        key="texture"
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: tex,
-          backgroundSize: `${size}px ${size}px`,
-          backgroundRepeat: "repeat",
-          opacity: op,
-          mixBlendMode: "overlay",
-        }}
-      />,
-    );
+  const stack = PACK_TEXTURE_STACKS[pack.texture];
+  if (stack) {
+    // Layered surface (G1.6): fuse two tiles with a background-blend-mode, then
+    // composite onto the card with the shared low-opacity mix-blend overlay —
+    // exactly as legibility-safe as one tile, just richer (mirrors the still).
+    const [a, b, blend] = stack;
+    const ta = packTextureImage(a);
+    const tb = packTextureImage(b);
+    if (ta && tb) {
+      const sa = PACK_TEX_SIZE[a] || 20;
+      const sb = PACK_TEX_SIZE[b] || 20;
+      children.push(
+        <div
+          key="texture"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: `${ta}, ${tb}`,
+            backgroundSize: `${sa}px ${sa}px, ${sb}px ${sb}px`,
+            backgroundRepeat: "repeat, repeat",
+            backgroundBlendMode: blend,
+            opacity: pack.bold ? 0.15 : 0.1,
+            mixBlendMode: "overlay",
+          }}
+        />,
+      );
+    }
+  } else {
+    const tex = packTextureImage(pack.texture);
+    if (tex) {
+      const size = PACK_TEX_SIZE[pack.texture] || 20;
+      const op = pack.texture === "grain" ? (pack.bold ? 0.18 : 0.12) : pack.bold ? 0.16 : 0.1;
+      children.push(
+        <div
+          key="texture"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: tex,
+            backgroundSize: `${size}px ${size}px`,
+            backgroundRepeat: "repeat",
+            opacity: op,
+            mixBlendMode: "overlay",
+          }}
+        />,
+      );
+    }
   }
   const geo = packAccentGeometry(pack.accentGeo, width, height, pack.bold, accent);
   if (geo) {

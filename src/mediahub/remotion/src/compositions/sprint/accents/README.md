@@ -13,4 +13,13 @@ export default { name: "hexframe", decoration };
 ```
 
 `name` is the `accent_style` brief token. Draw in the accent role only, in the
-margins, at the supplied opacity.
+margins, at the supplied opacity. Keep it frame-pure (no `Math.random` /
+`Date.now` / CSS animation) and `pointer-events: none`.
+
+Shipped pack (R1.5 — sizing + style variants of the built-in accents):
+`thick_stripe`, `thin_stripe`, `double_stripe`, `side_rail`, `large_brackets`,
+`small_brackets`, `bracket_frame`, `corner_tabs`, `offset_badge`. The built-in
+`accentDecoration` switch in `StoryCard.tsx` owns the base set (`stripe`,
+`brackets`, `badge`, `frame`, `ribbon`, `arrow`, `underline`, `minimal`) — pick
+a name here that does NOT collide with those, or the inline case wins and your
+file never runs.
