@@ -5,13 +5,21 @@ a flat background, in different corners, and assert that the proposed crop
 (a) stays within the image bounds, (b) actually contains the subject, and
 (c) moves in the same direction as the subject does.
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pytest
 from PIL import Image
 
-from mediahub.graphic_renderer.saliency import best_crop, crops_for
+from mediahub.graphic_renderer.saliency import (
+    FORMAT_RATIOS,
+    best_crop,
+    crops_for,
+    focus_position,
+    focus_position_for_format,
+    ratio_for_format,
+)
 
 Box = tuple[int, int, int, int]  # (x0, y0, x1, y1)
 
@@ -19,6 +27,7 @@ Box = tuple[int, int, int, int]  # (x0, y0, x1, y1)
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+
 
 def _textured_block(size: tuple[int, int], seed: int = 0) -> Image.Image:
     """A noise block — dense gradient energy throughout, not just at edges."""
@@ -67,6 +76,7 @@ def _contains(crop, box: Box) -> bool:
 # Subject tracking — horizontal
 # --------------------------------------------------------------------------- #
 
+
 def test_crop_tracks_subject_left_vs_right(tmp_path):
     size = (300, 100)
     left_box = (20, 30, 60, 70)
@@ -91,6 +101,7 @@ def test_crop_tracks_subject_left_vs_right(tmp_path):
 # --------------------------------------------------------------------------- #
 # Subject tracking — vertical
 # --------------------------------------------------------------------------- #
+
 
 def test_crop_tracks_subject_top_vs_bottom(tmp_path):
     size = (100, 300)
@@ -117,6 +128,7 @@ def test_crop_tracks_subject_top_vs_bottom(tmp_path):
 # Multiple ratios at once
 # --------------------------------------------------------------------------- #
 
+
 def test_crops_for_multiple_ratios(tmp_path):
     size = (400, 400)
     box = (300, 300, 360, 360)  # subject bottom-right
@@ -142,6 +154,7 @@ def test_crops_for_multiple_ratios(tmp_path):
 # Cutout alpha path
 # --------------------------------------------------------------------------- #
 
+
 def test_crop_uses_cutout_alpha_to_find_subject(tmp_path):
     size = (300, 100)
     right_box = (240, 30, 280, 70)
@@ -164,6 +177,7 @@ def test_crop_uses_cutout_alpha_to_find_subject(tmp_path):
 # Featureless image -> centred crop
 # --------------------------------------------------------------------------- #
 
+
 def test_uniform_image_centres_crop(tmp_path):
     size = (300, 100)
     path = _save(Image.new("RGB", size, (120, 120, 120)), tmp_path, "flat.png")
@@ -179,6 +193,7 @@ def test_uniform_image_centres_crop(tmp_path):
 # --------------------------------------------------------------------------- #
 # Ratio spec forms + validation
 # --------------------------------------------------------------------------- #
+
 
 def test_ratio_spec_forms_are_equivalent(tmp_path):
     path = _save(_image_with_subject((300, 100), (240, 30, 280, 70), seed=6), tmp_path, "r.png")
@@ -204,8 +219,100 @@ def test_invalid_ratio_raises(tmp_path, bad):
 # Determinism
 # --------------------------------------------------------------------------- #
 
+
 def test_repeated_calls_are_deterministic(tmp_path):
     path = _save(_image_with_subject((320, 180), (40, 40, 110, 140), seed=9), tmp_path, "d.png")
     first = crops_for(path, ["9:16", "1:1", "4:5"])
     second = crops_for(path, ["9:16", "1:1", "4:5"])
     assert first == second
+
+
+# --------------------------------------------------------------------------- #
+# Format-aware focus (R1.7)
+# --------------------------------------------------------------------------- #
+
+
+def _pct(pos: str) -> tuple[float, float]:
+    """Parse a ``"<x>% <y>%"`` object-position into floats."""
+    x, y = pos.split()
+    return float(x.rstrip("%")), float(y.rstrip("%"))
+
+
+def test_format_ratios_cover_the_four_motion_cuts():
+    # The exact cuts R1.7 names, each mapped to its real aspect ratio.
+    assert FORMAT_RATIOS == {
+        "story": "9:16",
+        "portrait": "4:5",
+        "square": "1:1",
+        "landscape": "16:9",
+    }
+
+
+def test_ratio_for_format_resolves_known_cuts():
+    assert ratio_for_format("story") == "9:16"
+    assert ratio_for_format("portrait") == "4:5"
+    assert ratio_for_format("square") == "1:1"
+    assert ratio_for_format("landscape") == "16:9"
+
+
+def test_ratio_for_format_is_case_insensitive_and_trims():
+    assert ratio_for_format("LANDSCAPE") == "16:9"
+    assert ratio_for_format("  Portrait  ") == "4:5"
+
+
+@pytest.mark.parametrize("bad", ["", "feed_square", "nonsense", None])
+def test_ratio_for_format_falls_back_to_story(bad):
+    # Unknown/empty names resolve to the 9:16 story default, never raise.
+    assert ratio_for_format(bad) == "9:16"  # type: ignore[arg-type]
+
+
+def test_focus_position_for_format_matches_explicit_ratio(tmp_path):
+    # The per-format wrapper is exactly focus_position at the resolved ratio.
+    path = _save(_image_with_subject((1000, 1000), (60, 60, 300, 300), seed=11), tmp_path, "s.png")
+    assert focus_position_for_format(path, "story") == focus_position(path, "9:16")
+    assert focus_position_for_format(path, "portrait") == focus_position(path, "4:5")
+    assert focus_position_for_format(path, "square") == focus_position(path, "1:1")
+    assert focus_position_for_format(path, "landscape") == focus_position(path, "16:9")
+
+
+def test_focus_position_for_format_steers_per_axis(tmp_path):
+    """A square source with a top-left subject: the 9:16 story crop slides
+    horizontally (tracks X, Y pinned mid) while the 16:9 landscape crop slides
+    vertically (tracks Y, X pinned mid). The whole point of R1.7 — each cut
+    keeps the subject in frame for *its* aspect, so the strings differ."""
+    path = _save(_image_with_subject((1000, 1000), (60, 60, 300, 300), seed=12), tmp_path, "c.png")
+
+    story = focus_position_for_format(path, "story")
+    landscape = focus_position_for_format(path, "landscape")
+    square = focus_position_for_format(path, "square")
+
+    sx, sy = _pct(story)
+    lx, ly = _pct(landscape)
+    # Story: subject pulls X left of centre, Y stays mid (full height used).
+    assert sx < 50 and abs(sy - 50) < 1
+    # Landscape: subject pulls Y above centre, X stays mid (full width used).
+    assert abs(lx - 50) < 1 and ly < 50
+    # A 1:1 crop of a 1:1 source is the whole image — dead centre.
+    assert square == "50% 50%"
+    # Distinct focal points across cuts is the deliverable.
+    assert story != landscape
+
+
+def test_focus_position_for_format_unknown_matches_story(tmp_path):
+    path = _save(_image_with_subject((1000, 1000), (60, 60, 300, 300), seed=13), tmp_path, "u.png")
+    # Unknown cut falls back to the 9:16 story ratio.
+    assert focus_position_for_format(path, "feed_square") == focus_position_for_format(
+        path, "story"
+    )
+
+
+def test_focus_position_for_format_safe_default_on_bad_path():
+    # Same never-raise contract as focus_position.
+    assert focus_position_for_format("", "landscape") == "center 28%"
+    assert focus_position_for_format("/nonexistent/photo.jpg", "square") == "center 28%"
+
+
+def test_focus_position_for_format_is_deterministic(tmp_path):
+    path = _save(_image_with_subject((900, 1600), (80, 80, 260, 320), seed=14), tmp_path, "det.png")
+    for fmt in ("story", "portrait", "square", "landscape"):
+        assert focus_position_for_format(path, fmt) == focus_position_for_format(path, fmt)
