@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `14fb8ce94` · Merge pull request #784: Scrub all remaining traces of the removed social scheduling/publishing
+**Last updated:** 2026-06-17 · `4f7ceff77` · Reorganise top nav: Studio under Create, org account dropdown, drop online/Developer tabs (#786)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1173,6 +1173,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `3d58e0bd9` | Reorganise top nav: Studio under Create, org account dropdown, drop online/Developer tabs |
 | 2026-06-17 | `9414408a2` | ROADMAP: drop stray F.8 from the phase registry |
 | 2026-06-17 | `12d2b5128` | Scrub all remaining traces of the removed social scheduling/publishing |
 | 2026-06-17 | `55e398e62` | Tidy the home-page pipeline diagram engine block |
@@ -1182,6 +1183,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `7a3e5a86b` | Fix flaky planner-interpret test under full-suite ordering |
 | 2026-06-17 | `16a8cade2` | Move Plan under Create; add Free-Text NL input + goals to the planner |
 | 2026-06-17 | `cbe5dd7b5` | Auto-maintain the whole roadmap, not just the to-do list |
-| 2026-06-17 | `7c5148927` | Make the developer "Clear all caches" button fully clear disk + memory |
-| 2026-06-17 | `9603e8877` | Fix sitewide FPS: stop animating non-compositable paint properties |
 <!-- /ROADMAP:ACTIVITY -->
