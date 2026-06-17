@@ -360,7 +360,7 @@ PIPELINE_DIAGRAM_CSS = """
    pinned and scoped to the stage. When SIGNED IN, the diagram is the club's
    surface, so it drops the pin and follows the active brand (--lane ←
    --mh-primary) like every other accent on the site. */
-body:not(.mh-signed-in) .mh-pl-stage {
+html:not(.mh-signed-in) .mh-pl-stage {
   --lane: #D4FF3A;
   --lane-glow: rgba(212,255,58,0.35);
 }

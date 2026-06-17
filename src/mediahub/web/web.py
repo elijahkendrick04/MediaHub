@@ -9780,7 +9780,7 @@ def _layout(
     return render_template_string(
         """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="{{ 'mh-signed-in' if signed_in else '' }}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -9837,7 +9837,7 @@ def _layout(
      page fully usable (effects are decorative). -->
 <script defer src="{{ url_for('static', filename='js/ui-kit.js') }}"></script>
 </head>
-<body class="{{ 'mh-has-dock ' if dock else '' }}{{ 'mh-signed-in' if signed_in else '' }}" data-page="{{ active }}">
+<body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
 {{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
