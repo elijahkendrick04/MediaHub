@@ -59,8 +59,8 @@ MEDIAHUB_SENTINEL_AUTOFIX_WORKER_TIMEOUT=1   # plus one per trusted issue
 MEDIAHUB_SENTINEL_AUTOFIX_OUT_OF_MEMORY=1
 ```
 
-Every action must still pass ALL of these gates (same philosophy as the
-publishing gate in `publishing/publish_gate.py`):
+Every action must still pass ALL of these gates (a notify-then-gate
+philosophy — notify freely, but never act without clearing every guard):
 
 - **Kill switch** — `MEDIAHUB_SENTINEL_KILL=1` stops all actions instantly;
   notifications keep flowing (observability never turns off).

@@ -78,7 +78,6 @@ TIERS: tuple[TierInfo, ...] = (
         features=(
             "Unlimited content runs",
             "1 brand profile",
-            "Auto scheduling",
             "Priority rendering",
             "Email support",
         ),
@@ -135,9 +134,8 @@ class FeatureGroup:
 # check/cross feature lists on the tier cards and the comparison table on
 # ``/pricing`` (UI 1.20), so those two views can never drift from each other.
 # Deliberately copy-only: no price lives here (ADR-0011 / PC.4). The boolean
-# rows encode real product gating — e.g. "Auto scheduling" is a paid feature
-# (see the Free-tier soft limit in web.py), and every Club capability carries
-# into Federation ("Everything in Club").
+# rows encode real product gating — e.g. "Priority rendering" is a paid feature,
+# and every Club capability carries into Federation ("Everything in Club").
 FEATURE_MATRIX: tuple[FeatureGroup, ...] = (
     FeatureGroup(
         "Content & creative",
@@ -152,10 +150,7 @@ FEATURE_MATRIX: tuple[FeatureGroup, ...] = (
     ),
     FeatureGroup(
         "Publishing & export",
-        (
-            FeatureRow("Manual export (copy / download)", free=True, club=True, federation=True),
-            FeatureRow("Auto scheduling", free=False, club=True, federation=True),
-        ),
+        (FeatureRow("Manual export (copy / download)", free=True, club=True, federation=True),),
     ),
     FeatureGroup(
         "Scale & support",

@@ -172,14 +172,14 @@ It is worth stating bluntly what the programmatic-graphics section implies, beca
 
 ### 7.1 All-in-one social suites (Predis, Ocoya, Simplified, Vista Social)
 
-These are MediaHub's closest *shape* competitors (generate → brand → approve → schedule), though all are general-purpose, prompt-driven, not data-driven. The pattern:
+These are MediaHub's closest *shape* competitors (generate → brand → approve → export), though all are general-purpose, prompt-driven, not data-driven. The pattern:
 
 - **Predis.ai** is the most complete (prompt → caption + carousel + reel + competitor analysis + scheduling). It is also the loudest validation of MediaHub's worry: reviewers consistently report it is **samey** — "the AI learns from popular templates, not your unique style," outputs "resemble other generated outputs," one test saw three of five videos open with "Hey there!" Its **Competitor Analysis** (NLP-cluster what's working on rivals' handles) is the steal.
 - **Ocoya** is copy-first ("Travis" on OpenAI models); visuals come from **integrations** (Canva/Unsplash/Adobe), not native gen — a pragmatic "let best-in-class tools handle pixels" model.
 - **Simplified** bundles writer + design + avatar video + scheduler behind a **"Brand Kit once → everything inherits it"** UX and a generous free tier (acquisition wedge).
 - **Vista Social**'s standout is **"AI Knowledge"** — train the assistant on your content repository/website/docs for *grounded* output, the closest competitor concept to MediaHub's explainability/provenance.
 
-**MediaHub's defensible edge vs. all of them:** every suite starts from a *human-supplied idea*; MediaHub starts from *structured data* and applies deterministic intelligence (PB detection, ranking, explainability) that LLM suites cannot do and would hallucinate. **The table-stakes generation features MediaHub lacks (be honest):** native multi-format breadth (carousels/video in one click), a visible Brand Kit onboarding step, real per-post variation, integrated multi-channel scheduling, and repurposing flows.
+**MediaHub's defensible edge vs. all of them:** every suite starts from a *human-supplied idea*; MediaHub starts from *structured data* and applies deterministic intelligence (PB detection, ranking, explainability) that LLM suites cannot do and would hallucinate. **The table-stakes generation features MediaHub lacks (be honest):** native multi-format breadth (carousels/video in one click), a visible Brand Kit onboarding step, real per-post variation, and repurposing flows.
 
 ### 7.2 Ad-creative engines — the best in the world at "many on-brand variants"
 

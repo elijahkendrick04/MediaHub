@@ -34,9 +34,6 @@ Before the pilot club touches anything, the operator must:
    - `DATA_DIR` — `/var/data` (or wherever the Render disk is mounted)
 
    Recommended:
-   - `BUFFER_ACCESS_TOKEN` — only if the pilot club doesn't yet have
-     its own Buffer; otherwise leave unset and let the club connect
-     inline from the publishing modal.
    - `ANTHROPIC_API_KEY` + `MEDIAHUB_LLM_PROVIDER=anthropic` — only
      if quality on Gemini Flash isn't enough for the pilot brand.
 
@@ -59,10 +56,10 @@ Before the pilot club touches anything, the operator must:
 
 The club needs to know three things:
 
-1. **Manual approval is non-negotiable.** Nothing goes live without a
-   human pressing "schedule". MediaHub is an assistant; it never
-   publishes autonomously. (The dissertation §4 governance argument
-   in plain English.)
+1. **Manual approval is non-negotiable.** A human reviews and approves
+   every piece, then exports or downloads it to post manually. MediaHub
+   is an assistant; it never publishes to social channels itself. (The
+   dissertation §4 governance argument in plain English.)
 
 2. **One club per deployment.** Their data is on their MediaHub
    instance, not pooled with anyone else's. Other clubs would get a
@@ -97,14 +94,12 @@ Live walkthrough (45 minutes, screen-share):
    the explainer ("Why this card?"). Edit the caption with them.
    Demonstrate Sponsor Variant and Motion Video.
 
-4. **Buffer connect.** From the schedule modal, paste their Buffer
-   access token. Schedule one card to their *test* channel. Verify
-   the post lands in Buffer's queue (Buffer staging, not their main
-   channels — until they trust it).
+4. **Approve and export.** Approve the card, then download it (or the
+   content-pack ZIP). Show them that the exported file is what they
+   post manually to their own channels — MediaHub never posts for them.
 
-5. **`/activity` tour.** Show them where to see scheduled vs published
-   vs failed. Show them the "Recent posting activity" panel. Show
-   them where to find "Why did this run fail?" if a run errors out.
+5. **`/activity` tour.** Show them where to see each run's state and
+   where to find "Why did this run fail?" if a run errors out.
 
 6. **`/status` link.** Point them at the public status page. "If
    anything looks broken, check here first."
@@ -122,7 +117,6 @@ Every day for the first week, the operator checks:
 |---|---|---|
 | Uptime over 24h | `/status` | < 99.5% → diagnose |
 | Failed runs in last 24h | `/activity` failure callout | ≥ 1 → screenshot, message club |
-| Buffer failures in last 24h | `/activity` "Recent posting activity" | ≥ 1 → check Buffer token, channel state |
 | Last LLM error | `/healthz/usage` | non-null + recent → check Gemini key or paid Anthropic fallback |
 | Gemini quota headroom | `/healthz/usage` | < 200 calls left at noon UTC → switch to Anthropic for the day |
 
@@ -138,11 +132,11 @@ Once-weekly 15-minute call:
 - What didn't? (Walk through any failures together.)
 - What's missing? (Capture as backlog items, do not commit to
   implementing during the pilot.)
-- One screenshot of the published content from their Buffer queue.
+- One screenshot of the content they exported and posted manually.
 
 Send a written follow-up:
 > "This week MediaHub generated N pieces of content from M meet
-> uploads. K of N were published. The status page shows
+> uploads. K of N were approved and exported. The status page shows
 > X.XX% uptime. Next week we're processing the [meet name] file."
 
 ---
@@ -154,7 +148,6 @@ Send a written follow-up:
 | `/healthz` returns 5xx | Render service down, disk unmounted | Check Render dashboard; redeploy with disk |
 | `/status` shows long gap | Render scaled to zero, or app crash loop | Check Render logs; if crash, revert deploy |
 | Cards show "AI unavailable" error | LLM key missing/invalid | Check `/healthz/usage` "Last LLM error"; rotate key |
-| Buffer posts all failing | Token expired or channel disconnected | Pilot club re-pastes Buffer token via schedule modal |
 | Pipeline error on every upload | Format change in result file | Capture file → reproduce in a staging deploy → fix parser → redeploy |
 | One run failed mysteriously | Could be transient (parse, LLM timeout) | Show the club "Why did this run fail?" on /activity; re-upload |
 | Uptime dropping | Crash loop, OOM kills, or a Blueprint sync downgraded the plan | Confirm dashboard Instance Type is Standard (2 GB) and `render.yaml` has `plan: standard`; check `/healthz/memory` for RSS climbing past ~80% |
@@ -169,8 +162,7 @@ The pilot is a success if:
 - [ ] **Uptime ≥ 99.5%** over the 30 days (read from `/status`).
 - [ ] **Zero unmasked pipeline errors** the club had to escalate.
 - [ ] **At least one weekly meet processed** end-to-end with the
-  club hitting publish.
-- [ ] **Buffer publish success rate ≥ 95%** (from the posting log).
+  club approving and exporting content.
 - [ ] **Club says "we'd keep using this"** without prompting.
 
 Anything less means iterate, don't ship.
@@ -183,8 +175,8 @@ At the end of the pilot:
 
 - **Continue on the managed hosted service:** keep the club's dedicated
   instance running under the operator's account. The operator covers
-  hosting, LLM provider billing, and Buffer access-token rotation. The
-  club is billed monthly under the standard hosted-SaaS plan.
+  hosting and LLM provider billing. The club is billed monthly under the
+  standard hosted-SaaS plan.
 
 - **Stop:** delete the club's instance and the disk. Confirm to the
   club in writing that `DATA_DIR` is gone. Any cached data the

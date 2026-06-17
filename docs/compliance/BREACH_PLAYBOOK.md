@@ -12,7 +12,8 @@ A breach of security leading to accidental or unlawful destruction, loss,
 alteration, unauthorised disclosure of, or access to, personal data —
 confidentiality, integrity, **or availability**. Examples for MediaHub:
 a cross-tenant read of another club's runs; a leaked `users.jsonl`;
-a published card for an opted-out child; a lost/unrestorable data volume;
+a card for an opted-out/no-consent child slipping past the consent gate into
+an approved or exported pack; a lost/unrestorable data volume;
 a compromised provider API key that exposes prompt payloads.
 
 ## The clock
@@ -42,10 +43,9 @@ a compromised provider API key that exposes prompt payloads.
 
 ## Procedure
 
-1. **Contain** — kill switch (`MEDIAHUB_PUBLISH_KILL_SWITCH=1`) if
-   publication is implicated; rotate exposed credentials (`.env` only —
-   no code change needed); suspend the affected route/feature; preserve
-   logs and the audit ledger (never delete — they are evidence).
+1. **Contain** — rotate exposed credentials (`.env` only — no code change
+   needed); suspend the affected route/feature; preserve logs and the audit
+   ledger (never delete — they are evidence).
 2. **Record** — open the incident in the register: facts, scope (which
    tenants, which data subjects, children involved?), `detected_at`.
    Art 33(5) requires documenting **every** breach, even ones assessed as
@@ -66,7 +66,7 @@ a compromised provider API key that exposes prompt payloads.
 | Scenario | ICO? | Data subjects? |
 |---|---|---|
 | Cross-tenant read of athlete data (children) | Likely yes | Likely yes (high risk — children) |
-| Card published for an opted-out/no-consent child | Likely yes | Yes, via the club |
+| Card for an opted-out/no-consent child reaches an approved/exported pack | Likely yes | Yes, via the club |
 | Encrypted backup lost, key safe | Document only | No |
 | Provider key leaked, no evidence of prompt-log access | Assess; phased notification if unclear | Assess |
 | Brief availability outage, no data exposure | Document only | No |

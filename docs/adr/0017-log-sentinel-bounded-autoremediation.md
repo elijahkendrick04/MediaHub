@@ -24,7 +24,7 @@ Render Logs API with a strict autonomy posture:
    requires the global flag AND a per-issue flag, and every action passes a
    kill switch, a daily cap, a per-issue cooldown and a boot-grace window
    (anti restart-loop), with the claim persisted *before* execution. This is
-   the publish-gate philosophy (`publishing/publish_gate.py`) applied to ops.
+   a notify-then-gate philosophy applied to ops.
 4. **Everything is auditable.** Findings, notifications, gate decisions and
    action outcomes append to `DATA_DIR/log_sentinel/audit.jsonl`;
    `/healthz/sentinel` exposes the live snapshot.
@@ -33,7 +33,7 @@ Render Logs API with a strict autonomy posture:
 
 - **LLM-decided remediation** ("read the logs, do whatever fixes them"): an
   unbounded actor with production credentials contradicts the bounded-autonomy
-  model (`docs/AUTONOMY_MODEL.md`) and the deterministic-engine principle.
+  posture of the `autonomy/` runner and the deterministic-engine principle.
 - **Auto-editing env vars / triggering deploys** as v1 actions: durable config
   mutations from a daemon are harder to reason about and to undo than a
   restart; deferred until a concrete need shows up, behind the same gates.

@@ -32,8 +32,9 @@ alternatives.
 MediaHub ships as a swimming results→content pipeline. The maintainer is redirecting
 it toward a **content-strategy brain**: a multi-sport, multi-tenant intelligence
 layer that decides what a team should post, drafts it, and — per a per-content-type
-toggle — can publish largely autonomously. Results ingestion becomes one spoke among
-many. A hard product constraint is **no hidden fees / truly-free self-host**.
+toggle — readies it for a human to review and then export/download for manual
+posting. Results ingestion becomes one spoke among many. A hard product constraint
+is **no hidden fees / truly-free self-host**.
 
 This change is scoped to **documentation + non-breaking scaffolding only**. No shipped
 swimming behaviour changes; no feature is implemented; the scaffolding is inert.
@@ -43,13 +44,13 @@ swimming behaviour changes; no feature is implemented; the scaffolding is inert.
 1. **Rebuild `docs/ROADMAP.md`** around the research report's **Phase 0–5** spine
    (0 de-risk licensing/cost · 1 strategy brain + post-type taxonomy + sport
    profiles · 2 autonomy toggles + orchestration · 3 broaden ingestion · 4
-   direct-to-platform publishing · 5 local-AI substitution). New stable IDs
+   creative-suite breadth · 5 local-AI substitution). New stable IDs
    `P0`–`P5` / `P0.1`… verified compatible with `scripts/roadmap_autoupdate.py`.
    This **supersedes** the previous Parity → Distinction → Leadership spine (lineage
    noted in the roadmap). Badge legend, plain-English intro, the `roadmap: <ID>
    <status>` trailer convention, and the auto-generated marker blocks are preserved
    untouched. Appendices A/B/C are retained as execution detail with a bridging note.
-2. **Author five supporting docs:** `POST_TYPE_TAXONOMY.md`, `AUTONOMY_MODEL.md`,
+2. **Author four supporting docs:** `POST_TYPE_TAXONOMY.md`,
    `SPORT_PROFILES.md`, `ARCHITECTURE_TARGET.md`, `DEPENDENCY_LICENSING.md`.
 3. **Add inert scaffolding:** `src/mediahub/sport_profiles/` (typed `SportProfile`/
    `PostTypeConfig` dataclasses, `AutonomyLevel` enum, YAML loader) + two profiles
@@ -70,10 +71,9 @@ swimming behaviour changes; no feature is implemented; the scaffolding is inert.
   JSON — profiles are human-authored/reviewed (including by non-coders), so comments
   and readability matter. Treated as read-only shipped config (like
   `data/ontology/`, `data/voices/seed/`), resolved relative to `data/`, not `DATA_DIR`.
-- **`AutonomyLevel` shape.** Chosen: the three states the brief specifies
-  (`draft_only`/`approval_required`/`fully_autonomous`), `str`-backed to match
-  `ContentType`, gated by default, with a test-enforced invariant that no shipped
-  profile defaults to `fully_autonomous`.
+- **`AutonomyLevel` shape.** Chosen: the two review-disposition states
+  (`draft_only`/`approval_required`), `str`-backed to match `ContentType`, gated
+  by default — a human approves before any content is used.
 - **Supersede vs. delete the old roadmap appendices.** Chosen: supersede the spine
   but **retain** Appendices A (Generative Content Engine v2 build prompts, tied to
   in-flight code + ADR-0001), B (older growth sequence), and C (theming

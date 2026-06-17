@@ -55,7 +55,7 @@ def test_privacy_notice_describes_real_third_party_flows(client):
     # The old notice falsely claimed nothing left the box. The rewritten
     # notice must name the actual recipients found in the data-flow audit.
     assert "No data is sent to third parties" not in html
-    for recipient in ("Gemini", "Anthropic", "Photoroom", "Replicate", "Stripe", "Buffer"):
+    for recipient in ("Gemini", "Anthropic", "Photoroom", "Replicate", "Stripe"):
         assert recipient in html, f"privacy notice must disclose {recipient}"
     # Children's-data section and ICO complaint info are mandatory content.
     assert "under 18" in html or "under-18" in html
@@ -87,7 +87,7 @@ def test_cookie_policy_describes_essential_only_cookie(client):
 
 def test_dpa_lists_subprocessors_and_breach_duty(client):
     html = client.get("/dpa").get_data(as_text=True)
-    for sub in ("Gemini", "Anthropic", "Photoroom", "Replicate", "Buffer"):
+    for sub in ("Gemini", "Anthropic", "Photoroom", "Replicate"):
         assert sub in html
     assert "without undue delay" in html
     assert "sub-processor" in html.lower()

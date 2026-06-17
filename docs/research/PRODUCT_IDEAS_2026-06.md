@@ -5,7 +5,7 @@ build. Each idea was researched against (a) the current codebase, (b) the
 competitive landscape, (c) the swimming/multi-sport data ecosystem, and (d)
 2025–2026 platform/API feasibility. Sources are linked per claim.
 
-**In plain words:** this is a menu, not a plan. Twenty-two things MediaHub could
+**In plain words:** this is a menu, not a plan. Nineteen things MediaHub could
 add next, each one checked against what competitors do, what the data and
 platform rules allow, and what the code already has. The owner picks; then we
 build the picks.
@@ -14,23 +14,8 @@ build the picks.
 surface + integrations/tenancy inventory) and three web research passes:
 competitor landscape (Gipper, Box Out, TeamUnify/SportsEngine, SwimTopia,
 Pitchero, Spond, Canva…), data ecosystem (LENEX, Hy-Tek, Swim England,
-qualifying times, adjacent sports), and distribution/AI feasibility (Meta,
-TikTok, Telegram, email, TTS/alt-text costs).
-
----
-
-## ⚠️ One urgent side-finding: the Buffer path is fragile
-
-MediaHub's only live publishing connector is Buffer (`publishing/buffer.py`,
-classic `/1/updates/create.json`). Buffer's classic developer API was **closed to
-new developers in 2019**, remaining third-party integrations were **cut off on
-1 Mar 2025**, and the 2026 beta API **does not support third-party OAuth** — so
-it cannot post on behalf of client clubs
-([Keboola deprecation notice](https://status.keboola.com/buffer-api-deprecation-and-migration-to-data-streams),
-[Postproxy write-up](https://postproxy.dev/blog/what-happened-to-buffer-api-alternatives-for-developers/),
-[buffer.com/developer-api](https://buffer.com/developer-api)). Existing tokens
-may keep working for a while, but the roadmap's P4.4 ("demote Buffer") is more
-urgent than the roadmap assumed. Ideas **5–8** below are the escape routes.
+qualifying times, adjacent sports), and export/AI feasibility (alt-text and
+TTS costs, member-list delivery, first-party surfaces).
 
 ---
 
@@ -48,7 +33,7 @@ Nobody does meaning-detection, ranking, explainability, or safeguarding-aware
 approval. Clubs tolerate roughly **£30–£100/mo** for software that demonstrably
 saves volunteer hours. The ideas below either widen that moat (intelligence
 layer), shorten the path to revenue (Phase C), or own distribution
-(post-approval publishing).
+(post-approval export and first-party surfaces).
 
 ---
 
@@ -57,27 +42,24 @@ layer), shorten the path to revenue (Phase C), or own distribution
 | # | Idea | Theme | Effort | Depends on |
 |---|---|---|---|---|
 | 1 | Instant try-it demo (no signup) | Sell & onboard | M | — |
-| 2 | Public club achievements page + website embed | Sell & onboard | M | (16 for consent) |
+| 2 | Public club achievements page + website embed | Sell & onboard | M | (13 for consent) |
 | 3 | Sponsor manager + sponsor exposure reports | Sell & onboard | M | — |
 | 4 | In-product referral engine | Sell & onboard | S–M | — |
-| 5 | Email digest delivery (newsletter actually sends) | Distribution | M | — |
-| 6 | Telegram club-channel publishing (+ WhatsApp share button) | Distribution | S–M | — |
-| 7 | Bluesky + Mastodon connectors (P4.1 pulled forward) | Distribution | S–M | gate decision |
-| 8 | Meta (IG/FB/Threads) publishing readiness — start the review clock | Distribution | M + calendar | gate decision |
-| 9 | Athlete registry + milestone detection | Intelligence | M–L | — |
-| 10 | Club records engine + "NEW CLUB RECORD" cards | Intelligence | M | (9 helps) |
-| 11 | Season-current qualifying-time packs | Intelligence | S–M | — |
-| 12 | Data-driven meet previews from entry files | Intelligence | M | (13 helps) |
-| 13 | LENEX (.lef/.lxf) ingestion | Intelligence | M | — |
-| 14 | Live meet mode (watch a results URL mid-gala) | Intelligence | M–L | — |
-| 15 | Season wrap / monthly recap packs | Intelligence | M | (9 helps) |
-| 16 | Consent & safeguarding manager | Trust & safety | M–L | (9 helps) |
-| 17 | Magic-link mobile approvals | Trust & safety | M | — |
-| 18 | OCR fallback for scanned PDFs | Quality | M | — |
-| 19 | Auto alt-text on every export | Quality | S | — |
-| 20 | PB certificates + A4 noticeboard posters | Quality | S–M | — |
-| 21 | Bilingual captions (Welsh first) | Quality | S | — |
-| 22 | Engagement feedback loop | Intelligence | S now, M–L later | (7/8 for metrics) |
+| 5 | Email digest delivery (newsletter actually sends to the club's own list) | Distribution | M | — |
+| 6 | Athlete registry + milestone detection | Intelligence | M–L | — |
+| 7 | Club records engine + "NEW CLUB RECORD" cards | Intelligence | M | (6 helps) |
+| 8 | Season-current qualifying-time packs | Intelligence | S–M | — |
+| 9 | Data-driven meet previews from entry files | Intelligence | M | (10 helps) |
+| 10 | LENEX (.lef/.lxf) ingestion | Intelligence | M | — |
+| 11 | Live meet mode (watch a results URL mid-gala) | Intelligence | M–L | — |
+| 12 | Season wrap / monthly recap packs | Intelligence | M | (6 helps) |
+| 13 | Consent & safeguarding manager | Trust & safety | M–L | (6 helps) |
+| 14 | Magic-link mobile approvals | Trust & safety | M | — |
+| 15 | OCR fallback for scanned PDFs | Quality | M | — |
+| 16 | Auto alt-text on every export | Quality | S | — |
+| 17 | PB certificates + A4 noticeboard posters | Quality | S–M | — |
+| 18 | Bilingual captions (Welsh first) | Quality | S | — |
+| 19 | Engagement feedback loop | Intelligence | S now, M later | — |
 
 Effort: S ≈ a day or two · M ≈ up to a week · L ≈ multi-week. All estimates
 assume the existing pipeline/renderer/scheduler seams are reused, not rebuilt.
@@ -113,7 +95,7 @@ behind a worker budget. Effort **M**.
 
 **What:** a hosted, shareable per-club page of *approved* cards ("Latest from
 Swansea Aquatics") plus an iframe/script embed and a per-club RSS/JSON feed for
-club websites. Only cards that passed approval (and, once idea 16 exists,
+club websites. Only cards that passed approval (and, once idea 13 exists,
 consent checks) appear. Optional "powered by MediaHub" badge → referral loop.
 
 **Why:** zero external gating — it's all first-party Flask
@@ -128,15 +110,15 @@ permanent advert to visiting clubs.
 **How it lands:** public blueprint with signed per-club tokens; reads
 `workflow` approved states; cached card PNGs already exist on disk; RSS is a
 template. Effort **M**. Safeguarding note: public pages must respect consent
-flags — ship after or alongside idea 16, or launch with initials-only mode.
+flags — ship after or alongside idea 13, or launch with initials-only mode.
 
 ### 3. Sponsor manager + sponsor exposure reports
 
 **What:** a sponsor registry per club (logo, tier, active months), automatic
 sponsor-slot rotation on cards/reels (the renderer already demos a "Sponsor
 Variant" — see `docs/PILOT_PLAYBOOK.md` Day 1 step 3), and a monthly per-sponsor
-exposure report (cards featuring the sponsor, posts published, reach once
-analytics land) as a branded PDF/HTML email the club can forward to the sponsor.
+exposure report (cards featuring the sponsor, approved/exported this month) as a
+branded PDF/HTML email the club can forward to the sponsor.
 
 **Why:** this changes the WTP conversation (PC.4): a club that can show its
 sponsor "you appeared on 14 posts this month" can *charge the sponsor* more than
@@ -147,7 +129,8 @@ Gipper markets sponsor graphics. Nobody reports sponsor exposure at club level.
 
 **How it lands:** sponsor fields on `web/club_profile.py`; rotation rule in
 `creative_brief`/generation; `sponsor_activation` content type already exists
-(`club_platform/stubs.py`); counting from `workflow`/posting log. Effort **M**.
+(`club_platform/stubs.py`); counting from the `workflow` approval history.
+Effort **M**.
 
 ### 4. In-product referral engine
 
@@ -164,102 +147,38 @@ it in-product instead of in a spreadsheet makes the motion run itself.
 
 ---
 
-## Group 2 — Distribution (own the approve→post loop; de-risk Buffer)
+## Group 2 — Distribution (own the approve→export loop on first-party surfaces)
 
-### 5. Email digest delivery — make the newsletter actually send
+MediaHub does not publish or schedule to social channels — approved content is
+reviewed by a human and then exported or downloaded for manual posting. The
+distribution ideas worth owning are therefore the surfaces MediaHub controls
+end-to-end: export and delivery to a club's *own* member list, and the
+first-party public surfaces (the achievements wall, embed and RSS from idea 2).
+
+### 5. Email digest delivery — make the newsletter actually send to the club's own list
 
 **What:** the v7.3 grouped HTML newsletter already builds
 (`/api/runs/<run_id>/newsletter`, `content_pack/builder.py`) but nothing can
 send it. Add: club member list (CSV import + unsubscribe links), a weekly
-digest job on the existing scheduler, and delivery via Resend.
+digest job on the existing scheduler, and delivery via Resend — to the club's
+*own* parent/member list, not a social platform.
 
 **Why:** Gipper sells newsletters as a paid-tier feature
 ([gipper.com/pricing](https://www.gipper.com/pricing)); clubs already run parent
-email lists; email needs no platform review at all. Cost is trivial: Resend is
-free to 3k emails/mo, $20/mo for 50k — a 200-member weekly digest across 50
-clubs ≈ 40k/mo ([resend.com/pricing](https://resend.com/pricing)). This also
-gives sponsors (idea 3) a second surface.
+email lists; email to your own list needs no platform review at all. Cost is
+trivial: Resend is free to 3k emails/mo, $20/mo for 50k — a 200-member weekly
+digest across 50 clubs ≈ 40k/mo ([resend.com/pricing](https://resend.com/pricing)).
+This also gives sponsors (idea 3) a second surface.
 
-**How it lands:** new `publishing/email.py` (or a notify channel), member-list
-store keyed to workspace, scheduler job type, unsubscribe route. GDPR: import
-implies consent capture + one-click unsubscribe. Effort **M**.
-
-### 6. Telegram club-channel publishing (+ WhatsApp share button)
-
-**What:** a Telegram Bot connector — club adds the MediaHub bot as admin of its
-club channel; approved cards/reels post natively (PNG + MP4 both supported by
-`sendPhoto`/`sendVideo`). Plus a lightweight "share to WhatsApp" button in the
-review UI (caption copied + media downloaded + `wa.me` open) as the stopgap for
-WhatsApp-centric UK clubs.
-
-**Why:** Telegram's Bot API is free with generous broadcast limits
-([core.telegram.org/bots/faq](https://core.telegram.org/bots/faq)) — the best
-effort-to-value distribution target found in the feasibility pass. WhatsApp has
-no official Channels API and the Business Platform bills per template message
-(~$0.01–0.14/msg, verification required —
-[Meta pricing](https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing)),
-so Telegram is the legitimate channel play and the first place the full
-publish-gate→post loop can run for real.
-
-**How it lands:** `publishing/telegram.py` beside `buffer.py`, gated by
-`publishing/publish_gate.py`; per-workspace bot/channel binding; MP4s finally
-get a direct outlet (Buffer only takes one image URL today). Effort **S–M**.
-
-### 7. Bluesky + Mastodon connectors (P4.1, pulled forward)
-
-**What:** the roadmap already names these as the first publish targets (P4.1).
-Both are weekend-sized: Bluesky needs **no app review at all** (OAuth or app
-passwords, documented posting flow —
-[docs.bsky.app](https://docs.bsky.app/blog/create-post)); Mastodon is an open
-per-instance REST API. Connect-account UI + two small adapters behind the
-publish gate.
-
-**Why pull it forward:** (a) Buffer fragility (see top); (b) it makes the
-autonomy story demonstrable end-to-end ("approved → it posted") with zero
-platform risk; (c) it's the cheapest possible rehearsal of the connector
-pattern before Meta. **Gate note:** P4 is formally behind Phase C's exit
-criteria — pulling P4.1 forward is the maintainer's call; the evidence says the
-cost is days, not weeks.
-
-**How it lands:** `publishing/bluesky.py` (atproto), `publishing/mastodon.py`;
-account binding per workspace; posting log already exists
-(`publishing/posting_log.py`). Effort **S–M**.
-
-### 8. Meta (Instagram/Facebook/Threads) publishing readiness — start the clock
-
-**What:** begin Meta **Business Verification + App Review** now (the calendar
-time is the bottleneck, not the code): `instagram_content_publish`,
-`pages_manage_posts`, Threads. Code side: JPEG conversion of cards (IG API is
-**JPEG-only**), publicly reachable media URLs (already served), a "Connect
-Instagram" flow, and a `publishing/meta.py` adapter held behind an operator
-flag until review passes.
-
-**Why:** it's the highest-value unlock — IG now allows **100 API-published
-posts/24h/account, including Reels, Stories and carousels**
-([Meta content publishing docs](https://developers.facebook.com/docs/instagram-platform/content-publishing/)),
-at $0. Review is 1–5 business days per submission but verification can take
-weeks ([Meta app review](https://developers.facebook.com/docs/instagram-platform/app-review/)).
-One Meta review covers FB Pages + IG (+ Threads scoped separately). TikTok is
-explicitly *not* in this idea: unaudited clients are forced private-only
-(SELF_ONLY, ≤5 users/24h —
-[TikTok guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines)),
-so it waits until clubs demand it. Aggregator bridge if needed sooner: Ayrshare
-$299/mo for 10 profiles ([ayrshare.com/pricing](https://www.ayrshare.com/pricing/)).
-
-**How it lands:** Pillow JPEG export in `graphic_renderer`; `publishing/meta.py`
-behind flag + publish gate; carousel grouping (one card per swimmer per meet —
-the carousel format has the highest engagement+save rate per Socialinsider's
-35M-post benchmark, and sports is a top-engagement industry —
-[socialinsider.io](https://www.socialinsider.io/social-media-benchmarks/instagram)).
-Effort **M** code + external calendar. **Gate note:** formally P4.2 — same
-maintainer call as idea 7, but the *application* can start without shipping
-anything.
+**How it lands:** a delivery/notify channel (alongside `notify/channels.py`),
+member-list store keyed to workspace, scheduler job type, unsubscribe route.
+GDPR: import implies consent capture + one-click unsubscribe. Effort **M**.
 
 ---
 
 ## Group 3 — Intelligence-layer depth (deterministic; the moat)
 
-### 9. Athlete registry + milestone detection
+### 6. Athlete registry + milestone detection
 
 **What:** a lightweight per-club athlete table (canonical name + variants,
 optional ASA number, year of birth, active flag) that aggregates across runs.
@@ -271,7 +190,7 @@ meet", comeback after long absence (extends the existing `ReturnToFormDetector`)
 per-run only (`media_library` linking is name-string based). Per-athlete
 celebration at scale is verified whitespace: Gipper markets "equitable
 recognition" but every graphic is manual labour. The registry is also the data
-spine for ideas 10, 15 and 16. Identity glitches (twins/siblings cross-matching
+spine for ideas 7, 12 and 13. Identity glitches (twins/siblings cross-matching
 in PB verification — `docs/KNOWN_ISSUES.md`) get a place to be fixed by a human
 once instead of every meet.
 
@@ -280,7 +199,7 @@ back-filled from `runs_v4` snapshots; detectors join `recognition_swim/
 achievements/`; review-time "is this the same swimmer?" merge UI. Effort
 **M–L**. Deterministic throughout — no LLM in identity or milestone logic.
 
-### 10. Club records engine + "NEW CLUB RECORD" cards
+### 7. Club records engine + "NEW CLUB RECORD" cards
 
 **What:** per-club records table (event × course × age-group × gender), seeded
 by CSV import and/or accumulated from ingested meets; a deterministic
@@ -298,7 +217,7 @@ onboarding hook ("upload your records sheet, we'll guard it").
 (deterministic engine extension — allowed, it's a new detector, not an AI
 replacement). Effort **M**.
 
-### 11. Season-current qualifying-time packs
+### 8. Season-current qualifying-time packs
 
 **What:** curated, versioned JSON datasets of qualifying times — county,
 regional, national — selectable per club, refreshed each season, powering
@@ -321,7 +240,7 @@ with provenance (source PDF URL per table); detector wiring + card archetype.
 Effort **S–M** (ongoing seasonal curation is the real cost — document the
 refresh runbook).
 
-### 12. Data-driven meet previews from entry files
+### 9. Data-driven meet previews from entry files
 
 **What:** parse entry/psych-sheet files (Hy-Tek entries, LENEX `entries`
 element, PDF psych sheets) and auto-generate the pre-meet pack: "Good luck this
@@ -338,7 +257,7 @@ entries ([Lenex 3.0 spec](https://www.southeastswimming.org/wp-content/uploads/2
 type-detects results); feed `club_platform` event_preview with parsed data
 instead of form input; planner signal. Effort **M**, deterministic parsing.
 
-### 13. LENEX (.lef/.lxf) ingestion
+### 10. LENEX (.lef/.lxf) ingestion
 
 **What:** a parser for LENEX 3.0 — the XML interchange format used by
 SportSystems and European federations; `.lxf` is just a zipped `.lef` (the
@@ -350,13 +269,13 @@ free of charge"* ([swimrankings wiki](https://wiki.swimrankings.net/index.php/sw
 SportSystems exports it ([SportSystems KB](https://helpdesk.sportsys.co.uk/knowledgebase.php?article=19)),
 and Swim England's own results uploader accepts exactly Hy-Tek + LENEX — so
 HY3 + LENEX support means MediaHub can ingest the entire licensed-meet pipeline
-upstream of Swim England. It also unlocks European clubs later, and idea 12's
+upstream of Swim England. It also unlocks European clubs later, and idea 9's
 entries come free.
 
 **How it lands:** `interpreter/lenex_parser.py` + the four official example
 files as test fixtures. Effort **M**. Deterministic.
 
-### 14. Live meet mode — watch a results URL during the gala
+### 11. Live meet mode — watch a results URL during the gala
 
 **What:** club pastes the meet's live-results link before the gala (Hy-Tek
 "Real-Time Results" static HTML on the host club's site, results.swimming.org
@@ -378,7 +297,7 @@ theatrical hand-sell demo imaginable.
 type + per-swim dedupe keys + the autonomy queue (which by design never
 publishes). Effort **M–L**.
 
-### 15. Season wrap / monthly recap packs
+### 12. Season wrap / monthly recap packs
 
 **What:** cross-run aggregate content: "Your club's October — 47 PBs, 12
 medals, 3 club records, 5 debuts", biggest improver, end-of-season wrap pack +
@@ -392,19 +311,19 @@ required — pure aggregation of what's already stored.
 
 **How it lands:** aggregation over `runs_v4` snapshots + `data.db`; new pack
 type + reel sequence; scheduler can draft it monthly via the autonomy queue.
-Effort **M** (athlete registry (9) makes the numbers trustworthy).
+Effort **M** (athlete registry (6) makes the numbers trustworthy).
 
 ---
 
 ## Group 4 — Trust, safety, compliance
 
-### 16. Consent & safeguarding manager
+### 13. Consent & safeguarding manager
 
 **What:** a per-athlete consent registry — photo OK / name OK / initials-only /
 do-not-feature — imported from the club's existing consent records (CSV),
-enforced **deterministically** at generation and again at the publish gate;
-review UI shows "blocked: no consent on file"; a consent-status export for the
-club's welfare officer. Defaults to most-restrictive when unknown.
+enforced **deterministically** at generation and again before content is
+exported; review UI shows "blocked: no consent on file"; a consent-status
+export for the club's welfare officer. Defaults to most-restrictive when unknown.
 
 **Why:** Swim England's own *Social Media Good Club Guide* tells clubs to manage
 photo consent and designated-officer sign-off
@@ -416,12 +335,12 @@ strongest possible §4 evidence for the Swim England API application
 (`docs/commercial/SWIM_ENGLAND_API_APPLICATION.md`), and the thing that makes
 idea 2's public pages safe.
 
-**How it lands:** consent store keyed to the athlete registry (9); a new
-publish-gate check beside the existing safeguarding rule
-(`publishing/publish_gate.py`); generation-time name/photo redaction
-(initials-only rendering); audit entries. Effort **M–L**.
+**How it lands:** consent store keyed to the athlete registry (6); a new
+deterministic export-time check beside the existing safeguarding rule;
+generation-time name/photo redaction (initials-only rendering); audit entries.
+Effort **M–L**.
 
-### 17. Magic-link mobile approvals
+### 14. Magic-link mobile approvals
 
 **What:** tokenised, expiring review links — when a pack is ready, the
 designated approver gets an ntfy push / email with a link that opens a
@@ -443,7 +362,7 @@ mobile-first lite view; scoped strictly to one run; audit who approved. Effort
 
 ## Group 5 — Quality & polish
 
-### 18. OCR fallback for scanned PDFs
+### 15. OCR fallback for scanned PDFs
 
 **What:** when the PDF text layer is garbage (low-DPI scans) or the upload is an
 image, run OCR (Tesseract or RapidOCR in the Docker image), then the normal
@@ -460,11 +379,11 @@ critical, and committee secretaries *will* upload phone photos of printouts.
 low-confidence row flagging (the "flag ambiguous rows" doctrine already
 exists). Effort **M**. Deterministic.
 
-### 19. Auto alt-text on every export
+### 16. Auto alt-text on every export
 
 **What:** result-grounded alt text for every card ("Maya Patel, 50m freestyle,
 31.24 — a 0.8s personal best at the Swansea Spring Open"), included in the
-export ZIP, the newsletter, the public page/embed, and every publish payload.
+export ZIP, the newsletter, and the public page/embed.
 
 **Why:** `docs/KNOWN_ISSUES.md`: "Generated images do not include alt-text."
 Best practice is purpose-aware alt text under ~125 chars with human review —
@@ -477,9 +396,9 @@ feature, real differentiator for inclusive clubs and committee approval.
 
 **How it lands:** extend the caption generation contract with an `alt_text`
 field (AI surface → `media_ai.llm`, honest-error when no provider); thread
-through pack/export/publish. Effort **S**.
+through pack/export. Effort **S**.
 
-### 20. PB certificates + A4 noticeboard posters
+### 17. PB certificates + A4 noticeboard posters
 
 **What:** print exports: a branded A4 PB/achievement certificate per swimmer per
 meet (batch ZIP), and an A4/A3 "weekend round-up" poster for the leisure-centre
@@ -496,7 +415,7 @@ dependencies; pure renderer reuse; deeply on-brand for "celebrate every kid"
 prints to PDF natively; `reportlab` already an optional dep in tests); batch
 export route on the pack. Effort **S–M**.
 
-### 21. Bilingual captions — Welsh first
+### 18. Bilingual captions — Welsh first
 
 **What:** per-club caption language settings: English, Cymraeg, or bilingual
 (Welsh + English in one caption, the standard pattern for Welsh organisations).
@@ -513,37 +432,26 @@ scale — DeepL free tier is 500k chars/mo if ever needed,
 review UI showing both variants (AI surface, honest-error rule applies). Effort
 **S**.
 
-### 22. Engagement feedback loop
+### 19. Engagement feedback loop
 
-**What:** phase 1 (now): record which tone variant / archetype the club picks
-and which cards get approved vs rejected — per-club preference telemetry feeding
-the existing caption few-shot store and `memory/`. Phase 2 (once ideas 7/8
-land): pull per-post metrics — IG `views`/`reach`/`saved`/`shares` (note: Meta
-replaced `impressions` with `views` in Apr 2025 and is deprecating legacy Page
-metrics through Jun 2026 — build on the new names:
-[Meta insights](https://developers.facebook.com/docs/instagram-platform/insights/),
-[Page Insights changes](https://developers.facebook.com/blog/post/2025/08/15/page-insights-api-updates/)) —
-and let the planner learn "carousel PB cards earn saves for this club; reels
-earn reach" (the format split the 35M-post Socialinsider benchmark found).
+**What:** record which tone variant / archetype the club picks and which cards
+get approved vs rejected — per-club preference telemetry feeding the existing
+caption few-shot store and `memory/`, so the planner learns each club's taste
+("this club approves carousel PB cards; reels get edited down") and the next
+pack is better-aimed before it's even reviewed.
 
-**Why:** this is the compounding intelligence-layer moat — every approval and
-every post makes the next plan better, which no template tool can replicate.
-Phase 1 needs no external APIs at all.
+**Why:** this is the compounding intelligence-layer moat — every approval makes
+the next plan better, which no template tool can replicate. It needs no external
+APIs at all: the signal is entirely first-party, drawn from the club's own
+review decisions.
 
-**How it lands:** approval-seam telemetry → `memory/` + `observability/`;
-later a metrics-pull scheduler job per connected account. Effort **S** now,
-**M–L** for the metrics phase.
+**How it lands:** approval-seam telemetry → `memory/` + `observability/`.
+Effort **S**.
 
 ---
 
 ## Considered and parked (with reasons)
 
-- **TikTok / YouTube / X connectors** — TikTok unaudited = private-only posts;
-  YouTube default quota ≈ 6 uploads/day across *all* tenants until audited; X
-  is pay-per-use with low grassroots value. Revisit on club demand.
-- **WhatsApp Business Platform** — per-template-message billing + verification
-  friction; no official Channels API. The share-button stopgap (idea 6) covers
-  the workflow meanwhile.
 - **Second sport now** — gated behind Phase C (≥10 paying clubs) by the
   roadmap. Worth recording for when the gate opens: the data research reorders
   P3 by API accessibility — **Basketball England (PlayHQ public API, no auth)**
@@ -556,23 +464,23 @@ later a metrics-pull scheduler job per connected account. Effort **S** now,
 - **Multi-meet ZIP splitting, SC/LC conversion, split-time detectors, twin
   disambiguation UI** — real Known-Issues fixes, but lower product impact than
   the list above; bundle them into a robustness sprint when convenient (the
-  athlete registry (9) subsumes twin disambiguation).
+  athlete registry (6) subsumes twin disambiguation).
 - **Digital signage / Canva-style template marketplace** — template-shop
   direction explicitly against product principles; signage is served by the
-  public page + posters (ideas 2 and 20).
+  public page + posters (ideas 2 and 17).
 
 ## If only five get built (maintainer's call, but a recommendation)
 
-Phase-C logic says: pick what shortens the sale and survives the Buffer risk.
+Phase-C logic says: pick what shortens the sale and deepens what MediaHub owns
+end-to-end.
 
 1. **#1 Instant demo** — the sales motion's sharpest tool.
-2. **#16 Consent manager** (+ start **#9 athlete registry** underneath it) —
+2. **#13 Consent manager** (+ start **#6 athlete registry** underneath it) —
    the objection-killer for committees and the Swim England application.
-3. **#5 Email digest** — immediate, review-free distribution with sponsor value.
-4. **#11 Qualifying-time packs** — cheap, deterministic, parent-delighting
+3. **#5 Email digest** — immediate, review-free distribution to the club's own
+   member list, with sponsor value.
+4. **#8 Qualifying-time packs** — cheap, deterministic, parent-delighting
    content depth.
-5. **#7 Bluesky/Mastodon (or #6 Telegram)** — close the approve→post loop on a
-   free network and retire the Buffer single-point-of-failure.
-
-With **#8 (start the Meta verification clock)** as a parallel paperwork track,
-since the calendar, not code, is the long pole.
+5. **#2 Public achievements page + embed** — a first-party distribution surface
+   MediaHub owns end-to-end, no platform review, and a permanent advert to every
+   visiting club.

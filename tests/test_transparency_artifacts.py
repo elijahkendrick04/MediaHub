@@ -26,14 +26,14 @@ def test_subprocessor_page_public_and_complete(client):
     assert r.status_code == 200
     page = r.data.decode()
     # every provider in the canonical inventory appears on the public page
-    for provider in ("Render", "Google", "Anthropic", "Photoroom", "Replicate", "Buffer"):
+    for provider in ("Render", "Google", "Anthropic", "Photoroom", "Replicate"):
         assert provider in page, f"{provider} missing from /legal/subprocessors"
     assert "swimmingresults.org" in page  # the source-not-processor clarification
 
 
 def test_public_page_matches_canonical_inventory():
     canonical = (DOCS / "SUBPROCESSORS.md").read_text()
-    for provider in ("Render", "Google", "Anthropic", "Photoroom", "Replicate", "Buffer"):
+    for provider in ("Render", "Google", "Anthropic", "Photoroom", "Replicate"):
         assert provider in canonical
 
 

@@ -78,5 +78,5 @@ Live issues that we accept for now. Each has a workaround and is tracked in
 
 - **Generated images do not include alt-text** — ✅ fixed (W.11, 2026-06-12):
   a result-grounded alt text is produced in the same provider call as the
-  caption, is editable beside it in review, and rides the export ZIP, the
-  public wall embeds/feeds and Buffer publish payloads.
+  caption, is editable beside it in review, and rides the export ZIP and the
+  public wall embeds/feeds.

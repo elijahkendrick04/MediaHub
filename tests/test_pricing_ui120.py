@@ -94,21 +94,21 @@ def test_cards_have_both_check_and_cross_marks(monkeypatch, tmp_path):
 
 
 def test_free_tier_shows_a_cross_for_a_paid_only_feature(monkeypatch, tmp_path):
-    """Auto scheduling is a paid feature, so the Free card must cross it out."""
+    """Priority rendering is a paid feature, so the Free card must cross it out."""
     from mediahub.web import billing
 
     html = _get(_make_app(monkeypatch, tmp_path, with_stripe=False))
     # The Free card is the first tier card; isolate it and assert the paid-only
     # row is rendered as a cross within it.
     free_card = html.split('class="mh-tier"', 1)[1].split("mh-tier-cta", 1)[0]
-    assert "Auto scheduling" in free_card
-    # Within the Free card, the Auto-scheduling row is a not-included row.
-    seg = free_card.split("Auto scheduling", 1)[0]
+    assert "Priority rendering" in free_card
+    # Within the Free card, the Priority-rendering row is a not-included row.
+    seg = free_card.split("Priority rendering", 1)[0]
     assert "mh-feat-no" in seg.rsplit("<li", 1)[-1] or "mh-feat-no" in free_card
     # Sanity: the matrix really gates it (free off, club on).
     rows = {r.label: r for r in billing.feature_rows()}
-    assert rows["Auto scheduling"].value_for(billing.PLAN_FREE) is False
-    assert rows["Auto scheduling"].value_for(billing.PLAN_CLUB) is True
+    assert rows["Priority rendering"].value_for(billing.PLAN_FREE) is False
+    assert rows["Priority rendering"].value_for(billing.PLAN_CLUB) is True
 
 
 def test_string_valued_features_show_their_value(monkeypatch, tmp_path):

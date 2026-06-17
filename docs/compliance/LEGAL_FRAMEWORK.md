@@ -12,8 +12,9 @@ birth, sex category, club, race times); the platform enriches that data from
 swimmingresults.org, detects achievements, renders branded social cards
 (including names and, where supplied, photos of athletes — **most of whom are
 under 18**), captions them via cloud LLMs (Google Gemini, Anthropic), and
-packages them for publication to Instagram/Facebook/TikTok after human
-approval. The data subjects at the centre of gravity are **child athletes**.
+packages them for human approval and export/download — the club then posts the
+content manually; MediaHub does not publish to Instagram/Facebook/TikTok
+itself. The data subjects at the centre of gravity are **child athletes**.
 
 ---
 
@@ -169,7 +170,8 @@ ICO guidance states that conforming to the Children's Code satisfies this
 duty. For MediaHub the concrete design translation (Phase 2
 `compliance/childrens-code`) is per-tenant child-protection policy controls:
 surname initialisation, age suppression, photo exclusion for under-18 posts,
-no auto-publication of minors' content (already an autonomy-gate invariant),
+the fact that MediaHub does not publish to social at all (minors' content,
+like all approved content, is only ever exported for a human to post),
 and consent/opt-out enforcement before any child appears on a card.
 
 ---
@@ -239,7 +241,6 @@ verified positions:
 | **Render** (hosting, reference target) | Everything (full database, uploads, rendered cards, logs) | US (region-dependent) | DPA with SCCs; **DPF-certified**; ISO 27001. The single most significant transfer: the entire athlete data store lives on the host |
 | **swimmingresults.org** | Receives only HTTP requests containing athlete name (+ club) as search parameters; it is a **data source**, not a processor | UK (Swim England rankings) | Not a transfer in the Art 44 sense; the legal issue is Art 14/fairness/lawful basis for the *collection* — see Q4 |
 | **ntfy / webhooks** (optional) | Operational notifications — must be kept free of athlete personal data (Phase 2 minimisation) | Configurable | Avoid personal data; else DPA needed |
-| **Buffer / social platforms** (publishing) | Approved cards + captions (names/photos of children) | US | Publication, authorised per-club; Meta/TikTok become independent controllers on publication. The club's lawful basis and consent registry must cover publication itself |
 
 **Engineering consequence:** LLM/image payload minimisation (Phase 2
 `compliance/retention-and-minimisation`) directly shrinks the transfer
@@ -254,22 +255,23 @@ before a payload leaves the platform.
 > OPEN_LEGAL_QUESTIONS.md for solicitor confirmation.
 
 **Operating model:** the operator hosts MediaHub; clubs upload athlete data;
-the platform enriches from swimmingresults.org and renders/publishes content
-after club approval.
+the platform enriches from swimmingresults.org and renders content for club
+approval and export/download — the club posts it manually; the platform does
+not publish to social channels.
 
 **Recommended allocation (most defensible default):**
 
 1. **Club = controller** for all athlete personal data: the club decides to
    use the service, which athletes' data to upload, whether to enable
-   enrichment, what to approve, and what to publish. The club holds the
+   enrichment, what to approve, and what to export and post. The club holds the
    member relationship, determines purposes, and is the natural owner of the
    lawful basis, the Art 13/14 notices, and consent/opt-out collection.
 2. **Operator (MediaHub) = processor** for that data, acting on the club's
    documented instructions under an **Art 28 DPA** the platform provides:
    storage, parsing, detection, ranking, rendering, captioning (including
    engaging Google/Anthropic/Photoroom/Replicate/Render as authorised
-   **sub-processors**), and transmission to social platforms on the club's
-   approval.
+   **sub-processors**), and export/download of approved content for the club
+   to post manually — the platform is not a publication sub-processor.
 3. **The swimmingresults.org enrichment** is the delicate step: the platform
    designed it, but it should be framed as processing **on the club's
    documented instructions** — a per-tenant **opt-in** feature described in

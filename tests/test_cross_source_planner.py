@@ -290,7 +290,7 @@ def test_swimming_plan_is_ranked_grounded_and_explainable(tmp_path):
     for item in plan.items:
         assert item.reasons, item.post_type
         assert item.post_type == canonical_slug(item.post_type)
-        assert item.default_autonomy in {"draft_only", "approval_required", "fully_autonomous"}
+        assert item.default_autonomy in {"draft_only", "approval_required"}
 
     # The operator goal boosted its target type.
     goal_item = next(i for i in plan.items if i.post_type == "milestone_celebration")

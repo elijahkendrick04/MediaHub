@@ -10,7 +10,7 @@ codebase, not for end users.
 python -m venv .venv && source .venv/bin/activate
 make install           # pip install -r requirements.txt && pip install -e .
 make media-deps        # Playwright Chromium + Remotion node_modules
-cp .env.example .env   # add cloud API keys (Gemini and/or Anthropic, Buffer, Replicate, Photoroom)
+cp .env.example .env   # add cloud API keys (Gemini and/or Anthropic, Replicate, Photoroom)
 make run               # boots the Flask app for development
 ```
 

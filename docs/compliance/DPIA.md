@@ -16,9 +16,9 @@ follows the ICO's DPIA structure. It describes the system as actually built (evi
 
 MediaHub turns swimming competition results into branded social-media content for UK
 clubs. The data subjects are predominantly **under-18 athletes**. The processing exists
-to save volunteer time while keeping a human approval gate between data and public
-publication. This DPIA covers the whole pipeline: ingestion → detection → PB
-verification → rendering → AI captioning → approval → export/publication, plus
+to save volunteer time while keeping a human approval gate between data and any
+public posting. This DPIA covers the whole pipeline: ingestion → detection → PB
+verification → rendering → AI captioning → approval → export/download, plus
 account/billing data.
 
 ## Step 2 — Describe the processing
@@ -26,8 +26,8 @@ account/billing data.
 **Nature.** Clubs upload results files (HY3/SDIF/PDF/CSV/XLSX) or links; MediaHub
 parses them deterministically, detects achievements, verifies personal bests against
 public web sources, renders graphics/video on its own servers, generates captions via
-cloud LLMs, and holds everything for human review. Publication is by download or via
-the club's Buffer account.
+cloud LLMs, and holds everything for human review. MediaHub does not publish to social
+channels: approved content is exported/downloaded for a human to post manually.
 
 **Scope of data.** Athlete names, dates of birth/ages, gender, club, race results,
 age groups, governing-body identifiers, photographs. Account data: club officer email +
@@ -44,13 +44,12 @@ disability, Art. 9).
 | Anthropic | Same, as failover | US |
 | Photoroom / Replicate (only if enabled) | Athlete photos for background removal | [PHOTOROOM_REGION] / US |
 | DuckDuckGo (or self-hosted SearXNG) | Search queries: athlete name, club, birth year | US |
-| Buffer (only if club connects) | Approved caption + graphic | US |
 | Stripe | Email, plan (controller-side) | US |
 
 **Retention.** Caches: PB warm cache 7 days, research cache 30 days, demo uploads
 24 hours. Runs/uploads/packs: until deleted or per configured retention
-(`MEDIAHUB_RETENTION_DAYS`). Caption memory: deleted with its run/account. Posting and
-AI-usage logs: ring-buffer trimmed.
+(`MEDIAHUB_RETENTION_DAYS`). Caption memory: deleted with its run/account. AI-usage
+logs: ring-buffer trimmed.
 
 **Context.** Data subjects are children; the uploading club holds the direct
 relationship and the consents. Results are typically already public (meet results,
@@ -72,9 +71,9 @@ communications cover this processing; pilot-club feedback to be recorded here.]
   fidelity for minimisation; documented in ENV_INVENTORY.
 - **Accuracy:** parsing/detection/ranking are deterministic; PB claims are verified
   against sources with confidence scores; uncertain rows are flagged, never guessed.
-- **Human oversight:** nothing publishes without club approval except per-type
-  autonomous opt-in behind a fail-closed gate — and **content about under-18s never
-  auto-publishes** (`publishing/publish_gate.py`).
+- **Human oversight:** MediaHub does not post to social channels at all — approved
+  content (including minors') is only ever exported/downloaded for a human to post
+  manually, and consent gating blocks a refused athlete from approval and packing.
 - **Rights support:** in-product erasure (run, athlete, account — cascading through
   caches, caption memory, rendered assets), export, rectification + post-publication
   correction/takedown workflow; Art 12A request log with stop-the-clock metadata
@@ -83,8 +82,8 @@ communications cover this processing; pilot-club feedback to be recorded here.]
 - **Consent gating (two registries, one answer):** the W.2 per-athlete consent
   levels (photo/name/initials/do-not-feature) AND the compliance ledger
   (refusals/revocations, Art 18 restriction, opt-in mode with parental flags,
-  erasure suppression) — a card is blocked at approval, pack build, the publish
-  route, and the autonomous gate if EITHER blocks. Tenant-level Children's Code
+  erasure suppression) — a card is blocked at approval and at pack build if
+  EITHER blocks. Tenant-level Children's Code
   controls (surname initialisation, age suppression, photo exclusion) apply on
   top for under-18s, ON by default for new workspaces.
 
@@ -117,10 +116,10 @@ confirmation**.
 | Risk | Mitigation | Status |
 |------|-----------|--------|
 | R1 | Providers used via API terms with training disabled where offered; transfer mechanisms ([UK-US Data Bridge / IDTA]) executed per provider; pseudonymisation flag available; prompt content minimised; provider list disclosed in Privacy Notice/DPA | Code: done; vendor terms: **operational** |
-| R2 | Deterministic engine + confidence scores + human approval + fail-closed gate; rectification + correction/takedown workflow; minors never auto-publish | Done |
+| R2 | Deterministic engine + confidence scores + human approval before any content is used; rectification + correction/takedown workflow; MediaHub does not publish to social — approved content is only exported for a human to post | Done |
 | R3 | DPA + recorded lawful-basis/parental-consent attestation at workspace setup; children's section in Privacy Notice; media `permission_status` field | Done (attestation); per-photo consent enforcement: roadmap |
 | R4 | ADR-0014 isolation + invariant test suite; IDOR checks on run/card routes | Done |
-| R5 | Retention job (`MEDIAHUB_RETENTION_DAYS`) for runs/uploads/packs; erasure cascades to caches + caption memory + posting-log excerpts | Done |
+| R5 | Retention job (`MEDIAHUB_RETENTION_DAYS`) for runs/uploads/packs; erasure cascades to caches + caption memory | Done |
 | R6 | Hosting-level disk encryption; 0600 file modes; secrets in env | **Operational** (platform) |
 | R7 | Wall is opt-in, token-scoped, approved-cards-only, initials-by-default; demo skips PB lookups and purges at 24h | Done |
 | R8 | Standing rule: re-run DPIA + Art. 9 condition before para support ships | Recorded |
@@ -135,5 +134,5 @@ confirmation**.
 | DPO advice (if appointed) | [DPO_NAME] | |
 | Consult ICO first? | Only if the High residual risks above cannot be reduced — currently judged reducible via the mitigations; **solicitor to confirm** | |
 
-**Review:** re-run on any of — new sub-processor, para-swimming support, autonomy
-default changes, public-wall full-name default, EU expansion.
+**Review:** re-run on any of — new sub-processor, para-swimming support, a change
+to the human-approval/consent gating, public-wall full-name default, EU expansion.

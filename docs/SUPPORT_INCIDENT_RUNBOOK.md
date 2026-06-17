@@ -35,24 +35,21 @@ complaints; aim much faster).
 
 **Detect.** Signals: uptime monitor (observability/uptime), users reporting
 errors, a provider breach notice, anomalous ledger entries
-(`DATA_DIR/autonomy_audit/`, posting log), Render alerts.
+(`DATA_DIR/autonomy_audit/`), Render alerts.
 
 **Contain.**
-1. Publishing: flip the autonomy kill switch (publish gate honours it) and,
-   if needed, suspend Buffer channel connections.
-2. Access: rotate the operator `/developer` credential by setting
+1. Access: rotate the operator `/developer` credential by setting
    `MEDIAHUB_DEV_USER` / `MEDIAHUB_DEV_PASSWORD_HASH` (argon2id hash, ADR-0019)
    — or change the baked-in default in code; rotate `SECRET_KEY` to invalidate
    every session cookie (including any outstanding operator session) plus magic
    links and reset tokens; rotate any provider key suspected leaked (`.env`
    only — never code).
-3. If the host itself is compromised: scale the Render service to zero;
+2. If the host itself is compromised: scale the Render service to zero;
    the data disk persists.
 
 **Assess.** What data, whose, since when? Evidence sources, in order: the
-posting log (what actually went out, with caption excerpts), the per-org
-autonomy audit ledger, `legal_acceptances.jsonl`, run JSONs, Render logs.
-Write a timeline as you go — it becomes the ICO record.
+per-org autonomy audit ledger, `legal_acceptances.jsonl`, run JSONs, Render
+logs. Write a timeline as you go — it becomes the ICO record.
 
 **Notify.**
 - **Record first:** open an incident in the Art 33(5) register

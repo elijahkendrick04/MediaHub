@@ -26,9 +26,8 @@ from mediahub.sport_profiles import (
 def test_autonomy_values_are_bare_strings():
     assert AutonomyLevel.DRAFT_ONLY.value == "draft_only"
     assert AutonomyLevel.APPROVAL_REQUIRED.value == "approval_required"
-    assert AutonomyLevel.FULLY_AUTONOMOUS.value == "fully_autonomous"
     # str-backed: usable directly as its string value
-    assert AutonomyLevel.FULLY_AUTONOMOUS == "fully_autonomous"
+    assert AutonomyLevel.APPROVAL_REQUIRED == "approval_required"
 
 
 def test_autonomy_default_is_gated():
@@ -40,9 +39,9 @@ def test_autonomy_default_is_gated():
     [
         ("draft_only", AutonomyLevel.DRAFT_ONLY),
         ("Draft-Only", AutonomyLevel.DRAFT_ONLY),
-        ("  FULLY AUTONOMOUS ", AutonomyLevel.FULLY_AUTONOMOUS),
+        ("  APPROVAL REQUIRED ", AutonomyLevel.APPROVAL_REQUIRED),
         ("approval_required", AutonomyLevel.APPROVAL_REQUIRED),
-        (AutonomyLevel.FULLY_AUTONOMOUS, AutonomyLevel.FULLY_AUTONOMOUS),
+        (AutonomyLevel.DRAFT_ONLY, AutonomyLevel.DRAFT_ONLY),
     ],
 )
 def test_autonomy_from_str_tolerant(raw, expected):
@@ -56,14 +55,6 @@ def test_autonomy_from_str_unknown_falls_back_to_gated():
         AutonomyLevel.from_str("banana", default=AutonomyLevel.DRAFT_ONLY)
         is AutonomyLevel.DRAFT_ONLY
     )
-
-
-def test_autonomy_flags():
-    assert AutonomyLevel.DRAFT_ONLY.requires_human_approval is True
-    assert AutonomyLevel.APPROVAL_REQUIRED.requires_human_approval is True
-    assert AutonomyLevel.FULLY_AUTONOMOUS.requires_human_approval is False
-    assert AutonomyLevel.FULLY_AUTONOMOUS.can_auto_publish is True
-    assert AutonomyLevel.APPROVAL_REQUIRED.can_auto_publish is False
 
 
 # --- PostTypeConfig / SportProfile ------------------------------------------
@@ -153,15 +144,11 @@ def test_list_sport_profiles_finds_at_least_two():
     assert {"swimming", "football"}.issubset(profs)
 
 
-def test_shipped_profiles_are_gated_by_default():
-    # Safety invariant: no shipped profile may default any post type to
-    # fully_autonomous. Autonomy is opt-in per workspace, never out of the box.
+def test_shipped_profiles_have_valid_disposition():
+    # Every shipped post type carries a real disposition level; the default is
+    # approval-required (a human approves before content is used).
     for prof in list_sport_profiles():
         for key, cfg in prof.post_types.items():
-            assert cfg.default_autonomy is not AutonomyLevel.FULLY_AUTONOMOUS, (
-                f"{prof.sport}.{key} ships as fully_autonomous — must be gated"
-            )
-            # every parsed level must be a real enum member
             assert isinstance(cfg.default_autonomy, AutonomyLevel)
 
 

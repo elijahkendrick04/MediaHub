@@ -27,15 +27,15 @@
 | **Art 8** child consent (ISS) | n/a today (no child-facing service), but consent registry must model parental consent for under-18s regardless of basis chosen | No consent registry exists at all | **Critical** | C1 |
 | **Arts 12–13** transparency (data from subject) | Nothing | No club-facing Art 13 template, no notice generator | **High** | C4 |
 | **Art 14** (data NOT from subject — the swimmingresults.org enrichment) | Nothing; athletes/parents are never told their ranking history is being fetched and turned into content | **Mandatory notice missing for an active processing flow** | **Critical** | C4 (template) + C1 (per-tenant enrichment opt-in) |
-| **Art 15** access (SAR) | No per-athlete export; data scattered over S1–S14 | SAR cannot be answered within Art 12A time limits without manual archaeology | **High** | C2 |
+| **Art 15** access (SAR) | No per-athlete export; data scattered over S1–S13 | SAR cannot be answered within Art 12A time limits without manual archaeology | **High** | C2 |
 | **Art 16** rectification | Per-run re-edit only | No athlete-level rectification | Medium | C2 |
 | **Art 17** erasure | Run-level delete + global cache clear + per-asset delete only | **No athlete-level erasure**; blind spots: memory.db (S12), per-run PB cache (S6), search cache HTML (S8), users ledger (S11), club-profile rosters (S10) — see DATA_MAP §7 | **Critical** | C2 |
 | **Art 18** restriction | Nothing | No restriction flag; restricted athletes keep flowing into new packs | **High** | C2 |
-| **Art 19** notification of rectification/erasure to recipients | Nothing | Erasure must record/propagate to recipients where feasible (Buffer queue); published posts honestly out of reach | Medium | C2 |
+| **Art 19** notification of rectification/erasure to recipients | Nothing | Erasure must record/propagate to recipients where feasible; content the club already exported and posted manually is honestly out of reach | Medium | C2 |
 | **Art 20** portability | Nothing | SAR export in machine-readable JSON largely satisfies; applies only to consent/contract-based processing | Low | C2 |
 | **Art 21** objection | Nothing | Opt-out registry needed (objection ≈ opt-out in this product) | **Critical** (same mechanism as consent gating) | C1 |
-| **Arts 22 / 22A–22D** automated decisions | Human approval default; autonomous path gated + minors excluded | Approval gate is UI-level; must be unbypassable in code; ADM analysis recorded (Q9) | **High** | S8 (`security/llm-pipeline`) + C7 |
-| **Art 25** DP by design/default (+ children's higher protection matters, DUAA s 81) | `permission_status`/`safe_for_minors` fields exist (S9); safeguarding gate blocks minors from autonomy | No child-policy controls (surname initialisation, age suppression, photo exclusion); defaults not privacy-high | **High** | C5 |
+| **Arts 22 / 22A–22D** automated decisions | Human approval before any content is used; MediaHub does not publish to social — approved content is only exported for a human to post | Approval gate is UI-level; must be unbypassable in code; ADM analysis recorded (Q9) | **High** | S8 (`security/llm-pipeline`) + C7 |
+| **Art 25** DP by design/default (+ children's higher protection matters, DUAA s 81) | `permission_status`/`safe_for_minors` fields exist (S9); MediaHub does not publish to social, so minors' content is only ever exported for a human to post | No child-policy controls (surname initialisation, age suppression, photo exclusion); defaults not privacy-high | **High** | C5 |
 | **Art 28** processor contract | No DPA template; sub-processors engaged without flow-down terms visible to clubs | Clubs are processing without Art 28 terms | **Critical** | C4 |
 | **Art 30** ROPA | None before this phase | Closed by [`ROPA.md`](ROPA.md) (DRAFT; needs operator identity + sign-off) | **High** → addressed | Phase 1 |
 | **Art 32** security | Partial: bcrypt, signed cookies, tenant scoping on key routes, zip-bomb limits, audit ledger | No CSRF tokens, no login rate limiting, no idle timeout, no security headers/CSP, no MIME validation, no structured security log, no at-rest encryption, account deletion impossible | **Critical** | S1–S8 (Phase 3) |
@@ -53,10 +53,10 @@
 
 | Standard | Current state | Gap | Severity | Closes |
 |---|---|---|---|---|
-| 1 Best interests · 5 Detrimental use | Safeguarding gate (autonomy) only | No best-interests assessment; publication decisions lack child-specific controls | **High** | C5, C7 |
+| 1 Best interests · 5 Detrimental use | Human approval + export-only (no social publishing) only | No best-interests assessment; approval/export decisions lack child-specific controls | **High** | C5, C7 |
 | 2 DPIA | None | See Art 35 | **High** | C7 |
 | 4 Transparency | None | Athlete/parent-facing notice (Art 14) must be child-readable | **High** | C4 |
-| 7 Default settings · 8 Minimisation | Defaults publish full name + age + photo when club approves | Per-tenant under-18 rules needed: surname initialisation, age suppression, photo exclusion — **privacy-high by default** | **High** | C5 |
+| 7 Default settings · 8 Minimisation | Defaults render full name + age + photo onto approved/exported content | Per-tenant under-18 rules needed: surname initialisation, age suppression, photo exclusion — **privacy-high by default** | **High** | C5 |
 | 9 Data sharing | LLM/image/social flows un-minimised | See Art 5(1)(c) | **High** | C3, C5 |
 | 12 Profiling | PB enrichment builds longitudinal performance profiles of children | Opt-in + transparency + purpose limits | **High** | C1, C4 |
 | 15 Online tools | No way for an athlete/parent to exercise rights | Rights intake + complaints form | **High** | C2, C6 |

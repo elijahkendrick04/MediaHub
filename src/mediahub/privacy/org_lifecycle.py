@@ -90,7 +90,6 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 # Every data.db table that keys rows by profile_id. live_watch_swims and
 # magic_link_versions hang off watches/runs and are handled separately.
 _ORG_TABLES = (
-    "posting_attempts",
     "approval_events",
     "content_corrections",
     "club_records",

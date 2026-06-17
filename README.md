@@ -73,7 +73,6 @@ Upload  →  Interpreter  →  Pipeline  →  Recognition  →  Content Pack
 | [`ARCHITECTURE_TARGET.md`](docs/ARCHITECTURE_TARGET.md) | Hub-and-spoke target architecture (mapped onto today's modules) |
 | [`POST_TYPE_TAXONOMY.md`](docs/POST_TYPE_TAXONOMY.md) | Universal vs sport-specific post types (swimming, football, basketball, running) |
 | [`SPORT_PROFILES.md`](docs/SPORT_PROFILES.md) | The sport-profile concept + how to add a new sport |
-| [`AUTONOMY_MODEL.md`](docs/AUTONOMY_MODEL.md) | Per-content-type autonomy levels + guardrails |
 | [`DEPENDENCY_LICENSING.md`](docs/DEPENDENCY_LICENSING.md) | No-hidden-fees register + free substitutes |
 | [`KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Current rough edges |
 | [`TECHNICAL_DEBT.md`](docs/TECHNICAL_DEBT.md) | Legacy modules + cleanup priorities |
