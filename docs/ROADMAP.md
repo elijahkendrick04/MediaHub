@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `cfdfa74b4` · Merge pull request #734 from elijahkendrick04/claude/nifty-franklin-ki5tz6
+**Last updated:** 2026-06-17 · `b7624610e` · Merge pull request #727: Build UI2.8 — inline machine-readable Codeblock view on the review page
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1553,6 +1553,8 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-17 | `1ec1f2b0f` | R1.19: per-card audio-mix profiles (voice_lead / balanced / music_forward) |
+| 2026-06-17 | `64c70ed91` | style: ruff-format the UI2.8 additions (hygiene hook) |
+| 2026-06-17 | `e6a0c475d` | Build UI2.8 — inline machine-readable Codeblock view on the review page |
 | 2026-06-17 | `89373a184` | R1.9: cutout-layer compositing in motion (parallax foreground) |
 | 2026-06-17 | `c1e71c990` | Apply ruff-format to G1.15 files |
 | 2026-06-17 | `47b2451f9` | R1.23: dynamic logo sizing + scene-aware animated logo reveal |
@@ -1560,5 +1562,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `3a897d3c8` | Add club custom-font upload pipeline (G1.10) |
 | 2026-06-17 | `872fdd9f7` | R1.5: motion accent-decoration expansion pack |
 | 2026-06-17 | `16b02fead` | G1.30: apply ruff-format to inspection overlay module + tests |
-| 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 <!-- /ROADMAP:ACTIVITY -->
