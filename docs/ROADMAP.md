@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-16 · `b08ce2814` · Merge pull request #691: Subtitle/caption burn-in engine (R1.3)
+**Last updated:** 2026-06-17 · `4562a5c39` · Merge pull request #709 from elijahkendrick04/claude/modest-brown-ya1sqz
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -178,7 +178,6 @@ sequence it or merge with care.
 - **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.2** · Graphic generator sprint — Multi-athlete collage / relay layout engine compositing 2–4 cutouts into one balanced frame with deterministic multi-subject placement. *Build: new `graphic_renderer/collage.py` + `layouts/v2/relay_collage.html`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.5** · Graphic generator sprint — Accent-geometry expansion pack — hexagons, art-deco corners, wave rules, spiral flourishes, glitch dividers. *Build: append to `style_packs.ACCENT_GEOS` + accent-geo generator (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.10** · Graphic generator sprint — Club custom-font upload pipeline — security-sandboxed validation, subsetting, first-party self-hosting. *Build: new `typography/font_intake.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1561,6 +1560,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 | 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
 | 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
 | 2026-06-16 | `2b0691b5b` | Add subtitle/caption burn-in engine (R1.3) |

@@ -131,6 +131,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.23** · Graphic generator sprint — Headless-Chromium context pooling — reuse a warm browser context across renders for fast batch runs. *Build: `render.py` renderer infra (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **R1.30** · Reel generator sprint — Reel cover & outro redesign system — data-driven cover variants + outro CTA variants (follow handle, next meet, sponsor thanks). *Build: `MeetReel.tsx` `CoverScreen`/`OutroScreen` (sole owner) + optional `sprint/reel/` overlays.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-16)*
 - ✅ **R1.3** · Reel generator sprint — Subtitle/caption burn-in engine — read the voiceover SRT, render APCA-gated on-video captions. *Build: new `visual/subtitle_burn.py` + `sprint/layers/captions.tsx`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
+- ✅ **G1.5** · Graphic generator sprint — Accent-geometry expansion pack — hexagons, art-deco corners, wave rules, spiral flourishes, glitch dividers. *Build: append to `style_packs.ACCENT_GEOS` + accent-geo generator (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
