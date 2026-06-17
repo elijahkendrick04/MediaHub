@@ -2754,6 +2754,74 @@ def _load_run(run_id: str) -> Optional[dict]:
         return None
 
 
+def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
+    """UI2.8 — assemble the curated, machine-readable JSON shown inline on the
+    review page's Recognition-summary card (rendered through the first-party
+    Codeblock highlighter, ``code_highlight.code_block`` — the "raw parsed-data
+    view" host surface the kit's Codeblock effect was waiting for).
+
+    This is the *explainability* payload: meet context, the parsed/matched swim
+    counts, and the ranked achievements the engine decided on — each with its
+    confidence and suggested post type — in the same JSON shape the export and
+    the downstream content steps consume. It is built from an explicit field
+    **whitelist**, so no filesystem path under ``DATA_DIR``, provider key or
+    internal blob can leak onto the page, and the achievements list is capped so
+    a large meet can't render a multi-megabyte block. Never raises: on any error
+    it returns a small, honest error document instead of breaking the review
+    page.
+    """
+    try:
+        data = data or {}
+        meet = data.get("meet") or {}
+        rr = data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        total = len(ranked)
+        shown = ranked[: max(0, int(max_achievements))]
+        achievements = []
+        for ra in shown:
+            ra = ra if isinstance(ra, dict) else {}
+            a = ra.get("achievement") or {}
+            achievements.append(
+                {
+                    "rank": ra.get("rank"),
+                    "type": a.get("type"),
+                    "swimmer": a.get("swimmer_name"),
+                    "event": a.get("event"),
+                    "time": a.get("time") or a.get("swim_time") or a.get("result_time"),
+                    "quality_band": ra.get("quality_band"),
+                    "confidence": a.get("confidence_label"),
+                    "suggested_post_type": ra.get("suggested_post_type"),
+                }
+            )
+        doc = {
+            "run_id": run_id,
+            "meet": {
+                "name": meet.get("name"),
+                "date": meet.get("date"),
+                "course": meet.get("course"),
+                "venue": meet.get("venue"),
+            },
+            "counts": {
+                "parsed_swims": data.get("parsed_swim_count"),
+                "club_swims": data.get("our_swim_count"),
+                "achievements": rr.get("n_achievements", total),
+            },
+            "achievements": achievements,
+            "parse_warnings": [str(w) for w in (data.get("parse_warnings") or [])][:50],
+        }
+        if total > len(shown):
+            doc["achievements_truncated"] = {"shown": len(shown), "total": total}
+        return json.dumps(doc, indent=2, ensure_ascii=False, default=str)
+    except Exception as exc:  # noqa: BLE001 — a preview must never 500 /review
+        return json.dumps(
+            {
+                "error": "could not assemble machine-readable view",
+                "detail": str(exc)[:200],
+            },
+            indent=2,
+        )
+
+
 def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
     """Resolve the owning profile_id for a run.
 
@@ -17396,7 +17464,7 @@ def create_app() -> Flask:
             )
 
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
@@ -17693,6 +17761,17 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
       <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
       <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+    <!-- UI2.8 — Codeblock raw parsed-data view. The machine-readable JSON the
+         recognition engine produced, shown inline through the first-party
+         server-side highlighter (no CDN), syntax-coloured and copyable, so a
+         volunteer never has to leave the page or read an unstyled browser tab
+         to see exactly what the engine decided. Whitelisted fields only; the
+         block is server-rendered so it works with JavaScript disabled (only the
+         copy button is a progressive enhancement). -->
+    <div class="mh-machine-readable" id="mh-machine-readable" style="margin-top:var(--sp-4)">
+      <p class="muted" style="font-size:12px;margin:0 0 8px">The machine-readable data the recognition engine produced for this run &mdash; meet context, the parsed and club-matched swim counts and the ranked achievements, in the same JSON shape the export and the downstream content steps consume. Read-only; copy it straight from here.</p>
+      {_code_hl.code_block(_machine_readable_run(data, run_id), "json", label="Recognition data")}
     </div>
   </details>
 </div>
