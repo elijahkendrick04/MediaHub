@@ -320,3 +320,54 @@ def test_legacy_slug_alias_resolves(client):
     else:
         # If not aliased on this deployment, it must degrade to a redirect, not 500.
         assert r.status_code in (301, 302, 303, 307, 308)
+
+
+# =========================================================================== #
+# Plan — the predominant non-tile entry gets its own how-it-works too
+# =========================================================================== #
+def test_plan_intro_renders_its_own_slide():
+    frag = ci.render_plan_intro(start_url="/plan", back_url="/make")
+    assert "How it works" in frag
+    assert ">Plan</h1>" in frag
+    assert ">THE ENGINE</text>" in frag
+    # Its CTA opens the planner (not a content generator).
+    assert "Open Plan &rarr;" in frag
+    assert 'href="/plan"' in frag
+    for svg in _svgs(frag):
+        ET.fromstring(svg)
+
+
+def test_plan_intro_is_plan_specific_not_a_media_tile():
+    frag = ci.render_plan_intro(start_url="/plan", back_url="/make")
+    # Plan-specific give/get, drawn in both orientations — not media-format chips.
+    for label in ("What's coming up", "Your goals", "Club history", "Ranked ideas"):
+        assert frag.count(f">{label}</text>") == 2, label
+    # And its slide is distinct from every content tile's.
+    for ct, meta in REGISTRY.items():
+        if meta.how_it_works is not None:
+            assert meta.how_it_works.tagline != ci._PLAN_TAGLINE
+
+
+def test_plan_intro_is_deterministic():
+    assert ci.render_plan_intro(start_url="/plan", back_url="/make") == ci.render_plan_intro(
+        start_url="/plan", back_url="/make"
+    )
+
+
+def test_plan_route_renders_and_starts_the_planner(client):
+    r = client.get("/make/plan")
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    assert "How it works" in html and ">Plan</h1>" in html
+    with webmod.app.test_request_context():
+        from flask import url_for
+
+        assert f'href="{url_for("plan_page")}"' in html
+
+
+def test_create_page_plan_tile_is_predominant_and_links_to_its_intro(client):
+    body = client.get("/make").get_data(as_text=True)
+    assert 'class="mh-plan-tile"' in body
+    assert 'href="/make/plan"' in body
+    # Predominant = the Plan tile sits above the content-type grid in the DOM.
+    assert body.index('class="mh-plan-tile"') < body.index('class="mh-template-grid"')

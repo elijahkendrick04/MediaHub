@@ -404,6 +404,47 @@ def _outputs_for(formats: list[str]) -> tuple[list[tuple[str, str]], list[tuple[
     return chips, dims
 
 
+def _intro_slide(
+    *,
+    title: str,
+    tagline: str,
+    inputs: list[tuple[str, str]],
+    outputs: list[tuple[str, str]],
+    steps: tuple[str, ...],
+    meta_chips_html: str,
+    a11y: str,
+    start_url: str,
+    start_label: str,
+    back_url: str,
+) -> str:
+    """The shared "how it works" first-slide markup: hero header → give/engine/get
+    circuit → numbered steps → action row. ``inputs``/``outputs`` are
+    ``(label, glyph_markup)`` pairs. Deterministic (no randomness / no I/O)."""
+    steps_html = "".join(
+        f'<li class="mh-ci-step"><span class="mh-ci-step-num">{i}</span>'
+        f'<span class="mh-ci-step-body">{_x(step)}</span></li>'
+        for i, step in enumerate(steps, 1)
+    )
+    return (
+        '<section class="mh-hero mh-ci-head" data-lane="03" '
+        'style="padding-top:var(--sp-8);padding-bottom:var(--sp-5)">'
+        '<span class="mh-hero-eyebrow">How it works</span>'
+        f"<h1>{_x(title)}</h1>"
+        f'<p class="lede">{_x(tagline)}</p>'
+        "</section>"
+        '<div class="mh-pl-stage mh-ci-stage">'
+        f'<p class="mh-visually-hidden">{_x(a11y)}</p>'
+        f"{_svg_horizontal(inputs, outputs)}{_svg_vertical(inputs, outputs)}"
+        "</div>"
+        f'<ol class="mh-ci-steps">{steps_html}</ol>'
+        '<div class="mh-ci-actions">'
+        f'<a class="btn mh-ci-start" href="{start_url}">{_x(start_label)} &rarr;</a>'
+        f'<a class="btn secondary" href="{back_url}">&larr; Back to Create</a>'
+        f'<span class="mh-ci-meta">{meta_chips_html}</span>'
+        "</div>"
+    )
+
+
 def render_content_intro(
     meta: ContentTypeMeta,
     *,
@@ -412,11 +453,8 @@ def render_content_intro(
     start_url: str,
     back_url: str,
 ) -> str:
-    """Full ``<body>`` markup for a heading's "how it works" first slide.
-
-    Deterministic (no randomness / no I/O) so it is cache-safe and simple to
-    test. Pass the result straight to ``_layout``.
-    """
+    """Full ``<body>`` markup for a content-type tile's "how it works" first
+    slide. Pass the result straight to ``_layout``."""
     hiw = _resolved_hiw(meta)
     inputs = [(label, _glyph(key)) for label, key in hiw.inputs]
     out_chips, out_dims = _outputs_for(formats)
@@ -430,12 +468,6 @@ def render_content_intro(
         "without your approval."
     )
 
-    steps_html = "".join(
-        f'<li class="mh-ci-step"><span class="mh-ci-step-num">{i}</span>'
-        f'<span class="mh-ci-step-body">{_x(step)}</span></li>'
-        for i, step in enumerate(hiw.steps, 1)
-    )
-
     meta_chips = "".join(
         f'<span class="mh-ci-chip">{_x(label)}'
         + (f' <span class="mh-ci-chip-dim">{_x(dim)}</span>' if dim else "")
@@ -445,23 +477,72 @@ def render_content_intro(
     if effort:
         meta_chips += f'<span class="mh-ci-chip mh-ci-chip--time">{_x(effort)}</span>'
 
-    return (
-        '<section class="mh-hero mh-ci-head" data-lane="03" '
-        'style="padding-top:var(--sp-8);padding-bottom:var(--sp-5)">'
-        '<span class="mh-hero-eyebrow">How it works</span>'
-        f"<h1>{_x(meta.title)}</h1>"
-        f'<p class="lede">{_x(hiw.tagline)}</p>'
-        "</section>"
-        '<div class="mh-pl-stage mh-ci-stage">'
-        f'<p class="mh-visually-hidden">{_x(a11y)}</p>'
-        f"{_svg_horizontal(inputs, out_chips)}{_svg_vertical(inputs, out_chips)}"
-        "</div>"
-        f'<ol class="mh-ci-steps">{steps_html}</ol>'
-        '<div class="mh-ci-actions">'
-        f'<a class="btn mh-ci-start" href="{start_url}">Start {_x(meta.title)} &rarr;</a>'
-        f'<a class="btn secondary" href="{back_url}">&larr; Back to Create</a>'
-        f'<span class="mh-ci-meta">{meta_chips}</span>'
-        "</div>"
+    return _intro_slide(
+        title=meta.title,
+        tagline=hiw.tagline,
+        inputs=inputs,
+        outputs=out_chips,
+        steps=hiw.steps,
+        meta_chips_html=meta_chips,
+        a11y=a11y,
+        start_url=start_url,
+        start_label=f"Start {meta.title}",
+        back_url=back_url,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Plan — the strategic "what should we make?" entry. It is NOT a content-type
+# tile (its output is a ranked, explainable plan, not a media format), so it
+# carries its own intro spec here rather than in the ContentType REGISTRY, and
+# its "Start" opens the planner (/plan) instead of a generator.
+# --------------------------------------------------------------------------- #
+_PLAN_INPUTS: tuple[tuple[str, str], ...] = (
+    ("What's coming up", "words"),
+    ("Your goals", "trophy"),
+    ("Club history", "meet"),
+)
+_PLAN_OUTPUTS: tuple[tuple[str, str], ...] = (
+    ("Ranked ideas", "pb"),
+    ("The reasoning", "note"),
+    ("Top pick to make", "graphic"),
+)
+_PLAN_STEPS: tuple[str, ...] = (
+    "Describe what's coming up in your own words and set your goals.",
+    "The engine ranks what to post next from your results, the calendar and your "
+    "goals — with the reasoning shown for every idea.",
+    "Jump straight into making the top idea, or work down the ranked list.",
+)
+_PLAN_TAGLINE = "Not sure what to post? Get a ranked, explainable plan of what to make next."
+
+
+def render_plan_intro(*, start_url: str, back_url: str) -> str:
+    """Full ``<body>`` markup for the Plan "how it works" first slide. Same visual
+    language as the tiles; its Start opens the planner."""
+    inputs = [(label, _glyph(key)) for label, key in _PLAN_INPUTS]
+    outputs = [(label, _glyph(key)) for label, key in _PLAN_OUTPUTS]
+    a11y = (
+        "How Plan works. You give: what's coming up, your goals and your club "
+        "history. The MediaHub engine ranks what to post next, with the reasoning "
+        "shown for every idea. You get a ranked, explainable content plan — and can "
+        "jump straight into making the top pick. Nothing posts without your approval."
+    )
+    meta_chips = (
+        '<span class="mh-ci-chip">Ranked plan</span>'
+        '<span class="mh-ci-chip">Reasoning shown</span>'
+        '<span class="mh-ci-chip mh-ci-chip--time">~ 30s</span>'
+    )
+    return _intro_slide(
+        title="Plan",
+        tagline=_PLAN_TAGLINE,
+        inputs=inputs,
+        outputs=outputs,
+        steps=_PLAN_STEPS,
+        meta_chips_html=meta_chips,
+        a11y=a11y,
+        start_url=start_url,
+        start_label="Open Plan",
+        back_url=back_url,
     )
 
 
@@ -537,5 +618,85 @@ CONTENT_INTRO_CSS = """
 @media (max-width: 720px) {
   .mh-ci-steps { grid-template-columns: 1fr; }
   .mh-ci-meta { margin-left: 0; width: 100%; }
+}
+
+/* The predominant "Plan" entry tile at the top of the Create page. Sits above
+   the content-type grid and is lane-accented + lifted so it reads as the
+   strategic starting point ("what should we make?"). Links to Plan's own
+   how-it-works first slide. */
+.mh-plan-tile {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+  padding: 22px 24px;
+  border: 1px solid var(--lane);
+  border-radius: 14px;
+  background:
+    radial-gradient(130% 170% at 0% 0%, rgba(212,255,58,0.10), transparent 60%),
+    var(--surface);
+  box-shadow: 0 0 0 1px rgba(212,255,58,0.08), 0 10px 30px rgba(0,0,0,0.25);
+  text-decoration: none;
+  color: var(--ink);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.mh-plan-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 1px rgba(212,255,58,0.20), 0 16px 40px rgba(0,0,0,0.34);
+}
+.mh-plan-tile-icon {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(212,255,58,0.10);
+  color: var(--lane);
+  border: 1px solid color-mix(in oklab, var(--lane) 30%, transparent);
+}
+.mh-plan-tile-body {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.mh-plan-tile-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--lane);
+}
+.mh-plan-tile-title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0;
+  line-height: 1.15;
+}
+.mh-plan-tile-title .editorial { color: var(--lane); }
+.mh-plan-tile-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-dim);
+  max-width: 64ch;
+  line-height: 1.5;
+}
+.mh-plan-tile-cta {
+  flex: 0 0 auto;
+  font-weight: 700;
+  border: 1px solid var(--lane);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--lane);
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .mh-plan-tile { padding: 18px; }
+  .mh-plan-tile-cta { width: 100%; text-align: center; }
 }
 """

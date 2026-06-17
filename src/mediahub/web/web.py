@@ -8756,6 +8756,7 @@ from mediahub.web.content_intro import (  # noqa: E402
     CONTENT_INTRO_CSS as _MH_CI_CSS,
     presentation_for as _ct_presentation_for,
     render_content_intro as _render_content_intro,
+    render_plan_intro as _render_plan_intro,
 )
 from mediahub.web.cadence_heatmap import (  # noqa: E402
     CADENCE_HEATMAP_CSS as _MH_CAD_CSS,
@@ -25394,26 +25395,30 @@ function mhPlanGenerate(btn) {{
         )
 
         # Plan moved here from the top bar — it answers this page's own hero
-        # question ("what should we make?"), so it sits at the top of Create as
-        # the strategic entry point into the ranked, explainable content plan.
+        # question ("what should we make?"), so it sits at the TOP of Create as
+        # the predominant, strategic entry point into the ranked, explainable
+        # content plan. Like every tile it opens its own how-it-works first slide
+        # (/make/plan); that slide's "Open Plan" CTA continues into the planner.
+        _plan_tile_icon = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<path d="M9 11l3 3L22 4"/>'
+            '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
+            "</svg>"
+        )
         plan_entry_html = (
-            f'<a href="{_h(url_for("plan_page"))}" '
-            "style=\"display:flex;align-items:center;gap:18px;flex-wrap:wrap;"
-            "margin-bottom:var(--sp-5);padding:18px 20px;border:1px solid var(--lane);"
-            'border-radius:12px;background:rgba(212,255,58,0.05);text-decoration:none;color:var(--ink)">'
-            '<div style="flex:1;min-width:240px">'
-            '<span style="font-family:var(--font-mono,monospace);font-size:10.5px;'
-            'text-transform:uppercase;letter-spacing:0.14em;color:var(--lane)">Plan</span>'
-            '<div style="font-size:18px;font-weight:700;margin:4px 0 6px 0">'
-            'Not sure what to post? <em class="editorial" style="color:var(--lane)">Plan your next posts.</em></div>'
-            '<p style="margin:0;font-size:13px;color:var(--ink-dim);max-width:62ch">'
-            "MediaHub ranks what to post next from your results, the calendar and what you tell it "
-            "&mdash; with the reasoning shown for every item. Describe what&rsquo;s coming up in your own "
-            "words and it fills in the calendar for you, then jump straight into making the top idea.</p>"
-            "</div>"
-            '<span style="flex:0 0 auto;font-weight:600;border:1px solid var(--lane);'
-            'border-radius:999px;padding:8px 16px;font-size:13px;color:var(--lane);white-space:nowrap">'
-            "Open Plan &rarr;</span>"
+            f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
+            f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
+            '<span class="mh-plan-tile-body">'
+            '<span class="mh-plan-tile-eyebrow">Plan &middot; Start here</span>'
+            '<span class="mh-plan-tile-title">Not sure what to post? '
+            '<em class="editorial">Plan your next posts.</em></span>'
+            '<span class="mh-plan-tile-desc">MediaHub ranks what to post next from your '
+            "results, the calendar and what you tell it &mdash; with the reasoning shown for "
+            "every item. Describe what&rsquo;s coming up in your own words and it fills in the "
+            "calendar for you, then jump straight into making the top idea.</span>"
+            "</span>"
+            '<span class="mh-plan-tile-cta">Open Plan &rarr;</span>'
             "</a>"
         )
 
@@ -25442,9 +25447,19 @@ function mhPlanGenerate(btn) {{
         # first slide automatically — no per-heading wiring here.
         try:
             from mediahub.club_platform.content_types import REGISTRY
-            from mediahub.club_platform.post_types import implemented_content_type
+            from mediahub.club_platform.post_types import canonical_slug, implemented_content_type
         except ImportError:
             return redirect(url_for("make_page"))
+
+        # Plan is the predominant non-content-type entry. It gets the same
+        # how-it-works first slide, but its "Open Plan" CTA opens the planner.
+        if canonical_slug(ct) == "plan":
+            try:
+                plan_start = url_for("plan_page")
+            except Exception:
+                plan_start = url_for("make_page")
+            body = _render_plan_intro(start_url=plan_start, back_url=url_for("make_page"))
+            return _layout("Plan", body, active="create")
 
         ctype = implemented_content_type(ct)
         if ctype is None or ctype not in REGISTRY:
