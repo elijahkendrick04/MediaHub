@@ -159,6 +159,8 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.27** · Graphic generator sprint — Interactive brief/design editor — tweak text layers, palette, archetype and style pack with live re-render. *Build: new `web/web.py` route + template (distinct route from G1.26).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **R1.14** · Reel generator sprint — Transition library expansion + per-card timing — new transitions (glitch, slide-stack, light-sweep) + a duration field. *Build: `MeetReel.tsx` `transitionFor` + `TransitionWrap` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
+- ✅ **R1.15** · Reel generator sprint — Multi-format batch reel render — one request renders + caches all four cuts in a single pass. *Build: `visual/motion.py` `render_meet_reel` + a new web route (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
+- ✅ **G1.19** · Graphic generator sprint — Grayscale/mono accessibility render mode — deterministic B/W with role remap. *Build: new `sprint_hooks/mono_mode.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
