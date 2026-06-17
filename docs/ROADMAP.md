@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `1f0ee9ed5` · Merge PR #712: R1.5 motion accent-decoration expansion pack
+**Last updated:** 2026-06-17 · `b24310675` · Merge pull request #717: R1.23 dynamic logo sizing + scene-aware animated logo reveal
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -203,7 +203,6 @@ sequence it or merge with care.
 - **R1.19** · Reel generator sprint — Per-card audio-mix profiles (voice_lead / balanced / music_forward) folded into the audio plan + cache key. *Build: `visual/audio_mux.py` (file-sibling R1.20 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.21** · Reel generator sprint — Local Piper TTS provider backend behind the voiceover seam (zero-cost; honest error if the model is absent). *Build: `visual/voiceover.py` (sole owner).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.23** · Reel generator sprint — Dynamic logo sizing + animated logo reveals per scene (small/medium/large/auto, scene-aware entrance). *Build: `sprint/layers/logo_anim.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.25** · Reel generator sprint — Multi-part stagger sequences — component-group cascades (name → event → result → chips) beyond per-word. *Build: `sprint/layers/stagger.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.27** · Reel generator sprint — Frame-by-frame motion visual-regression harness — render reference frames, pixel-diff in CI. *Build: new tooling + new tests under `tests/`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.29** · Reel generator sprint — Progressive in-render poster capture via a Remotion `delayRender` hook, skipping ffprobe extraction. *Build: `remotion/render.js` + `visual/motion.py` `_finish_cached_video` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
@@ -1558,8 +1557,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `47b2451f9` | R1.23: dynamic logo sizing + scene-aware animated logo reveal |
 | 2026-06-17 | `3a897d3c8` | Add club custom-font upload pipeline (G1.10) |
 | 2026-06-17 | `872fdd9f7` | R1.5: motion accent-decoration expansion pack |
+| 2026-06-17 | `16b02fead` | G1.30: apply ruff-format to inspection overlay module + tests |
 | 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 | 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
 | 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
