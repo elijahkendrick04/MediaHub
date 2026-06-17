@@ -320,6 +320,174 @@ def test_mux_args_voice_only_ignores_cut_times(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Per-card audio-mix profiles (R1.19)
+# ---------------------------------------------------------------------------
+
+
+def _voice_on(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_VOICEOVER", "1")
+    monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
+    monkeypatch.delenv("MEDIAHUB_REEL_MIX_PROFILE", raising=False)
+    monkeypatch.setattr("mediahub.visual.voiceover.is_available", lambda: True)
+
+
+def test_mix_profile_table_and_balanced_is_the_historic_mix():
+    assert set(audio_mux.AUDIO_MIX_PROFILES) == {"voice_lead", "balanced", "music_forward"}
+    assert audio_mux.DEFAULT_MIX_PROFILE == "balanced"
+    # ``balanced`` must reproduce the historic constants exactly, or every
+    # pre-profile cache would be silently orphaned.
+    bal = audio_mux.AUDIO_MIX_PROFILES["balanced"]
+    assert bal["music_under_voice_weight"] == audio_mux.MUSIC_UNDER_VOICE_WEIGHT
+    assert bal["music_bed_volume"] == audio_mux.MUSIC_BED_VOLUME
+    assert bal["duck_ratio"] == audio_mux.DUCK_RATIO
+    # voice_lead sits below balanced; music_forward above (resting bed level)…
+    assert (
+        audio_mux.AUDIO_MIX_PROFILES["voice_lead"]["music_under_voice_weight"]
+        < bal["music_under_voice_weight"]
+        < audio_mux.AUDIO_MIX_PROFILES["music_forward"]["music_under_voice_weight"]
+    )
+    # …and voice_lead ducks the bed harder than music_forward does.
+    assert (
+        audio_mux.AUDIO_MIX_PROFILES["voice_lead"]["duck_ratio"]
+        > bal["duck_ratio"]
+        > audio_mux.AUDIO_MIX_PROFILES["music_forward"]["duck_ratio"]
+    )
+
+
+def test_resolve_mix_profile_validates_and_defaults():
+    assert audio_mux.resolve_mix_profile("VOICE_LEAD") == "voice_lead"
+    assert audio_mux.resolve_mix_profile("  music_forward ") == "music_forward"
+    assert audio_mux.resolve_mix_profile("balanced") == "balanced"
+    for bad in ("", "  ", None, "nonsense", 0):
+        assert audio_mux.resolve_mix_profile(bad) == "balanced"
+
+
+def test_env_mix_profile_reads_the_operator_env(monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_REEL_MIX_PROFILE", raising=False)
+    assert audio_mux.env_mix_profile() == "balanced"
+    monkeypatch.setenv("MEDIAHUB_REEL_MIX_PROFILE", "music_forward")
+    assert audio_mux.env_mix_profile() == "music_forward"
+    monkeypatch.setenv("MEDIAHUB_REEL_MIX_PROFILE", "garbage")
+    assert audio_mux.env_mix_profile() == "balanced", "an invalid env value falls back safely"
+
+
+def test_mix_profile_levels_is_a_fresh_validated_dict():
+    levels = audio_mux.mix_profile_levels("voice_lead")
+    assert set(levels) == {"music_under_voice_weight", "music_bed_volume", "duck_ratio"}
+    levels["music_bed_volume"] = 99.0  # mutating the copy must not poison the table
+    assert audio_mux.AUDIO_MIX_PROFILES["voice_lead"]["music_bed_volume"] != 99.0
+    assert audio_mux.mix_profile_levels("nope") == audio_mux.AUDIO_MIX_PROFILES["balanced"]
+
+
+def test_build_audio_plan_default_omits_mix_for_byte_identity(monkeypatch):
+    _voice_on(monkeypatch)
+    base = audio_mux.build_audio_plan(script="Spring Open. Meet recap.", content_key="k")
+    assert base is not None and set(base) == {"voice", "script"}
+    explicit = audio_mux.build_audio_plan(
+        script="Spring Open. Meet recap.", content_key="k", mix_profile="balanced"
+    )
+    assert explicit == base, "explicit balanced must not change the cache identity"
+
+
+def test_build_audio_plan_records_non_default_profile(monkeypatch):
+    _voice_on(monkeypatch)
+    base = audio_mux.build_audio_plan(script="Spring Open.", content_key="k")
+    for name in ("voice_lead", "music_forward"):
+        plan = audio_mux.build_audio_plan(script="Spring Open.", content_key="k", mix_profile=name)
+        assert plan["mix"] == name
+        assert plan != base, "a non-default mix must diverge the cache identity"
+
+
+def test_build_audio_plan_profile_precedence(monkeypatch):
+    _voice_on(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_REEL_MIX_PROFILE", "music_forward")
+    # explicit (known) wins over env
+    assert (
+        audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="voice_lead")["mix"]
+        == "voice_lead"
+    )
+    # no explicit → env default applies
+    assert audio_mux.build_audio_plan(script="x", content_key="k")["mix"] == "music_forward"
+    # an unknown explicit value falls through to the env default
+    assert (
+        audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="garbage")["mix"]
+        == "music_forward"
+    )
+    # env unset + no valid explicit → balanced → no mix key
+    monkeypatch.delenv("MEDIAHUB_REEL_MIX_PROFILE", raising=False)
+    assert "mix" not in audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="garbage")
+
+
+def test_build_audio_plan_profile_needs_an_audio_source(monkeypatch):
+    # Voice off and no music → silent None even with a profile requested.
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
+    assert (
+        audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="music_forward")
+        is None
+    )
+
+
+def test_mux_args_balanced_default_matches_the_historic_levels(tmp_path):
+    """The default profile reproduces R1.20's resting bed + duck ratio exactly."""
+    vm = " ".join(
+        audio_mux.mux_args(
+            tmp_path / "v.mp4",
+            tmp_path / "n.mp3",
+            tmp_path / "bed.mp3",
+            tmp_path / "o.mp4",
+            duration_sec=15.0,
+        )
+    )
+    assert f"volume={audio_mux.MUSIC_UNDER_VOICE_WEIGHT:.3f}" in vm  # resting bed 0.300
+    assert f"ratio={audio_mux.DUCK_RATIO:g}" in vm  # ratio 6
+    mo = " ".join(
+        audio_mux.mux_args(
+            tmp_path / "v.mp4", None, tmp_path / "bed.mp3", tmp_path / "o.mp4", duration_sec=7.0
+        )
+    )
+    assert f"volume={audio_mux.MUSIC_BED_VOLUME:.3f}" in mo  # bed 0.400
+
+
+def test_mux_args_profiles_scale_bed_and_duck(tmp_path):
+    def vm(profile):
+        return " ".join(
+            audio_mux.mux_args(
+                tmp_path / "v.mp4",
+                tmp_path / "n.mp3",
+                tmp_path / "bed.mp3",
+                tmp_path / "o.mp4",
+                duration_sec=15.0,
+                profile=profile,
+            )
+        )
+
+    def mo(profile):
+        return " ".join(
+            audio_mux.mux_args(
+                tmp_path / "v.mp4",
+                None,
+                tmp_path / "bed.mp3",
+                tmp_path / "o.mp4",
+                duration_sec=7.0,
+                profile=profile,
+            )
+        )
+
+    # voice_lead: lower resting bed, harder duck.
+    assert "volume=0.180" in vm("voice_lead") and "ratio=9" in vm("voice_lead")
+    assert "volume=0.320" in mo("voice_lead")
+    # music_forward: higher resting bed, gentler duck.
+    assert "volume=0.500" in vm("music_forward") and "ratio=3.5" in vm("music_forward")
+    assert "volume=0.600" in mo("music_forward")
+    # The sidechain ducking stays in place under every profile (voice clear).
+    for prof in ("voice_lead", "balanced", "music_forward"):
+        assert "sidechaincompress=" in vm(prof)
+    # An unknown profile renders as balanced, never an error.
+    assert f"ratio={audio_mux.DUCK_RATIO:g}" in vm("garbage")
+
+
+# ---------------------------------------------------------------------------
 # apply_audio — honest fallback paths (no real synthesis involved)
 # ---------------------------------------------------------------------------
 
@@ -458,5 +626,38 @@ def test_real_mux_voice_plus_music_sidechain_ducks(tmp_path, monkeypatch):
     assert rec["status"] == "mixed"
     assert rec["voice"] == "en-GB-SoniaNeural"
     assert rec["music"] == "bed.wav"
+    assert rec["ducking"] == "sidechain"
+    assert rec["mix"] == "balanced", "a plan with no mix key records the default profile"
+    assert audio_mux.has_audio_stream(video) is True
+
+
+@pytest.mark.skipif(_FFMPEG is None, reason="no FFmpeg binary available")
+def test_real_mux_honours_a_non_default_profile(tmp_path, monkeypatch):
+    """R1.19: a voice+music plan carrying ``mix=voice_lead`` muxes for real
+    (a lower, harder-ducked bed) and the record reports the applied profile."""
+    video = _make_clip(tmp_path / "reel.mp4", seconds=15.0)
+    voice = _make_tone(tmp_path / "voice.wav", seconds=9.0)
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    _make_tone(music_dir / "bed.wav", seconds=4.0)
+    monkeypatch.setenv("MEDIAHUB_REEL_MUSIC_DIR", str(music_dir))
+
+    class _Result:
+        audio_path = voice
+        transcript = "Spring Open. Recap."
+
+    monkeypatch.setattr("mediahub.visual.voiceover.synthesize", lambda *a, **k: _Result())
+    plan = {
+        "voice": "en-GB-SoniaNeural",
+        "script": "Spring Open. Recap.",
+        "music": "bed.wav",
+        "music_bytes": (music_dir / "bed.wav").stat().st_size,
+        "mix": "voice_lead",
+    }
+    rec = audio_mux.apply_audio(
+        video, plan, duration_sec=15.0, cut_times=audio_mux.card_cut_times(15.0, 3)
+    )
+    assert rec["status"] == "mixed"
+    assert rec["mix"] == "voice_lead"
     assert rec["ducking"] == "sidechain"
     assert audio_mux.has_audio_stream(video) is True
