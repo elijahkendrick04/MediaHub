@@ -21874,7 +21874,7 @@ Relay team broke club record"></textarea>
             'font-weight:700;letter-spacing:0.02em">Coming soon</span></div>'
             f'<h2 style="margin:0 0 6px 0;font-size:18px">{_h(title)}</h2>'
             f'<p class="dim" style="margin:0;line-height:1.55">{_h(body)}</p>'
-            '</div>'
+            "</div>"
         )
 
     def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
