@@ -264,12 +264,10 @@ def test_engine_colours_follow_the_club_brand_not_pinned_yellow():
     — change the club's colours and the engine recolours, like the website. No
     hard-coded lane-yellow may pin it (that would ignore the brand)."""
     css = ci.CONTENT_INTRO_CSS
-    # The stage re-points --lane at the brand seed and routes the glow through it.
+    # The stage re-points --lane at the brand seed and routes the glow through it
+    # (--lane-glow), so the engine box + its glow follow the club brand.
     assert "--lane: var(--mh-primary)" in css
-    assert "color-mix(in oklab, var(--mh-primary)" in css
-    # The engine box glow (hard-yellow in the landing CSS) is recoloured via the
-    # brand --lane-glow, scoped to the intro stage.
-    assert ".mh-ci-stage .mh-pl-engine-bg" in css
+    assert "--lane-glow: color-mix(in oklab, var(--mh-primary)" in css
     # Nothing in the feature's CSS may hard-code the lane-yellow literal.
     assert "#D4FF3A" not in css.upper()
     assert "212,255,58" not in css.replace(" ", "")

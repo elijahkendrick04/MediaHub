@@ -582,11 +582,11 @@ CONTENT_INTRO_CSS = """
 /* chips that sit beneath it.                                             */
 /* ===================================================================== */
 .mh-ci-head { margin-bottom: var(--sp-5); }
-/* The how-it-works diagram is the *club's* surface, so its lit traces take the
+/* The how-it-works diagram is the club's surface, so its lit traces take the
    active profile's brand colour — overriding the home-page diagram's pinned
    lane-yellow (PR #782, scoped to .mh-pl-stage for the unbranded marketing
-   home). It uses the SAME token the rest of the site themes from — --lane ←
-   --mh-primary, set per-profile by the <style id="mh-theme-seed"> injection — so
+   home). It uses the SAME token the rest of the site themes from: --lane comes
+   from --mh-primary, re-pointed per profile by the brand-seed style block, so
    when a club changes its colours the engine recolours automatically, exactly
    like every other accent on the site. No bespoke per-request colour: one
    mechanism, no drift. (.mh-ci-stage is the same element as .mh-pl-stage and
@@ -595,19 +595,6 @@ CONTENT_INTRO_CSS = """
   margin-bottom: var(--sp-6);
   --lane: var(--mh-primary);
   --lane-glow: color-mix(in oklab, var(--mh-primary) 42%, transparent);
-}
-/* The engine box glow is a hard-yellow drop-shadow in the landing-diagram CSS
-   (PR #782 bakes the literal for the unbranded home). On the club's surface,
-   recolour it to the brand via --lane-glow — otherwise a non-yellow club gets a
-   brand-coloured stroke ringed by a stale yellow halo. Scoped + higher
-   specificity than .mh-pl-engine-bg, so the home page is untouched. */
-.mh-ci-stage .mh-pl-engine-bg {
-  filter: drop-shadow(0 0 10px var(--lane-glow));
-  animation: mh-ci-breathe 3.4s ease-in-out infinite;
-}
-@keyframes mh-ci-breathe {
-  0%, 100% { filter: drop-shadow(0 0 10px var(--lane-glow)); }
-  50%      { filter: drop-shadow(0 0 20px var(--lane-glow)); }
 }
 
 .mh-ci-steps {

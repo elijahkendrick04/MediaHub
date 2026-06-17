@@ -9837,7 +9837,7 @@ def _layout(
      page fully usable (effects are decorative). -->
 <script defer src="{{ url_for('static', filename='js/ui-kit.js') }}"></script>
 </head>
-<body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
+<body class="{{ 'mh-has-dock ' if dock else '' }}{{ 'mh-signed-in' if signed_in else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
 {{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
@@ -9854,15 +9854,19 @@ def _layout(
       <!-- Pit-wall plate — follows the cascade surface so a re-skinned
            chrome shows a proper backplate (Phase 1.6 Stage F3). -->
       <rect x="0.5" y="0.5" width="31" height="31" rx="2" fill="var(--mh-surface)" stroke="var(--mh-outline-rule)" stroke-width="1"/>
-      <!-- Ascending podium bars: silver (ink) / brand primary / brand tertiary.
-           The silver bar uses currentColor so it inherits the link's ink
-           colour (var(--ink)) — Stage F3's "MediaHub's own marks use
-           currentColor + var()" rule. -->
+      <!-- Ascending podium bars: silver (ink) / lane-yellow / medal-gold. The
+           MediaHub logo is the one mark that does NOT re-skin with the club
+           brand — it stays MediaHub's own identity colours so a club always
+           knows whose product they're in (maintainer decision: "the logo is the
+           only thing that doesn't change colour"). The silver bar keeps
+           currentColor (the link's neutral ink, constant); the lane-yellow and
+           medal-gold bars + baseline are pinned, not var(--mh-primary/tertiary),
+           so they never take the active profile's colours. -->
       <rect x="6"  y="20" width="5" height="7"  fill="currentColor" opacity="0.55"/>
-      <rect x="13.5" y="9"  width="5" height="18" fill="var(--mh-primary)"/>
-      <rect x="21" y="14" width="5" height="13" fill="var(--mh-tertiary)"/>
-      <!-- Lane baseline — brand primary stroke -->
-      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="var(--mh-primary)" stroke-width="1"/>
+      <rect x="13.5" y="9"  width="5" height="18" fill="#D4FF3A"/>
+      <rect x="21" y="14" width="5" height="13" fill="#F4D58D"/>
+      <!-- Lane baseline — MediaHub lane-yellow (fixed) -->
+      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="#D4FF3A" stroke-width="1"/>
     </svg>
     MediaHub
   </a>
