@@ -283,6 +283,72 @@ def _photo_focus_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
+# Alpha cutouts are PNGs (heavier than the JPEG background photo) so the long
+# edge is capped a touch tighter to keep the inlined data URI reasonable.
+_CUTOUT_MAX_EDGE = 1100
+
+
+def _cutout_cache_dir() -> Path:
+    d = _cache_dir() / "cutouts"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """Resolve the brief's sourced photo into an alpha-cutout PNG data URI (R1.9).
+
+    The motion render's foreground cutout layer (``sprint/layers/cutout.tsx``)
+    composites the athlete with their background removed as a parallax
+    foreground plane. The cut is produced by the same configured background
+    remover the still renderer uses (``media_ai.providers.get_bg_remover``), so
+    motion and still isolate the subject identically. The result is cached as a
+    PNG under ``motion_cache/cutouts/`` keyed by the source photo's identity, so
+    the (~300 ms+) remover runs at most once per photo, then is downscaled and
+    inlined — Remotion's headless Chromium only sees what the props carry.
+
+    Honest by construction: only a *real* remover is used (``is_available()``),
+    never rembg's passthrough alpha, so the foreground plane is never a flat
+    rectangular photo masquerading as a cutout. Empty string on any miss (no
+    brief, ``no-photo`` treatment, asset gone, no usable remover, decode or
+    synthesis failure) — a missing or failed cutout must never fail a motion
+    render; the TSX layer simply no-ops.
+    """
+    src = _photo_asset_path_for_brief(brief)
+    if src is None:
+        return ""
+    try:
+        import io
+
+        from PIL import Image
+
+        # Cache the alpha cut keyed by the source's identity (path/mtime/size)
+        # so repeat renders of the same photo skip the remover entirely.
+        st = src.stat()
+        key = hashlib.sha256(
+            f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")
+        ).hexdigest()[:24]
+        cut_path = _cutout_cache_dir() / f"{key}.png"
+        if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+            from mediahub.media_ai.providers import get_bg_remover
+
+            remover = get_bg_remover()
+            # Only composite a genuine cut — a provider that can't actually
+            # remove the background would passthrough the whole rectangle.
+            if remover is None or not remover.is_available():
+                return ""
+            remover.remove(str(src), str(cut_path))
+        if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+            return ""
+        with Image.open(cut_path) as im:
+            im = im.convert("RGBA")
+            im.thumbnail((_CUTOUT_MAX_EDGE, _CUTOUT_MAX_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+
+
 def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
     """The exact colour roles the card's STILL graphic paints, for motion.
 
@@ -418,6 +484,10 @@ def _card_to_props(
         "photoTreatment": str(b.get("photo_treatment") or ""),
         "photoSrc": _photo_data_uri_for_brief(b),
         "photoPos": _photo_focus_for_brief(b),
+        # R1.9: the athlete cut out to alpha, composited by the cutout sprint
+        # layer as a parallax foreground plane. "" = no prepared cut (no photo
+        # or no usable remover) and the layer no-ops.
+        "cutoutSrc": _cutout_data_uri_for_brief(b),
         "archetype": str(b.get("layout_template") or ""),
         # The still's style pack id (graphic_renderer.style_packs): the motion
         # render layers the same ground/texture/accent-geometry overlay so a
@@ -486,6 +556,7 @@ def _card_manifest_axes(card_props: dict) -> dict:
         if card_props.get("roleGround")
         else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
+        "has_cutout": bool(card_props.get("cutoutSrc")),
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",
     }
@@ -546,6 +617,117 @@ def _reel_audio_plan(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Subtitle / caption burn-in (R1.3; see visual/subtitle_burn.py)
+# ---------------------------------------------------------------------------
+
+# The Remotion compositions and the FFmpeg engine both run at 30fps; the caption
+# engine needs the cadence to turn millisecond SRT cues into frame windows.
+MOTION_FPS = 30
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _subtitles_enabled() -> bool:
+    """True when the operator opted into burned captions (``MEDIAHUB_SUBTITLES``).
+
+    Captions paint the spoken narration on screen for muted autoplay, so they
+    ride on top of the existing voiceover opt-in: a render only burns captions
+    when a voice-narration plan exists for it too (the story path literally
+    reads that voiceover's SRT).
+    """
+    return os.environ.get("MEDIAHUB_SUBTITLES", "").strip().lower() in _TRUTHY
+
+
+def _caption_roles(card_dict: dict, brand_dict: dict) -> tuple[str, str, str]:
+    """``(ground, onground, accent)`` for the caption colour, brand-filled.
+
+    Prefers the card's resolved still-parity roles (already APCA-gated) and
+    falls back to the brand palette so the caption is always legible on its
+    own ground.
+    """
+    ground = str(card_dict.get("roleGround") or brand_dict.get("primary") or "")
+    onground = str(card_dict.get("roleOnGround") or "")
+    accent = str(card_dict.get("roleAccent") or brand_dict.get("accent") or "")
+    return ground, onground, accent
+
+
+def _story_caption_json(
+    card_dict: dict, brand_dict: dict, audio_plan, *, duration_sec: float
+) -> str:
+    """The caption track for a story render as a JSON string, or ``""``.
+
+    Reads the story narration's voiceover SRT (built from the same fact-only
+    script the audio speaks). Returns ``""`` whenever captions are off or no
+    voice plan exists, so the silent-path cache key stays byte-identical.
+    """
+    if not _subtitles_enabled() or not audio_plan:
+        return ""
+    script = str(audio_plan.get("script") or "").strip()
+    voice = str(audio_plan.get("voice") or "")
+    if not script or not voice:
+        return ""
+    try:
+        from mediahub.visual import subtitle_burn
+
+        ground, onground, accent = _caption_roles(card_dict, brand_dict)
+        track = subtitle_burn.story_caption_track(
+            script,
+            voice=voice,
+            duration_sec=duration_sec,
+            fps=MOTION_FPS,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+        )
+        return subtitle_burn.track_json(track)
+    except Exception:
+        return ""
+
+
+def _reel_caption_json(card_dict: dict, brand_dict: dict, *, beat_frames: int) -> str:
+    """Per-beat caption track for a reel card as a JSON string, or ``""``.
+
+    The reel narrates one continuous script, so each beat is captioned from its
+    own verified line (``narration.story_script`` with no club sign-off),
+    distributed across the beat — no extra synthesis, fully deterministic.
+    """
+    try:
+        from mediahub.visual import narration, subtitle_burn
+
+        line = narration.story_script(card_dict, {})
+        if not line.strip():
+            return ""
+        ground, onground, accent = _caption_roles(card_dict, brand_dict)
+        track = subtitle_burn.text_caption_track(
+            line,
+            total_frames=beat_frames,
+            fps=MOTION_FPS,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+        )
+        return subtitle_burn.track_json(track)
+    except Exception:
+        return ""
+
+
+def _caption_manifest(caption_json: str) -> dict:
+    """Explainability record for a story render's captions."""
+    if not caption_json:
+        return {"status": "off"}
+    try:
+        cues = len(json.loads(caption_json).get("cues", []))
+    except Exception:
+        cues = 0
+    return {"status": "on", "cues": cues}
+
+
+def _reel_caption_manifest(cards_props: list[dict]) -> dict:
+    """Explainability record for a reel render's per-beat captions."""
+    counts = [_caption_manifest(cp.get("captionsJson") or "").get("cues", 0) for cp in cards_props]
+    return {"status": "on" if any(counts) else "off", "cues_per_card": counts}
+
+
 def _audio_record_path(cached: Path) -> Path:
     """Sidecar recording whether the planned audio was attached to this MP4.
 
@@ -557,15 +739,21 @@ def _audio_record_path(cached: Path) -> Path:
     return Path(cached).with_suffix(".audio.json")
 
 
-def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) -> dict:
+def _finish_cached_video(
+    cached: Path, *, kind: str, plan, duration_sec: float, n_cards: int = 0
+) -> dict:
     """Idempotent finishing pass on the cached MP4: attach the planned audio
     (honest silent fallback on failure; retried on the next request) and
     ensure the poster-frame sidecar exists. Returns the manifest-ready
     audio record.
+
+    ``n_cards`` (reels only) yields the card-cut beat grid the music accents
+    align to; stories have no internal cuts and leave it at 0.
     """
     try:
         from mediahub.visual import audio_mux
 
+        cut_times = audio_mux.card_cut_times(duration_sec, n_cards) if kind == "reel" else None
         if plan:
             record_path = _audio_record_path(cached)
             audio_rec: dict = {}
@@ -577,7 +765,9 @@ def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) 
                 except (OSError, ValueError):
                     audio_rec = {}
             if not audio_rec:
-                audio_rec = audio_mux.apply_audio(cached, plan, duration_sec=duration_sec)
+                audio_rec = audio_mux.apply_audio(
+                    cached, plan, duration_sec=duration_sec, cut_times=cut_times
+                )
                 try:
                     record_path.write_text(
                         json.dumps(audio_rec, indent=2, sort_keys=True, default=str),
@@ -765,6 +955,12 @@ def render_story_card(
     )
     audio_plan = _story_audio_plan(card_dict, brand_dict)
 
+    # Burn-in captions (R1.3): only attach the prop when a track exists so the
+    # captions-off path keeps the historic cache key byte-identical.
+    caption_json = _story_caption_json(card_dict, brand_dict, audio_plan, duration_sec=duration_sec)
+    if caption_json:
+        card_dict = {**card_dict, "captionsJson": caption_json}
+
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
             raise ReelEngineUnavailable(
@@ -829,6 +1025,7 @@ def render_story_card(
             "duration_sec": duration_sec,
             "card": _card_manifest_axes(card_dict),
             "audio": audio_rec,
+            "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
@@ -857,6 +1054,33 @@ def reel_duration_for(n_cards: int) -> float:
     return REEL_COVER_SEC + REEL_PER_CARD_SEC * n + REEL_OUTRO_SEC
 
 
+def _render_reel_parallel_or_none(
+    *, props: dict, cached: Path, duration_sec: float, size: tuple[int, int]
+) -> Optional[Path]:
+    """Opt-in parallel reel composition (roadmap R1.28).
+
+    Delegates to :mod:`mediahub.visual.reel_parallel`: when
+    ``MEDIAHUB_REEL_PARALLEL`` is set and Node/Remotion/FFmpeg are available,
+    the reel's frame timeline is split across concurrent segment renders and
+    composited into the silent cache MP4 at ``cached`` — exactly what the
+    serial ``_run_remotion`` would write, just faster on a multi-core worker.
+
+    Returns the path on success, or ``None`` (the signal to take the serial
+    render) when the feature is disabled, the prerequisites are missing, or
+    anything goes wrong. Frame-purity makes the parallel output identical to
+    the serial reel, so the content cache key is unchanged either way.
+    """
+    from mediahub.visual import reel_parallel
+
+    return reel_parallel.try_render_reel_parallel(
+        composition_id=COMP_REEL,
+        props=props,
+        out_path=cached,
+        duration_sec=duration_sec,
+        size=size,
+    )
+
+
 def _assemble_reel_props(
     top_cards: list[dict],
     brand_kit: Any,
@@ -869,10 +1093,11 @@ def _assemble_reel_props(
     renders.
 
     Embeds the cards' photos, resolves saliency + still-parity colour roles,
-    derives the data-driven duration, and builds the audio plan — none of
-    which depend on the output pixel size. Pulling it out lets
-    ``render_meet_reel_all_formats`` do this once and reuse it across every
-    cut, instead of re-embedding photos and re-resolving roles per format.
+    derives the data-driven duration, builds the audio plan, and bakes in the
+    R1.3 burn-in captions — none of which depend on the output pixel size.
+    Pulling it out lets ``render_meet_reel_all_formats`` do this once and reuse
+    it across every cut, instead of re-embedding photos and re-resolving roles
+    per format.
 
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
     briefs_list)``.
@@ -920,7 +1145,37 @@ def _assemble_reel_props(
         duration_sec = reel_duration_for(len(cards_props))
 
     audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
+
+    # Burn-in captions (R1.3): caption each beat from its own verified line when
+    # the reel has a voice plan and the operator opted in. Only set when a track
+    # exists, so the captions-off cache key stays byte-identical. The Remotion
+    # engine paints these via captions.tsx; the still+FFmpeg fallback does not
+    # burn reel captions (it renders pre-baked stills) and silently ignores them.
+    # Beat-grid is the per-card duration, not the output size, so the same
+    # captioned cards drive every cut a batch produces.
+    if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
+        beat_frames = max(1, round(REEL_PER_CARD_SEC * MOTION_FPS))
+        for cp in cards_props:
+            cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames)
+            if cj:
+                cp["captionsJson"] = cj
+
     return cards_props, brand_dict, meet_name, duration_sec, audio_plan, briefs_list
+
+
+def _reel_cta_props(sponsor: str, next_meet: str) -> dict[str, str]:
+    """R1.30 outro-CTA props (sponsor thanks / next meet), folded into the
+    Remotion props AND the cache key ONLY when present, so a reel with neither
+    stays byte-identical to before R1.30. Honest: only a sponsor / next meet
+    the caller actually supplied is ever shown."""
+    cta: dict[str, str] = {}
+    sponsor = (sponsor or "").strip()
+    next_meet = (next_meet or "").strip()
+    if sponsor:
+        cta["sponsor"] = sponsor
+    if next_meet:
+        cta["nextMeet"] = next_meet
+    return cta
 
 
 def _render_reel_one_format(
@@ -932,17 +1187,19 @@ def _render_reel_one_format(
     duration_sec: float,
     audio_plan: Any,
     briefs_list: list,
+    cta_props: dict,
     engine: str,
     format_name: str,
     out_path: Path,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
-    The cache payload folds in the format's pixel ``size``, so each cut
-    caches independently — and the ``story`` cut's key stays byte-identical
-    to the pre-multi-format render (same cards/brand/meet/duration/audio,
-    same size), so existing cached reels remain valid cache hits whether they
-    were produced by the single route or the batch.
+    The cache payload folds in the format's pixel ``size``, so each cut caches
+    independently — and the ``story`` cut's key stays byte-identical to the
+    pre-multi-format render (same cards/brand/meet/duration/cta/audio, same
+    size), so existing cached reels remain valid cache hits whether they were
+    produced by the single route or the batch. Carries main's R1.28 parallel
+    path, R1.30 outro CTA, and R1.3 captions through unchanged.
     """
     size = motion_format_size(format_name)
     out_path = Path(out_path)
@@ -974,27 +1231,59 @@ def _render_reel_one_format(
         "duration": duration_sec,
         "size": list(size),
     }
+    if cta_props:
+        cache_payload["cta"] = cta_props
     if audio_plan:
         cache_payload["audio"] = audio_plan
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
         audio_rec = _finish_cached_video(
-            cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+            cached,
+            kind="reel",
+            plan=audio_plan,
+            duration_sec=duration_sec,
+            n_cards=len(cards_props),
         )
         if audio_plan:
             _update_manifest_audio(cached, audio_rec)
         return _publish(cached, out_path)
 
-    _run_remotion(
-        composition_id=COMP_REEL,
-        props={"cards": cards_props, "brand": brand_dict, "meetName": meet_name},
-        out_path=cached,
-        duration_sec=duration_sec,
-        size=size,
-    )
+    # R1.30 outro-CTA props (sponsor / next meet) ride into reel_props so BOTH
+    # the parallel (R1.28) and the serial render path carry them.
+    reel_props = {
+        "cards": cards_props,
+        "brand": brand_dict,
+        "meetName": meet_name,
+        **cta_props,
+    }
+    # Cold render. Try the opt-in parallel composition path (R1.28) first: it
+    # splits the reel's frames across concurrent segment renders and composites
+    # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
+    # workers. It returns None — and we take the unchanged serial render — when
+    # disabled, unavailable, or on any failure.
+    render_strategy = "serial"
+    if (
+        _render_reel_parallel_or_none(
+            props=reel_props, cached=cached, duration_sec=duration_sec, size=size
+        )
+        is not None
+    ):
+        render_strategy = "parallel-segments"
+    else:
+        _run_remotion(
+            composition_id=COMP_REEL,
+            props=reel_props,
+            out_path=cached,
+            duration_sec=duration_sec,
+            size=size,
+        )
     audio_rec = _finish_cached_video(
-        cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+        cached,
+        kind="reel",
+        plan=audio_plan,
+        duration_sec=duration_sec,
+        n_cards=len(cards_props),
     )
     from mediahub.visual.audio_mux import poster_path_for
 
@@ -1003,12 +1292,15 @@ def _render_reel_one_format(
         {
             "kind": "reel",
             "engine": engine,
+            "render_strategy": render_strategy,
             "format": format_name,
             "size": list(size),
             "duration_sec": duration_sec,
             "meet_name": meet_name,
+            "cta": cta_props,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "audio": audio_rec,
+            "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
@@ -1025,6 +1317,8 @@ def render_meet_reel(
     duration_sec: Optional[float] = None,
     briefs: Optional[list[Optional[dict]]] = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    sponsor: str = "",
+    next_meet: str = "",
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -1042,6 +1336,13 @@ def render_meet_reel(
                   (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
       format_name  output cut: ``story`` (default) / ``portrait`` /
                   ``square`` / ``landscape``.
+      sponsor     optional sponsor name for the reel's outro close (R1.30).
+                  When set, the Remotion outro shows a "proudly supported by"
+                  thank-you; blank falls back to the follow-the-club close.
+                  Only ever names a sponsor the caller actually supplied.
+      next_meet   optional next-meet label for the outro "next up" close
+                  (R1.30). Sponsor wins when both are given; the next meet
+                  then rides along as the outro's secondary line.
 
     Audio + poster behaviour matches ``render_story_card``: opt-in narration
     (built only from the cards' own facts) and/or the operator's music bed
@@ -1061,6 +1362,7 @@ def render_meet_reel(
     ) = _assemble_reel_props(
         top_cards, brand_kit, meet_name=meet_name, duration_sec=duration_sec, briefs=briefs
     )
+    cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
         cards_props=cards_props,
         brand_dict=brand_dict,
@@ -1069,6 +1371,7 @@ def render_meet_reel(
         duration_sec=duration_sec,
         audio_plan=audio_plan,
         briefs_list=briefs_list,
+        cta_props=cta_props,
         engine=engine,
         format_name=format_name,
         out_path=out_path,
@@ -1100,14 +1403,18 @@ def render_meet_reel_all_formats(
     formats: Optional[list[str]] = None,
     base_name: str = "reel",
     render_slot: Optional[Callable[[str], ContextManager]] = None,
+    sponsor: str = "",
+    next_meet: str = "",
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
     One call shapes the cards' props once (photos embedded, saliency + colour
-    roles resolved, audio plan built — the expensive, format-independent work)
-    and then renders each cut from those shared props. Cuts already in the
-    motion cache are reused, so a story reel rendered earlier by the single
-    route is a cache hit here and only the missing cuts cost a render.
+    roles resolved, audio plan + captions built — the expensive,
+    format-independent work) and then renders each cut from those shared props.
+    Cuts already in the motion cache are reused, so a story reel rendered
+    earlier by the single route is a cache hit here and only the missing cuts
+    cost a render. Each cut carries main's R1.28 parallel path, R1.30 outro CTA
+    and R1.3 captions identically to ``render_meet_reel``.
 
     Inputs mirror ``render_meet_reel`` plus:
       out_dir     directory the cuts are written into; each format's filename
@@ -1158,6 +1465,7 @@ def render_meet_reel_all_formats(
     ) = _assemble_reel_props(
         top_cards, brand_kit, meet_name=meet_name, duration_sec=duration_sec, briefs=briefs
     )
+    cta_props = _reel_cta_props(sponsor, next_meet)
 
     out_dir = Path(out_dir)
     rendered: dict[str, Path] = {}
@@ -1175,6 +1483,7 @@ def render_meet_reel_all_formats(
                     duration_sec=duration_sec,
                     audio_plan=audio_plan,
                     briefs_list=briefs_list,
+                    cta_props=cta_props,
                     engine=engine,
                     format_name=fmt,
                     out_path=out_path,

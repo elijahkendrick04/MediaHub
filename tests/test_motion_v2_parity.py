@@ -305,8 +305,11 @@ def test_reel_cover_chips_count_up_honestly():
     # Chips count up to totals derived only from the honest reelStats.
     assert "chipsProgress" in src
     assert "progress: number" in src
-    # Pluralisation follows the final count (no mid-count flicker).
-    assert 'stats.pbs === 1 ? "" : "S"' in src
+    # The number counts up over each chip's honest value (frame-pure).
+    assert "Math.round(chip.value * p)" in src
+    # Pluralisation follows the FINAL count (no mid-count flicker): the words
+    # are chosen on n in reelStats and baked into the chip before the count-up.
+    assert "n === 1" in src
 
 
 # ---------------------------------------------------------------------------

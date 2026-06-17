@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" role="img" aria-label="__LABEL__">
+  <defs>
+    <linearGradient id="ribbonFace__UID__" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="__TINT__"/>
+      <stop offset="1" stop-color="__TINT_DEEP__"/>
+    </linearGradient>
+    <radialGradient id="ribbonSheen__UID__" cx="0.36" cy="0.30" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.5"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- two ribbon tails hanging below the rosette -->
+  <path d="M48 80 L40 142 L54 130 L60 92 Z" fill="__TINT_DEEP__"/>
+  <path d="M72 80 L80 142 L66 130 L60 92 Z" fill="__TINT__"/>
+  <!-- pleated rosette ring (16 notches) -->
+  <g fill="__TINT_DEEP__">
+    <circle cx="60" cy="56" r="44"/>
+  </g>
+  <circle cx="60" cy="56" r="44" fill="none" stroke="__TINT__" stroke-width="3"
+          stroke-dasharray="8 6.27" stroke-opacity="0.9"/>
+  <!-- pleated petals via a dashed thick ring reads as a rosette edge -->
+  <circle cx="60" cy="56" r="35" fill="url(#ribbonFace__UID__)"/>
+  <circle cx="60" cy="56" r="35" fill="url(#ribbonSheen__UID__)"/>
+  <circle cx="60" cy="56" r="35" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="1.5"/>
+  <!-- centre medallion -->
+  <circle cx="60" cy="56" r="24" fill="__TINT_DEEP__"/>
+  <circle cx="60" cy="56" r="24" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1.5"/>
+  <text x="60" y="56" text-anchor="middle" dominant-baseline="central"
+        font-family="Anton, Arial, sans-serif" font-size="22" letter-spacing="0.5"
+        fill="#FFFFFF" fill-opacity="0.96">__TEXT__</text>
+</svg>

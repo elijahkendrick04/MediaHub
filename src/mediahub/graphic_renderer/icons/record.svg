@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 132" role="img" aria-label="__LABEL__">
+  <defs>
+    <linearGradient id="recFace__UID__" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="__TINT__"/>
+      <stop offset="1" stop-color="__TINT_DEEP__"/>
+    </linearGradient>
+    <radialGradient id="recSheen__UID__" cx="0.36" cy="0.24" r="0.9">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- shield body -->
+  <path d="M18 16 L102 16 L102 70 Q102 108 60 126 Q18 108 18 70 Z" fill="__TINT_DEEP__"/>
+  <path d="M23 21 L97 21 L97 69 Q97 103 60 119 Q23 103 23 69 Z" fill="url(#recFace__UID__)"/>
+  <path d="M23 21 L97 21 L97 69 Q97 103 60 119 Q23 103 23 69 Z" fill="url(#recSheen__UID__)"/>
+  <path d="M23 21 L97 21 L97 69 Q97 103 60 119 Q23 103 23 69 Z" fill="none"
+        stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="1.5"/>
+  <!-- crowning star -->
+  <path d="M60 30 L64.6 42.4 L77.8 43.1 L67.6 51.4 L71 64.2 L60 56.8 L49 64.2 L52.4 51.4 L42.2 43.1 L55.4 42.4 Z"
+        fill="#FFFFFF" fill-opacity="0.95"/>
+  <!-- label band -->
+  <rect x="30" y="78" width="60" height="26" rx="5" fill="__TINT_DEEP__" fill-opacity="0.85"/>
+  <text x="60" y="92" text-anchor="middle" dominant-baseline="central"
+        font-family="Anton, Arial, sans-serif" font-size="17" letter-spacing="1"
+        fill="#FFFFFF" fill-opacity="0.96">__TEXT__</text>
+</svg>
