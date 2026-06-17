@@ -12695,11 +12695,31 @@ def _hero_product_demo() -> str:
         '<div class="mh-hero-demo" aria-hidden="true">'
         '<div class="mh-demo-glow"></div>'
         '<div class="mh-demo-frame">'
-        # --- browser chrome ---
+        # --- Chrome browser chrome: a tab strip + a toolbar with the omnibox
+        # parked on the real deployed URL, so the mockup reads as the live
+        # hosted product open in an actual browser rather than a generic window.
         '<div class="mh-demo-bar">'
+        # row 1 — macOS traffic lights + the active Chrome tab
+        '<div class="mh-demo-tabstrip">'
         '<span class="mh-demo-dots"><i></i><i></i><i></i></span>'
-        '<span class="mh-demo-tab"><span class="mh-demo-tab-logo"></span>MediaHub</span>'
-        '<span class="mh-demo-flag">live demo</span>'
+        '<span class="mh-demo-tab">'
+        '<span class="mh-demo-tab-logo"></span>'
+        '<span class="mh-demo-tab-title">MediaHub — Content studio</span>'
+        '<span class="mh-demo-tab-x"></span>'
+        "</span>"
+        '<span class="mh-demo-tab-add"></span>'
+        "</div>"
+        # row 2 — back / forward / reload, the secure omnibox, the overflow menu
+        '<div class="mh-demo-toolbar">'
+        '<span class="mh-demo-nav back"></span>'
+        '<span class="mh-demo-nav fwd"></span>'
+        '<span class="mh-demo-nav reload"></span>'
+        '<span class="mh-demo-omni">'
+        '<span class="mh-demo-lock"></span>'
+        '<span class="mh-demo-url">mediahub-gzwc.onrender.com</span>'
+        "</span>"
+        '<span class="mh-demo-menu"><i></i><i></i><i></i></span>'
+        "</div>"
         "</div>"
         # --- screen / cross-fading stage ---
         '<div class="mh-demo-screen"><div class="mh-demo-stage">'
