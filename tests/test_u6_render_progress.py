@@ -27,6 +27,7 @@ What is asserted here:
        progress floor lifts it monotonically, ``stop()`` freezes it, and the
        accent defaults to lane.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -50,11 +51,14 @@ from mediahub.web import web as webmod  # noqa: E402
 _NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(_NODE is None, reason="node not on PATH")
 
-# The six render/generation panels U.6 upgrades, by a unique fragment of each.
+# The render/generation panels U.6 upgrades, by a unique fragment of each.
+# generateReelBatch is the R1.15 multi-format batch panel — it follows the
+# same shared-controller contract, so it joins the guarded set.
 _RENDER_FUNCS = {
     "createGraphic": "function createGraphic(",
     "generateMotion": "function generateMotion(",
     "generateReel": "function generateReel(",
+    "generateReelBatch": "function generateReelBatch(",
     "regenerateGraphic": "function regenerateGraphic(",
     "mhGen (draft panel)": "function mhGen(panel)",
     "generateReelGrouped": "function generateReelGrouped(",
@@ -95,7 +99,7 @@ def test_controller_is_self_contained_iife():
 def test_controller_markup_is_the_giant_numeral_motif():
     js = webmod._RENDER_PROGRESS_JS
     assert 'class="mh-render-prog-pct display-num"' in js  # reuses the motif
-    assert "mh-render-prog-sign" in js                      # the % glyph
+    assert "mh-render-prog-sign" in js  # the % glyph
     assert "mh-render-prog-bar" in js and "mh-render-prog-fill" in js
     # Accessibility: it is an announced progressbar with a live phase label.
     assert 'role="progressbar"' in js
@@ -109,8 +113,8 @@ def test_controller_is_honest_never_claims_done_early():
     (``complete``) reaches 100. This mirrors the no-fabrication rule: a
     progress bar that hits 100 before the artefact exists is a lie."""
     js = webmod._RENDER_PROGRESS_JS
-    assert "var CEIL = 94" in js          # eased asymptote < 100
-    assert "var CAP  = 97" in js          # real-floor ceiling < 100 while running
+    assert "var CEIL = 94" in js  # eased asymptote < 100
+    assert "var CAP  = 97" in js  # real-floor ceiling < 100 while running
     # The only path to 100 is the finishing animation inside complete().
     assert "100 - finishFrom" in js
     assert "complete:" in js and "setProgress:" in js and "stop:" in js
@@ -136,16 +140,17 @@ def test_css_for_loading_state_in_base_css():
     # The giant numeral is responsive (fluid clamp), not a fixed size.
     assert "clamp(56px" in css
     # Reduced-motion: the new component's animation/transition are disabled.
-    rm = css[css.index("prefers-reduced-motion"):]
+    rm = css[css.index("prefers-reduced-motion") :]
     assert ".mh-render-prog" in rm
 
 
 def test_generic_panel_spinner_removed_from_render_panels():
     src = _src()
-    # The 24px in-panel spinner markup is gone everywhere (all six panels).
+    # The 24px in-panel spinner markup is gone everywhere (all render panels).
     assert src.count("width:24px;height:24px;border:2px solid") == 0
     # Each upgraded panel now drives the shared controller and gates its result.
-    assert src.count("MH.renderProgress(panel") == 6
+    # 7 = the original six U.6 panels + R1.15's generateReelBatch panel.
+    assert src.count("MH.renderProgress(panel") == len(_RENDER_FUNCS)
 
 
 @pytest.mark.parametrize("name,marker", list(_RENDER_FUNCS.items()))
@@ -213,7 +218,12 @@ def page_html(tmp_path, monkeypatch):
             ]
         },
         "cards": [
-            {"id": "swim-1", "swimmer_name": "Eira Hughes", "event": "100m Freestyle", "time": "59.80"}
+            {
+                "id": "swim-1",
+                "swimmer_name": "Eira Hughes",
+                "event": "100m Freestyle",
+                "time": "59.80",
+            }
         ],
     }
     (wm.RUNS_DIR / "r1.json").write_text(json.dumps(run), encoding="utf-8")
@@ -243,9 +253,9 @@ def test_grouped_pack_wires_reel_through_controller(page_html):
     assert "MH.renderProgress(panel" in grouped
     # No page in the flow paints the old 24px in-panel spinner any more.
     for url, html in page_html.items():
-        assert "width:24px;height:24px;border:2px solid" not in html, (
-            f"{url} still paints the old panel spinner"
-        )
+        assert (
+            "width:24px;height:24px;border:2px solid" not in html
+        ), f"{url} still paints the old panel spinner"
 
 
 # =========================================================================== #
@@ -391,8 +401,6 @@ def test_controller_behaviour_in_a_dom():
         comp.write_text(webmod._RENDER_PROGRESS_JS, encoding="utf-8")
         harness = Path(d) / "harness.js"
         harness.write_text(_HARNESS, encoding="utf-8")
-        r = subprocess.run(
-            [_NODE, str(harness), str(comp)], capture_output=True, text=True
-        )
+        r = subprocess.run([_NODE, str(harness), str(comp)], capture_output=True, text=True)
     assert r.returncode == 0, f"behaviour harness failed:\nSTDOUT:{r.stdout}\nSTDERR:{r.stderr}"
     assert "RENDER_PROGRESS_BEHAVIOUR_OK" in r.stdout
