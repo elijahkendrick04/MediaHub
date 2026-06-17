@@ -572,7 +572,13 @@ def apply_audio(
 
 def poster_time_for(kind: str, duration_sec: float) -> float:
     """Deterministic poster timestamp: stories late enough that the layers
-    have animated in; reels on the brand cover."""
+    have animated in; reels on the brand cover.
+
+    Mirrored by ``remotion/render.js``'s ``posterTimeFor`` for the in-render
+    poster capture (R1.29) — keep the two formulas in sync. This is still the
+    timestamp used for the ffmpeg fallback grab when the in-render poster is
+    absent (the free ffmpeg engine, or a render.js capture failure).
+    """
     d = max(0.1, float(duration_sec))
     if kind == "reel":
         return min(1.5, max(0.0, d - 0.2))
