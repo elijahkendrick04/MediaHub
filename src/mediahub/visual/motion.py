@@ -843,6 +843,15 @@ REEL_COVER_SEC = 2.0
 REEL_PER_CARD_SEC = 4.0
 REEL_OUTRO_SEC = 1.0
 
+# Reel composition revision — folded into the reel cache key. Bump it whenever
+# MeetReel.tsx's deterministic output changes for an *unchanged* payload, so
+# reels cached against the previous render are retired and the upgrade reaches
+# re-requested meets instead of serving a stale cut. Story renders are keyed
+# separately and stay byte-identical, so this is reel-only.
+#   "2" — R1.14: expanded transition library (glitch / slide-stack /
+#         light-sweep) + per-card transition timing.
+REEL_COMPOSITION_REVISION = "2"
+
 
 def reel_duration_for(n_cards: int) -> float:
     """Total reel seconds for ``n_cards`` ranked moments.
@@ -961,6 +970,7 @@ def render_meet_reel(
         "meet": meet_name,
         "duration": duration_sec,
         "size": list(size),
+        "rev": REEL_COMPOSITION_REVISION,
     }
     if audio_plan:
         cache_payload["audio"] = audio_plan
@@ -992,6 +1002,7 @@ def render_meet_reel(
             "kind": "reel",
             "engine": engine,
             "format": format_name,
+            "composition_revision": REEL_COMPOSITION_REVISION,
             "size": list(size),
             "duration_sec": duration_sec,
             "meet_name": meet_name,
