@@ -770,7 +770,13 @@ def subset_to_woff2(
     from fontTools import subset as ft_subset
 
     try:
-        font = TTFont(BytesIO(data), fontNumber=0, lazy=True)
+        # recalcTimestamp=False so font.save() preserves the input's head
+        # timestamps instead of stamping wall-clock time — without it two
+        # intakes of the *same* font straddling a 1-second boundary produce
+        # different WOFF2 bytes (and a different sha256), which flakes the
+        # idempotency contract. The subsetter Options flag below only covers
+        # the subset pass; the final save reads this TTFont attribute.
+        font = TTFont(BytesIO(data), fontNumber=0, lazy=True, recalcTimestamp=False)
     except Exception as exc:
         raise FontValidationError(f"font failed to parse under fontTools: {exc}") from exc
 
