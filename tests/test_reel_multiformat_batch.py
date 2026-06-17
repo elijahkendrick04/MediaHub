@@ -299,13 +299,12 @@ def test_story_cut_reuses_single_route_cache(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# ffmpeg fallback engine — every cut, not just story (R1.16 added multi-format
-# support to the free engine: each cut is rendered from the card's still frame,
-# so the batch path produces all four with no per-cut errors).
+# ffmpeg fallback engine — every cut (R1.16 made the free fallback multi-format,
+# so the batch produces story + portrait + square + landscape, not story only).
 # ---------------------------------------------------------------------------
 
 
-def test_ffmpeg_engine_renders_all_formats(tmp_path, monkeypatch):
+def test_ffmpeg_engine_renders_every_cut(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
 
@@ -323,9 +322,9 @@ def test_ffmpeg_engine_renders_all_formats(tmp_path, monkeypatch):
         [_card()], _brand(), tmp_path / "motion", base_name="reel_3"
     )
     assert result["engine"] == "ffmpeg"
-    # R1.16: the free engine renders every cut, so the batch produces all four
-    # with no per-cut errors (previously only "story" survived).
-    assert set(result["rendered"]) == {"story", "portrait", "square", "landscape"}
+    # R1.16: the ffmpeg fallback now renders every cut, so the batch produces
+    # all four formats and records no capability-gap errors.
+    assert set(result["rendered"]) == set(motion.MOTION_FORMATS)
     assert result["errors"] == {}
 
 
