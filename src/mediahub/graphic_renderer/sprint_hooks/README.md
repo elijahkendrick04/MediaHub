@@ -48,6 +48,16 @@ the modules here are safe to ship in the always-loaded registry.
   extracted by deterministic PIL k-means (`graphic_renderer.photo_palette`) —
   APCA-gated and never overriding a confirmed brand hex. Opt-in, byte-identical
   when the flag is off.
+- `mono_mode.py` (**G1.19**, `ORDER = 90`) — grayscale / mono accessibility
+  render. Deterministic B/W with a colour-**role remap**: the painted `--mh-*`
+  tokens are rewritten to a contrast-preserving neutral-grey ramp (accent ↔ ground
+  at opposite extremes, so the inverted chip and hero still pop and every APCA pair
+  clears its gate), then a page-level `filter: grayscale(1)` flattens photos /
+  logos / overlays / v1 grounds too. Opt in per card via `brief.render_mode` /
+  `background_style` (`mono` / `monochrome` / `grayscale` / `b&w` …) or a mono
+  phrase in `brief.mood` / `style_pack`, or operator-wide via the
+  `MEDIAHUB_MONO_MODE` env flag (`MEDIAHUB_MONO_CONTRAST` optionally trims the B/W
+  photo pass; default `1.0`). Runs last, so it desaturates earlier hooks' output too.
 - `inspect_overlay.py` (**G1.30**, `ORDER = 95`) — render debug / inspection
   overlay + design-explainability sidecar (`graphic_renderer/inspect.py`). When
   `MEDIAHUB_INSPECT_OVERLAY` is set (or a brief carries a truthy `inspect_overlay`
@@ -57,6 +67,6 @@ the modules here are safe to ship in the always-loaded registry.
   observes the finished card; opt-in, byte-identical when off.
 
 Capabilities that also fit this seam include **G1.8** (gradient-mesh
-backgrounds), **G1.19** (mono mode) and **G1.22** (icon/badge overlays).
-Capabilities that change formats, encoding, fonts, palettes or text-fitting edit
-their own dedicated module/region instead.
+backgrounds) and **G1.22** (icon/badge overlays). Capabilities that change
+formats, encoding, fonts, palettes or text-fitting edit their own dedicated
+module/region instead.
