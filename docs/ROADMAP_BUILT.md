@@ -133,6 +133,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **R1.3** · Reel generator sprint — Subtitle/caption burn-in engine — read the voiceover SRT, render APCA-gated on-video captions. *Build: new `visual/subtitle_burn.py` + `sprint/layers/captions.tsx`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-16)*
 - ✅ **G1.5** · Graphic generator sprint — Accent-geometry expansion pack — hexagons, art-deco corners, wave rules, spiral flourishes, glitch dividers. *Build: append to `style_packs.ACCENT_GEOS` + accent-geo generator (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **G1.10** · Graphic generator sprint — Club custom-font upload pipeline — security-sandboxed validation, subsetting, first-party self-hosting. *Build: new `typography/font_intake.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
+- ✅ **R1.5** · Reel generator sprint — Motion accent-decoration expansion + sizing variants (thick/thin stripe, large/small brackets, offset badge). *Build: one file each in `sprint/accents/<name>.tsx` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)

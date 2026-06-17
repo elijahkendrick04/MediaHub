@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `f5504f7be` · Merge pull request #713 from elijahkendrick04/claude/jolly-bell-mlfo84
+**Last updated:** 2026-06-17 · `1f0ee9ed5` · Merge PR #712: R1.5 motion accent-decoration expansion pack
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -192,7 +192,6 @@ sequence it or merge with care.
 - **G1.30** · Graphic generator sprint — Render debug/inspection overlay + design-explainability sidecar (crop box, saliency centroid, fitted sizes, why-this-design JSON). *Build: new `sprint_hooks/inspect_overlay.py` + new `graphic_renderer/inspect.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.1** · Reel generator sprint — Motion-intent program pack — 5+ new intents (bounce_in, flip_reveal, swirl, reveal_from_sides, cascade). *Build: one file each in `remotion/.../sprint/intents/<name>.ts` (auto-discovered — no `StoryCard.tsx` edit) + add the token to `creative_brief/design_spec.MOTION_INTENTS` (sole owner).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.2** · Reel generator sprint — Scene-mode pack — 3 new structurally-distinct scenes (vertical-split, radial-rings, marquee-crawl). *Build: `sprint/scenes/<archetype>.tsx` per scene (auto-discovered; replaces the built-in scene for that archetype).* · ❌ **NOT STARTED** · 🟢 ISOLATED
-- **R1.5** · Reel generator sprint — Motion accent-decoration expansion + sizing variants (thick/thin stripe, large/small brackets, offset badge). *Build: one file each in `sprint/accents/<name>.tsx` (auto-discovered).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.9** · Reel generator sprint — Cutout-layer compositing in motion — alpha cutout as a separate animated foreground layer with parallax. *Build: `sprint/layers/cutout.tsx` overlay + `visual/motion.py` asset prep (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.10** · Reel generator sprint — Motion photo filter stack — deterministic frame-pure brightness/contrast/saturation/blur from brief fields. *Build: `sprint/layers/photo_filters.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1560,6 +1559,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-17 | `3a897d3c8` | Add club custom-font upload pipeline (G1.10) |
+| 2026-06-17 | `872fdd9f7` | R1.5: motion accent-decoration expansion pack |
 | 2026-06-17 | `48e10ca23` | G1.5: accent-geometry expansion pack (hexagons, deco corners, wave, spiral, glitch) |
 | 2026-06-16 | `418ef8b76` | style: ruff-format the R1.3 caption wiring |
 | 2026-06-16 | `105cae3a7` | G1.23: isolate render-pool tests from the G1.24 render cache |
