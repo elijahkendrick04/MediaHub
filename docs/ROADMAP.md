@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `3db80d546` · Merge pull request #771 from elijahkendrick04/claude/adoring-allen-789shf
+**Last updated:** 2026-06-17 · `d84a0db85` · Merge pull request #772 from elijahkendrick04/claude/sharp-ramanujan-7ltbfp
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1521,6 +1521,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `7c5148927` | Make the developer "Clear all caches" button fully clear disk + memory |
 | 2026-06-17 | `9603e8877` | Fix sitewide FPS: stop animating non-compositable paint properties |
 | 2026-06-17 | `27968b58d` | autotest: stop the fixer rewriting the golden oracle and opening no-op PRs |
 | 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
@@ -1528,6 +1529,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
 | 2026-06-17 | `c3c846f0c` | Fix pre-existing CI red: ffmpeg reel engine now renders all formats (R1.16) |
 | 2026-06-17 | `96d200249` | fix: make font_intake.subset_to_woff2 truly deterministic (pin head.modified) |
-| 2026-06-17 | `880493a59` | Add R1.22 colour-role transition motion overlay (fade/gradient/pulse) |
-| 2026-06-17 | `6489b74df` | Fix non-deterministic font intake (head timestamp flake) |
 <!-- /ROADMAP:ACTIVITY -->
