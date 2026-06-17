@@ -107,3 +107,68 @@ def test_operator_purge_clears_caches(monkeypatch, tmp_path):
         assert not p.exists() or not any(p.rglob("*.json")), p
     # Source data untouched by the route.
     assert (runs / "run-123.json").exists()
+
+
+def test_purge_clears_graphic_render_cache_on_disk(monkeypatch, tmp_path):
+    """The still-graphic renderer's HTML→PNG cache is a purge root.
+
+    Regression: before this was wired in, "Clear all caches" promised graphic
+    renders but left every rendered card PNG on disk.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.privacy.cache_purge import cache_roots, purge_all_caches
+
+    labels = [label for label, _ in cache_roots()]
+    assert "graphic_render_cache" in labels
+
+    render_cache = tmp_path / "render_cache"
+    render_cache.mkdir(parents=True, exist_ok=True)
+    (render_cache / "deadbeef.png").write_bytes(b"\x89PNG\r\n\x1a\n fake")
+
+    report = purge_all_caches()
+
+    assert "graphic_render_cache" in report["sections"]
+    assert report["sections"]["graphic_render_cache"]["files_deleted"] >= 1
+    assert not (render_cache / "deadbeef.png").exists()
+
+
+def test_purge_clears_in_process_module_caches(monkeypatch, tmp_path):
+    """A disk purge must also drop the matching in-process caches from memory,
+    or the worker keeps serving them (and its RSS never falls)."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.privacy.cache_purge import purge_all_caches
+    from mediahub.graphic_renderer import render_cache as rc
+    from mediahub.graphic_renderer import render as R
+
+    # Seed the in-memory base64 asset-URI cache and the preprocessed-logo cache.
+    rc._asset_cache[("/some/photo.jpg", 1, 2)] = "data:image/jpeg;base64,AAAA"
+    R._LOGO_PREP_CACHE[("/some/logo.png", 1, 2)] = ("data:image/png;base64,BBBB", None)
+    assert len(rc._asset_cache) >= 1
+    assert len(R._LOGO_PREP_CACHE) >= 1
+
+    report = purge_all_caches()
+
+    # Both in-process caches are emptied and reported.
+    assert len(rc._asset_cache) == 0
+    assert len(R._LOGO_PREP_CACHE) == 0
+    assert "graphic_render_asset_cache" in report["inprocess_cleared"]
+    assert "logo_prep_cache" in report["inprocess_cleared"]
+
+
+def test_operator_route_clears_studio_render_cache(monkeypatch, tmp_path):
+    """The operator route drops web.py's own in-process render-preview cache
+    (the design-studio cache), not just the disk caches."""
+    app = _make_app(monkeypatch, tmp_path)
+    from mediahub.web.web import _studio_render_cache
+
+    _studio_render_cache.clear()
+    _studio_render_cache["sig-abc"] = {"preview": "data:...", "sidecar": {}}
+    assert len(_studio_render_cache) == 1
+
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["dev_operator"] = True
+    r = c.post("/operator/cache/purge")
+    assert r.status_code in (302, 303)
+
+    assert len(_studio_render_cache) == 0
