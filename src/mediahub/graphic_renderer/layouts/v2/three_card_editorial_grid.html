@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   three_card_editorial_grid  (v2 archetype, PAR-7 — G1.1)
+
+   A magazine "three-up": a full-width masthead row, then THREE
+   self-contained, inset, rounded editorial cards in a row, then a
+   full-width foot row. Each card is a complete unit:
+
+     [ A · WHO ]     surface card: "Athlete" label + first name + surname.
+     [ B · RESULT ]  the dominant ACCENT card, lifted — the headline mark.
+     [ C · CONTEXT ] surface card: the event, the meet, an optional
+                     measured highlight (collapses when empty).
+
+   Structural signature: three discrete inset CARDS (gutters + rounded
+   corners + their own labels) framed by a shared masthead and foot — a
+   "grid of cards", which reads differently from the three edge-to-edge
+   full-height BAYS of triptych_progression (column geometry, no gutters,
+   no masthead/foot rows) and from the 2x2 stat CELLS of
+   editorial_numbers_grid. The distinctiveness is the card-grid geometry.
+
+   Overflow safety: each card is ~1/3 width (~300px content after
+   padding), much narrower than the full-canvas single-line boxes the
+   autofit vars assume. So the surname is scaled via calc(var * 0.32) AND
+   wraps, the result via calc(var * 0.5) AND wraps; every value line
+   breaks. Holds at 1080x1350 and 1080x1920: the cards grow taller, the
+   masthead and foot stay pinned.
+   =================================================================== */
+
+.tg {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 78px 64px 70px;
+  gap: 30px;
+}
+.tg *, .tg *::before, .tg *::after { box-sizing: border-box; }
+
+/* masthead row */
+.tg__masthead {
+  flex: 0 0 auto;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 24px;
+  padding-bottom: 22px; border-bottom: 5px solid var(--mh-accent);
+}
+.tg__kicker {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: 56px; line-height: 0.9; letter-spacing: -0.01em;
+  text-transform: uppercase; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.tg__masthead-meet {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 22px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--mh-accent); text-align: right; flex: 0 0 auto;
+  overflow-wrap: anywhere;
+}
+
+/* the three cards */
+.tg__cards { flex: 1 1 auto; display: flex; gap: 24px; min-height: 0; }
+.tg__card {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column;
+  background: var(--mh-surface); color: var(--mh-on-surface);
+  border-radius: 18px; padding: 34px 28px;
+  overflow: hidden;
+}
+.tg__card-lab {
+  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-size: 15px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 18px;
+}
+.tg__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 30px; letter-spacing: 0.01em; text-transform: uppercase;
+  color: var(--mh-on-surface); margin-bottom: 2px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.tg__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.32);
+  line-height: 0.9; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-surface);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* middle card — dominant accent, lifted */
+.tg__result-card {
+  background: var(--mh-accent); color: var(--mh-primary);
+  justify-content: center; transform: translateY(-14px);
+}
+.tg__result-card .tg__card-lab { color: var(--mh-primary); opacity: 0.78; }
+.tg__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.5);
+  font-variation-settings: var(--mh-axes-result, normal);
+  line-height: 0.9; letter-spacing: -0.02em;
+  color: var(--mh-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+
+.tg__ctx-val {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 24px; line-height: 1.16; color: var(--mh-on-surface);
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.tg__ctx-meet {
+  margin-top: 16px;
+  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 19px;
+  color: var(--mh-on-surface); opacity: 0.8; overflow-wrap: anywhere;
+}
+.tg__hero { margin-top: auto; padding-top: 18px; }
+.tg__hero:has(.tg__hero-val:empty) { display: none; }
+.tg__hero-lab {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 13px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 5px;
+}
+.tg__hero-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 22px; color: var(--mh-on-surface); overflow-wrap: anywhere;
+}
+
+/* foot row */
+.tg__foot {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+}
+.tg__foot-id { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.tg__logo { height: 52px; width: auto; flex: 0 0 auto; }
+.tg__logo img, .tg__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.tg__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  text-transform: uppercase; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.tg__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="tg">
+  <div class="tg__masthead">
+    <div class="tg__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="tg__masthead-meet">{{MEET_NAME}}</div>
+  </div>
+
+  <div class="tg__cards">
+    <div class="tg__card tg__who-card">
+      <div class="tg__card-lab">Athlete</div>
+      <div class="tg__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="tg__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    </div>
+    <div class="tg__card tg__result-card">
+      <div class="tg__card-lab">Result</div>
+      <div class="tg__result">{{RESULT_VALUE}}</div>
+    </div>
+    <div class="tg__card tg__ctx-card">
+      <div class="tg__card-lab">Event</div>
+      <div class="tg__ctx-val">{{EVENT_NAME}}</div>
+      <div class="tg__ctx-meet">{{MEET_NAME}}</div>
+      <div class="tg__hero">
+        <div class="tg__hero-lab">Highlight</div>
+        <div class="tg__hero-val">{{HERO_STAT}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tg__foot">
+    <div class="tg__foot-id">
+      <div class="tg__logo">{{LOGO_BLOCK}}</div>
+      <div class="tg__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="tg__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

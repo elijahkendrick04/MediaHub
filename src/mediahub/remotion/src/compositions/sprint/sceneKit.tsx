@@ -25,6 +25,19 @@
 import React from "react";
 import type { SceneCtx } from "./registry";
 
+// Append an 8-bit alpha to a #rrggbb role hex (the StoryCard scrim precedent,
+// e.g. `${roles.ground}B0`) — a named helper for scenes that build their own
+// ground-tinted scrims (a split panel, a seam edge) where PhotoFill's
+// full-frame gradients don't fit. Pass-through for an already-aliased value.
+export function withAlpha(hex: string, a: number): string {
+  const h = (hex || "").trim();
+  if (!h.startsWith("#") || h.length < 7) {
+    return h;
+  }
+  const v = Math.max(0, Math.min(255, Math.round(a * 255)));
+  return `${h.slice(0, 7)}${v.toString(16).padStart(2, "0")}`;
+}
+
 // Deterministic single-line fit: shrink a base size until the estimated line
 // width (chars × an average heavy-display glyph ratio) fits the box. The cheap
 // TSX cousin of the still renderer's measured autofit — long surnames shrink
