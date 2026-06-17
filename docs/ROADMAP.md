@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `a6b01b66b` · Merge pull request #778: Create per-heading "how it works" slides + brand-following colours
+**Last updated:** 2026-06-17 · `825b29f5b` · Merge pull request #793 from elijahkendrick04/claude/compassionate-cannon-l6jwbz
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1173,6 +1173,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `8844c7a45` | Apply ruff-format to sample_graphics |
+| 2026-06-17 | `52091bb6e` | Show real sample outputs in the landing engine showcase |
 | 2026-06-17 | `778d5f43d` | Promote design studio to a Create tile; tidy the top-bar nav |
 | 2026-06-17 | `aac0efef2` | Fix dock-class regression: carry mh-signed-in on <html>, not <body> |
 | 2026-06-17 | `dee74b698` | Brand colours: signed-in follows the club everywhere; logo stays fixed |
@@ -1183,6 +1185,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `7b6506894` | Create: integrate PR #782 engine-block redesign into the how-it-works slides |
 | 2026-06-17 | `36b32d88e` | Create: make each how-it-works graphic depict its tile's own engine |
 | 2026-06-17 | `55e398e62` | Tidy the home-page pipeline diagram engine block |
-| 2026-06-17 | `c85e025b4` | Create: give Plan its own how-it-works + a predominant tile |
-| 2026-06-17 | `a1d6812e1` | Create: enforce every tile authors its own specific "how it works" |
 <!-- /ROADMAP:ACTIVITY -->
