@@ -38760,9 +38760,7 @@ voice, and queues them for one-click approval.</p>
                     rhythm_raw[key] = val
             weights_arg = (request.args.get("weights") or "").strip()
             if weights_arg:
-                rhythm_raw["weights"] = [
-                    float(w) for w in weights_arg.split(",") if w.strip()
-                ]
+                rhythm_raw["weights"] = [float(w) for w in weights_arg.split(",") if w.strip()]
         except (TypeError, ValueError):
             return None, (
                 jsonify(

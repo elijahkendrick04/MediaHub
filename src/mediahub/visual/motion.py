@@ -1365,9 +1365,7 @@ def _assemble_reel_props(
     rhythm_norm = normalise_reel_rhythm(rhythm, len(cards_props))
 
     if duration_sec is None:
-        duration_sec = reel_duration_for(
-            len(cards_props), **_reel_duration_kwargs(rhythm_norm)
-        )
+        duration_sec = reel_duration_for(len(cards_props), **_reel_duration_kwargs(rhythm_norm))
 
     # One reel, one mix (R1.19): the headline (first card to name one) drives
     # the voice/music balance; absent that, the operator env default decides.

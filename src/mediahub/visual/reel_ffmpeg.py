@@ -963,9 +963,7 @@ def render_meet_reel_from_props(
     if not cards_props:
         raise ValueError("at least one card is required for a reel")
     if duration_sec is None:
-        duration_sec = reel_duration_for(
-            len(cards_props), **_reel_duration_kwargs(rhythm)
-        )
+        duration_sec = reel_duration_for(len(cards_props), **_reel_duration_kwargs(rhythm))
     out_path = Path(out_path)
     width, height = _format_size(format_name)
     briefs = list(brief_dicts or [])
