@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `78abe01ed` · G1.26 — Live archetype × style-pack preview gallery (#716)
+**Last updated:** 2026-06-17 · `1ac15de4f` · Merge pull request #711: Parallelise the free FFmpeg reel engine's beat rendering
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1521,6 +1521,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
 | 2026-06-17 | `a71353d0d` | Re-trigger CI |
 | 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
 | 2026-06-17 | `c3c846f0c` | Fix pre-existing CI red: ffmpeg reel engine now renders all formats (R1.16) |
@@ -1530,6 +1531,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `88c6088ce` | Fix stale ffmpeg-engine batch test after R1.16 multi-format support |
 | 2026-06-17 | `e8792b384` | test: update stale ffmpeg-engine reel test for R1.16 multi-format |
 | 2026-06-17 | `35dbe58c8` | Apply ruff-format to the R1.12 reel call-sites |
-| 2026-06-17 | `a1206eaaa` | G1.13: SVG vector export path (outlined fonts, no raster) |
-| 2026-06-17 | `a544a7961` | Fix CI: ruff-format the studio cross-link in template_gallery.py |
 <!-- /ROADMAP:ACTIVITY -->
