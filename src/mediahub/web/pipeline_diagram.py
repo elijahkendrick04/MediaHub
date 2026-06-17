@@ -119,14 +119,17 @@ def _dot(x: float, y: float, kind: str, delay: float) -> str:
 def _engine(cx: float, cy: float, w: float, h: float) -> str:
     x0 = cx - w / 2
     y0 = cy - h / 2
+    # Icon / title / sub are a single optically-centred stack: the spark caps
+    # the wordmark with a tight gap, the title sits as the heaviest element and
+    # the sub trails one line below — the whole cluster balanced around ``cy``.
     return (
         '<g class="mh-pl-engine">'
         f'<rect class="mh-pl-engine-bg" x="{x0:.1f}" y="{y0:.1f}" '
         f'width="{w:.1f}" height="{h:.1f}" rx="16"/>'
-        + _icon(_ICON_SPARK, cx, cy - 30, 30, "mh-pl-ico mh-pl-ico--engine")
-        + f'<text class="mh-pl-engine-title" x="{cx:.1f}" y="{cy + 12:.1f}" '
+        + _icon(_ICON_SPARK, cx, cy - 23, 26, "mh-pl-ico mh-pl-ico--engine")
+        + f'<text class="mh-pl-engine-title" x="{cx:.1f}" y="{cy + 15:.1f}" '
         f'text-anchor="middle">{_ENGINE_TITLE}</text>'
-        + f'<text class="mh-pl-engine-sub" x="{cx:.1f}" y="{cy + 36:.1f}" '
+        + f'<text class="mh-pl-engine-sub" x="{cx:.1f}" y="{cy + 34:.1f}" '
         f'text-anchor="middle">{_ENGINE_SUB}</text>' + "</g>"
     )
 
@@ -148,15 +151,15 @@ def _svg_horizontal() -> str:
     read_x0, read_edge = 28, 28 + chip_w  # 28 .. 224
     write_x0 = 812
     write_edge = write_x0  # 812
-    eng_cx, eng_cy, eng_w, eng_h = 520, 230, 224, 164
-    eng_left, eng_right = eng_cx - eng_w / 2, eng_cx + eng_w / 2  # 408 .. 632
+    eng_cx, eng_cy, eng_w, eng_h = 520, 230, 244, 136
+    eng_left, eng_right = eng_cx - eng_w / 2, eng_cx + eng_w / 2  # 398 .. 642
 
     wires, pulses, dots, chips = [], [], [], []
 
     # Read column → engine
     for i, ((label, icon), ry) in enumerate(zip(_READS, rows)):
         py = ports[i]
-        d = f"M {read_edge} {ry} C {read_edge + 96} {ry}, {eng_left - 96} {py}, {eng_left} {py}"
+        d = f"M {read_edge} {ry} C {read_edge + 80} {ry}, {eng_left - 80} {py}, {eng_left} {py}"
         wires.append(_wire(d))
         pulses.append(_pulse(d, "in", delay=i * 0.5))
         dots.append(_dot(read_edge, ry, "read", delay=i * 0.5))
@@ -166,7 +169,7 @@ def _svg_horizontal() -> str:
     # Engine → write column
     for i, ((label, icon), wy) in enumerate(zip(_WRITES, rows)):
         py = ports[i]
-        d = f"M {eng_right} {py} C {eng_right + 96} {py}, {write_edge - 96} {wy}, {write_edge} {wy}"
+        d = f"M {eng_right} {py} C {eng_right + 80} {py}, {write_edge - 80} {wy}, {write_edge} {wy}"
         wires.append(_wire(d))
         pulses.append(_pulse(d, "out", delay=i * 0.5 + 1.4))
         dots.append(_dot(eng_right, py, "engine", delay=i * 0.5 + 1.0))
@@ -221,8 +224,8 @@ def _svg_vertical() -> str:
     read_yc, write_yc = 78, 700
     read_edge = read_yc + chip_h / 2  # 120 (bottom of read chips)
     write_edge = write_yc - chip_h / 2  # 658 (top of write chips)
-    eng_cx, eng_cy, eng_w, eng_h = 230, 400, 210, 150
-    eng_top, eng_bot = eng_cy - eng_h / 2, eng_cy + eng_h / 2  # 325 .. 475
+    eng_cx, eng_cy, eng_w, eng_h = 230, 400, 244, 136
+    eng_top, eng_bot = eng_cy - eng_h / 2, eng_cy + eng_h / 2  # 332 .. 468
 
     wires, pulses, dots, chips = [], [], [], []
 
@@ -342,6 +345,14 @@ PIPELINE_DIAGRAM_CSS = """
   line-height: 1.55;
 }
 .mh-pl-stage {
+  /* The engine graphic is MediaHub's own product mark, so its lit traces always
+     burn in the signature lane-yellow — pinned here, scoped to the stage, so it
+     stays luminous on a dark surface no matter which brand palette themes the
+     surrounding page (the marketing home runs the generic-default navy kit,
+     which would otherwise drag --lane to a near-invisible navy in here). Site
+     chrome is untouched. */
+  --lane: #D4FF3A;
+  --lane-glow: rgba(212,255,58,0.35);
   position: relative;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
@@ -388,7 +399,7 @@ PIPELINE_DIAGRAM_CSS = """
 .mh-pl-ico > * { vector-effect: non-scaling-stroke; }
 .mh-pl-ico--read { stroke: var(--ink-dim); }
 .mh-pl-ico--write { stroke: var(--lane); filter: drop-shadow(0 0 4px var(--lane-glow)); }
-.mh-pl-ico--engine { stroke: var(--lane); }
+.mh-pl-ico--engine { stroke: var(--lane); filter: drop-shadow(0 0 5px var(--lane-glow)); }
 
 /* Engine node — the lane-accented hub, breathing glow */
 .mh-pl-engine-bg {
@@ -409,8 +420,8 @@ PIPELINE_DIAGRAM_CSS = """
 .mh-pl-engine-sub {
   fill: var(--ink-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 .mh-pl-col-head {
   fill: var(--ink-muted);
