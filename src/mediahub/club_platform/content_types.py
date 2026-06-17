@@ -55,6 +55,12 @@ class HowItWorks:
     tagline: str  # one-line promise shown under the title
     inputs: tuple[tuple[str, str], ...]  # (label, icon_key) — "what you give"
     steps: tuple[str, ...]  # 2–4 numbered steps describing the flow
+    # The engine node's process line — the centre of the graphic, e.g.
+    # "detect · rank · brand · generate". Authored per tile so each graphic
+    # depicts THAT tile's actual functionality, not a generic pipeline. Empty
+    # falls back to the canonical phrase (safety net); the per-tile guard test
+    # requires every surfaced tile to author its own distinct line.
+    engine_process: str = ""
 
 
 @dataclass
@@ -156,6 +162,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 "them by how content-worthy they are.",
                 "You get branded cards, captions and a reel to review, approve and export.",
             ),
+            engine_process="detect · rank · brand · generate",
         ),
     ),
     ContentType.ATHLETE_SPOTLIGHT: ContentTypeMeta(
@@ -181,6 +188,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 "The engine gathers every achievement they earned and ranks it by impact.",
                 "You get a single-athlete spotlight card, caption and story to approve.",
             ),
+            engine_process="gather · rank · brand · generate",
         ),
     ),
     ContentType.EVENT_PREVIEW: ContentTypeMeta(
@@ -207,6 +215,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 "The engine shapes the story angles and writes preview copy in your voice.",
                 "You get feed and story captions plus a branded graphic to approve.",
             ),
+            engine_process="angle · write · brand",
         ),
     ),
     ContentType.SPONSOR_ACTIVATION: ContentTypeMeta(
@@ -234,6 +243,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 "partnership feeling natural.",
                 "You get a brand-safe graphic and caption to approve and export.",
             ),
+            engine_process="feature · write · brand-check",
         ),
     ),
     ContentType.SESSION_UPDATE: ContentTypeMeta(
@@ -259,6 +269,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 "The engine writes short, shareable Stories and feed cards in your voice.",
                 "You get quick captions and a graphic to post between sessions.",
             ),
+            engine_process="summarise · write · brand",
         ),
     ),
     ContentType.FREE_TEXT: ContentTypeMeta(
@@ -285,6 +296,7 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
                 "MediaHub interprets it, writes the caption and places your photos in.",
                 "You get a branded graphic draft to edit, approve and export.",
             ),
+            engine_process="interpret · write · place",
         ),
     ),
 }

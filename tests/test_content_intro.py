@@ -80,9 +80,12 @@ def test_every_heading_renders_a_first_slide(ct):
     # Header chrome.
     assert "How it works" in body
     assert f">{REGISTRY[ct].title}</h1>" in body
-    # The engine sits between give/get, in the landing-page phrasing.
+    # The engine sits between give/get; its process line is this tile's own
+    # (drawn in both orientations).
     assert ">THE ENGINE</text>" in body
-    assert ">detect · rank · brand · generate</text>" in body
+    process = REGISTRY[ct].how_it_works.engine_process
+    assert process, f"{ct.value}: engine_process must be authored"
+    assert body.count(f">{process}</text>") == 2, process
     assert ">What you give</text>" in body
     assert ">What you get</text>" in body
     # Numbered steps + a single Start CTA into the real flow.
@@ -151,6 +154,12 @@ def test_every_implemented_tile_authors_its_own_how_it_works(ct):
     assert hiw.tagline.strip(), f"{ct.value}: how_it_works.tagline is empty"
     assert len(hiw.inputs) >= 1, f"{ct.value}: how_it_works needs at least one input chip"
     assert len(hiw.steps) >= 2, f"{ct.value}: how_it_works needs at least two steps"
+    # The graphic's centre — the engine process line — must be authored too, so
+    # the diagram depicts THIS tile's functionality, not a generic pipeline.
+    assert hiw.engine_process.strip(), (
+        f"{ct.value}: author engine_process so its graphic is unique to this tile's "
+        "functionality (e.g. 'detect · rank · brand · generate')"
+    )
     for label, icon_key in hiw.inputs:
         assert label.strip(), f"{ct.value}: blank input label"
         assert icon_key.strip(), f"{ct.value}: blank input icon key"
@@ -163,6 +172,7 @@ def test_each_tile_how_it_works_is_specific_to_that_tile():
     tile, not a copy of a sibling's."""
     seen_tagline: dict[str, str] = {}
     seen_steps: dict[tuple, str] = {}
+    seen_process: dict[str, str] = {}
     for ct, meta in REGISTRY.items():
         if not meta.is_implemented or meta.how_it_works is None:
             continue
@@ -181,7 +191,15 @@ def test_each_tile_how_it_works_is_specific_to_that_tile():
             f"{ct.value} shares its steps with {seen_steps.get(hiw.steps)} — "
             "each tile needs its own"
         )
+        # The engine line is the centre of the graphic — it must be unique to
+        # this tile's functionality, not a shared generic pipeline.
+        assert hiw.engine_process not in seen_process, (
+            f"{ct.value} shares its engine process line "
+            f"({hiw.engine_process!r}) with {seen_process.get(hiw.engine_process)} — "
+            "each tile's graphic must depict its own functionality"
+        )
         seen_tagline[hiw.tagline] = ct.value
+        seen_process[hiw.engine_process] = ct.value
         seen_steps[hiw.steps] = ct.value
 
 
@@ -215,8 +233,8 @@ def test_unauthored_heading_falls_back_to_a_derived_slide():
 def test_variable_input_counts_stay_well_formed(n_in):
     inputs = [(f"Input {i}", ci._glyph("note")) for i in range(n_in)]
     outputs = [("Caption", ci._glyph("caption")), ("Graphic", ci._glyph("graphic"))]
-    ET.fromstring(ci._svg_horizontal(inputs, outputs))
-    ET.fromstring(ci._svg_vertical(inputs, outputs))
+    ET.fromstring(ci._svg_horizontal(inputs, outputs, "detect · rank · brand"))
+    ET.fromstring(ci._svg_vertical(inputs, outputs, "detect · rank · brand"))
 
 
 # =========================================================================== #
@@ -330,6 +348,9 @@ def test_plan_intro_renders_its_own_slide():
     assert "How it works" in frag
     assert ">Plan</h1>" in frag
     assert ">THE ENGINE</text>" in frag
+    # Its engine line is Plan's own (recommends rather than generates), drawn in
+    # both orientations.
+    assert frag.count(f">{ci._PLAN_ENGINE_PROCESS}</text>") == 2
     # Its CTA opens the planner (not a content generator).
     assert "Open Plan &rarr;" in frag
     assert 'href="/plan"' in frag
@@ -342,10 +363,12 @@ def test_plan_intro_is_plan_specific_not_a_media_tile():
     # Plan-specific give/get, drawn in both orientations — not media-format chips.
     for label in ("What's coming up", "Your goals", "Club history", "Ranked ideas"):
         assert frag.count(f">{label}</text>") == 2, label
-    # And its slide is distinct from every content tile's.
+    # And its slide is distinct from every content tile's — tagline AND the
+    # engine line at the centre of the graphic.
     for ct, meta in REGISTRY.items():
         if meta.how_it_works is not None:
             assert meta.how_it_works.tagline != ci._PLAN_TAGLINE
+            assert meta.how_it_works.engine_process != ci._PLAN_ENGINE_PROCESS
 
 
 def test_plan_intro_is_deterministic():

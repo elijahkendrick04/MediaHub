@@ -161,7 +161,13 @@ def _head(text: str, x: float, y: float) -> str:
     )
 
 
-def _engine(cx: float, cy: float, w: float, h: float) -> str:
+# The canonical full-pipeline phrase — the fallback when a tile hasn't authored
+# its own engine process line (the per-tile guard test requires surfaced tiles
+# to author one, so each graphic's centre is specific to that tile's function).
+_CANONICAL_ENGINE_PROCESS = "detect · rank · brand · generate"
+
+
+def _engine(cx: float, cy: float, w: float, h: float, process: str) -> str:
     x0, y0 = cx - w / 2, cy - h / 2
     return (
         '<g class="mh-pl-engine">'
@@ -171,7 +177,7 @@ def _engine(cx: float, cy: float, w: float, h: float) -> str:
         + f'<text class="mh-pl-engine-title" x="{cx:.1f}" y="{cy + 12:.1f}" '
         'text-anchor="middle">THE ENGINE</text>'
         + f'<text class="mh-pl-engine-sub" x="{cx:.1f}" y="{cy + 36:.1f}" '
-        'text-anchor="middle">detect · rank · brand · generate</text>' + "</g>"
+        f'text-anchor="middle">{_x(process)}</text>' + "</g>"
     )
 
 
@@ -225,7 +231,9 @@ def _spread(n: int, center: float, spacing: float) -> list[float]:
 # --------------------------------------------------------------------------- #
 # Diagram geometry — variable input/output counts (the home page is fixed at 3).
 # --------------------------------------------------------------------------- #
-def _svg_horizontal(inputs: list[tuple[str, str]], outputs: list[tuple[str, str]]) -> str:
+def _svg_horizontal(
+    inputs: list[tuple[str, str]], outputs: list[tuple[str, str]], process: str
+) -> str:
     W = 1040
     chip_w, chip_h = 196, 66
     read_x0, read_edge = 28, 224
@@ -297,13 +305,15 @@ def _svg_horizontal(inputs: list[tuple[str, str]], outputs: list[tuple[str, str]
         + "</g>"
         + '<g class="mh-pl-nodes">'
         + "".join(chips)
-        + _engine(eng_cx, eng_cy, eng_w, eng_h)
+        + _engine(eng_cx, eng_cy, eng_w, eng_h, process)
         + "</g>"
     )
     return _svg_shell("h", W, H, body)
 
 
-def _svg_vertical(inputs: list[tuple[str, str]], outputs: list[tuple[str, str]]) -> str:
+def _svg_vertical(
+    inputs: list[tuple[str, str]], outputs: list[tuple[str, str]], process: str
+) -> str:
     W, H = 460, 760
     chip_w, chip_h = 132, 84
     n_in, n_out = len(inputs), len(outputs)
@@ -365,7 +375,7 @@ def _svg_vertical(inputs: list[tuple[str, str]], outputs: list[tuple[str, str]])
         + "</g>"
         + '<g class="mh-pl-nodes">'
         + "".join(chips)
-        + _engine(eng_cx, eng_cy, eng_w, eng_h)
+        + _engine(eng_cx, eng_cy, eng_w, eng_h, process)
         + "</g>"
     )
     return _svg_shell("v", W, H, body)
@@ -410,6 +420,7 @@ def _intro_slide(
     tagline: str,
     inputs: list[tuple[str, str]],
     outputs: list[tuple[str, str]],
+    process: str,
     steps: tuple[str, ...],
     meta_chips_html: str,
     a11y: str,
@@ -419,7 +430,8 @@ def _intro_slide(
 ) -> str:
     """The shared "how it works" first-slide markup: hero header → give/engine/get
     circuit → numbered steps → action row. ``inputs``/``outputs`` are
-    ``(label, glyph_markup)`` pairs. Deterministic (no randomness / no I/O)."""
+    ``(label, glyph_markup)`` pairs; ``process`` is the engine node's per-tile
+    process line. Deterministic (no randomness / no I/O)."""
     steps_html = "".join(
         f'<li class="mh-ci-step"><span class="mh-ci-step-num">{i}</span>'
         f'<span class="mh-ci-step-body">{_x(step)}</span></li>'
@@ -434,7 +446,7 @@ def _intro_slide(
         "</section>"
         '<div class="mh-pl-stage mh-ci-stage">'
         f'<p class="mh-visually-hidden">{_x(a11y)}</p>'
-        f"{_svg_horizontal(inputs, outputs)}{_svg_vertical(inputs, outputs)}"
+        f"{_svg_horizontal(inputs, outputs, process)}{_svg_vertical(inputs, outputs, process)}"
         "</div>"
         f'<ol class="mh-ci-steps">{steps_html}</ol>'
         '<div class="mh-ci-actions">'
@@ -458,14 +470,14 @@ def render_content_intro(
     hiw = _resolved_hiw(meta)
     inputs = [(label, _glyph(key)) for label, key in hiw.inputs]
     out_chips, out_dims = _outputs_for(formats)
+    process = hiw.engine_process or _CANONICAL_ENGINE_PROCESS
 
     in_labels = ", ".join(label for label, _ in hiw.inputs)
     out_labels = ", ".join(label for label, _ in out_dims)
     a11y = (
         f"How {meta.title} works. You give: {in_labels}. The MediaHub engine "
-        "detects what matters, ranks it, applies your branding and generates the "
-        f"content. You get: {out_labels} — to review and approve. Nothing leaves "
-        "without your approval."
+        f"({process.replace('·', 'then')}) turns that into your content. You get: "
+        f"{out_labels} — to review and approve. Nothing leaves without your approval."
     )
 
     meta_chips = "".join(
@@ -482,6 +494,7 @@ def render_content_intro(
         tagline=hiw.tagline,
         inputs=inputs,
         outputs=out_chips,
+        process=process,
         steps=hiw.steps,
         meta_chips_html=meta_chips,
         a11y=a11y,
@@ -514,6 +527,8 @@ _PLAN_STEPS: tuple[str, ...] = (
     "Jump straight into making the top idea, or work down the ranked list.",
 )
 _PLAN_TAGLINE = "Not sure what to post? Get a ranked, explainable plan of what to make next."
+# Plan recommends rather than generates — its engine line is its own.
+_PLAN_ENGINE_PROCESS = "ingest · detect · rank · recommend"
 
 
 def render_plan_intro(*, start_url: str, back_url: str) -> str:
@@ -537,6 +552,7 @@ def render_plan_intro(*, start_url: str, back_url: str) -> str:
         tagline=_PLAN_TAGLINE,
         inputs=inputs,
         outputs=outputs,
+        process=_PLAN_ENGINE_PROCESS,
         steps=_PLAN_STEPS,
         meta_chips_html=meta_chips,
         a11y=a11y,
