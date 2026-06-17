@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `825b29f5b` · Merge pull request #793 from elijahkendrick04/claude/compassionate-cannon-l6jwbz
+**Last updated:** 2026-06-17 · `ad9820fb3` · Tidy up the home page (#795)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1173,6 +1173,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `a4d470ec4` | Apply ruff-format (collapse single-line audience-icon CSS string) |
+| 2026-06-17 | `3f29519c1` | Tidy up the home page: fix invisible navy elements, wrong icon, unstyled kickers |
 | 2026-06-17 | `8844c7a45` | Apply ruff-format to sample_graphics |
 | 2026-06-17 | `52091bb6e` | Show real sample outputs in the landing engine showcase |
 | 2026-06-17 | `778d5f43d` | Promote design studio to a Create tile; tidy the top-bar nav |
@@ -1183,6 +1185,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `9414408a2` | ROADMAP: drop stray F.8 from the phase registry |
 | 2026-06-17 | `12d2b5128` | Scrub all remaining traces of the removed social scheduling/publishing |
 | 2026-06-17 | `7b6506894` | Create: integrate PR #782 engine-block redesign into the how-it-works slides |
-| 2026-06-17 | `36b32d88e` | Create: make each how-it-works graphic depict its tile's own engine |
-| 2026-06-17 | `55e398e62` | Tidy the home-page pipeline diagram engine block |
 <!-- /ROADMAP:ACTIVITY -->
