@@ -268,22 +268,6 @@ class TestExportEvents:
                 "review_latest": _ago(minutes=2), "posted_latest": ""}
         assert af._posted_export_event("r1", {}, summ) is None
 
-    def test_publish_ok(self):
-        att = {"run_id": "r1", "channel_name": "Instagram", "service": "buffer",
-               "attempted_at": _ago(minutes=20), "status": "ok", "caption_excerpt": "Tom PB!"}
-        e = af._export_attempt_event(att, {"meet_name": "County"})
-        assert e.subkind == "post_ok" and e.status_tone == af.TONE_GOOD
-        assert e.status_label == "published" and "Instagram" in e.title
-        assert e.summary == "Tom PB!"
-
-    def test_publish_failed_uses_error_kind(self):
-        att = {"run_id": "r1", "channel_name": "X", "attempted_at": _ago(minutes=15),
-               "status": "failed", "error_kind": "auth", "error_message": "token expired"}
-        e = af._export_attempt_event(att, {})
-        assert e.subkind == "post_failed" and e.status_tone == af.TONE_BAD
-        assert e.status_label == "auth" and "failed" in e.title.lower()
-        assert e.summary == "token expired"
-
 
 # ===========================================================================
 # Unit — the merged builder
@@ -302,52 +286,43 @@ class TestBuildFeed:
             "c1": _state("c1", "approved", changed=_ago(minutes=40)),
             "c2": _state("c2", "posted", posted=_ago(minutes=20)),
         }}
-        attempts = [
-            {"run_id": "r1", "channel_name": "Instagram", "attempted_at": _ago(minutes=10),
-             "status": "ok", "caption_excerpt": "PB!"},
-        ]
-        return runs, wf, attempts
+        return runs, wf
 
     def test_merge_sort_newest_first(self):
-        runs, wf, attempts = self._data()
-        events = af.build_activity_feed(runs=runs, workflow_by_run=wf, posting_attempts=attempts)
-        # 2 runs + 1 approval + 1 posted-export + 1 publish-export = 5
-        assert len(events) == 5
+        runs, wf = self._data()
+        events = af.build_activity_feed(runs=runs, workflow_by_run=wf)
+        # 2 runs + 1 approval + 1 posted-export = 4
+        assert len(events) == 4
         times = [af.parse_ts(e.ts) for e in events]
         assert times == sorted(times, reverse=True)
-        # Newest is the 10-min-ago publish.
-        assert events[0].kind == af.KIND_EXPORT and events[0].subkind == "post_ok"
+        # Newest is the 20-min-ago posted-card export.
+        assert events[0].kind == af.KIND_EXPORT and events[0].subkind == "posted"
 
     def test_counts(self):
-        runs, wf, attempts = self._data()
-        events = af.build_activity_feed(runs=runs, workflow_by_run=wf, posting_attempts=attempts)
-        assert af.feed_counts(events) == {"all": 5, "run": 2, "approval": 1, "export": 2}
+        runs, wf = self._data()
+        events = af.build_activity_feed(runs=runs, workflow_by_run=wf)
+        assert af.feed_counts(events) == {"all": 4, "run": 2, "approval": 1, "export": 1}
 
     def test_kind_filter(self):
-        runs, wf, attempts = self._data()
+        runs, wf = self._data()
         for kind in (af.KIND_RUN, af.KIND_APPROVAL, af.KIND_EXPORT):
-            events = af.build_activity_feed(
-                runs=runs, workflow_by_run=wf, posting_attempts=attempts, kind=kind
-            )
+            events = af.build_activity_feed(runs=runs, workflow_by_run=wf, kind=kind)
             assert events and all(e.kind == kind for e in events)
 
     def test_invalid_kind_returns_all(self):
-        runs, wf, attempts = self._data()
-        events = af.build_activity_feed(
-            runs=runs, workflow_by_run=wf, posting_attempts=attempts, kind="bogus"
-        )
-        assert len(events) == 5
+        runs, wf = self._data()
+        events = af.build_activity_feed(runs=runs, workflow_by_run=wf, kind="bogus")
+        assert len(events) == 4
 
     def test_limit(self):
-        runs, wf, attempts = self._data()
-        assert len(af.build_activity_feed(runs=runs, workflow_by_run=wf,
-                                          posting_attempts=attempts, limit=2)) == 2
+        runs, wf = self._data()
+        assert len(af.build_activity_feed(runs=runs, workflow_by_run=wf, limit=2)) == 2
 
     def test_run_meta_titles_approval_from_runs(self):
         # The approval event borrows the run's meet name even though only the
         # runs list carries it.
-        runs, wf, attempts = self._data()
-        events = af.build_activity_feed(runs=runs, workflow_by_run=wf, posting_attempts=[])
+        runs, wf = self._data()
+        events = af.build_activity_feed(runs=runs, workflow_by_run=wf)
         approval = next(e for e in events if e.kind == af.KIND_APPROVAL)
         assert approval.title == "County Champs"
 
@@ -420,18 +395,14 @@ class TestFeedRoute:
         ws = WorkflowStore(wm.RUNS_DIR)
         ws.set_status("r1", "c1", CardStatus.APPROVED)
         ws.set_status("r1", "c2", CardStatus.POSTED)
-        from mediahub.publishing import posting_log
-        posting_log.record_attempt(profile_id="club-a", run_id="r1", card_id="c1",
-                                   channel_name="Instagram", status="ok", caption="Great swim!")
 
         _pin(c, "club-a")
         body = c.get("/activity/feed").get_data(as_text=True)
         assert "Activity feed" in body
         assert "County Champs" in body              # run + approval titles
-        assert "Instagram" in body                  # publish export
         assert 'data-kind="run"' in body
         assert 'data-kind="approval"' in body
-        assert 'data-kind="export"' in body
+        assert 'data-kind="export"' in body         # the card marked posted
         assert '<article class="mh-feed-item' in body
         assert "<details" in body                   # expandable detail
         assert 'class="tag good"' in body
@@ -453,15 +424,11 @@ class TestFeedRoute:
         from mediahub.workflow.store import WorkflowStore
         ws = WorkflowStore(wm.RUNS_DIR)
         ws.set_status("rb", "c1", CardStatus.APPROVED)
-        from mediahub.publishing import posting_log
-        posting_log.record_attempt(profile_id="club-b", run_id="rb", card_id="c1",
-                                   channel_name="ClubBChannel", status="ok", caption="secret")
 
         _pin(c, "club-a")
         body = c.get("/activity/feed").get_data(as_text=True)
         assert "Club A meet" in body
         assert "Club B meet" not in body
-        assert "ClubBChannel" not in body
 
     def test_kind_filter_server_side(self, feed_client):
         c, wm = feed_client

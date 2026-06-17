@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Storage paths — same convention as publishing/posting_log.py
+# Storage paths — the standard DATA_DIR/data.db convention used across MediaHub
 # ---------------------------------------------------------------------------
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))

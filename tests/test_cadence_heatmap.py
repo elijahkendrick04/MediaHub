@@ -427,26 +427,6 @@ class TestCadenceActivityCounts:
         assert today.isoformat() in gen
         assert old[:10] not in gen
 
-    def test_posting_attempts_only_count_successes(self, gated_client):
-        _, wm = gated_client
-        from mediahub.publishing import posting_log
-        today = datetime.now(timezone.utc).date()
-        when = f"{today.isoformat()}T12:00:00+00:00"
-        posting_log.record_attempt(
-            profile_id="club-a", run_id="a1", card_id="c1",
-            status="ok", attempted_at=when,
-        )
-        posting_log.record_attempt(
-            profile_id="club-a", run_id="a1", card_id="c2",
-            status="ok", attempted_at=when,
-        )
-        posting_log.record_attempt(
-            profile_id="club-a", run_id="a1", card_id="c3",
-            status="failed", error_kind="net", attempted_at=when,
-        )
-        _, post = wm._cadence_activity_counts("club-a", today)
-        assert post == {today.isoformat(): 2}  # the failed attempt is excluded
-
     def test_empty_profile_id_is_safe(self, gated_client):
         _, wm = gated_client
         assert wm._cadence_activity_counts("", datetime.now(timezone.utc).date()) == ({}, {})

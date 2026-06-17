@@ -69,27 +69,12 @@ def _seed_pb_caches(data_dir, athlete="Jane Smith", club="Sharks", run_id="run1"
     return warm / f"{key}.json", per_run / f"{key}.json", research / "q1.json"
 
 
-def _seed_posting_log(profile_id="sharks", run_id="run1", caption="Jane Smith PB!"):
-    from mediahub.publishing import posting_log
-
-    posting_log._ensure_schema()
-    rid = posting_log.record_attempt(
-        profile_id=profile_id,
-        run_id=run_id,
-        card_id="c-jane",
-        status="ok",
-        caption=caption,
-    )
-    assert rid > 0
-
-
 # ---- athlete erasure --------------------------------------------------------
 
 
 def test_athlete_erasure_cascades_everywhere(data_dir):
     run_file = _seed_run(data_dir)
     warm, per_run, research = _seed_pb_caches(data_dir)
-    _seed_posting_log()
     from mediahub.privacy import erase_athlete
 
     report = erase_athlete("sharks", "Jane Smith", "Sharks")
@@ -114,16 +99,9 @@ def test_athlete_erasure_cascades_everywhere(data_dir):
     # Caches gone.
     assert not warm.exists() and not per_run.exists() and not research.exists()
 
-    # Posting-log excerpt blanked (row kept).
-    from mediahub.publishing import posting_log
-
-    rows = posting_log.recent_attempts("sharks")
-    assert rows and all("jane" not in (r["caption_excerpt"] or "").lower() for r in rows)
-
     assert report.cards_removed == 1
     assert report.swims_removed == 1
     assert report.runs_touched == ["run1"]
-    assert report.posting_excerpts >= 1
 
 
 def test_athlete_erasure_is_tenant_scoped(data_dir):
@@ -164,16 +142,11 @@ def test_athlete_erasure_reaches_caption_memory(data_dir):
 def test_run_deletion_cascade_clears_per_run_stores(data_dir):
     _seed_run(data_dir)
     _, per_run, _ = _seed_pb_caches(data_dir)
-    _seed_posting_log()
     from mediahub.privacy import run_deletion_cascade
 
     report = run_deletion_cascade("run1", "sharks")
     assert not per_run.exists()
     assert report["pb_cache_files"] >= 1
-    from mediahub.publishing import posting_log
-
-    rows = posting_log.recent_attempts("sharks")
-    assert rows and all((r["caption_excerpt"] or "") == "" for r in rows)
 
 
 def test_run_deletion_cascade_purges_athlete_swims(data_dir):

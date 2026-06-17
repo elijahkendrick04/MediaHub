@@ -18,8 +18,8 @@ Two layers:
   turns that plan into platform-ready caption cards. This is the one engine
   the caption stubs and the meet-recap content tools route through.
 
-The planner recommends; humans approve; generation drafts. Publishing
-autonomy stays with ``publishing.type_gate`` (P2.4).
+The planner recommends; humans approve; generation drafts. A human always
+approves before any content leaves the system.
 """
 
 from .director import plan_content_directions

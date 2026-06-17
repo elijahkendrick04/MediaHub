@@ -7,12 +7,11 @@ Inspired by GitHub's dashboard feed, this merges three records MediaHub
   * **approvals** — per-card review decisions in the ``WorkflowStore`` sidecars
                     (approved / rejected / edited)
   * **exports**   — content that left the system: cards marked *posted* in the
-                    workflow store, plus publish attempts logged by
-                    ``publishing.posting_log``
+                    workflow store
 
 It introduces **no new data source** — every event is assembled from a store
 that already exists. The module is deliberately pure: it takes records that the
-caller has already read (DB rows, workflow states, posting-log rows) and returns
+caller has already read (DB rows, workflow states) and returns
 structured :class:`ActivityEvent` objects. That keeps the interesting logic —
 status mapping, per-run aggregation, merge, sort, date bucketing — fully unit
 testable without Flask, a database, or the filesystem. The Flask route does the
@@ -393,52 +392,6 @@ def _posted_export_event(run_id: str, meta: Any, summ: dict) -> Optional[Activit
     )
 
 
-def _export_attempt_event(attempt: Any, meta: Any) -> ActivityEvent:
-    status = str(_get(attempt, "status", "") or "").strip().lower()
-    channel = str(_get(attempt, "channel_name") or _get(attempt, "channel_id") or "a channel")
-    error_kind = str(_get(attempt, "error_kind", "") or "")
-    error_msg = str(_get(attempt, "error_message", "") or "")
-    excerpt = str(_get(attempt, "caption_excerpt", "") or "")
-    run_id = str(_get(attempt, "run_id", "") or "")
-
-    if status == "ok":
-        subkind, label, tone = "post_ok", "published", TONE_GOOD
-        title = f"Published to {channel}"
-        summary = _clip(excerpt, 160) if excerpt else "Posted to the channel."
-    else:
-        subkind, label, tone = "post_failed", (error_kind or "failed"), TONE_BAD
-        title = f"Publish to {channel} failed"
-        summary = _clip(error_msg, 160) or "The publish attempt did not succeed."
-
-    detail: list[tuple[str, str]] = [("Channel", channel)]
-    service = str(_get(attempt, "service", "") or "")
-    if service:
-        detail.append(("Service", service))
-    detail.append(("Status", status or "—"))
-    scheduled = str(_get(attempt, "scheduled_at", "") or "")
-    if scheduled:
-        detail.append(("Scheduled for", scheduled))
-    if excerpt:
-        detail.append(("Caption", _clip(excerpt)))
-    if error_msg:
-        detail.append(("Error", _clip(error_msg)))
-    meet = str(_get(meta, "meet_name") or _get(meta, "file_name") or "")
-    if meet:
-        detail.append(("Run", meet))
-
-    return ActivityEvent(
-        kind=KIND_EXPORT,
-        subkind=subkind,
-        ts=str(_get(attempt, "attempted_at", "") or ""),
-        title=title,
-        status_label=label,
-        status_tone=tone,
-        summary=summary,
-        detail=detail,
-        run_id=run_id or None,
-    )
-
-
 # ---------------------------------------------------------------------------
 # The builder
 # ---------------------------------------------------------------------------
@@ -448,7 +401,6 @@ def build_activity_feed(
     *,
     runs: Sequence[Any] = (),
     workflow_by_run: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    posting_attempts: Sequence[Any] = (),
     run_meta: Optional[Mapping[str, Any]] = None,
     kind: str = "",
     limit: int = 80,
@@ -456,10 +408,9 @@ def build_activity_feed(
     """Merge the three lanes into one reverse-chronological list of events.
 
     ``runs`` are run rows (Mappings); ``workflow_by_run`` maps a run id to its
-    ``{card_id: state}`` workflow states; ``posting_attempts`` are posting-log
-    rows. ``run_meta`` maps a run id to a record carrying ``meet_name`` /
-    ``file_name`` (used to title approval / export events and to label posting
-    attempts) — runs is used to seed it when not supplied. ``kind`` optionally
+    ``{card_id: state}`` workflow states. ``run_meta`` maps a run id to a record
+    carrying ``meet_name`` / ``file_name`` (used to title approval / export
+    events) — runs is used to seed it when not supplied. ``kind`` optionally
     filters to a single lane. Events are sorted newest-first and capped at
     ``limit``.
     """
@@ -493,12 +444,6 @@ def build_activity_feed(
                 ev = _posted_export_event(str(rid), meta.get(str(rid)), summ)
                 if ev:
                     events.append(ev)
-
-    if want in ("", KIND_EXPORT):
-        for attempt in posting_attempts:
-            events.append(
-                _export_attempt_event(attempt, meta.get(str(_get(attempt, "run_id", ""))))
-            )
 
     events.sort(key=lambda e: (parse_ts(e.ts) or _EPOCH), reverse=True)
     if limit is not None and limit >= 0:

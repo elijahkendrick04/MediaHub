@@ -219,45 +219,6 @@ def test_pack_filter_removes_blocked_athletes(tmp_path, monkeypatch):
     assert len(run["recognition_report"]["ranked_achievements"]) == 2
 
 
-def test_publish_gate_blocks_opted_out_athlete(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from mediahub.compliance.consent import ConsentRegistry
-    from mediahub.publishing.publish_gate import evaluate_publish_gate
-
-    _make_profile("clubx")
-    ConsentRegistry("clubx").record(athlete_name="Sam Adult", status="refused")
-    card = {
-        "swimmer_name": "Sam Adult",
-        "confidence": 0.95,
-        "raw_facts": {"age": 25},
-        "safe_to_post": {"level": "safe"},
-    }
-    verdict = evaluate_publish_gate(
-        "clubx", "result_card", card=card, caption="Great swim!", audit=False
-    )
-    consent_check = next(c for c in verdict.checks if c.name == "consent")
-    assert consent_check.passed is False
-    assert verdict.allowed is False
-
-
-def test_publish_gate_consent_check_passes_clean_athlete(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    from mediahub.publishing.publish_gate import evaluate_publish_gate
-
-    _make_profile("clubx")
-    card = {
-        "swimmer_name": "Sam Adult",
-        "confidence": 0.95,
-        "raw_facts": {"age": 25},
-        "safe_to_post": {"level": "safe"},
-    }
-    verdict = evaluate_publish_gate(
-        "clubx", "result_card", card=card, caption="Great swim!", audit=False
-    )
-    consent_check = next(c for c in verdict.checks if c.name == "consent")
-    assert consent_check.passed is True
-
-
 # ------------------------------------------------------------------- UI
 
 
