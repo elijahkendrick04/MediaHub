@@ -38921,9 +38921,7 @@ voice, and queues them for one-click approval.</p>
                 job["video_urls"] = video_urls
                 # Keep the legacy single field on the story cut (or the first
                 # produced) so a single-format poller still gets a video_url.
-                job["video_url"] = video_urls.get("story") or next(
-                    iter(video_urls.values()), ""
-                )
+                job["video_url"] = video_urls.get("story") or next(iter(video_urls.values()), "")
                 job["formats_failed"] = dict(errors)
                 try:
                     from mediahub.notify import inbox as _inbox
@@ -38957,9 +38955,7 @@ voice, and queues them for one-click approval.</p>
                     pass
             _variant_job_save(job)
 
-        threading.Thread(
-            target=_worker, name=f"reelbatch-{job_id[:8]}", daemon=True
-        ).start()
+        threading.Thread(target=_worker, name=f"reelbatch-{job_id[:8]}", daemon=True).start()
         return (
             jsonify(
                 {

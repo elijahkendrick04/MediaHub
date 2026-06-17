@@ -16,6 +16,7 @@ Two layers, mirroring the rest of the motion suite:
   ``video_urls`` / ``formats_failed`` passthrough, with
   ``render_meet_reel_all_formats`` mocked so no real render runs.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -133,9 +134,7 @@ def test_partial_failure_is_captured_not_fatal(tmp_path, monkeypatch):
     """A genuine render failure on one cut records that cut in ``errors`` and
     still ships the cuts that succeeded — a batch must not be all-or-nothing."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        motion, "_render_reel_one_format", _fake_one_format(fail_for={"square"})
-    )
+    monkeypatch.setattr(motion, "_render_reel_one_format", _fake_one_format(fail_for={"square"}))
 
     result = motion.render_meet_reel_all_formats(
         [_card()], _brand(), tmp_path / "motion", base_name="reel_3"
@@ -276,9 +275,7 @@ def test_story_cut_reuses_single_route_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr(motion, "_run_remotion", _fake_run_remotion)
     # Keep the finishing pass (poster/audio probe) out of the way.
-    monkeypatch.setattr(
-        motion, "_finish_cached_video", lambda *a, **k: {"status": "off"}
-    )
+    monkeypatch.setattr(motion, "_finish_cached_video", lambda *a, **k: {"status": "off"})
 
     card, brand = _card(), _brand()
 
@@ -398,8 +395,18 @@ def _fake_all_formats_writing(rendered_formats, errors=None):
     ``errors`` for the rest."""
     errors = errors or {}
 
-    def _impl(cards, brand_kit, out_dir, *, meet_name="", briefs=None,
-              base_name="reel", duration_sec=None, formats=None, render_slot=None):
+    def _impl(
+        cards,
+        brand_kit,
+        out_dir,
+        *,
+        meet_name="",
+        briefs=None,
+        base_name="reel",
+        duration_sec=None,
+        formats=None,
+        render_slot=None,
+    ):
         rendered: dict[str, Path] = {}
         for fmt in motion.MOTION_FORMATS:
             if fmt in rendered_formats:
@@ -441,8 +448,11 @@ class TestReelBatchRoute:
 
     def test_batch_partial_reports_failed_formats(self, app_env):
         app, wm, _ = app_env
-        errs = {"portrait": "needs Remotion", "square": "needs Remotion",
-                "landscape": "needs Remotion"}
+        errs = {
+            "portrait": "needs Remotion",
+            "square": "needs Remotion",
+            "landscape": "needs Remotion",
+        }
         with app.test_client() as c:
             c.post("/api/organisation/active", data={"profile_id": "alpha"})
             with mock.patch.object(
