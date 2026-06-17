@@ -19,7 +19,16 @@ hand-written prose is never touched:
      lists: ``done`` **moves the item from its to-do list to the Completed
      list** (date-stamped); ``wip``/``blocked``/``todo`` set the badge in
      place, or move the item back out of Completed — ``F.*`` ids return to
-     the founder list, everything else to the main (Fable 5) list.
+     the founder list, everything else to the main (build) list.
+  5. **In-depth phase plan** — the forward roadmap's "plan in depth" carries one
+     section per open phase, each wrapped in ``<!-- ROADMAP:PHASE <key> -->``
+     markers, with a machine-readable ``<!-- ROADMAP:PHASES -->`` registry
+     mapping each phase key to the item ids that compose it. On every push the
+     bot recomputes each phase's status **from the same lists above** (so the
+     phase badge can never drift out of sync with its items) and, when a phase's
+     every item has shipped, **moves the whole phase section into
+     ``ROADMAP_BUILT.md``** (the ``BUILT_PHASES`` block) — so nothing
+     already-built lingers on the forward plan.
 
 Directive convention (put one per line in any commit message)::
 
@@ -37,7 +46,7 @@ The roadmap's list contract (kept by this script):
 
       - **<ID>** · <description> · <emoji> **<LABEL>**
 
-  ``<!-- ROADMAP:TODO -->`` is the main list (things Fable 5 can build);
+  ``<!-- ROADMAP:TODO -->`` is the main list (things a build session can build);
   ``<!-- ROADMAP:TODO_FOUNDER -->`` is the founder list (things only the
   maintainer can do — ``F.*`` ids plus the founder-owned ``PC.*`` items).
   Both are searched for directive ids; an id must be unique across them.
@@ -380,7 +389,7 @@ def sweep_completed(text, *, done_text=None, today=None):
                         new_bodies[target],
                         f"- **{fid}** · {rem_text} — filed by the roadmap sweep as "
                         f"the human half of {ident}; needs its step-by-step guide "
-                        "written (ask in any Fable 5 session) · ❌ **NOT STARTED**",
+                        "written (ask in any build session) · ❌ **NOT STARTED**",
                     )
                     suffix = f" — founder remainder filed as {fid}"
 
@@ -482,6 +491,202 @@ def _fetch_sentinel_issues():
 
 def _md_escape(s: str) -> str:
     return (s or "").replace("|", "\\|").strip()[:100]
+
+
+# ---------------------------------------------------------------------------
+# In-depth phase plan: bot-maintained status badges + auto-move when complete
+# ---------------------------------------------------------------------------
+#
+# The forward roadmap's "plan in depth" used to hand-maintain a status badge per
+# phase, which silently rotted: a phase whose every item had shipped still read
+# "NOT STARTED". These helpers make the bot-maintained to-do / Completed lists
+# the single source of truth for phase status too. Each phase section is wrapped:
+#
+#     <!-- ROADMAP:PHASE 2 -->
+#     ### Phase 2 — Direct publishing · P4 · ❌ **NOT STARTED**
+#     …prose…
+#     <!-- /ROADMAP:PHASE 2 -->
+#
+# and a registry block maps each phase key to the item ids that compose it:
+#
+#     <!-- ROADMAP:PHASES
+#     2 = P4.
+#     5 = F.9, F.10, F.11, PC.15
+#     -->
+#
+# A token ending in "." is a prefix glob (``P4.`` → ``P4.1``/``P4.2``/…);
+# anything else is an exact id (``PC.15``, ``F.9``). On every push each phase's
+# status is recomputed from its items across the two to-do lists + the Completed
+# list: every item done -> **complete** (the whole section is moved to
+# ROADMAP_BUILT.md's ``BUILT_PHASES`` block, date-stamped); some done / some
+# in-progress -> in progress; none -> not started; no items found at all ->
+# left untouched (never guess a status away).
+
+_PHASE_STATUS = {
+    "complete": ("✅", "COMPLETE"),
+    "in_progress": ("\U0001F535", "IN PROGRESS"),
+    "not_started": ("❌", "NOT STARTED"),
+}
+
+# Any "- **id** …" / "- ✅ **id** …" list line, with the remainder captured so a
+# 🔵 in-progress badge can be spotted.
+_LIST_ITEM_RE = re.compile(r"^- (?:✅\s+)?\*\*([^*]+)\*\*(.*)$", re.MULTILINE)
+
+# The phase registry is a single hidden HTML comment (`<!-- ROADMAP:PHASES … -->`)
+# so it never renders; `\b` keeps it from matching the per-phase `ROADMAP:PHASE N`
+# section markers.
+_PHASES_RE = re.compile(r"<!--\s*ROADMAP:PHASES\b(.*?)-->", re.DOTALL)
+
+
+def parse_phase_registry(text):
+    """Parse ``<!-- ROADMAP:PHASES … -->`` into ``{key: [tokens]}`` (or ``{}``).
+
+    Each non-blank ``<key> = <tok>, <tok>, …`` line is one phase. Order is
+    preserved (insertion order) so the forward plan is processed top-to-bottom.
+    """
+    m = _PHASES_RE.search(text)
+    if not m:
+        return {}
+    out = {}
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, rhs = line.split("=", 1)
+        toks = [t.strip() for t in rhs.split(",") if t.strip()]
+        if key.strip() and toks:
+            out[key.strip()] = toks
+    return out
+
+
+def _id_matches(ident: str, token: str) -> bool:
+    """An id matches a token: prefix glob (token ends ``.``) or exact match."""
+    return ident.startswith(token) if token.endswith(".") else ident == token
+
+
+def _ids_in_block(body: str):
+    """``[(id, is_wip)]`` for every list line in a block body."""
+    return [(m.group(1), "\U0001F535" in m.group(2)) for m in _LIST_ITEM_RE.finditer(body)]
+
+
+def compute_phase_status(text, registry, *, done_text=None):
+    """``{key: status}`` for each phase key, read from the live lists.
+
+    To-do items come from the two to-do blocks (in ``text``); done items from
+    the DONE block (in ``done_text`` if given, else ``text``). Status values:
+    ``complete`` · ``in_progress`` · ``not_started`` · ``unknown`` (no items
+    matched — the section is then left untouched).
+    """
+    done_src = text if done_text is None else done_text
+    todo_ids = []
+    for name in _TODO_BLOCKS:
+        m = _block_re(name).search(text)
+        if m:
+            todo_ids += _ids_in_block(m.group(1))
+    m = _block_re("DONE").search(done_src)
+    done_ids = [i for i, _ in _ids_in_block(m.group(1))] if m else []
+
+    out = {}
+    for key, tokens in registry.items():
+        def hit(ident, _tokens=tokens):
+            return any(_id_matches(ident, t) for t in _tokens)
+
+        open_here = [(i, w) for (i, w) in todo_ids if hit(i)]
+        done_here = [i for i in done_ids if hit(i)]
+        if not open_here and not done_here:
+            out[key] = "unknown"
+        elif not open_here:
+            out[key] = "complete"
+        elif done_here or any(w for _, w in open_here):
+            out[key] = "in_progress"
+        else:
+            out[key] = "not_started"
+    return out
+
+
+def _phase_block_re(key: str) -> re.Pattern:
+    return re.compile(
+        re.escape(f"<!-- ROADMAP:PHASE {key} -->")
+        + r"(.*?)"
+        + re.escape(f"<!-- /ROADMAP:PHASE {key} -->"),
+        re.DOTALL,
+    )
+
+
+def _rewrite_phase_header(body: str, badge_md: str) -> str:
+    """Replace the trailing ``· <emoji> **LABEL**`` on the block's first
+    ``### …`` heading line with ``· {badge_md}`` (gating prose before it kept)."""
+    return re.sub(
+        r"^### .*$",
+        lambda m: f"{_BADGE_RE.sub('', m.group(0))} · {badge_md}",
+        body,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+
+def _prepend_built_phase(built_text: str, entry: str):
+    """Prepend a finished-phase ``entry`` inside the ``BUILT_PHASES`` block
+    (newest first). Returns the new text, or ``None`` if the block is absent."""
+    if not _block_re("BUILT_PHASES").search(built_text):
+        return None
+    body = _block_re("BUILT_PHASES").search(built_text).group(1)
+    new_body = "\n" + entry.strip("\n") + "\n" + body.lstrip("\n")
+    return _block_re("BUILT_PHASES").sub(
+        lambda _m: f"<!-- ROADMAP:BUILT_PHASES -->{new_body}<!-- /ROADMAP:BUILT_PHASES -->",
+        built_text,
+        count=1,
+    )
+
+
+def update_phases(text, built_text, registry, *, today=None):
+    """Maintain phase badges and move completed phases to ``built_text``.
+
+    For each phase in ``registry`` that has a ``ROADMAP:PHASE`` block in
+    ``text``: set its header badge to the computed status, and — when complete —
+    cut the whole section out of ``text`` and prepend it to ``built_text``'s
+    ``BUILT_PHASES`` block (badge → ``COMPLETE (auto-moved <date>)``). Idempotent
+    (a moved phase has no block left to act on). Returns
+    ``(new_text, new_built, moved_keys)``.
+    """
+    today = today or date.today().isoformat()
+    status = compute_phase_status(text, registry, done_text=built_text)
+    has_target = _block_re("BUILT_PHASES").search(built_text) is not None
+    out, built, moved = text, built_text, []
+    for key in registry:
+        m = _phase_block_re(key).search(out)
+        if not m:
+            continue
+        body, st = m.group(1), status.get(key, "unknown")
+        if st == "unknown":
+            continue
+        if st == "complete":
+            entry = _rewrite_phase_header(
+                body, f"✅ **COMPLETE (auto-moved {today})**"
+            ).strip("\n")
+            relocated = _prepend_built_phase(built, entry) if has_target else None
+            if relocated is not None:
+                out = _phase_block_re(key).sub("", out, count=1)
+                built = relocated
+                moved.append(key)
+            else:
+                # No relocation target — at least keep the in-place badge honest
+                # rather than dropping a finished section on the floor.
+                out = _replace_phase_body(out, key, _rewrite_phase_header(body, "✅ **COMPLETE**"))
+        else:
+            emoji, label = _PHASE_STATUS[st]
+            new_body = _rewrite_phase_header(body, f"{emoji} **{label}**")
+            if new_body != body:
+                out = _replace_phase_body(out, key, new_body)
+    return out, built, moved
+
+
+def _replace_phase_body(text: str, key: str, new_body: str) -> str:
+    return _phase_block_re(key).sub(
+        lambda _m: f"<!-- ROADMAP:PHASE {key} -->{new_body}<!-- /ROADMAP:PHASE {key} -->",
+        text,
+        count=1,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -596,6 +801,16 @@ def main() -> int:
             applied.append(f"{ident}={status_kw}")
         else:
             print(f"note: no list item matched directive id {ident!r}", file=sys.stderr)
+
+    # 2b. in-depth phase plan: recompute each phase's status badge from the now
+    #     up-to-date lists, and MOVE any fully-complete phase section out of the
+    #     forward roadmap into ROADMAP_BUILT.md — so nothing already-built ever
+    #     lingers on the plan. Runs after the sweep + directives so it sees the
+    #     final list state.
+    registry = parse_phase_registry(text)
+    if registry:
+        text, built, moved_phases = update_phases(text, built, registry)
+        applied += [f"phase {k}=moved" for k in moved_phases]
 
     # 3. last-updated stamp
     tip = _git("show", "-s", "--format=%cs\x1f%H\x1f%s", after).strip().split("\x1f")

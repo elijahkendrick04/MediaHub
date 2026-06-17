@@ -46,7 +46,7 @@ DOC = (
     "- **F.2** · Register with the ICO and fill in the business identity · ❌ **NOT STARTED**\n"
     "- **PC.6** · Phase C 🥇 — Win the first ~10 paying clubs · 🔵 **IN PROGRESS**\n"
     "<!-- /ROADMAP:TODO_FOUNDER -->\n\n"
-    "## To do — Fable 5\n\n"
+    "## To do — build list\n\n"
     "<!-- ROADMAP:TODO -->\n"
     "- **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace · ⚠️ **BLOCKED**\n"
     "- **PC.4** · Phase C 🥇 — Pricing by revealed WTP · ❌ **NOT STARTED**\n"
@@ -615,3 +615,122 @@ def test_directive_messages_lookback_zero_is_push_range_only(tmp_path, monkeypat
     # lookback=0 disables the backstop → behaviour collapses to the explicit range.
     got = dict(ru.parse_directives(ru._directive_messages(base, after, lookback=0)))
     assert got == {"G1.30": "done", "G1.99": "done"}
+
+
+# --- in-depth phase plan (badges + auto-move when complete) ------------------
+# The forward roadmap's per-phase status used to be hand-maintained and rotted
+# (a phase whose every item shipped still read "NOT STARTED"). These cover the
+# bot deriving each phase's badge from the live lists and moving a complete
+# phase off the forward plan into ROADMAP_BUILT.md.
+
+PHASE_FWD = (
+    "# Roadmap\n\n"
+    "<!-- ROADMAP:TODO -->\n"
+    "- **P4.1** · Phase 2 — Bluesky · ❌ **NOT STARTED**\n"
+    "- **P6.1** · Phase 3 — Format catalogue · 🔵 **IN PROGRESS**\n"
+    "<!-- /ROADMAP:TODO -->\n\n"
+    "<!-- ROADMAP:TODO_FOUNDER -->\n"
+    "- **F.9** · Choose the name · ❌ **NOT STARTED**\n"
+    "<!-- /ROADMAP:TODO_FOUNDER -->\n\n"
+    "## The plan in depth\n\n"
+    "<!-- ROADMAP:PHASES\n"
+    "1 = U., G1.\n"
+    "2 = P4.\n"
+    "3 = P6.\n"
+    "9 = ZZ.\n"
+    "-->\n\n"
+    "<!-- ROADMAP:PHASE 1 -->\n"
+    "### Phase 1 — Product polish · U · ❌ **NOT STARTED**\n\n"
+    "Phase one prose.\n"
+    "<!-- /ROADMAP:PHASE 1 -->\n\n"
+    "<!-- ROADMAP:PHASE 2 -->\n"
+    "### Phase 2 — Direct publishing · P4 · ❌ **NOT STARTED**\n\n"
+    "Phase two prose.\n"
+    "<!-- /ROADMAP:PHASE 2 -->\n\n"
+    "<!-- ROADMAP:PHASE 3 -->\n"
+    "### Phase 3 — Creative suite · P6 · 🔒 gated · ❌ **NOT STARTED**\n\n"
+    "Phase three prose.\n"
+    "<!-- /ROADMAP:PHASE 3 -->\n"
+)
+
+PHASE_BUILT = (
+    "# Built\n\n"
+    "## Finished phases (newest first)\n\n"
+    "<!-- ROADMAP:BUILT_PHASES -->\n"
+    "<!-- /ROADMAP:BUILT_PHASES -->\n\n"
+    "<!-- ROADMAP:DONE -->\n"
+    "- ✅ **U.1** · Phase 1 — Core-flow polish *(completed 2026-06-13)*\n"
+    "- ✅ **G1.1** · Sprint — archetypes *(completed 2026-06-16)*\n"
+    "<!-- /ROADMAP:DONE -->\n"
+)
+
+
+def test_parse_phase_registry():
+    reg = ru.parse_phase_registry(PHASE_FWD)
+    assert reg == {
+        "1": ["U.", "G1."],
+        "2": ["P4."],
+        "3": ["P6."],
+        "9": ["ZZ."],
+    }
+    assert ru.parse_phase_registry("no markers here") == {}
+
+
+def test_id_matches_glob_and_exact():
+    assert ru._id_matches("P4.1", "P4.")  # prefix glob
+    assert not ru._id_matches("PC.4", "P4.")  # PC.* must not match P4.
+    assert ru._id_matches("PC.15", "PC.15")  # exact
+    assert not ru._id_matches("PC.150", "PC.15")  # exact is not a prefix
+    assert ru._id_matches("UI 1.3", "UI 1.")
+    assert not ru._id_matches("UI 1.3", "U.")  # "U." must not swallow "UI …"
+
+
+def test_compute_phase_status_all_outcomes():
+    reg = ru.parse_phase_registry(PHASE_FWD)
+    st = ru.compute_phase_status(PHASE_FWD, reg, done_text=PHASE_BUILT)
+    assert st["1"] == "complete"  # U.1 + G1.1 done, none open
+    assert st["2"] == "not_started"  # P4.1 open, nothing done, not wip
+    assert st["3"] == "in_progress"  # P6.1 carries a 🔵 badge
+    assert st["9"] == "unknown"  # ZZ.* matches nothing → never guessed
+
+
+def test_update_phases_relocates_complete_and_sets_badges():
+    new_fwd, new_built, moved = ru.update_phases(
+        PHASE_FWD, PHASE_BUILT, ru.parse_phase_registry(PHASE_FWD), today="2026-06-17"
+    )
+    assert moved == ["1"]
+    # Phase 1 is gone from the forward plan entirely …
+    assert "<!-- ROADMAP:PHASE 1 -->" not in new_fwd
+    assert "Phase 1 — Product polish" not in new_fwd
+    # … and now lives in the BUILT_PHASES block, badge rewritten + dated.
+    assert "Phase 1 — Product polish · U · ✅ **COMPLETE (auto-moved 2026-06-17)**" in new_built
+    assert "Phase one prose." in new_built
+    # Phase 3 flipped to IN PROGRESS in place, gating prose preserved.
+    assert "### Phase 3 — Creative suite · P6 · 🔒 gated · 🔵 **IN PROGRESS**" in new_fwd
+    # Phase 2 unchanged (already NOT STARTED) and still on the forward plan.
+    assert "### Phase 2 — Direct publishing · P4 · ❌ **NOT STARTED**" in new_fwd
+
+
+def test_update_phases_is_idempotent():
+    once = ru.update_phases(
+        PHASE_FWD, PHASE_BUILT, ru.parse_phase_registry(PHASE_FWD), today="2026-06-17"
+    )
+    twice = ru.update_phases(
+        once[0], once[1], ru.parse_phase_registry(once[0]), today="2026-06-18"
+    )
+    assert twice[2] == []  # nothing left to move
+    assert twice[0] == once[0]  # forward plan unchanged on the second pass
+    assert twice[1] == once[1]  # built record unchanged on the second pass
+
+
+def test_update_phases_no_built_target_keeps_section_in_place():
+    # Without a BUILT_PHASES block, a complete phase must NOT be dropped on the
+    # floor — its badge is corrected in place instead.
+    built_no_target = PHASE_BUILT.replace(
+        "<!-- ROADMAP:BUILT_PHASES -->\n<!-- /ROADMAP:BUILT_PHASES -->\n\n", ""
+    )
+    new_fwd, _new_built, moved = ru.update_phases(
+        PHASE_FWD, built_no_target, ru.parse_phase_registry(PHASE_FWD)
+    )
+    assert moved == []
+    assert "### Phase 1 — Product polish · U · ✅ **COMPLETE**" in new_fwd
