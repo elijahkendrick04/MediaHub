@@ -220,13 +220,13 @@ def exposure_report(profile_id: str, month: str, *, workflow_store=None) -> dict
     """Per-sponsor exposure counts for one month (``month`` = ``YYYY-MM``).
 
     Joins the exposure ledger (which cards carried which sponsor) with the
-    workflow sidecar (approved/posted per card) and the posting log
-    (publish attempts). Counts only what the ledger actually recorded.
+    workflow sidecar (approved/posted per card). Counts only what the ledger
+    actually recorded.
     Returns::
 
         {month, profile_id, sponsors: [
             {sponsor_id, sponsor_name, cards: N, approved: N, posted: N,
-             publish_attempts_ok: N, runs: [run_id, ...]},
+             runs: [run_id, ...]},
         ]}
     """
     month = (month or "").strip()[:7]

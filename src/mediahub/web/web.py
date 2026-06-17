@@ -35508,7 +35508,6 @@ where they appeared, ready to forward.</p>
     <div><div style="font-size:26px;font-weight:800">{s["cards"]}</div><div class="dim">cards carried the slot</div></div>
     <div><div style="font-size:26px;font-weight:800">{s["approved"]}</div><div class="dim">approved</div></div>
     <div><div style="font-size:26px;font-weight:800">{s["posted"]}</div><div class="dim">posted</div></div>
-    <div><div style="font-size:26px;font-weight:800">{s["publish_attempts_ok"]}</div><div class="dim">publish attempts OK</div></div>
   </div>
   <p class="dim" style="font-size:12px;margin-bottom:0">Runs: {runs_list}</p>
 </div>"""
