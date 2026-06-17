@@ -265,19 +265,26 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
-def _photo_focus_for_brief(brief: Optional[dict]) -> str:
-    """Saliency ``object-position`` for the brief's photo ("" when no photo).
+def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOTION_FORMAT) -> str:
+    """Saliency ``object-position`` for the brief's photo, steered per cut.
 
-    Reuses the still renderer's deterministic saliency maths so a face that
-    the still keeps in frame stays in frame on the video too.
+    Reuses the still renderer's deterministic saliency maths so a face the
+    still keeps in frame stays in frame on the video too — now resolved for
+    the requested output cut. The 9:16 story, 4:5 portrait, 1:1 square and
+    16:9 landscape crops of the same photo slide along different axes, so a
+    subject framed for the tall story can sit off-centre in the wide
+    landscape; computing the focus per format keeps it centred in each.
+    ``""`` when the brief sourced no photo (the TSX then uses its own
+    neutral default). The ``story`` default resolves to the 9:16 ratio, so a
+    default-cut render is byte-identical to the pre-format behaviour.
     """
     p = _photo_asset_path_for_brief(brief)
     if p is None:
         return ""
     try:
-        from mediahub.graphic_renderer.saliency import focus_position
+        from mediahub.graphic_renderer.saliency import focus_position_for_format
 
-        return focus_position(p, "9:16")
+        return focus_position_for_format(p, format_name)
     except Exception:
         return ""
 
@@ -318,6 +325,7 @@ def _card_to_props(
     variation_seed: int = 0,
     brief: Optional[dict] = None,
     brand_kit: Any = None,
+    format_name: str = DEFAULT_MOTION_FORMAT,
 ) -> dict[str, Any]:
     """Coerce one content-pack card payload into the StoryCard props shape.
 
@@ -339,6 +347,11 @@ def _card_to_props(
     included) ride along as ``roleGround``/``roleSurface``/``roleAccent``/
     ``roleOnGround`` so the motion render and the approved still can never
     disagree on colour. Empty strings keep the seed-permutation fallback.
+
+    ``format_name`` is the output cut (story / portrait / square / landscape);
+    it steers the saliency ``photoPos`` so the photo's focal point is resolved
+    for that frame's aspect ratio. The ``story`` default keeps ``photoPos``
+    byte-identical to the pre-format behaviour.
     """
     ach = card.get("achievement") if isinstance(card, dict) else None
     if not isinstance(ach, dict):
@@ -416,7 +429,7 @@ def _card_to_props(
         "mood": str(b.get("mood") or ""),
         "photoTreatment": str(b.get("photo_treatment") or ""),
         "photoSrc": _photo_data_uri_for_brief(b),
-        "photoPos": _photo_focus_for_brief(b),
+        "photoPos": _photo_focus_for_brief(b, format_name),
         "archetype": str(b.get("layout_template") or ""),
         # The still's style pack id (graphic_renderer.style_packs): the motion
         # render layers the same ground/texture/accent-geometry overlay so a
@@ -761,6 +774,7 @@ def render_story_card(
         variation_seed=variation_seed,
         brief=brief,
         brand_kit=brand_kit,
+        format_name=format_name,
     )
     audio_plan = _story_audio_plan(card_dict, brand_dict)
 
@@ -921,7 +935,9 @@ def render_meet_reel(
                         seed = 1
         brief = briefs_list[idx] if idx < len(briefs_list) else None
         cards_props.append(
-            _card_to_props(c, variation_seed=seed, brief=brief, brand_kit=brand_kit),
+            _card_to_props(
+                c, variation_seed=seed, brief=brief, brand_kit=brand_kit, format_name=format_name
+            ),
         )
 
     if not meet_name:

@@ -103,6 +103,51 @@ def focus_position(image_path: Union[str, Path], ratio: RatioSpec = "4:5") -> st
 
 
 # --------------------------------------------------------------------------- #
+# Format-aware focus (R1.7)
+# --------------------------------------------------------------------------- #
+
+# Canonical social-output cut → its aspect ratio. A caller that knows only the
+# *cut name* (the motion renderer's story / portrait / square / landscape) gets
+# the crop steered for that frame's real shape: a face kept in a 9:16 story can
+# fall out of frame in a 16:9 landscape, because the two crops slide along
+# different axes. Resolving the ratio per format fixes the focus to each cut.
+# Pixel sizes live with the renderer (``visual.motion.MOTION_FORMATS``); this is
+# the ratio-only view, kept in lockstep by ``tests/test_motion_format_focus.py``.
+FORMAT_RATIOS: Dict[str, str] = {
+    "story": "9:16",
+    "portrait": "4:5",
+    "square": "1:1",
+    "landscape": "16:9",
+}
+
+_DEFAULT_FORMAT_RATIO = "9:16"
+
+
+def ratio_for_format(format_name: str) -> str:
+    """Aspect-ratio spec for a named output cut.
+
+    Case-insensitive; unknown or empty names fall back to the 9:16 story
+    ratio (the default cut), so a caller can pass a format straight through
+    without first validating it.
+    """
+    if not format_name:
+        return _DEFAULT_FORMAT_RATIO
+    return FORMAT_RATIOS.get(str(format_name).strip().lower(), _DEFAULT_FORMAT_RATIO)
+
+
+def focus_position_for_format(image_path: Union[str, Path], format_name: str = "story") -> str:
+    """CSS ``object-position`` keeping the saliency focus in frame for a *cut*.
+
+    A per-format wrapper over :func:`focus_position`: the 9:16 story, 4:5
+    portrait, 1:1 square and 16:9 landscape crops of the same photo slide
+    along different axes, so each cut needs its centroid resolved for its own
+    aspect ratio. Unknown format names fall back to the 9:16 story ratio, and
+    the same safe-default-on-failure contract as :func:`focus_position` holds.
+    """
+    return focus_position(image_path, ratio_for_format(format_name))
+
+
+# --------------------------------------------------------------------------- #
 # Ratio parsing
 # --------------------------------------------------------------------------- #
 
@@ -270,4 +315,13 @@ def _slide(value: float, hi: int) -> int:
     return pos
 
 
-__all__ = ["crops_for", "best_crop", "focus_position", "Crop", "RatioSpec"]
+__all__ = [
+    "crops_for",
+    "best_crop",
+    "focus_position",
+    "focus_position_for_format",
+    "ratio_for_format",
+    "FORMAT_RATIOS",
+    "Crop",
+    "RatioSpec",
+]
