@@ -33,6 +33,7 @@ escaping.
 
 Guarded by ``tests/test_engine_showcase.py``.
 """
+
 from __future__ import annotations
 
 # --------------------------------------------------------------------------- #
@@ -128,7 +129,7 @@ def story_card_svg() -> str:
         + '<text x="46" y="57" class="mhg-m mhg-l" font-size="13" '
         'letter-spacing="2">NEW PB &#183; 100M FREESTYLE</text>'
         # athlete name (display, edge-anchored, two lines)
-        + '<text x="26" y="150" class="mhg-d mhg-i" font-size="74" '
+         + '<text x="26" y="150" class="mhg-d mhg-i" font-size="74" '
         'letter-spacing="-2">TOM</text>'
         + '<text x="26" y="222" class="mhg-d mhg-i" font-size="74" '
         'letter-spacing="-2">DAVIES</text>'
@@ -139,7 +140,7 @@ def story_card_svg() -> str:
         + '<text x="30" y="452" class="mhg-m mhg-dim" font-size="15" '
         'letter-spacing="3">FINAL &#183; LONG COURSE</text>'
         # PB delta — the achievement, on the medal chip (only gold on the card)
-        + '<rect x="28" y="486" width="150" height="46" rx="8" '
+         + '<rect x="28" y="486" width="150" height="46" rx="8" '
         'fill="var(--medal,#F4D58D)"/>'
         + '<path d="M44 502 l8 13 8 -13 z" class="mhg-mi" fill="currentColor"/>'
         + '<text x="68" y="516" class="mhg-d mhg-mi" font-size="26">&#8722;0.74s</text>'
@@ -149,20 +150,17 @@ def story_card_svg() -> str:
         + '<text x="192" y="521" class="mhg-m mhg-i" font-size="20" '
         'font-weight="700">53.15</text>'
         # footer lockup — wordmark + lane + grounded confidence
-        + f'<line x1="28" y1="576" x2="{w-28}" y2="576" class="mhg-i" '
+         + f'<line x1="28" y1="576" x2="{w-28}" y2="576" class="mhg-i" '
         'stroke="currentColor" stroke-width="1" style="opacity:0.14"/>'
         + '<rect x="28" y="592" width="26" height="26" rx="5" '
         'fill="var(--lane,#D4FF3A)"/>'
         + '<text x="41" y="610" text-anchor="middle" class="mhg-d mhg-li" '
-        'font-size="14">R</text>'
-        + '<text x="64" y="604" class="mhg-m mhg-i" font-size="13" '
+        'font-size="14">R</text>' + '<text x="64" y="604" class="mhg-m mhg-i" font-size="13" '
         'letter-spacing="1">RIVERSIDE SC</text>'
         + '<text x="64" y="617" class="mhg-m mhg-ft" font-size="10" '
         'letter-spacing="1.5">SOURCE-GROUNDED &#183; 0.96</text>'
         + f'<text x="{w-26}" y="614" text-anchor="end" class="mhg-d mhg-l" '
-        'font-size="40" style="opacity:0.9">04</text>'
-        + _corner_marks(w, h)
-        + "</svg>"
+        'font-size="40" style="opacity:0.9">04</text>' + _corner_marks(w, h) + "</svg>"
     )
 
 
@@ -206,7 +204,7 @@ def reel_poster_svg() -> str:
         + f'<text x="{w-28}" y="58" text-anchor="end" class="mhg-m mhg-i" '
         'font-size="15" style="font-variant-numeric:tabular-nums">0:15</text>'
         # play affordance — the video signifier
-        + '<circle cx="180" cy="262" r="62" class="mhg-l" fill="currentColor" '
+         + '<circle cx="180" cy="262" r="62" class="mhg-l" fill="currentColor" '
         'style="opacity:0.12"/>'
         + '<circle class="mhg-reel-pulse" cx="180" cy="262" r="48" fill="none" '
         'stroke="var(--lane,#D4FF3A)" stroke-width="2" style="opacity:0.45"/>'
@@ -220,17 +218,14 @@ def reel_poster_svg() -> str:
         + '<text x="30" y="524" class="mhg-m mhg-dim" font-size="14" '
         'letter-spacing="2">5 SWIMMERS &#183; 3 PBS &#183; 1 RELAY</text>'
         # timeline (cover / beats / outro)
-        + beats
-        + '<text x="28" y="600" class="mhg-m mhg-ft" font-size="10" '
+         + beats + '<text x="28" y="600" class="mhg-m mhg-ft" font-size="10" '
         'letter-spacing="2">COVER &#183; RANKED BEATS &#183; CLUB OUTRO</text>'
         # outro wordmark
-        + '<rect x="28" y="610" width="22" height="22" rx="5" '
+         + '<rect x="28" y="610" width="22" height="22" rx="5" '
         'fill="var(--lane,#D4FF3A)"/>'
         + '<text x="39" y="626" text-anchor="middle" class="mhg-d mhg-li" '
-        'font-size="12">R</text>'
-        + '<text x="58" y="626" class="mhg-m mhg-i" font-size="12" '
-        'letter-spacing="1">RIVERSIDE SC</text>'
-        + "</svg>"
+        'font-size="12">R</text>' + '<text x="58" y="626" class="mhg-m mhg-i" font-size="12" '
+        'letter-spacing="1">RIVERSIDE SC</text>' + "</svg>"
     )
 
 
@@ -244,13 +239,13 @@ def feed_graphic_svg() -> str:
     base = 350  # podium baseline y
     # (x, bar-height, rank, fill, name, time)
     steps = [
-        (40, 96, "2", "#E6E8ED", "A. NOLAN", "53.18"),    # silver
+        (40, 96, "2", "#E6E8ED", "A. NOLAN", "53.18"),  # silver
         (140, 150, "1", "var(--medal,#F4D58D)", "T. DAVIES", "52.41"),  # gold
         (240, 64, "3", "var(--medal-deep,#C9A04B)", "R. KHAN", "54.02"),  # bronze
     ]
     bars = ""
     bw = 80
-    for (x, bh, rank, fill, name, t) in steps:
+    for x, bh, rank, fill, name, t in steps:
         top = base - bh
         rank_ink = "mhg-li" if rank == "1" else "mhg-mi"
         bars += (
@@ -282,12 +277,10 @@ def feed_graphic_svg() -> str:
         + '<rect x="28" y="416" width="22" height="22" rx="5" '
         'fill="var(--lane,#D4FF3A)"/>'
         + '<text x="39" y="432" text-anchor="middle" class="mhg-d mhg-li" '
-        'font-size="12">R</text>'
-        + '<text x="58" y="432" class="mhg-m mhg-i" font-size="12" '
+        'font-size="12">R</text>' + '<text x="58" y="432" class="mhg-m mhg-i" font-size="12" '
         'letter-spacing="1">RIVERSIDE SC</text>'
         + f'<text x="{w-28}" y="432" text-anchor="end" class="mhg-m mhg-ft" '
-        'font-size="11" letter-spacing="1.5">FEED &#183; 1080&#215;1350</text>'
-        + "</svg>"
+        'font-size="11" letter-spacing="1.5">FEED &#183; 1080&#215;1350</text>' + "</svg>"
     )
 
 
@@ -337,13 +330,13 @@ def detected_ranked_svg() -> str:
         + f'<text x="{w-28}" y="35" text-anchor="end" class="mhg-m mhg-ft" '
         'font-size="10" letter-spacing="1.5">CONTENT-WORTHINESS</text>'
         # big stat
-        + '<text x="26" y="86" class="mhg-d mhg-i" font-size="68" '
+         + '<text x="26" y="86" class="mhg-d mhg-i" font-size="68" '
         'letter-spacing="-3">12</text>'
         + '<text x="120" y="66" class="mhg-d mhg-i" font-size="20">MOMENTS</text>'
         + '<text x="120" y="84" class="mhg-m mhg-dim" font-size="10" '
         'letter-spacing="1">FROM 42 SWIMS READ</text>'
         # divider above rows
-        + f'<line x1="28" y1="84" x2="{w-28}" y2="84" class="mhg-i" '
+         + f'<line x1="28" y1="84" x2="{w-28}" y2="84" class="mhg-i" '
         'stroke="currentColor" stroke-width="1" style="opacity:0.12"/>'
         + body
         + '<text x="28" y="218" class="mhg-m mhg-ft" font-size="9" '
@@ -380,7 +373,7 @@ def brand_kit_svg() -> str:
         + '<text x="28" y="38" class="mhg-m mhg-l" font-size="11" '
         'letter-spacing="2">YOUR BRAND</text>'
         # monogram chip
-        + '<rect x="28" y="52" width="52" height="52" rx="11" '
+         + '<rect x="28" y="52" width="52" height="52" rx="11" '
         'fill="var(--lane,#D4FF3A)"/>'
         + '<text x="54" y="92" text-anchor="middle" class="mhg-d mhg-li" '
         'font-size="34">RSC</text>'
@@ -391,11 +384,10 @@ def brand_kit_svg() -> str:
         # type specimen
         + '<text x="28" y="210" class="mhg-d mhg-i" font-size="46">Aa</text>'
         + '<text x="92" y="196" class="mhg-m mhg-dim" font-size="11">'
-        'Display &#183; Mono</text>'
-        + '<text x="92" y="212" class="mhg-m mhg-i" font-size="16" '
+        "Display &#183; Mono</text>" + '<text x="92" y="212" class="mhg-m mhg-i" font-size="16" '
         'style="font-variant-numeric:tabular-nums">00:52.41</text>'
         # lock state
-        + '<rect x="148" y="50" width="64" height="22" rx="11" fill="none" '
+         + '<rect x="148" y="50" width="64" height="22" rx="11" fill="none" '
         'stroke="var(--lane,#D4FF3A)" stroke-width="1.3" style="opacity:0.7"/>'
         + '<text x="180" y="65" text-anchor="middle" class="mhg-m mhg-l" '
         'font-size="9" letter-spacing="1.5">LOCKED</text>'
@@ -441,8 +433,7 @@ def moments_svg() -> str:
         'stroke="currentColor" stroke-width="1" style="opacity:0.12"/>'
         + rows
         + '<text x="28" y="224" class="mhg-m mhg-ft" font-size="9" '
-        'letter-spacing="1">RANKED BY CONTENT-WORTHINESS</text>'
-        + "</svg>"
+        'letter-spacing="1">RANKED BY CONTENT-WORTHINESS</text>' + "</svg>"
     )
 
 
