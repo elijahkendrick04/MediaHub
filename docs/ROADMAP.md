@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `3100b9c7d` · Merge pull request #639 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-17 · `ed7686408` · Merge pull request #768 from elijahkendrick04/claude/dazzling-clarke-1lo7to
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1521,6 +1521,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `27968b58d` | autotest: stop the fixer rewriting the golden oracle and opening no-op PRs |
 | 2026-06-17 | `f94af4d62` | Parallelise the free FFmpeg reel engine's beat rendering |
 | 2026-06-17 | `a71353d0d` | Re-trigger CI |
 | 2026-06-17 | `7b2017c69` | Wire G1.1 result slots to the G1.9 variable-font axis var |
@@ -1528,6 +1529,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `96d200249` | fix: make font_intake.subset_to_woff2 truly deterministic (pin head.modified) |
 | 2026-06-17 | `880493a59` | Add R1.22 colour-role transition motion overlay (fade/gradient/pulse) |
 | 2026-06-17 | `6489b74df` | Fix non-deterministic font intake (head timestamp flake) |
-| 2026-06-17 | `88c6088ce` | Fix stale ffmpeg-engine batch test after R1.16 multi-format support |
-| 2026-06-17 | `e8792b384` | test: update stale ffmpeg-engine reel test for R1.16 multi-format |
 <!-- /ROADMAP:ACTIVITY -->
