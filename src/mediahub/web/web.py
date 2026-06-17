@@ -8752,6 +8752,11 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web.content_intro import (  # noqa: E402
+    CONTENT_INTRO_CSS as _MH_CI_CSS,
+    presentation_for as _ct_presentation_for,
+    render_content_intro as _render_content_intro,
+)
 from mediahub.web.cadence_heatmap import (  # noqa: E402
     CADENCE_HEATMAP_CSS as _MH_CAD_CSS,
     cadence_panel_html as _cadence_panel_html,
@@ -8781,6 +8786,7 @@ BASE_CSS = (
     + _MH_AUDIENCE_ICON_CSS
     + _MH_MOTION_CSS
     + _MH_PL_CSS
+    + _MH_CI_CSS
     + _MH_CAD_CSS
     + _MH_RG_CSS
 )
@@ -24876,18 +24882,11 @@ function mhPlanGenerate(btn) {{
         except ImportError:
             REGISTRY = {}
 
-        # Presentation-only metadata (output formats + rough effort) keyed
-        # by ContentType value. This is UI sugar — it does NOT live on the
-        # registry dataclass, so adding/removing keys here can never affect
-        # the engine. Unknown types fall back to a generic format chip.
-        _ct_presentation = {
-            "meet_recap": (["Caption", "Graphic", "Reel"], "~ 60s"),
-            "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
-            "event_preview": (["Caption", "Graphic"], "~ 40s"),
-            "sponsor_activation": (["Caption", "Graphic"], "~ 30s"),
-            "session_update": (["Caption", "Graphic"], "~ 20s"),
-            "free_text": (["Caption", "Graphic"], "~ 15s"),
-        }
+        # Presentation-only metadata (output formats + rough effort) lives in
+        # mediahub.web.content_intro.PRESENTATION_FORMATS so the Create tiles and
+        # each heading's "how it works" first slide read from one source. UI
+        # sugar only — it does NOT live on the registry dataclass, so it can
+        # never affect the engine. Unknown types fall back to a generic chip.
 
         # Session Update and Sponsor Post are no longer their own tiles —
         # Free Text now interprets any such prompt (and adds photos) into a
@@ -24903,10 +24902,14 @@ function mhPlanGenerate(btn) {{
         for ct, meta in REGISTRY.items():
             if getattr(meta.type, "value", str(ct)) in _hidden_cts:
                 continue
-            # Defensive: a stale endpoint name in the content-type
-            # registry must NEVER 500 the whole /make page.
+            ct_val = getattr(meta.type, "value", str(ct))
+            # Defensive: a stale endpoint name in the content-type registry must
+            # NEVER 500 the whole /make page. We resolve the primary route only
+            # to decide Ready-vs-disabled; the tile itself links to the per-type
+            # "how it works" first slide (content_type_intro), whose Start button
+            # carries on to the real route.
             try:
-                route_url = url_for(meta.primary_route_endpoint)
+                url_for(meta.primary_route_endpoint)
                 href_ok = True
             except Exception:
                 log.warning(
@@ -24915,23 +24918,21 @@ function mhPlanGenerate(btn) {{
                     ct,
                     meta.primary_route_endpoint,
                 )
-                route_url = "#"
                 href_ok = False
             if meta.is_implemented and href_ok:
                 badge = '<span class="tag live">Ready</span>'
-                action = f'href="{route_url}"'
+                action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
                 disabled_cls = ""
                 if not primary_marked:
                     disabled_cls = " mh-template-primary"
                     primary_marked = True
             else:
                 badge = '<span class="tag">Coming soon</span>'
-                action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'
+                action = 'href="#" onclick="return false"'
                 disabled_cls = " is-disabled"
 
             # Build the output-format chip row + effort estimate.
-            ct_val = getattr(meta.type, "value", str(ct))
-            formats, effort = _ct_presentation.get(ct_val, (["Caption"], ""))
+            formats, effort = _ct_presentation_for(ct_val)
             fmt_chips = "".join(
                 f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
             )
@@ -25154,6 +25155,48 @@ function mhPlanGenerate(btn) {{
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
+
+    # ---- /make/<ct> — the per-heading "how it works" first slide ------------
+    @app.route("/make/<ct>")
+    def content_type_intro(ct):
+        # Every implemented Create tile links here first. The slide explains, in
+        # the landing page's visual language, what this heading takes in and
+        # produces; its "Start" CTA carries on to the real route. Registry-driven
+        # (mediahub.web.content_intro), so a heading added to the REGISTRY gets a
+        # first slide automatically — no per-heading wiring here.
+        try:
+            from mediahub.club_platform.content_types import REGISTRY
+            from mediahub.club_platform.post_types import implemented_content_type
+        except ImportError:
+            return redirect(url_for("make_page"))
+
+        ctype = implemented_content_type(ct)
+        if ctype is None or ctype not in REGISTRY:
+            # Unknown / planning-only slug — send them back to the chooser.
+            return redirect(url_for("make_page"))
+        meta = REGISTRY[ctype]
+
+        formats, effort = _ct_presentation_for(ctype.value)
+        # Start → the real flow. Degrade gracefully (a missing endpoint sends the
+        # user back to Create rather than 500ing the intro).
+        try:
+            start_url = url_for(meta.primary_route_endpoint)
+        except Exception:
+            log.warning(
+                "content_type_intro: %r references unknown endpoint %r",
+                ctype.value,
+                meta.primary_route_endpoint,
+            )
+            start_url = url_for("make_page")
+
+        body = _render_content_intro(
+            meta,
+            formats=formats,
+            effort=effort,
+            start_url=start_url,
+            back_url=url_for("make_page"),
+        )
+        return _layout(meta.title, body, active="create")
 
     def _compose_spotlight_caption(run_id: str, swimmer_key: str, tone: str = ""):
         """Compose the single spotlight caption from APPROVED achievements.
