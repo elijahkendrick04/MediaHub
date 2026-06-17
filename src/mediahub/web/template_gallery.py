@@ -788,12 +788,16 @@ def _card(entry: dict, *, active: str) -> str:
     )
 
 
-def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str = "all") -> str:
+def render_gallery_body(
+    *, gallery_url: str, make_url: str, active_category: str = "all", studio_url: str = ""
+) -> str:
     """Render the full gallery page body (hero + filters + grid + CTA + JS).
 
     Pure string builder: ``gallery_url`` and ``make_url`` are pre-resolved
-    ``url_for`` strings, ``active_category`` is already validated. The returned
-    string is handed to ``_layout`` by the route.
+    ``url_for`` strings, ``active_category`` is already validated. When
+    ``studio_url`` is given (the G1.26 live preview gallery), a prominent link to
+    it is rendered after the intro. The returned string is handed to ``_layout``
+    by the route.
     """
     active = active_category if active_category in _CATEGORY_LABELS else "all"
     entries = gallery_entries()
@@ -825,6 +829,21 @@ def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str
         "colours, type and logo, with your athletes&rsquo; photos.</p>"
     )
 
+    # G1.26 cross-link: from the schematic wireframes to the live, rendered
+    # preview studio (every archetype × pack as a real card, with filters).
+    studio_cta = ""
+    if studio_url:
+        studio_cta = (
+            f'<a class="mh-arch-gallery-link" href="{_e(studio_url)}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">See live preview thumbnails &rarr;</span>'
+            '<span class="mh-agl-sub">Browse every archetype &times; style pack as a '
+            "real rendered card — filter by ground, texture, accent and density.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">Open the studio</span>'
+            "</a>"
+        )
+
     # Section heading keeps the heading order valid (hero h1 → h2 → card h3);
     # visually hidden because the hero already titles the page.
     section_h2 = '<h2 class="mh-arch-sr">Template library</h2>'
@@ -852,7 +871,7 @@ def render_gallery_body(*, gallery_url: str, make_url: str, active_category: str
 
     return (
         f'<section id="mh-arch-gallery" class="mh-arch-gallery" data-active="{active}">'
-        f"{hero}{intro}{section_h2}{chips}{grid}{empty}{cta}"
+        f"{hero}{intro}{studio_cta}{section_h2}{chips}{grid}{empty}{cta}"
         "</section>"
         f"{script}"
     )
