@@ -299,8 +299,8 @@ def test_story_cut_reuses_single_route_cache(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# ffmpeg fallback engine — renders every cut (R1.16 made the free engine
-# multi-format; the batch dispatches all four cuts to it, not story only).
+# ffmpeg fallback engine — every cut (R1.16 made the free fallback multi-format,
+# so the batch produces story + portrait + square + landscape, not story only).
 # ---------------------------------------------------------------------------
 
 
@@ -330,6 +330,7 @@ def test_ffmpeg_engine_renders_every_cut(tmp_path, monkeypatch):
     assert result["engine"] == "ffmpeg"
     assert set(result["rendered"]) == set(motion.MOTION_FORMATS)
     assert result["errors"] == {}
+    # …and each cut was dispatched to the ffmpeg engine at its own geometry.
     assert set(dispatched) == set(motion.MOTION_FORMATS)
 
 

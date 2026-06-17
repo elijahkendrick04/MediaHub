@@ -45,6 +45,7 @@ smaller, safe size over an overflowing one.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 
 __all__ = [
@@ -57,6 +58,12 @@ __all__ = [
     "balance_lines",
     "fit_balanced",
     "fit_balanced_px",
+    # Variable-font axis optimisation (G1.9)
+    "FontAxes",
+    "AxisPlan",
+    "font_axes_for",
+    "optimise_axes",
+    "axis_css",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -722,6 +729,219 @@ def fit_text(
     )
     lines = wrap_text(text, box_w, size, font_family=font_family, weight=weight)
     return size, lines
+
+
+# --------------------------------------------------------------------------- #
+# Variable-font axis optimisation (G1.9)
+# --------------------------------------------------------------------------- #
+# The self-hosted renderer fonts that ship a genuine variable woff2 expose
+# continuous axes (each file's ``fvar`` table is verified by
+# tests/test_variable_font_axes.py). This region turns an already-fitted text
+# slot into the best axis *instance* for that slot — deterministically and
+# font-file-free, the same Tier-A layout-maths contract as :func:`fit_font_px`
+# above (no network, no LLM, identical output on every machine).
+#
+# Three axis TYPES are modelled, each applied ONLY where the active face truly
+# carries the axis. A static face (or an unknown family) yields an empty plan —
+# never a synthesised/faked axis, which the graphic-craft rules forbid:
+#   * opsz (optical size) — reported per slot so a caller can pin the optical
+#     master to the rendered size (large hero text → display master, small
+#     labels → text master). The stylesheet sets ``font-optical-sizing: auto``
+#     so the browser applies opsz automatically; the value is surfaced here for
+#     explainability and tests.
+#   * wght (weight) — the requested weight clamped to the face's range, then
+#     traded DOWN toward a legibility floor to recover horizontal width before
+#     the caller has to shrink ``px`` — so a long line can stay larger by going
+#     a touch lighter.
+#   * wdth (width) — condensed toward the face's minimum to recover any width
+#     the weight trade could not. No self-hosted face exposes ``wdth`` today, so
+#     this is a tested, ready capability that activates automatically for any
+#     width-axis variable face added through the fonts workflow — it is never
+#     faux-condensation via ``transform: scaleX`` (a visible-stroke defect).
+
+
+@dataclass(frozen=True)
+class FontAxes:
+    """The genuine variable axes a face exposes, as inclusive ``(min, max)`` ranges.
+
+    Mirrors the shipped ``layouts/fonts/*.woff2`` ``fvar`` tables (and the
+    ``@font-face`` ranges in ``_shared.css``). ``None`` means the face does not
+    carry that axis, so :func:`optimise_axes` never emits a setting for it.
+    """
+
+    wght: tuple[int, int] | None = None  # CSS weight, 100..900 scale
+    opsz: tuple[float, float] | None = None  # optical size, in points
+    wdth: tuple[float, float] | None = None  # width, in percent (100 = normal)
+
+
+# Registry keyed by normalised first-family name. MUST stay in lock-step with
+# the ``@font-face`` axis ranges in ``layouts/_shared.css`` and the shipped
+# ``layouts/fonts/*.woff2`` fvar tables (tests/test_variable_font_axes.py pins
+# both directions). Bebas Neue / Anton / Bowlby One have no variable cut on
+# Google Fonts, so they are intentionally absent → an empty (no-op) plan.
+_FONT_AXES: dict[str, FontAxes] = {
+    "inter": FontAxes(wght=(100, 900), opsz=(14.0, 32.0)),
+    "space grotesk": FontAxes(wght=(300, 700)),
+    "jetbrains mono": FontAxes(wght=(100, 800)),
+}
+
+# How light the weight axis may be traded for fit. Lighter advances narrower,
+# but a display/data line must not turn spindly, so the trade stops at this
+# floor (or the face's own minimum, whichever is heavier).
+_WEIGHT_FIT_FLOOR = 300
+
+
+@dataclass(frozen=True)
+class AxisPlan:
+    """The optimised variable-axis instance for one single-line slot.
+
+    The numeric fields are the resolved axis values (``None`` where the face
+    lacks the axis). ``css`` is a ready ``font-variation-settings`` value for the
+    axes deliberately controlled to make the line fit — the weight trade and any
+    width condensation — e.g. ``"'wght' 612"``. It is ``""`` when the slot
+    already fits at its requested weight, so a caller can emit
+    ``font-variation-settings: <css or 'normal'>`` and a non-tight slot renders
+    byte-identically to before. (``opsz`` is delegated to
+    ``font-optical-sizing: auto`` and so is *not* folded into ``css``; build a
+    full instance string with :func:`axis_css` when you need one.)
+    """
+
+    wght: float | None = None
+    opsz: float | None = None
+    wdth: float | None = None
+    css: str = ""
+
+
+def font_axes_for(font_family: str) -> FontAxes | None:
+    """The variable axes the first family of a CSS stack exposes, or ``None``."""
+    return _FONT_AXES.get(_first_family(font_family))
+
+
+def _normalise_weight(weight: int | str) -> int:
+    """A weight name or number → an int clamped to the CSS 100..900 scale."""
+    if isinstance(weight, str):
+        numeric = _WEIGHT_NAMES.get(weight.strip().lower(), 400)
+    else:
+        numeric = int(weight)
+    return max(100, min(900, numeric))
+
+
+def _fmt_axis(value: float) -> str:
+    """Axis value as a CSS number: integral values drop the ``.0``, else 1 dp."""
+    rounded = round(value)
+    if abs(value - rounded) < 1e-9:
+        return str(int(rounded))
+    return f"{value:.1f}"
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    """Clamp ``value`` into ``[lo, hi]`` (lo wins if the range is inverted)."""
+    return max(lo, min(hi, value))
+
+
+def axis_css(
+    *, wght: float | None = None, wdth: float | None = None, opsz: float | None = None
+) -> str:
+    """Format a CSS ``font-variation-settings`` value from axis values.
+
+    Tags are emitted in the canonical ``wght, wdth, opsz`` order; ``None`` axes
+    are skipped. Returns ``""`` when nothing is set, so a caller can fall back to
+    ``normal``.
+    """
+    parts: list[str] = []
+    if wght is not None:
+        parts.append(f"'wght' {_fmt_axis(wght)}")
+    if wdth is not None:
+        parts.append(f"'wdth' {_fmt_axis(wdth)}")
+    if opsz is not None:
+        parts.append(f"'opsz' {_fmt_axis(opsz)}")
+    return ", ".join(parts)
+
+
+def _heaviest_weight_within(base: float, floor: float, target_factor: float) -> float:
+    """Heaviest weight in ``[floor, base]`` whose width factor ≤ ``target_factor``.
+
+    Width scales with :func:`_weight_factor` (``1 + (w-400)/100 * 0.012``), which
+    is monotonic in ``w``. We want the *boldest* weight that still fits, so the
+    line stays as heavy as possible while not overflowing. Returns ``floor`` when
+    even the floor is too heavy.
+    """
+    # Solve _weight_factor(w) <= target_factor for w:
+    #   1 + (w - 400) * 0.00012 <= target_factor
+    bound = 400.0 + (target_factor - 1.0) / 0.00012
+    w = min(base, bound)
+    return float(max(floor, min(base, w)))
+
+
+def optimise_axes(
+    text: str,
+    box_w: float,
+    *,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    fitted_px: float,
+) -> AxisPlan:
+    """Best variable-axis instance for a single-line slot — deterministic.
+
+    Given the already-:func:`fit_font_px`-chosen ``fitted_px`` and the slot width
+    ``box_w``, return the axis tuple to set on the slot:
+
+    * ``opsz`` is matched to ``fitted_px`` (clamped to the face's optical range);
+    * ``wght`` starts at the requested ``weight`` clamped to the face's range and
+      — only if the line would overflow ``box_w`` — is traded down toward
+      ``_WEIGHT_FIT_FLOOR`` to recover width;
+    * ``wdth`` (where the face has it) is then condensed toward its minimum to
+      recover any residual overflow.
+
+    ``css`` deviates from ``""`` only when a fit-recovering move was made, so a
+    slot that already fits renders unchanged. Faces with no variable axes (the
+    static display faces, unknown families) return an empty plan.
+    """
+    axes = font_axes_for(font_family)
+    if axes is None:
+        return AxisPlan()
+
+    numeric_weight = _normalise_weight(weight)
+
+    # opsz — match the optical master to the rendered size (reported; applied by
+    # font-optical-sizing: auto in the stylesheet).
+    opsz: float | None = None
+    if axes.opsz is not None and fitted_px > 0:
+        opsz = round(_clamp(float(fitted_px), axes.opsz[0], axes.opsz[1]), 1)
+
+    # wght — requested weight, clamped to the axis.
+    wght: float | None = None
+    if axes.wght is not None:
+        wght = float(_clamp(float(numeric_weight), axes.wght[0], axes.wght[1]))
+
+    wdth: float | None = None
+    deviated = False
+    if text and text.strip() and fitted_px > 0 and box_w > 0:
+        eff_weight = int(wght) if wght is not None else numeric_weight
+        measured = em_width(text, font_family=font_family, weight=eff_weight) * fitted_px
+        if measured > box_w + 1e-6:
+            ratio = box_w / measured  # < 1: the width factor we must reach
+            # 1) trade weight down toward the floor (lighter advances narrower).
+            if axes.wght is not None and wght is not None:
+                floor = max(float(axes.wght[0]), float(_WEIGHT_FIT_FLOOR))
+                if wght > floor:
+                    target_factor = _weight_factor(eff_weight) * ratio
+                    lighter = _heaviest_weight_within(wght, floor, target_factor)
+                    lighter = round(lighter)
+                    if lighter < wght:
+                        wght = float(lighter)
+                        deviated = True
+                        measured = (
+                            em_width(text, font_family=font_family, weight=int(wght)) * fitted_px
+                        )
+                        ratio = box_w / measured if measured > 0 else 1.0
+            # 2) condense width toward the face minimum for any residual overflow.
+            if axes.wdth is not None and ratio < 1.0 - 1e-6:
+                wdth = round(_clamp(100.0 * ratio, axes.wdth[0], min(100.0, axes.wdth[1])), 1)
+                deviated = True
+
+    css = axis_css(wght=wght, wdth=wdth) if deviated else ""
+    return AxisPlan(wght=wght, opsz=opsz, wdth=wdth, css=css)
 
 
 # --------------------------------------------------------------------------- #
