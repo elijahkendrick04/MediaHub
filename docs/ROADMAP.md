@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `91ccbe3fe` · Merge pull request #710 from elijahkendrick04/claude/serene-gauss-bjvurq
+**Last updated:** 2026-06-17 · `8b7615078` · Merge pull request #723 from elijahkendrick04/claude/busy-shannon-ukifaz
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -180,7 +180,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.7** · Reel generator sprint — Format-aware photo focal points — per-format (story/portrait/square/landscape) saliency crops fed into motion props. *Build: `visual/motion.py` `_photo_focus_for_brief` + `saliency.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.12** · Reel generator sprint — Reel beat-rhythm & duration customisation — per-card beat weights + custom cover/outro durations. *Build: `MeetReel.tsx` beat-carving region (sole owner) + `reel_duration_for` in `visual/motion.py` (distinct fn).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **R1.16** · Reel generator sprint — ffmpeg fallback engine multi-format support — render portrait/square/landscape (today only story). *Build: `visual/reel_ffmpeg.py` (file-sibling R1.17 edits a different function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **R1.22** · Reel generator sprint — Colour-role transition animation across the clip (fade / gradient / pulse), APCA-safe every frame. *Build: `sprint/layers/role_transition.tsx` additive overlay.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
