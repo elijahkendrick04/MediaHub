@@ -18,8 +18,10 @@ approves everything before it goes anywhere.
 
 **Where we are right now (June 2026):** the product is built and live — signup,
 billing code, multi-tenancy, the generative design engine, fourteen
-swimming-depth features and a UK legal-compliance baseline have all shipped
-(the full record is in [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)). The decision now
+swimming-depth features, the full **Phase 1 product-polish pass**, a **60-item
+generator-engine upgrade sprint** (30 graphic + 30 reel builds) and a UK
+legal-compliance baseline have all shipped (the full record is in
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)). The decision now
 (founder directive, **2026-06-13**) is to **make the product as good as it can
 possibly be — genuinely something clubs *want* to use — before we
 commercialise.** So the plan is reordered: every piece of work that improves the
@@ -81,12 +83,17 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
-list, and the items inside the two to-do lists refresh on every push to `main`
-via [`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml).
+list, the items inside the two to-do lists, **and the in-depth phase plan's
+status badges** all refresh on every push to `main` via
+[`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml).
 **Completed work is not kept on this page** — when an item is marked done it is
 moved out of its to-do list into the Completed list in
-[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md) (the bot maintains that file too). To move
-an item, put a directive line in any commit message:
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md), and when *every* item in a phase has
+shipped the bot moves that whole phase section off this plan into
+`ROADMAP_BUILT.md` too (so nothing already-built ever lingers here). Each phase's
+badge in "The plan in depth" is derived from its items in the lists below, so it
+can never drift out of sync with them. To move an item, put a directive line in
+any commit message:
 
 > `roadmap: <ID> <status>` — `<ID>` is an item ID from the lists below (`U.2`,
 > `P4.1`, `P6.3` …); `<status>` is `done` · `wip` · `blocked` · `todo`. `done`
@@ -114,63 +121,24 @@ _No open production findings — the log sentinel has nothing filed._
 
 ## To do — things to build (priority order)
 
-Ask in any session ("build P4.1"). In priority order: **Phase 1** product polish
-(U.*) makes what exists feel finished; **Phase 2** publishing (P4.*) lets clubs
-actually post; **Phase 3** creative-suite breadth (P6.*) makes MediaHub do far
-more; **Phase 4** local-AI (P5.*) is operator-margin work. Then the
-deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
-(P3.*), **Phase 7** go-to-market ops (PC.16). Every item is first-party/in-house
-— an external service only ever sits behind a swappable seam for the unavoidable
-final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
-begin until Phases 1–5 are complete (rule 12).
+Ask in any build session ("build P4.1"). In priority order: **Phase 2**
+publishing (P4.*) lets clubs actually post; **Phase 3** creative-suite breadth
+(P6.*) makes MediaHub do far more; **Phase 4** local-AI (P5.*) is operator-margin
+work. Then the deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6**
+second sport (P3.*), **Phase 7** go-to-market ops (PC.16). Every item is
+first-party/in-house — an external service only ever sits behind a swappable seam
+for the unavoidable final hop (rule 11). **Phase 6 and Phase 7 are hard-gated**
+(🔒): they don't begin until Phases 1–5 are complete (rule 12). (**Phase 1**
+product polish is complete — shipped and moved to
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md).)
 
-**Generator Upgrade Sprint — 60 parallel builds (CURRENT TOP PRIORITY, added 2026-06-16).**
-The graphic still-renderer and the Remotion/ffmpeg reel engine each get a 30-item
-deep-upgrade sprint — **30 graphic builds (`G1.*`)** and **30 reel builds (`R1.*`)**,
-listed *first* in the build queue below. Every item is deliberately sized to be a
-**whole session's work on its own** (too large to safely co-build with another — it
-would time out or each half would land weaker) and no two items build the same
-feature. They are engineered to be dispatched as **simultaneous parallel sessions on
-their own branches with no merge conflicts to worry about** — see the protocol below.
-The **deterministic-engine boundary stays untouched** (parsers, detectors, ranker,
-colour-science); these are renderer / compositor / audio builds only.
-
-### Generator sprint — parallel-dispatch merge protocol (read before dispatching)
-
-The merge-safety is built into the code, not left to session discipline. Two
-auto-discovery seams shipped with this list so a new capability is added as its **own
-new file** and wired automatically — **zero edits to the big shared composition files**:
-
-- **Motion (reels):** `src/mediahub/remotion/src/compositions/sprint/` — drop a file in
-  `intents/`, `scenes/`, `patterns/`, `accents/`, `springs/`, `layers/` (additive
-  overlays) or `reel/`, and webpack's build-time `require.context` registers it. The old
-  14-items-on-one-`switch` hot spot in `StoryCard.tsx` is **gone** — those are now
-  independent file drops. (Each folder's `README.md` states the drop-in contract; the
-  motion-parity test scans these folders, so a registered intent/scene counts as covered.)
-- **Graphics (stills):** `src/mediahub/graphic_renderer/sprint_hooks/` — drop a module
-  exposing `apply(html, ctx)` and it runs in the render pipeline automatically (no
-  `render.py` edit). Both seams are no-ops while empty, so today's renders are
-  byte-identical.
-
-Every item below is tagged:
-
-- **🟢 ISOLATED** — creates only new files (a seam drop or a brand-new module). *Cannot*
-  conflict with any other item; dispatch with zero thought.
-- **🟡 DISTINCT-REGION** — edits a shared file (`style_packs.py`, `autofit.py`,
-  `render.py`, `MeetReel.tsx`, `visual/*.py`, `web.py`) but only in its **own distinct
-  function/region**. No two items touch the same function, so git auto-merges them; the
-  worst case is a one-line import nudge resolved in seconds. Sibling sets that share a
-  file are named on the line so you can eyeball them.
-
-So: fire all 60 at once. The 🟢 items are unconditionally safe; the 🟡 items auto-merge
-because their edit regions don't overlap.
-
-**UI2 — design-system-uplift follow-on surfaces · ✅ COMPLETE (nothing to build here).**
-The seven original UI2 surfaces (UI2.1–UI2.7) and the UI2.8 follow-on — an inline,
-machine-readable *Codeblock* view of a run's recognition data on the review page — are all
-shipped and recorded in [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). Each reused the already-built
-UI motion/effect kit ([`ui-uplift/README.md`](ui-uplift/README.md)) rather than force-fitting
-an effect. This epic is closed; new UI follow-on work would be filed as fresh `UI 1.*` items.
+> **Shipped and moved off this plan:** the **60-item Generator Upgrade Sprint**
+> (`G1.*` graphic + `R1.*` reel builds, added 2026-06-16) and the **UI2
+> design-system-uplift** follow-on surfaces (`UI2.1`–`UI2.8`) are complete — the
+> record, including the two parallel-safe auto-discovery seams
+> (`remotion/.../compositions/sprint/`, `graphic_renderer/sprint_hooks/`) that
+> remain the extension points for future renderer work, is in
+> [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
@@ -218,7 +186,7 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 
 ## To do — things only you can do (the rebrand + go-to-market motion — last)
 
-Fable 5 cannot register a business, sign a contract, spend your money, or sit in
+Claude Code cannot register a business, sign a contract, spend your money, or sit in
 front of a swim-club committee. These are **the rebrand + go-to-market motion —
 deliberately the last things we do**, after the product is excellent (Phases
 1–4) and proven on a second sport (Phase 6). Each item has a **step-by-step
@@ -303,7 +271,7 @@ in the order below.
    clubs.
 9. **Verify:** the name passes all four registers (Companies House, trade
    marks, domain, handles), with screenshots/notes kept in one folder — then
-   tell Fable 5 the chosen name so the rebrand sweep (PC.15) can be built and
+   tell Claude Code the chosen name so the rebrand sweep (PC.15) can be built and
    F.2's legal placeholders get the real value.
 
 #### F.10 — Register the company at Companies House
@@ -349,7 +317,7 @@ supersedes the old "sole trader is fine to start" note in F.2: decided
 9. VAT: nothing to do below the registration threshold — F.1 step 7 already
    covers the decision; just keep records.
 10. Feed the new identity into everything queued behind it: Stripe (F.1) as
-    the Ltd, ICO (F.2) in the company's name — and give Fable 5 the five
+    the Ltd, ICO (F.2) in the company's name — and give Claude Code the five
     identity values so the legal placeholders fill — the solicitor (F.3),
     Swim England (F.5), insurance (F.6).
 11. **Verify:** the company appears on the public register; the certificate,
@@ -387,7 +355,7 @@ it.
    records your email provider gives you (`MEDIAHUB_EMAIL_FROM` — mail from
    your own domain lands in inboxes; mail from borrowed domains lands in
    spam).
-6. Ask Fable 5 for the small code half (rides with PC.15): a canonical-host
+6. Ask Claude Code for the small code half (rides with PC.15): a canonical-host
    redirect so the old `*.onrender.com` URLs 301 to the new domain — every
    old link keeps working forever.
 7. **Verify:** `https://www.<name>.co.uk` serves the app with a padlock and
@@ -419,7 +387,7 @@ and the backup/restore drill (PC.14) already rehearses the actual move.
    **(c) Stay on Render and revisit at traction** — £0 effort, a legitimate
    choice while selling time is the binding constraint. If (c): stop here
    and diary it for after the first ~3 paying clubs.
-2. If (a) or (b): ask Fable 5 to build **PC.16** (the code half) — the
+2. If (a) or (b): ask Claude Code to build **PC.16** (the code half) — the
    compose + reverse-proxy TLS template, the off-site backup-target
    preflight, the log-sentinel log-source seam (it currently reads logs via
    the Render API and must honest-disable or grow a journald/file source off
@@ -488,7 +456,7 @@ annual data-protection fee.
 2. Register as a data controller at **ico.org.uk/registration** and pay the
    fee (tier 1 covers a small business; it renews annually).
 3. Note the ICO registration number you receive.
-4. Give Fable 5 the five values — trading/company name, company number (or
+4. Give Claude Code the five values — trading/company name, company number (or
    "sole trader"), business address, contact email, ICO number — and ask it
    to fill the placeholders in `web/legal.py` (one edit fixes every legal
    page and the footer; the canonical list is `legal.PLACEHOLDERS`).
@@ -506,10 +474,10 @@ paid contract.
 2. Send them the four live pages (`/terms`, `/privacy`, `/cookies`, `/dpa`),
    the DPIA draft (`docs/compliance/DPIA.md`), and the specific open
    questions listed in [`COMPLIANCE_AUDIT.md`](COMPLIANCE_AUDIT.md) §4(d).
-3. Feed their edits back through Fable 5 — it updates `web/legal.py` and
+3. Feed their edits back through Claude Code — it updates `web/legal.py` and
    bumps the document version, which automatically routes every signed-in
    account through re-acceptance. That's the mechanism, not a promise.
-4. When they sign off, ask Fable 5 to remove the DRAFT banners and record the
+4. When they sign off, ask Claude Code to remove the DRAFT banners and record the
    sign-off date.
 5. **Verify:** the four pages render without DRAFT banners and carry dated
    versions.
@@ -531,7 +499,7 @@ terms accepted and a lawful UK→US transfer mechanism confirmed.
 5. In Render: pin the region, confirm disk encryption, confirm TLS/HSTS at
    the edge.
 6. **Verify:** every subprocessor named in the Privacy Notice §7 has a
-   recorded agreement in your folder — and tell Fable 5 about any provider
+   recorded agreement in your folder — and tell Claude Code about any provider
    you add or drop so the notice stays true.
 
 #### F.5 — Submit the Swim England API application
@@ -613,7 +581,7 @@ not viable solo).
 The boring decisions a paying customer silently assumes someone has made.
 
 1. Set `MEDIAHUB_RETENTION_DAYS` on Render to the retention period you want —
-   and tell Fable 5 if you change it later, so the Privacy Notice's retention
+   and tell Claude Code if you change it later, so the Privacy Notice's retention
    table keeps matching what the code does.
 2. Name the breach owner (you): the person who notifies affected clubs
    without undue delay and the ICO within 72 hours. Write the name into the
@@ -653,7 +621,7 @@ are curated, not scraped.
 
 1. Each season, follow the runbook in `data/standards/README.md`: download
    the new county/regional/national qualifying-time PDFs.
-2. Hand them to Fable 5 to convert into the versioned dataset format under
+2. Hand them to Claude Code to convert into the versioned dataset format under
    `data/standards/<season>/` with per-table provenance (source URL + date).
 3. **Verify:** one known qualifying swim produces a "qualified" card naming
    the new standard and its source.
@@ -700,7 +668,7 @@ needed the repo public is finished.
 1. Confirm the reason it is public has expired and nobody external still
    needs read access — anyone who does becomes a collaborator instead (repo
    Settings → Collaborators).
-2. Ask Fable 5 for the **pre-flight sweep** (one session): re-check forks —
+2. Ask Claude Code for the **pre-flight sweep** (one session): re-check forks —
    **0 as of 2026-06-12**; a fork made while public survives the flip as an
    independent public copy, so any that appeared need a decision before
    flipping — and re-confirm nothing fetches this repo's files
@@ -712,7 +680,7 @@ needed the repo public is finished.
    **2,000 min/month**, and today's schedules (autotest every 6 h, nightly
    Lighthouse + cross-browser sweeps, the daily contract suite, the
    half-hourly dependabot-automerge sweep, plus every push/PR) would burn
-   that in days. Cheapest first: have Fable 5 trim the schedules (autotest
+   that in days. Cheapest first: have Claude Code trim the schedules (autotest
    6 h → daily, automerge 30 min → 2–6 h, consolidate the nightlies) and
    ship the trim *before* the flip so the quota never silently stalls CI;
    GitHub Pro (~$4/mo, 3,000 min) if trimming isn't enough; heavy jobs onto
@@ -727,7 +695,7 @@ needed the repo public is finished.
    open a Claude Code session on the repo, push a trivial commit and watch
    CI + the roadmap-autoupdate bot go green, and confirm Dependabot still
    files PRs.
-6. Ask Fable 5 to record the public window honestly in the compliance docs
+6. Ask Claude Code to record the public window honestly in the compliance docs
    (Q13 in `OPEN_LEGAL_QUESTIONS.md` + `DATA_MAP` §6): pin the make-public
    date from your account security log (github.com/settings/security-log,
    filter `repo.access` — 90-day retention), or state repo creation
@@ -744,206 +712,23 @@ The long-form plan for everything still open, **in the priority order we'll work
 it.** The record of completed phases (0, 1, 2, W and the shipped Phase C build
 half) lives in [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md).
 
-### Phase 1 — Product polish & usability · U · ❌ **NOT STARTED**
+Each phase below sits in a `<!-- ROADMAP:PHASE N -->` block and its status badge
+is **bot-maintained**: on every push the auto-updater recomputes the badge from
+the phase's items in the to-do lists above, and once every item has shipped it
+moves the whole phase section into [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The
+hidden registry comment that follows maps each phase to its item ids — leave it
+in place when editing.
 
-**Goal.** Make the product clubs already touch every week feel finished and
-obviously good to use — the single fastest way to make MediaHub something people
-*want*. Flask + Jinja stay; this is design and interaction quality on the
-existing surfaces, not a rewrite.
+<!-- ROADMAP:PHASES
+2 = P4.
+3 = P6.
+4 = P5.
+5 = F.9, F.10, F.11, PC.15
+6 = P3.
+7 = PC.4, PC.6, PC.16, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.8, F.12, F.13
+-->
 
-**Exit criterion.** A first-time committee volunteer can go upload → configure →
-process → review → approve → export without confusion, on a credible
-sport-editorial UI, with every state (empty / loading / error / success)
-designed and every recognition decision explained.
-
-- **U.1 — Core-flow polish.** Home, Add Input, the content-pack review, and
-  Settings → Autonomy raised to a credible product standard: strong hierarchy,
-  one obvious primary action per screen, the dark-first palette on the existing
-  `--bg`/`--accent`/`--ink`/`--panel` CSS variables, no generic-SaaS filler.
-- **U.2 — Every state designed.** Empty, loading, error and success states
-  across the primary flow — including the honest AI-unavailable error and the
-  parse-uncertainty / flag-for-review surfaces (never a silent guess).
-- **U.3 — Explainability & confidence.** "Why this card / why not" and the
-  confidence displays made clear and trustworthy in the review UI — the
-  intelligence layer is the moat, so it has to *read* as intelligent.
-- **U.4 — Onboarding & mobile review.** A fast, obvious first run: brand-kit
-  setup and a sample-to-first-content-pack path; mobile-aware review/approve
-  (desktop-primary) so a volunteer can approve from a phone.
-- **U.5 — Scroll-driven progressive reveal.** Landing sections reveal
-  line-by-line on scroll; dark editorial theme throughout. Pure CSS
-  IntersectionObserver, no new deps. *Inspired by Opal (op.al).*
-- **U.6 — Branded render/generation loading state.** Large editorial %-counter +
-  minimal progress bar for real render waits; reuses the giant-numeral motif.
-  Replaces the generic spinner on long card/reel renders. *Inspired by Lusion
-  (lusion.co). Supports U.2.*
-- **U.7 — "Focus the facts" caption/explainability highlight.** In captions and
-  the why-this-card review UI, source-grounded entities (athlete / time / event /
-  PB) are sharp + pill-highlighted; surrounding filler copy is de-emphasised.
-  Server-side span injection — no client JS required. *Inspired by Pedro Duarte
-  (ped.ro). Supports U.3.*
-- **U.8 — Animated how-it-works pipeline diagram.** Glowing nodes + connecting
-  traces on the landing page showing reads (club site / socials / brand kit) →
-  writes (captions / graphics / reels); reuses the blueprint grid motif. SVG +
-  CSS keyframes. *Inspired by AuthKit (authkit.com).*
-- **U.9 — Cycling hero accent word.** The gold italic accent word in the landing
-  hero cycles through content types (stories / reels / graphics / captions) with
-  a CSS crossfade; optionally swaps a matching icon. *Inspired by Spring/Summer
-  (springsummer.dk).*
-- **U.10 — Framed in-app product demo in hero.** Short looping screen-capture or
-  interactive inline preview of generate → review → approve sits inside a framed
-  browser/device mockup; subtle ambient glow behind it. *Inspired by Reflect
-  (reflect.app).*
-- **U.11 — Outputs inside real platform frames.** Sample outputs (cards, reels)
-  presented inside Instagram Story/feed/Reel phone mockups with a subtle CSS
-  autoplay carousel. Pure HTML/CSS — no JS framework. *Inspired by AndAgain
-  (andagain.uk).*
-- **U.12 — Animated count-up stat numerals.** Organisations / total runs / cards
-  generated numerals odometer-count upward on page load + on scroll-into-view.
-  Vanilla JS counter. *Inspired by Max Yinger (yinger.dev).*
-- **U.13 — Floating mobile action dock.** Fixed bottom-centre thumb-reachable
-  capsule (Create / Library / Approve) visible on mobile viewports during
-  review/approve; hidden on desktop. *Inspired by Duties (duties.xyz). Supports
-  U.4.*
-- **U.14 — Cursor-following hover preview.** Hovering an item in Media Library
-  or the CREATE list spawns a floating cross-dissolve thumbnail that tracks the
-  cursor. JS + absolute positioning; no external dep. *Inspired by Christopher
-  Ireland + SuperHi.*
-- **U.15 — Before/after reveal slider.** Drag-to-wipe between a raw results
-  sheet (input) and the finished branded graphic (output) on the landing page.
-  Single vanilla JS slider, no library. *Inspired by Lovi (lovi.care).*
-- **U.16 — Subtle 3D tilt on output cards.** Premium parallax/tilt-on-hover for
-  sample output cards; uses CSS perspective + JS pointer-tracking; respects
-  `prefers-reduced-motion`. *Inspired by Atlas (atlascard.com).*
-- **UI 1.1 — Cycling example-prompt placeholder.** In the CREATE / Free-Text
-  input and any search field, the placeholder animates through curated real
-  examples ('Try: Tom Davies PB 100m free', 'Try: top three at county finals'),
-  guiding first-time users with zero extra UI. Pure CSS/JS, no new deps.
-  *Inspired by Cosmos (cosmos.so). Supports U.4.*
-- **UI 1.2 — Bento-grid feature section.** The uniform capability card rows on
-  the landing are replaced by a bento grid of varied-size tiles — each carries
-  its own mini-visual (a sample story card, a stat chip, brand-kit swatches, a
-  'moments we detect' list, a reel preview). Dark/premium, all on existing CSS
-  variables. *Inspired by Umbrel (umbrel.com).*
-- **UI 1.3 — Inline media thumbnails in a display headline.** Small real output
-  thumbnails are embedded inline within a large hero sentence: 'From a results
-  sheet [img] to a story [img], a feed graphic [img] and a reel [img].' Images
-  served from the static directory — no external fetch. *Inspired by Samara
-  (samara.com).*
-- **UI 1.4 — Tactile spring-physics micro-interactions.** A restrained
-  spring-physics layer on primary buttons, card-selection, and toggles: subtle
-  magnetic hover + bouncy press. Vanilla JS driving CSS custom-property
-  animation; `prefers-reduced-motion` respected; understated to preserve the
-  editorial tone. *Inspired by Family (family.co).*
-- **UI 1.5 — Live local-time + system-status HUD readout.** A small mono
-  header/footer strip shows live local time and a deployment/system status line,
-  extending the existing ONLINE indicator in the blueprint/HUD aesthetic.
-  Low-priority polish; no new backend surface. *Inspired by AndAgain
-  (andagain.uk), Dul Zorigoo (dzrgo.com), Metalab (metalab.com).*
-- **UI 1.6 — Animated results/data charts.** Podium/results bar charts and
-  cohort/area charts that animate in on scroll — used on the landing
-  sample-outputs section and inside the in-app parsed-results view. Vanilla JS
-  + CSS custom properties; no charting SDK required. *Inspired by Mixpanel
-  (mixpanel.com).*
-- **UI 1.7 — Pinned-panel scrollytelling.** A sticky visual panel that swaps its
-  content per workflow step (results → moments → drafts → approve) as the
-  narrative scrolls past on the landing how-it-works section. Pure CSS
-  scroll-driven; no JS library. *Inspired by Linear (linear.app).*
-- **UI 1.8 — Timestamp-anchored reel review comments.** Feedback markers pinned
-  to a specific moment on a generated reel in the review surface; stored per
-  run/card in SQLite, displayed as overlays on the video scrubber. Flask-backed,
-  no new external service. *Inspired by Frame.io.*
-- **UI 1.9 — Multi-select + bulk actions.** Checkboxes, select-all, and bulk
-  approve/export/delete in the Media Library and review queue. Pure HTML form
-  multi-select with progressive JS enhancement; no new routes beyond extending
-  existing action endpoints. *Inspired by Frame.io.*
-- **UI 1.10 — Visual template/archetype gallery.** Browse all 12 content
-  archetypes with preview thumbnails and category filters before creating a pack.
-  Renders existing archetype data from the design-spec catalog; no new API or
-  external service. *Inspired by Chronicle (chroniclehq.com).*
-- **UI 1.11 — Tabbed code-example switcher.** Language tabs + syntax highlighting
-  + copy button on the Developer/API docs page. Pure HTML/CSS tabs; syntax
-  highlighter bundled locally (no CDN). *Inspired by Resend (resend.com).*
-- **UI 1.12 — Results data table.** Sortable/filterable parsed-results view with
-  inline sparklines (athlete progress over time) and coloured delta badges
-  (PB/improvement). Server-side sort via existing Flask routes; vanilla JS
-  sparklines drawn on `<canvas>`. *Inspired by Wope (wope.com).*
-- **UI 1.13 — Annotated UI callouts.** Labelled hotspots + SVG connector lines
-  on a sample card and the review UI, forming an 'anatomy of a card' diagram for
-  the landing or onboarding tour. Static HTML/SVG; no new library. *Inspired by
-  Liveblocks (liveblocks.io).*
-- **UI 1.14 — Notifications inbox.** A bell icon + unread-count badge + dropdown
-  listing render-complete, pack-ready, and error events. Backed by the existing
-  scheduler/notify layer; polled via lightweight SSE or periodic fetch; no
-  external push service. *Inspired by Liveblocks (liveblocks.io).*
-- **UI 1.15 — Command palette / Cmd-K.** Fast keyboard navigation and quick
-  actions (jump to Create / Library / Settings; trigger common actions). Vanilla
-  JS; keyboard-accessible; no framework. *Inspired by GitHub.*
-- **UI 1.16 — Dashboard activity feed.** Recent runs, approvals, and exports as
-  cards with status badges, relative timestamps, and expandable detail.
-  Server-rendered from the existing audit log; no new data source. *Inspired by
-  GitHub.*
-- **UI 1.17 — Content-cadence heatmap.** A calendar activity grid showing
-  generation and posting consistency over the past year. Server-rendered inline
-  SVG from run history; no JS library required. *Inspired by GitHub's
-  contribution graph.*
-- **UI 1.18 — Inspector/properties panel.** A lightweight side panel to tweak a
-  generated card before approval: edit caption text, swap brand palette swatch,
-  toggle elements, adjust crop. Posted back to existing Flask card-edit routes;
-  no new persistence layer. *Inspired by Sketch (sketch.com).*
-- **UI 1.19 — Testimonial/social-proof carousel.** Club/coach quote cards with
-  avatar initials, arrow controls, and autoplay on the landing. Pure CSS/JS; no
-  carousel library. *Inspired by Sketch (sketch.com).*
-- **UI 1.20 — Polished pricing page.** Tier cards with check/cross feature lists,
-  a recommended-plan highlight, a billing-period toggle, and a feature comparison
-  table. Server-rendered; matches existing CSS variables. *Inspired by Resend
-  (resend.com).*
-- **UI 1.21 — Text-scramble/decode animation.** Character-by-character
-  scramble-then-decode reveal for the 'engine is generating…' processing state
-  and optional hero headline. Vanilla JS; respects `prefers-reduced-motion`.
-  *Inspired by Locomotive (locomotive.ca).*
-- **UI 1.22 — FAQ accordion.** Expandable Q&A section on the landing. Pure HTML
-  `<details>`/`<summary>` with CSS transition animation; no JS library. *Inspired
-  by Limitless AI and status pages.*
-- **UI 1.23 — Light/dark theme toggle.** Dark-first with an optional light mode.
-  CSS custom-property swap + `localStorage` persistence + `prefers-color-scheme`
-  default; no new build step. *Inspired by AuthKit (authkit.com).*
-- **UI 1.24 — Moment-type marquee/ticker.** A continuous horizontal scrolling
-  ticker of moment types (PBs · medals · comebacks · finals · club records) or
-  club names used as a section divider on the landing. Pure CSS `animation:
-  marquee` loop. *Inspired by SavoirFaire and SuperHi.*
-- **UI 1.25 — Emoji reactions.** Quick emoji reactions (👍 ❤️ 🔥) on generated
-  cards and in the review queue. Reaction counts stored per card in the existing
-  DB; tallied server-side; updated via fetch without a full page reload. *Inspired
-  by Liveblocks (liveblocks.io).*
-- **UI 1.26 — Cursor-anchored progress/info readout.** A small percent/status
-  label that follows the cursor during long actions (render/upload). Vanilla JS
-  pointer-position tracking; disappears on completion; hidden on touch devices.
-  *Inspired by UNVEIL and Cosmos (cosmos.so).*
-- **UI 1.27 — Horizontal drag/scroll gallery.** A mouse-draggable horizontal
-  carousel for the Media Library and the landing sample-output showcase. Vanilla
-  JS pointer-event drag; CSS `overflow-x: auto` with scroll-snap; no carousel
-  lib. *Inspired by Fey (feyapp.com) and Sketch (sketch.com).*
-- **UI 1.28 — Keyboard shortcuts overlay.** Press `?` to reveal a modal listing
-  available shortcuts; quick keys to approve/reject/navigate in the review flow.
-  Vanilla JS; no new dependencies. *Inspired by GitHub.*
-- **UI 1.29 — Sticky chaptered scroll-spy nav.** A fixed side chapter/section nav
-  that highlights the current section on long pages and the how-it-works guide.
-  Pure JS IntersectionObserver + CSS sticky; no library. *Inspired by Linear
-  (linear.app).*
-- **UI 1.30 — AI 'weekend at a glance' summary panel.** An at-a-glance summary
-  card of the meet's key story (top swims, PBs, medals) surfaced from
-  MediaHub's existing summarisation pipeline — no external API, no additional LLM
-  call beyond what the content pack already produced. *Inspired by Mixpanel
-  (mixpanel.com) and Fey (feyapp.com).*
-
-**Building blocks.** All shipped: the primary flow, the design-spec director +
-12-archetype catalog, the Adaptive Theming Engine, magic-link mobile approvals,
-the autonomy controls. This phase is craft on top of them.
-
-**Dependencies.** None — this is the front of the queue.
-
----
-
+<!-- ROADMAP:PHASE 2 -->
 ### Phase 2 — Direct publishing · P4 · ❌ **NOT STARTED**
 
 **Goal.** Replace the paid Buffer dependency with direct platform adapters,
@@ -965,7 +750,7 @@ thin, swappable adapters for the final hop to a network the club already uses.
 Everything upstream of that hop — the content, the intelligence, the branding,
 the gate and the audit — is in-house.
 
-#### P4.1 — Bluesky (AT Protocol) + Mastodon adapters · ❌
+#### P4.1 — Bluesky (AT Protocol) + Mastodon adapters
 
 The free/open posting targets — build these first. **Build detail (June 2026
 feasibility pass):** `publishing/bluesky.py` (AT Protocol; app-password or
@@ -978,7 +763,7 @@ not weeks — they rehearse the connector pattern (connect → gate → post →
 → audit) before the Meta review lands, and they make the autonomy story
 demonstrable end-to-end on a zero-risk network.
 
-#### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters · ❌
+#### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters
 
 Least-privilege per integration; a human connects each account. **Platform
 API policy gates auto-posting (verified June 2026):** Instagram
@@ -995,11 +780,11 @@ Reels/Stories/carousels); group packs as **carousels** by default (the
 engagement format in the 2025 benchmarks). **TikTok and YouTube stay deferred
 until clubs demand them.**
 
-#### P4.3 — X adapter · ❌
+#### P4.3 — X adapter
 
 X moved to pay-per-use (6 Feb 2026); treat as a paid, optional target.
 
-#### P4.4 — Demote Buffer to optional · ❌
+#### P4.4 — Demote Buffer to optional
 
 **Resilience work, not preference:** Buffer's classic developer API has been
 closed to new developers since 2019, remaining third-party integrations were
@@ -1009,7 +794,7 @@ onboard new clubs' accounts. P4.1/P4.5/P4.6 are the replacement paths; keep
 Buffer only while the legacy token still functions, and surface an honest
 error the day it stops.
 
-#### P4.5 — Email digest delivery · ❌ *(pull-forward candidate during Phase C)*
+#### P4.5 — Email digest delivery *(pull-forward candidate during Phase C)*
 
 The v7.3 grouped newsletter already builds
 (`/api/runs/<run_id>/newsletter`, `content_pack/builder.py`) — nothing can
@@ -1027,7 +812,7 @@ sponsor slot and W.11 alt text in the template; W.9 approval links ride the
 same channel. **Exit:** a club imports members and receives a weekly digest
 of approved content; unsubscribes stick; unkeyed deployments honest-error.
 
-#### P4.6 — Telegram channel publishing (+ WhatsApp share stopgap) · ❌ *(pull-forward candidate during Phase C)*
+#### P4.6 — Telegram channel publishing (+ WhatsApp share stopgap) *(pull-forward candidate during Phase C)*
 
 The best effort-to-value publish target found in the June 2026 feasibility
 pass: the Telegram Bot API is free, needs no review, and sends **PNG and MP4
@@ -1052,7 +837,9 @@ auto-publish) and **P0** (Buffer is a flagged, optional paid path).
 
 
 ---
+<!-- /ROADMAP:PHASE 2 -->
 
+<!-- ROADMAP:PHASE 3 -->
 ### Phase 3 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · ❌ **NOT STARTED**
 
 **Goal.** Build **MediaHub's own first-party version of every
@@ -1064,7 +851,7 @@ shop. The evidence base is two exhaustive competitor inventories
 [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)); **every
 bullet in both** is mapped — feature by feature, with a completeness index —
 in [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). The 24 one-line
-work packages (P6.1–P6.24) are in the Fable 5 to-do list above; the companion
+work packages (P6.1–P6.24) are in the build to-do list above; the companion
 doc carries each package's build depth and per-item exit criterion.
 
 **Order within the phase.** Within the
@@ -1103,8 +890,10 @@ cloud provider on the same seam). Feeds back into **PC.4** packaging
 (quotas/tiers).
 
 ---
+<!-- /ROADMAP:PHASE 3 -->
 
-### Phase 4 — Zero-cost local AI everywhere · P5 · ❌ **NOT STARTED**
+<!-- ROADMAP:PHASE 4 -->
+### Phase 4 — Zero-cost local AI everywhere · P5 · 🔵 **IN PROGRESS**
 
 **Goal.** Give every AI call a zero-cost local path, completing the
 no-hidden-fees discipline for the hosted deployment's margins.
@@ -1150,7 +939,9 @@ default; see [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md).
 
 
 ---
+<!-- /ROADMAP:PHASE 4 -->
 
+<!-- ROADMAP:PHASE 5 -->
 ### Phase 5 — Rebrand & identity · F.9–F.11 + PC.15 · ❌ **NOT STARTED**
 
 **Goal.** Retire the "MediaHub" working title for the real, defensible company
@@ -1169,7 +960,7 @@ above with full step-by-step guides; **PC.15** (the code sweep) waits on F.9's
 chosen name. Why the name is upstream of every filing, and why the domain comes
 before any host move:
 
-#### F.9–F.12 — Business identity, own domain, cheaper hosting · ❌ founder work (guides above; added & prioritised 2026-06-12) + PC.15/PC.16 code halves
+#### F.9–F.12 — Business identity, own domain, cheaper hosting · founder work (guides above; added & prioritised 2026-06-12) + PC.15/PC.16 code halves
 
 Why this workstream jumped to the head of the founder list:
 
@@ -1213,7 +1004,9 @@ Why this workstream jumped to the head of the founder list:
   customers still only ever get a URL.
 
 ---
+<!-- /ROADMAP:PHASE 5 -->
 
+<!-- ROADMAP:PHASE 6 -->
 ### Phase 6 — Second sport (broaden ingestion spokes) · P3 · 🔒 gated on Phases 1–5 · ❌ **NOT STARTED**
 
 **Goal.** Ingest beyond swimming and normalise every spoke to the canonical
@@ -1256,8 +1049,10 @@ sport-agnostic *ingestion* from a URL; P3 adds the per-sport *detector* quality.
 
 
 ---
+<!-- /ROADMAP:PHASE 6 -->
 
-### Phase 7 — Go to market · PC.4 / PC.6 + F.1–F.8 / F.13 / F.12 + PC.16 · 🔒 gated on Phases 1–5 · ❌ **NOT STARTED**
+<!-- ROADMAP:PHASE 7 -->
+### Phase 7 — Go to market · PC.4 / PC.6 + F.1–F.8 / F.13 / F.12 + PC.16 · 🔒 gated on Phases 1–5 · 🔵 **IN PROGRESS**
 
 **Goal.** Commercialise — lawfully and without the founder in the loop — once the
 product is excellent, rebranded and proven on a second sport. **The last thing we
@@ -1304,7 +1099,7 @@ tasks are on the founder list above (F.1–F.8, F.13, F.12) with step-by-step
 guides; **PC.16** is the buildable hosting-cutover half. The pricing and
 distribution detail:
 
-#### PC.4 — Pricing by revealed willingness-to-pay · 🔵 founder work (guide above)
+#### PC.4 — Pricing by revealed willingness-to-pay · founder work (guide above)
 
 Build shipped 2026-06-11: a quote ledger (`commercial/wtp.py`,
 `DATA_DIR/commercial/wtp_quotes.jsonl`), per-quote Stripe Checkout charging
@@ -1329,7 +1124,7 @@ tier down; Gipper proves a far higher institutional ceiling — but only for a
 schools/federation buyer with a budget. That gap is why Routes B/C carry the
 revenue weight and why the Club tier must be set by revealed WTP, not assumed.
 
-#### PC.6 — Go-to-market / distribution · 🔵 founder work (guide above)
+#### PC.6 — Go-to-market / distribution · founder work (guide above)
 
 Distribution kills solo ventures, not product gaps. Instrumented 2026-06-11:
 lead ledger by source, cold-share readout, referral-debt readout
@@ -1385,6 +1180,7 @@ full GTM push and no paid conversion proceed until the product is complete. The
 selling, payments, legal sign-off, ops, repo-private and hosting tasks
 (F.1–F.8, F.13, F.12) and the PC.16 hosting-cutover half all sit behind this
 gate.
+<!-- /ROADMAP:PHASE 7 -->
 
 ## The rules we build by
 
@@ -1498,11 +1294,12 @@ ideas backlog in
 ### Strategy changelog (hand-written — newest first)
 
 One table row per strategy/roadmap change, added by hand (the daily roadmap
-engine or a Fable 5 session). Engineering ships are tracked by the Completed
+engine or a Claude Code session). Engineering ships are tracked by the Completed
 list and the auto table below, not here.
 
 | Date | Change | Read more |
 |---|---|---|
+| 2026-06-17 | **Roadmap auto-maintenance extended to the whole forward plan + builder framing made model-agnostic:** the "plan in depth" used to hand-maintain a status badge per phase, which silently rotted (the completed Phase 1 + the 60-item generator sprint still read NOT STARTED below the to-do lists while every one of their items had shipped). Now each phase sits in a `<!-- ROADMAP:PHASE N -->` block with a hidden item-id registry, and on every push the bot recomputes each phase's badge from the lists and **moves any fully-complete phase off this plan into [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)** — so nothing already-built lingers here. The completed Phase 1 + sprint were relocated, Phase 4/7 badges corrected to IN PROGRESS, and the per-item drift badges removed from the in-depth sub-headers. Separately, the decommissioned "Fable 5" builder references were replaced with model-agnostic wording. | *Status* section · [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py) |
 | 2026-06-13 | **In-house-first hardened + second-sport/GTM hard-gated (founder directive):** every roadmap idea is now explicitly first-party — an external service is allowed only as an optional swappable adapter for the unavoidable final hop (social-platform publishing, Stripe card rails, physical print), never for intelligence / content / data. Concrete closes: generative imagery (P6.3) gains an in-house local-diffusion backend (**new P5.6**, FLUX.1-schnell-class, Apache-2.0); email (P4.5) defaults to an in-house SMTP relay (managed relay optional); second-sport data (P3.2) is vendored public-domain / open data with live APIs optional; the P6.20 MCP server is clarified as one MediaHub *exposes* (it depends on no external MCP). New **rule 11** (in-house first) + **rule 12** (Phase 6 second sport & Phase 7 go-to-market 🔒 gated until Phases 1–5 complete). | Rules 11 & 12 · P5.6 · P6.3 |
 | 2026-06-13 | **Roadmap reordered — build-first, market-last (founder directive):** usability + capability work pulled to the front (Phase 1 product polish · 2 direct publishing · 3 creative-suite breadth · 4 zero-cost local AI); the three deliberately-last things sequenced at the end, in order — **5 rebrand · 6 second sport · 7 go to market.** Phases renumbered into priority order (item IDs kept stable); the gating that made P3–P6 wait on paying clubs is lifted. Everything already shipped moved out of this file into [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md), so no completed items / no ✅ ticks remain on the roadmap. Reverses the commercialise-first *ordering* of rules 2/4 + ADR-0011/0015 — the prior decision's evidence stands. | Rules 2 & 4 · [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md) |
 | 2026-06-12 | **Daily scan — Swim England platform move (material):** Swim England announced (4 Mar 2026) a Sport:80-built membership platform launching Autumn 2026, with a new **Rankings API** for verified swim times and a swimmingresults.org integration underway, and a SportsEngine integration announcement expected later in 2026. F.5’s application route should be re-verified against this programme before submitting (dated note added to the F.5 guide); the Swim England↔SportsEngine tie-up is also a fresh input to the queued Route C go/no-go. Competitor watch otherwise quiet (Gipper/SwimTopia/TeamUnify/Swimcloud: no results-ingestion or auto-graphics move); IG Graph API and TikTok Content Posting API policies stable. ⚠️ *Flagged for founder review (not adopted):* PR #418’s public passwordless operator sign-in is an owner-decided demo convenience, but it exposes every tenant’s data and the operator consoles — re-lock it at the latest alongside F.13, before the first club pays (ADR-0015 gate 3). | [Sport:80 announcement](https://www.swimming.org/swimengland/sport80-membership-platform/) · F.5 guide |

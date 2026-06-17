@@ -11,10 +11,15 @@
 #   3. refreshes the "Recent code activity" feed (last ~12 non-bot commits),
 #   4. applies any `roadmap: <ID> <status>` directives found in the pushed
 #      commit messages (e.g. `roadmap: P1.2 done`, `roadmap: F.2 done`):
-#      `done` MOVES the item from its to-do list (founder or Fable 5) into
+#      `done` MOVES the item from its to-do list (founder or build) into
 #      the Completed list (date-stamped); any other status sets the item's
 #      badge in place, or returns a Completed item to the right to-do list
-#      (`F.*` ids -> the founder list, everything else -> the main list).
+#      (`F.*` ids -> the founder list, everything else -> the main list),
+#   5. maintains the in-depth phase plan: recomputes each `ROADMAP:PHASE N`
+#      block's status badge from its items in the to-do/Completed lists and,
+#      once every item in a phase has shipped, MOVES the whole phase section
+#      off docs/ROADMAP.md into docs/ROADMAP_BUILT.md's BUILT_PHASES block
+#      (so nothing already-built lingers on the forward plan).
 #
 # Landing mechanism (fixed 2026-06-10): `main` is branch-protected and
 # REQUIRES changes via pull request, so the old direct commit-back was

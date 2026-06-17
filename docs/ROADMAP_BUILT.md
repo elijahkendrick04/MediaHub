@@ -388,6 +388,54 @@ contact and runbook exist ✅; a test payment produces an expensable invoice
 
 ## Finished phases (newest first)
 
+Phases relocated here automatically once every item shipped are kept in the
+`BUILT_PHASES` block below (the roadmap bot moves a complete phase off
+[`ROADMAP.md`](ROADMAP.md) and prepends it here, newest first); the hand-written
+phase records follow.
+
+<!-- ROADMAP:BUILT_PHASES -->
+
+### Phase 1 — Product polish & usability + the Generator Upgrade Sprint · ✅ **COMPLETE (2026-06-13 → 2026-06-17)**
+
+The post-reorder **Phase 1 (product polish & usability)** and the **60-item
+generator-engine upgrade sprint** both shipped; the per-item record is in the
+Completed list at the top of this file (`U.1`–`U.16`, `UI 1.1`–`UI 1.30`,
+`UI2.1`–`UI2.8`, and `G1.1`–`G1.30` + `R1.1`–`R1.30`).
+
+**Phase 1 — product polish.** The core flow (Home, Add Input, content-pack
+review, Settings → Autonomy) was raised to a credible sport-editorial standard;
+every empty/loading/error/success state designed (including the honest
+AI-unavailable error and the parse-uncertainty / flag-for-review surfaces);
+explainability + confidence made to *read* as intelligent; first-run onboarding
++ a sample-to-first-pack path; mobile-aware review/approve; plus the
+landing/review craft batch (`U.5`–`U.16`, `UI 1.*`) and the UI2
+design-system-uplift follow-on surfaces (`UI2.1`–`UI2.8`, including the inline,
+machine-readable Codeblock view of a run's recognition data on the review page).
+Exit criterion met: a first-time committee volunteer can go upload → configure →
+process → review → approve → export on a credible UI with every state designed.
+
+**Generator Upgrade Sprint — 60 parallel builds (added 2026-06-16, shipped by
+2026-06-17).** The graphic still-renderer and the Remotion/ffmpeg reel engine
+each got a 30-item deep-upgrade sprint — **30 graphic builds (`G1.*`)** and
+**30 reel builds (`R1.*`)** — every item sized to a whole session and scoped to a
+distinct module so all 60 could be dispatched as simultaneous parallel sessions.
+The deterministic-engine boundary stayed untouched (renderer / compositor /
+audio only). The merge-safety was built into the code via two auto-discovery
+seams that remain the extension points for future renderer work:
+
+- **Motion (reels):** `src/mediahub/remotion/src/compositions/sprint/` — a file
+  dropped in `intents/`, `scenes/`, `patterns/`, `accents/`, `springs/`,
+  `layers/` (additive overlays) or `reel/` is registered by webpack's build-time
+  `require.context`; the old 14-items-on-one-`switch` hot spot in `StoryCard.tsx`
+  was retired in favour of these independent file drops (each folder's
+  `README.md` states the drop-in contract; the motion-parity test scans them).
+- **Graphics (stills):** `src/mediahub/graphic_renderer/sprint_hooks/` — a module
+  exposing `apply(html, ctx)` runs in the render pipeline automatically (no
+  `render.py` edit). Both seams are no-ops while empty, so renders stayed
+  byte-identical.
+
+<!-- /ROADMAP:BUILT_PHASES -->
+
 ### Phase W — Deepen the swimming wedge · ✅ **BUILT (all 14 items, 2026-06-12, one integration pass — [ADR-0016](adr/0016-phase-w-integration-plan.md))**
 
 Wedge-sellability work on existing seams; no new paid dependency; AI surfaces
