@@ -26,6 +26,7 @@ This module pins the whole feature:
      (works with JS disabled), it adds no CDN dependency, and it rides the run's
      existing access guard.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -50,6 +51,7 @@ _UI_KIT_JS = (_WEB_DIR / "static" / "js" / "ui-kit.js").read_text()
 @pytest.fixture(scope="module")
 def web():
     import mediahub.web.web as wm
+
     return wm
 
 
@@ -185,9 +187,9 @@ class TestMachineReadableHelper:
 class TestCodeblockRendering:
     def test_payload_is_html_escaped_in_the_block(self, web):
         run = _sample_run(1)
-        run["recognition_report"]["ranked_achievements"][0]["achievement"][
-            "swimmer_name"
-        ] = "<script>alert(1)</script>"
+        run["recognition_report"]["ranked_achievements"][0]["achievement"]["swimmer_name"] = (
+            "<script>alert(1)</script>"
+        )
         payload = web._machine_readable_run(run, "run-xss")
         # Raw (un-rendered) JSON still contains the literal text...
         assert "<script>" in payload
@@ -225,10 +227,12 @@ def mr_app(tmp_path, monkeypatch):
 
     import mediahub.web.club_profile as cp
     import mediahub.web.web as wm
+
     importlib.reload(cp)
     importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
+
     save_profile(ClubProfile(profile_id="riverside", display_name="Riverside SC"))
 
     run_id = "run-mr-" + uuid.uuid4().hex[:8]
@@ -244,7 +248,9 @@ def mr_app(tmp_path, monkeypatch):
                 "confidence_label": "high",
                 "confidence": 0.95,
             },
-            "rank": 1, "priority": 9.0, "quality_band": "elite",
+            "rank": 1,
+            "priority": 9.0,
+            "quality_band": "elite",
             "suggested_post_type": "feed",
         },
         {
@@ -259,7 +265,9 @@ def mr_app(tmp_path, monkeypatch):
                 "confidence_label": "high",
                 "confidence": 0.9,
             },
-            "rank": 2, "priority": 5.0, "quality_band": "strong",
+            "rank": 2,
+            "priority": 5.0,
+            "quality_band": "strong",
             "suggested_post_type": "story",
         },
     ]
@@ -274,12 +282,15 @@ def mr_app(tmp_path, monkeypatch):
         "recognition_report": {
             "meet_name": "Spring Invitational",
             "ranked_achievements": achievements,
-            "n_achievements": 2, "n_swims_analysed": 2,
+            "n_achievements": 2,
+            "n_swims_analysed": 2,
         },
         "parsed_swim_count": 64,
         "our_swim_count": 12,
         "parse_warnings": [],
-        "self_check": {}, "detector_summary": {}, "dispatch_log": {},
+        "self_check": {},
+        "detector_summary": {},
+        "dispatch_log": {},
         # A secret that must never reach the page (proves the whitelist end-to-end).
         "ANTHROPIC_API_KEY": "sk-end-to-end-should-never-appear",
     }
@@ -366,9 +377,7 @@ class TestFailSafeAndNoCdn:
     def test_block_is_server_rendered_not_js_injected(self, mr_app):
         # The whole point of server-side highlighting: the JSON is in the HTML,
         # so a no-JS / reduced-motion reader sees it (only copy needs JS).
-        body = mr_app["client"].get(f"/review/{mr_app['run_id']}").get_data(
-            as_text=True
-        )
+        body = mr_app["client"].get(f"/review/{mr_app['run_id']}").get_data(as_text=True)
         # The block sits before </html> as real markup, not built by a script.
         assert "mh-machine-readable" in body
 

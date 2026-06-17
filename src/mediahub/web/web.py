@@ -2754,9 +2754,7 @@ def _load_run(run_id: str) -> Optional[dict]:
         return None
 
 
-def _machine_readable_run(
-    data: Optional[dict], run_id: str, *, max_achievements: int = 60
-) -> str:
+def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
     """UI2.8 — assemble the curated, machine-readable JSON shown inline on the
     review page's Recognition-summary card (rendered through the first-party
     Codeblock highlighter, ``code_highlight.code_block`` — the "raw parsed-data
