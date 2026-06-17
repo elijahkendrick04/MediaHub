@@ -42,31 +42,36 @@ ANCHOR = date(2026, 6, 17)
 # ---------------------------------------------------------------------------
 
 
-class _Hit:
-    def __init__(self, title, url, snippet, domain):
-        self.title, self.url, self.snippet, self.domain = title, url, snippet, domain
+_RESEARCH_QUERY = "County Championships 2026 date"
 
 
-class _FakeResearch:
-    def __init__(self, *a, **k):
-        pass
-
-    def search(self, query, num=None):
-        return [_Hit("County Champs 2026", "https://swimming.org/champs", "12 July 2026 at Ponds Forge.", "swimming.org")]
-
-
-def _install_fake_llm(monkeypatch, proposal, *, research=True, provider="gemini"):
+def _install_fake_llm(monkeypatch, proposal, *, research=False, provider="gemini"):
     """Patch ai_core.ask_with_tools to drive the on_tool_call wiring the way a
-    real model would: optionally research, then propose, then return text."""
-    import mediahub.ai_core as ai_core
-    import mediahub.context_engine.research as research_mod
+    real model would: optionally research, then propose, then return text.
 
-    monkeypatch.setattr(research_mod, "ResearchClient", _FakeResearch, raising=True)
+    Network is ALWAYS stubbed at ``WebResearcher.search`` — the network boundary
+    ``ResearchClient`` wraps — mirroring the proven offline pattern in
+    tests/test_deep_research.py. Patching the class *method* (not replacing the
+    ``ResearchClient`` class) is robust under full-suite ordering, where an
+    earlier test can otherwise leave ``ResearchClient`` resolving to a class our
+    patch never touched (which let the real web search run on CI)."""
+    import mediahub.ai_core as ai_core
+    from mediahub.web_research import search as searchmod
+    from mediahub.web_research.search import SearchResult
+
+    monkeypatch.setattr(
+        searchmod.WebResearcher,
+        "search",
+        lambda self, q, num=5: [
+            SearchResult("https://swimming.org/champs", "County Champs 2026", "12 July 2026 at Ponds Forge.", "searxng")
+        ],
+        raising=True,
+    )
 
     def fake_ask_with_tools(system, user, *, tools, on_tool_call, max_tokens=1200, max_rounds=4):
         names = {t["name"] for t in tools}
         if research and "research_web" in names:
-            on_tool_call("research_web", {"query": "County Championships 2026 date", "reason": "confirm"})
+            on_tool_call("research_web", {"query": _RESEARCH_QUERY, "reason": "confirm"})
         on_tool_call("propose_inputs", proposal)
         return types.SimpleNamespace(text="done", provider=provider)
 
@@ -101,8 +106,21 @@ def test_interpret_shapes_events_blackouts_goals(monkeypatch):
     assert out["goals"] == [{"post_type": "sponsor_activation", "note": "push new sponsor"}]
     assert out["summary"].startswith("County Champs")
     assert out["provider"] == "gemini"
-    # Web research the model used comes back for display + provenance.
-    assert out["research"] and out["research"][0]["hits"][0]["domain"] == "swimming.org"
+
+
+def test_interpret_threads_web_research(monkeypatch):
+    """When the model researches, the hits are recorded for display/provenance —
+    sourced from the stubbed WebResearcher, never the live network."""
+    from mediahub.content_engine.nl_inputs import interpret_planner_inputs
+
+    _install_fake_llm(monkeypatch, {"summary": "checked the date"}, research=True)
+    out = interpret_planner_inputs("County champs?", goal_choices=GOAL_CHOICES, today=ANCHOR)
+
+    assert out["research"], "research the model ran should be recorded"
+    log = out["research"][0]
+    assert log["query"] == _RESEARCH_QUERY
+    hit = log["hits"][0]
+    assert hit["domain"] == "swimming.org" and hit["title"] == "County Champs 2026"
 
 
 def test_interpret_drops_goal_for_unenabled_type(monkeypatch):
