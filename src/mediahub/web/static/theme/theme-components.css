@@ -758,8 +758,10 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 .mh-bento {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-rows: minmax(148px, auto);
-  grid-auto-flow: dense;
+  grid-template-areas:
+    "story story reel feed"
+    "story story reel feed"
+    "rank  rank  brand moments";
   gap: var(--sp-4);
   margin: var(--sp-6) 0 var(--sp-7);
 }
@@ -768,15 +770,38 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
-  padding: var(--sp-5);
+  /* Each tile frames one *generated* sample output (an inline SVG render),
+     so it is the visual — no inner padding, the artwork fills the frame. */
+  padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
+  aspect-ratio: 1 / 1;          /* square default (brand kit, moments) */
   transition: transform var(--dur-med) var(--ease-out-quick),
               border-color var(--dur-med) var(--ease-out-quick);
 }
+/* The sample output render fills its frame. */
+.mh-bento-tile > svg { width: 100%; height: 100%; display: block; }
+/* Area placement + per-output aspect: the story card is the 2×2 showpiece
+   at its true 9:16; the reel and feed columns sit tall beside it; the
+   detected-&-ranked read-out runs wide along the bottom. */
+.mh-bento-tile.feature    { grid-area: story; aspect-ratio: 9 / 16; }
+.mh-bento-tile.is-reel    { grid-area: reel;  aspect-ratio: 9 / 16; }
+.mh-bento-tile.is-feed    { grid-area: feed;  aspect-ratio: 9 / 16; }
+.mh-bento-tile.wide       { grid-area: rank;  aspect-ratio: auto; }
+.mh-bento-tile.is-brand   { grid-area: brand; }
+.mh-bento-tile.is-moments { grid-area: moments; }
 .mh-bento-tile:hover { transform: translateY(-2px); border-color: var(--rule); }
+.mh-bento-caption {
+  font-family: var(--font-body);
+  color: var(--ink-dim);
+  font-size: clamp(13px, 1.1vw, 15px);
+  line-height: 1.5;
+  max-width: 56ch;
+  margin: var(--sp-2) auto 0;
+  text-align: center;
+}
 .mh-bento-tile::after {
   content: '';
   position: absolute;
@@ -814,6 +839,52 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   will-change: transform;
 }
 .mh-bento-tile.is-tilting::before { opacity: 1; }
+
+/* The reel sample's play affordance breathes so the still reads as video.
+   This is the one ambient motion in the showcase — gated off below for
+   reduced-motion users. */
+@keyframes mh-reel-pulse {
+  0%   { transform: scale(0.9);  opacity: 0.55; }
+  70%  { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+.mhg-reel-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mh-reel-pulse 2.4s var(--ease-out, ease-out) infinite;
+}
+
+/* Sample-showcase responsiveness — collapse the 4-col showpiece grid to a
+   2-up, then a single column, resetting the spanning areas so no output is
+   ever cropped or stretched. */
+@media (max-width: 860px) {
+  .mh-bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "story story"
+      "reel  feed"
+      "rank  rank"
+      "brand moments";
+  }
+  .mh-bento-tile.feature { aspect-ratio: 4 / 5; }
+}
+@media (max-width: 520px) {
+  .mh-bento {
+    grid-template-columns: 1fr;
+    grid-template-areas: "story" "reel" "feed" "rank" "brand" "moments";
+  }
+  .mh-bento-tile.feature,
+  .mh-bento-tile.is-reel,
+  .mh-bento-tile.is-feed { aspect-ratio: 9 / 16; }
+}
+
+/* The cursor-tracked sheen is a pure enhancement: stand it down entirely for
+   reduced-motion users (belt-and-braces with the JS gate, which also never
+   binds the tilt under reduced motion). */
+@media (prefers-reduced-motion: reduce) {
+  .mh-bento-tile::before { display: none; }
+  .mhg-reel-pulse { animation: none; }
+}
 
 /* =====================================================================
    UI 1.3 — INLINE MEDIA THUMBNAILS IN A DISPLAY HEADLINE

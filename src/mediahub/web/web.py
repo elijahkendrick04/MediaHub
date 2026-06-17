@@ -83,6 +83,7 @@ from .bounded_cache import BoundedCache
 from . import auth as _auth
 from . import billing as _billing
 from . import charts as _charts
+from . import sample_graphics as _sample_graphics
 from . import legal as _legal
 from . import tenancy as _tenancy
 
@@ -13600,14 +13601,17 @@ def create_app() -> Flask:
             "</section>"
         )
 
-        # --- Bento feature grid (UI 1.2) — replaces the old uniform
-        # three-card sample row. Varied-size tiles, each with its own
-        # mini-visual (story card, reel timeline, detected-&-ranked stat,
-        # brand-kit swatches, the moments-we-detect list, a feed graphic),
-        # so a first-time visitor sees the breadth of the engine before
-        # they upload. Pure visual; non-interactive. The heading reuses the
-        # U.5 scroll-reveal helper so it surfaces line-by-line like every
-        # other landing section. Inspired by Umbrel.
+        # --- Engine showcase (UI 1.2, rebuilt) — the "what the engine does"
+        # section now *shows* what MediaHub produces instead of describing it.
+        # Each tile frames a real, deterministic sample output rendered by
+        # web/sample_graphics.py: a story card, a meet reel, a feed graphic,
+        # the detected-&-ranked intelligence read-out, the brand-kit
+        # application and the moment taxonomy. They are first-party inline
+        # SVG (no external fetch) that consume the live brand tokens and
+        # self-hosted fonts, so they mirror the real Playwright/Remotion
+        # output a first-time visitor would get from their own meet file.
+        # The grid + tilt + reveal infrastructure (Umbrel-style bento, U.16
+        # tilt) carries over; the heading reuses the U.5 scroll-reveal helper.
         bento_html = (
             '<section class="mh-section" id="mh-ch-engine">'
             '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
@@ -13618,62 +13622,35 @@ def create_app() -> Flask:
                 ]
             )
             + '<div class="mh-bento mh-reveal-group">'
-            # Tile 1 — story card showpiece (2×2)
-            '<div class="mh-bento-tile feature is-medal">'
-            '<span class="mh-bento-eyebrow">Story card · 1080×1920</span>'
-            '<div class="mh-bento-title">Tom Davies.<br><em>PB</em> 100m free.</div>'
-            '<div class="mh-bento-time">52.41<span class="mh-bento-delta">−0.74s</span></div>'
-            '<p class="mh-bento-note">A clean vertical story graphic. Name, event and split, set in your club’s palette and type, rendered on our server and ready to post to Stories.</p>'
-            '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
-            "</div>"
-            # Tile 2 — motion reel (2×1)
-            '<div class="mh-bento-tile wide">'
-            '<span class="mh-bento-eyebrow">Motion reel · 15s MP4</span>'
-            '<div class="mh-bento-title">Meet-day <em>highlights</em></div>'
-            '<div class="mh-bento-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
-            '<div class="mh-bento-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> Branded outro</div>'
-            "</div>"
-            # Tile 3 — detected & ranked stat (1×1)
-            '<div class="mh-bento-tile is-medal">'
-            '<span class="mh-bento-eyebrow">Detected &amp; ranked</span>'
-            '<div class="mh-bento-stat">12</div>'
-            '<p class="mh-bento-note">moments found in the sample meet, scored by content-worthiness.</p>'
-            '<div class="mh-bento-chips"><span class="hot">5 PBs</span><span>3 medals</span></div>'
-            "</div>"
-            # Tile 4 — brand-kit swatches (1×1)
-            '<div class="mh-bento-tile">'
-            '<span class="mh-bento-eyebrow">Your brand, applied</span>'
-            '<div class="mh-bento-brand">'
-            '<span class="mh-bento-logo">SC</span>'
-            '<span class="mh-bento-swatches">'
-            '<span style="background:var(--lane)"></span>'
-            '<span style="background:var(--medal)"></span>'
-            '<span style="background:var(--info)"></span>'
-            '<span style="background:var(--ink)"></span>'
-            "</span>"
-            "</div>"
-            '<p class="mh-bento-note">Palette, fonts and logo, read from your site and locked onto every card.</p>'
-            "</div>"
-            # Tile 5 — moments we detect (2×1)
-            '<div class="mh-bento-tile wide">'
-            '<span class="mh-bento-eyebrow">Moments we detect</span>'
-            '<ul class="mh-bento-moments">'
-            '<li class="m-pb">Personal bests</li>'
-            '<li class="m-pb">Medal finishes</li>'
-            '<li class="m-key">Club records</li>'
-            '<li class="m-key">First-time swims</li>'
-            '<li class="m-std">Qualifying times</li>'
-            '<li class="m-std">Comeback swims</li>'
-            "</ul>"
-            "</div>"
-            # Tile 6 — feed graphic (2×1)
-            '<div class="mh-bento-tile wide">'
-            '<span class="mh-bento-eyebrow">Feed graphic · 1080×1350</span>'
-            '<div class="mh-bento-title">Top three <em>finals</em></div>'
-            '<div class="mh-bento-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
-            '<div class="mh-bento-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
-            "</div>"
-            "</div>"
+            # Story card — the 2×2 showpiece (Tom Davies / 52.41 carries
+            # through from the looping product demo for one coherent story).
+            + '<div class="mh-bento-tile feature is-story">'
+            + _sample_graphics.story_card_svg()
+            + "</div>"
+            # Meet reel poster frame.
+            + '<div class="mh-bento-tile is-reel">'
+            + _sample_graphics.reel_poster_svg()
+            + "</div>"
+            # Feed graphic — top-three finals podium.
+            + '<div class="mh-bento-tile is-feed">'
+            + _sample_graphics.feed_graphic_svg()
+            + "</div>"
+            # Detected & ranked — the intelligence read-out (wide).
+            + '<div class="mh-bento-tile wide is-rank">'
+            + _sample_graphics.detected_ranked_svg()
+            + "</div>"
+            # Your brand, applied.
+            + '<div class="mh-bento-tile is-brand">'
+            + _sample_graphics.brand_kit_svg()
+            + "</div>"
+            # Moments we detect — the taxonomy.
+            + '<div class="mh-bento-tile is-moments">'
+            + _sample_graphics.moments_svg()
+            + "</div>"
+            + "</div>"
+            + '<p class="mh-bento-caption">Real sample output — every name, '
+            "time and place comes from the file you upload, set in your club’s "
+            "palette and type. Nothing is invented.</p>"
             "</section>"
         )
 
