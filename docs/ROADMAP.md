@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-17 · `1ffb9a87f` · Merge pull request #728 from elijahkendrick04/claude/affectionate-ptolemy-n55xv1
+**Last updated:** 2026-06-17 · `de2bb9ccf` · Merge pull request #729: G1.8 gradient-mesh background engine
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -176,7 +176,6 @@ an effect. This epic is closed; new UI follow-on work would be filed as fresh `U
 - **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.2** · Graphic generator sprint — Multi-athlete collage / relay layout engine compositing 2–4 cutouts into one balanced frame with deterministic multi-subject placement. *Build: new `graphic_renderer/collage.py` + `layouts/v2/relay_collage.html`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.4** · Graphic generator sprint — Ground-treatment expansion pack — gradient-mesh, bokeh, light-ray, paper-weave grounds with weight caps. *Build: append to `style_packs.GROUNDS` + its ground-CSS generator (distinct region; file-siblings G1.5/G1.6/G1.28 each edit a different vocab/function).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
-- **G1.8** · Graphic generator sprint — Gradient-mesh background engine — deterministic multi-stop linear/radial/conic meshes keyed to brand roles, as SVG. *Build: new `sprint_hooks/gradient_mesh_bg.py` + new `graphic_renderer/gradient_mesh.py` (render-hook drop).* · ❌ **NOT STARTED** · 🟢 ISOLATED
 - **G1.9** · Graphic generator sprint — Variable-font support — variable WOFF2 axes (weight/width/optical) + per-slot axis optimisation. *Build: `layouts/_shared.css` + `layouts/fonts/` + `autofit.py` (distinct region).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.12** · Graphic generator sprint — Multi-line hero & split-result fitting — wrap/balance compound surnames and split times (`1:45.23 / 50.12`). *Build: `autofit.py` (file-sibling G1.11) + v2 hero slots.* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION
 - **G1.13** · Graphic generator sprint — SVG vector export path — editable SVG (outlined fonts, no raster) alongside each PNG. *Build: new `graphic_renderer/svg_export.py`.* · ❌ **NOT STARTED** · 🟢 ISOLATED
@@ -1556,5 +1555,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `194070927` | R1.21: local Piper TTS backend behind the voiceover seam |
 | 2026-06-17 | `20aa28cfe` | R1.1: motion-intent program pack (5 new reel/story intents) |
 | 2026-06-17 | `e6a0c475d` | Build UI2.8 — inline machine-readable Codeblock view on the review page |
-| 2026-06-17 | `89373a184` | R1.9: cutout-layer compositing in motion (parallax foreground) |
 <!-- /ROADMAP:ACTIVITY -->
