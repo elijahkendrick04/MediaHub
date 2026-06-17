@@ -23,11 +23,40 @@ def apply(html: str, ctx: RenderHookCtx) -> str:
 ```
 
 `apply` must be **deterministic** and should opt out (return `html` unchanged)
-unless `ctx.brief` requests the effect. A hook that raises is skipped, never fatal.
-With no modules here (today) the registry is a no-op and renders are byte-identical.
+unless `ctx.brief` (or an explicit operator toggle) requests the effect. A hook
+that raises is skipped, never fatal. A hook that nothing opts into — no brief
+request and no operator toggle — is a no-op, so renders stay byte-identical and
+the modules here are safe to ship in the always-loaded registry.
 
-Capabilities that fit this seam include **G1.8** (gradient-mesh backgrounds),
-**G1.19** (mono mode), **G1.21** (depth-of-field blur), **G1.22** (icon/badge
-overlays), **G1.29** (animated-still loops) and **G1.30** (inspection overlay).
+## Implemented hooks
+
+- `depth_of_field.py` (**G1.21**, `ORDER = 40`) — depth-of-field photo
+  treatment. When a brief sets `photo_treatment` (or `background_style`) to a
+  depth-of-field token (`depth_of_field` / `dof` / `background_blur` / …), it
+  blurs the photographic background layers (`.bg-photo`, `.bg-ai`) and keeps the
+  athlete cutout (`.athlete-cutout`) sharp. Pure CSS-filter transform, opt-in,
+  byte-identical for every other brief.
+- `animated_still.py` (**G1.29**, `ORDER = 20`) — animated still loops. When a
+  brief opts in (`animate_still` truthy, `background_style == "animated_loop"`,
+  or an explicit `animated_loop` name), it injects a subtle, seamlessly-looping
+  animated SVG layer so a live preview of the card breathes. The matching APNG/
+  GIF exporter and the loop maths live in `graphic_renderer/animated_still.py`.
+  Opt-in, byte-identical for every other brief.
+- `photo_tint.py` (**G1.7**, `ORDER = 40`) — photo-derived ground tinting. When
+  `MEDIAHUB_PHOTO_TINT` is set, nudges a v2 card's derived `--mh-surface` (and the
+  no-brand fallback ground only) toward the dominant colour of the card's photo —
+  extracted by deterministic PIL k-means (`graphic_renderer.photo_palette`) —
+  APCA-gated and never overriding a confirmed brand hex. Opt-in, byte-identical
+  when the flag is off.
+- `inspect_overlay.py` (**G1.30**, `ORDER = 95`) — render debug / inspection
+  overlay + design-explainability sidecar (`graphic_renderer/inspect.py`). When
+  `MEDIAHUB_INSPECT_OVERLAY` is set (or a brief carries a truthy `inspect_overlay`
+  attribute), it injects a `pointer-events:none` HUD — rule-of-thirds grid,
+  content safe-area, saliency-focus crosshair, a why-this-design panel and the
+  same facts embedded as a machine-readable JSON sidecar. Runs late so it
+  observes the finished card; opt-in, byte-identical when off.
+
+Capabilities that also fit this seam include **G1.8** (gradient-mesh
+backgrounds), **G1.19** (mono mode) and **G1.22** (icon/badge overlays).
 Capabilities that change formats, encoding, fonts, palettes or text-fitting edit
 their own dedicated module/region instead.

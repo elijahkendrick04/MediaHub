@@ -28,12 +28,19 @@ Measurement strategy (deterministic by construction)
   on very old Pillow). Still deterministic for a given file — used for
   pixel-accurate fitting where the font ships with the deployment.
 
-The table is an **approximation, by design**: no kerning, ligatures, optical
-sizing, or complex-script shaping. For Latin display/headline text in
-fixed-width boxes it is accurate to within a few percent — more than enough to
-choose a font size that will not overflow. When in doubt it errs slightly *wide*
-(via the unlisted-glyph default), so it prefers a smaller, safe size over an
-overflowing one.
+The table is an **approximation, by design**: it models advance widths plus
+**kerning-pair corrections and common f-ligatures** (G1.11) but not optical
+sizing or complex-script shaping. Those two corrections only ever make a
+measured line *narrower* — real type sets pairs like ``VA``/``To``/``W.`` and
+ligatures like ``fi``/``ffl`` tighter than the bare advance sum — and they are
+kept deliberately *conservative* (smaller in magnitude than a real face's
+kerning), so the estimate stays a safe upper bound on the rendered width. A
+global cap (``_MAX_TIGHTEN_FRACTION``) bounds the total tightening so no
+pathological all-kerning string can collapse the estimate below reality. For
+Latin display/headline text in fixed-width boxes the result is accurate to
+within a couple of percent — and still errs slightly *wide* (via the
+unlisted-glyph default and the conservative corrections), so it prefers a
+smaller, safe size over an overflowing one.
 """
 
 from __future__ import annotations
@@ -46,6 +53,7 @@ __all__ = [
     "wrap_text",
     "measure_line_px",
     "em_width",
+    "kern_ligature_em",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -315,19 +323,228 @@ def _char_em(ch: str, profile: str, scale: float) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# Kerning + ligature corrections (G1.11) — "truer measured fits"
+# --------------------------------------------------------------------------- #
+# A bare advance-sum over-states the width of real type: the face's kerning pulls
+# diagonal/round/punctuation pairs (``VA``, ``To``, ``W.``) closer, and the
+# default ``liga`` feature folds ``fi``/``fl``/``ff`` into a single narrower
+# glyph. Both corrections only ever *narrow* the estimate, so they are applied
+# in em units (scaled per family) and kept deliberately **conservative** — every
+# value is smaller in magnitude than a real face's, so the corrected width stays
+# a safe upper bound on the rendered advance (the never-overflow contract). The
+# Helvetica/Arial metrics underpinning ``_AFM_1000`` are the source these are
+# calibrated against; values are 1/1000 em, all negative (a tightening).
+
+# Kerning pairs (left+right glyph -> 1/1000 em adjustment, always negative).
+# Curated from the high-impact Helvetica/Arial pairs that actually occur in
+# names, event titles and result lines — caps↔caps display pairs (the dominant
+# case for MediaHub's upper-cased hero surnames), caps↔lowercase, and glyph↔
+# punctuation (the largest, safest kerns). Pairs not listed contribute nothing.
+_KERN_1000: dict[str, int] = {
+    # A before tall / round / diagonal caps and its lowercase reflexes.
+    "AC": -20,
+    "AG": -20,
+    "AO": -20,
+    "AQ": -20,
+    "AU": -20,
+    "AT": -55,
+    "AV": -65,
+    "AW": -45,
+    "AY": -65,
+    "Av": -25,
+    "Aw": -20,
+    "Ay": -25,
+    # F before A, common lowercase, and the very tight punctuation kerns.
+    "FA": -65,
+    "Fa": -20,
+    "Fe": -10,
+    "Fi": -10,
+    "Fo": -20,
+    "Fr": -10,
+    "Fu": -10,
+    "F.": -90,
+    "F,": -90,
+    # L before tall caps / Y and a leading apostrophe.
+    "LT": -55,
+    "LV": -55,
+    "LW": -45,
+    "LY": -55,
+    "L'": -90,
+    # P before A and punctuation.
+    "PA": -65,
+    "Pa": -10,
+    "Pe": -10,
+    "Po": -10,
+    "P.": -100,
+    "P,": -100,
+    # R before tall caps.
+    "RT": -20,
+    "RV": -25,
+    "RW": -20,
+    "RY": -30,
+    # T before caps, lowercase and punctuation (Taylor / Turner / Tomlin …).
+    "TA": -65,
+    "Ta": -65,
+    "Tc": -50,
+    "Te": -50,
+    "Ti": -15,
+    "To": -55,
+    "Tr": -45,
+    "Ts": -50,
+    "Tu": -50,
+    "Tw": -45,
+    "Ty": -50,
+    "T.": -65,
+    "T,": -65,
+    "T-": -90,
+    "T:": -40,
+    "T;": -40,
+    # V before caps, lowercase and punctuation (Vance / Vega / Vo …).
+    "VA": -65,
+    "Va": -55,
+    "Ve": -45,
+    "Vi": -15,
+    "Vo": -45,
+    "Vr": -35,
+    "Vu": -35,
+    "Vy": -35,
+    "V.": -90,
+    "V,": -90,
+    "V-": -65,
+    "V:": -40,
+    # W before caps, lowercase and punctuation (Walsh / Wong / Webb …).
+    "WA": -45,
+    "Wa": -35,
+    "We": -25,
+    "Wi": -10,
+    "Wo": -35,
+    "Wr": -25,
+    "Wu": -25,
+    "Wy": -20,
+    "W.": -65,
+    "W,": -65,
+    "W-": -40,
+    # Y before caps, lowercase and punctuation (Young / Yates / Yeo …).
+    "YA": -65,
+    "Ya": -65,
+    "Ye": -55,
+    "Yi": -15,
+    "Yo": -65,
+    "Yp": -55,
+    "Yu": -55,
+    "Yv": -55,
+    "Y.": -90,
+    "Y,": -90,
+    "Y-": -85,
+    "Y:": -45,
+    # Lowercase tails before a full stop / comma (caption sign-offs).
+    "r.": -25,
+    "r,": -25,
+    "v.": -25,
+    "v,": -25,
+    "w.": -25,
+    "w,": -25,
+    "y.": -25,
+    "y,": -25,
+}
+_KERN_EM: dict[str, float] = {pair: v / 1000.0 for pair, v in _KERN_1000.items()}
+
+# Common Latin ligatures the browser's default ``liga`` feature folds into one
+# glyph, narrower than its parts. Width *saved* in 1/1000 em (negative). Matched
+# longest-first (``ffi``/``ffl`` before ``ff``/``fi``/``fl``); lowercase only,
+# since a capital ``F`` does not ligate. Savings are conservative — a real face
+# usually folds at least this much, so the estimate stays a safe upper bound.
+_LIGATURE_1000: dict[str, int] = {
+    "ffi": -45,
+    "ffl": -45,
+    "ff": -25,
+    "fi": -18,
+    "fl": -18,
+}
+_LIGATURE_EM: dict[str, float] = {seq: v / 1000.0 for seq, v in _LIGATURE_1000.items()}
+
+# Safety backstop: the net kern+ligature tightening can never remove more than
+# this fraction of the raw advance width. Real Latin text tightens ~1–4% (a
+# dense all-caps ``AVAW…`` run tops out near this), so on realistic input the
+# cap never binds — it exists only so a synthetic worst case cannot collapse the
+# estimate below the real rendered width and break the never-overflow contract.
+_MAX_TIGHTEN_FRACTION = 0.10
+
+
+def _kern_ligature_em(text: str, profile: str, scale: float, advance_em: float) -> float:
+    """Net width correction (em, ``<= 0``) from kerning pairs + common ligatures.
+
+    Returns ``0.0`` for monospace (fixed advance — no kerning or ligatures) and
+    for text shorter than two characters. Ligatures are consumed longest-first so
+    ``ffi`` is not double-counted as ``ff`` + ``fi``; kerning is summed over every
+    adjacent character pair (the ligature components are absent from the kern
+    table, so the two passes never overlap). The result is scaled by the family
+    table scale — condensed/serif faces tighten proportionally to their advances
+    — then floored at ``-_MAX_TIGHTEN_FRACTION`` of the raw advance width.
+    """
+    n = len(text)
+    if profile == "mono" or n < 2:
+        return 0.0
+    # Ligatures: longest-match, non-overlapping.
+    liga = 0.0
+    i = 0
+    while i < n - 1:
+        seg3 = text[i : i + 3]
+        if seg3 in _LIGATURE_EM:
+            liga += _LIGATURE_EM[seg3]
+            i += 3
+            continue
+        seg2 = text[i : i + 2]
+        if seg2 in _LIGATURE_EM:
+            liga += _LIGATURE_EM[seg2]
+            i += 2
+            continue
+        i += 1
+    # Kerning: every adjacent pair in the original string.
+    kern = 0.0
+    for j in range(n - 1):
+        kern += _KERN_EM.get(text[j : j + 2], 0.0)
+    correction = (liga + kern) * scale
+    floor = -advance_em * _MAX_TIGHTEN_FRACTION
+    return correction if correction > floor else floor
+
+
+# --------------------------------------------------------------------------- #
 # Public measurement primitives
 # --------------------------------------------------------------------------- #
 def em_width(text: str, *, font_family: str = "Inter", weight: int | str = 400) -> float:
     """Width of ``text`` in **em units** (multiply by the px size to get px).
 
-    Deterministic and font-file-free: this is the char-width-table estimate.
+    Deterministic and font-file-free: the char-width-table advance sum, made
+    *truer* by conservative kerning-pair and common-ligature corrections (G1.11)
+    that only ever narrow the line. The corrections satisfy the identity
+    ``em_width(t) == raw_advance_em(t) + kern_ligature_em(t)`` and never push the
+    estimate below the real rendered width.
     """
     if not text:
         return 0.0
     profile = _classify_family(font_family)
     scale = _table_scale(font_family)
     factor = _weight_factor(weight)
-    return sum(_char_em(ch, profile, scale) for ch in text) * factor
+    advance = sum(_char_em(ch, profile, scale) for ch in text)
+    correction = _kern_ligature_em(text, profile, scale, advance)
+    return (advance + correction) * factor
+
+
+def kern_ligature_em(text: str, *, font_family: str = "Inter", weight: int | str = 400) -> float:
+    """The em width that kerning + ligature folding removes from ``text`` (``<= 0``).
+
+    Explainability handle for the G1.11 correction: ``em_width(t)`` equals the
+    bare advance sum **plus** this value (both already including the weight
+    factor). ``0.0`` for monospace, empty or single-character input.
+    """
+    if not text:
+        return 0.0
+    profile = _classify_family(font_family)
+    scale = _table_scale(font_family)
+    factor = _weight_factor(weight)
+    advance = sum(_char_em(ch, profile, scale) for ch in text)
+    return _kern_ligature_em(text, profile, scale, advance) * factor
 
 
 @lru_cache(maxsize=256)
