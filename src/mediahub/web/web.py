@@ -10293,7 +10293,7 @@ def _layout(
     {% if signed_in %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
       <a href="{{ url_for('sign_out') }}">Sign out</a>
-    {% else %}
+    {% elif account_email %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
     {% endif %}
     {% if dev_operator %}
