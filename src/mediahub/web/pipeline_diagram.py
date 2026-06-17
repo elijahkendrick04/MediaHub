@@ -345,22 +345,24 @@ PIPELINE_DIAGRAM_CSS = """
   line-height: 1.55;
 }
 .mh-pl-stage {
-  /* The engine graphic is MediaHub's own product mark, so its lit traces always
-     burn in the signature lane-yellow — pinned here, scoped to the stage, so it
-     stays luminous on a dark surface no matter which brand palette themes the
-     surrounding page (the marketing home runs the generic-default navy kit,
-     which would otherwise drag --lane to a near-invisible navy in here). Site
-     chrome is untouched. */
-  --lane: #D4FF3A;
-  --lane-glow: rgba(212,255,58,0.35);
   position: relative;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(120% 130% at 50% 0%, rgba(212,255,58,0.05), transparent 62%),
+    radial-gradient(120% 130% at 50% 0%, color-mix(in oklab, var(--lane) 5%, transparent), transparent 62%),
     var(--surface);
   padding: var(--sp-6);
   overflow: hidden;
+}
+/* When SIGNED OUT, this is the unbranded marketing home: it runs the generic-
+   default navy kit, which would drag the diagram's lit traces to a near-
+   invisible navy. There the engine stays MediaHub's own signature lane-yellow,
+   pinned and scoped to the stage. When SIGNED IN, the diagram is the club's
+   surface, so it drops the pin and follows the active brand (--lane ←
+   --mh-primary) like every other accent on the site. */
+html:not(.mh-signed-in) .mh-pl-stage {
+  --lane: #D4FF3A;
+  --lane-glow: rgba(212,255,58,0.35);
 }
 .mh-pl-svg { display: block; width: 100%; height: auto; }
 .mh-pl-svg--v { display: none; }
@@ -406,7 +408,7 @@ PIPELINE_DIAGRAM_CSS = """
   fill: var(--surface-3);
   stroke: var(--lane);
   stroke-width: 1.75;
-  filter: drop-shadow(0 0 10px rgba(212,255,58,0.32));
+  filter: drop-shadow(0 0 10px var(--lane-glow));
   animation: mh-pl-breathe 3.4s ease-in-out infinite;
 }
 .mh-pl-engine-title {
@@ -461,7 +463,7 @@ PIPELINE_DIAGRAM_CSS = """
   50%      { opacity: 1; }
 }
 @keyframes mh-pl-breathe {
-  0%, 100% { filter: drop-shadow(0 0 10px rgba(212,255,58,0.30)); }
-  50%      { filter: drop-shadow(0 0 18px rgba(212,255,58,0.52)); }
+  0%, 100% { filter: drop-shadow(0 0 10px var(--lane-glow)); }
+  50%      { filter: drop-shadow(0 0 18px var(--lane-glow)); }
 }
 """

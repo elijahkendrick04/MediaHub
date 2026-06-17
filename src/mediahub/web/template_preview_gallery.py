@@ -239,9 +239,9 @@ def normalise_state(raw: dict | None) -> StudioState:
 
 _SCHEMATIC_STYLE = (
     ".gd{fill:#11131b}.sf{fill:#1b1e28}.paper{fill:#ece7da}.ph{fill:#313643}"
-    ".ac{fill:#d4ff3a}.onac{fill:#0a0b11}.ik{fill:#5b6172}.ik2{fill:#aeb4c6}"
+    ".ac{fill:var(--lane,#d4ff3a)}.onac{fill:#0a0b11}.ik{fill:#5b6172}.ik2{fill:#aeb4c6}"
     ".dk{fill:#2a2e3a}.ln{stroke:#2a2e3a;stroke-width:1}"
-    ".acln{fill:none;stroke:#d4ff3a;stroke-width:2}"
+    ".acln{fill:none;stroke:var(--lane,#d4ff3a);stroke-width:2}"
     ".dkln{stroke:#9a907c;stroke-width:1}.ln-f{fill:none;stroke:#2a2e3a;stroke-width:1}"
 )
 

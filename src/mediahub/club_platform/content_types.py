@@ -33,6 +33,36 @@ class ContentType(str, Enum):
     FREE_TEXT = "free_text"
 
 
+@dataclass(frozen=True)
+class HowItWorks:
+    """Per-content-type "how it works" first-slide content (UI only).
+
+    Drives the Create → heading intro slide (``/make/<type>``): a homepage-style
+    ``you give → the engine → you get`` diagram plus a few numbered steps. Pure
+    presentation copy + icon *keys* (resolved to glyphs by the web renderer);
+    it touches no engine, AI or data surface.
+
+    Optional on :class:`ContentTypeMeta`. When a content type omits it, the
+    intro renderer derives a sensible default from the existing ``description``
+    and ``title`` — so a half-built tile never renders broken. That default is
+    a **safety net only**: every tile surfaced under Create MUST author its own
+    tile-specific ``HowItWorks``. Adding a new tile therefore means authoring a
+    new "how it works" for it — a contract enforced by
+    ``tests/test_content_intro.py`` (the suite fails until the new tile has its
+    own non-empty, distinct slide).
+    """
+
+    tagline: str  # one-line promise shown under the title
+    inputs: tuple[tuple[str, str], ...]  # (label, icon_key) — "what you give"
+    steps: tuple[str, ...]  # 2–4 numbered steps describing the flow
+    # The engine node's process line — the centre of the graphic, e.g.
+    # "detect · rank · brand · generate". Authored per tile so each graphic
+    # depicts THAT tile's actual functionality, not a generic pipeline. Empty
+    # falls back to the canonical phrase (safety net); the per-tile guard test
+    # requires every surfaced tile to author its own distinct line.
+    engine_process: str = ""
+
+
 @dataclass
 class ContentTypeMeta:
     type: ContentType
@@ -42,6 +72,10 @@ class ContentTypeMeta:
     is_implemented: bool  # if False, route renders a stub page
     icon_svg: str  # tiny inline SVG for navigation cards
     primary_route_endpoint: str  # url_for endpoint name
+    # Optional first-slide "how it works" content. None → the intro renderer
+    # derives a graceful default, so adding a heading never requires authoring
+    # this to get a working slide.
+    how_it_works: "HowItWorks | None" = None
 
 
 # --- Icon SVGs (inline, 24×24 viewBox) ---
@@ -115,6 +149,21 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=True,
         icon_svg=_WAVES_SVG,
         primary_route_endpoint="upload",
+        how_it_works=HowItWorks(
+            tagline="From a raw results file to ranked, branded, ready-to-post content.",
+            inputs=(
+                ("Results file", "file"),
+                ("PB history", "pb"),
+                ("Your brand kit", "brand"),
+            ),
+            steps=(
+                "Upload your Hytek results file (.hy3) or a zip — we read every swim.",
+                "The engine detects PBs, medals, finals and first-times, then ranks "
+                "them by how content-worthy they are.",
+                "You get branded cards, captions and a reel to review, approve and export.",
+            ),
+            engine_process="detect · rank · brand · generate",
+        ),
     ),
     ContentType.ATHLETE_SPOTLIGHT: ContentTypeMeta(
         type=ContentType.ATHLETE_SPOTLIGHT,
@@ -128,6 +177,19 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=True,
         icon_svg=_PERSON_SVG,
         primary_route_endpoint="spotlight_landing",
+        how_it_works=HowItWorks(
+            tagline="One swimmer's meet, told as a single ranked story.",
+            inputs=(
+                ("A processed meet", "meet"),
+                ("Pick a swimmer", "swimmer"),
+            ),
+            steps=(
+                "Choose any meet you've already processed, then pick the swimmer.",
+                "The engine gathers every achievement they earned and ranks it by impact.",
+                "You get a single-athlete spotlight card, caption and story to approve.",
+            ),
+            engine_process="gather · rank · brand · generate",
+        ),
     ),
     ContentType.EVENT_PREVIEW: ContentTypeMeta(
         type=ContentType.EVENT_PREVIEW,
@@ -141,6 +203,20 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=True,
         icon_svg=_CALENDAR_SVG,
         primary_route_endpoint="stub_weekend_preview",
+        how_it_works=HowItWorks(
+            tagline="Build the hype before the first whistle.",
+            inputs=(
+                ("Event details", "event"),
+                ("Athletes to watch", "swimmer"),
+                ("Photo (optional)", "photo"),
+            ),
+            steps=(
+                "Tell us the event, the date and venue, and who to watch.",
+                "The engine shapes the story angles and writes preview copy in your voice.",
+                "You get feed and story captions plus a branded graphic to approve.",
+            ),
+            engine_process="angle · write · brand",
+        ),
     ),
     ContentType.SPONSOR_ACTIVATION: ContentTypeMeta(
         type=ContentType.SPONSOR_ACTIVATION,
@@ -154,6 +230,21 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=True,
         icon_svg=_STAR_SVG,
         primary_route_endpoint="stub_sponsor_post",
+        how_it_works=HowItWorks(
+            tagline="Brand-safe posts that lead with the moment, not the logo.",
+            inputs=(
+                ("Sponsor + event", "sponsor"),
+                ("Key achievement", "trophy"),
+                ("Brand rules", "brand"),
+            ),
+            steps=(
+                "Tell us the sponsor, the event and the moment to celebrate.",
+                "The engine writes a sponsor-friendly caption that keeps the "
+                "partnership feeling natural.",
+                "You get a brand-safe graphic and caption to approve and export.",
+            ),
+            engine_process="feature · write · brand-check",
+        ),
     ),
     ContentType.SESSION_UPDATE: ContentTypeMeta(
         type=ContentType.SESSION_UPDATE,
@@ -167,6 +258,19 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=True,
         icon_svg=_SESSION_SVG,
         primary_route_endpoint="stub_session_update",
+        how_it_works=HowItWorks(
+            tagline="Quick mid-meet updates while the action is still live.",
+            inputs=(
+                ("What's happened", "note"),
+                ("Current session", "meet"),
+            ),
+            steps=(
+                "Type the event, the latest, and which session you're in.",
+                "The engine writes short, shareable Stories and feed cards in your voice.",
+                "You get quick captions and a graphic to post between sessions.",
+            ),
+            engine_process="summarise · write · brand",
+        ),
     ),
     ContentType.FREE_TEXT: ContentTypeMeta(
         type=ContentType.FREE_TEXT,
@@ -181,5 +285,18 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=True,
         icon_svg=_PENCIL_SVG,
         primary_route_endpoint="free_text_chat_page",
+        how_it_works=HowItWorks(
+            tagline="Describe any post in plain words — get a branded graphic back.",
+            inputs=(
+                ("Your words", "words"),
+                ("Photos (optional)", "photo"),
+            ),
+            steps=(
+                "Type what you want — a shout-out, a thank-you, a milestone, anything.",
+                "MediaHub interprets it, writes the caption and places your photos in.",
+                "You get a branded graphic draft to edit, approve and export.",
+            ),
+            engine_process="interpret · write · place",
+        ),
     ),
 }

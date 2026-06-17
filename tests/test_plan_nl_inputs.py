@@ -286,8 +286,14 @@ def test_create_page_surfaces_plan_entry(app_with_org):
     with app_with_org.test_client() as client:
         _with_org(client)
         html = client.get("/make").get_data(as_text=True)
+        # Plan is the predominant entry at the top of Create; like every tile it
+        # opens its own "how it works" first slide, which then continues into the
+        # planner itself.
         assert "Open Plan" in html
-        assert 'href="/plan"' in html
+        assert 'href="/make/plan"' in html
+        intro = client.get("/make/plan").get_data(as_text=True)
+        assert "How it works" in intro
+        assert 'href="/plan"' in intro  # the slide's CTA opens the planner
 
 
 def test_studio_removed_from_top_bar_but_create_present(app_with_org):

@@ -827,7 +827,7 @@ def _render_why_inner(
             f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px">'
             f"{label}{offset_tag}</div>"
             f'<blockquote style="margin:2px 0 0 0;padding:6px 10px;border-left:2px solid var(--accent);'
-            f"background:rgba(212,255,58,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;"
+            f"background:color-mix(in oklab, var(--lane) 5%, transparent);font-family:ui-monospace,Menlo,monospace;font-size:12px;"
             f'color:var(--ink)">{raw}</blockquote>'
             f"</li>"
         )
@@ -863,7 +863,7 @@ def _render_why_inner(
     perf_block = ""
     if perf_ctx:
         perf_block = (
-            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:rgba(212,255,58,0.06);'
+            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:color-mix(in oklab, var(--lane) 6%, transparent);'
             'border-left:2px solid var(--lane);border-radius:4px">'
             '<div style="font-size:10px;text-transform:uppercase;color:var(--lane);letter-spacing:0.5px;'
             'margin-bottom:2px">Performance context (AI)</div>'
@@ -961,7 +961,7 @@ def _render_why_this_card(
     )
     shell_open = (
         f'<details{_open_attr} class="why-card" style="margin-top:10px;padding:10px 12px;'
-        'background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.25);border-radius:8px">'
+        'background:color-mix(in oklab, var(--lane) 6%, transparent);border:1px solid color-mix(in oklab, var(--lane) 25%, transparent);border-radius:8px">'
         '<summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--lane);'
         'user-select:none;list-style:none;display:flex;align-items:center;gap:6px">'
         f'<span aria-hidden="true">&#9432;</span> {_summary_label}</summary>'
@@ -999,14 +999,14 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     btn = (
         f'<button class="btn secondary" type="button" '
         f'style="font-size:11px;padding:4px 10px;'
-        f'background:rgba(212,255,58,0.15);border-color:rgba(212,255,58,0.40);color:var(--lane)" '
+        f'background:color-mix(in oklab, var(--lane) 15%, transparent);border-color:color-mix(in oklab, var(--lane) 40%, transparent);color:var(--lane)" '
         f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)})">'
         f"Use in next caption</button>"
     )
     panel = (
         f'<div id="{panel_id}" data-mh-why-caption '
         f'style="display:none;margin-top:8px;padding:8px 10px;'
-        f"background:rgba(212,255,58,0.04);border:1px dashed rgba(212,255,58,0.30);"
+        f"background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px dashed color-mix(in oklab, var(--lane) 30%, transparent);"
         f'border-radius:6px;font-size:12px;color:var(--ink);line-height:1.45"></div>'
     )
     return btn, panel
@@ -3192,7 +3192,7 @@ function switchTone(btn) {
     var isActive = tab.dataset.tone === newTone;
     tab.classList.toggle('active', isActive);
     if (isActive) {
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'color-mix(in oklab, var(--lane) 15%, transparent)';
       tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
     } else {
       tab.style.background = 'transparent';
@@ -3219,7 +3219,7 @@ function switchToneLive(btn, captionUrl, cardId) {
     var isActive = tab.dataset.tone === newTone;
     tab.classList.toggle('active', isActive);
     if (isActive) {
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'color-mix(in oklab, var(--lane) 15%, transparent)';
       tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
       tab.style.fontWeight = '600';
     } else {
@@ -3286,7 +3286,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       }
       if (isTransient) {
         if (captionDiv) {
-          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(212,255,58,0.20);border-radius:6px;background:rgba(212,255,58,0.04)">'
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid color-mix(in oklab, var(--lane) 20%, transparent);border-radius:6px;background:color-mix(in oklab, var(--lane) 4%, transparent)">'
             + '<div style="font-weight:600;color:var(--accent);margin-bottom:4px">&#x21BB; Briefly busy &mdash; try again</div>'
             + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + (j.message || 'Wait a few seconds and click regenerate again.') + '</div>'
             + '</div>';
@@ -3307,7 +3307,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
           if (variants.length > 1) {
             var pills = variants.map(function(_, i) {
               var sel = (i === idx);
-              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(212,255,58,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
+              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'color-mix(in oklab, var(--lane) 14%, transparent)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
@@ -3333,7 +3333,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // the server's language registry, so new languages need no JS change.
       if (captionDiv && j.caption_secondary) {
         var secBox = document.createElement('div');
-        secBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(212,255,58,0.03)';
+        secBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)';
         secBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(j.secondary_language_label || 'Translation') + '</div>'
           + '<span style="white-space:pre-wrap" dir="' + (j.secondary_rtl ? 'rtl' : 'auto') + '">' + safeText(j.caption_secondary) + '</span>';
         captionDiv.appendChild(secBox);
@@ -3657,7 +3657,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var formatLabels = {'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'};
   var tabsHtml = formats.map(function(f) {
     var active = (f === cur);
-    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
+    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
   }).join('');
   // Per-graphic photo picker — the user decides which photo lands on THIS
   // graphic. Library photos remembered for this card's athlete (linked at
@@ -3669,7 +3669,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var athlete = data.card_athlete || '';
   var photoUrl = createUrl.replace(/\/create-graphic$/, '/photo');
   function _pchip(label, active, oc) {
-    return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'rgba(212,255,58,0.12)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
+    return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'color-mix(in oklab, var(--lane) 12%, transparent)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
   }
   var autoOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", false)';
   var noneOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", true)';
@@ -4281,7 +4281,7 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
     var hook = (vt.brief && vt.brief.primary_hook) || '';
     return (
-      '<div class="variant-tile" style="flex:1;min-width:min(160px,100%);background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+      '<div class="variant-tile" style="flex:1;min-width:min(160px,100%);background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
         (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
@@ -4384,7 +4384,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "✦ AI",
             True,
             "tone-tab-ai",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--lane)",
             "Live AI caption. Generates fresh each time.",
         ),
@@ -4393,7 +4393,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "Warm",
             False,
             "",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--accent)",
             "Warm & community — friendly, first-name, inclusive.",
         ),
@@ -4402,7 +4402,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "Hype",
             False,
             "",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--accent)",
             "Energetic & hype — race-day language, high energy.",
         ),
@@ -4411,7 +4411,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "Precise",
             False,
             "",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--accent)",
             "Data-led — numbers first, sponsor-friendly, no fluff.",
         ),
@@ -4453,7 +4453,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     schedule_btn = _schedule_button_html(run_id, card_id_raw, _wf_card_el_id)
 
     return (
-        f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
+        f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">'
         f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
         f'<div style="margin-bottom:8px">{tabs_html}</div>'
         f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
@@ -4478,7 +4478,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f"</div>"
         f'<div class="assist-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>'
         f"</div>"
-        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
@@ -4953,7 +4953,7 @@ function turnMeetIntoPack() {{
   // also blocks a second click (pointer-events:none), so no disabled toggle.
   setState('loading');
   status.style.display = '';
-  status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
+  status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid color-mix(in oklab, var(--lane) 30%, transparent);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
     '<span id="ti-status-text">Drafting every artefact with live AI&hellip;</span>';
   var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
@@ -5721,7 +5721,11 @@ BASE_CSS = """
   --lane-h:    var(--mh-primary-hover);       /* #E6FF6B — hover lift */
   --lane-deep: var(--mh-primary-pressed);     /* #A8CC2E — pressed/underline */
   --lane-ink:  var(--mh-on-primary);          /* #0A0B11 — text on lane bg */
-  --lane-glow: rgba(212,255,58,0.35);
+  /* The accent glow tracks --lane (← --mh-primary), so every glow/shadow that
+     uses var(--lane-glow) follows the active club's brand colour just like the
+     strokes do — change the club's colours and the whole site's accents recolour
+     together. Falls back to the lane-yellow default when --lane is the default. */
+  --lane-glow: color-mix(in oklab, var(--lane) 35%, transparent);
 
   /* SIGNATURE ACCENT 2 — medal gold.
      Reserved EXCLUSIVELY for athlete achievements (PB, medal, first-time,
@@ -6020,8 +6024,8 @@ header.topnav nav a.live::before {
   transition: background var(--transition);
 }
 .mh-notif-item:hover { background: rgba(245,242,232,0.04); }
-.mh-notif-item.is-unread { background: rgba(212,255,58,0.05); }
-.mh-notif-item.is-unread:hover { background: rgba(212,255,58,0.09); }
+.mh-notif-item.is-unread { background: color-mix(in oklab, var(--lane) 5%, transparent); }
+.mh-notif-item.is-unread:hover { background: color-mix(in oklab, var(--lane) 9%, transparent); }
 .mh-notif-dot {
   flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
   margin-top: 5px; background: var(--ink-faint);
@@ -6491,7 +6495,7 @@ p:last-child { margin-bottom: 0; }
 .mh-react-btn .mh-react-emoji { font-size: 14px; line-height: 1; }
 .mh-react-btn .mh-react-count { font-variant-numeric: tabular-nums; min-width: 7px; text-align: center; color: var(--ink-dim); }
 .mh-react-btn .mh-react-count[hidden] { display: none; }
-.mh-react-btn.is-on { background: rgba(212,255,58,0.10); border-color: rgba(212,255,58,0.45); color: var(--lane); }
+.mh-react-btn.is-on { background: color-mix(in oklab, var(--lane) 10%, transparent); border-color: color-mix(in oklab, var(--lane) 45%, transparent); color: var(--lane); }
 .mh-react-btn.is-on .mh-react-count { color: var(--lane); }
 .btn.large { padding: 14px 28px; font-size: 14px; }
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
@@ -6555,8 +6559,8 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
   white-space: nowrap;
   line-height: 1.4;
 }
-.tag.lane  { background: rgba(212,255,58,0.10); color: var(--lane);  border-color: rgba(212,255,58,0.40); }
-.tag.live  { background: rgba(212,255,58,0.10); color: var(--lane);  border-color: rgba(212,255,58,0.50); }
+.tag.lane  { background: color-mix(in oklab, var(--lane) 10%, transparent); color: var(--lane);  border-color: color-mix(in oklab, var(--lane) 40%, transparent); }
+.tag.live  { background: color-mix(in oklab, var(--lane) 10%, transparent); color: var(--lane);  border-color: color-mix(in oklab, var(--lane) 50%, transparent); }
 .tag.live::before {
   content: '';
   width: 5px; height: 5px;
@@ -6642,7 +6646,7 @@ input[type=text]:hover, input[type=email]:hover, textarea:hover, select:hover {
 }
 input[type=text]:focus, input[type=email]:focus, input[type=password]:focus, input[type=url]:focus, input[type=number]:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--lane);
-  box-shadow: 0 0 0 2px rgba(212,255,58,0.18);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--lane) 18%, transparent);
   background: rgba(245,242,232,0.04);
 }
 input[type=checkbox], input[type=radio] {
@@ -6985,7 +6989,7 @@ a.card:hover, .card[data-interactive]:hover {
 }
 .mh-toast.success { border-color: rgba(34,197,94,0.45); }
 .mh-toast.error   { border-color: rgba(244,63,94,0.45); }
-.mh-toast.info    { border-color: rgba(212,255,58,0.45); }
+.mh-toast.info    { border-color: color-mix(in oklab, var(--lane) 45%, transparent); }
 .mh-toast .mh-toast-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
 .mh-toast.success .mh-toast-icon { color: var(--good); }
 .mh-toast.error   .mh-toast-icon { color: var(--bad); }
@@ -7168,15 +7172,15 @@ a.card:hover, .card[data-interactive]:hover {
 .mh-fact--time {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  background: rgba(212, 255, 58, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, 0.18);
+  background: color-mix(in oklab, var(--lane) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--lane) 18%, transparent);
 }
 /* PB / medal / record — the achievement itself: the brand gold-green, loudest. */
 .mh-fact--pb {
   color: var(--lane);
   font-weight: 700;
-  background: rgba(212, 255, 58, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, 0.30);
+  background: color-mix(in oklab, var(--lane) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--lane) 30%, transparent);
 }
 
 .mh-card-actions {
@@ -7202,8 +7206,8 @@ a.card:hover, .card[data-interactive]:hover {
   transition: all var(--transition);
 }
 .mh-card-actions button:hover { color: var(--ink); border-color: var(--rule); }
-.mh-card-actions button.primary { color: var(--lane); border-color: rgba(212,255,58,0.30); }
-.mh-card-actions button.primary:hover { background: rgba(212,255,58,0.08); border-color: var(--lane); }
+.mh-card-actions button.primary { color: var(--lane); border-color: color-mix(in oklab, var(--lane) 30%, transparent); }
+.mh-card-actions button.primary:hover { background: color-mix(in oklab, var(--lane) 8%, transparent); border-color: var(--lane); }
 /* Achievement / medal variant — gold accent for PB / medal / first-time */
 .mh-content-card.medal { border-left-color: var(--medal); }
 .mh-content-card.medal .mh-card-platform { color: var(--medal); }
@@ -7259,7 +7263,7 @@ a.card:hover, .card[data-interactive]:hover {
   color: var(--good); font-size: 13px; font-weight: 700;
 }
 .mh-stage[data-state="active"] {
-  background: rgba(212,255,58,0.05);
+  background: color-mix(in oklab, var(--lane) 5%, transparent);
   border-bottom: 2px solid var(--lane);
 }
 .mh-stage[data-state="active"] .mh-stage-label { color: var(--lane); }
@@ -7429,8 +7433,8 @@ textarea, select { max-width: 100%; }
 .mh-hero-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 999px;
-  background: rgba(212,255,58,0.08);
-  border: 1px solid rgba(212,255,58,0.20);
+  background: color-mix(in oklab, var(--lane) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--lane) 20%, transparent);
   font-size: 12px; font-weight: 600;
   color: var(--accent);
   letter-spacing: 0.02em;
@@ -7797,8 +7801,8 @@ textarea, select { max-width: 100%; }
 }
 .mh-profile-card .meta-line .pill {
   padding: 3px 8px;
-  background: rgba(212,255,58,0.10);
-  border: 1px solid rgba(212,255,58,0.30);
+  background: color-mix(in oklab, var(--lane) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--lane) 30%, transparent);
   border-radius: 2px;
   color: var(--lane);
   font-weight: 500;
@@ -7848,7 +7852,7 @@ textarea, select { max-width: 100%; }
   align-items: center; justify-content: center;
   min-height: 180px;
   background:
-    repeating-linear-gradient(45deg, rgba(212,255,58,0.025) 0 10px, transparent 10px 20px),
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--lane) 2.5%, transparent) 0 10px, transparent 10px 20px),
     var(--surface);
   border: 1px dashed var(--chrome);
   border-radius: var(--radius);
@@ -7865,7 +7869,7 @@ textarea, select { max-width: 100%; }
 }
 .mh-new-profile:hover {
   background:
-    repeating-linear-gradient(45deg, rgba(212,255,58,0.05) 0 10px, transparent 10px 20px),
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--lane) 5%, transparent) 0 10px, transparent 10px 20px),
     var(--surface-2);
   border-color: var(--lane);
   color: var(--lane);
@@ -8053,7 +8057,7 @@ textarea, select { max-width: 100%; }
   white-space: nowrap;
 }
 .mh-arch-tag[data-cat="photo"] { color: #7fd4ff; border-color: rgba(127,212,255,0.32); }
-.mh-arch-tag[data-cat="data"] { color: var(--lane); border-color: rgba(212,255,58,0.32); }
+.mh-arch-tag[data-cat="data"] { color: var(--lane); border-color: color-mix(in oklab, var(--lane) 32%, transparent); }
 .mh-arch-tag[data-cat="editorial"] { color: #f6a5d0; border-color: rgba(246,165,208,0.32); }
 .mh-arch-slug {
   font-family: var(--font-mono);
@@ -8371,6 +8375,12 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web.content_intro import (  # noqa: E402
+    CONTENT_INTRO_CSS as _MH_CI_CSS,
+    presentation_for as _ct_presentation_for,
+    render_content_intro as _render_content_intro,
+    render_plan_intro as _render_plan_intro,
+)
 from mediahub.web.cadence_heatmap import (  # noqa: E402
     CADENCE_HEATMAP_CSS as _MH_CAD_CSS,
     cadence_panel_html as _cadence_panel_html,
@@ -8400,6 +8410,7 @@ BASE_CSS = (
     + _MH_AUDIENCE_ICON_CSS
     + _MH_MOTION_CSS
     + _MH_PL_CSS
+    + _MH_CI_CSS
     + _MH_CAD_CSS
     + _MH_RG_CSS
 )
@@ -9246,7 +9257,7 @@ _VISUAL_PANEL_JS = """<script>
   }
   function chipStyle(active){
     return 'font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid '
-      + (active?'var(--lane)':'var(--border)') + ';background:' + (active?'rgba(212,255,58,0.12)':'transparent')
+      + (active?'var(--lane)':'var(--border)') + ';background:' + (active?'color-mix(in oklab, var(--lane) 12%, transparent)':'transparent')
       + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0';
   }
   function render(panel, data){
@@ -9268,7 +9279,7 @@ _VISUAL_PANEL_JS = """<script>
     var formats = [['feed_portrait','Portrait'],['feed_square','Square']];
     var tabs = formats.map(function(f){
       var on = (f[0] === cur);
-      return '<button type="button" class="mh-vbtn" data-fmt="' + f[0] + '" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'rgba(212,255,58,0.15)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
+      return '<button type="button" class="mh-vbtn" data-fmt="' + f[0] + '" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'color-mix(in oklab, var(--lane) 15%, transparent)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
     }).join('');
     var photos = data.available_photos || [];
     var picker = '';
@@ -9806,7 +9817,7 @@ def _layout(
     return render_template_string(
         """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="{{ 'mh-signed-in' if signed_in else '' }}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -9880,15 +9891,19 @@ def _layout(
       <!-- Pit-wall plate — follows the cascade surface so a re-skinned
            chrome shows a proper backplate (Phase 1.6 Stage F3). -->
       <rect x="0.5" y="0.5" width="31" height="31" rx="2" fill="var(--mh-surface)" stroke="var(--mh-outline-rule)" stroke-width="1"/>
-      <!-- Ascending podium bars: silver (ink) / brand primary / brand tertiary.
-           The silver bar uses currentColor so it inherits the link's ink
-           colour (var(--ink)) — Stage F3's "MediaHub's own marks use
-           currentColor + var()" rule. -->
+      <!-- Ascending podium bars: silver (ink) / lane-yellow / medal-gold. The
+           MediaHub logo is the one mark that does NOT re-skin with the club
+           brand — it stays MediaHub's own identity colours so a club always
+           knows whose product they're in (maintainer decision: "the logo is the
+           only thing that doesn't change colour"). The silver bar keeps
+           currentColor (the link's neutral ink, constant); the lane-yellow and
+           medal-gold bars + baseline are pinned, not var(--mh-primary/tertiary),
+           so they never take the active profile's colours. -->
       <rect x="6"  y="20" width="5" height="7"  fill="currentColor" opacity="0.55"/>
-      <rect x="13.5" y="9"  width="5" height="18" fill="var(--mh-primary)"/>
-      <rect x="21" y="14" width="5" height="13" fill="var(--mh-tertiary)"/>
-      <!-- Lane baseline — brand primary stroke -->
-      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="var(--mh-primary)" stroke-width="1"/>
+      <rect x="13.5" y="9"  width="5" height="18" fill="#D4FF3A"/>
+      <rect x="21" y="14" width="5" height="13" fill="#F4D58D"/>
+      <!-- Lane baseline — MediaHub lane-yellow (fixed) -->
+      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="#D4FF3A" stroke-width="1"/>
     </svg>
     MediaHub
   </a>
@@ -12425,7 +12440,7 @@ html.mh-js .mh-bulkbar.is-empty{display:none}
 .mh-row-check-wrap{display:inline-flex;align-items:flex-start;padding-top:2px;
   cursor:pointer}
 td.mh-bulk-cell,th.mh-bulk-cell{width:34px;text-align:center;vertical-align:middle}
-.ach-row.is-selected{background:rgba(212,255,58,0.05);border-radius:8px}
+.ach-row.is-selected{background:color-mix(in oklab, var(--lane) 5%, transparent);border-radius:8px}
 @media (max-width:640px){.mh-bulkbar{position:static}
   .mh-bulkbar-actions{margin-left:0;width:100%}}
 """
@@ -14989,7 +15004,7 @@ def create_app() -> Flask:
       <div id="mh-url-progress-fill" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width 0.45s ease"></div>
     </div>
   </div>
-  <div id="mh-url-status" role="status" aria-live="polite" hidden style="margin-top:var(--sp-3);padding:10px 12px;border-radius:8px;background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.22);font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)"></div>
+  <div id="mh-url-status" role="status" aria-live="polite" hidden style="margin-top:var(--sp-3);padding:10px 12px;border-radius:8px;background:color-mix(in oklab, var(--lane) 6%, transparent);border:1px solid color-mix(in oklab, var(--lane) 22%, transparent);font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)"></div>
   <div id="mh-url-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
 </div>
 <script>
@@ -22680,7 +22695,7 @@ Relay team broke club record"></textarea>
   <h2 style="margin-top:0">Tell the planner (direct signals)</h2>
   <p class="dim" style="font-size:12.5px;margin-top:0">Upcoming events boost previews and announcements; blackout dates hold them back; goals nudge a type you want to push. Saved per organisation.</p>
 
-  <div style="border:1px solid var(--lane);border-radius:10px;padding:14px;background:rgba(212,255,58,0.04);margin:4px 0 18px 0">
+  <div style="border:1px solid var(--lane);border-radius:10px;padding:14px;background:color-mix(in oklab, var(--lane) 4%, transparent);margin:4px 0 18px 0">
     <label for="mh-plan-nl" style="font-weight:600;display:flex;align-items:center;gap:8px">
       <span class="tag live" style="font-size:10px">AI</span>Describe what&rsquo;s coming up
     </label>
@@ -23312,18 +23327,11 @@ function mhPlanGenerate(btn) {{
         except ImportError:
             REGISTRY = {}
 
-        # Presentation-only metadata (output formats + rough effort) keyed
-        # by ContentType value. This is UI sugar — it does NOT live on the
-        # registry dataclass, so adding/removing keys here can never affect
-        # the engine. Unknown types fall back to a generic format chip.
-        _ct_presentation = {
-            "meet_recap": (["Caption", "Graphic", "Reel"], "~ 60s"),
-            "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
-            "event_preview": (["Caption", "Graphic"], "~ 40s"),
-            "sponsor_activation": (["Caption", "Graphic"], "~ 30s"),
-            "session_update": (["Caption", "Graphic"], "~ 20s"),
-            "free_text": (["Caption", "Graphic"], "~ 15s"),
-        }
+        # Presentation-only metadata (output formats + rough effort) lives in
+        # mediahub.web.content_intro.PRESENTATION_FORMATS so the Create tiles and
+        # each heading's "how it works" first slide read from one source. UI
+        # sugar only — it does NOT live on the registry dataclass, so it can
+        # never affect the engine. Unknown types fall back to a generic chip.
 
         # Session Update and Sponsor Post are no longer their own tiles —
         # Free Text now interprets any such prompt (and adds photos) into a
@@ -23339,10 +23347,14 @@ function mhPlanGenerate(btn) {{
         for ct, meta in REGISTRY.items():
             if getattr(meta.type, "value", str(ct)) in _hidden_cts:
                 continue
-            # Defensive: a stale endpoint name in the content-type
-            # registry must NEVER 500 the whole /make page.
+            ct_val = getattr(meta.type, "value", str(ct))
+            # Defensive: a stale endpoint name in the content-type registry must
+            # NEVER 500 the whole /make page. We resolve the primary route only
+            # to decide Ready-vs-disabled; the tile itself links to the per-type
+            # "how it works" first slide (content_type_intro), whose Start button
+            # carries on to the real route.
             try:
-                route_url = url_for(meta.primary_route_endpoint)
+                url_for(meta.primary_route_endpoint)
                 href_ok = True
             except Exception:
                 log.warning(
@@ -23351,23 +23363,21 @@ function mhPlanGenerate(btn) {{
                     ct,
                     meta.primary_route_endpoint,
                 )
-                route_url = "#"
                 href_ok = False
             if meta.is_implemented and href_ok:
                 badge = '<span class="tag live">Ready</span>'
-                action = f'href="{route_url}"'
+                action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
                 disabled_cls = ""
                 if not primary_marked:
                     disabled_cls = " mh-template-primary"
                     primary_marked = True
             else:
                 badge = '<span class="tag">Coming soon</span>'
-                action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'
+                action = 'href="#" onclick="return false"'
                 disabled_cls = " is-disabled"
 
             # Build the output-format chip row + effort estimate.
-            ct_val = getattr(meta.type, "value", str(ct))
-            formats, effort = _ct_presentation.get(ct_val, (["Caption"], ""))
+            formats, effort = _ct_presentation_for(ct_val)
             fmt_chips = "".join(
                 f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
             )
@@ -23611,26 +23621,30 @@ function mhPlanGenerate(btn) {{
         )
 
         # Plan moved here from the top bar — it answers this page's own hero
-        # question ("what should we make?"), so it sits at the top of Create as
-        # the strategic entry point into the ranked, explainable content plan.
+        # question ("what should we make?"), so it sits at the TOP of Create as
+        # the predominant, strategic entry point into the ranked, explainable
+        # content plan. Like every tile it opens its own how-it-works first slide
+        # (/make/plan); that slide's "Open Plan" CTA continues into the planner.
+        _plan_tile_icon = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<path d="M9 11l3 3L22 4"/>'
+            '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
+            "</svg>"
+        )
         plan_entry_html = (
-            f'<a href="{_h(url_for("plan_page"))}" '
-            "style=\"display:flex;align-items:center;gap:18px;flex-wrap:wrap;"
-            "margin-bottom:var(--sp-5);padding:18px 20px;border:1px solid var(--lane);"
-            'border-radius:12px;background:rgba(212,255,58,0.05);text-decoration:none;color:var(--ink)">'
-            '<div style="flex:1;min-width:240px">'
-            '<span style="font-family:var(--font-mono,monospace);font-size:10.5px;'
-            'text-transform:uppercase;letter-spacing:0.14em;color:var(--lane)">Plan</span>'
-            '<div style="font-size:18px;font-weight:700;margin:4px 0 6px 0">'
-            'Not sure what to post? <em class="editorial" style="color:var(--lane)">Plan your next posts.</em></div>'
-            '<p style="margin:0;font-size:13px;color:var(--ink-dim);max-width:62ch">'
-            "MediaHub ranks what to post next from your results, the calendar and what you tell it "
-            "&mdash; with the reasoning shown for every item. Describe what&rsquo;s coming up in your own "
-            "words and it fills in the calendar for you, then jump straight into making the top idea.</p>"
-            "</div>"
-            '<span style="flex:0 0 auto;font-weight:600;border:1px solid var(--lane);'
-            'border-radius:999px;padding:8px 16px;font-size:13px;color:var(--lane);white-space:nowrap">'
-            "Open Plan &rarr;</span>"
+            f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
+            f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
+            '<span class="mh-plan-tile-body">'
+            '<span class="mh-plan-tile-eyebrow">Plan &middot; Start here</span>'
+            '<span class="mh-plan-tile-title">Not sure what to post? '
+            '<em class="editorial">Plan your next posts.</em></span>'
+            '<span class="mh-plan-tile-desc">MediaHub ranks what to post next from your '
+            "results, the calendar and what you tell it &mdash; with the reasoning shown for "
+            "every item. Describe what&rsquo;s coming up in your own words and it fills in the "
+            "calendar for you, then jump straight into making the top idea.</span>"
+            "</span>"
+            '<span class="mh-plan-tile-cta">Open Plan &rarr;</span>'
             "</a>"
         )
 
@@ -23648,6 +23662,58 @@ function mhPlanGenerate(btn) {{
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
+
+    # ---- /make/<ct> — the per-heading "how it works" first slide ------------
+    @app.route("/make/<ct>")
+    def content_type_intro(ct):
+        # Every implemented Create tile links here first. The slide explains, in
+        # the landing page's visual language, what this heading takes in and
+        # produces; its "Start" CTA carries on to the real route. Registry-driven
+        # (mediahub.web.content_intro), so a heading added to the REGISTRY gets a
+        # first slide automatically — no per-heading wiring here.
+        try:
+            from mediahub.club_platform.content_types import REGISTRY
+            from mediahub.club_platform.post_types import canonical_slug, implemented_content_type
+        except ImportError:
+            return redirect(url_for("make_page"))
+
+        # Plan is the predominant non-content-type entry. It gets the same
+        # how-it-works first slide, but its "Open Plan" CTA opens the planner.
+        if canonical_slug(ct) == "plan":
+            try:
+                plan_start = url_for("plan_page")
+            except Exception:
+                plan_start = url_for("make_page")
+            body = _render_plan_intro(start_url=plan_start, back_url=url_for("make_page"))
+            return _layout("Plan", body, active="create")
+
+        ctype = implemented_content_type(ct)
+        if ctype is None or ctype not in REGISTRY:
+            # Unknown / planning-only slug — send them back to the chooser.
+            return redirect(url_for("make_page"))
+        meta = REGISTRY[ctype]
+
+        formats, effort = _ct_presentation_for(ctype.value)
+        # Start → the real flow. Degrade gracefully (a missing endpoint sends the
+        # user back to Create rather than 500ing the intro).
+        try:
+            start_url = url_for(meta.primary_route_endpoint)
+        except Exception:
+            log.warning(
+                "content_type_intro: %r references unknown endpoint %r",
+                ctype.value,
+                meta.primary_route_endpoint,
+            )
+            start_url = url_for("make_page")
+
+        body = _render_content_intro(
+            meta,
+            formats=formats,
+            effort=effort,
+            start_url=start_url,
+            back_url=url_for("make_page"),
+        )
+        return _layout(meta.title, body, active="create")
 
     def _compose_spotlight_caption(run_id: str, swimmer_key: str, tone: str = ""):
         """Compose the single spotlight caption from APPROVED achievements.
@@ -24267,7 +24333,7 @@ function mhPlanGenerate(btn) {{
                 sp_visual_panel = (
                     f'<div class="visual-panel" data-card="{card_id_safe}" '
                     f'style="display:none;margin-top:10px;padding:12px;'
-                    f"background:rgba(212,255,58,0.04);border:1px solid var(--border);"
+                    f"background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);"
                     f'border-radius:8px"></div>'
                 )
 
@@ -25225,7 +25291,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # as the legacy /free-text/quick form.
             chat_picker_html = _render_library_picker_for_active_profile()
             accepted_html = f"""
-<div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:rgba(212,255,58,0.04)">
+<div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <div class="strap live" style="margin-bottom:var(--sp-3)">Accepted brief</div>
   {_format_brief_html(s.accepted_brief)}
   <form method="post" action="{generate_url}" style="margin-top:var(--sp-3)">
@@ -26613,7 +26679,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f"</p>"
                 )
             brand_preview_html = f"""
-<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(212,255,58,0.03)">
+<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:color-mix(in oklab, var(--lane) 3%, transparent)">
   <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Brand DNA preview</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
@@ -26728,7 +26794,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
 </section>
 
-<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(212,255,58,0.04)">
+<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <h2 style="margin-top:0">Re-analyse brand from website + social links</h2>
   <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and/or social profile links. MediaHub reads each link, extracts the palette, tone of voice, characteristic phrases and recent captions, and updates the brand profile below. AI-driven &mdash; no manual style guide needed.</p>
   <form method="POST">
@@ -28737,7 +28803,7 @@ what you're doing, what they should do.</p>
         ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
         ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
         ".mh-compare td{text-align:center;color:var(--ink-muted)}"
-        ".mh-compare .is-rec{background:rgba(212,255,58,.045)}"
+        ".mh-compare .is-rec{background:color-mix(in oklab, var(--lane) 4.5%, transparent)}"
         ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
         "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
         "border-bottom-color:var(--border-h)}"
@@ -30327,7 +30393,7 @@ what you're doing, what they should do.</p>
 
             preview_html = f"""
 <div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
-     background:rgba(212,255,58,0.04)">
+     background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <h3 style="margin-top:0;margin-bottom:8px">What MediaHub learned about {_h(prof.display_name)}</h3>
   <p style="font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 10px 0">
     {_h(prof.brand_voice_summary or "(no voice summary yet — capture again from a richer source)")}</p>
@@ -30478,7 +30544,7 @@ what you're doing, what they should do.</p>
                 rule_chips = "".join(
                     '<li style="padding:6px 10px;margin:4px 4px 0 0;'
                     "display:inline-block;border-radius:4px;"
-                    "background:rgba(212,255,58,0.08);border:1px solid rgba(212,255,58,0.30);"
+                    "background:color-mix(in oklab, var(--lane) 8%, transparent);border:1px solid color-mix(in oklab, var(--lane) 30%, transparent);"
                     f'color:var(--ink);font-size:11.5px;line-height:1.35;max-width:100%">'
                     f'<strong style="color:var(--lane,var(--accent))">MUST</strong> &middot; {_h(r[:240])}'
                     "</li>"
@@ -31030,7 +31096,7 @@ function mhSetupMode(mode) {{
 }}
 .mh-combobox-options li:hover,
 .mh-combobox-options li.mh-combobox-active {{
-  background: rgba(212,255,58,0.10);
+  background: color-mix(in oklab, var(--lane) 10%, transparent);
   color: var(--lane, var(--accent, #D4FF3A));
 }}
 .mh-combobox-options li.mh-combobox-empty {{
@@ -31051,7 +31117,7 @@ function mhSetupMode(mode) {{
   text-align: center;
   cursor: pointer;
   background:
-    repeating-linear-gradient(45deg, rgba(212,255,58,0.02) 0 10px,
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--lane) 2%, transparent) 0 10px,
                               transparent 10px 20px),
     var(--surface, var(--panel, #14171F));
   color: var(--ink-dim, var(--ink-muted, #B6B2A6));
@@ -31063,7 +31129,7 @@ function mhSetupMode(mode) {{
 }}
 .mh-drop-zone.is-dragover {{
   border-color: var(--lane, var(--accent, #D4FF3A));
-  background: rgba(212,255,58,0.06);
+  background: color-mix(in oklab, var(--lane) 6%, transparent);
   color: var(--ink, #F5F2E8);
 }}
 .mh-drop-zone-inner strong {{ color: var(--ink, #F5F2E8); font-weight: 600; }}
@@ -33923,7 +33989,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   // Visual marker on the active sort button.
   var allBtns = section.querySelectorAll('button[onclick*="mhSortPackSection"]');
   Array.prototype.forEach.call(allBtns, function(b) {{
-    b.style.background = (b === btn) ? 'rgba(212,255,58,0.18)' : '';
+    b.style.background = (b === btn) ? 'color-mix(in oklab, var(--lane) 18%, transparent)' : '';
     b.style.color = (b === btn) ? 'var(--accent)' : '';
   }});
 }};
