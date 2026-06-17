@@ -86,13 +86,245 @@ def _gen_bg_enabled() -> bool:
     return _flag("MEDIAHUB_GEN_BG", "0")
 
 
+# ---------------------------------------------------------------------------
+# G1.14 — render quality profiles + WebP/AVIF output.
+#
+# A *quality profile* bundles the two knobs that trade render speed against
+# output fidelity: the screenshot device-pixel-ratio (sharper text/gradients
+# at higher DPR, but a bigger capture to resample) and the encoder settings for
+# each still format. Three named profiles cover the useful range — ``fast`` for
+# quick previews, ``standard`` (the historic default) for posts, ``high`` for
+# print-adjacent crispness. The active profile is chosen by
+# ``MEDIAHUB_RENDER_QUALITY``; an explicit ``MEDIAHUB_RENDER_DPR`` still wins for
+# DPR so existing ops/tuning keeps working.
+#
+# The encode step is deliberately deterministic (no AI, no heuristics): a fixed
+# suffix→format map and fixed per-profile encoder params, so the same HTML at
+# the same profile always produces the same bytes for a given Pillow build. The
+# canonical rendered artifact stays a target-size PNG (so the G1.23 pool and the
+# G1.24 PNG cache keep working unchanged); WebP/AVIF/JPEG are a cheap transcode
+# of that PNG in the dispatcher.
+# ---------------------------------------------------------------------------
+
+
+class RenderEncodeError(RuntimeError):
+    """Raised when a requested still format cannot be honestly produced.
+
+    We never write a mislabelled file (e.g. PNG bytes under a ``.avif`` name)
+    or silently downgrade the format the caller asked for — if the deployment's
+    Pillow can't encode the requested codec, the operator gets a clear error
+    instead of a lie on disk.
+    """
+
+
+@dataclass(frozen=True)
+class QualityProfile:
+    """A render quality tier: screenshot DPR + per-format encoder settings.
+
+    ``dpr`` is the device-pixel-ratio used at screenshot time (the capture is
+    then resampled back down to the target canvas with Lanczos). The remaining
+    fields are encoder knobs: ``webp_quality``/``webp_method`` (0-100 / 0-6),
+    ``avif_quality``/``avif_speed`` (0-100 / 0-10, higher speed = faster &
+    lossier), ``jpeg_quality`` (0-100), and ``png_optimize`` (zlib effort).
+    """
+
+    name: str
+    dpr: int
+    webp_quality: int
+    webp_method: int
+    avif_quality: int
+    avif_speed: int
+    jpeg_quality: int
+    png_optimize: bool
+
+
+# The three tiers. ``standard`` reproduces the historic render exactly (DPR 2,
+# optimised PNG) so today's posts are byte-identical; ``fast`` halves the
+# capture and skips the slow encoder passes; ``high`` triples the capture and
+# spends the most encoder effort for the crispest result.
+_QUALITY_PROFILES: dict[str, QualityProfile] = {
+    "fast": QualityProfile(
+        name="fast",
+        dpr=1,
+        webp_quality=80,
+        webp_method=2,
+        avif_quality=55,
+        avif_speed=8,
+        jpeg_quality=82,
+        png_optimize=False,
+    ),
+    "standard": QualityProfile(
+        name="standard",
+        dpr=2,
+        webp_quality=90,
+        webp_method=4,
+        avif_quality=65,
+        avif_speed=6,
+        jpeg_quality=90,
+        png_optimize=True,
+    ),
+    "high": QualityProfile(
+        name="high",
+        dpr=3,
+        webp_quality=95,
+        webp_method=6,
+        avif_quality=82,
+        avif_speed=3,
+        jpeg_quality=95,
+        png_optimize=True,
+    ),
+}
+
+_DEFAULT_QUALITY = "standard"
+
+# Output still formats, keyed by the lowercase file suffix the caller writes to.
+# The value is the Pillow format string passed to ``Image.save``. PNG is the
+# default and the only lossless option; WEBP/AVIF are the G1.14 additions; JPEG
+# rides along for free (and feeds the EXIF/print siblings).
+_ENCODE_FORMATS: dict[str, str] = {
+    ".png": "PNG",
+    ".webp": "WEBP",
+    ".avif": "AVIF",
+    ".jpg": "JPEG",
+    ".jpeg": "JPEG",
+}
+
+# Reverse map: Pillow format string → canonical lowercase extension, used by
+# callers (``render_brief``) to name the output file for a chosen format.
+_FORMAT_EXTENSIONS: dict[str, str] = {
+    "PNG": "png",
+    "WEBP": "webp",
+    "AVIF": "avif",
+    "JPEG": "jpg",
+}
+
+
+def _quality_profile(name: str | None = None) -> QualityProfile:
+    """Resolve the active quality profile.
+
+    ``name`` (or ``MEDIAHUB_RENDER_QUALITY`` when ``name`` is None) selects the
+    tier; an unknown/blank value falls back to ``standard`` so a typo degrades
+    to the safe default rather than erroring mid-render.
+    """
+    key = (
+        (name if name is not None else os.environ.get("MEDIAHUB_RENDER_QUALITY", ""))
+        .strip()
+        .lower()
+    )
+    return _QUALITY_PROFILES.get(key, _QUALITY_PROFILES[_DEFAULT_QUALITY])
+
+
+def _coerce_profile(quality) -> QualityProfile:
+    """Normalise a caller-supplied profile (a name, a QualityProfile, or None)."""
+    if isinstance(quality, QualityProfile):
+        return quality
+    if isinstance(quality, str) and quality.strip():
+        return _quality_profile(quality)
+    return _quality_profile()
+
+
 def _dpr_render() -> int:
-    """Device-pixel-ratio used at screenshot time. Defaults to 2."""
+    """Device-pixel-ratio used at screenshot time.
+
+    An explicit ``MEDIAHUB_RENDER_DPR`` always wins (clamped to 1..4) so existing
+    ops tuning and tests keep their exact behaviour. With it unset/blank the DPR
+    comes from the active quality profile (``standard`` → 2, matching the historic
+    default); an invalid explicit value also falls back to the profile DPR.
+    """
+    raw = os.environ.get("MEDIAHUB_RENDER_DPR")
+    if raw is not None and raw.strip() != "":
+        try:
+            return max(1, min(4, int(raw)))
+        except Exception:
+            return _quality_profile().dpr
+    return _quality_profile().dpr
+
+
+def _resolve_image_format(explicit: str | None, output_path: "str | Path") -> str:
+    """Return the Pillow format string for the output.
+
+    An ``explicit`` format name (``"webp"``, ``".avif"``, ``"PNG"`` …) wins;
+    otherwise the format is inferred from the output path's suffix. An unknown
+    explicit name is a hard error (the caller asked for something we don't do);
+    an unknown *suffix* defaults to PNG (the historic behaviour for ``.png`` and
+    anything else a caller happened to pass).
+    """
+    if explicit:
+        key = "." + str(explicit).strip().lower().lstrip(".")
+        fmt = _ENCODE_FORMATS.get(key)
+        if fmt is None:
+            raise RenderEncodeError(
+                f"unsupported render image format {explicit!r}; "
+                f"choose one of {sorted(set(_ENCODE_FORMATS.values()))}"
+            )
+        return fmt
+    suffix = Path(output_path).suffix.lower()
+    return _ENCODE_FORMATS.get(suffix, "PNG")
+
+
+def _pil_can_encode(pil_format: str) -> bool:
+    """True if the installed Pillow can encode ``pil_format``.
+
+    PNG/JPEG are always present in Pillow; WEBP/AVIF are optional codecs whose
+    availability we probe via ``PIL.features`` (falling back to the registered
+    extension table). Used to turn an unavailable codec into an honest error
+    rather than a corrupt/mislabelled file.
+    """
+    if pil_format in ("PNG", "JPEG"):
+        return Image is not None
+    if Image is None:
+        return False
+    feature = {"WEBP": "webp", "AVIF": "avif"}.get(pil_format)
+    if feature is None:
+        return True
     try:
-        v = int(os.environ.get("MEDIAHUB_RENDER_DPR", "2"))
-        return max(1, min(4, v))
+        from PIL import features as _pil_features
+
+        return bool(_pil_features.check(feature))
     except Exception:
-        return 2
+        try:
+            return pil_format in set(Image.registered_extensions().values())
+        except Exception:
+            return False
+
+
+def _encode_image(img, pil_format: str, profile: QualityProfile) -> bytes:
+    """Encode a PIL image to ``pil_format`` bytes under ``profile``.
+
+    Deterministic: fixed encoder params per profile/format. JPEG drops alpha
+    (it has none) by flattening to RGB; WEBP/AVIF keep the alpha channel. Raises
+    ``RenderEncodeError`` if the codec isn't available so we never emit a
+    mislabelled file.
+    """
+    from io import BytesIO
+
+    if not _pil_can_encode(pil_format):
+        raise RenderEncodeError(
+            f"{pil_format} output was requested but this Pillow build cannot encode it; "
+            f"install a Pillow with {pil_format} support or pick a supported format"
+        )
+    buf = BytesIO()
+    if pil_format == "PNG":
+        src = img if img.mode in ("RGBA", "RGB", "P", "L", "LA") else img.convert("RGBA")
+        src.save(buf, format="PNG", optimize=profile.png_optimize)
+    elif pil_format == "WEBP":
+        src = img if img.mode in ("RGBA", "RGB") else img.convert("RGBA")
+        src.save(buf, format="WEBP", quality=profile.webp_quality, method=profile.webp_method)
+    elif pil_format == "AVIF":
+        src = img if img.mode in ("RGBA", "RGB") else img.convert("RGBA")
+        src.save(buf, format="AVIF", quality=profile.avif_quality, speed=profile.avif_speed)
+    elif pil_format == "JPEG":
+        src = img if img.mode == "RGB" else img.convert("RGB")
+        src.save(
+            buf,
+            format="JPEG",
+            quality=profile.jpeg_quality,
+            optimize=profile.png_optimize,
+            progressive=True,
+        )
+    else:  # pragma: no cover - guarded by _resolve_image_format
+        raise RenderEncodeError(f"unsupported encode format: {pil_format}")
+    return buf.getvalue()
 
 
 _GRAIN_SVG_BLOCK = (
@@ -2746,18 +2978,17 @@ def _active_pool() -> Optional[_RenderPool]:
 atexit.register(shutdown_render_pool)
 
 
-def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]) -> int:
-    """Headless-Chromium render; returns bytes written. Raises if Playwright is unavailable.
+def _produce_png(html: str, output_path: Path, size: tuple[int, int], dpr: int) -> int:
+    """Render (or cache-serve) the canonical target-size PNG to ``output_path``.
 
-    Routes through the warm render pool when one is active (see
-    ``render_pool_session``); otherwise launches a fresh one-shot Chromium. Both
-    paths share ``_render_on_context``, so the output PNG is identical either way.
+    This is the format-agnostic render core: the G1.24 PNG cache, the G1.23 warm
+    pool, and the one-shot Chromium fallback, all keyed on ``dpr`` passed in by
+    the caller. ``render_html_to_png`` wraps it to add the output-format encode.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     width, height = size
-    dpr = _dpr_render()
 
     # G1.24 incremental render-stage cache: the screenshot is a pure function of
     # (final HTML, canvas size, DPR), so an identical card reuses the previously
@@ -2791,6 +3022,75 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
             return _render_on_context(ctx, html, output_path, size, dpr)
         finally:
             browser.close()
+
+
+def render_html_to_png(
+    html: str,
+    output_path: str | Path,
+    size: tuple[int, int],
+    *,
+    image_format: str | None = None,
+    quality=None,
+) -> int:
+    """Headless-Chromium render; returns bytes written. Raises if Playwright is unavailable.
+
+    Routes through the warm render pool when one is active (see
+    ``render_pool_session``); otherwise launches a fresh one-shot Chromium. Both
+    paths share ``_render_on_context``, so the rendered PNG is identical either
+    way, and the G1.24 cache reuses it across calls.
+
+    G1.14 — output format + quality profiles:
+      - ``image_format`` picks the still format (``"png"`` (default), ``"webp"``,
+        ``"avif"``, ``"jpeg"``). When None it's inferred from the output path's
+        suffix, so ``foo.webp`` writes WebP with no extra argument.
+      - ``quality`` is a :class:`QualityProfile` or a profile name
+        (``"fast"``/``"standard"``/``"high"``); None uses the active profile from
+        ``MEDIAHUB_RENDER_QUALITY``. The profile drives both the screenshot DPR
+        and the encoder settings.
+    The canonical rendered/cached artifact is always a target-size PNG; a
+    non-PNG output renders that PNG to a temp sibling, then transcodes it — so
+    the pool and cache stay shared across formats and the default PNG path is
+    byte-identical. A WebP/AVIF the deployment's Pillow can't encode is an honest
+    ``RenderEncodeError`` rather than a mislabelled file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    profile = _coerce_profile(quality)
+    img_format = _resolve_image_format(image_format, output_path)
+    # DPR resolution: an explicit MEDIAHUB_RENDER_DPR is the ops override and
+    # always wins (handled inside _dpr_render). With it unset, a caller-supplied
+    # ``quality`` profile drives the DPR; otherwise the env profile/default does.
+    dpr = _dpr_render()
+    if quality is not None and os.environ.get("MEDIAHUB_RENDER_DPR", "").strip() == "":
+        dpr = profile.dpr
+
+    # PNG: the canonical artifact is exactly the output — unchanged historic path.
+    if img_format == "PNG":
+        return _produce_png(html, output_path, size, dpr)
+
+    # Non-PNG: render the canonical PNG to a temp sibling, then transcode it to
+    # the requested format under the active profile.
+    png_path = output_path.with_name(output_path.name + ".g114src.png")
+    try:
+        _produce_png(html, png_path, size, dpr)
+        if Image is None:
+            raise RenderEncodeError(f"{img_format} output requires Pillow, which is not installed")
+        try:
+            with Image.open(png_path) as im:
+                im.load()
+                data = _encode_image(im, img_format, profile)
+        except RenderEncodeError:
+            raise
+        except Exception as exc:
+            raise RenderEncodeError(f"failed to encode {img_format} output: {exc}")
+        output_path.write_bytes(data)
+        return len(data)
+    finally:
+        try:
+            png_path.unlink()
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -3316,8 +3616,10 @@ def render_brief(
     skip_cutout: bool = False,
     watermark_text: str = "",
     photo_pos_override: str = "",
+    image_format: str = "png",
+    quality=None,
 ) -> RenderResult:
-    """Render a CreativeBrief into a single PNG. Returns RenderResult.
+    """Render a CreativeBrief into a single still. Returns RenderResult.
 
     ``sponsor_logo_path`` (PC.8): an optional sponsor logo image embedded in
     the sponsor strip beside the sponsor name.
@@ -3327,6 +3629,11 @@ def render_brief(
     ``photo_pos_override`` (UI 1.18): an explicit CSS ``object-position`` from
     the inspector's manual crop control, used in place of the saliency focus
     for v2 archetypes. Empty (the default) keeps the automatic crop.
+    ``image_format`` (G1.14): the output still format — ``"png"`` (default,
+    lossless), ``"webp"``, ``"avif"``, or ``"jpeg"``. The file is named
+    ``<format_name>.<ext>`` accordingly. ``quality`` (G1.14) selects the render
+    quality profile (``"fast"``/``"standard"``/``"high"`` or a
+    :class:`QualityProfile`); None uses ``MEDIAHUB_RENDER_QUALITY``.
     """
     width, height = size
     output_dir = Path(output_dir)
@@ -3639,11 +3946,24 @@ def render_brief(
         ),
     )
 
-    # Output path
+    # Output path — the file extension follows the requested image format
+    # (G1.14): PNG by default, else WebP/AVIF/JPEG.
     visual_id = "v_" + uuid.uuid4().hex[:12]
-    out_png = output_dir / f"{format_name}.png"
+    pil_format = _resolve_image_format(image_format, output_dir / format_name)
+    out_ext = _FORMAT_EXTENSIONS.get(pil_format, "png")
+    out_path = output_dir / f"{format_name}.{out_ext}"
 
-    bytes_written = render_html_to_png(html, out_png, (width, height))
+    # Forward the encode controls only when they deviate from the defaults, so
+    # the common PNG path keeps the historic 3-positional-arg call into
+    # render_html_to_png (the output suffix already drives PNG inference). This
+    # keeps existing render_html_to_png stubs valid and the default render
+    # byte-for-byte unchanged.
+    encode_kwargs: dict = {}
+    if pil_format != "PNG":
+        encode_kwargs["image_format"] = image_format
+    if quality is not None:
+        encode_kwargs["quality"] = quality
+    bytes_written = render_html_to_png(html, out_path, (width, height), **encode_kwargs)
 
     visual = GeneratedVisual(
         id=visual_id,
@@ -3654,7 +3974,7 @@ def render_brief(
         format_name=format_name,
         width=width,
         height=height,
-        file_path=str(out_png),
+        file_path=str(out_path),
         text_layers=dict(brief.text_layers or {}),
         palette=dict(brief.palette or {}),
         sourced_asset_ids=list(brief.sourced_asset_ids or []),
@@ -3669,6 +3989,8 @@ def render_brief(
 __all__ = [
     "GeneratedVisual",
     "RenderResult",
+    "QualityProfile",
+    "RenderEncodeError",
     "render_brief",
     "render_html_to_png",
     "render_pool_session",
