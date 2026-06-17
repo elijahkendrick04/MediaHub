@@ -430,13 +430,24 @@ def _normalise_tokens(value: str) -> set[str]:
     return out
 
 
+# Organisation-type words that the aliases above normalise TO. They appear in
+# almost every club name ("City of …", "… Swimming Club", "… Aquatics") so they
+# describe the *kind* of club, not its identity — the identity is the place name
+# (cardiff, brighton, manchester). They must NOT count as a distinguishing token,
+# or every "Co …" club would match every other (e.g. "Co Brighton" matching
+# "City of Cardiff" on the shared token "city").
+_GENERIC_CLUB_TOKENS: frozenset[str] = frozenset(
+    {"city", "swimming", "club", "aquatics", "university", "of"}
+)
+
+
 def _name_tokens_match(target: str, candidate: str) -> bool:
     """
     Decide whether *candidate* refers to the same club as *target*.
     A match requires either:
       - identical normalised forms, OR
       - one set of significant tokens contains the other (subset), OR
-      - shared 'core' tokens (length ≥ 4) that overlap substantially.
+      - shared identity tokens (length ≥ 4, not generic org-type words).
     """
     a = _normalise_tokens(target)
     b = _normalise_tokens(candidate)
@@ -446,10 +457,10 @@ def _name_tokens_match(target: str, candidate: str) -> bool:
         return True
     if a.issubset(b) or b.issubset(a):
         return True
-    # Significant tokens (length ≥ 4) — require overlap of all the
-    # shorter side's significant tokens.
-    sig_a = {t for t in a if len(t) >= 4}
-    sig_b = {t for t in b if len(t) >= 4}
+    # Identity tokens: significant (length ≥ 4) AND not a generic org-type word,
+    # so the match turns on the distinctive place name, not "city"/"swimming".
+    sig_a = {t for t in a if len(t) >= 4 and t not in _GENERIC_CLUB_TOKENS}
+    sig_b = {t for t in b if len(t) >= 4 and t not in _GENERIC_CLUB_TOKENS}
     if not sig_a or not sig_b:
         return False
     smaller, larger = (sig_a, sig_b) if len(sig_a) <= len(sig_b) else (sig_b, sig_a)
