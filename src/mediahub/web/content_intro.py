@@ -169,14 +169,17 @@ _CANONICAL_ENGINE_PROCESS = "detect · rank · brand · generate"
 
 def _engine(cx: float, cy: float, w: float, h: float, process: str) -> str:
     x0, y0 = cx - w / 2, cy - h / 2
+    # Icon / title / sub are one optically-centred stack (matches the tidied
+    # home-page engine block, PR #782): spark caps the wordmark with a tight
+    # gap, the title is the heaviest element, the sub trails one line below.
     return (
         '<g class="mh-pl-engine">'
         f'<rect class="mh-pl-engine-bg" x="{x0:.1f}" y="{y0:.1f}" '
         f'width="{w:.1f}" height="{h:.1f}" rx="16"/>'
-        + _icon(_ICON_SPARK, cx, cy - 30, 30, "mh-pl-ico mh-pl-ico--engine")
-        + f'<text class="mh-pl-engine-title" x="{cx:.1f}" y="{cy + 12:.1f}" '
+        + _icon(_ICON_SPARK, cx, cy - 23, 26, "mh-pl-ico mh-pl-ico--engine")
+        + f'<text class="mh-pl-engine-title" x="{cx:.1f}" y="{cy + 15:.1f}" '
         'text-anchor="middle">THE ENGINE</text>'
-        + f'<text class="mh-pl-engine-sub" x="{cx:.1f}" y="{cy + 36:.1f}" '
+        + f'<text class="mh-pl-engine-sub" x="{cx:.1f}" y="{cy + 34:.1f}" '
         f'text-anchor="middle">{_x(process)}</text>' + "</g>"
     )
 
@@ -238,7 +241,7 @@ def _svg_horizontal(
     chip_w, chip_h = 196, 66
     read_x0, read_edge = 28, 224
     write_x0 = write_edge = 812
-    eng_cx, eng_w = 520, 224
+    eng_cx, eng_w = 520, 244  # widened (PR #782) so the process line breathes
     n_in, n_out = len(inputs), len(outputs)
     n_max = max(n_in, n_out, 1)
     if n_max <= 3:
@@ -249,8 +252,12 @@ def _svg_horizontal(
         row_sp = 108
         eng_cy = 70 + chip_h / 2 + (n_max - 1) * row_sp / 2.0
         H = int(round(2 * eng_cy))
-    port_sp = min(row_sp, 46)
-    eng_h = max(164, int((n_max - 1) * port_sp + 70))
+    # Ports fan ±40 into the engine (matches the home-page diagram), and the box
+    # is trimmed to 136 for ≤3 nodes (PR #782), growing only when more ports
+    # need the room. Wire control points eased 96→80 for cleaner S-curves.
+    port_sp = min(row_sp, 40)
+    cp = 80
+    eng_h = max(136, int((n_max - 1) * port_sp + 44))
     eng_left, eng_right = eng_cx - eng_w / 2, eng_cx + eng_w / 2
 
     wires: list[str] = []
@@ -262,8 +269,8 @@ def _svg_horizontal(
         zip(inputs, _spread(n_in, eng_cy, row_sp), _spread(n_in, eng_cy, port_sp))
     ):
         d = (
-            f"M {read_edge} {ry:.1f} C {read_edge + 96} {ry:.1f}, "
-            f"{eng_left - 96:.1f} {py:.1f}, {eng_left:.1f} {py:.1f}"
+            f"M {read_edge} {ry:.1f} C {read_edge + cp} {ry:.1f}, "
+            f"{eng_left - cp:.1f} {py:.1f}, {eng_left:.1f} {py:.1f}"
         )
         wires.append(_wire(d))
         pulses.append(_pulse(d, "in", delay=i * 0.5))
@@ -275,8 +282,8 @@ def _svg_horizontal(
         zip(outputs, _spread(n_out, eng_cy, row_sp), _spread(n_out, eng_cy, port_sp))
     ):
         d = (
-            f"M {eng_right:.1f} {py:.1f} C {eng_right + 96:.1f} {py:.1f}, "
-            f"{write_edge - 96} {wy:.1f}, {write_edge} {wy:.1f}"
+            f"M {eng_right:.1f} {py:.1f} C {eng_right + cp:.1f} {py:.1f}, "
+            f"{write_edge - cp} {wy:.1f}, {write_edge} {wy:.1f}"
         )
         wires.append(_wire(d))
         pulses.append(_pulse(d, "out", delay=i * 0.5 + 1.4))
@@ -319,11 +326,12 @@ def _svg_vertical(
     n_in, n_out = len(inputs), len(outputs)
     n_max = max(n_in, n_out, 1)
     col_sp = 150 if n_max <= 3 else (104 if n_max == 4 else 86)
-    port_sp = min(col_sp, 46)
+    port_sp = min(col_sp, 40)
     read_yc, write_yc = 78, 700
     read_edge = read_yc + chip_h / 2
     write_edge = write_yc - chip_h / 2
-    eng_cx, eng_cy, eng_w, eng_h = 230, 400, 210, 150
+    # Wider + trimmed engine box to match the tidied home-page diagram (PR #782).
+    eng_cx, eng_cy, eng_w, eng_h = 230, 400, 244, 136
     eng_top, eng_bot = eng_cy - eng_h / 2, eng_cy + eng_h / 2
 
     wires: list[str] = []
