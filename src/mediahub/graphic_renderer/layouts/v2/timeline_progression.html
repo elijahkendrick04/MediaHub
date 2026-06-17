@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   timeline_progression  (v2 archetype, PAR-7 — G1.1)
+
+   A connected vertical TIMELINE: one accent spine runs top-to-bottom
+   down the left margin, threaded through circular milestone nodes read
+   as a progression of beats:
+
+     ● START    the kicker / achievement label.
+     ● ATHLETE  first name + an oversized surname.
+     ● RESULT   the dominant node — an accent disc carrying the headline
+                time/mark and the event. This is the peak of the line.
+     ● CONTEXT  the meet, and an optional measured highlight chip.
+
+   The club lockup anchors the foot.
+
+   Structural signature: a single CONNECTED spine with marker dots,
+   which reads at a glance as a journey/progression — distinct from the
+   three separate edge-to-edge bays of triptych_progression, the vertical
+   right RAIL of stat_stack_sidebar, the 2x2 cells of editorial_numbers_grid
+   and the centred numeral of big_number_dominant. The distinctiveness comes
+   from the spine GEOMETRY (a line you can follow), not a recolour, so it
+   reads as new structure even on an all-dark kit.
+
+   Overflow safety: name + result sit in a ~2/3-width column (the rail
+   eats the left ~190px), narrower than the full-canvas single-line boxes
+   the autofit vars assume (surname fit ~= 86% of canvas, result ~= 52%).
+   So the surname is scaled via calc(var * 0.5) AND allowed to WRAP/break
+   (a long or space-less name flows to extra lines instead of clipping);
+   the result is scaled via calc(var * 0.62) and also breaks. Holds at
+   1080x1350 and 1080x1920: the spine simply grows taller, the foot stays
+   bottom-anchored. No photo required; a supplied portrait sits as a quiet
+   desaturated wash behind the ground rather than as the focal element.
+   =================================================================== */
+
+.tl {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 96px 80px 80px 190px;
+}
+.tl *, .tl *::before, .tl *::after { box-sizing: border-box; }
+
+/* quiet portrait wash behind everything */
+.tl__photo { position: absolute; inset: 0; z-index: 0; opacity: 0.12; }
+.tl__photo img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: var(--mh-photo-pos, center 28%);
+  filter: grayscale(1) contrast(1.05);
+}
+
+/* the connected spine — a single accent line down the left margin */
+.tl__rail {
+  position: absolute;
+  left: 120px; top: 110px; bottom: 150px;
+  width: 6px; border-radius: 3px;
+  background: linear-gradient(var(--mh-accent), var(--mh-accent));
+  opacity: 0.55; z-index: 1;
+}
+
+.tl__nodes { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 52px; }
+.tl__node { position: relative; }
+/* the marker dot, centred on the rail (rail is at 120px; node padding 70px) */
+.tl__node::before {
+  content: "";
+  position: absolute; left: -82px; top: 6px;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--mh-primary);
+  border: 6px solid var(--mh-accent);
+}
+
+.tl__lab {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 21px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 12px;
+}
+.tl__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 40px; letter-spacing: 0.01em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+.tl__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.5);
+  line-height: 0.9; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+
+/* the RESULT node — the dominant accent disc beat */
+.tl__result-node::before {
+  width: 40px; height: 40px; left: -89px; top: 2px;
+  background: var(--mh-accent); border-color: var(--mh-accent);
+}
+.tl__result-card {
+  display: inline-block;
+  background: var(--mh-accent); color: var(--mh-primary);
+  border-radius: 14px; padding: 24px 34px;
+  max-width: 100%;
+}
+.tl__result-lab {
+  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-size: 17px; letter-spacing: 0.32em; text-transform: uppercase;
+  color: var(--mh-primary); opacity: 0.8; margin-bottom: 8px;
+}
+.tl__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.62);
+  line-height: 0.92; letter-spacing: -0.01em;
+  color: var(--mh-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+.tl__event {
+  margin-top: 12px;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 26px; line-height: 1.12; text-transform: uppercase;
+  color: var(--mh-primary); opacity: 0.92;
+  overflow-wrap: anywhere;
+}
+
+.tl__meet {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 27px; line-height: 1.16; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+/* optional measured highlight chip — collapses entirely when empty so an
+   unfilled slot never leaves a dangling label on the spine. */
+.tl__hero { margin-top: 14px; }
+.tl__hero:has(.tl__hero-val:empty) { display: none; }
+.tl__hero-lab {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 14px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 6px;
+}
+.tl__hero-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 24px; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+
+.tl__foot {
+  position: relative; z-index: 2;
+  margin-top: auto; padding-top: 30px;
+  border-top: 2px solid var(--mh-outline);
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+}
+.tl__foot-id { min-width: 0; }
+.tl__logo { height: 58px; width: auto; margin-bottom: 12px; }
+.tl__logo img, .tl__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.tl__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  line-height: 1.18; text-transform: uppercase; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.tl__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="tl">
+  <div class="tl__photo">{{ATHLETE_IMG_BLOCK}}</div>
+  <div class="tl__rail"></div>
+
+  <div class="tl__nodes">
+    <div class="tl__node">
+      <div class="tl__lab">{{ACHIEVEMENT_LABEL}}</div>
+    </div>
+    <div class="tl__node">
+      <div class="tl__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="tl__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    </div>
+    <div class="tl__node tl__result-node">
+      <div class="tl__result-card">
+        <div class="tl__result-lab">Result</div>
+        <div class="tl__result">{{RESULT_VALUE}}</div>
+        <div class="tl__event">{{EVENT_NAME}}</div>
+      </div>
+    </div>
+    <div class="tl__node">
+      <div class="tl__meet">{{MEET_NAME}}</div>
+      <div class="tl__hero">
+        <div class="tl__hero-lab">Highlight</div>
+        <div class="tl__hero-val">{{HERO_STAT}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tl__foot">
+    <div class="tl__foot-id">
+      <div class="tl__logo">{{LOGO_BLOCK}}</div>
+      <div class="tl__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="tl__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

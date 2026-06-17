@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   full_height_portrait_split  (v2 archetype, PAR-7 — G1.1)
+
+   A clean vertical split: a FULL-HEIGHT portrait fills the left ~56% of
+   the canvas, edge to edge, top to bottom; a full-height info column on
+   the right ~44% carries the kicker, the name, the event, the result and
+   the meta, stacked. A thin accent seam runs the full height of the split
+   line. The photo gets a brand-tinted scrim so the column copy and the
+   seam read against it without distorting the subject.
+
+   Structural signature: ONE full-height portrait beside a full-height
+   info column, split by a straight vertical seam. That is distinct from
+   duo_athlete_split (a 50/50 split CROSSED by a single name band, built
+   for two subjects) and from split_diagonal_hero (an angled photo stage
+   ABOVE a wedge). Here the portrait is uninterrupted and the type lives
+   entirely in its own column — a poised, gallery-portrait feel.
+
+   No-photo grace: when no cutout is supplied the photo panel is a brand
+   surface carrying a large faint surname watermark, so the split still
+   reads as deliberate rather than broken.
+
+   Overflow safety: the info column is ~44% width (~347px content), so the
+   surname is scaled via calc(var * 0.5) AND wraps, the result via
+   calc(var * 0.62) AND wraps. Holds at 1080x1350 and 1080x1920: the
+   portrait and column both grow taller, the meta stays bottom-anchored.
+   =================================================================== */
+
+.ps {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.ps *, .ps *::before, .ps *::after { box-sizing: border-box; }
+
+/* full-height portrait panel */
+.ps__photo {
+  position: relative; flex: 0 0 56%;
+  background: var(--mh-surface); overflow: hidden;
+  border-right: 8px solid var(--mh-accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.ps__watermark {
+  position: absolute; inset: 0; z-index: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: 200px; line-height: 0.8; letter-spacing: -0.02em;
+  text-transform: uppercase; color: var(--mh-on-surface); opacity: 0.1;
+  overflow: hidden; text-align: center;
+  word-break: break-word;
+}
+.ps__photo-img { position: absolute; inset: 0; z-index: 1; }
+.ps__photo-img img {
+  width: 100%; height: 100%;
+  object-fit: cover; object-position: var(--mh-photo-pos, center 28%);
+  display: block;
+}
+.ps__photo-img:empty { display: none; }
+/* brand-tinted scrim — protects the seam edge, never the subject's centre */
+.ps__scrim {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--mh-primary) 0%, transparent) 60%,
+    color-mix(in srgb, var(--mh-primary) 55%, transparent) 100%);
+}
+
+/* full-height info column */
+.ps__col {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column;
+  padding: 92px 60px 72px;
+}
+.ps__kicker {
+  display: flex; align-items: center; gap: 12px;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 21px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 28px;
+}
+.ps__kicker::before {
+  content: ""; width: 38px; height: 6px; border-radius: 4px;
+  background: var(--mh-accent); flex: 0 0 auto;
+}
+.ps__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 36px; letter-spacing: 0.01em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
+}
+.ps__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.5);
+  line-height: 0.88; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+.ps__event {
+  margin-top: 28px; padding-top: 22px;
+  border-top: 4px solid var(--mh-accent);
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 26px; line-height: 1.14; text-transform: uppercase;
+  color: var(--mh-on-primary); overflow-wrap: anywhere;
+}
+.ps__result-wrap { margin-top: 40px; }
+.ps__result-lab {
+  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-size: 16px; letter-spacing: 0.28em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 8px;
+}
+.ps__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.62);
+  line-height: 0.9; letter-spacing: -0.02em;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+.ps__hero { margin-top: 16px; }
+.ps__hero:has(.ps__hero-val:empty) { display: none; }
+.ps__hero-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 23px; letter-spacing: 0.04em; color: var(--mh-accent);
+  overflow-wrap: anywhere;
+}
+
+.ps__foot {
+  margin-top: auto; padding-top: 28px;
+  border-top: 2px solid var(--mh-outline);
+}
+.ps__meet {
+  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 19px;
+  color: var(--mh-on-primary); opacity: 0.82; margin-bottom: 14px;
+  overflow-wrap: anywhere;
+}
+.ps__lockup { display: flex; align-items: center; gap: 16px; }
+.ps__logo { height: 50px; width: auto; flex: 0 0 auto; }
+.ps__logo img, .ps__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.ps__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 18px;
+  text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
+}
+.ps__sponsor { margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="ps">
+  <div class="ps__photo">
+    <div class="ps__watermark">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="ps__photo-img">{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="ps__scrim"></div>
+  </div>
+
+  <div class="ps__col">
+    <div class="ps__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="ps__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="ps__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="ps__event">{{EVENT_NAME}}</div>
+    <div class="ps__result-wrap">
+      <div class="ps__result-lab">Result</div>
+      <div class="ps__result">{{RESULT_VALUE}}</div>
+      <div class="ps__hero">
+        <div class="ps__hero-val">{{HERO_STAT}}</div>
+      </div>
+    </div>
+    <div class="ps__foot">
+      <div class="ps__meet">{{MEET_NAME}}</div>
+      <div class="ps__lockup">
+        <div class="ps__logo">{{LOGO_BLOCK}}</div>
+        <div class="ps__club">{{CLUB_FULL}}</div>
+      </div>
+      <div class="ps__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

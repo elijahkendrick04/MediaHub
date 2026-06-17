@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   vertical_stat_tower  (v2 archetype, PAR-7 — G1.1)
+
+   The whole canvas is one vertical TOWER of full-width stacked tiers,
+   like a totem of facts: a header (kicker + athlete name), then
+   full-bleed horizontal tiers of varying height —
+
+     [ EVENT  ]   a surface tier, the discipline.
+     [ RESULT ]   the dominant ACCENT tier, tallest — the tower's peak,
+                  carrying the headline time/mark.
+     [ MOVE   ]   an optional measured-highlight tier (collapses empty).
+
+   The club lockup anchors the foot.
+
+   Structural signature: full-width tiers stacked vertically with a tall
+   dominant accent tier — a different geometry from the vertical right
+   RAIL of stat_stack_sidebar (a side scoreboard beside a stage), the 2x2
+   CELLS of editorial_numbers_grid, and the stacked broadcast BANDS of
+   ticker_strip (which crawl/fence horizontally). The distinctiveness is
+   the dominant-tier rhythm, not a recolour.
+
+   Overflow safety: tiers are full-width, so the result tier matches the
+   full-canvas result box closely; it still uses calc(var * 0.92) AND
+   wraps, and the header surname uses calc(var * 0.78) and wraps. Holds at
+   1080x1350 and 1080x1920: the result tier flexes to take the extra
+   height, the foot stays bottom-anchored.
+   =================================================================== */
+
+.vt {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 80px 72px 72px;
+  gap: 18px;
+}
+.vt *, .vt *::before, .vt *::after { box-sizing: border-box; }
+
+.vt__head { flex: 0 0 auto; }
+.vt__kicker {
+  display: flex; align-items: center; gap: 14px;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 22px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 18px;
+}
+.vt__kicker::before {
+  content: ""; width: 44px; height: 7px; border-radius: 4px;
+  background: var(--mh-accent); flex: 0 0 auto;
+}
+.vt__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 38px; letter-spacing: 0.01em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+.vt__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.78);
+  line-height: 0.88; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* the stacked tiers */
+.vt__stack { flex: 1 1 auto; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.vt__tier {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 26px 34px; border-radius: 14px;
+  background: var(--mh-surface); color: var(--mh-on-surface);
+}
+.vt__tier-lab {
+  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-size: 16px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 8px;
+}
+.vt__tier-val {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 40px; line-height: 1.04; text-transform: uppercase;
+  color: var(--mh-on-surface);
+  overflow-wrap: anywhere;
+}
+
+/* the RESULT tier — dominant, accent-filled, takes the spare height */
+.vt__result-tier {
+  flex: 1 1 auto; min-height: 0;
+  background: var(--mh-accent); color: var(--mh-primary);
+}
+.vt__result-tier .vt__tier-lab { color: var(--mh-primary); opacity: 0.78; }
+.vt__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.92);
+  line-height: 0.9; letter-spacing: -0.02em;
+  color: var(--mh-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* optional measured-highlight tier — collapses entirely when empty */
+.vt__move-tier:has(.vt__move-val:empty) { display: none; }
+.vt__move-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 32px; color: var(--mh-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.vt__foot {
+  flex: 0 0 auto; padding-top: 26px; margin-top: 2px;
+  border-top: 2px solid var(--mh-outline);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+}
+.vt__foot-id { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.vt__logo { height: 54px; width: auto; flex: 0 0 auto; }
+.vt__logo img, .vt__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.vt__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  line-height: 1.16; text-transform: uppercase; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.vt__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="vt">
+  <div class="vt__head">
+    <div class="vt__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="vt__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="vt__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  </div>
+
+  <div class="vt__stack">
+    <div class="vt__tier vt__event-tier">
+      <div class="vt__tier-lab">Event</div>
+      <div class="vt__tier-val">{{EVENT_NAME}}</div>
+    </div>
+    <div class="vt__tier vt__result-tier">
+      <div class="vt__tier-lab">Result</div>
+      <div class="vt__result">{{RESULT_VALUE}}</div>
+    </div>
+    <div class="vt__tier vt__move-tier">
+      <div class="vt__tier-lab">The move</div>
+      <div class="vt__tier-val vt__move-val">{{HERO_STAT}}</div>
+    </div>
+  </div>
+
+  <div class="vt__foot">
+    <div class="vt__foot-id">
+      <div class="vt__logo">{{LOGO_BLOCK}}</div>
+      <div class="vt__club">{{CLUB_FULL}}<br>{{MEET_NAME}}</div>
+    </div>
+    <div class="vt__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

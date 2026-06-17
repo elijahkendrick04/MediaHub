@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   staggered_diagonal_offset  (v2 archetype, PAR-7 — G1.1)
+
+   Type blocks STEPPED down a descending diagonal: the kicker, the name,
+   the result and the event each sit further to the right and lower than
+   the last, so the eye travels a diagonal staircase. A single thin accent
+   guide rule runs the diagonal behind them, with a small accent tick
+   marking each step. The club lockup anchors the foot.
+
+   Structural signature: staggered text BLOCKS on a diagonal axis — there
+   is no photo stage, no wedge, no seam. That sets it apart from
+   split_diagonal_hero (a hard diagonal SEAM cutting a photo stage above a
+   solid wedge of facts): here the diagonal is expressed purely by the
+   offset rhythm of the type, an editorial / kinetic feel. The
+   distinctiveness is the offset geometry, not a recolour.
+
+   Overflow safety: the steps push content right, so each block is
+   narrower than the full canvas. The surname is scaled via
+   calc(var * 0.62) AND wraps; the result via calc(var * 0.7) AND wraps;
+   the kicker/event break too. Holds at 1080x1350 and 1080x1920: the
+   staircase simply spreads down the taller canvas, the foot stays pinned.
+   =================================================================== */
+
+.so {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.so *, .so *::before, .so *::after { box-sizing: border-box; }
+
+/* the diagonal guide rule, behind the type */
+.so__rule {
+  position: absolute; z-index: 0;
+  left: 4%; top: 50%; width: 116%; height: 5px;
+  background: var(--mh-accent); opacity: 0.4;
+  transform: translateY(-50%) rotate(34deg); transform-origin: left center;
+}
+
+.so__steps {
+  position: relative; z-index: 1;
+  height: 100%;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 96px 80px;
+  gap: 30px;
+}
+.so__step { position: relative; max-width: 84%; }
+/* accent tick at each step */
+.so__step::before {
+  content: ""; position: absolute; left: -28px; top: 10px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--mh-accent);
+}
+.so__s1 { margin-left: 0; }
+.so__s2 { margin-left: 90px; }
+.so__s3 { margin-left: 200px; }
+.so__s4 { margin-left: 120px; }
+
+.so__kicker {
+  display: inline-flex; align-items: center; gap: 12px;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 23px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent); overflow-wrap: anywhere;
+}
+.so__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 38px; letter-spacing: 0.01em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
+}
+.so__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.62);
+  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+.so__result {
+  display: inline-block;
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.7);
+  line-height: 0.9; letter-spacing: -0.02em;
+  color: var(--mh-primary); background: var(--mh-accent);
+  padding: 10px 22px; border-radius: 10px;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+.so__event {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 28px; line-height: 1.12; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.92; overflow-wrap: anywhere;
+}
+.so__hero {
+  margin-top: 8px;
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 22px; letter-spacing: 0.04em; color: var(--mh-accent);
+  overflow-wrap: anywhere;
+}
+.so__hero:empty { display: none; }
+
+.so__foot {
+  position: absolute; z-index: 2; left: 80px; right: 80px; bottom: 64px;
+  padding-top: 26px; border-top: 2px solid var(--mh-outline);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+}
+.so__foot-id { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.so__logo { height: 52px; width: auto; flex: 0 0 auto; }
+.so__logo img, .so__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.so__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
+}
+.so__meet {
+  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 18px;
+  color: var(--mh-on-primary); opacity: 0.8; text-align: right;
+  flex: 0 0 auto; overflow-wrap: anywhere;
+}
+.so__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="so">
+  <div class="so__rule"></div>
+
+  <div class="so__steps">
+    <div class="so__step so__s1">
+      <div class="so__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    </div>
+    <div class="so__step so__s2">
+      <div class="so__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="so__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    </div>
+    <div class="so__step so__s3">
+      <div class="so__result">{{RESULT_VALUE}}</div>
+      <div class="so__hero">{{HERO_STAT}}</div>
+    </div>
+    <div class="so__step so__s4">
+      <div class="so__event">{{EVENT_NAME}}</div>
+    </div>
+  </div>
+
+  <div class="so__foot">
+    <div class="so__foot-id">
+      <div class="so__logo">{{LOGO_BLOCK}}</div>
+      <div class="so__club">{{CLUB_FULL}}</div>
+      <div class="so__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+    <div class="so__meet">{{MEET_NAME}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>

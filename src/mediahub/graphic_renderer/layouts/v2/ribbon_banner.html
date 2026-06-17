@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   ribbon_banner  (v2 archetype, PAR-7 — G1.1)
+
+   An award-ribbon motif: a centred banner sash with notched, double-
+   pointed (chevron) ends carries the achievement label across the upper
+   third, with two ribbon tails descending from it. Beneath the ribbon the
+   athlete name, the headline result and the event read down the centre;
+   the club lockup anchors the foot.
+
+   Structural signature: a SHAPED ribbon/pennant (clip-path chevron ends +
+   hanging tails) as the centrepiece, an award/prize feel. That sets it
+   apart from horizon_band (a flat full-width rectangular band carrying the
+   result) and from ticker_strip (stacked broadcast bands that fence and
+   crawl). Here the band is a shaped object, not a rule. The ribbon and
+   tails paint in the accent role, so the motif is brand-coloured and
+   deterministic — no asset, no hex.
+
+   Overflow safety: the label rides the ribbon and is allowed to WRAP (the
+   ribbon grows taller rather than clipping); the surname is scaled via
+   calc(var * 0.66) AND wraps; the result via calc(var * 0.78) AND wraps.
+   Holds at 1080x1350 and 1080x1920: the centred stack breathes into the
+   taller canvas, the foot stays bottom-anchored.
+   =================================================================== */
+
+.rb {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 92px 80px 80px;
+  text-align: center;
+}
+.rb *, .rb *::before, .rb *::after { box-sizing: border-box; }
+
+/* the ribbon assembly */
+.rb__ribbon-wrap { position: relative; width: 100%; margin-bottom: 60px; flex: 0 0 auto; }
+.rb__ribbon {
+  position: relative; z-index: 2;
+  display: inline-block; max-width: 88%;
+  margin: 0 auto; padding: 24px 76px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  clip-path: polygon(0 0, 100% 0, 93% 50%, 100% 100%, 0 100%, 7% 50%);
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: 50px; line-height: 0.94; letter-spacing: 0.01em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+/* two tails hanging from behind the ribbon */
+.rb__tail {
+  position: absolute; z-index: 1; top: 60%;
+  width: 56px; height: 84px;
+  background: var(--mh-accent); opacity: 0.85;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+}
+.rb__tail--l { left: calc(50% - 96px); }
+.rb__tail--r { right: calc(50% - 96px); }
+
+.rb__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 34px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px; overflow-wrap: anywhere;
+}
+.rb__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.66);
+  line-height: 0.88; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+
+.rb__result-wrap { margin-top: 40px; }
+.rb__result-lab {
+  font-family: 'Inter',sans-serif; font-weight: 800;
+  font-size: 17px; letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 8px;
+}
+.rb__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.78);
+  line-height: 0.9; letter-spacing: -0.02em;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+}
+.rb__event {
+  margin-top: 22px;
+  display: inline-block; padding-top: 16px;
+  border-top: 4px solid var(--mh-accent);
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 26px; line-height: 1.12; text-transform: uppercase;
+  color: var(--mh-on-primary); opacity: 0.92; overflow-wrap: anywhere;
+}
+.rb__hero { margin-top: 16px; }
+.rb__hero:has(.rb__hero-val:empty) { display: none; }
+.rb__hero-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-weight: 700;
+  font-size: 23px; letter-spacing: 0.04em; color: var(--mh-accent);
+  overflow-wrap: anywhere;
+}
+
+.rb__foot {
+  margin-top: auto; padding-top: 30px; width: 100%;
+  border-top: 2px solid var(--mh-outline);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  text-align: left;
+}
+.rb__foot-id { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.rb__logo { height: 52px; width: auto; flex: 0 0 auto; }
+.rb__logo img, .rb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.rb__meta { display: flex; flex-direction: column; min-width: 0; }
+.rb__meet {
+  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 19px;
+  color: var(--mh-on-primary); opacity: 0.82; overflow-wrap: anywhere;
+}
+.rb__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 19px;
+  text-transform: uppercase; color: var(--mh-on-primary); overflow-wrap: anywhere;
+}
+.rb__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="rb">
+  <div class="rb__ribbon-wrap">
+    <div class="rb__tail rb__tail--l"></div>
+    <div class="rb__tail rb__tail--r"></div>
+    <div class="rb__ribbon">{{ACHIEVEMENT_LABEL}}</div>
+  </div>
+
+  <div class="rb__first">{{ATHLETE_FIRST_NAME}}</div>
+  <div class="rb__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+
+  <div class="rb__result-wrap">
+    <div class="rb__result-lab">Result</div>
+    <div class="rb__result">{{RESULT_VALUE}}</div>
+    <div class="rb__event">{{EVENT_NAME}}</div>
+    <div class="rb__hero">
+      <div class="rb__hero-val">{{HERO_STAT}}</div>
+    </div>
+  </div>
+
+  <div class="rb__foot">
+    <div class="rb__foot-id">
+      <div class="rb__logo">{{LOGO_BLOCK}}</div>
+      <div class="rb__meta">
+        <div class="rb__meet">{{MEET_NAME}}</div>
+        <div class="rb__club">{{CLUB_FULL}}</div>
+      </div>
+    </div>
+    <div class="rb__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+</div>
+</body>
+</html>
