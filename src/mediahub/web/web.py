@@ -22002,6 +22002,7 @@ Relay team broke club record"></textarea>
     # keeps every heading short and scannable instead of one long scroll.
     _SETTINGS_ICONS = {
         "org": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>',
+        "templates": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
         "members": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
         "activity": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
         "schedule": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
@@ -22019,11 +22020,10 @@ Relay team broke club record"></textarea>
     def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
         """(title, description, icon_key, href) for the settings tiles.
 
-        11 cards for everyone, a 12th (Developer) only when an operator is
-        signed in — matching the "11 headings, 12 for a developer" spec. A
-        "Pricing & plans" tile is added when signed into a club profile,
-        because Pricing leaves the top bar for signed-in users and lives
-        here instead (grouped with Billing & plan).
+        12 cards for everyone, a 13th (Developer) only when an operator is
+        signed in. A "Pricing & plans" tile is added when signed into a club
+        profile, because Pricing leaves the top bar for signed-in users and
+        lives here instead (grouped with Billing & plan).
         """
         cards: list[tuple[str, str, str, str]] = [
             (
@@ -22031,6 +22031,13 @@ Relay team broke club record"></textarea>
                 "Logos, palette, tone and the brand the engine applies to every card.",
                 "org",
                 url_for("organisation_setup"),
+            ),
+            (
+                "Templates",
+                "The 12 card styles your packs are composed from — the engine "
+                "picks the right one per moment.",
+                "templates",
+                url_for("template_gallery"),
             ),
             (
                 "Team members",
@@ -23987,75 +23994,23 @@ function mhPlanGenerate(btn) {{
                 "</div>"
             )
 
-        # Brand-flow strip: small visible indicator that the active
-        # organisation's brand IS being applied to whatever the user
-        # creates here. Without it, the user has no quick signal that
-        # picking one of the tiles below will honour their colours —
-        # which was the core "doesn't carry through" complaint.
-        #
-        # Note on building the HTML below: ``_h`` is ``markupsafe.escape``,
-        # which returns ``Markup``. Concatenating ``Markup + str`` causes
-        # the trailing str to be re-escaped — so we build the whole
-        # block as a single f-string with escaped values pre-strified.
-        brand_strip_html = ""
-        prof_for_strip = _active_profile()
-        if prof_for_strip is not None:
-            try:
-                from mediahub.brand.palette import effective_palette as _eff_pal
-
-                _bs_pal = _eff_pal(
-                    manual=prof_for_strip.brand_palette_manual or {},
-                    extracted=prof_for_strip.brand_palette_extracted or {},
-                )
-            except Exception:
-                _bs_pal = {}
-            _bs_swatches_parts: list[str] = []
-            for slot in ("primary", "secondary", "accent", "fourth"):
-                hex_v = _bs_pal.get(slot)
-                if not (isinstance(hex_v, str) and hex_v.startswith("#")):
-                    continue
-                _slot_esc = str(_h(slot))
-                _hex_esc = str(_h(hex_v))
-                _bs_swatches_parts.append(
-                    f'<span aria-hidden="true" title="{_slot_esc} {_hex_esc}" '
-                    f'style="display:inline-block;width:14px;height:14px;'
-                    f"border-radius:3px;background:{_hex_esc};"
-                    f"border:1px solid rgba(245,242,232,0.20);"
-                    f'margin-right:6px;vertical-align:middle"></span>'
-                )
-            if _bs_swatches_parts:
-                _setup_url = str(_h(url_for("organisation_setup")))
-                _name_esc = str(_h(prof_for_strip.display_name or ""))
-                _bs_swatches = "".join(_bs_swatches_parts)
-                brand_strip_html = (
-                    f'<div style="margin-bottom:var(--sp-5);padding:10px 14px;'
-                    f"border:1px solid var(--border);border-radius:8px;"
-                    f"background:var(--surface);display:flex;align-items:center;"
-                    f'gap:12px;flex-wrap:wrap;font-size:13px;color:var(--ink-dim)">'
-                    f'<span style="font-family:var(--font-mono,monospace);'
-                    f"font-size:10.5px;text-transform:uppercase;letter-spacing:0.12em;"
-                    f'color:var(--ink-muted)">Brand in use</span>'
-                    f"{_bs_swatches}"
-                    f'<span style="color:var(--ink);font-weight:600">{_name_esc}</span>'
-                    f'<a href="{_setup_url}" '
-                    f'style="margin-left:auto;font-size:12px;'
-                    f'color:var(--ink-muted);text-decoration:underline">'
-                    f"Review brand setup &rarr;</a>"
-                    f"</div>"
-                )
+        # The active organisation's profile drives the first-run nudge below.
+        # (A "Brand in use" strip used to sit here; it was removed — the brand
+        # is reviewed from Settings → Organisation & brand instead.)
+        active_prof = _active_profile()
 
         # U.4 — first-run nudge. A brand-new org (no completed runs yet) gets
         # the one-click sample path up top so the very first thing it can do is
         # see the whole engine run, rather than having to source a results file
         # before anything appears. Once the org has real runs the nudge retires.
         first_run_cta = ""
-        if prof_for_strip is not None:
+        if active_prof is not None:
             _has_done_run = False
             try:
                 conn = _db()
                 row = conn.execute(
                     "SELECT 1 FROM runs WHERE profile_id = ? AND status = 'done' LIMIT 1",
-                    (prof_for_strip.profile_id,),
+                    (active_prof.profile_id,),
                 ).fetchone()
                 conn.close()
                 _has_done_run = row is not None
@@ -24072,19 +24027,6 @@ function mhPlanGenerate(btn) {{
                     ),
                     button_label="Generate a sample pack →",
                 )
-
-        # Browse-the-templates entry point — lets a user see the card styles
-        # the engine can produce *before* picking a starting point (UI 1.10).
-        gallery_link_html = (
-            f'<a class="mh-arch-gallery-link" href="{_h(url_for("template_gallery"))}">'
-            '<span class="mh-agl-text">'
-            '<span class="mh-agl-title">Browse the template gallery</span>'
-            '<span class="mh-agl-sub">See the 12 card styles your packs are '
-            "composed from — the engine picks the right one per moment.</span>"
-            "</span>"
-            '<span class="mh-agl-cta">View templates &rarr;</span>'
-            "</a>"
-        )
 
         # Plan moved here from the top bar — it answers this page's own hero
         # question ("what should we make?"), so it sits at the TOP of Create as
@@ -24122,9 +24064,7 @@ function mhPlanGenerate(btn) {{
             "</section>"
             f"{_free_tier_banner_html()}"
             f"{plan_entry_html}"
-            f"{brand_strip_html}"
             f"{first_run_cta}"
-            f"{gallery_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
