@@ -122,6 +122,17 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
         return None, 0.0
     # Strip a leading year-of-birth token if one slipped into the club cell.
     cleaned = _CLUB_YOB_PREFIX.sub("", s).strip()
+    # Para-classification suffix: a results "Class" column ("14" = S14/SM14) sits
+    # between the club and the time and gets absorbed into the club cell
+    # ("Co Cardiff 14"). Strip the trailing 1-2 digit class so a club's para
+    # swimmers fold into the parent club instead of becoming a separate club.
+    cleaned = re.sub(r"\s+\d{1,2}$", "", cleaned).strip()
+    # Collapsed "Name AaD Club" row (e.g. relay/AaD-format events) where the
+    # whole row landed in the club cell: the actual club is the text AFTER the
+    # age number. "Dion Edwards 19 Swansea Uni" -> "Swansea Uni".
+    m = re.search(r"[A-Za-z].*?\s\d{1,2}\s+([A-Za-z].*)$", cleaned)
+    if m:
+        cleaned = m.group(1).strip()
     if not cleaned or not re.search(r"[A-Za-z]", cleaned):
         # Nothing club-like remains (the cell carried only a year-of-birth, e.g.
         # "(04)") — not a club, so don't surface it in the club picker.
