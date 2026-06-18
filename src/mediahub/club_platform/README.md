@@ -15,6 +15,17 @@ Two layers since ADR-0013:
 
 Also here:
 
+- `format_catalog.py` — the **smart format catalogue** (P6.1): every club
+  *design format* as data — a per-channel size for each social platform
+  (Instagram / Facebook / X / LinkedIn / Pinterest / TikTok / YouTube …) plus
+  off-feed formats clubs need (poster, flyer, certificate, coach card, athlete
+  one-pager, season calendar, wallpaper). Each is a typed `FormatSpec` (canvas
+  size, safe zones, which layouts suit it, and which run data it needs). Pure
+  data, no AI — it just tells the renderer what size to paint. `custom_format()`
+  builds an any-size canvas (px/mm/cm/in). Per-sport availability comes from the
+  sport profile — a certificate only appears for a sport that produces results.
+  The "turn this design into that format" transformer that drives the catalogue
+  lives in `turn_into/transform.py`.
 - `sponsors.py` — the club's sponsor list (who, what tier, when active),
   the fair-rotation rule that decides which sponsor's logo rides which
   card (the same card always gets the same sponsor), and the monthly

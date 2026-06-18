@@ -123,6 +123,11 @@ class CreativeBrief:
     mood: str = ""  # one or two mood words
     ai_directed: bool = False  # True when AI chose the direction
     variation_signature: str = ""  # short signature for dedup/audit
+    # Gen Engine v2 style pack (additive; default-safe). The decorative lever
+    # bundle (ground × texture × accent-geometry × density) the renderer layers
+    # over the chosen archetype — see ``graphic_renderer.style_packs``. Empty =
+    # the bare pack (undecorated), so legacy/flag-off callers are byte-identical.
+    style_pack: str = ""
     # --- Gen Engine v2 Tier B (additive; default-safe for legacy callers) ---
     # The measured emphasis facts this card can honestly lead with, keyed by
     # design_spec.STAT_KEYS ("pb_delta" → "−0.42s on PB"). Only facts the
@@ -664,18 +669,58 @@ def generate(
     except Exception:  # never break brief generation for an optional feature
         log.debug("gen-v2 archetype selection skipped", exc_info=True)
 
+    # Gen Engine v2 style pack: layer a deterministic decorative treatment over
+    # the chosen archetype so a content pack reads as varied per-card designs,
+    # not one repeated look. Mirrors the archetype floor's contract — an
+    # explicit seed (incl. 0, the ?stable path) is an exact, reproducible pick;
+    # no seed derives a stable-per-card pack that spreads across the pack and
+    # walks past this card's recently-used packs. When the design-spec director
+    # gave this card a mood, the pick is scoped to that mood's curated preset
+    # bundle (``style_packs.mood_preset_packs``) so the decoration matches the
+    # feeling, not just a seed; an empty/unknown mood (every legacy / non-AI
+    # brief) falls straight through to the full-catalog pick — byte-identical.
+    # v2-only and additive: under the kill switch the pack stays empty (bare).
+    try:
+        if _v2_on:
+            from mediahub.graphic_renderer import style_packs as _sp
+
+            _mood = (brief.mood or "").strip()
+            if variation_seed is not None:
+                _pack = _sp.pick_mood_pack(_mood, variation_seed)
+            else:
+                _recent_packs = [
+                    s.split("sp:", 1)[1] for s in (recent_signatures or []) if "sp:" in s
+                ]
+                _pack_key = str(
+                    content_item.get("id")
+                    or content_item.get("swim_id")
+                    or ach.get("swim_id")
+                    or ""
+                )
+                _pack = _sp.pick_mood_pack_for_card(_mood, _pack_key or None, _recent_packs)
+            brief.style_pack = _pack.id
+    except Exception:
+        log.debug("gen-v2 style-pack selection skipped", exc_info=True)
+
     # Stamp a signature so callers can dedupe / audit recent renders.
     _stamp_signature(brief)
     return brief
 
 
 def _stamp_signature(brief: CreativeBrief) -> None:
-    """(Re)compute the dedupe/audit signature from the brief's final axes."""
+    """(Re)compute the dedupe/audit signature from the brief's final axes.
+
+    The trailing ``sp:<pack-id>`` token records the v2 style pack so callers
+    threading recent signatures (regenerate, bulk-pack) can walk both the
+    archetype *and* the pack axis past recent renders. Old signatures without
+    the token are simply ignored by the pack-avoidance parse.
+    """
     brief.variation_signature = (
         f"{brief.layout_template}|{brief.palette.get('primary', '')}|"
         f"{brief.background_style}|{brief.accent_style}|"
         f"{brief.typography_pair}|{brief.composition}|"
         f"{brief.photo_treatment}|{brief.primary_hook[:40]}"
+        f"|sp:{brief.style_pack}"
     )
 
 
@@ -687,8 +732,10 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
     two can never drift. Honest by construction: the hero-stat slot is filled
     only when the named fact was actually measured (``hero_stat_options``),
     and the colour-role assignment is recorded for the renderer's APCA-gated
-    application — never painted unconditionally. Re-stamps the variation
-    signature so dedupe/audit reflects the applied direction.
+    application — never painted unconditionally. When a pack was already
+    selected, the decorative style pack is re-keyed to the spec mood's curated
+    preset bundle (G1.28) so the decoration matches the chosen feeling. Re-stamps
+    the variation signature so dedupe/audit reflects the applied direction.
     """
     brief.layout_template = spec.archetype
     if spec.headline_hook:
@@ -707,6 +754,25 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.colour_role_assignment = dict(spec.colour_roles.to_dict())
     except Exception:
         brief.colour_role_assignment = {}
+    # Mood-keyed style pack (G1.28): re-key the decorative pack to the mood's
+    # curated preset bundle so the decoration matches the feeling the director
+    # chose. This is the same selection ``generate()``'s v2 pack block makes for
+    # an AI-directed card, applied to the pre-computed-spec paths (candidate
+    # pool, regenerate-variants) that set the mood *after* generate() already
+    # picked. Guarded to a no-op when no pack was selected (a bare brief, or the
+    # v2 kill switch left ``style_pack`` empty) or the mood has no bundle — so
+    # direct callers and the legacy engine are byte-identical. The archetype is
+    # folded into the key so distinct candidates for one card spread across the
+    # bundle rather than sharing a single pack.
+    try:
+        if brief.style_pack:
+            from mediahub.graphic_renderer import style_packs as _sp
+
+            if _sp.mood_preset_packs(brief.mood):
+                _key = f"{brief.content_item_id}|{brief.layout_template}"
+                brief.style_pack = _sp.pick_mood_pack_for_card(brief.mood, _key).id
+    except Exception:
+        log.debug("gen-v2 mood style-pack re-key skipped", exc_info=True)
     _stamp_signature(brief)
     return brief
 

@@ -63,6 +63,29 @@ def test_protected_engine_guard_intact():
     assert "_touches_protected" in inspect.getsource(gitops.implement_until_green)
 
 
+# --- the ground-truth oracle must not be rewritten by the bot (PR #637/#645) -
+def test_golden_oracle_and_calibration_guards_wired():
+    """Two anti-cheat guards the fixer must keep:
+
+    * The human-blessed golden oracle is a PROTECTED path. A ``ground_truth_regression``
+      means the deterministic engine diverged from the baseline; the only edit the coder
+      could land is rewriting the oracle to grade its own homework (PR #637 bumped
+      ``parsed_swim_count`` to silence the regression). Touching it must ABORT the cycle
+      so the finding is surfaced to a human, never auto-rebaselined.
+    * Calibration artefacts (``precision.json``'s ``computed_at`` is rewritten every run)
+      must never ride into a fix commit — otherwise a tick with no real fix opens a PR
+      whose only diff is a timestamp bump (PR #645, a no-op "fix").
+    """
+    assert gitops._touches_protected(["autotest/baseline/golden-baseline.json"]), (
+        "the human-blessed golden oracle is unprotected — the coder could rewrite it to "
+        "make a ground_truth_regression 'pass' (PR #637)")
+    assert any("calibration" in p for p in gitops._NO_COMMIT_PATHS), (
+        "autotest/calibration is not in _NO_COMMIT_PATHS — calibration churn can ride a "
+        "fix commit and open a no-op PR (PR #645)")
+    # the no-commit set is actually applied when staging a fix
+    assert "_NO_COMMIT_PATHS" in inspect.getsource(gitops._changed_files)
+
+
 # --- scope caps --------------------------------------------------------------
 def test_scope_caps_are_wired():
     assert isinstance(gitops.MAX_FILES, int) and gitops.MAX_FILES > 0

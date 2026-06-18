@@ -11,7 +11,7 @@
 | **Fly.io** | Fly edge terminates TLS (`force_https = true` in fly.toml) | Set `MEDIAHUB_SESSION_COOKIE_SECURE=true` |
 | **Docker / VPS** | **The container itself serves plain HTTP on :5000.** A reverse proxy (Caddy/nginx + Let's Encrypt) MUST terminate TLS in front of it; never expose :5000 to the internet | Proxy config; set `MEDIAHUB_SESSION_COOKIE_SECURE=true`; pass `X-Forwarded-For` (login throttling keys on it) |
 
-Internal egress (LLM APIs, image APIs, swimmingresults.org, Buffer) is
+Internal egress (LLM APIs, image APIs, swimmingresults.org) is
 HTTPS via `requests`/SDK defaults with certificate verification — never
 disable verification.
 

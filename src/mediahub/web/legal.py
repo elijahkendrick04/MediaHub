@@ -186,14 +186,6 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
         engaged_when="Only if voiceover is enabled",
     ),
     Subprocessor(
-        name="Buffer, Inc.",
-        processing="Relay of approved posts to social platforms",
-        location="United States",
-        env_keys=("BUFFER_ACCESS_TOKEN",),
-        transfer_mechanism="DPA; SCCs/IDTA",
-        engaged_when="Only if the club connects publishing",
-    ),
-    Subprocessor(
         name="Resend, Inc.",
         processing=(
             "Transactional email delivery: password resets, email "
@@ -232,6 +224,13 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "to DuckDuckGo by default or the operator's self-hosted SearXNG — "
         "disclosed in Privacy Notice §3–4. A public search engine is not an "
         "Art. 28 sub-processor; queries are transient and uncontracted."
+    ),
+    "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT": (
+        "the operator's own self-hosted local diffusion image backend (P6.3 "
+        "imagine seam, the in-house default; filled by P5.6). Inference runs on "
+        "the operator's own infrastructure — a self-hosted model is not an "
+        "Art. 28 sub-processor. Cloud image generation uses GEMINI_API_KEY "
+        "(Google, already a declared sub-processor)."
     ),
 }
 
@@ -461,10 +460,9 @@ def terms_html(*, privacy_url: str, cookies_url: str, dpa_url: str) -> str:
   <p>MediaHub is a hosted web application for sports clubs. You upload competition
   results (files or links) and photos; MediaHub detects achievements, generates branded
   graphics, videos and captions, and queues them for <strong>your review and
-  approval</strong> before anything is exported or published. Nothing is published to
-  social media without a human decision unless your organisation explicitly opts a
-  post type into autonomous publishing, and even then content about under-18s is always
-  held for human review.</p>
+  approval</strong> before anything is exported. MediaHub does not publish to
+  social media on your behalf &mdash; once you approve content you export or
+  download it and post it yourself.</p>
 </div>
 
 <div class="card">
@@ -668,10 +666,6 @@ def privacy_html(
         <td>Search queries containing athlete name, club and birth year; fetches of
             public results pages</td>
         <td>DuckDuckGo (or a self-hosted SearXNG instance)</td></tr>
-    <tr><td>Social scheduling</td>
-        <td>Approved caption and graphic (athlete name embedded)</td>
-        <td>Buffer, then your connected social platforms &mdash; only if your club
-            connects Buffer</td></tr>
     <tr><td>Payments</td><td>Email, plan, payment details (collected by Stripe
         directly)</td><td>Stripe</td></tr>
     <tr><td>Transactional email (password resets, verification, workspace
@@ -730,7 +724,7 @@ def privacy_html(
 <div class="card">
   <h2>7. International transfers</h2>
   <p>Google (Gemini), Anthropic, Replicate, Microsoft (voiceover, where enabled),
-  Resend (email, where configured), Stripe and Buffer process data in the United
+  Resend (email, where configured) and Stripe process data in the United
   States; Photoroom processes data in [PHOTOROOM_REGION]; an operator-configured
   OpenAI-compatible endpoint (where one is configured) processes data wherever that
   chosen provider runs. Where a provider is

@@ -25,5 +25,15 @@ pipeline here.
 from __future__ import annotations
 
 from .pipeline import turn_meet_into_pack, save_pack, load_pack, list_packs
+from .transform import transform_design, blank_brief_for_format, TransformResult
 
-__all__ = ["turn_meet_into_pack", "save_pack", "load_pack", "list_packs"]
+__all__ = [
+    "turn_meet_into_pack",
+    "save_pack",
+    "load_pack",
+    "list_packs",
+    # turn_into v2 — the P6.1 format transformer ("turn this into that").
+    "transform_design",
+    "blank_brief_for_format",
+    "TransformResult",
+]

@@ -24,7 +24,6 @@ _PAID_ENVS = (
     "REPLICATE_API_TOKEN",
     "PHOTOROOM_API_KEY",
     "STRIPE_SECRET_KEY",
-    "BUFFER_ACCESS_TOKEN",
 )
 
 
@@ -68,18 +67,6 @@ def test_voiceover_is_off_by_default(no_paid_config):
 
     flag = os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower()
     assert flag not in {"1", "true", "yes", "on"}
-
-
-# --- Buffer (paid scheduling SaaS) ------------------------------------------
-
-
-def test_buffer_errors_honestly_without_a_token(no_paid_config):
-    from mediahub.publishing.buffer import BufferAuthError, _PreparedToken
-
-    with pytest.raises(BufferAuthError, match="not configured"):
-        _PreparedToken.require(None)
-    with pytest.raises(BufferAuthError):
-        _PreparedToken.require("   ")
 
 
 # --- Replicate / PhotoRoom (paid per-call cutout APIs) ----------------------

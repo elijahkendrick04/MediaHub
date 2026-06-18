@@ -6,8 +6,8 @@
 > uses, and how much it's allowed to post on its own. The files are plain text
 > (YAML) so a non-coder can read and edit them. Adding a new sport mostly means
 > *writing one of these files* (plus a parser and some templates) — not rewriting
-> the engine. New here? Read [`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md) and
-> [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md) first.
+> the engine. New here? Read [`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md)
+> first.
 
 Evidence base: [`research/ROADMAP_RESEARCH_2026.md`](research/ROADMAP_RESEARCH_2026.md)
 §A.2. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
@@ -22,7 +22,7 @@ from the **engine layer** that already ships:
 
 | Layer | Object | Where | Concern |
 |---|---|---|---|
-| Strategy / config | `SportProfile` (new) | `data/sport_profiles/<sport>.yaml` + `mediahub.sport_profiles` | *What* a sport posts, fed by what, rendered how, how autonomously. |
+| Strategy / config | `SportProfile` (new) | `data/sport_profiles/<sport>.yaml` + `mediahub.sport_profiles` | *What* a sport posts, fed by what, rendered how, reviewed how. |
 | Engine | `SportConfig` (shipped) | `mediahub.recognition.registry` | *How* a sport's deterministic detectors / history / ranker work. |
 
 Keeping them separate is intentional: the engine is accuracy-critical and
@@ -79,9 +79,10 @@ by humans, including non-coders, so comments and readability win. They are
 read-only *shipped* config (like `data/ontology/` and `data/voices/seed/`), not
 per-run runtime state — so they resolve relative to `data/`, not `DATA_DIR`.
 
-**Safety invariant:** no shipped profile may default any post type to
-`fully_autonomous` (enforced by `tests/test_sport_profiles.py`). Autonomy is opt-in
-per workspace — see [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
+**Safety invariant:** `default_autonomy` is only a review disposition
+(`draft_only` / `approval_required`, enforced by
+`tests/test_sport_profiles.py`); a human approves before any content is used,
+and MediaHub does not post to social channels.
 
 ## 3. Loading a profile
 
@@ -98,8 +99,8 @@ Override the directory for tests/ops with `base_dir=...` or the
 `MEDIAHUB_SPORT_PROFILES_DIR` env var. **This package is live** (P1.3): the
 cross-source planner (`content_engine.planner`) enumerates a sport's post
 types from its profile via `club_platform.post_types.post_types_for()`
-(ADR-0013), and the per-type autonomy policy (P2.4) uses
-`sport_profiles.autonomy.AutonomyLevel` as the canonical publishing-policy
+(ADR-0013), and the per-type review policy uses
+`sport_profiles.autonomy.AutonomyLevel` as the canonical review-disposition
 enum.
 
 ## 4. How to add a new sport (step by step)
@@ -140,5 +141,4 @@ Sport profiles were Phase-1 groundwork in [`ROADMAP.md`](ROADMAP.md); the
 [`CONTENT_PLANNER.md`](CONTENT_PLANNER.md)): `/plan` builds a ranked,
 explainable plan from any shipped profile (swimming end-to-end; football on
 profile + direct/external signals until its engine lands). The forward work:
-the remaining per-type autonomy enforcement (Phase 2), then real second-sport
-ingestion (Phase 3).
+real second-sport ingestion (Phase 3).

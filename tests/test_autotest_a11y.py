@@ -81,3 +81,32 @@ def test_available_respects_flag(monkeypatch):
     assert a11y.available() is True
     monkeypatch.setenv("AUTOTEST_A11Y", "0")
     assert a11y.available() is False
+
+
+def test_a11y_audit_gated_to_html_content_types():
+    """The crawler must only run axe-core on genuine HTML documents. Non-HTML
+    routes (service-worker JS, JSON manifest/API, CSS) are rendered by Chromium in
+    a synthetic viewer with no ``<title>``; auditing them produced FALSE
+    ``document-title`` findings — one per route, each a distinct fingerprint that
+    never dedupes — which flooded the fixer with identically-titled "missing
+    <title>" PRs (the /sw.js, /manifest.webmanifest, /api/status, /healthz/search
+    pile-up). Gate them out at the source."""
+    from autotest.run import _is_html_content_type
+
+    # Audited: real HTML (with/without charset), XHTML, and unknown (fail-open —
+    # a real page always sends text/html, so an empty type must not silence it).
+    assert _is_html_content_type("text/html") is True
+    assert _is_html_content_type("text/html; charset=utf-8") is True
+    assert _is_html_content_type("application/xhtml+xml") is True
+    assert _is_html_content_type("") is True
+
+    # Skipped: every non-HTML response the duplicate PRs were "fixing".
+    for non_html in (
+        "application/javascript",     # /sw.js  (service worker)
+        "text/javascript",
+        "application/manifest+json",  # /manifest.webmanifest
+        "application/json",           # /api/status, /healthz/*
+        "text/css",                   # /fonts.css
+        "image/png",
+    ):
+        assert _is_html_content_type(non_html) is False, non_html

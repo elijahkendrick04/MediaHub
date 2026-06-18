@@ -67,12 +67,29 @@ def _normalise_reaction(raw: str) -> tuple[str | None, float]:
     return None, 0.0
 
 
+def _person_name(raw: str) -> str:
+    """Tidy a competitor name: collapse spaces and reorder "Lastname, Firstname"
+    to "Firstname Lastname" so comma- and space-ordered sources agree.
+
+    Accent-bearing names are preserved (the letter test is Unicode-aware), so
+    "José", "Siân" and "Müller" survive intact.
+    """
+    s = re.sub(r"\s+", " ", str(raw).strip())
+    if "," in s:
+        last, _, first = s.partition(",")
+        last, first = last.strip(), first.strip()
+        if first and last and re.search(r"[^\W\d_]", first):
+            s = f"{first} {last}"
+    return s.strip(" ,")
+
+
 def _normalise_name(raw: str) -> tuple[str | None, float]:
-    s = raw.strip()
+    s = _person_name(raw)
     # A real competitor name has letters and NO digits — a token like "H-7 L"
     # or "Heat 7" is a heat/lane/relay-leg artifact, not a swimmer, and must not
-    # surface as a result.
-    if len(s) >= 3 and re.search(r"[A-Za-z]", s) and not re.search(r"\d", s):
+    # surface as a result. The letter test is Unicode-aware so accented names
+    # ("José", "Siân") survive.
+    if len(s) >= 3 and re.search(r"[^\W\d_]", s) and not re.search(r"\d", s):
         return s, 0.80
     return None, 0.0
 
@@ -184,152 +201,196 @@ def _extract_swim_from_cells(
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Structural row regex (no swim vocabulary; place / name / age / club / time)
+# Multi-record line parser (no swim vocabulary)
 # ---------------------------------------------------------------------------
+#
+# A printed results line carries one OR MORE competitor records. Multi-column
+# templates put several complete records on one baseline::
+#
+#   1 Arthur, Andrew 23 UoAPS 28.73     33 Warner, Liam 16 East Lothian 32.82
+#
+# We split a line into records by anchoring on the TIME token (the one token
+# whose shape is unambiguous), then classify each record's tokens as::
+#
+#   [place]  name…  [age|yob]  [club…]  time
+#
+# This is layout-independent: 1-, 2- and 3-column pages, with or without a
+# place / age / club column, all reduce to the same record grammar — so the
+# common two-swimmers-per-line layout no longer loses half of every event.
 
-# Place tokens: 1, 1., =1, *1, *1., ---, DQ, DNS, DNF, NS
-_PLACE = r"(?P<place>=?\*?\d{1,3}\.?|---|DQ|DNS|DNF|NS)"
-# Name: words including letters, hyphens, apostrophes, periods, commas; min 3 chars
-_NAME = r"(?P<name>[A-Za-z][A-Za-z'\-\.\, ]{2,}?[A-Za-z\.\)])"
-# Age / YOB: 1-4 digits, optionally parenthesised. British results print the
-# year of birth in parentheses between the name and the club
-# ("Tom DAVIES (04) City of Sheffield 50.12"); without the optional parens none
-# of the row patterns matched that format and every such line was dropped.
-_AGE = r"(?P<age>\(?\d{1,4}\)?)"
-# Club: any printable run
-_CLUB = r"(?P<club>[A-Za-z][A-Za-z0-9'\-\.\,\& /]{1,}?)"
-# Time: mm:ss.cc or ss.cc; optional X-prefix; or DQ/DNS/DNF/NS
-_TIME = r"(?P<time>X?\d{1,2}:\d{2}\.\d{2}|X?\d{1,3}\.\d{2}|DQ|DNS|DNF|NS)"
-
-# Full row: place + name + age + club + time (most permissive ordering)
-_ROW_RE = re.compile(
-    r"^\s*"
-    + _PLACE
-    + r"\s+"
-    + _NAME
-    + r"\s+"
-    + _AGE
-    + r"\s+"
-    + _CLUB
-    + r"\s+"
-    + _TIME
-    + r"(?:\s|$)"
-)
-# Variant without leading place (place column may be missing or merged)
-_ROW_RE_NO_PLACE = re.compile(
-    r"^\s*" + _NAME + r"\s+" + _AGE + r"\s+" + _CLUB + r"\s+" + _TIME + r"(?:\s|$)"
-)
-# Variant: place + name + club + time (no age column visible — common in some
-# narrow templates)
-_ROW_RE_NO_AGE = re.compile(
-    r"^\s*" + _PLACE + r"\s+" + _NAME + r"\s+" + _CLUB + r"\s+" + _TIME + r"(?:\s|$)"
-)
-
-_TIME_SHAPE = re.compile(r"^\d{1,2}:\d{2}\.\d{2}$|^\d{1,3}\.\d{2}$")
-_DSQ_TOKENS = {"DQ", "DNS", "DNF", "NS"}
+# Unicode letter (accented names — José, Siân, Müller — must survive).
+_LETTER = r"[^\W\d_]"
+# Time token: optional J/X/R judged-or-marker prefix, then mm:ss.cc or ss.cc.
+_TIME_TOKEN = re.compile(r"^[JXRjxr]?\d{0,3}:?\d{1,2}\.\d{2}$")
+# Disqualification / no-time markers that occupy the time column.
+_DSQ_TOKEN = re.compile(r"^(?:DQ|DNS|DNF|DNC|NS|SCR|WD)$", re.IGNORECASE)
+# Rank token starting a record: 1, 1., =1, *1 (ties), or --- (no place / DQ).
+_PLACE_TOKEN = re.compile(r"^=?\*?\d{1,3}\.?$|^-{2,}$")
+# Age (AaD) or year-of-birth token between name and club, optionally in parens.
+_AGEYOB_TOKEN = re.compile(r"^\(?\d{1,4}\)?$")
+_DSQ_VALUES = {"DQ", "DNS", "DNF", "DNC", "NS", "SCR", "WD"}
 
 
-def _structural_swim_from_match(m: re.Match, raw: str) -> InterpretedSwim | None:
-    """Build an InterpretedSwim from a regex Match against a row."""
-    gd = m.groupdict()
-    raw_place = gd.get("place")
-    raw_name = (gd.get("name") or "").strip()
-    # The age/YOB may arrive parenthesised (British "Name (04) Club") — unwrap
-    # before the digit checks below so "(04)" is read as the year 2004.
-    raw_age = gd.get("age")
-    if raw_age:
-        raw_age = raw_age.strip("()")
-    raw_club = (gd.get("club") or "").strip()
-    raw_time = (gd.get("time") or "").strip()
+def _is_time_like(tok: str) -> bool:
+    return bool(_TIME_TOKEN.match(tok) or _DSQ_TOKEN.match(tok))
 
-    field_conf: dict[str, float] = {}
 
-    # Time normalisation (strip leading X for marker times)
-    time_val: str | None = None
-    time_clean = raw_time.lstrip("X")
-    if time_clean.upper() in _DSQ_TOKENS:
-        time_val = time_clean.upper()
-        field_conf["time"] = 0.85
-    else:
-        t_norm, t_conf = _normalise_time(time_clean)
-        if t_norm is not None:
-            time_val = t_norm
-            field_conf["time"] = t_conf
+def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
+    """Split text into (token, big_gap_before) pairs.
 
-    # Place normalisation
+    A "big gap" is a run of 2+ spaces — a column break preserved by the PDF
+    extractor (or present in space-aligned text). It is a secondary cue used to
+    separate name from club when a row has no age/yob column.
+    """
+    out: list[tuple[str, bool]] = []
+    prev_end = 0
+    for m in re.finditer(r"\S+", text):
+        gap = text[prev_end : m.start()]
+        out.append((m.group(0), prev_end != 0 and len(gap) >= 2))
+        prev_end = m.end()
+    return out
+
+
+def _split_into_records(
+    tokens: list[tuple[str, bool]],
+) -> list[list[tuple[str, bool]]]:
+    """Break a tokenised line into records, each ending at a time token."""
+    records: list[list[tuple[str, bool]]] = []
+    cur: list[tuple[str, bool]] = []
+    for tok, big in tokens:
+        cur.append((tok, big))
+        if _is_time_like(tok):
+            records.append(cur)
+            cur = []
+    return records
+
+
+def _marker_or_time(tok: str) -> tuple[str | None, float]:
+    """Normalise a time-column token (strip J/X/R prefix; accept DSQ markers)."""
+    clean = re.sub(r"^[JXRjxr]", "", tok)
+    if clean.upper() in _DSQ_VALUES:
+        return clean.upper(), 0.85
+    return _normalise_time(clean)
+
+
+def _looks_like_relay(name_toks: list[str]) -> bool:
+    """A team name ending in a single-letter leg ("… A" / "… B"), with no age
+    and no club, is a relay squad — not an individual. Skip it so it never
+    surfaces as a phantom swimmer."""
+    return len(name_toks) >= 2 and len(name_toks[-1]) == 1 and name_toks[-1].isalpha()
+
+
+def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
+    """Classify one time-terminated record's tokens into an InterpretedSwim."""
+    if not rec:
+        return None
+    time_tok = rec[-1][0]
+    body = rec[:-1]
+
+    # Place (optional leading rank).
     place_val: int | None = None
-    if raw_place:
-        cleaned = raw_place.lstrip("=").lstrip("*").rstrip(".")
+    start = 0
+    if body and _PLACE_TOKEN.match(body[0][0]):
+        cleaned = body[0][0].lstrip("=*").rstrip(".")
         if cleaned.isdigit():
             place_val = int(cleaned)
-            field_conf["place"] = 0.90
+        start = 1
+    middle = body[start:]
+    if not middle:
+        return None  # a "place time" line with no competitor is a total/header
 
-    # YOB / age disambiguation
-    yob_val: int | None = None
-    if raw_age:
-        if len(raw_age) == 4 and raw_age.isdigit():
-            y = int(raw_age)
-            if 1940 <= y <= 2030:
-                yob_val = y
-                field_conf["yob"] = 0.90
-        elif len(raw_age) == 2 and raw_age.isdigit():
-            y = int(raw_age)
-            yob_val = 2000 + y if y <= 30 else 1900 + y
-            field_conf["yob"] = 0.70
-        elif raw_age.isdigit():
-            # 1-3 digit number is most likely an age, not a YOB
-            field_conf["age_raw"] = 0.6
+    # Age / year-of-birth separator: the first standalone numeric token after at
+    # least one name token splits the name (before) from the club (after).
+    sep: int | None = None
+    for j in range(1, len(middle)):
+        if _AGEYOB_TOKEN.match(middle[j][0]):
+            sep = j
+            break
 
-    # Name confidence
-    if len(raw_name) >= 3 and re.search(r"[A-Za-z]", raw_name):
-        field_conf["name"] = 0.80
+    age_tok: str | None = None
+    if sep is not None:
+        name_toks = [t for t, _ in middle[:sep]]
+        age_tok = middle[sep][0]
+        club_toks = [t for t, _ in middle[sep + 1 :]]
     else:
+        # No age column — split name|club at the first column break, if any.
+        brk = next((j for j in range(1, len(middle)) if middle[j][1]), None)
+        if brk is not None:
+            name_toks = [t for t, _ in middle[:brk]]
+            club_toks = [t for t, _ in middle[brk:]]
+        else:
+            name_toks = [t for t, _ in middle]
+            club_toks = []
+
+    time_val, time_conf = _marker_or_time(time_tok)
+    if time_val is None:
         return None
 
-    # Club
-    club_val: str | None = raw_club if raw_club else None
-    if club_val:
-        field_conf["club"] = 0.75
-
-    if not (field_conf.get("name") and field_conf.get("time")):
+    # Drop leading lane / heat numbers sitting before the name (the place was
+    # already consumed, and a competitor name never begins with a bare number).
+    while name_toks and name_toks[0].strip("()").isdigit():
+        name_toks.pop(0)
+    name = _person_name(" ".join(name_toks))
+    if len(name) < 3 or not re.search(_LETTER, name):
         return None
+    if age_tok is None and not club_toks and _looks_like_relay(name_toks):
+        return None
+
+    field_conf: dict[str, float] = {"name": 0.80, "time": time_conf}
+    if place_val is not None:
+        field_conf["place"] = 0.90
+
+    yob_val: int | None = None
+    if age_tok is not None:
+        yob_val, yconf = _normalise_yob(age_tok.strip("()"))
+        if yob_val is not None:
+            field_conf["yob"] = yconf
+
+    club_val: str | None = None
+    if club_toks:
+        club_val, cconf = _normalise_club(" ".join(club_toks))
+        if club_val is not None:
+            field_conf["club"] = cconf
 
     row_conf = sum(field_conf.values()) / len(field_conf)
-
     return InterpretedSwim(
-        swimmer_name=raw_name,
+        swimmer_name=name,
         yob=yob_val,
         club=club_val,
         place=place_val,
         time=time_val,
         reaction=None,
         confidence=round(min(row_conf, 1.0), 4),
-        raw_row=raw.strip(),
+        raw_row=" ".join(t for t, _ in rec),
         field_confidence=field_conf,
     )
+
+
+def _parse_records_from_line(text: str) -> list[InterpretedSwim]:
+    """Parse every competitor record carried by one printed line."""
+    swims: list[InterpretedSwim] = []
+    for rec in _split_into_records(_tokenise_with_gaps(text)):
+        swim = _record_to_swim(rec)
+        if swim is not None:
+            swims.append(swim)
+    return swims
 
 
 def _structural_extract_lines(
     stream: IngestStream,
 ) -> list[tuple[int, InterpretedSwim]]:
-    """Extract swim rows from stream.lines via structural regex.
+    """Extract swim records from stream.lines via the multi-record parser.
 
-    Returns list of (line_index, swim) tuples so callers can map swims to
-    nearby event headers.
+    Returns (line_index, swim) tuples so callers map swims to nearby event
+    headers; one line may yield several swims (multi-column layouts).
     """
     out: list[tuple[int, InterpretedSwim]] = []
     for idx, line in enumerate(stream.lines):
         text = getattr(line, "text", str(line))
         if not text.strip():
             continue
-        # Try the most informative pattern first
-        for pat in (_ROW_RE, _ROW_RE_NO_PLACE, _ROW_RE_NO_AGE):
-            m = pat.match(text)
-            if m:
-                swim = _structural_swim_from_match(m, text)
-                if swim is not None:
-                    out.append((idx, swim))
-                    break
+        for swim in _parse_records_from_line(text):
+            out.append((idx, swim))
     return out
 
 
@@ -394,12 +455,13 @@ def assign_rows_to_events(
     Populate each InterpretedEvent.swims using the strongest of two paths:
 
       A. Schema-based extraction over stream.tables (induced ColumnSchema).
-      B. Structural row-regex extraction over stream.lines.
+      B. Multi-record line parsing over stream.lines.
 
     The path that yields more swims wins.  When path B wins, swims are
     assigned by line index to the most recently seen event header (rather
     than evenly chunked).  This makes the interpreter robust to PDFs whose
-    column structure is fragile (variable token counts across rows).
+    column structure is fragile (variable token counts across rows) and to
+    multi-column layouts where one printed line carries several records.
     """
     # ---- Path A: schema/table-based extraction (existing behaviour) ------
     schema_swims: list[InterpretedSwim] = []
@@ -419,7 +481,7 @@ def assign_rows_to_events(
         if not schema_swims:
             schema_swims = _extract_from_lines(stream, schemas)
 
-    # ---- Path B: structural row-regex over stream.lines ------------------
+    # ---- Path B: multi-record line parser over stream.lines --------------
     structural_with_idx = _structural_extract_lines(stream)
     structural_swims = [s for _, s in structural_with_idx]
 

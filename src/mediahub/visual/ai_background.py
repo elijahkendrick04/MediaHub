@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import logging
 import os
 from pathlib import Path
@@ -178,71 +177,33 @@ _FORMAT_ASPECT = {
 
 
 def _call_imagen(prompt: str, aspect_ratio: str) -> Optional[bytes]:
-    """POST to Imagen via the Gemini ``:predict`` endpoint.
+    """Generate one background image via the shared Imagen ``:predict`` client.
 
-    Returns raw PNG bytes on success, None on any failure. The Gemini
-    API key controls billing — if Imagen isn't enabled on the
-    operator's project, the call returns 403 and we degrade silently.
+    Delegates to :func:`mediahub.media_ai.imagine_providers.gemini_imagine.imagen_predict`
+    — the one place the Imagen HTTP shape lives, since P6.3 generalised this
+    single-purpose call behind the ``imagine`` seam. The request is byte-for-byte
+    the historic one (same model, aspect, ``sampleCount=1``,
+    ``personGeneration=dont_allow``, ``safetySetting=block_only_high``), so a
+    given prompt still yields the same cached bytes under the same cache key.
+
+    Returns raw image bytes on success, ``None`` on any failure (no key, Imagen
+    billing disabled → 403, network/parse error) — the renderer's procedural
+    water+noise backdrop handles the ``None`` case.
     """
-    key = _resolve_key()
-    if not key:
-        return None
     try:
-        import requests  # type: ignore
-    except Exception:
+        from mediahub.media_ai.imagine_providers.gemini_imagine import imagen_predict
+    except Exception:  # pragma: no cover - import guard
         return None
-
-    url = f"{_GEMINI_API_BASE}/models/{_IMAGEN_MODEL}:predict" f"?key={key}"
-    payload = {
-        "instances": [{"prompt": prompt}],
-        "parameters": {
-            "sampleCount": 1,
-            "aspectRatio": aspect_ratio,
-            # Imagen 4 supports a personGeneration safety setting. We
-            # ask for none because the prompt is non-figurative anyway,
-            # and this avoids overly cautious refusals.
-            "personGeneration": "dont_allow",
-            "safetySetting": "block_only_high",
-        },
-    }
-    try:
-        r = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload),
-            timeout=_IMAGEN_TIMEOUT,
-        )
-    except Exception as e:
-        log.debug("ai_background: imagen POST failed: %s", e)
-        return None
-    if r.status_code != 200:
-        log.debug(
-            "ai_background: imagen non-200: %s %s",
-            r.status_code,
-            (r.text or "")[:300],
-        )
-        return None
-
-    try:
-        body = r.json()
-    except Exception as e:
-        log.debug("ai_background: imagen response not JSON: %s", e)
-        return None
-
-    preds = body.get("predictions") or []
-    if not preds or not isinstance(preds, list):
-        log.debug("ai_background: imagen returned no predictions: %s", body)
-        return None
-    first = preds[0] or {}
-    b64 = first.get("bytesBase64Encoded")
-    if not b64:
-        log.debug("ai_background: imagen prediction missing bytes: %s", first)
-        return None
-    try:
-        return base64.b64decode(b64)
-    except Exception as e:
-        log.debug("ai_background: imagen base64 decode failed: %s", e)
-        return None
+    images = imagen_predict(
+        prompt,
+        aspect_ratio=aspect_ratio,
+        sample_count=1,
+        model=_IMAGEN_MODEL,
+        timeout=_IMAGEN_TIMEOUT,
+        allow_people=False,
+        safety="block_only_high",
+    )
+    return images[0] if images else None
 
 
 # ---------------------------------------------------------------------------

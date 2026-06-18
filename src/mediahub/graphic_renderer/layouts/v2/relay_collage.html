@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   relay_collage  (v2 archetype, PAR-7)
+
+   A squad / relay poster. The upper STAGE is a shared studio backdrop
+   on the brand ground where 2-4 athlete cutouts stand together on one
+   baseline (the deterministic, weight-balanced placement is composited
+   in by graphic_renderer/collage.py via the relay_collage sprint hook,
+   dropped between the RC:STAGE markers). A full-width NAME BAND sits at
+   the stage foot, and a solid DATA PANEL across the bottom carries the
+   event, the result in oversized monospace, and the meet line — so the
+   team and the scoreline share the frame.
+
+   Structural signature: ONE wide multi-subject stage above ONE name
+   band above ONE data panel — a 3-deck horizontal stack built around a
+   group of bodies standing on a common floor. No other archetype
+   composites several cutouts: duo_athlete_split bisects the canvas for
+   a single photo bay, the triptych is three text bays, the sidebar is a
+   narrow rail. When only one (or no) usable photo resolves, the stage
+   keeps the single ATHLETE_IMG_BLOCK (cover-cropped on the saliency
+   focus) over the painted backdrop, so the deck structure never breaks.
+
+   Colours come ONLY from the resolved brand roles the renderer injects
+   as --mh-* custom properties; neutral rgba() is used solely for depth
+   (scrims / shadow / lane texture), never for brand colour. The kicker
+   and name band use the accent ground with primary text — the
+   resolver's APCA-gated primary-on-accent pair.
+   =================================================================== */
+
+.rc {
+  --pad: 52px;          /* inset for stage furniture                    */
+  --stage-h: 60%;       /* the multi-subject backdrop occupies the top  */
+  --band-h: 13%;        /* the crossing name band                       */
+
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.rc *, .rc *::before, .rc *::after { box-sizing: border-box; }
+
+/* ---- The squad stage (top) ---- */
+.rc__stage {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: var(--stage-h);
+  overflow: hidden;
+}
+/* Painted studio backdrop: brand ground + soft centre glow + faint
+   vertical lane ropes + a grounding floor shadow. A real single photo
+   (cover) hides it; the cutout collage stands in front of it. */
+.rc__backdrop {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 90% at 50% 18%, rgba(255,255,255,0.10) 0%, rgba(0,0,0,0) 60%),
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.05) 0 2px,
+      rgba(0,0,0,0)          2px 96px),
+    var(--mh-primary);
+}
+.rc__floor {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 30%;
+  background: linear-gradient(0deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0) 100%);
+  pointer-events: none;
+}
+/* The injected collage (or the single-photo fallback) fills the stage. */
+.rc__solo { position: absolute; inset: 0; }
+.rc__solo img,
+.rc__solo svg {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: var(--mh-photo-pos, center 30%);
+  display: block;
+}
+.rc__solo:empty { display: none; }
+
+.rc__scrim-top {
+  position: absolute; left: 0; right: 0; top: 0; height: 24%;
+  background: linear-gradient(180deg, rgba(0,0,0,0.46) 0%, rgba(0,0,0,0) 100%);
+  pointer-events: none; z-index: 4;
+}
+.rc__kicker {
+  position: absolute; z-index: 5;
+  top: var(--pad); left: var(--pad);
+  max-width: calc(100% - 2 * var(--pad));
+  padding: 13px 22px;
+  background: var(--mh-accent);
+  color: var(--mh-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 21px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.rc__kicker:empty { display: none; }
+
+.rc__id {
+  position: absolute; z-index: 5;
+  top: var(--pad); right: var(--pad);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  text-align: right;
+}
+.rc__logo { height: 58px; width: auto; }
+.rc__logo img,
+.rc__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.rc__logo:empty { display: none; }
+.rc__club {
+  font-weight: 800; font-size: 22px; letter-spacing: 0.02em;
+  text-transform: uppercase; color: var(--mh-on-primary);
+  text-shadow: 0 1px 10px rgba(0,0,0,0.45);
+  overflow-wrap: anywhere; max-width: 46vw;
+}
+.rc__club:empty { display: none; }
+
+/* ---- The crossing name band ---- */
+.rc__band {
+  position: absolute; left: 0; right: 0; z-index: 6;
+  top: calc(var(--stage-h) - var(--band-h) / 2);
+  height: var(--band-h);
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 0 var(--pad);
+  background: var(--mh-accent);
+  color: var(--mh-primary);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.32);
+}
+.rc__first {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 26px; letter-spacing: 0.16em;
+  text-transform: uppercase; margin-bottom: 2px;
+}
+.rc__first:empty { display: none; }
+.rc__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400;
+  font-size: var(--mh-fit-surname-px, 116px);
+  line-height: 0.9; letter-spacing: -0.02em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+/* ---- The data panel (bottom) ---- */
+.rc__data {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  top: calc(var(--stage-h) + var(--band-h) / 2);
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  display: flex; flex-direction: column; justify-content: center;
+  padding: var(--pad);
+  gap: 6px;
+}
+.rc__row {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 28px;
+}
+.rc__event-wrap { min-width: 0; }
+.rc__lab {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 15px; letter-spacing: 0.26em;
+  text-transform: uppercase; color: var(--mh-accent); margin-bottom: 8px;
+}
+.rc__event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 34px; line-height: 1.08;
+  letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--mh-on-surface); overflow-wrap: anywhere;
+}
+.rc__result {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: var(--mh-fit-result-px, 88px);
+  font-variation-settings: var(--mh-axes-result, normal);
+  line-height: 0.9; letter-spacing: -0.02em;
+  white-space: nowrap; color: var(--mh-accent); text-align: right;
+}
+.rc__result:empty { display: none; }
+.rc__meta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; margin-top: 14px;
+  border-top: 1px solid var(--mh-outline); padding-top: 16px;
+}
+.rc__hero {
+  display: inline-flex; align-items: center; gap: 12px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 21px; line-height: 1.15;
+  color: var(--mh-on-surface); overflow-wrap: anywhere; min-width: 0;
+}
+.rc__hero::before {
+  content: ""; flex: 0 0 auto; width: 30px; height: 6px;
+  border-radius: 3px; background: var(--mh-accent);
+}
+.rc__hero:empty { display: none; }
+.rc__meet {
+  font-weight: 500; font-size: 16px; letter-spacing: 0.04em;
+  color: var(--mh-on-surface); opacity: 0.74; text-align: right;
+  overflow-wrap: anywhere;
+}
+.rc__meet:empty { display: none; }
+.rc__sponsor { margin-top: 16px; }
+.rc__sponsor:empty { display: none; }
+</style>
+</head>
+<body>
+<div class="rc">
+
+  <div class="rc__stage">
+    <div class="rc__backdrop"></div>
+    <!--RC:STAGE--><div class="rc__solo">{{ATHLETE_IMG_BLOCK}}</div><!--/RC:STAGE-->
+    <div class="rc__floor"></div>
+    <div class="rc__scrim-top"></div>
+    <div class="rc__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="rc__id">
+      <div class="rc__logo">{{LOGO_BLOCK}}</div>
+      <div class="rc__club">{{CLUB_FULL}}</div>
+    </div>
+  </div>
+
+  <div class="rc__band">
+    <div class="rc__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="rc__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  </div>
+
+  <div class="rc__data">
+    <div class="rc__row">
+      <div class="rc__event-wrap">
+        <div class="rc__lab">Event</div>
+        <div class="rc__event">{{EVENT_NAME}}</div>
+      </div>
+      <div class="rc__result">{{RESULT_VALUE}}</div>
+    </div>
+    <div class="rc__meta">
+      <div class="rc__hero">{{HERO_STAT}}</div>
+      <div class="rc__meet">{{MEET_NAME}}</div>
+    </div>
+    <div class="rc__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

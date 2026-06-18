@@ -4,8 +4,8 @@
 > the AI pipeline. Each threat names its mitigating capability (S1–S8
 > below) or is explicitly **accepted** into the residual-risk register
 > (`SECURITY_REPORT.md`). Assets ranked by harm: (1) children's personal
-> data, (2) tenant isolation, (3) the publish path (what goes public under
-> a club's name), (4) operator credentials/API keys.
+> data, (2) tenant isolation, (3) the approval / export path (what a club
+> approves and exports under its own name), (4) operator credentials/API keys.
 >
 > Capabilities: S1 `security/authn-authz` · S2 `security/input-handling` ·
 > S3 `security/web-hardening` · S4 `security/secrets-and-config` ·
@@ -22,7 +22,7 @@ Internet ──> [TLS proxy (Render/Fly/反向代理)] ──> Flask monolith (w
                                             ├── Remotion/Node renderer (MP4)
                                             ├── scraper (swimmingresults.org, results-from-URL) <- untrusted web
                                             ├── LLM APIs (Gemini/Anthropic)              <- untrusted *output*
-                                            └── image APIs / Buffer / ntfy (egress)
+                                            └── image APIs / ntfy (egress)
 ```
 
 ## 1. Upload → parse pipeline (untrusted bytes)
@@ -69,7 +69,7 @@ Internet ──> [TLS proxy (Render/Fly/反向代理)] ──> Flask monolith (w
 |---|---|---|
 | LLM01 prompt injection | Uploaded results (PDF/HTML text) contain "ignore previous instructions…" which flows into caption prompts | **S8** — untrusted fields delimited + system-prompt hardening ("treat as data"); injection-pattern screening flags suspicious achievements for review |
 | LLM02 insecure output | LLM output rendered into HTML/cards | Exists: `_h()` escaping; output is text-only, never eval'd/exec'd; **S8** regression test |
-| LLM02/06 output triggers actions | A caption containing tool-like syntax causes privileged action | **S8** — no code path parses captions for actions; the human-approval gate is server-side state, not UI; test proves a malicious caption cannot publish itself |
+| LLM02/06 output triggers actions | A caption containing tool-like syntax causes privileged action | **S8** — no code path parses captions for actions; the human-approval gate is server-side state, not UI; test proves a malicious caption cannot get itself approved or exported |
 | LLM04 model DoS | Attacker-driven repeated caption calls burn quota | Exists: review-driven generation + observability; per-session research caps; accepted residual at extreme scale |
 | LLM06 sensitive disclosure | Prompts over-share athlete data | Mitigated (C3 minimisation) |
 | LLM09 overreliance | Fake PB claims in captions | Exists: deterministic engine decides PB status; caption layer only phrases it; confidence language enforced |
@@ -80,7 +80,7 @@ Internet ──> [TLS proxy (Render/Fly/反向代理)] ──> Flask monolith (w
 |---|---|---|
 | E | `/admin/compliance` and operator routes reachable without operator session | Exists: 404 unless `is_dev_operator()`; tests pin it |
 | I | Debug endpoints/stack traces leak internals | **S3** — generic production error pages, no tracebacks |
-| R | No audit of who exported/erased/published | **S7** (+C2) — structured security event log |
+| R | No audit of who exported/erased/approved | **S7** (+C2) — structured security event log |
 | S | CSRF on state-changing routes | Exists: SameSite=Lax + signed session; **S3** adds CSRF tokens on auth + compliance + admin forms; residual documented for legacy fetch-driven routes (Lax cookie is the floor) |
 
 ## 7. Deployment targets (Docker/Render/Fly/VPS)
@@ -94,13 +94,17 @@ Internet ──> [TLS proxy (Render/Fly/反向代理)] ──> Flask monolith (w
 | I | Backup loss/exposure | **S6** — encrypted backup script + restore test procedure |
 | D | Host/provider compromise | **Accepted residual** (any SaaS) — register entry |
 
-## 8. Publish path
+## 8. Approval / export path
+
+> MediaHub does not publish to social channels — approved content is exported/
+> downloaded and the club posts it manually. The threats here concern the
+> approval gate and the export, not any platform publishing.
 
 | STRIDE | Threat | Disposition |
 |---|---|---|
-| E | Bypass human approval via direct API | Verified: schedule/publish routes check workflow state server-side; autonomy passes the 8-check publish gate (kill switch, policy, provenance, confidence, brand safety, safeguarding, **consent**, rate caps); **S8** adds the regression test |
-| R | Untraceable publishes | Exists: immutable per-org audit ledger + posting log; **S7** events |
-| S | Stolen per-club Buffer token | Stored per-profile on disk (0-knowledge of platform creds otherwise); **S6/S4** file modes + least-privilege documented |
+| E | Bypass human approval via direct API (mark a card approved/exportable without review) | Verified: approval/export routes check workflow state and consent **server-side**; **S8** adds the regression test |
+| E/I | Consent-blocked athlete reaches an exportable pack | Consent gate enforced at approval and pack build (a refused athlete is filtered out); **S8** regression test |
+| R | Untraceable approvals/exports | Exists: immutable per-org audit ledger; **S7** events |
 
 ## Out of scope / accepted (full register in SECURITY_REPORT.md)
 

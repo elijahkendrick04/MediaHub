@@ -3,8 +3,7 @@
 Every surface that can make a card public asks this module first:
 
 - card approval (``POST /api/workflow/<run>/<card>`` in web.py),
-- pack building (``api_turn_into`` filters blocked cards out),
-- the autonomous publish gate (``publishing.publish_gate`` consent check).
+- pack building (``api_turn_into`` filters blocked cards out).
 
 Keeping the decision in one function means the answer cannot drift between
 surfaces. The rule set is documented in ``compliance.consent``; the

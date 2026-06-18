@@ -4,16 +4,17 @@
 > goes in one end and posts come out the other. The new shape is a **hub with
 > spokes**. In the middle sits a "strategy brain" that decides what a team should
 > post. Around it are *spokes*: things that bring information in (results, fixtures,
-> news), things that make the posts look good (graphics, reels, voice), and things
-> that send them out (Instagram, etc.). The brain is the valuable part; results
-> ingestion becomes just one spoke. Crucially, **most of this already exists** —
+> news) and things that make the posts look good (graphics, reels, voice).
+> Finished content is reviewed by a human and then exported or downloaded for
+> manual posting. The brain is the valuable part; results ingestion becomes just
+> one spoke. Crucially, **most of this already exists** —
 > this page maps the new picture onto the folders we already have, so we extend
 > rather than rebuild. New here? Read [`ARCHITECTURE.md`](ARCHITECTURE.md) (today's
 > shape) first.
 
 Evidence base: [`research/ROADMAP_RESEARCH_2026.md`](research/ROADMAP_RESEARCH_2026.md)
 Part B. Related: [`SPORT_PROFILES.md`](SPORT_PROFILES.md),
-[`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md), [`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md),
+[`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md),
 [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md), [`ROADMAP.md`](ROADMAP.md).
 
 ---
@@ -34,12 +35,12 @@ Part B. Related: [`SPORT_PROFILES.md`](SPORT_PROFILES.md),
    ┌──────────────────────────────────┐   │              │  plan → draft    │
    │  ORCHESTRATION BACKBONE           │◀──┘              └────────┬─────────┘
    │  one workflow per content type,   │                          │
-   │  optional human-approval signal   │   ┌──────────────────────┼───────────────┐
-   │  (= the autonomy toggle)          │   ▼                      ▼               ▼
-   └──────────────────────────────────┘  asset-generation   publishing layer   multi-tenant
-                                          engines (graphics,  (direct APIs /     workspace
-                                          reels, voice,       Buffer today)      isolation
-                                          theming, cutout)
+   │  human review before content is   │   ┌──────────────────────┼───────────────┐
+   │  used                             │   ▼                      ▼               ▼
+   └──────────────────────────────────┘  asset-generation   review + export    multi-tenant
+                                          engines (graphics,  (human approves,   workspace
+                                          reels, voice,       then download for  isolation
+                                          theming, cutout)    manual posting)
                               ▲
                    LOCAL-AI SUBSTITUTION LAYER (LLM, TTS, ASR, cutout, graphics)
                    guarantees zero per-call cost under everything above
@@ -66,7 +67,7 @@ connect**, not to spawn a parallel structure.
 | **Asset: voice** | `voice` (learned styles), `visual/voiceover.py` (`edge-tts`) | Swap `edge-tts` cloud endpoint for Piper (Phase 5). |
 | **Asset: theming** | `theming` (Adaptive Theming Engine, **shipped**) + `brand` | Already single-source-of-truth across web/motion/email/graphic. |
 | **Asset: cutout** | `media_ai.providers` (**rembg server default**, Replicate/PhotoRoom optional) | Already free-by-default; keep flag. |
-| **Publishing layer** | `publishing.buffer` (+ `posting_log`) | Add direct platform adapters (Bluesky/Mastodon free first), drop the Buffer dependency (Phase 4). |
+| **Review + export** | `workflow.store` + the content-pack export/download surface | Approved content is exported/downloaded for manual posting; MediaHub does not post to social channels. |
 | **Orchestration backbone** | `workflow.store` (lightweight, per-run) | Promote to a durable per-content-type workflow engine with a human-approval signal (Temporal) (Phase 2). |
 | **Multi-tenancy** | `web/tenancy.py` per-org membership binding (ADR-0014) + `web` org-gate + `_can_access_run` invariant (`tests/test_run_route_isolation_invariant.py`, `tests/test_workspace_membership_invariant.py`) | ✅ Shipped (PC.3): accounts bind to workspaces via `memberships.jsonl`; bound orgs are members-only at every pinning/editing surface; unbound orgs keep standalone behaviour. (Postiz/Mixpost stayed reference-only — nothing embedded.) |
 | **LLM / AI surfaces** | `media_ai.llm` + `ai_core.llm` (Gemini→Anthropic failover) | Add an Ollama local provider as the zero-cost default (Phase 5). |
@@ -80,13 +81,9 @@ Resist new packages; most work extends existing ones. The genuinely *new* surfac
 2. **A cross-source planner** — extend `content_engine` (not a new package) with a
    three-source fuser that emits a ranked content plan keyed by sport profile.
 3. **An orchestration adapter** — a thin module wrapping the chosen backbone
-   (Temporal) so each content type runs as a workflow with an optional approval
-   signal; `workflow.store` becomes its persistence detail or is superseded.
-4. **An autonomy enforcer** — turns `AutonomyLevel` + the §4 guardrails
-   ([`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md)) into the actual publish/skip decision.
-5. **Direct publishing adapters** — `publishing/<platform>.py` per platform,
-   mirroring the existing `media_ai.providers` resolver pattern.
-6. **A local-AI provider** — an Ollama backend behind the existing `ai_core.llm`
+   (Temporal) so each content type runs as a workflow with a human-approval
+   step; `workflow.store` becomes its persistence detail or is superseded.
+4. **A local-AI provider** — an Ollama backend behind the existing `ai_core.llm`
    interface (no new public surface; just another provider).
 
 Everything else is *generalisation* of code that already ships.
@@ -95,9 +92,9 @@ Everything else is *generalisation* of code that already ships.
 
 - **Orchestration backbone: Temporal** (`temporalio/temporal`, **MIT**, truly free
   to self-host; 3,000+ paying customers incl. Snap/Netflix/Stripe). Each content
-  type is a durable workflow; the **human-approval signal** physically implements
-  the per-type autonomy toggle (gated types pause on the signal; autonomous types
-  skip it). See [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
+  type is a durable workflow that pauses on a **human-approval signal** until a
+  person reviews the draft; approved content is then exported for manual posting.
+  See [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
 - **Local-AI substitution layer:** Ollama (LLM), Piper (TTS), whisper.cpp /
   faster-whisper (ASR), rembg / MODNet (cutout), Satori (graphics) — each truly
   free and permissive (MIT / Apache-2.0 / MPL-2.0). This layer guarantees the
@@ -106,12 +103,13 @@ Everything else is *generalisation* of code that already ships.
 ## 5. Boundaries that do not move
 
 - **Deterministic engine** (parsers, detectors, ranker, colour-science) stays
-  non-AI and authoritative. Autonomy and the brain never touch the *data layer* —
-  only the *direction* and *publish* layers (cf. [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md)).
+  non-AI and authoritative. The brain never touches the *data layer* — only the
+  *direction* and *export* layers (cf. [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md)).
 - **AI honesty rule:** no provider configured ⇒ honest error
   (`ClaudeUnavailableError` / `ProviderNotConfigured`), never a fabricated fallback.
-- **Human approval before external publishing** is the default
-  ([`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md)).
+- **Human review before content is used** is the default — approved content is
+  exported or downloaded for manual posting; MediaHub does not post to social
+  channels.
 - **No AGPL code embedded.** Postiz / MediaCMS / MinIO are referenced only as
   separate services across a network boundary
   ([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 200" role="img" aria-label="A motion reel">
+  <title>Motion reel (output) — match-day highlights, 15-second cut</title>
+  <!-- OUTPUT: a 9:16 reel poster frame. Branded play affordance over a dark
+       motion field, a progress timeline (three beats played), and the
+       headline. Rendered server-side with the club wordmark. Self-contained
+       vector, no external refs. -->
+  <defs>
+    <linearGradient id="reel-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#181C26"/>
+      <stop offset="1" stop-color="#06070C"/>
+    </linearGradient>
+    <radialGradient id="reel-glow" cx="0.5" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#D4FF3A" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#D4FF3A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="144" height="200" fill="url(#reel-bg)"/>
+  <rect width="144" height="200" fill="url(#reel-glow)"/>
+  <!-- format chips -->
+  <rect x="11" y="11" width="34" height="14" rx="7" fill="#D4FF3A" fill-opacity="0.14" stroke="#D4FF3A" stroke-opacity="0.5" stroke-width="1"/>
+  <text x="28" y="21" text-anchor="middle" font-family="monospace" font-size="7" font-weight="700" letter-spacing="1" fill="#D4FF3A">REEL</text>
+  <text x="133" y="21" text-anchor="end" font-family="monospace" font-size="7.5" font-weight="700" fill="#F5F2E8" opacity="0.85">0:15</text>
+  <!-- play affordance -->
+  <circle cx="72" cy="88" r="30" fill="#D4FF3A" opacity="0.12"/>
+  <circle cx="72" cy="88" r="22" fill="#D4FF3A"/>
+  <path d="M66 77 L66 99 L87 88 Z" fill="#0A0B11"/>
+  <!-- progress timeline: three beats played -->
+  <g>
+    <rect x="13" y="150" width="22" height="5" rx="2.5" fill="#D4FF3A"/>
+    <rect x="39" y="150" width="22" height="5" rx="2.5" fill="#D4FF3A"/>
+    <rect x="65" y="150" width="22" height="5" rx="2.5" fill="#D4FF3A"/>
+    <rect x="91" y="150" width="22" height="5" rx="2.5" fill="#F5F2E8" opacity="0.28"/>
+    <rect x="117" y="150" width="14" height="5" rx="2.5" fill="#F5F2E8" opacity="0.28"/>
+  </g>
+  <!-- headline -->
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="#F5F2E8" letter-spacing="-0.4">
+    <text x="13" y="173" font-size="13">MATCH-DAY</text>
+    <text x="13" y="187" font-size="13">HIGHLIGHTS</text>
+  </g>
+</svg>

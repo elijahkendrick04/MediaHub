@@ -78,7 +78,6 @@ TIERS: tuple[TierInfo, ...] = (
         features=(
             "Unlimited content runs",
             "1 brand profile",
-            "Buffer scheduling",
             "Priority rendering",
             "Email support",
         ),
@@ -95,6 +94,81 @@ TIERS: tuple[TierInfo, ...] = (
         ),
     ),
 )
+
+
+@dataclass(frozen=True)
+class FeatureRow:
+    """One dimension of the pricing comparison (UI 1.20).
+
+    ``label`` is the dimension; the per-plan cell is one of:
+      * ``True``  — included (rendered as a check),
+      * ``False`` — not included (rendered as a muted cross),
+      * ``str``   — included, with the specific value shown ("Unlimited",
+        "3 / month", …).
+
+    This carries the *absence* (✗) and per-cell value information that a flat
+    per-tier bullet list (``TierInfo.features``) structurally cannot, which is
+    exactly what the check/cross cards and the comparison table need.
+    """
+
+    label: str
+    free: object = False
+    club: object = False
+    federation: object = False
+
+    def value_for(self, plan: str) -> object:
+        return {
+            PLAN_FREE: self.free,
+            PLAN_CLUB: self.club,
+            PLAN_FEDERATION: self.federation,
+        }.get(plan, False)
+
+
+@dataclass(frozen=True)
+class FeatureGroup:
+    title: str
+    rows: tuple[FeatureRow, ...]
+
+
+# Feature comparison matrix — the single source of truth for BOTH the
+# check/cross feature lists on the tier cards and the comparison table on
+# ``/pricing`` (UI 1.20), so those two views can never drift from each other.
+# Deliberately copy-only: no price lives here (ADR-0011 / PC.4). The boolean
+# rows encode real product gating — e.g. "Priority rendering" is a paid feature,
+# and every Club capability carries into Federation ("Everything in Club").
+FEATURE_MATRIX: tuple[FeatureGroup, ...] = (
+    FeatureGroup(
+        "Content & creative",
+        (
+            FeatureRow("Content runs", free="3 / month", club="Unlimited", federation="Unlimited"),
+            FeatureRow("Brand profiles", free="1", club="1", federation="Multi-club"),
+            FeatureRow(
+                "On-brand captions, graphics & motion", free=True, club=True, federation=True
+            ),
+            FeatureRow("Priority rendering", free=False, club=True, federation=True),
+        ),
+    ),
+    FeatureGroup(
+        "Publishing & export",
+        (FeatureRow("Manual export (copy / download)", free=True, club=True, federation=True),),
+    ),
+    FeatureGroup(
+        "Scale & support",
+        (
+            FeatureRow("Multi-club workspaces", free=False, club=False, federation=True),
+            FeatureRow("Enterprise tools", free=False, club=False, federation=True),
+            FeatureRow(
+                "Support", free="Community", club="Email", federation="Onboarding & priority"
+            ),
+        ),
+    ),
+)
+
+
+def feature_rows() -> tuple[FeatureRow, ...]:
+    """Every comparison row, flattened in display order."""
+    return tuple(row for group in FEATURE_MATRIX for row in group.rows)
+
 
 # Map a paid plan to the env var holding its Stripe Price id.
 _PLAN_PRICE_ENV = {

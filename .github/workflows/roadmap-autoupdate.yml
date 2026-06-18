@@ -11,10 +11,15 @@
 #   3. refreshes the "Recent code activity" feed (last ~12 non-bot commits),
 #   4. applies any `roadmap: <ID> <status>` directives found in the pushed
 #      commit messages (e.g. `roadmap: P1.2 done`, `roadmap: F.2 done`):
-#      `done` MOVES the item from its to-do list (founder or Fable 5) into
+#      `done` MOVES the item from its to-do list (founder or build) into
 #      the Completed list (date-stamped); any other status sets the item's
 #      badge in place, or returns a Completed item to the right to-do list
-#      (`F.*` ids -> the founder list, everything else -> the main list).
+#      (`F.*` ids -> the founder list, everything else -> the main list),
+#   5. maintains the in-depth phase plan: recomputes each `ROADMAP:PHASE N`
+#      block's status badge from its items in the to-do/Completed lists and,
+#      once every item in a phase has shipped, MOVES the whole phase section
+#      off docs/ROADMAP.md into docs/ROADMAP_BUILT.md's BUILT_PHASES block
+#      (so nothing already-built lingers on the forward plan).
 #
 # Landing mechanism (fixed 2026-06-10): `main` is branch-protected and
 # REQUIRES changes via pull request, so the old direct commit-back was
@@ -31,6 +36,19 @@
 # Why only `main`? So the file-disjoint feature-branch PRs (Appendix A's
 # parallel bucket) never collide on ROADMAP.md — the roadmap moves when work
 # *lands* on the mainline, not on every feature-branch push.
+#
+# Self-conflict fix (2026-06-13): every refresh rewrites the SAME lines (the
+# LAST_UPDATED stamp + the top of the ACTIVITY table), so a bot PR computed
+# from the stale triggering checkout was dead-on-arrival the moment another
+# roadmap refresh landed first — GitHub marked it `dirty` and auto-merge
+# stalled. Two changes keep the single PR path conflict-free:
+#   * the refresh is regenerated on top of the FRESHEST main — the job
+#     re-fetches and resets the bot branch to origin/main before running the
+#     script, so the branch is always exactly "latest main + roadmap delta"
+#     and its PR can never conflict on those shared lines; and
+#   * the PR lands by SQUASH, so each refresh is ONE tidy
+#     `docs: auto-update roadmap (#N) [skip render]` commit on main, not a
+#     merge commit plus a sibling branch commit (which read like two writers).
 #
 # Loop safety, three layers:
 #   1. pushes/merges made with the built-in GITHUB_TOKEN do not trigger
@@ -76,6 +94,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Branch the refresh off the freshest main
+        # Regenerate on top of the live origin/main, NOT the (possibly stale)
+        # commit that triggered this run: concurrent feature merges advance
+        # main while this job queues, and every refresh edits the same
+        # stamp/activity lines. Building the bot branch from the current tip
+        # makes the resulting PR exactly "latest main + roadmap delta", so it
+        # can never conflict with a roadmap refresh that landed first.
+        run: |
+          git fetch --no-tags --force origin main
+          git checkout -B bot/roadmap-autoupdate FETCH_HEAD
+
       - name: Refresh ROADMAP.md
         env:
           # For the sentinel-issues fetch (read-only; fail-soft to "leave the
@@ -95,24 +124,23 @@ jobs:
           # github.token so the workflow still functions without the secret.
           GH_TOKEN: ${{ secrets.AUTOTEST_GH_PAT || github.token }}
         run: |
-          if git diff --quiet -- docs/ROADMAP.md; then
+          if git diff --quiet -- docs/ROADMAP.md docs/ROADMAP_BUILT.md; then
             echo "No roadmap changes — nothing to land."
             exit 0
           fi
-          BRANCH=bot/roadmap-autoupdate
+          BRANCH=bot/roadmap-autoupdate   # already checked out from origin/main
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$BRANCH"
-          git add docs/ROADMAP.md
+          git add docs/ROADMAP.md docs/ROADMAP_BUILT.md
           # [skip render]: a roadmap refresh is docs-only — deploying it is
           # pure waste, and these bot deploys have repeatedly wedged
           # Render's build queue (queued with zero build logs for hours,
-          # blocking real deploys behind them). The marker must also be on
-          # the MERGE commit subject below — that's the commit Render
-          # inspects on a push to main.
+          # blocking real deploys behind them). The marker must also ride the
+          # merge commit subject below — that's the commit Render inspects on
+          # a push to main.
           git commit -m "docs: auto-update roadmap [skip render]"
-          # Single-purpose branch: force-push is safe and refreshes any
-          # still-open bot PR to the newest computed state.
+          # Single-purpose branch, rebuilt from origin/main this run: force-push
+          # is safe and refreshes any still-open bot PR to the newest state.
           git push --force origin "$BRANCH"
           PR=$(gh pr list --head "$BRANCH" --base main --state open \
                  --json number --jq '.[0].number' || true)
@@ -125,12 +153,15 @@ jobs:
           else
             echo "Reusing open roadmap PR #$PR"
           fi
-          # Two landing paths: --auto arms auto-merge while checks are
-          # pending; a docs-only PR is often ALREADY clean by now, and
-          # GitHub refuses to arm auto-merge on a clean PR — so fall
-          # through to an immediate merge. Only if both fail (auto-merge
-          # disabled repo-side AND checks pending/failed) is the PR left
-          # open for a human — preserved, never lost.
+          # The repo standardises on merge commits (squash disabled repo-wide),
+          # so land with --merge. The [skip render] marker still rides the merge
+          # commit subject via --subject — that's the commit Render inspects — so
+          # the docs-only refresh never triggers a deploy. --auto arms auto-merge
+          # while checks are pending; a docs-only PR is often ALREADY clean by
+          # now, and GitHub refuses to arm auto-merge on a clean PR — so fall
+          # through to an immediate --merge. Only if both fail (auto-merge
+          # disabled repo-side AND checks pending/failed) is the PR left open for
+          # a human — preserved, never lost.
           if gh pr merge "$PR" --merge --auto \
                --subject "docs: auto-update roadmap (#${PR}) [skip render]"; then
             echo "Auto-merge armed on PR #$PR — lands when checks pass."

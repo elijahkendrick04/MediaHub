@@ -90,7 +90,6 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 # Every data.db table that keys rows by profile_id. live_watch_swims and
 # magic_link_versions hang off watches/runs and are handled separately.
 _ORG_TABLES = (
-    "posting_attempts",
     "approval_events",
     "content_corrections",
     "club_records",
@@ -312,9 +311,8 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
     - ``media/<file>`` + ``media_assets.json`` — library blobs + metadata
     - ``consent_registry.csv`` + ``athletes.json`` — the W.2 registry and
       the athlete register it keys
-    - ``sponsor_exposure.jsonl``, ``posting_log.json``,
-      ``club_records.json``, ``corrections.json``, ``audit_log.jsonl``,
-      ``memberships.json``
+    - ``sponsor_exposure.jsonl``, ``club_records.json``,
+      ``corrections.json``, ``audit_log.jsonl``, ``memberships.json``
     - ``README.txt`` — what's inside and what is held elsewhere (Stripe)
 
     Returns a manifest dict with per-section counts.
@@ -415,18 +413,6 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
         conn = _connect()
         if conn is not None:
             try:
-                posting = (
-                    _rows_as_dicts(
-                        conn,
-                        "SELECT * FROM posting_attempts WHERE profile_id = ? ORDER BY id",
-                        (pid,),
-                    )
-                    if _table_exists(conn, "posting_attempts")
-                    else []
-                )
-                manifest["posting_rows"] = len(posting)
-                zf.writestr("posting_log.json", json.dumps(posting, indent=2, default=str))
-
                 records = (
                     _rows_as_dicts(conn, "SELECT * FROM club_records WHERE profile_id = ?", (pid,))
                     if _table_exists(conn, "club_records")
@@ -484,7 +470,7 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
             "Contents: profile.json (brand kit, sponsors, wall settings), runs/ "
             "(parsed results, cards, captions + per-card approval states), media/ "
             "+ media_assets.json, consent_registry.csv + athletes.json, "
-            "sponsor_exposure.jsonl, posting_log.json, club_records.json, "
+            "sponsor_exposure.jsonl, club_records.json, "
             "corrections.json, audit_log.jsonl, memberships.json.\n\n"
             "Not included: billing records (held by Stripe — accessible from "
             "Billing → Manage billing), and other members' account data.\n"

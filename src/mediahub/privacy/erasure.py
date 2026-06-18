@@ -123,11 +123,17 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
     """The stores a run delete must reach BEYOND the run files themselves.
 
     web.py removes the DB row, run JSON, run directory, packs and workflow
-    file; this adds the per-run PB cache, the caption memory, the posting-log
-    excerpts, and the motion cache. Never raises — erasure of one store must
-    not abort erasure of the rest.
+    file; this adds the per-run PB cache, the caption memory, and the motion
+    cache. Never raises — erasure of one store must not abort erasure of the
+    rest.
     """
-    report = {"pb_cache_files": 0, "memory_rows": 0, "posting_excerpts": 0, "motion_files": 0}
+    report = {
+        "pb_cache_files": 0,
+        "memory_rows": 0,
+        "motion_files": 0,
+        "athlete_swims": 0,
+        "review_comments": 0,
+    }
     try:
         from mediahub.pb_discovery.cache import _discovered_root
 
@@ -152,16 +158,22 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
             report["memory_rows"] = memory_store.delete_run(tenant_id=profile_id, run_id=run_id)
         except Exception as exc:
             log.warning("erasure: memory sweep failed for %s: %s", run_id, exc)
-    try:
-        from mediahub.publishing.posting_log import scrub_run_excerpts
+        try:
+            from mediahub.athletes import registry as athlete_registry
 
-        report["posting_excerpts"] = scrub_run_excerpts(run_id)
-    except Exception as exc:
-        log.warning("erasure: posting-log scrub failed for %s: %s", run_id, exc)
+            report["athlete_swims"] = athlete_registry.purge_run(profile_id, run_id).get("swims", 0)
+        except Exception as exc:
+            log.warning("erasure: athlete-swims purge failed for %s: %s", run_id, exc)
     try:
         report["motion_files"] = _purge_motion_cache_for_run(run_id)
     except Exception as exc:
         log.warning("erasure: motion-cache sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.workflow.review_comments import delete_comments_for_run
+
+        report["review_comments"] = delete_comments_for_run(run_id)
+    except Exception as exc:
+        log.warning("erasure: reel review-comments sweep failed for %s: %s", run_id, exc)
     return report
 
 
@@ -181,7 +193,6 @@ class AthleteErasureReport:
     pb_cache_files: int = 0
     research_cache_files: int = 0
     memory_rows: int = 0
-    posting_excerpts: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -194,7 +205,6 @@ class AthleteErasureReport:
             "pb_cache_files": self.pb_cache_files,
             "research_cache_files": self.research_cache_files,
             "memory_rows": self.memory_rows,
-            "posting_excerpts": self.posting_excerpts,
         }
 
 
@@ -349,12 +359,6 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
         report.memory_rows = memory_store.delete_matching(tenant_id=profile_id, needle=name)
     except Exception as exc:
         log.warning("erasure: memory sweep failed for %r: %s", name, exc)
-    try:
-        from mediahub.publishing.posting_log import scrub_matching_excerpts
-
-        report.posting_excerpts = scrub_matching_excerpts(profile_id, name)
-    except Exception as exc:
-        log.warning("erasure: posting-log scrub failed for %r: %s", name, exc)
     return report
 
 

@@ -64,12 +64,12 @@ aspirational — each point below is enforced by tests that fail our build:
   deterministic parsers and detectors — never by a language model — so a
   published time can always be traced to its source row (provenance is kept
   end-to-end).
-- **Human approval before publishing** is the default for everything; the
-  publish gate's safeguarding rule means **minors' content never
-  auto-publishes** even where a club opts a post type into autonomy
-  ([AUTONOMY_MODEL](../AUTONOMY_MODEL.md), `publishing/publish_gate.py`).
-- **Immutable audit ledger** per organisation for every autonomous decision;
-  export history and approval states are recorded.
+- **Human approval before content is used**, always: MediaHub does not publish
+  to social channels at all. Approved content — minors' included — is only ever
+  exported/downloaded for a human to post manually, and consent gating blocks a
+  refused athlete from approval and packing.
+- **Immutable audit ledger** per organisation; export history and approval
+  states are recorded.
 - **EU/UK data-residency hygiene:** fonts and rendering are self-hosted
   (no Google-Fonts-style CDN leaks — the Munich ruling drove this); secrets
   live in environment config only; ledgers holding personal data are

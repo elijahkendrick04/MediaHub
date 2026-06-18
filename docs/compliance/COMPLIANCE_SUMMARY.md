@@ -23,7 +23,7 @@
 
 | Gap (severity) | Closed by | Evidence |
 |---|---|---|
-| Art 5(1)(a)+6+21 — no lawful basis records, no consent/opt-out, objections unenforceable (**Critical**) | `compliance/lawful-basis-and-consent` | Per-tenant basis config + append-only consent registry (`mediahub/compliance/consent.py`); ONE gate function enforced at **approval (403), pack build (filtered), publish route (403), autonomous publish gate (check)** — `tests/test_consent_gating.py` (14), `test_llm_pipeline_security.py` consent-revocation test. Which basis a club should pick: **Q2 (open, by design)** |
+| Art 5(1)(a)+6+21 — no lawful basis records, no consent/opt-out, objections unenforceable (**Critical**) | `compliance/lawful-basis-and-consent` | Per-tenant basis config + append-only consent registry (`mediahub/compliance/consent.py`); ONE gate function enforced at **approval (403)** and **pack build (filtered)**, so a refused athlete never reaches an exportable pack — `tests/test_consent_gating.py` (14). Which basis a club should pick: **Q2 (open, by design)** |
 | Art 8 — no parental-consent modelling (**Critical**) | same | Opt-in mode requires parental grants for under-18/unknown-age athletes — tested |
 | Art 5(1)(e) — indefinite retention (**Critical**) | `compliance/retention-and-minimisation` | Per-class windows + tenant tightening + daily exactly-once purge job; accountability ledgers exempt — `tests/test_retention_minimisation.py` (13). Default values: **Q8** |
 | Art 14 — enrichment invisible to athletes/parents (**Critical**) | `compliance/transparency-artifacts` + per-tenant enrichment opt-out | Child-readable Art 14 notice template naming swimmingresults.org; `pb_enrichment_enabled` wired into the pipeline with an honest skip message. Lawfulness of the scraping itself: **Q4** |
@@ -41,7 +41,7 @@
 | Arts 12/13 — no notices | `compliance/transparency-artifacts` | Art 13 club-user notice + Art 14 athlete/parent notice templates (DRAFT) |
 | Art 15 — no SAR | `compliance/data-subject-rights` | `export_athlete` machine-readable export across all stores; Art 12A clock metadata (stop/resume extends due date) — tested |
 | Art 18 — no restriction | same | Registry `restricted` flag blocks in **every** mode — tested |
-| Arts 22/22A–D — approval gate UI-only | `security/llm-pipeline` | Publish route now enforces approval/consent/tenant **server-side**; ADM analysis recorded (**Q9**) |
+| Arts 22/22A–D — approval gate UI-only | `security/llm-pipeline` | Approval/consent/tenant checks enforced **server-side** (a caption cannot reach approval state); MediaHub does not publish to social — approved content is only exported for a human to post; ADM analysis recorded (**Q9**) |
 | Art 25 + DUAA children's duty | `compliance/childrens-code` | Surname-initialisation / age-suppression / photo-exclusion controls; high-privacy defaults for new orgs; [`CHILDRENS_CODE.md`](CHILDRENS_CODE.md) maps all 15 standards — `tests/test_childrens_code_controls.py` (13) |
 | Art 30 — no ROPA | Phase 1 | [`ROPA.md`](ROPA.md) (operator identity to complete) |
 | Arts 33–34 — no breach process | `compliance/complaints-and-breach` | [`BREACH_PLAYBOOK.md`](BREACH_PLAYBOOK.md) + incident register with 72h-clock evidence — tested |

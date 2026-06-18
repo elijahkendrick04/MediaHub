@@ -23,7 +23,8 @@
 
 Evidence base: [`research/ROADMAP_RESEARCH_2026.md`](research/ROADMAP_RESEARCH_2026.md)
 Parts C & D. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
-[`ROADMAP.md`](ROADMAP.md) (Phase 0 de-risk, Phase 5 local-AI).
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md) (Phase 0 de-risk — shipped) and
+[`ROADMAP.md`](ROADMAP.md) (Phase 4 — zero-cost local AI).
 
 > **Two rules before wiring anything in.**
 > 1. **Verify the licence yourself** from the actual `LICENSE` file at the version
@@ -41,7 +42,7 @@ Parts C & D. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
 
 | Building block | Role | Licence |
 |---|---|---|
-| `temporalio/temporal` (+ Python/TS/PHP SDKs) | Orchestration backbone / autonomy toggle | MIT |
+| `temporalio/temporal` (+ Python/TS/PHP SDKs) | Orchestration backbone / human-approval workflow | MIT |
 | `ollama/ollama`, `ggerganov/llama.cpp` | Local LLM (zero-cost brain/captions) | MIT |
 | `vercel/satori` | HTML/CSS→SVG→PNG graphics (~100× lighter than Chromium) | MPL-2.0 |
 | `rhasspy/piper` | Local neural TTS (voiceover) | MIT |
@@ -98,15 +99,14 @@ live bill.
 | Current dependency | Hidden-fee flag | Status today | Free substitute (roadmap) |
 |---|---|---|---|
 | **Remotion** (reels, `remotion/` + `visual/motion.py`) | ⚠️ **Company License** for for-profit >3 people ($25/seat/mo Creators; $0.01/render, $100/mo min Automators; $500/mo min Enterprise). v5.0 mandates telemetry `licenseKey` for the render tier. | **Optional behind a flag** — ✅ substituted (P0.1, 2026-06-10): `MEDIAHUB_REEL_ENGINE=ffmpeg` renders story cards + reels from the card's own still graphics via FFmpeg (`visual/reel_ffmpeg.py`), no Node/Remotion needed. Remotion stays the default for those who license it. | **Shipped**: still-graphic + FFmpeg engine. Satori remains the P5.4 *fast-path* (performance, not licensing). |
-| **`edge-tts`** (voiceover, `visual/voiceover.py`) | ⚠️ Free but depends on an undocumented **Microsoft Edge cloud endpoint** — not a stable contract. Operator-gated (`MEDIAHUB_VOICEOVER=1`), honest-errors when absent, and provider-slotted (`MEDIAHUB_TTS_PROVIDER`, P0.4) so the interface admits a local backend. | Optional, off by default | **Piper** (MIT, local, CPU) — slot registered; implementation lands with P5.2. |
-| **Buffer** (publishing, `publishing/buffer.py`) | ⚠️ **Paid** scheduling SaaS; an external account + token (`BUFFER_ACCESS_TOKEN`). | Shipped publishing path | **Direct platform APIs**; prioritise genuinely-free **Bluesky (AT Protocol)** + **Mastodon**; budget for X's pay-per-use (Phase 4). |
+| **`edge-tts`** (voiceover, `visual/voiceover.py`) | ⚠️ Free but depends on an undocumented **Microsoft Edge cloud endpoint** — not a stable contract. Operator-gated (`MEDIAHUB_VOICEOVER=1`), honest-errors when absent, and provider-slotted (`MEDIAHUB_TTS_PROVIDER`, P0.4) so the interface admits a local backend. | Optional, off by default | **Piper** (MIT, local, CPU) — ✅ **implemented (R1.21)**: `MEDIAHUB_TTS_PROVIDER=piper` + a Piper `.onnx` model (`MEDIAHUB_PIPER_MODEL`) runs fully offline; `piper-tts` stays an optional install, honest-errors when the package or model is absent. |
 | **`replicate`** (cutout, `media_ai/providers`) | ⚠️ **Paid** per-call cutout API. | **Optional** — default is already in-process **rembg** (`MEDIAHUB_CUTOUT_PROVIDER=server`) | **Already substituted**: rembg (MIT, local) is the default; Replicate/PhotoRoom are opt-in. ✅ |
 | **Hosted Anthropic / Gemini keys** (`media_ai.llm`, `ai_core.llm`) | ⚠️ Hosted LLM **API keys** (Gemini free tier today; Anthropic paid). | Shipped; Gemini-first, Anthropic failover | **Ollama** local provider behind the same `ai_core.llm` interface for a zero-key path (Phase 5). |
 
 Notes:
 - **No new *mandatory* paid dependency** may be added. Anything paid (Remotion
-  Company License, Replicate, hosted keys, Buffer, X API) must stay **optional,
-  behind a flag/env var, with a documented free default** ([`ROADMAP.md`](ROADMAP.md)
+  Company License, Replicate, hosted keys) must stay **optional, behind a
+  flag/env var, with a documented free default** ([`ROADMAP.md`](ROADMAP.md)
   Phase 0 exit criterion).
 - The cutout substitution is **already done** — `rembg` is the shipped default.
 - The remaining `requirements.txt` deps (Flask, Pillow, pdfplumber, lxml,

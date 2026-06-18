@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .status import CardStatus, CardWorkflowState, ScheduleStatus
+from .status import CardStatus, CardWorkflowState
 
 
 class WorkflowStore:
@@ -134,37 +134,6 @@ class WorkflowStore:
                 counts[key] += 1
         counts["total"] = len(states)
         return counts
-
-    def set_schedule(
-        self,
-        run_id: str,
-        card_id: str,
-        schedule_status: ScheduleStatus,
-        buffer_update_id: Optional[str] = None,
-        scheduled_at: Optional[str] = None,
-        schedule_error: Optional[str] = None,
-    ) -> CardWorkflowState:
-        """Update a card's external-scheduler state.
-
-        Used by the publishing layer (Buffer) to record when a card has
-        been queued or scheduled with a third-party service. Returns the
-        updated CardWorkflowState.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            states = self.load(run_id)
-            existing = states.get(card_id, CardWorkflowState(card_id=card_id))
-            existing.schedule_status = schedule_status
-            existing.last_changed_at = now
-            # Always overwrite the most recent attempt's metadata; explicit
-            # None clears prior values so the UI never shows a stale id
-            # after a failed re-schedule.
-            existing.buffer_update_id = buffer_update_id
-            existing.scheduled_at = scheduled_at
-            existing.schedule_error = schedule_error
-            states[card_id] = existing
-            self._save(run_id, states)
-            return existing
 
     def mark_all_posted(self, run_id: str) -> int:
         """Mark all approved cards as posted. Returns count of cards updated."""

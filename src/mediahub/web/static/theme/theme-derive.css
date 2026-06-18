@@ -128,6 +128,8 @@
        Equivalent to today's rgba(245,242,232,N) but driven by the
        neutral seed so a theme change ripples through.
        ---------------------------------------------------------------- */
+    /* Cream blend tinted with the neutral seed so a theme change
+       ripples through (dark-only). */
     --mh-outline:         color-mix(in oklch, var(--mh-prim-neutral-50) 14%, transparent);
     --mh-outline-variant: color-mix(in oklch, var(--mh-prim-neutral-50)  6%, transparent);
     --mh-outline-rule:    color-mix(in oklch, var(--mh-prim-neutral-50) 10%, transparent);

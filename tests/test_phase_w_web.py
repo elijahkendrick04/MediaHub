@@ -145,7 +145,6 @@ class TestClubDataPages:
         c = env["client"]
         _pin(c, "org-alpha")
         for path, marker in [
-            ("/club-data", b"Athletes"),
             ("/athletes", b"Roster"),
             ("/records", b"records sheet"),
             ("/live", b"live-results"),
@@ -154,6 +153,15 @@ class TestClubDataPages:
             r = c.get(path)
             assert r.status_code == 200, path
             assert marker in r.data, path
+
+    def test_club_data_tab_redirects_to_settings(self, env):
+        # The Club-data top-nav tab was retired; its old URL now redirects
+        # into Settings (records, athletes, etc. live there / on Create).
+        c = env["client"]
+        _pin(c, "org-alpha")
+        r = c.get("/club-data", follow_redirects=False)
+        assert r.status_code == 302
+        assert "/settings" in r.headers["Location"]
 
     def test_pages_prompt_without_org(self, env):
         c = env["client"]

@@ -19,7 +19,7 @@ generated captions naming athletes, club-user account emails.
 | E2 | Results from a link | `results_fetch/` 3-tier crawl → same pipeline | Same as E1 |
 | E3 | Media upload | media library routes → `media_library/store.py` | Photos of athletes (children), `linked_athlete_names`, uploader identity |
 | E4 | PB enrichment (collection from a third party, **not** the data subject) | `pb_discovery.fetch_profile` → swimmingresults.org | Athlete name + club sent as search query; PB history (event, course, time, date) received |
-| E5 | Club profile setup | `/organisation*` routes → `web/club_profile.py` | Roster ASA IDs, "important swimmers" list, club branding, per-club Buffer token |
+| E5 | Club profile setup | `/organisation*` routes → `web/club_profile.py` | Roster ASA IDs, "important swimmers" list, club branding |
 | E6 | Account signup/login | `/signup`, `/login` → `web/auth.py` | Club-user email + password (bcrypt-hashed) |
 
 ## 2. Stores (everything under `DATA_DIR`; resolution at `web/web.py:808-810`)
@@ -29,7 +29,7 @@ generated captions naming athletes, club-user account emails.
 | S1 | Raw uploads | `uploads_v4/<run_id>/<filename>` | `upload_post` | Full results file (all athletes) | per-run `profile_id` | With run delete |
 | S2 | Run state (single source of truth) | `runs_v4/<run_id>.json` + `data.db` `runs` table | `_persist_run` (`web.py:1529`) | Parsed athletes, achievements, captions (names embedded), ages | `profile_id` column/field | `POST /privacy/run/<id>/delete` → `_delete_run` (`web.py:1831`) cascades to S1–S5 |
 | S3 | Rendered outputs | `runs_v4/<run_id>/visuals/`, `runs_v4/<run_id>/motion_cache/`, `turn_into_packs/<run_id>/` | renderers | Card PNGs/MP4s with **names and photos of minors**; explainability manifests | via run | With run delete |
-| S4 | Workflow / approval state | `runs_v4/<run_id>__workflow.json` | `workflow/store.py` | Card approval decisions, schedule metadata | via run | With run delete |
+| S4 | Workflow / approval state | `runs_v4/<run_id>__workflow.json` | `workflow/store.py` | Card approval decisions (QUEUE → APPROVED → POSTED) | via run | With run delete |
 | S5 | In-memory run cache | process memory | `web.py` | Run state | — | Evicted on delete |
 | S6 | PB cache (per-run) | `data/discovered/pbs/<run_id>/<swimmer_key>.json` | `pb_discovery/cache.py:41` | PB history keyed by md5(name\|club) (`make_swimmer_key`, `cache.py:35`) | per-run | `POST /privacy/cache/clear` (`web.py:12579`) clears lookup caches; per-run files **not** covered by run delete — **gap** |
 | S7 | PB warm cache | `data/discovered/swimmers/<swimmer_key>.json` (7-day TTL) | same | Same | **NOT tenant-scoped** — shared across tenants; undermines the processor framing (LEGAL_FRAMEWORK §5) — **gap** | `/privacy/cache/clear` |
@@ -39,10 +39,9 @@ generated captions naming athletes, club-user account emails.
 | S11 | Users ledger | `users.jsonl` (chmod 0600, append-only) | `web/auth.py:191` | Email, bcrypt hash, plan, Stripe customer ID | global | **No delete route** — append-only; account erasure unimplemented — **gap** |
 | S12 | Semantic caption memory | `memory.db` (sqlite-vec) | `memory/store.py:127` (`upsert`) | **Captions with athlete names** + embeddings, `card_id`, `run_id` | `tenant_id` column | **Not deleted on run delete** — **gap** |
 | S13 | Autonomy audit ledger | `autonomy_audit/<org_id>.jsonl` (immutable, append-only) | `workflow/autonomy.py:93` | Tool args capped at 2000 chars — may embed athlete names from card payloads | per-org | Never (by design — accountability record); contents should be pseudonymised — **gap** |
-| S14 | Posting log | via `publishing/posting_log.py` | publish gate | Publish attempts per card | per-org | No purge |
-| S15 | Scheduler state | `data.db` task tables | `workflow/schedule.py` | Task params (JSON) — must not carry athlete data | per-org | No purge |
-| S16 | Session secret | `DATA_DIR/.secret_key` (0600) | `web.py:7877` | — (key material) | — | n/a |
-| S17 | Observability | `data.db` uptime/LLM-usage tables | `observability/` | Aggregate counts only | — | n/a |
+| S14 | Scheduler state | `data.db` task tables | `workflow/schedule.py` | Task params (JSON) — must not carry athlete data | per-org | No purge |
+| S15 | Session secret | `DATA_DIR/.secret_key` (0600) | `web.py:7877` | — (key material) | — | n/a |
+| S16 | Observability | `data.db` uptime/LLM-usage tables | `observability/` | Aggregate counts only | — | n/a |
 
 ## 3. Logs
 
@@ -64,24 +63,18 @@ generated captions naming athletes, club-user account emails.
 | F3 | Photo cutout → Photoroom | `media_ai/providers/photoroom_provider.py:64` | **Full photo bytes** (children) to `sdk.photoroom.com/v1/segment` | Only when tenant enables cloud cutout; consent-checked assets only |
 | F4 | Photo cutout → Replicate | `media_ai/providers/replicate_provider.py:63` | Full photo bytes to model `851-labs/background-remover` | Same; default remains in-process rembg (`rembg_local.py`) |
 | F5 | PB lookup → swimmingresults.org | `pb_discovery/fetch_profile.py` | HTTP GET with **athlete name + club** as search params | Per-tenant opt-in; rate-limited; cache-first (exists) |
-| F6 | Publishing → Buffer → Meta/TikTok | `publishing/` + per-club token in S10 | Approved card image + caption (names/photos of minors) | Consent-gated (Phase 2 capability 1); platforms become independent controllers |
-| F7 | Notifications → ntfy/webhook | `notify/channels.py` | Operational messages | Must carry **no athlete personal data** (enforce + test) |
-| F8 | Web research → SearXNG/DuckDuckGo | `web_research/` | Search queries | No minor names in queries (enforce + test) |
+| F6 | Notifications → ntfy/webhook | `notify/channels.py` | Operational messages | Must carry **no athlete personal data** (enforce + test) |
+| F7 | Web research → SearXNG/DuckDuckGo | `web_research/` | Search queries | No minor names in queries (enforce + test) |
 
-## 5. The publish path and its gates (as implemented)
+## 5. The approval / export path and its gates (as implemented)
 
 1. Human flow: upload → pipeline → `/review/<run_id>` → per-card approval
-   (S4) → export / schedule. Approval is the default for everything.
-2. Autonomous flow (per-type opt-in only): `publishing/publish_gate.py:399`
-   (`evaluate_publish_gate`) checks, in order: kill switch
-   (`MEDIAHUB_PUBLISH_KILL_SWITCH`), per-type policy
-   (`DATA_DIR/per_type_autonomy/`), provenance (`safe_to_post`), confidence
-   (default ≥ 0.85), brand safety, **safeguarding — any card with age < 18
-   is always blocked from autonomous publishing** (`publish_gate.py:313-322`,
-   ADR-0003), and hourly/daily rate caps. Every verdict is recorded in S13.
-3. **Phase 2 adds the consent gate**: a card featuring an opted-out or
-   no-consent athlete must be blocked from approval, pack rendering, and
-   publishing — in both flows.
+   (S4) → export / download. Approval is the default for everything, and it
+   is the only path: MediaHub does not publish to social channels — the club
+   posts the exported content manually.
+2. **The consent gate**: a card featuring an opted-out or no-consent athlete
+   is blocked from approval and from pack rendering, so a refused athlete
+   never reaches an exportable pack.
 
 ## 6. Real personal data inside the repository itself
 
@@ -112,7 +105,8 @@ others — redact-or-delete policy needed), S2 (parsed records + captions),
 S3 (rendered cards), S4 (approval state for X's cards), S6/S7/S8 (PB caches
 keyed by md5(name|club) and raw HTML), S9 (`linked_athlete_names` + photos),
 S10 (roster/important-swimmer IDs, voice examples), S12 (caption memory),
-S13/S14 (pseudonymise rather than delete — accountability records).
+S13 (pseudonymise rather than delete — accountability record).
 Today only S2→S5 cascade exists (run-level, not athlete-level), plus a
-global cache clear and per-asset media delete. Published social posts are
-**outside the platform's reach** and the tooling must say so honestly.
+global cache clear and per-asset media delete. Content the club has already
+exported and posted to social manually is **outside the platform's reach**
+and the tooling must say so honestly.

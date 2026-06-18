@@ -115,6 +115,23 @@ The 25+ Material 3 role tokens you actually consume:
 | `--mh-elevation-2` | Card drop | composite shadow |
 | `--mh-elevation-3` | Modal drop | composite shadow |
 
+### Dark-only colour scheme
+
+MediaHub ships a **single dark theme** — there is no light mode and no
+in-app theme toggle. Every surface / text / outline role above resolves
+to one dark value in `theme-base.css`. `color-scheme: dark` is pinned in
+`responsive_guardrails.py` so the UA chrome (scrollbars, form controls,
+text selection) renders dark to match.
+
+Lane-yellow is the brand *fill*: button fills stay lane-yellow with dark
+`--mh-on-primary` text, generic links use `--lane`, and the
+medal/tertiary accent is the pale gold that glows on the pit-wall.
+
+When you add chrome that needs a colour (a scrim, a tint), reference an
+existing role token (`--mh-surface*`, `--mh-on-surface*`,
+`--mh-outline*`) rather than hardcoding a hex, so a brand re-seed still
+ripples through.
+
 ### Tier 3 — Component tokens
 
 Deliberately deferred per Nathan Curtis's *"introduce only when
@@ -173,7 +190,7 @@ convention in `mediahub.theming.theme_store`:
 
 | Surface | Scheme | `primary ←` |
 |---|---|---|
-| Web (cascade) | both via `light-dark()` | `--mh-primary` |
+| Web (cascade) | dark | `--mh-primary` |
 | Motion (Remotion) | dark | `roles.dark.primary` |
 | Email | light | `roles.light.primary` |
 | Static graphics | light | `roles.light.primary` |
@@ -284,8 +301,7 @@ If a new role appears in 3+ components and needs to be themed:
 
 1. Add the token declaration to `theme-base.css`:
    ```css
-   --mh-new-role: light-dark(var(--mh-prim-X-Y),
-                              var(--mh-prim-X-Z));
+   --mh-new-role: var(--mh-prim-X-Y);
    ```
 2. Add the matching `@property` registration:
    ```css
@@ -405,4 +421,66 @@ citation matches a specific algorithm choice in the code:
 The detailed per-stage thesis plans (A–J) that documented this work
 have been consolidated — **this file is now the single canonical record
 of the theming architecture and its stages**. The stage breakdown and
-acceptance criteria live in [`docs/ROADMAP.md`](ROADMAP.md) §1.6.
+acceptance criteria live in [`docs/ROADMAP_BUILT.md`](ROADMAP_BUILT.md) §1.6
+(Appendix C — the theming engine is shipped, so its record moved to the built file).
+
+## 14. Multi-colour brand expansion (G1.20)
+
+The base engine derives the whole palette from a **single** seed: the
+`secondary` ramp is a muted same-hue derivation and `tertiary` is the seed
+hue + 60°. A club that owns three real colours — say navy, gold and crimson —
+saw only the navy; the gold and crimson were metadata the engine ignored.
+
+G1.20 lets a club hand the engine **N of their own colours** and have them
+placed into the brand role slots automatically, so the gold the club typed
+*is* the secondary the cards paint.
+
+### Automatic role assignment — two gates
+
+"Which colour fills which slot" is decided by
+`mediahub.theming.roles.assign_brand_roles`, gated by two deterministic
+checks:
+
+1. **APCA ink gate** (`ROLE_INK_FLOOR_APCA`, |Lc| ≥ 45). The dominant
+   `primary` role is a *fill that carries text* (button labels, chips), so it
+   only goes to a colour whose best ink (picked by `contrast.brand_on_color`)
+   clears the APCA "Bronze" floor. A mid-luminance colour where neither black
+   nor cream gives strong contrast is **demoted** to an accent slot, and a
+   gate-passing colour is promoted to primary instead — the engine never
+   paints buttons a colour their label can't sit on.
+2. **CIEDE2000 distinctness gate** (`ROLE_DISTINCT_DELTA_E`, ΔE ≥ 10, the same
+   ColorBrewer floor the CVD gate uses). A second colour that is
+   perceptually indistinct from an already-assigned role is marked
+   *redundant* and folded in, so a club that lists two near-identical blues
+   doesn't get two visually-identical brand roles.
+
+The assignment is **order-aware**: the club's first colour is their primary
+unless the APCA gate forces a demotion. Near-grey / near-black / near-white
+colours fail the brandability test (`chroma ≥ 5`, `8 ≤ tone ≤ 95`) and fall
+through to the derived neutral family — they never compete for a brand slot.
+Every decision is written to a plain-English trace for the audit panel.
+
+### Building the palette
+
+`palette.derive_palette_multi(seeds)` consumes the assignment. It keeps the
+MD3-derived `primary`, `neutral`, `neutral_variant` and the four **locked**
+status ramps exactly as the single-seed engine produces them, then replaces
+the `secondary` / `tertiary` ramps with tonal ramps built from the club's
+real colours (their full chroma, not the muted derivation). The materialised
+palette then flows through the same `quality.audit_palette` + `repair`
+pipeline (§9) — the gates that keep status colours distinct under CVD are
+unchanged.
+
+| Entry point | Input | Use |
+|---|---|---|
+| `derive_theme_multi(primary_source, extra_colours)` | a seed (hex/SVG/raster) + N extra hexes | the public counterpart to `derive_theme` |
+| `derive_palette_multi(seeds)` | a list of hexes | palette-only, the assignment-aware `derive_palette` |
+| `assign_brand_roles(colours)` | a list of hexes | the role mapping + per-colour analysis + trace |
+
+`BrandKit.ensure_derived_palette` threads the club's `secondary_colour` and
+`accent_colour` through `derive_theme_multi`. This is **exactly
+back-compatible**: a kit whose extras are absent or non-brandable (e.g. the
+historical default `secondary_colour="#000000"`) has ≤ 1 brandable colour, so
+`derive_palette_multi` returns `derive_palette(primary)` bit-for-bit and no
+existing club's theme drifts. The 30-seed golden-master catalogue (§4) still
+exercises the single-seed path verbatim.

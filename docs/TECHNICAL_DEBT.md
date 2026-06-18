@@ -79,8 +79,8 @@ rushed carve-up of this file is higher-risk than the debt it pays down.)
 ## Mixed persistence: JSONL ledgers + a shared SQLite `data.db`
 
 Some modules persist to a shared SQLite `data.db` (`workflow/schedule.py`,
-`memory/store.py`, `observability/`, `publishing/posting_log.py`,
-`media_library/store.py`, the run-metadata table), while others still use JSONL
+`memory/store.py`, `observability/`, `media_library/store.py`, the
+run-metadata table), while others still use JSONL
 ledgers (`context_engine/trust.py`, `brand/playbooks.py`, `workflow/autonomy.py`,
 `interpreter/patterns.py`) and run *snapshots* are per-run JSON files under
 `DATA_DIR/runs_v4/`. The split is historical, not principled. **Plan:** treat
@@ -88,17 +88,6 @@ ledgers (`context_engine/trust.py`, `brand/playbooks.py`, `workflow/autonomy.py`
 only for large immutable run snapshots; migrate the JSONL ledgers that need
 cross-worker consistency (trust, audit) into `data.db` tables. Decide
 per-ledger; don't migrate the append-only audit logs casually.
-
-## Two `AutonomyLevel` enums with different semantics
-
-`sport_profiles/autonomy.py` defines a *publishing-policy* enum
-(`draft_only`/`approval_required`/`fully_autonomous`, inert) while
-`autonomy/tools.py` defines a *runner-reach* `IntEnum`
-(`OFF`/`SUGGEST`/`DRAFT`/`PREPARE`, live). They describe different axes and must
-not be collapsed blindly, but having two types named `AutonomyLevel` invites
-confusion. **Plan:** when Phase 2's per-type toggle is built, rename one (e.g.
-the runner's to `RunnerReach`) and make the sport-profile policy the single
-public "how autonomous is this post type" type.
 
 ## Auto-generated inventories had rotted (partially resolved)
 

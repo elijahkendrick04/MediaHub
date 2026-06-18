@@ -46,30 +46,28 @@ These come with the roadmap rebuild. Full detail lives in the new docs under
 `docs/` (linked below); here they are in one plain line each.
 
 - **Strategy brain** — the "what should we post?" thinking part in the middle of
-  MediaHub. It decides the plan, writes drafts, and (where allowed) publishes —
-  instead of just turning one results file into posts. ([`docs/ARCHITECTURE_TARGET.md`](docs/ARCHITECTURE_TARGET.md))
+  MediaHub. It decides the plan and writes drafts — instead of just turning one
+  results file into posts. A person still reviews everything before it's used.
+  ([`docs/ARCHITECTURE_TARGET.md`](docs/ARCHITECTURE_TARGET.md))
 - **Hub and spoke** — the shape we're moving to: the strategy brain is the **hub**
   in the middle; the **spokes** are the things plugged into it.
 - **Spoke** — one thing plugged into the hub: a way to bring information *in*
-  (results, fixtures, news), make a post *look good* (graphics, reels, voice), or
-  send it *out* (Instagram, etc.). Results ingestion is now just one spoke.
+  (results, fixtures, news) or make a post *look good* (graphics, reels, voice).
+  Results ingestion is now just one spoke.
 - **Sport profile** — a simple settings sheet, one per sport, that says which kinds
-  of posts that sport makes, what each one needs, how it's designed, and how
-  autonomous it may be. ([`docs/SPORT_PROFILES.md`](docs/SPORT_PROFILES.md))
+  of posts that sport makes, what each one needs, how it's designed, and how its
+  drafts are reviewed before use. ([`docs/SPORT_PROFILES.md`](docs/SPORT_PROFILES.md))
 - **Post type** — one *kind* of post (a fixture announcement, a results recap, an
   athlete spotlight…). Most are the same for every sport. ([`docs/POST_TYPE_TAXONOMY.md`](docs/POST_TYPE_TAXONOMY.md))
-- **Autonomy level** — how much a single post type can do on its own. Three
-  settings: **draft_only** (just make a draft), **approval_required** (wait for a
-  person — the default), **fully_autonomous** (post by itself, if all the safety
-  checks pass). ([`docs/AUTONOMY_MODEL.md`](docs/AUTONOMY_MODEL.md))
-- **Guardrail** — a safety check that must pass before MediaHub posts anything by
-  itself: is the fact trustworthy, is the wording brand-safe, are we posting too
-  often, is the "stop everything" switch off, and is it all written down.
+- **Autonomy level** — the review disposition a single post type starts with: how
+  a finished draft is handled before anyone uses it. Two settings: **draft_only**
+  (just make a draft) and **approval_required** (a person approves it — the
+  default). Either way a human signs off before any content is used; MediaHub
+  never posts on its own.
 - **Three-source intelligence** — the brain mixes three kinds of signal to make its
   plan: the team's **own** signals (past posts, brand voice), **external** signals
   (fixtures, results, news, rival clubs), and **direct** input (onboarding answers,
   goals, blackout dates).
-- **Kill switch** — one control that instantly stops all automatic posting.
 - **Workspace** — one club's private room inside the shared MediaHub website. A
   club's profile, runs, photos and plans all live in its workspace, and other
   clubs can't see in. (Technically it's the same thing as an organisation

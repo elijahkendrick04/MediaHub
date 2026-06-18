@@ -33,11 +33,6 @@ services:
       # features return "AI unavailable" instead of inventing output.
       - key: GEMINI_API_KEY
         sync: false
-      # Buffer (REQUIRED for /activity scheduling). Operator-managed
-      # personal access token — one Buffer account shared across the
-      # whole deployment.
-      - key: BUFFER_ACCESS_TOKEN
-        sync: false
       # Optional Claude key. Set MEDIAHUB_LLM_PROVIDER=anthropic to
       # force-prefer Claude even when Gemini is also configured.
       - key: ANTHROPIC_API_KEY

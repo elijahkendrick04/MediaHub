@@ -209,7 +209,7 @@ The future data model should handle: organisations / clubs / societies / teams; 
 
 ## External integrations
 
-- Human approval before external publishing is the **default, always** — nothing auto-publishes out of the box. The ONLY exception is the Phase-2 autonomy model (`docs/AUTONOMY_MODEL.md`): a workspace may explicitly opt a single post type into `fully_autonomous`, and even then a post ships only when the full publish gate passes (`publishing/publish_gate.py`: kill switch, per-type policy, provenance, confidence threshold, brand safety, safeguarding — minors' content never auto-publishes — and rate caps), with every decision in the immutable per-org audit ledger. Never widen this exception, never default any type above `approval_required`, and never weaken a guardrail without explicit user sign-off.
+- **MediaHub does not publish or schedule content onto external social channels.** Approved cards are reviewed by a human and then exported or downloaded for manual posting — there is no machine path that places content on a social account. The Settings "Auto scheduling" and "Autonomy" surfaces are "Coming soon" placeholders. Do NOT add a social-publishing or auto-scheduling integration without explicit user sign-off; if one is ever built, human approval before external publishing is the default, always.
 - Use least privilege for every integration; never connect external accounts without explicit approval
 - Keep credentials out of source control — `.env` only
 
@@ -258,7 +258,12 @@ server:
 - **Story cards** — 6 seconds, one card per swimmer/achievement
 - **Meet reels** — data-driven length (`reel_duration_for`: 1 card → 7s …
   5 cards → 23s; 3 cards keep the historic 15s): branded cover with honest
-  label-derived stat chips → rank-weighted card beats → club outro
+  label-derived stat chips → rank-weighted card beats → club outro. The beat
+  rhythm is customisable (R1.12): `reel_duration_for` / `normalise_reel_rhythm`
+  take optional per-card beat weights + custom cover/outro seconds (mirrored
+  into `MeetReel.tsx`'s carve and the ffmpeg fallback, folded into the cache
+  key); a weighted card earns proportionally more seconds and an uncustomised
+  reel stays byte-identical
 - **Formats** — story 1080×1920 (default), portrait 1080×1350, square
   1080×1080, landscape 1920×1080 from the same compositions
   (`render.js --width/--height`)
@@ -279,6 +284,15 @@ with a `<hash>.json` explainability manifest and a `<hash>.poster.png`
 poster-frame sidecar beside each MP4 (the poster also ships next to the
 published file; the reel file route serves it via `?poster=1`).
 
+**Parallel reel composition (opt-in, `MEDIAHUB_REEL_PARALLEL=1`)** — a cold
+reel render can split its frame timeline into contiguous ranges, render them
+concurrently as segments sharing one bundle (`remotion/render_segments.js`),
+and composite them with FFmpeg's lossless concat (`visual/reel_parallel.py`,
+called from `render_meet_reel`). Frame-purity makes this **byte-identical** to
+the serial render — same output, same content-cache key — so it only cuts
+wall-clock on multi-core workers; it falls back to the serial render whenever
+Node/Remotion/FFmpeg are missing or any segment/concat step fails.
+
 Outputs are programmatic and data-driven (never static templates), club-branded
 from the `BrandKit`, and use real athlete/team imagery where provided — no
 synthetic AI-generated people unless explicitly requested.
@@ -292,8 +306,11 @@ synthetic AI-generated people unless explicitly requested.
 Both accept `?format=story|portrait|square|landscape` (default `story`) and
 serve the rendered MP4 directly with `Content-Type: video/mp4`. Cache hits
 return the existing file (< 30s wall-clock); cold renders take 30–90s on the
-deployment's worker. The free ffmpeg fallback engine renders the story format
-only and raises an honest `ReelEngineUnavailable` for the other cuts.
+deployment's worker. The free ffmpeg fallback engine renders all four cuts too
+(story/portrait/square/landscape): it renders the card's own still at the
+requested geometry and threads that `(width, height)` through every FFmpeg
+filter, folding the non-story cut into the cache key while keeping the story
+path's cache keys byte-identical.
 
 ### Brand consistency (motion ↔ still parity)
 
@@ -326,6 +343,13 @@ Branch model: feature branches from `dev`. Merges to `main` may happen
 autonomously without human approval, gated only on green CI — `main` is a
 trunk that auto-deploys to Render production, so a red build must never be
 merged. (This replaces the former human-approval-before-`main` rule.)
+**Merge method: merge commits, not squash** (maintainer decision 2026-06-13;
+squash + rebase disabled repo-side so the merge button can only create a merge
+commit). PR commit bodies therefore land on `main` verbatim — which the
+roadmap bot relies on to read `roadmap: <ID> <status>` directives. The two
+self-merging bots (`roadmap-autoupdate.yml`, the `autotest` CI fixer in
+`gitops.py`) use `gh pr merge --merge`; the roadmap bot keeps its `[skip render]`
+marker on the merge-commit subject via `--subject`.
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path. This is a deliberate,
 decided commercial principle (hosted-only; no free or capped self-host tier) —
@@ -347,7 +371,6 @@ repeatable content automation engine. Before building anything, ask:
 The intelligence layer is the moat:
 - Ingest → detect → rank → brand → generate → approve → export
 - Every step should be explainable and auditable
-- Human approval before external publishing — always the default; the sole
-  exception is a per-type, per-workspace `fully_autonomous` opt-in behind the
-  full publish gate + kill switch + audit trail (see "External integrations"
-  and `docs/AUTONOMY_MODEL.md`)
+- Human approval before external publishing — always, with no exception.
+  MediaHub does not place content on a social account; approved cards are
+  exported/downloaded for manual posting (see "External integrations")

@@ -1,5 +1,5 @@
-"""Tests for `mediahub.workflow.status` — CardStatus, ScheduleStatus,
-and CardWorkflowState dataclass serialisation.
+"""Tests for `mediahub.workflow.status` — CardStatus and CardWorkflowState
+dataclass serialisation.
 
 The workflow status dataclass is persisted to disk as JSON and read
 back across deploys. Round-trip stability matters more than feature
@@ -13,7 +13,6 @@ import pytest
 from mediahub.workflow.status import (
     CardStatus,
     CardWorkflowState,
-    ScheduleStatus,
 )
 
 
@@ -46,21 +45,6 @@ class TestCardStatusValues:
             CardStatus("totally-made-up")
 
 
-class TestScheduleStatusValues:
-    @pytest.mark.parametrize(
-        "member, value",
-        [
-            (ScheduleStatus.QUEUED, "queued"),
-            (ScheduleStatus.SCHEDULED, "scheduled"),
-            (ScheduleStatus.PUBLISHED, "published"),
-            (ScheduleStatus.FAILED, "failed"),
-        ],
-    )
-    def test_values_match_disk_strings(self, member: ScheduleStatus, value: str) -> None:
-        assert member.value == value
-        assert member == value
-
-
 # ---------------------------------------------------------------------------
 # CardWorkflowState defaults
 # ---------------------------------------------------------------------------
@@ -71,14 +55,10 @@ class TestCardWorkflowStateDefaults:
         s = CardWorkflowState(card_id="card:1")
         assert s.card_id == "card:1"
         assert s.status is CardStatus.QUEUE
-        assert s.schedule_status is ScheduleStatus.QUEUED
         assert s.edited_captions is None
         assert s.notes is None
         assert s.posted_at is None
         assert s.last_changed_at == ""
-        assert s.buffer_update_id is None
-        assert s.scheduled_at is None
-        assert s.schedule_error is None
 
 
 # ---------------------------------------------------------------------------
@@ -94,15 +74,6 @@ class TestToDict:
         # Must be a plain str, not the Enum instance.
         assert type(d["status"]) is str
 
-    def test_schedule_status_serialised_as_string_value(self) -> None:
-        s = CardWorkflowState(
-            card_id="x",
-            schedule_status=ScheduleStatus.SCHEDULED,
-        )
-        d = s.to_dict()
-        assert d["schedule_status"] == "scheduled"
-        assert type(d["schedule_status"]) is str
-
     def test_to_dict_keys_complete(self) -> None:
         d = CardWorkflowState(card_id="x").to_dict()
         expected = {
@@ -112,10 +83,6 @@ class TestToDict:
             "notes",
             "posted_at",
             "last_changed_at",
-            "schedule_status",
-            "buffer_update_id",
-            "scheduled_at",
-            "schedule_error",
         }
         assert set(d.keys()) == expected
 
@@ -139,10 +106,6 @@ class TestFromDict:
             notes="committee approved",
             posted_at="2024-05-01T12:00:00Z",
             last_changed_at="2024-04-30T10:00:00Z",
-            schedule_status=ScheduleStatus.PUBLISHED,
-            buffer_update_id="buf-1",
-            scheduled_at="2024-05-01T11:30:00Z",
-            schedule_error=None,
         )
         loaded = CardWorkflowState.from_dict(original.to_dict())
         assert loaded == original
@@ -153,12 +116,6 @@ class TestFromDict:
         )
         assert loaded.status is CardStatus.QUEUE
 
-    def test_unknown_schedule_status_falls_back_to_queued(self) -> None:
-        loaded = CardWorkflowState.from_dict(
-            {"card_id": "x", "schedule_status": "gone-fishing"}
-        )
-        assert loaded.schedule_status is ScheduleStatus.QUEUED
-
     def test_missing_card_id_defaults_to_empty_string(self) -> None:
         loaded = CardWorkflowState.from_dict({})
         assert loaded.card_id == ""
@@ -167,14 +124,11 @@ class TestFromDict:
         loaded = CardWorkflowState.from_dict({"card_id": "x"})
         assert loaded.edited_captions is None
         assert loaded.notes is None
-        assert loaded.buffer_update_id is None
         assert loaded.posted_at is None
-        assert loaded.scheduled_at is None
-        assert loaded.schedule_error is None
 
-    def test_legacy_dict_without_schedule_fields_loads(self) -> None:
-        # Older workflow sidecars predate the schedule_* fields; they must
-        # still load cleanly.
+    def test_legacy_dict_with_obsolete_fields_loads(self) -> None:
+        # Older workflow sidecars may carry fields that have since been removed;
+        # from_dict must ignore unknown extras and still load.
         legacy = {
             "card_id": "card:99",
             "status": "approved",
@@ -182,11 +136,12 @@ class TestFromDict:
             "notes": "old card",
             "posted_at": None,
             "last_changed_at": "2023-01-01T00:00:00Z",
+            "some_removed_field": "x",
+            "another_old_key": 7,
         }
         loaded = CardWorkflowState.from_dict(legacy)
         assert loaded.card_id == "card:99"
         assert loaded.status is CardStatus.APPROVED
-        assert loaded.schedule_status is ScheduleStatus.QUEUED
 
 
 # ---------------------------------------------------------------------------

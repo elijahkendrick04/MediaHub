@@ -66,6 +66,7 @@ src/mediahub/data/
 src/mediahub/discovered/
 src/mediahub/club_profiles/
 src/mediahub/motion_cache/
+src/mediahub/render_cache/
 src/mediahub/runs_v4/
 src/mediahub/turn_into_packs/
 # Phase W runtime writes (same no-DATA_DIR fallback)

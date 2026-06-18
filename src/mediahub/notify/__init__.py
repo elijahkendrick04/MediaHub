@@ -17,6 +17,7 @@ import logging
 import threading
 from typing import Optional
 
+from mediahub.notify import inbox
 from mediahub.notify.channels import Channel, Notification, all_channels
 
 log = logging.getLogger(__name__)
@@ -96,4 +97,4 @@ def notify_pack_ready(
     )
 
 
-__all__ = ["notify", "notify_pack_ready", "is_enabled", "configured_channels"]
+__all__ = ["notify", "notify_pack_ready", "is_enabled", "configured_channels", "inbox"]

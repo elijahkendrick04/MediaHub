@@ -1,7 +1,14 @@
 # Creative-Suite Parity — the MediaHub-shaped Canva / Adobe Express capability map
 
-**Status:** planned · the long-form companion for **Phase 6** in
-[`ROADMAP.md`](ROADMAP.md) · evidence bases checked in at
+**Status:** planned · the long-form companion for **Phase 3 — creative-suite
+breadth** in [`ROADMAP.md`](ROADMAP.md) · evidence bases checked in at
+
+> **Phase note (2026-06-13).** What this doc calls "Phase 6" is now **Phase 3**
+> in the reordered, build-first roadmap (the creative suite ships *before*
+> go-to-market). The `P6.*` item IDs are unchanged, and the "gated behind Phase
+> C / commercial-readiness + traction gates" sequencing stated below is
+> **superseded** — see [`ROADMAP.md`](ROADMAP.md) rule 2. Read "Phase 6" as
+> "Phase 3" throughout.
 [`research/CANVA_FEATURE_INVENTORY_2026.md`](research/CANVA_FEATURE_INVENTORY_2026.md)
 and
 [`research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md`](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)
@@ -50,10 +57,9 @@ policy ([`../CLAUDE.md`](../CLAUDE.md)) plus one explicit maintainer steer
    code; new *judgement* (which photo, which tone, which layout, which copy)
    goes through `media_ai.llm` / `ai_core.llm` with honest
    `ProviderNotConfigured` errors — never a heuristic fake.
-4. **Approval before anything leaves the building.** Every publishing/scheduling
-   feature inherits the P2.3 publish gate, the per-type `AutonomyLevel`
-   defaults, the kill switch, and the audit ledger. Nothing in Phase 6 widens
-   the autonomy exception.
+4. **Approval before anything leaves the building.** Every surface requires a
+   human to review and approve before content is exported; MediaHub never posts
+   to a social channel on its own.
 5. **Hosted-only.** "Desktop app", "works offline", "self-host" features map to
    browser/PWA surfaces of the hosted SaaS — never a customer install
    (ADR-0011).
@@ -127,11 +133,28 @@ nothing; (5) custom-size + blank-start escape hatch that still seeds from brand
 tokens. Multi-page formats (programmes, yearbooks, photo books) compose
 existing single-card renders into a paged PDF via the P6.12 document engine.
 
+**Status — shipped v1 (2026-06-18).** The catalogue and transformer are live:
+`club_platform/format_catalog.py` (typed `FormatSpec` registry — per-channel
+sizes for every social platform + off-feed club formats: poster, flyer,
+certificate, coach card, athlete one-pager, season calendar, wallpapers — with
+per-sport availability sourced from the sport profile, `custom_format()` for
+any px/mm/cm/in size, and `aspect_class` parity-tested against the renderer);
+`turn_into/transform.py` (`transform_design` re-targets an approved design's
+brief to any format by re-laying-out the composition for the new aspect through
+the design-spec director, with the deterministic per-aspect picker as the
+honest floor, preserving the approved palette/headline/stats/photo;
+`blank_brief_for_format` is the blank-start escape hatch); the web surface is
+`GET /api/formats` + the per-card **Reformat…** control posting to
+`POST /api/runs/<run_id>/card/<card_id>/reformat` (serves the re-rendered PNG).
+Deferred by design to their owning packages: multi-page composition → P6.12,
+print-ready CMYK/bleed output → P6.19, free-form manual element editing →
+P6.24, save-as-org-format presets and bulk autofill → P6.11/P6.15.
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
-| C1 | Social posts for every platform (IG posts/Stories/Reels, FB posts/covers, TikTok, YouTube thumbnails/banners, X, Pinterest, LinkedIn posts/banners, Tumblr, Lemon8) | 🔵 feed/story/reel shipped for IG-class sizes → 🆕 P6.1 per-channel `FormatSpec` presets for the rest |
+| C1 | Social posts for every platform (IG posts/Stories/Reels, FB posts/covers, TikTok, YouTube thumbnails/banners, X, Pinterest, LinkedIn posts/banners, Tumblr, Lemon8) | ✅ P6.1 per-channel `FormatSpec` presets shipped for IG/FB/X/LinkedIn/Pinterest/TikTok/YouTube sizes (Tumblr/Lemon8 are one more `FormatSpec` row each when asked) |
 | C1 | Posters · Flyers · Banners/yard signs (digital design side) | 🆕 P6.1 formats (`poster`, `flyer`, `event_banner`) from meet/fixture data; print output ↗ P6.19 |
 | C1 | Business cards | 🆕 P6.1 `coach_card` / committee contact card from roster + brand kit; print ↗ P6.19 |
 | C1 | Invitations · Greeting/thank-you cards · Postcards | 🆕 P6.1 club-event formats (awards night invite, volunteer thank-you, sponsor thank-you postcard) fed by `manual_entry` + sponsor kit |
@@ -144,14 +167,14 @@ existing single-card renders into a paged PDF via the P6.12 document engine.
 | C1 | Menus | 🆕 P6.1 `event_programme` (gala day programme/canteen sheet) from meet schedule |
 | C1 | Photo books | 🆕 P6.1 `season_yearbook` (multi-page, media-library-driven; composed via P6.12) |
 | C1 | Logos | 🆕 P6.1 crest/lockup variant generation (monochrome, knockout, badge forms) on top of the shipped DesignTokens lockup vocabulary — assistive, never replacing a club's crest |
-| C1 | Custom-size designs (px/mm/in) | 🆕 P6.1 custom `FormatSpec` dimensions incl. print units |
+| C1 | Custom-size designs (px/mm/in) | ✅ P6.1 `custom_format()` — any px/mm/cm/in canvas, bounds-checked |
 | C1 | Multi-design projects ("One Design") | 🆕 P6.1 — a content pack already groups mixed outputs; add mixed-format packs (e.g. recap + poster + certificate batch in one pack) |
-| C1 | Blank designs from scratch (preset/custom dimensions) | 🆕 P6.1 blank-start escape hatch seeded from brand tokens; manual editing ↗ P6.24 |
+| C1 | Blank designs from scratch (preset/custom dimensions) | ✅ P6.1 `blank_brief_for_format()` blank-start seeded from brand tokens; manual editing ↗ P6.24 |
 | C10 | 1M+ template library · templates by type/category | 🚫 adapted — archetype catalogue growth (12 → per-format sets) + format catalogue; deliberately *not* a template marketplace |
 | C10 | AI template generation from prompt | ✅ shipped — the Tier B design-spec director generates layout specs from data/brief (`creative_brief/ai_director.py`); prompt-first entry ↗ P6.2 |
 | C10 | Quick Create | 🆕 P6.1 one-click "make the obvious pack" per event, riding the P1.3 planner's top item |
 | C10 | Brand Templates / bulk template autofill | ↗ P6.11 (locked brand formats) + P6.15 (autofill at scale) |
-| C2 | Magic Switch (convert design to another format / resize / reformat; deck→doc transforms) | 🆕 P6.1 format transformer (`turn_into` v2 through the director); translation half ↗ P6.23 |
+| C2 | Magic Switch (convert design to another format / resize / reformat; deck→doc transforms) | ✅ P6.1 format transformer shipped (`turn_into.transform_design` re-lays-out through the director, deterministic floor); translation half ↗ P6.23 |
 | A1 | 220,000+ professional templates | 🚫 adapted — same as C10: archetypes + formats, not blanks |
 | A1 | Template categories (social, flyers, posters, banners, logos, invitations, cards, business cards, resumes, cover letters, brochures, menus, pamphlets, leaflets, certificates, worksheets, class schedules, book covers, album covers, product labels, gift certificates, ads, memes, collages, wallpapers, t-shirts) | 🆕 P6.1 — each becomes a `FormatSpec` where it has a club meaning (class schedule → training schedule; book/album cover → yearbook/season-mix cover; gift certificate → fundraiser voucher; meme → `meme` format with club in-jokes via caption engine; ads ↗ P6.16; collages ↗ P6.4; t-shirts ↗ P6.19; product labels ↗ P6.19) |
 | A1 | Presentations, documents, web pages, carousels | carousels 🆕 P6.1 multi-image carousel format; presentations/docs ↗ P6.12; web pages ↗ P6.13 |
@@ -162,7 +185,7 @@ existing single-card renders into a paged PDF via the P6.12 document engine.
 | A1 | Quick replace (swap content fast) | 🆕 P6.1 re-run a saved format against new data (the data-driven analogue of quick-replace) |
 | A1 | Brand-controlled / locked templates with style restrictions | ↗ P6.11 brand controls |
 | A8 | Switch between presentation and design | 🆕 P6.1 format transformer covers deck↔card transforms |
-| A18 | Resize design for any channel (one click) | 🆕 P6.1 per-channel re-render from the persisted CreativeBrief (not pixel scaling) |
+| A18 | Resize design for any channel (one click) | ✅ P6.1 per-channel re-render from the persisted CreativeBrief (re-layout, not pixel scaling) |
 | A2 | Generate coloring pages (text → printable line art) | 🆕 P6.1 `kids_activity_sheet` format (mascot/venue colouring pages for junior sections) via the P6.3 image provider with line-art style |
 | A10 | Drawing worksheets (100+ templates) · combine into coloring books | 🆕 P6.1 same `kids_activity_sheet` family; multi-page book via P6.12 |
 
@@ -203,21 +226,39 @@ writes gated behind explicit "remember this" + an org-visible memory list
 ranked items, not generic. Provider order Gemini→Anthropic as everywhere;
 no provider → honest error, the UI's manual controls keep working.
 
+**Status — shipped v1 (2026-06-18).** The copilot and its surfaces are live:
+`assistant/` package — `patch.py` (closed-vocabulary `SpecPatch` +
+deterministic validator/applier; out-of-vocabulary ops dropped, colour-role
+edits re-checked against the APCA gate and reverted if illegible; every edit
+applied/rejected-with-reason and reversible), `tools.py` (bounded read/propose
+allow-list for `ask_with_tools` — no publish/post/fetch tool exists),
+`copilot.py` (one-turn orchestrator; honest no-provider error leaves the design
+untouched), `session.py` (per-card chat + edit log) and `memory.py` (org
+preference book — explicit "remember this", inspect/delete, deterministic recall
+needing no embedding provider). Magic-Write caption tools (Summarise / Expand /
+Rewrite) added to `web/caption_assist.py`; voice via the browser's on-device
+speech + an honest server ASR seam (`assistant/asr.py`). Web: a per-card
+**Copilot…** panel + `POST …/card/<card>/assistant`, planner-seeded
+`…/assistant/suggestions`, `/api/assistant/memory` (+ delete),
+`/api/assistant/transcribe`. Deferred to owners: generative image edits →
+P6.3/P6.4, languages → P6.23, review-thread @assistant → P6.17, MCP exposure →
+P6.20.
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
-| C2 | Canva AI conversational assistant (text/voice/media prompts; "Design for me") | 🆕 P6.2 club content copilot on `free_text_chat` + `ai_core.ask_with_tools` |
-| C2 | Canva AI 2.0 — conversational design, iterative agentic editing, layered object intelligence, persistent Memory Library | 🆕 P6.2 spec-patch agentic loop + org assistant memory (extends `memory/`); layer-aware edits via the DesignSpec's structured layers |
+| C2 | Canva AI conversational assistant (text/voice/media prompts; "Design for me") | ✅ P6.2 club content copilot on `ai_core.ask_with_tools` (spec-patch editing) |
+| C2 | Canva AI 2.0 — conversational design, iterative agentic editing, layered object intelligence, persistent Memory Library | ✅ P6.2 spec-patch agentic loop + org assistant memory (inspect/delete); layer-aware edits via the DesignSpec's structured fields |
 | C2 | Canva AI 2.0 six workflows | split: connectors ↗ P6.20 · scheduling ↗ P6.16 · web research ✅ shipped (`web_research/`) · brand intelligence ↗ P6.11 · Sheets AI ↗ P6.15 · Code 2.0 ↗ P6.13 |
 | C2 | Canva Design Model (design-aware model: structure, layering, hierarchy, branding → fully editable output) | 🔵 partial — the Tier B design-spec director is exactly this pattern (LLM emits structured, editable specs; deterministic render); P6.2 extends it from generate-time to edit-time. "Available inside ChatGPT/Claude/Gemini" ↗ P6.20 (MCP server) |
 | C2 | Magic Design (AI layout from prompt or uploaded media) | 🔵 partial — director generates from data; 🆕 P6.2 adds prompt-/photo-first entry ("here's a photo, make something") routed into the same brief flow |
-| C2 | Magic Write (generate/summarise/expand/rewrite; tone adjustment; context awareness; 100+ languages) | 🔵 captions shipped (`web/ai_caption.py`, tone via voice profile) → 🆕 P6.2 editor text-tools (summarise/expand/rewrite/tone-shift) on any text block; languages ↗ P6.23 |
+| C2 | Magic Write (generate/summarise/expand/rewrite; tone adjustment; context awareness; 100+ languages) | ✅ P6.2 caption text-tools shipped (summarise/expand/rewrite on `web/caption_assist.py`; tone-shift via the tone arg); languages ↗ P6.23 |
 | C2 | Brand Voice (writes in your brand's tone) | ✅ shipped — `brand/voice_imitation.py` + learned voice store + few-shot caption examples |
 | C2 | Guided Presentations (conversational goal/story/structure flow) | ↗ P6.12, driven by this assistant |
 | C2 | Ask @Canva (tag the AI in a comment for feedback/generation) | ↗ P6.17 (assistant joins review threads) |
 | A2 | AI Assistant beta (conversational create/edit; generate images; change backgrounds/text; replace objects; position/align/stylise; edit individual layers; toggle on/off; smart prompt suggestions; Imaging Subagent) | 🆕 P6.2 — same copilot; image operations delegate to P6.3 providers; assistant is per-org toggleable; suggestions seeded from the planner |
-| A2 | Voice commands via microphone | 🆕 P6.2 voice input over the ASR provider seam (P5.3) |
+| A2 | Voice commands via microphone | ✅ P6.2 mic input via browser on-device speech; server ASR seam (`assistant/asr.py`) honest-errors until a provider lands (P5.3) |
 | A2 | Generate captions / Caption Writer for social posts | ✅ shipped — `web/ai_caption.py` (few-shot brand voice, generate-many-then-dedupe, per-platform variants, AI-tell ban-list, approval loop) |
 | A2 | Rewrite / text variations | 🆕 P6.2 text-tools (variations = the shipped generate-many-then-dedupe pattern applied to any text block) |
 | A2 | Text to Template (generate fully editable template from a prompt) | 🆕 P6.2 prompt → `FormatSpec` + design spec (editable, brand-locked); catalogue home ↗ P6.1 |
@@ -263,6 +304,27 @@ Text-to-video b-roll lands as a reel-scene provider (`visual/` scene source)
 strictly opt-in like `MEDIAHUB_GEN_BG`. Layer extraction (Magic Layers) is the
 inverse-render problem — scope to AI-image outputs only, where the provider
 returns layers natively.
+
+**Build status (2026-06-18) — 🔵 Builds 1 + 2 shipped.** **Build 1** (the seam +
+solid services + governance): `media_ai/imagine.py` (provider-agnostic facade) +
+`media_ai/imagine_providers/` (`base`, `gemini_imagine`, `local_imagine`);
+working `generate` + `similar` via Gemini Imagen (sport-editorial style presets,
+aspect ratios, no-people default); deterministic `subject_lift` (cutout +
+saliency); per-output provenance (IPTC `DigitalSourceType` embedded losslessly +
+a `<file>.imagine.json` manifest); a per-org quota ledger
+(`observability/imagine_usage.py`); media-library JSON routes + a "Generate an
+image" UI panel; and the `MEDIAHUB_GEN_BG` Imagen call generalised behind the
+seam (byte-identical renders). **Build 2** (working surfaces that need no P5.6):
+**Grab Text** (`imagine.grab_text`, vision-OCR transcribe → editable blocks,
+metered); **deterministic product mockups** (`mockups/` — poster/framed-print/
+phone-post/flatlay, key-free, brand-tinted, byte-deterministic; feeds P6.19);
+and a **generation-history + provenance viewer** (`/media-library/generated`).
+The generative **edit family** (`edit`/`expand`/`remove`/`upscale`/
+`style_match`) is defined in the seam and **honest-errors by capability** — the
+in-house local backend (P5.6) is the default that will fill it (then the
+mask-brush studio UI lands). Text-to-video b-roll (↗ P6.5), layer extraction,
+and 3D (deferred-last) remain. See
+[`adr/0023-p6-3-generative-imagery-seam.md`](adr/0023-p6-3-generative-imagery-seam.md).
 
 **Coverage.**
 
@@ -1674,7 +1736,7 @@ shapes our own design — we are building our versions, not tracking theirs.
 ## Relationship to standing decisions
 
 - Phase 6 never overrides: hosted-only (ADR-0011) · approval-first
-  publishing + autonomy guardrails (P2.3, AUTONOMY_MODEL) · deterministic
+  (human approval before any external use) · deterministic
   engine boundary · Gemini-first honest-error AI · self-hosted fonts ·
   GWS + 9router exclusions (CLAUDE.md, ADR-0007) · the ADR-0003 isolation
   invariant (forms/share-links/sites are new outward surfaces and inherit

@@ -89,7 +89,12 @@ Both are invoked by `pipeline_v4`. New detectors should be added under
 3. Rasterises HTML → PNG via Playwright (Chromium installed in the deployed
    container); WeasyPrint is the secondary in-process rasteriser for layouts
    that don't need a full browser.
-4. Generates each format size in `FORMAT_SIZES` (1080×1080, 1080×1350, 1080×1920).
+4. Generates each requested format size from `FORMAT_SIZES`. The default render
+   is the square/portrait/story trio (1080×1080, 1080×1350, 1080×1920);
+   landscape & extended aspect ratios (16:9 1920×1080, 3:2 1620×1080, 4:3
+   1440×1080) are opt-in — requested explicitly — and carry per-format
+   composition rules (`render.py`: `_format_aspect` / `_scale_for_format` /
+   `_v2_fit_boxes` / `_format_composition_css`).
 
 `creative_brief.generator.generate(card, club_profile)` decides:
 - Which template to use

@@ -8,20 +8,24 @@ Two layers:
   scoring (the swim newsworthiness ranker's pattern, generalised); every
   item carries reasons grounded in the signals that produced them. Operator
   inputs (upcoming events, structured goals, blackout dates) live in
-  ``inputs.py``.
+  ``inputs.py``; ``nl_inputs.py`` lets the operator *describe* those in plain
+  language (with optional web research) and turns the note into the same
+  structured inputs for review — the AI proposes, the deterministic planner
+  still ranks.
 * **Generation** — every content type produces its draft cards through
   ``generate_content``: an AI Director plans the set (platform mix, angle,
   hook) while avoiding anything the user has already seen, then the writer
   turns that plan into platform-ready caption cards. This is the one engine
   the caption stubs and the meet-recap content tools route through.
 
-The planner recommends; humans approve; generation drafts. Publishing
-autonomy stays with ``publishing.type_gate`` (P2.4).
+The planner recommends; humans approve; generation drafts. A human always
+approves before any content leaves the system.
 """
 
 from .director import plan_content_directions
 from .engine import generate_caption, generate_content, load_brand_context
 from .inputs import load_planner_inputs, save_planner_inputs
+from .nl_inputs import interpret_planner_inputs
 from .planner import (
     ContentPlan,
     PlanItem,
@@ -39,6 +43,7 @@ __all__ = [
     "gather_all_signals",
     "generate_caption",
     "generate_content",
+    "interpret_planner_inputs",
     "load_brand_context",
     "load_latest_plan",
     "load_planner_inputs",

@@ -44,6 +44,10 @@ _ARG_FILL = {
     "card_id": "card-orphan-1",
     "swimmer_key": "Orphan Athlete",
     "job_id": "job-x",
+    # UI 1.8 reel review-comment mutate route — the ownerless-run blast-radius
+    # sweep reaches it with a junk id; a foreign account must be refused before
+    # the comment is ever looked up.
+    "comment_id": "no-such-comment",
     # PC.10: the public wall's card route carries a per-org token. An
     # unknown token must 404 before any run data is touched, so sweeping
     # it with a junk token is exactly the guarantee to pin.

@@ -41,6 +41,15 @@ PROTECTED = (
     "src/mediahub/recognition/", "src/mediahub/recognition_swim/",
     "legacy/swim_content_v5/ranker_v3.py", "src/mediahub/theming/logo_chip.py",
     "src/mediahub/media_library/selector.py",
+    # The human-blessed ground-truth oracle. A `ground_truth_regression` means the
+    # deterministic engine diverged from these numbers; the finding's suspect points at
+    # the ENGINE (already protected above), and the baseline's own _comment says it is
+    # re-blessed "via PR ONLY (never auto-advanced)". So the only edit the coder could
+    # land is rewriting the oracle to grade its own homework — exactly the PR #637 cheat
+    # (it bumped parsed_swim_count to make a regression "pass"). Protect it: a diff
+    # touching the oracle aborts the cycle, so the finding is surfaced to a human
+    # instead of being silently rebaselined by the bot.
+    "autotest/baseline/golden-baseline.json",
 )
 
 # Self-governance ("constitution") set — the files that GOVERN the autonomous loop:
@@ -124,7 +133,12 @@ def _test_gate() -> tuple[bool, str]:
 
 # Runtime/data areas a gate run, the finder, or an over-eager coder may rewrite.
 # They must NEVER ride along in a fix commit to main — only source edits do.
-_NO_COMMIT_PATHS = ("autotest/reports", "autotest/screenshots", "autotest/runs", "data")
+# autotest/calibration is here because precision.json's `computed_at` is rewritten on
+# every run (autotest.metrics.write_precision). Without excluding it, a tick that finds
+# NO real fix still leaves a 1-line calibration diff, so _changed_files() reads non-empty
+# and the loop opens a PR whose only change is a timestamp bump (the PR #645 no-op fix).
+_NO_COMMIT_PATHS = ("autotest/reports", "autotest/screenshots", "autotest/runs",
+                    "autotest/calibration", "data")
 
 
 def _changed_files() -> tuple[list[str], int]:
@@ -358,7 +372,7 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
         return "gh CLI not found — cannot enable CI-gated auto-merge"
     # --delete-branch tidies the loop-owned branch once the auto-merge lands, so
     # these throwaway branches don't accumulate on origin.
-    m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch"],
+    m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--merge", "--delete-branch"],
                        cwd=str(REPO_ROOT), capture_output=True, text=True)
     if m.returncode != 0:
         err = (m.stderr or m.stdout or "").strip()
@@ -378,7 +392,7 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
                         "Configure required status checks on main (plus AUTOTEST_GH_PAT "
                         "so bot-PR workflows actually run) and auto-merge arms normally.")
             direct = subprocess.run(
-                ["gh", "pr", "merge", branch, "--squash", "--delete-branch"],
+                ["gh", "pr", "merge", branch, "--merge", "--delete-branch"],
                 cwd=str(REPO_ROOT), capture_output=True, text=True)
             if direct.returncode == 0:
                 return "merged directly (PR was already clean — checks verified green)"

@@ -20,3 +20,14 @@ explain the project in plain English.
   [`AUTOTEST_BENCHMARK_AND_GAPS.md`](autotest/AUTOTEST_BENCHMARK_AND_GAPS.md),
   [`IMPLEMENTATION_PROMPT.md`](autotest/IMPLEMENTATION_PROMPT.md),
   [`AUTOTEST_CHANGES.md`](autotest/AUTOTEST_CHANGES.md).
+- **Scheduled / automated re-checks (no third-party tool):** how a Claude Code
+  session re-checks a PR while it's alive (the in-session Monitor) and across
+  sessions (Anthropic Routines) — first-party only, no extra service, no cost —
+  [`SEND_LATER.md`](SEND_LATER.md).
+- **Format catalogue & "turn this into that" (P6.1):** the master list of design
+  formats a club can make (per-channel social sizes + posters, certificates,
+  cards, calendars, wallpapers) and how an approved design is re-laid-out into
+  any of them — [`FORMAT_CATALOGUE.md`](FORMAT_CATALOGUE.md).
+- **Conversational creative assistant (P6.2):** the club content copilot — edit a
+  design by talking to it; it proposes safe, on-brand, validated changes (never
+  paints pixels, never publishes) — [`CONVERSATIONAL_ASSISTANT.md`](CONVERSATIONAL_ASSISTANT.md).

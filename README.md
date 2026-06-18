@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-green.svg)](https://flask.palletsprojects.com/)
-[![Tests](https://img.shields.io/badge/tests-3815%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-8374%20passing-brightgreen.svg)](tests/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
 > **New here and not a coder?** Start with **[START_HERE.md](START_HERE.md)** — a
@@ -17,9 +17,9 @@
 > medals); more sports and more "decide-and-post-for-me" automation are on the way
 > (see the [roadmap](docs/ROADMAP.md)).
 
-**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack with **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 0–6); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
+**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack with **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (phases in priority order — build-first: rebrand → second sport → go-to-market are deliberately last; everything already shipped is recorded in [`docs/ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md)); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
 
-**What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
+**What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of posts ready for Instagram / Facebook / TikTok: athlete spotlights, weekend recaps, meet previews, and a one-click "turn this meet into eight assets" pack. Behind the posts sits the club-intelligence layer that keeps them accurate and on-brand: cross-meet athlete identity, a club-records book, qualifying-time standards ("made Counties!"), month/season recaps, a club Q&A that answers questions over the club's own results, per-athlete photo/name consent (safeguarding), a UK/EU data-protection rights engine, and multi-tenant workspaces so clubs don't see each other's data. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
 
 ---
 
@@ -68,11 +68,11 @@ Upload  →  Interpreter  →  Pipeline  →  Recognition  →  Content Pack
 | [`UPLOAD_TO_CARDS.md`](docs/UPLOAD_TO_CARDS.md) | End-to-end request walkthrough |
 | [`EXTENSION_GUIDE.md`](docs/EXTENSION_GUIDE.md) | Add a new sport / layout / voice / cutout provider |
 | [`DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Render, Fly, Docker, VPS |
-| [`ROADMAP.md`](docs/ROADMAP.md) | The Phase 0–6 multi-sport, autonomy-first plan |
+| [`ROADMAP.md`](docs/ROADMAP.md) | The forward plan — phases in priority order (build-first; rebrand → second sport → go-to-market last) |
+| [`ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md) | The record of everything already shipped (split out of the roadmap) |
 | [`ARCHITECTURE_TARGET.md`](docs/ARCHITECTURE_TARGET.md) | Hub-and-spoke target architecture (mapped onto today's modules) |
 | [`POST_TYPE_TAXONOMY.md`](docs/POST_TYPE_TAXONOMY.md) | Universal vs sport-specific post types (swimming, football, basketball, running) |
 | [`SPORT_PROFILES.md`](docs/SPORT_PROFILES.md) | The sport-profile concept + how to add a new sport |
-| [`AUTONOMY_MODEL.md`](docs/AUTONOMY_MODEL.md) | Per-content-type autonomy levels + guardrails |
 | [`DEPENDENCY_LICENSING.md`](docs/DEPENDENCY_LICENSING.md) | No-hidden-fees register + free substitutes |
 | [`KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Current rough edges |
 | [`TECHNICAL_DEBT.md`](docs/TECHNICAL_DEBT.md) | Legacy modules + cleanup priorities |
@@ -84,23 +84,82 @@ Inventories under `docs/`: `INVENTORY.md`, `ROUTE_INVENTORY.md`, `API_INVENTORY.
 
 ## Repository layout
 
+`src/mediahub/` is the live, supported package — ~48 sub-packages, grouped here by responsibility (the `…` notes mean "see that folder's own `README.md`"):
+
+**Ingest & understand** — the deterministic engine (not AI-replaced)
 ```
-src/mediahub/        live, supported package
-  web/               Flask UI + helpers (formerly swim_content_v4)
-  pipeline/          orchestration (formerly bridge files)
-  interpreter/       format-agnostic ingestion + ontology
-  recognition*/      detector bus + sport adapters
-  pb_discovery/      web-verified PB engine
-  graphic_renderer/  HTML/CSS → PNG via Playwright
-  voice/             learned caption styles
-  sport_profiles/    sport config + autonomy levels (roadmap scaffolding, inert)
-  …
-legacy/              read-only historical packages (V1–V5 + early V6)
-data/                ontology, voices, brand kits, sport profiles, discovered cache
-tests/               pytest suite (2837 collected)
-docs/                long-form documentation
-samples/             tiny representative meet corpus
-scripts/             build + maintenance scripts
+interpreter/        format-agnostic ingestion + induced ontology
+recognition*/       detector bus + swim achievement detectors
+pb_discovery/       web-verified PB engine + trust ledger
+context_engine/     who/what a meet is about (club, event, back-story)
+```
+
+**Decide, brief & rank** — the intelligence layer
+```
+content_engine/     the strategy brain + the single caption writer
+creative_brief/     per-card look & wording direction
+club_platform/      catalogue of content types (recap, spotlight, preview…)
+turn_into/          one meet → eight ready-to-post assets
+free_text_chat/     conversational brief builder
+inspiration/        content-idea + good-example library
+media_requirements/ pre-flight: does this content type have the media it needs?
+```
+
+**Render & brand**
+```
+graphic_renderer/   HTML/CSS → PNG via Playwright
+remotion/ + visual/ Remotion MP4 story cards & meet reels (Node, driven from Python)
+theming/ typography/ brand/   colour science, club typefaces, brand kits
+media_library/      media asset store + deterministic photo selector
+content_pack*/      the assembled, downloadable content pack
+voice/              learned caption styles
+venue_search/       public venue / pool backdrop photos
+```
+
+**Club intelligence** — shipped swim features
+```
+athletes/           cross-meet athlete identity + milestones
+club_records/       the club records book
+standards/          qualifying-time tables ("made Counties!")
+season_wrap/        month / season recap numbers
+club_qa/            ask questions over the club's own results
+```
+
+**Trust, safety & compliance**
+```
+safeguarding/       per-athlete photo / name consent
+compliance/ privacy/  UK/EU data-protection rights engine (erasure, DSR, retention)
+quality/            exact, no-AI checks on generated content
+```
+
+**Platform & operations**
+```
+web/                Flask UI + helpers (tenancy.py = multi-tenant workspaces; auth)
+pipeline/           run orchestration
+ai_core/ media_ai/  provider-agnostic LLM clients (Gemini → Anthropic failover)
+memory/             semantic caption recall (embeddings)
+results_fetch/      "results from a link" crawler + live-meet watch
+web_research/       search + bounded deep-research loop
+scheduler/          in-process, exactly-once job runner
+autonomy/           bounded narrow-tool runner — queues for review, never publishes
+notify/             push / webhook notifications
+observability/      LLM-usage + uptime tracking
+log_sentinel/       production-log night guard + safe auto-fixes
+backup/             disk-failure resilience
+commercial/         the founder's selling notebook (leads, quotes)
+sport_profiles/     sport config + per-post-type autonomy levels
+```
+
+**Outside `src/`**
+```
+legacy/   read-only historical packages (V1–V5 + early V6) — newer code still borrows from here
+data/     ontology, voices, brand kits, sport profiles, standards, discovered-PB cache
+tests/    pytest suite — 8,450 tests (8,374 pass; rest skip without Playwright/Chromium or optional corpora)
+docs/     long-form documentation (see the table above)
+samples/ + sample_data/   tiny representative meet corpus
+scripts/  build + maintenance scripts
+autotest/ the in-cloud self-tester + the LLM Council skill
+vendor/   downloaded reference skill-kits — NOT part of MediaHub
 ```
 
 ## Tests

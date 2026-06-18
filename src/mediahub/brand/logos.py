@@ -350,6 +350,103 @@ def resolve_logo_path(profile_id: str, logo_id: str) -> Optional[Path]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Background "logo wall" silhouette (signed-in chrome).
+#
+# The signed-in app paints a soft, brand-tinted wall of the org's logos behind
+# every page (web.py `_layout`). Each mark is the logo's *silhouette*, recoloured
+# to a single tint via a CSS mask — that's what makes the wall versatile across
+# ANY colour combination: a black logo, a full-colour logo and a light
+# "knockout" logo all read identically once tinted. For the mask to work it
+# needs a clean ALPHA channel, so this turns any uploaded logo into a
+# transparent silhouette:
+#   - already-transparent logos keep their own alpha;
+#   - opaque / flat-background logos (JPEG, white-background PNG) have that
+#     background keyed out, so the mask paints only the artwork — never a block;
+#   - SVGs are already clean vectors and pass straight through.
+# The result is trimmed to the artwork and cached once under
+# {DATA_DIR}/logo_variants/<profile_id>/<logo_id>_bg.png.
+# ---------------------------------------------------------------------------
+
+_BG_SILHOUETTE_MAX_DIM = 512
+
+
+def logo_bg_silhouette_path(profile_id: str, logo_id: str) -> Optional[Path]:
+    """Clean-alpha PNG of a logo for the signed-in background wall.
+
+    Returns a cached transparent silhouette suitable for use as a CSS mask.
+    Falls back to the raw logo path (SVGs, or if processing fails) and returns
+    None only when the source logo can't be found. Safe to call per request —
+    computed once, then served from cache.
+    """
+    src = resolve_logo_path(profile_id, logo_id)
+    if not src:
+        return None
+    # SVGs are already clean transparent vectors; Pillow can't rasterise them
+    # without an extra dependency, and they need no keying.
+    if src.suffix.lower() == ".svg":
+        return src
+    try:
+        safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
+        dst = _data_dir() / "logo_variants" / safe / f"{logo_id}_bg.png"
+        if dst.exists():
+            return dst
+        _render_bg_silhouette(src, dst)
+        return dst if dst.exists() else src
+    except Exception:
+        log.warning(
+            "bg silhouette failed for %s/%s — serving raw logo",
+            profile_id,
+            logo_id,
+            exc_info=True,
+        )
+        return src
+
+
+def _render_bg_silhouette(src: Path, dst: Path) -> None:
+    """Write a trimmed, transparent-background PNG silhouette of ``src``.
+
+    Uses the image's own alpha when it has one; otherwise keys out the flat
+    background colour sampled from the border, so opaque logos still mask to
+    just their artwork instead of a solid rectangle.
+    """
+    from PIL import Image
+    import numpy as np
+
+    with Image.open(src) as _im:
+        # Downscale BEFORE the numpy work: a background mark is small, and this
+        # bounds memory/CPU no matter how large the upload is.
+        _im.thumbnail((_BG_SILHOUETTE_MAX_DIM, _BG_SILHOUETTE_MAX_DIM))
+        im = _im.convert("RGBA")
+    arr = np.asarray(im).astype(np.float32)  # H, W, 4
+    alpha = arr[..., 3]
+    # Treat the logo as "already transparent" only if a meaningful fraction of
+    # pixels are actually see-through. A stray anti-aliased edge on an otherwise
+    # opaque white-background PNG must NOT count as transparency, or it would
+    # mask to a solid block — the exact failure we're guarding against.
+    transparent_frac = float((alpha < 250.0).mean())
+    if transparent_frac < 0.03:
+        # Effectively opaque: derive alpha by keying out the flat background.
+        # Sampling the 1px border ring and taking the median works for ANY
+        # solid background colour (white, navy, brand-coloured tile, …), not
+        # just white, and resists a logo element touching one edge.
+        rgb = arr[..., :3]
+        ring = np.concatenate([rgb[0, :, :], rgb[-1, :, :], rgb[:, 0, :], rgb[:, -1, :]], axis=0)
+        bg = np.median(ring, axis=0)
+        dist = np.sqrt(((rgb - bg) ** 2).sum(axis=-1))
+        # Soft matte: transparent within LO of the bg colour, opaque past HI.
+        lo, hi = 26.0, 70.0
+        arr[..., 3] = np.clip((dist - lo) / (hi - lo), 0.0, 1.0) * 255.0
+    out = Image.fromarray(arr.astype(np.uint8), "RGBA")
+    # Trim to the artwork using the alpha channel only (RGB stays non-zero
+    # under keyed-out pixels). Logos often ship with generous padding.
+    bbox = out.getchannel("A").getbbox()
+    if bbox:
+        out = out.crop(bbox)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    out.save(dst, "PNG")
+
+
 __all__ = [
     "ALLOWED_EXTENSIONS",
     "MAX_LOGO_BYTES",
@@ -358,5 +455,6 @@ __all__ = [
     "store_logo",
     "delete_logo",
     "resolve_logo_path",
+    "logo_bg_silhouette_path",
     "describe_logo_with_ai",
 ]

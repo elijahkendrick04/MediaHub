@@ -2,8 +2,7 @@
 #
 # Second reference profile, alongside swimming.yaml, to prove the sport-profile
 # concept generalises. See swimming.yaml's header and docs/SPORT_PROFILES.md for
-# the schema; docs/POST_TYPE_TAXONOMY.md for the post types; docs/AUTONOMY_MODEL.md
-# for the autonomy levels.
+# the schema; docs/POST_TYPE_TAXONOMY.md for the post types.
 #
 # The football DETECTOR engine does not exist yet: `engine_sport` below names
 # the recognition.registry sport this profile WILL bind to once a
@@ -35,7 +34,7 @@ post_types:
     template_namespace: football/matchday_xi
     default_autonomy: approval_required
 
-  full_time_score:                # prime candidate to flip to fully_autonomous
+  full_time_score:
     enabled: true
     data_inputs: [openfootball_json, manual_entry]
     template_namespace: football/full_time

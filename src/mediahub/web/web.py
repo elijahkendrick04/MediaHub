@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import hashlib
 import json
 import logging
 import mimetypes
 import os
 import queue
+import random
 import re
 import sqlite3
 import threading
@@ -61,6 +63,11 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from .humanise import humanise as _humanise
+from .weekend_glance import (
+    build_weekend_glance as _build_weekend_glance,
+    render_weekend_glance_html as _render_weekend_glance_html,
+)
+from . import results_table as _rt
 from .club_profile import (
     ClubProfile,
     list_profiles,
@@ -75,6 +82,8 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import charts as _charts
+from . import sample_graphics as _sample_graphics
 from . import legal as _legal
 from . import tenancy as _tenancy
 
@@ -124,14 +133,24 @@ except ImportError:
     _voiceover = None
 
 
+# Query-arg parsing helpers (shared by the print-production routes below).
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _clamp_float(value, *, default: float, lo: float, hi: float) -> float:
+    """Parse a query-arg float, clamped to ``[lo, hi]``; ``default`` on failure."""
+    try:
+        v = float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return lo if v < lo else hi if v > hi else v
+
+
 def _voiceover_enabled() -> bool:
     """True only when the module imported AND the operator opted in."""
-    return bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return (
+        bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in _TRUTHY
+    )
 
 
 # V7.3 imports
@@ -549,6 +568,219 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
     return exp
 
 
+# --------------------------------------------------------------------------- #
+# U.7 — "Focus the facts" caption / explainability highlight.
+#
+# In captions and the "Why this card?" review UI, the source-grounded entities
+# (athlete / event / time / PB-medal-record) are pill-highlighted and sharp; the
+# connective filler around them recedes. This is *server-side span injection* —
+# no client JS — so it works the moment the HTML lands (and inside the lazily
+# fetched why-card body).
+#
+# Critically it is SOURCE-GROUNDED, not a regex guess: every highlighted phrase
+# is built from the structured achievement the deterministic engine already
+# produced (`swimmer_name`, `event`, the result time, and the detected
+# achievement `type`). We never light up a number that "looks like a time" or a
+# word that "looks like a medal" — only text that matches a fact on the card.
+# So the highlight can't drift from the data, and it reinforces the moat (the
+# intelligence layer) rather than faking it. Inspired by Pedro Duarte (ped.ro);
+# supports U.3.
+# --------------------------------------------------------------------------- #
+
+# Swim-stroke long↔short forms, so a canonical "100m Freestyle" also lights up a
+# caption that wrote "100m Free" / "100 Free". Deterministic string expansion of
+# the *real* event label — not a new parser, not an AI surface.
+_STROKE_SHORT_FORMS: dict[str, tuple[str, ...]] = {
+    "freestyle": ("free",),
+    "backstroke": ("back",),
+    "breaststroke": ("breast",),
+    "butterfly": ("fly",),
+    "individual medley": ("im", "medley"),
+}
+
+
+def _event_variants(event: str) -> list[str]:
+    """Grounded display variants of one event label for fact-matching.
+
+    Returns the full label, the course-tag-stripped base ("100m Freestyle (LC)"
+    → "100m Freestyle"), the stroke short-forms ("100m Free"), and the
+    distance-without-``m`` forms ("100 Free") — all derived from the real event
+    string, so every variant is still source-grounded. Distance alone ("100") is
+    deliberately never emitted: a bare number would match stray figures.
+    """
+    ev = " ".join(str(event or "").split())
+    if not ev:
+        return []
+    out: list[str] = [ev]
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", ev).strip()  # drop a trailing "(LC)" etc.
+    if base and base not in out:
+        out.append(base)
+
+    # Stroke short-forms, applied to the lowercased base (matching is
+    # case-insensitive; output casing is taken from the matched text, not these).
+    low = base.lower()
+    stroked = [low]
+    for long_form, shorts in _STROKE_SHORT_FORMS.items():
+        if long_form in low:
+            for short in shorts:
+                stroked.append(low.replace(long_form, short))
+
+    # Distance "100m" → "100" companion of each stroked form.
+    expanded = list(stroked)
+    for form in stroked:
+        no_m = re.sub(r"(?<=\d)m\b", "", form)
+        if no_m != form:
+            expanded.append(no_m)
+
+    for form in expanded:
+        form = form.strip()
+        # Only keep forms that still carry a stroke word — a bare distance
+        # ("100") is not grounded enough to highlight safely.
+        if form and form not in out and not form.replace(" ", "").isdigit():
+            out.append(form)
+    return out
+
+
+def _card_facts(achievement: Optional[dict]) -> list[tuple[str, str]]:
+    """Source-grounded ``(phrase, kind)`` pairs for "focus the facts" highlighting.
+
+    Every phrase is derived from the structured achievement — never guessed.
+    ``kind`` is one of ``athlete`` / ``event`` / ``time`` / ``pb`` (the last
+    covers PB **and** medal/record markers, gated by the detected achievement
+    ``type`` so e.g. "gold" is only ever lit on an actual medal).
+    """
+    if not isinstance(achievement, dict):
+        return []
+    phrases: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(phrase: str, kind: str) -> None:
+        p = " ".join(str(phrase or "").split())
+        if len(p) < 2:  # never light up a stray single character
+            return
+        key = (p.lower(), kind)
+        if key in seen:
+            return
+        seen.add(key)
+        phrases.append((p, kind))
+
+    # Athlete — full name, plus the first name (captions usually go first-name).
+    name = " ".join(str(achievement.get("swimmer_name") or "").split())
+    if name:
+        add(name, "athlete")
+        parts = name.split()
+        if len(parts) > 1:
+            add(parts[0], "athlete")
+
+    # Event — the label and its grounded short-forms.
+    for variant in _event_variants(achievement.get("event") or ""):
+        add(variant, "event")
+
+    # Time — the result string(s); exact and highly distinctive.
+    raw_facts = achievement.get("raw_facts")
+    time_sources = [achievement.get("time"), achievement.get("time_str"), achievement.get("result")]
+    if isinstance(raw_facts, dict):
+        time_sources += [
+            raw_facts.get("time"),
+            raw_facts.get("time_str"),
+            raw_facts.get("result"),
+            raw_facts.get("final_time"),
+        ]
+    for t in time_sources:
+        add(str(t or "").strip(), "time")
+
+    # PB / medal / record markers — gated by the engine's AUTHORITATIVE detected
+    # type / post_angle (not the free-text angle_hint, which can mention "first"
+    # or "gold" metaphorically), so we never light up "gold" or "record" on a
+    # card the detector didn't actually flag as one.
+    type_blob = " ".join(str(achievement.get(k) or "") for k in ("type", "post_angle")).lower()
+    is_pb = bool(achievement.get("pb") or achievement.get("is_pb")) or any(
+        tok in type_blob for tok in ("pb", "personal_best", "best_time", "lifetime")
+    )
+    markers: list[str] = []
+    if is_pb:
+        markers += ["personal best", "lifetime best", "new best", "PB"]
+    if any(tok in type_blob for tok in ("medal", "podium", "gold", "silver", "bronze")):
+        markers += ["medal", "podium"]
+        for metal in ("gold", "silver", "bronze"):
+            if metal in type_blob:
+                markers.append(metal)
+    if "record" in type_blob:
+        markers += [
+            "club record",
+            "county record",
+            "regional record",
+            "national record",
+            "meet record",
+            "record",
+        ]
+    if "first" in type_blob:
+        markers.append("first")
+    for m in markers:
+        add(m, "pb")
+
+    return phrases
+
+
+# Fact kinds are a fixed internal vocabulary — never user text — so they are safe
+# to interpolate straight into a class name.
+_FOCUS_KINDS = {"athlete", "event", "time", "pb"}
+
+
+def _focus_facts_html(
+    text: str,
+    achievement: Optional[dict] = None,
+    *,
+    phrases: Optional[list[tuple[str, str]]] = None,
+) -> str:
+    """Server-side span injection for U.7.
+
+    Wrap every source-grounded fact found in ``text`` in a ``<span class="mh-fact
+    mh-fact--KIND">`` pill and de-emphasise the rest, returning safe HTML. Every
+    segment is HTML-escaped via ``_h`` — only the highlight ``<span>`` tags are
+    markup — so this is XSS-safe even on attacker-controlled caption text.
+
+    When nothing matches (or there are no facts) the text is returned plainly
+    escaped, with **no** de-emphasis wrapper, so non-grounded copy still reads at
+    full strength rather than being greyed out for nothing.
+    """
+    s = str(text or "")
+    if not s.strip():
+        return str(_h(s))
+    if phrases is None:
+        phrases = _card_facts(achievement or {})
+    if not phrases:
+        return str(_h(s))
+
+    # Longest phrases first so "100m Freestyle" beats "Freestyle" and
+    # "Emma Davies" beats "Emma" when both could match at the same spot.
+    ordered = sorted(phrases, key=lambda pk: len(pk[0]), reverse=True)
+    kind_of: dict[str, str] = {}
+    for phrase, kind in ordered:
+        kind_of.setdefault(phrase.lower(), kind if kind in _FOCUS_KINDS else "event")
+    alternation = "|".join(re.escape(p) for p, _ in ordered)
+    # Boundary = not flanked by an alphanumeric. Handles "PB", "Emma" and times
+    # like "58.21" / "1:02.34" (whose internal "." / ":" are non-alphanumeric).
+    pattern = re.compile(r"(?<![A-Za-z0-9])(" + alternation + r")(?![A-Za-z0-9])", re.IGNORECASE)
+
+    chunks: list[str] = []
+    pos = 0
+    matched_any = False
+    for m in pattern.finditer(s):
+        if m.start() > pos:
+            chunks.append(str(_h(s[pos : m.start()])))
+        hit = m.group(1)
+        kind = kind_of.get(hit.lower(), "event")
+        chunks.append(f'<span class="mh-fact mh-fact--{kind}">{_h(hit)}</span>')
+        pos = m.end()
+        matched_any = True
+    if not matched_any:
+        return str(_h(s))
+    if pos < len(s):
+        chunks.append(str(_h(s[pos:])))
+    return '<span class="mh-focus">' + "".join(chunks) + "</span>"
+
+
 def _render_why_inner(
     exp: dict,
     *,
@@ -565,13 +797,19 @@ def _render_why_inner(
     stays grounded: headline / bullets come from the ranker + LLM, source
     lines are quoted verbatim from the achievement's evidence.
     """
-    headline = _h(exp.get("headline", ""))
+    # U.7 — light up the source-grounded facts (athlete / event / time / PB) in
+    # the LLM's reasoning. Phrases are derived once from this card's achievement
+    # so the headline and every bullet highlight the same grounded entities; if
+    # there's no achievement in scope, _focus_facts_html falls back to plain
+    # escaped text.
+    _facts = _card_facts((ra or {}).get("achievement") if isinstance(ra, dict) else None)
+    headline = _focus_facts_html(exp.get("headline", ""), phrases=_facts)
     bullets = exp.get("bullets") or []
     source_lines = exp.get("source_lines") or []
 
     bullets_html = ""
     for b in bullets:
-        bullets_html += f'<li style="margin-bottom:3px">{_h(b)}</li>'
+        bullets_html += f'<li style="margin-bottom:3px">{_focus_facts_html(b, phrases=_facts)}</li>'
     if not bullets_html:
         bullets_html = ""
 
@@ -590,7 +828,7 @@ def _render_why_inner(
             f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px">'
             f"{label}{offset_tag}</div>"
             f'<blockquote style="margin:2px 0 0 0;padding:6px 10px;border-left:2px solid var(--accent);'
-            f"background:rgba(212,255,58,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;"
+            f"background:color-mix(in oklab, var(--lane) 5%, transparent);font-family:ui-monospace,Menlo,monospace;font-size:12px;"
             f'color:var(--ink)">{raw}</blockquote>'
             f"</li>"
         )
@@ -626,7 +864,7 @@ def _render_why_inner(
     perf_block = ""
     if perf_ctx:
         perf_block = (
-            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:rgba(212,255,58,0.06);'
+            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:color-mix(in oklab, var(--lane) 6%, transparent);'
             'border-left:2px solid var(--lane);border-radius:4px">'
             '<div style="font-size:10px;text-transform:uppercase;color:var(--lane);letter-spacing:0.5px;'
             'margin-bottom:2px">Performance context (AI)</div>'
@@ -724,7 +962,7 @@ def _render_why_this_card(
     )
     shell_open = (
         f'<details{_open_attr} class="why-card" style="margin-top:10px;padding:10px 12px;'
-        'background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.25);border-radius:8px">'
+        'background:color-mix(in oklab, var(--lane) 6%, transparent);border:1px solid color-mix(in oklab, var(--lane) 25%, transparent);border-radius:8px">'
         '<summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--lane);'
         'user-select:none;list-style:none;display:flex;align-items:center;gap:6px">'
         f'<span aria-hidden="true">&#9432;</span> {_summary_label}</summary>'
@@ -762,17 +1000,465 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     btn = (
         f'<button class="btn secondary" type="button" '
         f'style="font-size:11px;padding:4px 10px;'
-        f'background:rgba(212,255,58,0.15);border-color:rgba(212,255,58,0.40);color:var(--lane)" '
+        f'background:color-mix(in oklab, var(--lane) 15%, transparent);border-color:color-mix(in oklab, var(--lane) 40%, transparent);color:var(--lane)" '
         f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)})">'
         f"Use in next caption</button>"
     )
     panel = (
         f'<div id="{panel_id}" data-mh-why-caption '
         f'style="display:none;margin-top:8px;padding:8px 10px;'
-        f"background:rgba(212,255,58,0.04);border:1px dashed rgba(212,255,58,0.30);"
+        f"background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px dashed color-mix(in oklab, var(--lane) 30%, transparent);"
         f'border-radius:6px;font-size:12px;color:var(--ink);line-height:1.45"></div>'
     )
     return btn, panel
+
+
+def _reveal_lines(
+    lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title", el_id: str = ""
+) -> str:
+    """U.5 — render an editorial heading as stacked lines that reveal
+    one-by-one on scroll (inspired by Opal, op.al).
+
+    Each entry in ``lines`` becomes a ``.mh-line`` span inside a
+    ``.mh-reveal-lines`` heading. The Phase-10 IntersectionObserver
+    (``bindReveals`` in the layout) observes every line *individually* and adds
+    ``.is-in`` as it scrolls up through the viewport, so a section's headline
+    surfaces line after line instead of all at once; a small per-line CSS delay
+    keeps the cascade gentle when the lines cross the trigger together.
+
+    ``lines`` are pre-built, trusted HTML fragments — the static landing copy
+    here, including its ``<em class="editorial">`` accents. There is no user
+    data on this path, so the helper does not re-escape; any caller that ever
+    feeds it dynamic text MUST pass already-escaped fragments. No-JS and
+    reduced-motion visitors see every line immediately (the ``.mh-js`` /
+    ``prefers-reduced-motion`` gate in the CSS), so this is pure progressive
+    enhancement — content is never hidden without JavaScript able to reveal it.
+
+    ``el_id`` (optional) stamps an ``id`` on the heading element so a section
+    can name itself via ``aria-labelledby`` (e.g. the UI 1.22 FAQ region);
+    when omitted the output is byte-identical to the original helper.
+    """
+    spans = "".join(f'<span class="mh-line">{ln}</span>' for ln in lines)
+    id_attr = f' id="{el_id}"' if el_id else ""
+    return f'<{tag}{id_attr} class="{cls} mh-reveal-lines">{spans}</{tag}>'
+
+
+def _drag_hint(label: str = "Drag to explore") -> str:
+    """UI 1.27 — the "drag to explore" affordance shown beside a
+    ``.mh-drag-scroll`` gallery (Media Library filmstrip + landing
+    sample-output showcase).
+
+    It ships ``hidden``; ui-kit.js ``bindDragScroll`` reveals it only while
+    the row actually overflows (and hides it again after the first drag), so
+    the hint never promises a drag the row can't deliver. It is a pure cue:
+    the gallery scrolls with wheel / trackpad / touch / focused-arrow keys
+    even with no JS and no hint. The grip glyph is a static, first-party
+    inline SVG (no icon font, no CDN).
+    """
+    return (
+        '<p class="mh-ds-hint" hidden style="margin-top:var(--sp-3)">'
+        '<span class="mh-ds-hint__grip" aria-hidden="true">'
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+        'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+        'stroke-linejoin="round"><path d="m9 6-4 4 4 4M15 6l4 4-4 4"/></svg>'
+        f"</span> {_h(label)}</p>"
+    )
+
+
+def _chart_card(eyebrow: str, title: str, chart_html: str) -> str:
+    """UI 1.6 — wrap a chart in a labelled panel (eyebrow + title) for the
+    landing sample-outputs grid and the in-app Review "Meet at a glance" card.
+
+    ``eyebrow`` and ``title`` are trusted static copy and may carry HTML
+    entities (``&middot;``, ``&amp;``), exactly like ``_reveal_lines`` — there
+    is no user data on this path, so they are not re-escaped. ``chart_html`` is
+    the already-rendered, already-escaped figure from ``web/charts.py``.
+    """
+    return (
+        '<div class="mh-chart-card">'
+        '<div class="mh-chart-card-head">'
+        f'<span class="mh-chart-card-eyebrow">{eyebrow}</span>'
+        f'<h3 class="mh-chart-card-title">{title}</h3>'
+        "</div>"
+        f"{chart_html}"
+        "</div>"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# U.3 — Explainability & confidence surfaces.
+#
+# The deterministic engine (detectors + ranker) decides *whether* a swim is a
+# PB / medal / record and *how content-worthy* it is. Those outputs —
+# ``confidence_label``, ``quality_band``, ``priority``, the ranker ``factors``
+# and the near-miss category — are never recomputed or re-judged here; U.3 only
+# makes them *read* as the trustworthy intelligence they already are. The
+# plain-English glosses below are fixed UI legends for those deterministic
+# enums (the same pattern U.2 used to humanise parse-note codes) — NOT an AI
+# surface and NOT a heuristic stand-in for one. The LLM-written "Why this card?"
+# prose stays the only judgement surface on the review path; if no provider is
+# configured it still says so honestly rather than fabricate.
+# --------------------------------------------------------------------------- #
+
+# What each deterministic confidence band means, in a volunteer's words.
+_CONFIDENCE_MEANING: dict[str, str] = {
+    "high": "We're confident in the facts on this card — the result line is "
+    "clear and the achievement is directly supported by the data.",
+    "medium": "The facts look right, but one input is softer (for example a "
+    "prior best we couldn't fully confirm). Worth a quick glance "
+    "before you post it.",
+    "low": "We're less sure here — the source data was ambiguous or "
+    "incomplete. Check it against the original results before approving.",
+}
+_CONFIDENCE_CLS: dict[str, str] = {"high": "good", "medium": "warn", "low": "bad"}
+
+
+def _confidence_chip(label: str, *, numeric: Optional[float] = None) -> str:
+    """A labelled, self-explaining confidence chip for a review card.
+
+    Replaces the bare ``conf: medium`` tag. Carries the plain-English meaning
+    in a ``title=`` tooltip so a first-time reviewer understands what the
+    engine is telling them: confidence is "how sure we are the facts are
+    right" — a separate axis from content-worthiness (the worthiness meter).
+    """
+    lab = (str(label or "medium")).strip().lower()
+    cls = _CONFIDENCE_CLS.get(lab, "warn")
+    meaning = _CONFIDENCE_MEANING.get(lab, _CONFIDENCE_MEANING["medium"])
+    pct = ""
+    if isinstance(numeric, (int, float)) and 0.0 < float(numeric) <= 1.0:
+        pct = f'&nbsp;<span class="mh-conf-chip-pct">{float(numeric) * 100:.0f}%</span>'
+    return (
+        f'<span class="mh-conf-chip {cls}" title="{_h(meaning)}" data-conf="{_h(lab)}">'
+        f'<span class="mh-conf-chip-dot" aria-hidden="true"></span>'
+        f"Confidence&nbsp;&middot;&nbsp;{_h(lab.capitalize())}{pct}</span>"
+    )
+
+
+# What each deterministic quality band means.
+_BAND_MEANING: dict[str, str] = {
+    "elite": "Elite — a standout moment (gold, a record, a huge PB). Lead with these.",
+    "strong": "Strong — a clear, postable achievement.",
+    "story": "Story — a result with a good angle worth telling.",
+    "nice": "Nice — a genuine positive, lower in the running order.",
+    "not_worthy": "Below the bar — kept for the record, not suggested for posting.",
+}
+_BAND_CLS: dict[str, str] = {
+    "elite": "warn",
+    "strong": "info",
+    "story": "",
+    "nice": "",
+    "not_worthy": "bad",
+}
+
+
+def _band_chip(band: str) -> str:
+    """The quality-band tag, with its meaning in a tooltip (was a bare tag)."""
+    b = (str(band or "nice")).strip().lower()
+    cls = _BAND_CLS.get(b, "")
+    meaning = _BAND_MEANING.get(b, "")
+    return (
+        f'<span class="tag {cls}" style="font-size:10px" title="{_h(meaning)}">'
+        f"{_h(b.upper().replace('_', ' '))}</span>"
+    )
+
+
+def _worthiness_meter(priority: float) -> str:
+    """The content-worthiness (ranking) meter — a *different* axis from
+    confidence, labelled so the bare 0–1 score isn't read as a second
+    confidence number. The value comes straight from the deterministic ranker.
+    """
+    try:
+        p = max(0.0, min(1.0, float(priority)))
+    except (TypeError, ValueError):
+        p = 0.0
+    pct = int(round(p * 100))
+    return (
+        '<span class="mh-worth" title="Content-worthiness — the engine&#39;s ranking '
+        'of how postable this is, used to order the queue. Separate from confidence.">'
+        '<span class="mh-worth-label">Worth</span>'
+        '<span class="mh-worth-track">'
+        f'<span class="mh-worth-fill mh-bar-fill" style="width:{pct}%"></span></span>'
+        f'<span class="mh-worth-num">{pct}%</span></span>'
+    )
+
+
+def _avatar_initials(name: str) -> str:
+    """One- or two-letter initials for an athlete avatar chip.
+
+    First+last initial for a full name, the first two letters for a single
+    token, ``?`` for an empty name. Mirrors the sign-in card initials.
+    """
+    parts = [p for p in (name or "").strip().split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _athlete_avatar(
+    name: str,
+    *,
+    club: str = "",
+    stat: str = "",
+    focusable: bool = False,
+    size: int = 34,
+) -> str:
+    """An athlete avatar chip carrying a hover/focus Animated-Tooltip (the kit
+    ``.mh-tooltip``) that shows the athlete's name, club and a key stat.
+
+    Used on the review queue and the athlete-spotlight surfaces (UI2.2). The
+    tooltip is a decorative progressive enhancement: the chip is fully usable
+    with the effect absent (no-JS / reduced-motion), and every value shown is a
+    real, grounded fact already in the recognition report — never fabricated.
+
+    ``focusable=True`` makes the chip keyboard-reachable and exposes the same
+    name/club/stat to assistive tech via ``aria-label`` (use for standalone
+    placements). ``focusable=False`` keeps it decorative + ``aria-hidden`` (use
+    when the chip sits inside another link/control, or the same facts are
+    already visible as text beside it).
+    """
+    nm = (name or "").strip()
+    club = (club or "").strip()
+    stat = (stat or "").strip()
+    initials = _h(_avatar_initials(nm))
+
+    # Meta line: "Club · stat", dropping either empty half cleanly.
+    meta_inner = ""
+    if club:
+        meta_inner += f'<span class="mh-tooltip__club">{_h(club)}</span>'
+    if club and stat:
+        meta_inner += '<span class="mh-tooltip__sep" aria-hidden="true"> · </span>'
+    if stat:
+        meta_inner += f'<span class="mh-tooltip__stat">{_h(stat)}</span>'
+    meta_html = f'<span class="mh-tooltip__meta">{meta_inner}</span>' if meta_inner else ""
+
+    if focusable:
+        # Standalone, keyboard-reachable: AT gets the whole summary from the
+        # avatar's aria-label; the visual pop is a decorative duplicate.
+        aria = _h(" · ".join(p for p in (nm, club, stat) if p) or (nm or "Athlete"))
+        avatar_attrs = f'tabindex="0" role="img" aria-label="{aria}"'
+    else:
+        avatar_attrs = 'aria-hidden="true"'
+
+    return (
+        f'<span class="mh-tooltip" style="--mh-tip-size:{int(size)}px">'
+        f'<span class="mh-tooltip__avatar" {avatar_attrs}>{initials}</span>'
+        f'<span class="mh-tooltip__pop" role="tooltip" aria-hidden="true">'
+        f'<span class="mh-tooltip__name">{_h(nm)}</span>{meta_html}'
+        f"</span></span>"
+    )
+
+
+def _factor_to_dict(f: Any) -> dict:
+    """A ranker factor may arrive as a ``RankFactor`` dataclass or a plain dict
+    (persisted run JSON). Normalise to a dict; non-factors become ``{}``."""
+    if hasattr(f, "to_dict"):
+        try:
+            f = f.to_dict()
+        except Exception:
+            pass
+    return f if isinstance(f, dict) else {}
+
+
+def _render_factor_breakdown(factors: Any) -> str:
+    """Plain-English "how the ranking added up", replacing the raw
+    name/value/weight debug table.
+
+    Each row leads with the ranker's own grounded ``plain_summary`` (falling
+    back to ``reason``) and shows how much that reason counted, as a bar
+    normalised to the strongest contributor. Every number is read verbatim
+    from the deterministic ranker — nothing here re-judges the result. The
+    multiplicative ``profile_priority`` factor is shown as a ×multiplier rather
+    than a contribution bar, mirroring how the ranker actually applies it.
+    """
+    rows: list[tuple[str, str, float, float, bool]] = []
+    for f in factors or []:
+        d = _factor_to_dict(f)
+        if not d:
+            continue
+        name = str(d.get("name") or "")
+        try:
+            val = float(d.get("value") or 0.0)
+            wt = float(d.get("weight") or 0.0)
+        except (TypeError, ValueError):
+            val, wt = 0.0, 0.0
+        summary = (str(d.get("plain_summary") or d.get("reason") or "")).strip()
+        is_priority = name == "profile_priority"
+        contrib = 0.0 if is_priority else val * wt
+        # Skip a factor that neither contributed nor carries a human summary,
+        # and a no-op club override (×1.00) — they add noise, not trust.
+        if is_priority and abs(val - 1.0) <= 0.01:
+            continue
+        if not is_priority and contrib <= 0 and not summary:
+            continue
+        rows.append((name, summary, contrib, val, is_priority))
+
+    if not rows:
+        return (
+            '<p class="muted" style="font-size:12px;margin:0">'
+            "No ranking factors were recorded for this card.</p>"
+        )
+
+    top = max((c for _, _, c, _, p in rows if not p), default=0.0)
+    items = ""
+    for name, summary, contrib, val, is_priority in rows:
+        label = _h(_humanise(name))
+        text = _h(summary) if summary else label
+        if is_priority:
+            meter = (
+                f'<span class="mh-factor-mult" title="Club priority multiplier '
+                f'(set in your profile)">&times;{val:.2f}</span>'
+            )
+        else:
+            w = int(round((contrib / top) * 100)) if top > 0 else 0
+            meter = (
+                f'<span class="mh-factor-track" title="How much this reason '
+                f'counted (contribution {contrib:.2f})">'
+                f'<span class="mh-factor-fill" style="width:{w}%"></span></span>'
+            )
+        items += (
+            f'<li class="mh-factor"><span class="mh-factor-name">{label}</span>'
+            f'<span class="mh-factor-why">{text}</span>{meter}</li>'
+        )
+    return f'<ul class="mh-factor-list">{items}</ul>'
+
+
+# Plain-English for the deterministic near-miss categories the explainer
+# assigns to swims that produced no card (legacy/swim_content_v5/explainer.py).
+# (label, blurb) — the genuine close calls first in _NEAR_MISS_ORDER below.
+_NEAR_MISS: dict[str, tuple[str, str]] = {
+    "almost_pb": (
+        "Almost a PB",
+        "Just off a personal best — close enough that we flagged it.",
+    ),
+    "possible_pb_uncertain": (
+        "Possible PB — unconfirmed",
+        "This might be a PB, but there's no prior best on file to prove it.",
+    ),
+    "possible_barrier_no_history": (
+        "Possible first — no history",
+        "Could be a first-time barrier, but we have no past times to confirm it.",
+    ),
+    "ambiguous_swimmer_match": (
+        "Swimmer unconfirmed",
+        "We couldn't be sure which swimmer this was, so we held it back rather than guess.",
+    ),
+    "good_placing_weak_field": (
+        "Good place, light field",
+        "A good finish, but the field was small — so it scored lower.",
+    ),
+    "relay_mention_only": (
+        "Relay — mention only",
+        "Part of a relay; noted, but not made into its own card.",
+    ),
+    "lower_priority": (
+        "Outranked",
+        "A real result — just outranked by stronger swims at this meet.",
+    ),
+}
+# Genuine close calls first, the plain "outranked" bucket last.
+_NEAR_MISS_ORDER: list[str] = [
+    "almost_pb",
+    "possible_pb_uncertain",
+    "possible_barrier_no_history",
+    "ambiguous_swimmer_match",
+    "good_placing_weak_field",
+    "relay_mention_only",
+    "lower_priority",
+]
+
+
+def _near_miss_label(category: str) -> tuple[str, str]:
+    """(label, blurb) in plain English for a deterministic near-miss category."""
+    return _NEAR_MISS.get((str(category or "")).strip().lower(), _NEAR_MISS["lower_priority"])
+
+
+def _near_miss_is_close_call(category: str) -> bool:
+    """A 'close call' is any near-miss except the plain 'outranked' bucket —
+    the ones genuinely worth a reviewer's glance."""
+    return (str(category or "")).strip().lower() not in ("", "lower_priority")
+
+
+def _render_explainability_key() -> str:
+    """A compact "how to read these cards" key, so the review surface reads as
+    the intelligence it is to a first-time volunteer. Every gloss describes the
+    deterministic engine's own outputs — it makes nothing up."""
+
+    def _row(term: str, body: str) -> str:
+        return (
+            f'<div class="mh-key-row"><span class="mh-key-term">{term}</span>'
+            f'<span class="mh-key-body">{body}</span></div>'
+        )
+
+    return (
+        '<details class="mh-explain-key">'
+        '<summary><span aria-hidden="true">&#9432;</span> How to read these cards</summary>'
+        '<div class="mh-key-grid">'
+        + _row(
+            "Band",
+            "How big the moment is — <b>Elite</b> (gold, a record, a huge PB) "
+            "down through <b>Strong</b>, <b>Story</b> and <b>Nice</b>. It sets "
+            "the running order.",
+        )
+        + _row(
+            "Confidence",
+            "How sure we are the <b>facts</b> are right — computed by our engine "
+            "and checked against the source line, never guessed. "
+            "<b>High</b> / <b>Medium</b> / <b>Low</b>.",
+        )
+        + _row(
+            "Worth",
+            "How <b>postable</b> the engine rates it — a separate ranking used to "
+            "order the queue. A high-worth card can still be Medium confidence, "
+            "and the other way round.",
+        )
+        + _row(
+            "Why this card?",
+            "Written by AI from the <b>verified</b> facts and the ranking factors "
+            "— never invented. If no AI is configured it tells you so, rather "
+            "than make something up.",
+        )
+        + _row(
+            "Why not",
+            "Swims that didn&rsquo;t make a card are kept under <b>Run detail "
+            "&amp; diagnostics</b> with the reason in plain English — so you can "
+            "see nothing good was dropped silently.",
+        )
+        + "</div></details>"
+    )
+
+
+def _render_near_miss_hint(n_not_generated: int, n_close_calls: int) -> str:
+    """A slim, trustworthy "why not" pointer under the decision list.
+
+    Reassures the reviewer that the swims which produced no card weren't
+    silently dropped — they're traced, in plain English, under the diagnostics
+    section — and surfaces how many were genuine close calls worth a glance.
+    Empty when every swim produced a card.
+    """
+    if n_not_generated <= 0:
+        return ""
+    swims = f"{n_not_generated} swim{'' if n_not_generated == 1 else 's'}"
+    if n_close_calls > 0:
+        calls = (
+            f"{n_close_calls} {'was a close call' if n_close_calls == 1 else 'were close calls'}"
+        )
+        body = (
+            f"We also looked at <b>{swims}</b> that didn&rsquo;t make a card &mdash; "
+            f"<b>{calls}</b> worth a glance."
+        )
+        pip = '<span class="mh-nm-pip" aria-hidden="true"></span>'
+    else:
+        body = (
+            f"We also looked at <b>{swims}</b> that didn&rsquo;t make a card &mdash; "
+            "none were close calls, but the reason for each is recorded."
+        )
+        pip = ""
+    return (
+        f'<div class="mh-nearmiss-hint">{pip}<span>{body}</span>'
+        '<a href="#mh-not-generated">See why &rarr;</a></div>'
+    )
 
 
 # V8: media generation engine
@@ -803,6 +1489,102 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
+# P6.3: generative-imagery seam (imagine). Guards the image-AI routes/UI.
+try:
+    from mediahub.media_ai import imagine as _imagine
+
+    _imagine_ok = True
+except ImportError:
+    _imagine_ok = False
+    _imagine = None
+
+
+def _cutout_provider_label() -> str:
+    """Friendly name of the background remover that produces cut-outs.
+
+    Used for explainability on the cut-out before/after preview (UI2.1) so a
+    user knows *what* knocked the background out, not just the result.
+    """
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        name = (getattr(get_bg_remover(), "name", "") or "").lower()
+    except Exception:
+        name = ""
+    if "photoroom" in name:
+        return "Photoroom"
+    if "replicate" in name:
+        return "Replicate"
+    if "rembg" in name or "local" in name or "server" in name:
+        return "the on-server rembg model"
+    return "the configured background remover"
+
+
+def _v8_ensure_cutout(asset) -> "tuple[Optional[Path], str]":
+    """Resolve the background-removed cut-out PNG for a media asset (UI2.1).
+
+    Returns ``(path, status)`` where ``status`` is one of:
+
+      * ``"cached"``      — a persisted cut-out already exists, reused as-is
+      * ``"generated"``   — produced now (and persisted onto the asset)
+      * ``"unavailable"`` — no working background remover on this deployment
+      * ``"failed"``      — a remover ran but produced nothing usable
+      * ``"no_source"``   — the original file is missing
+
+    Honest-error rule (CLAUDE.md): when no real remover is available we return
+    ``"unavailable"`` rather than rembg's pass-through (which copies the whole
+    image with an alpha channel and removes *nothing*). A fake cut-out that
+    looks identical to the original is worse than an honest "not available".
+    The work is delegated to the renderer's own cut-out pipeline so the
+    preview shares the exact same DATA_DIR cache as the graphics engine.
+    """
+    if asset is None:
+        return None, "no_source"
+    # 1. Already have a usable cut-out on disk?
+    cp = getattr(asset, "cutout_path", None)
+    try:
+        if cp and Path(cp).exists() and Path(cp).stat().st_size > 1000:
+            return Path(cp), "cached"
+    except OSError:
+        pass
+    src = Path(getattr(asset, "path", "") or "")
+    if not src.exists():
+        return None, "no_source"
+    # 2. Is a *real* background remover available? Never fake it.
+    try:
+        from mediahub.media_ai.providers import get_bg_remover
+
+        remover = get_bg_remover()
+    except Exception:
+        remover = None
+    if remover is None or not remover.is_available():
+        return None, "unavailable"
+    # 3. Generate via the shared renderer cut-out path (same cache the
+    #    graphics engine uses, so a preview warms the render and vice versa).
+    try:
+        from mediahub.graphic_renderer.render import _maybe_cut_out_athlete
+
+        out = Path(
+            _maybe_cut_out_athlete(src, profile_id=getattr(asset, "profile_id", None) or "default")
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("cutout preview: generation failed for %s: %s", getattr(asset, "id", "?"), exc)
+        return None, "failed"
+    try:
+        same = out.resolve() == src.resolve()
+    except OSError:
+        same = str(out) == str(src)
+    if same or not out.exists():
+        return None, "failed"
+    # 4. Persist the link so future loads (and the renderer) skip the work.
+    try:
+        if _v8_get_media_store is not None:
+            _v8_get_media_store().update_fields(getattr(asset, "id", ""), {"cutout_path": str(out)})
+    except Exception:  # pragma: no cover - best-effort persistence
+        pass
+    return out, "generated"
+
+
 _SRC_ROOT = Path(__file__).resolve().parents[1]  # src/mediahub/ &mdash; local dev default
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
@@ -828,6 +1610,98 @@ def _get_wf_store() -> Optional["WorkflowStore"]:
         except ImportError:
             pass
     return _wf_store
+
+
+# Per-card inspector overrides (UI 1.18) ride the existing workflow
+# ``edited_captions`` bag under dotted ``insp.*`` keys — no underscore, so the
+# pack builder's ``tone_slot`` caption parser skips them cleanly. This is the
+# whole persistence story: no new store, no schema change.
+_INSPECTOR_EDIT_KEYS = {
+    "insp.accent": "accent",
+    "insp.focus": "photo_pos",
+    "insp.hideSponsor": "hide_sponsor",
+    "insp.noPhoto": "no_photo",
+}
+
+
+def _inspector_overrides_for_card(run_id: str, card_id: str) -> dict:
+    """Read a card's persisted inspector overrides as a render-ready dict.
+
+    Returns ``{accent?, photo_pos?, hide_sponsor?, no_photo?}`` — only the keys
+    the user actually set. Booleans are coerced from their stored string form.
+    Best-effort: any store/parse failure yields an empty dict so a render never
+    breaks on a missing or malformed sidecar.
+    """
+    out: dict = {}
+    try:
+        ws = _get_wf_store()
+        if ws is None:
+            return out
+        state = ws.load(run_id).get(card_id)
+        edits = (getattr(state, "edited_captions", None) or {}) if state else {}
+    except Exception:
+        return out
+    for store_key, render_key in _INSPECTOR_EDIT_KEYS.items():
+        if store_key not in edits:
+            continue
+        val = edits.get(store_key)
+        if render_key in ("hide_sponsor", "no_photo"):
+            out[render_key] = str(val).lower() in ("1", "true", "yes", "on")
+        elif val:
+            out[render_key] = str(val)
+    return out
+
+
+def _brand_swatches(brand_kit) -> list[dict]:
+    """Brand-locked accent swatches for the UI 1.18 inspector palette.
+
+    Only the club's OWN confirmed colours (primary / secondary / accent) are
+    offered — never an arbitrary colour picker — so a per-card tweak can never
+    paint a card off-brand. Returns ``[{role, hex}]`` de-duplicated, each a
+    valid CSS hex; an empty list when the kit has none.
+    """
+    pairs = [
+        ("primary", getattr(brand_kit, "primary_colour", None)),
+        ("secondary", getattr(brand_kit, "secondary_colour", None)),
+        ("accent", getattr(brand_kit, "accent_colour", None)),
+    ]
+    out: list[dict] = []
+    seen: set[str] = set()
+    for role, hexval in pairs:
+        h = str(hexval or "").strip()
+        if not re.fullmatch(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})", h):
+            continue
+        key = h.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"role": role, "hex": h})
+    return out
+
+
+def _inspector_state_attrs(wf_state) -> str:
+    """``data-insp-*`` attributes carrying a card's persisted inspector state.
+
+    Lets the drawer show the saved accent / crop / element toggles / caption the
+    moment it opens — no render round-trip needed. Values are HTML-escaped; only
+    set keys are emitted (an untouched card adds nothing).
+    """
+    edits = (getattr(wf_state, "edited_captions", None) or {}) if wf_state else {}
+    parts: list[str] = []
+    accent = str(edits.get("insp.accent") or "").strip()
+    if re.fullmatch(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})", accent):
+        parts.append(f'data-insp-accent="{_h(accent)}"')
+    focus = str(edits.get("insp.focus") or "").strip()
+    if focus:
+        parts.append(f'data-insp-focus="{_h(focus)}"')
+    if str(edits.get("insp.hideSponsor") or "").lower() in ("1", "true", "yes", "on"):
+        parts.append('data-insp-hide-sponsor="1"')
+    if str(edits.get("insp.noPhoto") or "").lower() in ("1", "true", "yes", "on"):
+        parts.append('data-insp-no-photo="1"')
+    caption = str(edits.get("warm-club_headline") or "").strip()
+    if caption:
+        parts.append(f'data-insp-caption="{_h(caption)}"')
+    return (" " + " ".join(parts)) if parts else ""
 
 
 # ---------------------------------------------------------------------
@@ -857,6 +1731,12 @@ _research_jobs: BoundedCache = BoundedCache(max_size=32)
 # Club-data Q&A jobs ("Ask the data"). Same lifecycle as the research
 # console: background thread, memory + disk record, org-scoped polls.
 _club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
+# G1.27 design-studio render cache: signature(brief levers) -> the JSON render
+# payload (a base64 data-URI preview + its explainability sidecar). Lets the
+# interactive editor re-show a previously-seen combination instantly and caps
+# repeated Playwright renders. Entries are a few hundred KB each; 48 × keeps it
+# well under the worker's memory ceiling.
+_studio_render_cache: BoundedCache = BoundedCache(max_size=48)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -930,7 +1810,14 @@ def _heartbeat_drain_loop() -> None:
         except Exception:
             pass
         finally:
-            _HEARTBEAT_QUEUE.task_done()
+            # task_done() must never escape this loop: a stray ValueError
+            # ("called too many times" — possible when the queue is join()ed
+            # or reset concurrently) would otherwise kill this daemon thread,
+            # silently stopping all heartbeat writes for the worker's life.
+            try:
+                _HEARTBEAT_QUEUE.task_done()
+            except ValueError:
+                pass
 
 
 def _ensure_heartbeat_thread() -> None:
@@ -1207,6 +2094,87 @@ def _research_console_enabled() -> bool:
     }
 
 
+# UI 1.1 — Cycling example-prompt placeholders (inspired by Cosmos). Each
+# describe-a-moment / search field carries a pipe-delimited list of real example
+# prompts in a data-mh-cycle-placeholder attribute; bindCyclePlaceholders() in
+# _layout types them through the field's own placeholder (a typewriter cycle:
+# type → hold → erase → next), guiding first-time users with zero extra chrome.
+# Pure vanilla JS, no deps, prefers-reduced-motion respected. The static
+# placeholder="" each field already carries stays as the no-JS / reduced-motion
+# fallback, so nothing is lost when the script or motion is unavailable.
+_CYCLE_PH_MOMENT = (
+    "Try: Tom Davies PB 100m free",
+    "Try: top three at county finals",
+    "Try: thank-you to our sponsor Riverside Physio",
+    "Try: Maya's first sub-30 50m fly",
+    "Try: relay squad breaks the club record",
+    "Try: medal haul from the regional gala",
+)
+_CYCLE_PH_RESEARCH = (
+    "Try: 2024 county championship headline results",
+    "Try: who set the regional 100m free record this season",
+    "Try: latest Swim England qualifying times",
+)
+_CYCLE_PH_ASKDATA = (
+    "Try: when did Alice Lee last PB the 100m free",
+    "Try: our medal count at the spring gala",
+    "Try: which swimmers broke 30s in the 50m fly",
+)
+
+
+def _cycle_ph_attr(phrases) -> str:
+    """Render the ``data-mh-cycle-placeholder`` attribute for one field.
+
+    The phrases are joined with `` | `` (the JS splits on the pipe, trimming
+    whitespace) and HTML-escaped so the value is safe inside a double-quoted
+    attribute. Returns the whole ``data-mh-cycle-placeholder="…"`` token so call
+    sites just drop it into the tag.
+    """
+    return f'data-mh-cycle-placeholder="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the lists are static, so there's no reason to
+# rebuild the escaped attribute on every request.
+_CYCLE_PH_ATTR_MOMENT = _cycle_ph_attr(_CYCLE_PH_MOMENT)
+_CYCLE_PH_ATTR_RESEARCH = _cycle_ph_attr(_CYCLE_PH_RESEARCH)
+_CYCLE_PH_ATTR_ASKDATA = _cycle_ph_attr(_CYCLE_PH_ASKDATA)
+
+
+# UI2.6 — Vanish search. The /activity (global run) search uses the design-kit
+# Vanish input (.mh-vanish): a rotating overlay-placeholder element
+# (.mh-vanish__ph) that swap-fades through real example queries, instead of the
+# UI 1.1 typewriter-through-the-native-placeholder cycle. The native placeholder
+# is emptied (the overlay carries the hint), so the input keeps an explicit
+# aria-label as its accessible name. bindVanish() in ui-kit.js reads this
+# pipe-delimited list from data-mh-placeholders and rotates it (paused while the
+# field holds text, no rotation under prefers-reduced-motion). The first phrase
+# is also baked into the overlay element server-side so the hint reads with no
+# JS, and a :placeholder-shown CSS rule hides the overlay the instant the box
+# holds text even if .is-typing never gets toggled (no-JS / pre-init safety).
+_VANISH_PH_SEARCH = (
+    "Search meet name, file or run id…",
+    "Search county championships…",
+    "Search spring gala 2026…",
+    "Find a file like regionals.hy3…",
+    "Jump to a run id like 7f3c9a…",
+)
+
+
+def _vanish_ph_attr(phrases) -> str:
+    """Render the ``data-mh-placeholders`` attribute for a Vanish input.
+
+    Phrases are joined with `` | `` (``bindVanish()`` in ``ui-kit.js`` splits on
+    the pipe and trims) and HTML-escaped so the value is safe inside a
+    double-quoted attribute. Returns the whole ``data-mh-placeholders="…"`` token
+    so call sites just drop it onto the ``.mh-vanish`` container.
+    """
+    return f'data-mh-placeholders="{_h(" | ".join(phrases))}"'
+
+
+# Precomputed once at import — the list is static.
+_VANISH_PH_ATTR_SEARCH = _vanish_ph_attr(_VANISH_PH_SEARCH)
+
+
 # Console page body (Capability 3c). A plain string — NOT an f-string — so the
 # JS braces stay literal; the route swaps __SUBMIT_URL__ for the real endpoint.
 # Results are rendered with textContent / createElement only (never innerHTML),
@@ -1222,7 +2190,7 @@ _WEB_RESEARCH_CONSOLE_BODY = """
     its bound it says so and asserts nothing &mdash; partial results are discarded.
   </p>
   <form id="rform" data-no-loader="1" style="margin-top:16px">
-    <textarea id="rq" name="question" rows="3" maxlength="500" required
+    <textarea id="rq" name="question" rows="3" maxlength="500" required __CYCLE_PH__
       placeholder="e.g. What were the headline results at the 2024 county championships for the City Aquatics club?"
       style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -1340,7 +2308,7 @@ _CLUB_QA_CONSOLE_BODY = """
     search, no guessing: if your data doesn't hold the answer, it says so.
   </p>
   <form id="qaform" data-no-loader="1" style="margin-top:16px">
-    <textarea id="qaq" name="question" rows="3" maxlength="400" required
+    <textarea id="qaq" name="question" rows="3" maxlength="400" required __CYCLE_PH__
       placeholder="e.g. When did Alice Lee last swim a PB in the 100m Freestyle?"
       style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -1463,6 +2431,41 @@ def _iso_age_secs(iso_str: Optional[str]) -> Optional[float]:
         return None
 
 
+def _cadence_activity_counts(profile_id: str, end):
+    """Per-day content activity for one organisation over the heatmap window.
+
+    Returns ``(generated, posted)`` — two ``{YYYY-MM-DD: count}`` dicts scoped
+    to ``profile_id``: ``generated`` is pipeline runs created that day (the
+    run history that grounds UI 1.17). ``posted`` is always empty now that
+    MediaHub no longer schedules posts onto social channels; the second slot
+    is kept so the heatmap renderer's shape is unchanged. ISO-8601 timestamps
+    sort lexically, so a ``>= start`` prefix compare bounds the scan to the
+    rendered year and ``substr(...,1,10)`` buckets by date in-engine.
+    Fail-soft: any DB trouble yields empty dicts so the Activity page never
+    500s over its decoration.
+    """
+    generated: dict[str, int] = {}
+    posted: dict[str, int] = {}
+    if not profile_id:
+        return generated, posted
+    start_iso = _cadence_window_start(end).isoformat()
+    try:
+        conn = _db()
+        try:
+            for r in conn.execute(
+                "SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS n FROM runs "
+                "WHERE profile_id = ? AND created_at >= ? GROUP BY d",
+                (profile_id, start_iso),
+            ).fetchall():
+                if r["d"]:
+                    generated[r["d"]] = int(r["n"] or 0)
+        finally:
+            conn.close()
+    except Exception as e:  # pragma: no cover - defensive
+        log.warning("cadence: activity counts unavailable: %s", e)
+    return generated, posted
+
+
 def _persist_run_progress(
     run_id: str, status: str, log_list: list, error: Optional[str] = None
 ) -> None:
@@ -1508,6 +2511,22 @@ def _init_db():
             file_name TEXT,
             progress_log TEXT,       -- JSON array, streamed for cross-worker polls
             heartbeat_at TEXT        -- ISO ts, advanced while the pipeline runs
+        );
+        -- UI 1.25 — emoji reactions on generated cards + the review queue.
+        -- One row per (card, emoji, anonymous reactor): the per-card tally is
+        -- COUNT(*) grouped by emoji, so a reactor counts once per emoji and a
+        -- second tap toggles their row off. The composite PK is the only index
+        -- needed — its (run_id, card_id) leftmost prefix covers both the
+        -- per-card tally and the per-run "my reactions" lookup. `emoji` is
+        -- constrained to a server-side allowlist before any INSERT, so no
+        -- arbitrary user string ever lands here.
+        CREATE TABLE IF NOT EXISTS card_reactions (
+            run_id     TEXT NOT NULL,
+            card_id    TEXT NOT NULL,
+            emoji      TEXT NOT NULL,
+            reactor_id TEXT NOT NULL,
+            created_at TEXT,
+            PRIMARY KEY (run_id, card_id, emoji, reactor_id)
         );
     """)
     # Additive migration for DBs created before progress_log / heartbeat_at /
@@ -1741,6 +2760,74 @@ def _load_run(run_id: str) -> Optional[dict]:
         return None
 
 
+def _machine_readable_run(data: Optional[dict], run_id: str, *, max_achievements: int = 60) -> str:
+    """UI2.8 — assemble the curated, machine-readable JSON shown inline on the
+    review page's Recognition-summary card (rendered through the first-party
+    Codeblock highlighter, ``code_highlight.code_block`` — the "raw parsed-data
+    view" host surface the kit's Codeblock effect was waiting for).
+
+    This is the *explainability* payload: meet context, the parsed/matched swim
+    counts, and the ranked achievements the engine decided on — each with its
+    confidence and suggested post type — in the same JSON shape the export and
+    the downstream content steps consume. It is built from an explicit field
+    **whitelist**, so no filesystem path under ``DATA_DIR``, provider key or
+    internal blob can leak onto the page, and the achievements list is capped so
+    a large meet can't render a multi-megabyte block. Never raises: on any error
+    it returns a small, honest error document instead of breaking the review
+    page.
+    """
+    try:
+        data = data or {}
+        meet = data.get("meet") or {}
+        rr = data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        total = len(ranked)
+        shown = ranked[: max(0, int(max_achievements))]
+        achievements = []
+        for ra in shown:
+            ra = ra if isinstance(ra, dict) else {}
+            a = ra.get("achievement") or {}
+            achievements.append(
+                {
+                    "rank": ra.get("rank"),
+                    "type": a.get("type"),
+                    "swimmer": a.get("swimmer_name"),
+                    "event": a.get("event"),
+                    "time": a.get("time") or a.get("swim_time") or a.get("result_time"),
+                    "quality_band": ra.get("quality_band"),
+                    "confidence": a.get("confidence_label"),
+                    "suggested_post_type": ra.get("suggested_post_type"),
+                }
+            )
+        doc = {
+            "run_id": run_id,
+            "meet": {
+                "name": meet.get("name"),
+                "date": meet.get("date"),
+                "course": meet.get("course"),
+                "venue": meet.get("venue"),
+            },
+            "counts": {
+                "parsed_swims": data.get("parsed_swim_count"),
+                "club_swims": data.get("our_swim_count"),
+                "achievements": rr.get("n_achievements", total),
+            },
+            "achievements": achievements,
+            "parse_warnings": [str(w) for w in (data.get("parse_warnings") or [])][:50],
+        }
+        if total > len(shown):
+            doc["achievements_truncated"] = {"shown": len(shown), "total": total}
+        return json.dumps(doc, indent=2, ensure_ascii=False, default=str)
+    except Exception as exc:  # noqa: BLE001 — a preview must never 500 /review
+        return json.dumps(
+            {
+                "error": "could not assemble machine-readable view",
+                "detail": str(exc)[:200],
+            },
+            indent=2,
+        )
+
+
 def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
     """Resolve the owning profile_id for a run.
 
@@ -1933,6 +3020,73 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     )
 
 
+# UI 1.25 — Emoji reactions. A FIXED, server-controlled allowlist: these three
+# are the only values that can ever be written to `card_reactions` or rendered
+# into a reaction strip. Keeping the set closed means no user-supplied string
+# reaches the DB or the HTML, so the feature carries no stored-XSS / data-bloat
+# surface. The order here is the left-to-right render order of the buttons.
+REACTION_EMOJI: tuple[str, ...] = ("👍", "❤️", "🔥")
+
+
+def _reaction_counts_for_run(run_id: str) -> dict[str, dict[str, int]]:
+    """Server-side reaction tally for a whole run: ``{card_id: {emoji: count}}``.
+
+    One indexed query (the ``card_reactions`` PK covers ``WHERE run_id=?``), so a
+    150-card review page tallies every reaction without a per-card round-trip.
+    Best-effort: any DB error yields an empty map and the strips render at zero
+    rather than 500-ing the page. Only allowlisted emoji are surfaced.
+    """
+    out: dict[str, dict[str, int]] = {}
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT card_id, emoji, COUNT(*) AS n FROM card_reactions "
+            "WHERE run_id=? GROUP BY card_id, emoji",
+            (run_id,),
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            if r["emoji"] in REACTION_EMOJI:
+                out.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
+    except Exception:
+        pass
+    return out
+
+
+def _render_reactions(
+    run_id: str, card_id: str, run_counts: dict[str, dict[str, int]] | None = None
+) -> str:
+    """Render the per-card emoji reaction strip (UI 1.25).
+
+    The counts are tallied server-side and baked into the markup so the strip is
+    correct on first paint and survives with JS disabled; the global reaction
+    script in ``_layout`` then enhances it (toggle via fetch, no page reload, and
+    a load-time highlight of *this* client's reactions). ``run_counts`` is the
+    whole-run tally from :func:`_reaction_counts_for_run`, looked up per card so
+    the page makes a single DB query rather than one per card. Every emoji comes
+    from the fixed :data:`REACTION_EMOJI` allowlist — nothing user-supplied is
+    rendered here.
+    """
+    counts = (run_counts or {}).get(card_id, {}) if run_counts else {}
+    btns = []
+    for emoji in REACTION_EMOJI:
+        n = int(counts.get(emoji, 0) or 0)
+        hidden = "" if n else " hidden"
+        btns.append(
+            f'<button type="button" class="mh-react-btn"'
+            f' data-mh-react-emoji="{_h(emoji)}"'
+            f' data-mh-react-run="{_h(run_id)}" data-mh-react-card="{_h(card_id)}"'
+            f' aria-pressed="false" aria-label="React {_h(emoji)}" title="React {_h(emoji)}">'
+            f'<span class="mh-react-emoji" aria-hidden="true">{emoji}</span>'
+            f'<span class="mh-react-count" data-mh-react-count{hidden}>{n}</span>'
+            f"</button>"
+        )
+    return (
+        f'<div class="mh-reactions" data-mh-react-card="{_h(card_id)}"'
+        f' role="group" aria-label="Quick reactions">' + "".join(btns) + "</div>"
+    )
+
+
 def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     """Return a friendly HTML page that auto-refreshes every 4 seconds."""
     try:
@@ -2005,6 +3159,9 @@ def _delete_run(run_id: str) -> bool:
         pass
     conn = _db()
     conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+    # UI 1.25 — cascade the run's emoji reactions so a deleted meet leaves no
+    # orphan tally behind (and a recycled run id can never inherit stale counts).
+    conn.execute("DELETE FROM card_reactions WHERE run_id = ?", (run_id,))
     conn.commit()
     conn.close()
     return existed
@@ -2029,402 +3186,6 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
     return pid or ""
 
 
-# ---------------------------------------------------------------------
-# Schedule (Buffer) modal &mdash; shared between classic + grouped pack pages
-# ---------------------------------------------------------------------
-
-
-def _schedule_modal_html() -> str:
-    """Return the hidden Buffer schedule modal markup.
-
-    The modal is populated by mhScheduleOpen() with channel checkboxes
-    fetched from /api/buffer/channels. When the token is missing the
-    fetch returns 401 and the open-handler shows an alert directing the
-    user to contact their administrator, then closes the dialog.
-    """
-    return """
-<div id="mh-sched-modal" class="no-print"
-     style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(8,12,20,0.72);
-            align-items:center;justify-content:center;padding:20px"
-     onclick="if(event.target===this) mhScheduleClose()">
-  <div role="dialog" aria-modal="true" aria-labelledby="mh-sched-title"
-       style="background:var(--panel,#10141d);border:1px solid var(--border,#252a36);
-              border-radius:12px;max-width:560px;width:100%;max-height:90vh;
-              overflow:auto;padding:22px;color:var(--ink,#e9eef5)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 id="mh-sched-title" style="margin:0;font-size:18px">Schedule with Buffer</h2>
-      <button class="btn secondary" style="font-size:14px;padding:4px 10px"
-              onclick="mhScheduleClose()" aria-label="Close">&times;</button>
-    </div>
-    <div id="mh-sched-error" style="display:none;color:var(--mh-prim-error-600);margin-bottom:10px"></div>
-    <div id="mh-sched-channels-wrap" style="margin-bottom:12px">
-      <div style="font-weight:600;margin-bottom:6px">Channels</div>
-      <div id="mh-sched-channels" style="display:flex;flex-direction:column;gap:6px;
-           max-height:180px;overflow:auto;border:1px solid var(--border,#252a36);
-           border-radius:8px;padding:8px">
-        <p class="muted" style="margin:0">Loading channels&hellip;</p>
-      </div>
-    </div>
-    <div style="margin-bottom:12px">
-      <label for="mh-sched-caption" style="font-weight:600;display:block;margin-bottom:4px">Caption</label>
-      <textarea id="mh-sched-caption" rows="6"
-        style="width:100%;padding:8px;border:1px solid var(--border,#252a36);
-               border-radius:8px;background:rgba(255,255,255,0.04);
-               color:inherit;font-family:inherit;resize:vertical"></textarea>
-    </div>
-    <div style="margin-bottom:12px">
-      <label for="mh-sched-when" style="font-weight:600;display:block;margin-bottom:4px">
-        Schedule for <span class="muted" style="font-weight:400">(leave blank for next queue slot)</span>
-      </label>
-      <input id="mh-sched-when" type="datetime-local"
-             style="padding:8px;border:1px solid var(--border,#252a36);border-radius:8px;
-                    background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>
-      <div id="mh-sched-when-hint" class="muted"
-           style="font-size:11px;margin-top:4px;line-height:1.4"></div>
-    </div>
-    <input type="hidden" id="mh-sched-media-url"/>
-    <input type="hidden" id="mh-sched-run-id"/>
-    <input type="hidden" id="mh-sched-card-id"/>
-    <input type="hidden" id="mh-sched-pill-id"/>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
-      <button class="btn secondary" onclick="mhScheduleClose()">Cancel</button>
-      <button id="mh-sched-send" class="btn" onclick="mhScheduleSend()">Send to Buffer</button>
-    </div>
-  </div>
-</div>
-"""
-
-
-def _schedule_modal_js() -> str:
-    """Return the JS that drives the Buffer schedule modal.
-
-    Pulls channels from /api/buffer/channels (401 or not-connected
-    surfaces a "contact administrator" alert and closes the modal —
-    Buffer credentials are env-var configured at deploy time, no
-    in-app redirect to a settings page exists), POSTs to
-    /api/runs/<id>/card/<cid>/schedule, and preserves the user's
-    edited caption when Buffer returns an error.
-    """
-    return """
-<script>
-(function(){
-  var API_BASE = window._API_BASE || '';
-
-  // Monotonic counter so a slow channel-list fetch can't clobber a
-  // newer one when the modal is re-opened on a different card before
-  // the first request settles. We compare on resolution and bail out
-  // if this isn't the most recent open call.
-  var _openSeq = 0;
-
-  function fmtDt(d) {
-    function pad(n) { return n < 10 ? '0' + n : '' + n; }
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
-      + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  }
-  function localToIso(local) {
-    if (!local) return '';
-    var d = new Date(local);
-    if (isNaN(d.getTime())) return '';
-    return d.toISOString();
-  }
-
-  // Resolve the user-visible label for the local timezone. Falls back
-  // to a UTC-offset string when Intl isn't available so the hint stays
-  // useful in older browsers.
-  function localTzLabel() {
-    try {
-      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (tz) return tz;
-    } catch (e) {}
-    var off = -new Date().getTimezoneOffset();
-    var sign = off >= 0 ? '+' : '-';
-    var abs = Math.abs(off);
-    var h = Math.floor(abs / 60), m = abs % 60;
-    return 'UTC' + sign + (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
-  }
-
-  function pickActiveCaption(cardEl) {
-    if (!cardEl) return '';
-    var activePanel = cardEl.querySelector('.tone-panel:not([style*="display:none"]) textarea');
-    if (activePanel && activePanel.value && activePanel.value.trim()) return activePanel.value.trim();
-    var firstPanel = cardEl.querySelector('.tone-panel textarea');
-    if (firstPanel && firstPanel.value && firstPanel.value.trim()) return firstPanel.value.trim();
-    var ta = cardEl.querySelector('textarea[id^="cap-text-"], textarea[id^="cap-"]');
-    if (ta && ta.value) return ta.value.trim();
-    var fallback = cardEl.textContent || '';
-    return fallback.trim().slice(0, 480);
-  }
-
-  function pickMediaUrl(cardEl) {
-    if (!cardEl) return '';
-    var img = cardEl.querySelector('img[src]');
-    if (img && img.getAttribute('src')) {
-      var src = img.getAttribute('src');
-      if (/^https?:/i.test(src)) return src;
-      try { return new URL(src, window.location.href).toString(); }
-      catch (e) { return ''; }
-    }
-    return '';
-  }
-
-  // Refresh the live hint under the datetime-local input. Reads the
-  // current value, parses it as local time (matching localToIso's
-  // semantics), and shows a UTC echo + a past-time warning when
-  // appropriate. Called on input and after the modal opens. We use
-  // textContent throughout to keep it XSS-safe (a Buffer error message
-  // never reaches this code path, but the tz string in pathological
-  // locales could).
-  function refreshWhenHint() {
-    var hint = document.getElementById('mh-sched-when-hint');
-    if (!hint) return;
-    var raw = (document.getElementById('mh-sched-when') || {}).value || '';
-    var tz = localTzLabel();
-    if (!raw) {
-      hint.style.color = '';
-      hint.textContent = 'Times use your local timezone (' + tz + '). '
-        + 'Leave blank to use the next available Buffer queue slot.';
-      return;
-    }
-    var d = new Date(raw);
-    if (isNaN(d.getTime())) {
-      hint.style.color = 'var(--bad)';
-      hint.textContent = 'Could not read that date/time.';
-      return;
-    }
-    var now = new Date();
-    // 1 minute grace for clock skew so picking "now" doesn't false-positive.
-    if (d.getTime() < now.getTime() - 60000) {
-      hint.style.color = 'var(--bad)';
-      hint.textContent = 'That time is in the past (' + tz
-        + '). Buffer will reject it — pick a future time or clear the field.';
-      return;
-    }
-    hint.style.color = '';
-    hint.textContent = tz + ' → sends to Buffer as '
-      + d.toISOString() + ' (UTC).';
-  }
-
-  window.mhScheduleOpen = function(runId, cardId, cardElId) {
-    var modal = document.getElementById('mh-sched-modal');
-    if (!modal) return;
-    var seq = ++_openSeq;
-    var cardEl = document.getElementById(cardElId);
-    document.getElementById('mh-sched-run-id').value = runId || '';
-    document.getElementById('mh-sched-card-id').value = cardId || '';
-    document.getElementById('mh-sched-pill-id').value = cardElId || '';
-    document.getElementById('mh-sched-caption').value = pickActiveCaption(cardEl);
-    var whenEl = document.getElementById('mh-sched-when');
-    whenEl.value = '';
-    // Bind the live hint refresher once. Marker attribute keeps us
-    // idempotent across multiple modal opens on the same page.
-    if (!whenEl.dataset.mhHintBound) {
-      whenEl.addEventListener('input', refreshWhenHint);
-      whenEl.addEventListener('change', refreshWhenHint);
-      whenEl.dataset.mhHintBound = '1';
-    }
-    refreshWhenHint();
-    document.getElementById('mh-sched-media-url').value = pickMediaUrl(cardEl);
-    var err = document.getElementById('mh-sched-error');
-    err.style.display = 'none'; err.textContent = '';
-
-    var chWrap = document.getElementById('mh-sched-channels');
-    chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels&hellip;</p>';
-
-    fetch(API_BASE + '/api/buffer/channels', {cache:'no-store'}).then(function(r){
-      return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){
-        // Non-JSON response (e.g. a proxy returned HTML). Return a synthetic
-        // body so the downstream branches can still surface a clear error.
-        return {status:r.status, body:{message:'Server returned an unreadable response.'}};
-      });
-    }).then(function(o){
-      // Stale-response guard: a newer mhScheduleOpen has fired while
-      // this fetch was in flight, so discard our result rather than
-      // overwriting the channel list / error UI for the new card.
-      if (seq !== _openSeq) return;
-      // 401 = no token configured OR token rejected by Buffer. Both
-      // cases want the inline Connect-Buffer form so the user can paste
-      // a (fresh) personal token without leaving the modal. The download
-      // fallback is always offered so a club with no Buffer at all
-      // isn't blocked from getting their content out.
-      if (o.status === 401) {
-        var runIdForDl = document.getElementById('mh-sched-run-id').value;
-        var cardIdForDl = document.getElementById('mh-sched-card-id').value;
-        var capForDl = encodeURIComponent(
-          document.getElementById('mh-sched-caption').value || ''
-        );
-        var dlUrl = API_BASE + '/api/runs/' + encodeURIComponent(runIdForDl)
-          + '/card/' + encodeURIComponent(cardIdForDl)
-          + '/download?caption=' + capForDl;
-        chWrap.innerHTML =
-          '<div style="font-size:13px;line-height:1.5;margin-bottom:10px">'
-          + ((o.body && o.body.message) || 'Buffer is not connected for this organisation.')
-          + '</div>'
-          + '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">'
-          +   '<label for="mh-buf-token" style="font-size:12px;font-weight:600">Buffer access token</label>'
-          +   '<input id="mh-buf-token" type="password" '
-          +     'placeholder="1/..." autocomplete="off" '
-          +     'style="padding:8px;border:1px solid var(--border,#252a36);'
-          +     'border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>'
-          +   '<button id="mh-buf-connect" class="btn" style="font-size:13px;padding:6px 12px;align-self:flex-start"'
-          +     ' onclick="mhConnectBufferFromModal()">Connect Buffer for this org</button>'
-          +   '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener" '
-          +     'style="font-size:11px;color:var(--accent)">Where do I get a Buffer access token? &rarr;</a>'
-          + '</div>'
-          + '<div style="border-top:1px solid var(--border,#252a36);padding-top:10px;margin-top:10px">'
-          +   '<div style="font-size:12px;color:var(--muted,#7a8597);margin-bottom:6px">No Buffer? Download the post for manual sharing:</div>'
-          +   '<a class="btn secondary" style="font-size:13px;padding:6px 12px" href="'
-          +     dlUrl + '">Download caption + visual (.zip)</a>'
-          + '</div>';
-        modal.style.display = 'flex';
-        return;
-      }
-      if (o.status >= 400) {
-        chWrap.innerHTML = '<p style="color:var(--bad);margin:0">' +
-          ((o.body && o.body.message) || ('Buffer error ' + o.status)) + '</p>';
-        modal.style.display = 'flex';
-        return;
-      }
-      var channels = (o.body && o.body.channels) || [];
-      if (!channels.length) {
-        chWrap.innerHTML = '<p class="muted" style="margin:0">No channels connected to this Buffer account.</p>';
-      } else {
-        chWrap.innerHTML = '';
-        channels.forEach(function(c, i){
-          var lbl = document.createElement('label');
-          lbl.style.display = 'flex';
-          lbl.style.alignItems = 'center';
-          lbl.style.gap = '8px';
-          lbl.style.cursor = 'pointer';
-          var cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.value = c.id;
-          cb.dataset.mhChannel = '1';
-          cb.checked = !!c.default || (i === 0 && channels.length === 1);
-          var name = c.formatted_username || c.service_username || c.id;
-          var service = c.service ? ' (' + c.service + ')' : '';
-          lbl.appendChild(cb);
-          var span = document.createElement('span');
-          span.textContent = name + service;
-          lbl.appendChild(span);
-          chWrap.appendChild(lbl);
-        });
-      }
-      modal.style.display = 'flex';
-    }).catch(function(e){
-      if (seq !== _openSeq) return;
-      chWrap.innerHTML = '<p style="color:var(--bad);margin:0">Network error: ' + (e && e.message || e) + '</p>';
-      modal.style.display = 'flex';
-    });
-  };
-
-  window.mhScheduleClose = function() {
-    var modal = document.getElementById('mh-sched-modal');
-    if (modal) modal.style.display = 'none';
-  };
-
-  // NOTE: mhWorkflowSet + the data-mh-wf delegated click handler now live
-  // globally in _layout() so every page (Review triage, Content builder)
-  // shares one handler. Defining them here too would double-bind the click
-  // listener and fire two POSTs per Approve/Reject.
-
-  window.mhScheduleSend = function() {
-    var runId  = document.getElementById('mh-sched-run-id').value;
-    var cardId = document.getElementById('mh-sched-card-id').value;
-    var pillId = document.getElementById('mh-sched-pill-id').value;
-    var caption = (document.getElementById('mh-sched-caption').value || '').trim();
-    var whenLocal = document.getElementById('mh-sched-when').value;
-    var mediaUrl = document.getElementById('mh-sched-media-url').value;
-    var err = document.getElementById('mh-sched-error');
-    err.style.display = 'none'; err.textContent = '';
-
-    var cbs = document.querySelectorAll('#mh-sched-channels input[data-mh-channel]:checked');
-    var ids = Array.prototype.map.call(cbs, function(cb){ return cb.value; });
-    if (!ids.length) { err.style.display = 'block'; err.textContent = 'Pick at least one channel.'; return; }
-    if (!caption) { err.style.display = 'block'; err.textContent = 'Caption is required.'; return; }
-
-    // Past-date guard: a `datetime-local` input has no min and the
-    // server / Buffer would surface a cryptic 4xx if we sent yesterday.
-    // 1-minute grace so picking "now" doesn't false-positive on clock skew.
-    if (whenLocal) {
-      var pickedTs = new Date(whenLocal).getTime();
-      if (isNaN(pickedTs)) {
-        err.style.display = 'block';
-        err.textContent = 'Could not read the scheduled time.';
-        return;
-      }
-      if (pickedTs < Date.now() - 60000) {
-        err.style.display = 'block';
-        err.textContent = 'Scheduled time is in the past. Pick a future time or clear the field to use the next queue slot.';
-        return;
-      }
-    }
-
-    var btn = document.getElementById('mh-sched-send');
-    var orig = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Sending\u2026';
-
-    fetch(API_BASE + '/api/runs/' + encodeURIComponent(runId)
-            + '/card/' + encodeURIComponent(cardId) + '/schedule', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        channel_ids: ids,
-        caption: caption,
-        scheduled_at: localToIso(whenLocal) || null,
-        media_url: mediaUrl || null
-      })
-    }).then(function(r){
-      return r.json().then(function(j){ return {status:r.status, body:j}; });
-    }).then(function(o){
-      btn.disabled = false; btn.textContent = orig;
-      if (o.body && typeof o.body.caption === 'string') {
-        document.getElementById('mh-sched-caption').value = o.body.caption;
-      }
-      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) {
-        var pill = document.querySelector('[data-schedule-pill="' + pillId + '"]');
-        if (pill) {
-          pill.style.display = '';
-          pill.textContent = 'scheduled';
-          pill.classList.remove('bad'); pill.classList.add('good');
-        }
-        var warn = o.body.warning ? (' Warning: ' + o.body.warning) : '';
-        if (window.MH && typeof window.MH.toast === 'function') {
-          window.MH.toast('Scheduled to Buffer.' + warn, warn ? 'info' : 'success');
-        } else if (window.console && console.log) {
-          // Quiet fallback for pathological host pages that lack
-          // MH.toast — log to console so a successful schedule never
-          // blocks the user with a synchronous browser dialog.
-          console.log('Scheduled to Buffer.' + warn);
-        }
-        mhScheduleClose();
-      } else {
-        var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
-        err.style.display = 'block'; err.textContent = msg;
-        var pill = document.querySelector('[data-schedule-pill="' + pillId + '"]');
-        if (pill) {
-          pill.style.display = '';
-          pill.textContent = 'failed';
-          pill.classList.remove('good'); pill.classList.add('bad');
-        }
-      }
-    }).catch(function(e){
-      btn.disabled = false; btn.textContent = orig;
-      err.style.display = 'block';
-      err.textContent = 'Network error: ' + (e && e.message || e);
-    });
-  };
-
-  document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape') {
-      var m = document.getElementById('mh-sched-modal');
-      if (m && m.style.display !== 'none') mhScheduleClose();
-    }
-  });
-})();
-</script>
-"""
-
-
 def _card_creative_js() -> str:
     """Shared client JS for the per-card creative toolbar: live caption
     tone tabs, create-graphic, motion render, and the 3-variant graphic
@@ -2442,7 +3203,7 @@ function switchTone(btn) {
     var isActive = tab.dataset.tone === newTone;
     tab.classList.toggle('active', isActive);
     if (isActive) {
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'color-mix(in oklab, var(--lane) 15%, transparent)';
       tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
     } else {
       tab.style.background = 'transparent';
@@ -2469,7 +3230,7 @@ function switchToneLive(btn, captionUrl, cardId) {
     var isActive = tab.dataset.tone === newTone;
     tab.classList.toggle('active', isActive);
     if (isActive) {
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'color-mix(in oklab, var(--lane) 15%, transparent)';
       tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
       tab.style.fontWeight = '600';
     } else {
@@ -2536,7 +3297,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       }
       if (isTransient) {
         if (captionDiv) {
-          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(212,255,58,0.20);border-radius:6px;background:rgba(212,255,58,0.04)">'
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid color-mix(in oklab, var(--lane) 20%, transparent);border-radius:6px;background:color-mix(in oklab, var(--lane) 4%, transparent)">'
             + '<div style="font-weight:600;color:var(--accent);margin-bottom:4px">&#x21BB; Briefly busy &mdash; try again</div>'
             + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + (j.message || 'Wait a few seconds and click regenerate again.') + '</div>'
             + '</div>';
@@ -2550,32 +3311,40 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       // Render the caption + a variant picker if we got multiple back.
       var variants = (j.variants && j.variants.length) ? j.variants : [text];
       var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-      function _renderActive(idx) {
+      function _renderActive(idx, reveal) {
         var active = variants[idx] || text;
         if (captionDiv) {
           var pickerHtml = '';
           if (variants.length > 1) {
             var pills = variants.map(function(_, i) {
               var sel = (i === idx);
-              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(212,255,58,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
+              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'color-mix(in oklab, var(--lane) 14%, transparent)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.innerHTML = pickerHtml + '<span class="mh-cap-body" style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
             btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
           });
+          // UI2.7 — word-by-word "AI is writing" reveal, on the *read-only*
+          // caption preview only and only on a fresh generation (reveal=true);
+          // variant-pill swaps re-render plainly. The editable textarea below
+          // is set with the plain value and never typed on.
+          if (reveal && window.MH && typeof MH.typeOn === 'function') {
+            var capBody = captionDiv.querySelector('.mh-cap-body');
+            if (capBody) MH.typeOn(capBody);
+          }
         }
         if (textarea) { textarea.value = active; }
       }
-      _renderActive(0);
+      _renderActive(0, true);
       // W.13 (generalised): bilingual workspaces get the side-by-side
       // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
       // so both are approved in one pass. Label + text direction come from
       // the server's language registry, so new languages need no JS change.
       if (captionDiv && j.caption_secondary) {
         var secBox = document.createElement('div');
-        secBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(212,255,58,0.03)';
+        secBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)';
         secBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(j.secondary_language_label || 'Translation') + '</div>'
           + '<span style="white-space:pre-wrap" dir="' + (j.secondary_rtl ? 'rtl' : 'auto') + '">' + safeText(j.caption_secondary) + '</span>';
         captionDiv.appendChild(secBox);
@@ -2742,33 +3511,36 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Generating graphic&hellip; this may take 5-15 seconds</div>';
   var cacheKey = cardId + '|' + fmt + '|' + assetId + '|' + (noPhoto ? '1' : '0');
   if (_visualCache[cacheKey]) {
     _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
     btn.disabled = false; btn.textContent = origLabel;
     return;
   }
+  var prog = MH.renderProgress(panel, {label: 'Designing your graphic', sub: 'Usually 5\u201315 seconds', expectedMs: 9000, accent: 'lane'});
   var reqBody = {format: fmt};
   if (assetId) reqBody.asset_id = assetId;
   if (noPhoto) reqBody.no_photo = true;
   fetch(createUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(reqBody)})
     .then(function(r) { return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok || res.body.error) {
         // Prefer user_message (clean operator copy, e.g. the "renderer
         // busy" 429) over the raw error code.
+        prog.stop();
+        btn.disabled = false; btn.textContent = origLabel;
         var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
         return;
       }
       _visualCache[cacheKey] = res.body;
-      _renderVisualPanel(panel, res.body, cardId, createUrl);
+      prog.complete(function(){
+        btn.disabled = false; btn.textContent = origLabel;
+        _renderVisualPanel(panel, res.body, cardId, createUrl);
+      });
     })
     .catch(function(err) {
+      prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
@@ -2896,7 +3668,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var formatLabels = {'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'};
   var tabsHtml = formats.map(function(f) {
     var active = (f === cur);
-    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
+    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
   }).join('');
   // Per-graphic photo picker — the user decides which photo lands on THIS
   // graphic. Library photos remembered for this card's athlete (linked at
@@ -2908,7 +3680,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var athlete = data.card_athlete || '';
   var photoUrl = createUrl.replace(/\/create-graphic$/, '/photo');
   function _pchip(label, active, oc) {
-    return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'rgba(212,255,58,0.12)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
+    return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'color-mix(in oklab, var(--lane) 12%, transparent)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
   }
   var autoOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", false)';
   var noneOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", true)';
@@ -2933,10 +3705,10 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="flex:0 0 220px;max-width:240px">' +
+      '<div style="flex:0 0 min(220px,100%);max-width:240px">' +
         '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)" />' +
       '</div>' +
-      '<div style="flex:1;min-width:200px">' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
         (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
         '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
@@ -2978,9 +3750,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering motion\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering ' + fmt + ' motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
+  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds \u2014 repeats are instant', expectedMs: 45000, accent: 'medal'});
   var fetchUrl = motionUrl + (fmt !== 'story' ? (motionUrl.indexOf('?') === -1 ? '?' : '&') + 'format=' + encodeURIComponent(fmt) : '');
   fetch(fetchUrl, {method:'POST'})
     .then(function(r) {
@@ -2990,25 +3760,28 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
       return r.json().then(function(j){ return {ok:false, body:j}; });
     })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok) {
         // Prefer user_message (clean operator-written copy) over detail
         // (raw stack trace). The backend Phase 1.5 mapping translates
         // known infra failures into actionable copy; falls back to detail
         // for anything unexpected.
+        prog.stop();
+        btn.disabled = false; btn.textContent = origLabel;
         var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
         return;
       }
+      prog.complete(function(){
+      btn.disabled = false; btn.textContent = origLabel;
       var url = URL.createObjectURL(res.blob);
       _motionCache[cardId + ':' + fmt] = url;
-      var vidCol = fmt === 'landscape' ? 'flex:0 0 300px;max-width:320px' : 'flex:0 0 200px;max-width:220px';
+      var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
       panel.innerHTML =
         '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
           '<div style="' + vidCol + '">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+            '<video class="mh-motion-video" src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
-          '<div style="flex:1;min-width:200px">' +
+          '<div style="flex:1;min-width:min(200px,100%)">' +
             '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
             '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered via Remotion. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
@@ -3017,10 +3790,20 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
             '</div>' +
             '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
           '</div>' +
-        '</div>';
+        '</div>' +
+        '<div class="mh-reel-comments" style="margin-top:12px"></div>';
       _loadMotionWhy(panel, motionUrl, fmt);
+      // UI 1.8 - pin timestamp comments to this card's motion clip too. The
+      // run-level comments endpoint sits at the path before '/card/'.
+      var _cmRoot = motionUrl.split('/card/')[0];
+      var _cmMount = panel.querySelector('.mh-reel-comments');
+      if (_cmMount && typeof mhReelComments === 'function') {
+        mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+      }
+      });
     })
     .catch(function(err) {
+      prog.stop();
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
@@ -3070,30 +3853,17 @@ function generateReel(btn, reelUrl, fmt) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
+  var prog = MH.renderProgress(panel, {label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'});
   var fail = function(msg) {
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   };
   var success = function(videoUrl) {
-    btn.disabled = false; btn.textContent = origLabel;
-    var vidCol = fmt === 'landscape' ? 'flex:0 0 340px;max-width:360px' : 'flex:0 0 240px;max-width:260px';
-    panel.innerHTML =
-      '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + vidCol + '">' +
-          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-        '</div>' +
-        '<div style="flex:1;min-width:240px">' +
-          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
-          '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Length follows the number of moments.</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-            '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
+    prog.complete(function(){
+      btn.disabled = false; btn.textContent = origLabel;
+      mhRenderReel(panel, reelUrl, fmt, videoUrl);
+    });
   };
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {method:'POST'})
     .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
@@ -3122,6 +3892,321 @@ function generateReel(btn, reelUrl, fmt) {
     .catch(function(err) { fail('Network error: ' + err); });
 }
 
+// R1.15 - render every reel cut (story/portrait/square/landscape) in one
+// background pass, then offer a download per produced cut. Reuses any cut
+// already cached, so running this after a single-format render only renders
+// the cuts still missing. Polls the same job-status route as generateReel.
+function generateReelBatch(btn, reelUrl) {
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering all formats…';
+  var prog = MH.renderProgress(panel, {label: 'Producing every reel format', sub: 'Story, portrait, square & landscape — up to a few minutes the first time', expectedMs: 150000, accent: 'medal'});
+  var fail = function(msg) {
+    prog.stop();
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+  };
+  var success = function(videoUrls, failed) {
+    prog.complete(function(){
+      btn.disabled = false; btn.textContent = origLabel;
+      mhRenderReelBatch(panel, reelUrl, videoUrls, failed);
+    });
+  };
+  fetch(reelUrl + '-batch', {method:'POST'})
+    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+    .then(function(res) {
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
+        return;
+      }
+      var tries = 0;
+      var poll = function() {
+        tries++;
+        if (tries > 120) { fail('timed out waiting for the render — try again'); return; }
+        fetch(res.body.poll_url)
+          .then(function(r){ return r.json(); })
+          .then(function(j) {
+            if (j.status === 'done' && j.video_urls && Object.keys(j.video_urls).length) { success(j.video_urls, j.formats_failed || {}); return; }
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {
+              fail(j.user_message || j.error || 'render failed'); return;
+            }
+            setTimeout(poll, 3000);
+          })
+          .catch(function() { setTimeout(poll, 3000); });
+      };
+      setTimeout(poll, 3000);
+    })
+    .catch(function(err) { fail('Network error: ' + err); });
+}
+
+// R1.15 - the finished multi-format panel: the story cut (or first produced)
+// as the scrubbable preview plus a labelled download for every cut, and an
+// honest note for any cut the active engine couldn't produce.
+function mhRenderReelBatch(panel, reelUrl, videoUrls, failed) {
+  var order = ['story', 'portrait', 'square', 'landscape'];
+  var primary = videoUrls.story || '';
+  if (!primary) { for (var i = 0; i < order.length; i++) { if (videoUrls[order[i]]) { primary = videoUrls[order[i]]; break; } } }
+  var dl = '';
+  order.forEach(function(f) {
+    if (videoUrls[f]) {
+      dl += '<a class="btn secondary" href="' + videoUrls[f] + '" download="meet-reel-' + f + '.mp4" style="font-size:12px;padding:4px 12px">' +
+        f.charAt(0).toUpperCase() + f.slice(1) + ' &middot; ' + (_MOTION_FMT_DIMS[f] || '') + '</a>';
+    }
+  });
+  var failNote = '';
+  var failedKeys = failed ? Object.keys(failed) : [];
+  if (failedKeys.length) {
+    var names = failedKeys.map(function(f){ return f.charAt(0).toUpperCase() + f.slice(1); }).join(', ');
+    failNote = '<div style="font-size:12px;color:var(--ink-muted);margin-top:8px">Not produced by the active render engine: ' + names + '. Switch to the Remotion engine for those cuts.</div>';
+  }
+  panel.innerHTML =
+    '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="flex:0 0 min(240px,100%);max-width:260px">' +
+        (primary ? '<video class="mh-reel-video" src="' + primary + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"></video>' : '') +
+      '</div>' +
+      '<div style="flex:1;min-width:min(240px,100%)">' +
+        '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; every format</div>' +
+        '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">All cuts rendered in one pass from the same ranked moments — download the size each channel wants.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' + dl + '</div>' +
+        failNote +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:14px"></div>';
+  var mount = panel.querySelector('.mh-reel-comments');
+  if (mount) mhReelComments({mount: mount, video: panel.querySelector('video.mh-reel-video'), baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
+// UI 1.8 - render the finished reel panel (video + format chips + download)
+// plus the Frame.io-style timestamp comment surface beneath it. Used by both
+// generateReel's success path and the on-load restore of a cached reel.
+function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
+  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(340px,100%);max-width:360px' : 'flex:0 0 min(240px,100%);max-width:260px';
+  panel.innerHTML =
+    '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="' + vidCol + '">' +
+        '<video class="mh-reel-video" src="' + videoUrl + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+      '</div>' +
+      '<div style="flex:1;min-width:min(240px,100%)">' +
+        '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
+        '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Scrub to a moment and pin a comment for your team.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' + _attrEsc('generateReelBatch(this, ' + JSON.stringify(reelUrl) + ')') + '>Render all formats</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:14px"></div>';
+  var mount = panel.querySelector('.mh-reel-comments');
+  if (mount) mhReelComments({mount: mount, video: panel.querySelector('video.mh-reel-video'), baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
+// UI 1.8 - the comments persist even when the cached MP4 is gone (a fresh
+// container, an evicted cache). Show the saved notes with a regenerate hint
+// rather than a broken <video>.
+function mhRenderReelCommentsOnly(panel, reelUrl, n) {
+  panel.innerHTML =
+    '<div style="font-size:13px;color:var(--ink);margin-bottom:8px;line-height:1.4">' +
+      'You have <b>' + n + '</b> saved review ' + (n === 1 ? 'comment' : 'comments') + ' on this reel. ' +
+      'Generate the reel above to see ' + (n === 1 ? 'it' : 'them') + ' pinned on the timeline.' +
+    '</div>' +
+    '<div class="mh-reel-comments"></div>';
+  var mount = panel.querySelector('.mh-reel-comments');
+  if (mount) mhReelComments({mount: mount, video: null, baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
+// UI 1.8 - timestamp-anchored review comments (Frame.io-style). Builds a
+// scrubber track with a pin per comment, a "comment at <time>" composer that
+// captures the current playhead, and a list with seek/resolve/delete. All
+// user text goes in via textContent (never innerHTML) so a caption-style XSS
+// can't ride a comment body; every write is a JSON POST (CSRF-exempt).
+function mhReelComments(opts) {
+  var mount = opts.mount, video = opts.video, baseUrl = opts.baseUrl, target = opts.target || 'reel';
+  if (!mount) return;
+  var state = { comments: [] };
+
+  function fmtTime(ms) {
+    var s = Math.max(0, Math.floor((ms || 0) / 1000));
+    var m = Math.floor(s / 60), r = s % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+  function curMs() { return (video && isFinite(video.currentTime)) ? Math.round(video.currentTime * 1000) : 0; }
+  function timeline() {
+    if (video && isFinite(video.duration) && video.duration > 0) return video.duration * 1000;
+    var mx = 0; state.comments.forEach(function(c){ if (c.t_ms > mx) mx = c.t_ms; });
+    return Math.max(mx * 1.08, 1000);
+  }
+  function jget(url) { return fetch(url, {headers:{'Accept':'application/json'}}).then(function(r){ return r.json(); }); }
+  function jpost(url, body) {
+    return fetch(url, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(body || {})})
+      .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){ return {status:r.status, body:null}; }); });
+  }
+  function showErr(m) { errEl.textContent = m; errEl.style.display = ''; setTimeout(function(){ errEl.style.display = 'none'; }, 4000); }
+
+  mount.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">' +
+      '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-muted)">Review comments <span class="mh-rc-count"></span></div>' +
+      '<div style="font-size:11px;color:var(--ink-muted)">Pin feedback to a moment</div>' +
+    '</div>' +
+    '<div class="mh-rc-track" title="Click to seek" style="position:relative;height:26px;border-radius:6px;background:var(--panel);border:1px solid var(--border);margin-bottom:8px;cursor:pointer;overflow:hidden">' +
+      '<div class="mh-rc-played" style="position:absolute;top:0;left:0;bottom:0;width:0;background:rgba(244,213,141,0.16);pointer-events:none"></div>' +
+      '<div class="mh-rc-playhead" style="position:absolute;top:0;bottom:0;left:0;width:2px;background:var(--accent);pointer-events:none"></div>' +
+    '</div>' +
+    '<form class="mh-rc-form" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">' +
+      '<span class="mh-rc-at" title="Pinned at this moment" style="font-variant-numeric:tabular-nums;font-size:12px;background:var(--accent);color:var(--medal-ink);border-radius:4px;padding:3px 8px;font-weight:700">0:00</span>' +
+      '<input class="mh-rc-body" type="text" maxlength="2000" placeholder="Add a comment at this moment…" style="flex:1;min-width:160px;font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--ink)" />' +
+      '<input class="mh-rc-author" type="text" maxlength="120" placeholder="Your name" style="width:118px;font-size:12px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--ink)" />' +
+      '<button type="submit" class="btn mh-rc-submit" style="font-size:12px;padding:6px 12px">Pin comment</button>' +
+    '</form>' +
+    '<div class="mh-rc-list" style="display:flex;flex-direction:column;gap:6px"></div>' +
+    '<div class="mh-rc-err" style="display:none;color:var(--bad);font-size:12px;margin-top:6px"></div>';
+
+  var track = mount.querySelector('.mh-rc-track');
+  var played = mount.querySelector('.mh-rc-played');
+  var playhead = mount.querySelector('.mh-rc-playhead');
+  var atChip = mount.querySelector('.mh-rc-at');
+  var form = mount.querySelector('.mh-rc-form');
+  var bodyIn = mount.querySelector('.mh-rc-body');
+  var authorIn = mount.querySelector('.mh-rc-author');
+  var list = mount.querySelector('.mh-rc-list');
+  var countEl = mount.querySelector('.mh-rc-count');
+  var errEl = mount.querySelector('.mh-rc-err');
+
+  try { authorIn.value = localStorage.getItem('mh_reviewer_name') || ''; } catch(e) {}
+  var typing = false;
+  bodyIn.addEventListener('focus', function(){ typing = true; });
+  bodyIn.addEventListener('blur', function(){ typing = false; });
+
+  function seekTo(ms) {
+    if (video && isFinite(video.duration)) { try { video.currentTime = Math.min(video.duration, ms / 1000); video.pause(); } catch(e) {} }
+  }
+  function highlight(id) {
+    var row = list.querySelector('.mh-rc-row[data-id="' + id + '"]');
+    if (!row) return;
+    row.style.outline = '2px solid var(--accent)';
+    row.scrollIntoView({block:'nearest', behavior:'smooth'});
+    setTimeout(function(){ row.style.outline = ''; }, 1500);
+  }
+
+  function renderMarkers() {
+    Array.prototype.slice.call(track.querySelectorAll('.mh-rc-pin')).forEach(function(p){ p.remove(); });
+    var tl = timeline();
+    state.comments.forEach(function(c) {
+      var pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'mh-rc-pin';
+      pin.title = fmtTime(c.t_ms) + ' — ' + c.body;
+      var pct = Math.max(0, Math.min(100, (c.t_ms / tl) * 100));
+      pin.style.cssText = 'position:absolute;top:3px;bottom:3px;width:3px;border:0;padding:0;border-radius:2px;cursor:pointer;transform:translateX(-1px);left:' + pct + '%;background:' + (c.resolved ? 'var(--ink-muted)' : 'var(--medal)');
+      pin.addEventListener('click', function(ev){ ev.stopPropagation(); seekTo(c.t_ms); highlight(c.id); });
+      track.appendChild(pin);
+    });
+  }
+
+  function renderList() {
+    list.textContent = '';
+    countEl.textContent = '· ' + state.comments.length;
+    if (!state.comments.length) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'font-size:12px;color:var(--ink-muted);padding:6px 0';
+      empty.textContent = 'No comments yet — scrub to a moment and pin the first note.';
+      list.appendChild(empty);
+      return;
+    }
+    state.comments.forEach(function(c) {
+      var row = document.createElement('div');
+      row.className = 'mh-rc-row';
+      row.setAttribute('data-id', c.id);
+      row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel)' + (c.resolved ? ';opacity:0.55' : '');
+
+      var tbtn = document.createElement('button');
+      tbtn.type = 'button';
+      tbtn.textContent = fmtTime(c.t_ms);
+      tbtn.title = 'Jump to this moment';
+      tbtn.style.cssText = 'flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;background:var(--medal);color:var(--medal-ink);border:0;border-radius:4px;padding:3px 7px;cursor:pointer';
+      tbtn.addEventListener('click', function(){ seekTo(c.t_ms); });
+
+      var mid = document.createElement('div');
+      mid.style.cssText = 'flex:1;min-width:0';
+      var bodyD = document.createElement('div');
+      bodyD.style.cssText = 'font-size:13px;color:var(--ink);line-height:1.35;word-break:break-word' + (c.resolved ? ';text-decoration:line-through' : '');
+      bodyD.textContent = c.body;
+      var meta = document.createElement('div');
+      meta.style.cssText = 'font-size:11px;color:var(--ink-muted);margin-top:2px';
+      meta.textContent = c.author || 'Reviewer';
+      mid.appendChild(bodyD); mid.appendChild(meta);
+
+      var actions = document.createElement('div');
+      actions.style.cssText = 'flex:0 0 auto;display:flex;gap:4px';
+      var resBtn = document.createElement('button');
+      resBtn.type = 'button';
+      resBtn.className = 'btn secondary';
+      resBtn.textContent = c.resolved ? 'Reopen' : 'Resolve';
+      resBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+      resBtn.addEventListener('click', function(){ mutate(c.id, {action: c.resolved ? 'reopen' : 'resolve'}); });
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn secondary';
+      delBtn.textContent = 'Delete';
+      delBtn.style.cssText = 'font-size:11px;padding:3px 8px';
+      delBtn.addEventListener('click', function(){ if (window.confirm('Delete this comment?')) mutate(c.id, {action:'delete'}); });
+      actions.appendChild(resBtn); actions.appendChild(delBtn);
+
+      row.appendChild(tbtn); row.appendChild(mid); row.appendChild(actions);
+      list.appendChild(row);
+    });
+  }
+
+  function refresh() {
+    jget(baseUrl + '?target=' + encodeURIComponent(target)).then(function(j) {
+      state.comments = (j && j.comments) || [];
+      renderMarkers(); renderList(); syncHead();
+    }).catch(function(){});
+  }
+  function mutate(id, body) {
+    jpost(baseUrl + '/' + encodeURIComponent(id), body).then(function(res) {
+      if (res.status >= 200 && res.status < 300) refresh();
+      else showErr((res.body && (res.body.detail || res.body.error)) || 'could not update comment');
+    }).catch(function(err){ showErr('Network error: ' + err); });
+  }
+
+  form.addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    var text = (bodyIn.value || '').trim();
+    if (!text) { bodyIn.focus(); return; }
+    var author = (authorIn.value || '').trim();
+    try { if (author) localStorage.setItem('mh_reviewer_name', author); } catch(e) {}
+    jpost(baseUrl, {target: target, t_ms: curMs(), body: text, author: author}).then(function(res) {
+      if (res.status >= 200 && res.status < 300) { bodyIn.value = ''; refresh(); }
+      else showErr((res.body && (res.body.detail || res.body.error)) || 'could not add comment');
+    }).catch(function(err){ showErr('Network error: ' + err); });
+  });
+
+  track.addEventListener('click', function(ev) {
+    var rect = track.getBoundingClientRect();
+    if (!rect.width) return;
+    seekTo(timeline() * Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width)));
+  });
+
+  function syncHead() {
+    var tl = timeline();
+    var ms = curMs();
+    var pct = tl > 0 ? Math.max(0, Math.min(100, (ms / tl) * 100)) : 0;
+    playhead.style.left = pct + '%';
+    played.style.width = pct + '%';
+    if (!typing) atChip.textContent = fmtTime(ms);
+  }
+  if (video) {
+    video.addEventListener('loadedmetadata', function(){ renderMarkers(); syncHead(); });
+    video.addEventListener('timeupdate', syncHead);
+    video.addEventListener('seeked', syncHead);
+  }
+  refresh();
+}
+
 function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   // V10: kick off a background variants job and poll for results. The old
   // synchronous request held the connection for every render (60-120s)
@@ -3138,16 +4223,12 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating 3 options\u2026';
-  function _vSpin(msg) {
-    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-      '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-      msg + '</div>';
-  }
+  var prog = MH.renderProgress(panel, {label: 'Designing 3 options', sub: 'Renders run one at a time \u2014 usually 1\u20132 minutes', expectedMs: 90000, accent: 'lane'});
   function _vFail(msg) {
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
   }
-  _vSpin('Designing 3 alternative options\u2026 renders run one at a time, usually 1-2 minutes.');
   fetch(variantsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(regenBody)})
     .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
     .then(function(res){
@@ -3173,19 +4254,22 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
             }
             if (st.body.status === 'running') {
               var total = st.body.total || 3;
-              var current = Math.min((st.body.done || 0) + 1, total);
-              _vSpin('Designing option ' + current + ' of ' + total + '... (' +
-                     (st.body.done || 0) + ' finished)');
+              var done = st.body.done || 0;
+              var current = Math.min(done + 1, total);
+              prog.setPhase('Designing option ' + current + ' of ' + total, done + ' of ' + total + ' finished');
+              prog.setProgress(Math.round((done / total) * 100));
               return;
             }
             clearInterval(timer);
-            btn.disabled = false; btn.textContent = origLabel;
             var variants = (st.body.variants || []).filter(function(v){ return v.visual; });
             if (!variants.length) {
               _vFail('Error: ' + (st.body.error || 'no variants produced'));
               return;
             }
-            _renderVariantPicker(panel, variants, cardId, createUrl);
+            prog.complete(function(){
+              btn.disabled = false; btn.textContent = origLabel;
+              _renderVariantPicker(panel, variants, cardId, createUrl);
+            });
           })
           .catch(function(){ /* transient poll error - keep polling */ });
       }, 2500);
@@ -3202,13 +4286,13 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {
   var tilesHtml = variants.map(function(vt) {
     var v = vt.visual;
     if (!v) {
-      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
+      return '<div style="flex:1;min-width:min(160px,100%);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
     }
     var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
     var hook = (vt.brief && vt.brief.primary_hook) || '';
     return (
-      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+      '<div class="variant-tile" style="flex:1;min-width:min(160px,100%);background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
         (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
@@ -3275,33 +4359,222 @@ function addGraphicToPack(btn, visualId) {
   _tick();
   setInterval(_tick, 30000);
 })();
+
+// ---- P6.1 — format catalogue picker + reformat ("turn this into that") ----
+// Re-target an approved card design to any catalogue size/format. The server
+// re-lays-out the approved brief for the new aspect (director + deterministic
+// floor) and returns a PNG; we show it inline with a download link.
+var _formatCatalogCache = null;
+function reformatToggle(btn, cardId) {
+  var panel = document.querySelector('.reformat-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  // First click: inline style is "none"; data-open tracks the toggle state.
+  var showing = panel.getAttribute('data-open') === '1';
+  if (showing) { panel.style.display = 'none'; panel.setAttribute('data-open', '0'); return; }
+  panel.style.display = ''; panel.setAttribute('data-open', '1');
+  if (panel.dataset.built === '1') return;
+  panel.innerHTML = '<div style="font-size:12px;color:var(--ink-muted)">Loading formats…</div>';
+  var build = function(cat) { _formatCatalogCache = cat; panel.dataset.built = '1'; _renderReformatPicker(panel, cardId, cat); };
+  if (_formatCatalogCache) { build(_formatCatalogCache); return; }
+  fetch(panel.dataset.formatsUrl).then(function(r){ return r.json(); }).then(build).catch(function(e){
+    panel.innerHTML = '<div style="font-size:12px;color:var(--bad)">Could not load formats: ' + e + '</div>';
+  });
+}
+
+function _renderReformatPicker(panel, cardId, cat) {
+  var html = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Reformat this design</div>';
+  (cat.groups || []).forEach(function(g){
+    html += '<div style="margin:6px 0 3px;font-size:11px;font-weight:600;color:var(--ink-dim)">' + g.label + '</div><div style="display:flex;gap:5px;flex-wrap:wrap">';
+    (g.formats || []).forEach(function(f){
+      var ttl = f.title + ' · ' + f.width + '×' + f.height + (f.requires_post_types && f.requires_post_types.length ? ' (needs result data)' : '');
+      html += '<button class="btn secondary" style="font-size:10px;padding:3px 8px" title="' + ttl + '" onclick=' + _attrEsc('reformatCard(this, ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f.slug) + ')') + '>' + f.title + '</button>';
+    });
+    html += '</div>';
+  });
+  html += '<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap;align-items:center">' +
+    '<input class="rf-w" type="number" min="200" max="10000" placeholder="W" aria-label="Custom width" style="width:62px;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit" />' +
+    '<span style="color:var(--ink-muted)">×</span>' +
+    '<input class="rf-h" type="number" min="200" max="10000" placeholder="H" aria-label="Custom height" style="width:62px;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit" />' +
+    '<select class="rf-unit" aria-label="Unit" style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"><option value="px">px</option><option value="mm">mm</option><option value="cm">cm</option><option value="in">in</option></select>' +
+    '<button class="btn secondary" style="font-size:10px;padding:3px 8px" onclick=' + _attrEsc('reformatCustom(this, ' + JSON.stringify(cardId) + ')') + '>Custom size</button>' +
+    '<label style="font-size:11px;color:var(--ink-dim);display:inline-flex;align-items:center;gap:4px;margin-left:6px" title="Let the AI art director pick the best layout for the new shape"><input class="rf-ai" type="checkbox" /> AI re-layout</label>' +
+    '</div>';
+  html += '<div class="rf-result" style="margin-top:10px"></div>';
+  panel.innerHTML = html;
+}
+
+function reformatCard(btn, cardId, slug) {
+  var panel = document.querySelector('.reformat-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var aiEl = panel.querySelector('.rf-ai');
+  var url = panel.dataset.reformatUrl + '?format=' + encodeURIComponent(slug) + ((aiEl && aiEl.checked) ? '&ai=1' : '');
+  _runReformat(panel, btn, url, slug.replace(/_/g, ' '));
+}
+
+function reformatCustom(btn, cardId) {
+  var panel = document.querySelector('.reformat-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var w = panel.querySelector('.rf-w').value, h = panel.querySelector('.rf-h').value;
+  var unit = panel.querySelector('.rf-unit').value;
+  if (!w || !h) { if (window.MH && MH.toast) MH.toast('Enter a width and height', 'error', 2500); return; }
+  var aiEl = panel.querySelector('.rf-ai');
+  var url = panel.dataset.reformatUrl + '?w=' + encodeURIComponent(w) + '&h=' + encodeURIComponent(h) + '&unit=' + encodeURIComponent(unit) + ((aiEl && aiEl.checked) ? '&ai=1' : '');
+  _runReformat(panel, btn, url, 'custom ' + w + '×' + h + unit);
+}
+
+function _runReformat(panel, btn, url, label) {
+  var result = panel.querySelector('.rf-result');
+  var orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  if (result) result.innerHTML = '<div style="font-size:12px;color:var(--ink-muted)">Reformatting to ' + label + '… (5–20s)</div>';
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){
+      var ct = r.headers.get('Content-Type') || '';
+      if (r.ok && ct.indexOf('image') === 0) { return r.blob().then(function(b){ return {img: URL.createObjectURL(b)}; }); }
+      return r.json().then(function(j){ return {err: (j && j.user_message) || (j && j.error) || 'Reformat failed'}; });
+    })
+    .then(function(res){
+      btn.disabled = false; btn.textContent = orig;
+      if (res.err) { if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">' + res.err + '</div>'; return; }
+      if (result) result.innerHTML =
+        '<div style="font-size:11px;color:var(--ink-muted);margin-bottom:4px">' + label + '</div>' +
+        '<img src="' + res.img + '" alt="Reformatted design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />' +
+        '<div style="margin-top:6px"><a class="btn secondary" style="font-size:11px;padding:3px 10px" href="' + res.img + '" download="reformat.png">Download .png</a></div>';
+    })
+    .catch(function(e){
+      btn.disabled = false; btn.textContent = orig;
+      if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">Network error: ' + e + '</div>';
+    });
+}
+
+// ---- P6.2 — conversational copilot (chat → validated spec-patch edits) ----
+// Plain-words editing of an approved design: the server runs a bounded tool
+// loop, applies only validated, on-brand, legible edits, and persists a new
+// brief version; we show what changed and offer a live preview.
+function copilotToggle(btn, cardId) {
+  var panel = document.querySelector('.copilot-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  if (panel.dataset.built === '1') return;
+  panel.dataset.built = '1'; panel.dataset.session = '';
+  panel.innerHTML =
+    '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Copilot &mdash; edit by conversation</div>' +
+    '<div class="cp-suggest" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px"></div>' +
+    '<div class="cp-log" style="max-height:240px;overflow:auto;margin-bottom:8px"></div>' +
+    '<div style="display:flex;gap:5px;align-items:center">' +
+      '<input class="cp-input" type="text" placeholder="e.g. make the headline punchier, more navy" aria-label="Message the copilot" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />' +
+      '<button class="btn secondary cp-mic" style="font-size:12px;padding:5px 9px" title="Speak (your browser transcribes on-device)" onclick=' + _attrEsc('copilotMic(this, ' + JSON.stringify(cardId) + ')') + '>&#127908;</button>' +
+      '<button class="btn cp-send" style="font-size:12px;padding:5px 12px;background:var(--lane);color:var(--lane-ink);border:none" onclick=' + _attrEsc('copilotSend(this, ' + JSON.stringify(cardId) + ')') + '>Send</button>' +
+    '</div>' +
+    '<div class="cp-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>';
+  fetch(panel.dataset.suggestUrl).then(function(r){return r.json();}).then(function(j){
+    var box = panel.querySelector('.cp-suggest');
+    (j.suggestions||[]).forEach(function(s){
+      var b=document.createElement('button'); b.className='btn secondary'; b.style.cssText='font-size:10px;padding:2px 8px';
+      b.textContent=s; b.onclick=function(){ panel.querySelector('.cp-input').value=s; panel.querySelector('.cp-input').focus(); };
+      box.appendChild(b);
+    });
+  }).catch(function(){});
+  panel.querySelector('.cp-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ copilotSend(panel.querySelector('.cp-send'), cardId); }});
+}
+
+function _cpAppend(panel, role, text) {
+  var log = panel.querySelector('.cp-log');
+  var who = role==='user' ? 'You' : 'Copilot';
+  var col = role==='user' ? 'var(--ink)' : 'var(--lane)';
+  var div = document.createElement('div'); div.style.cssText='margin-bottom:6px;font-size:12px';
+  div.innerHTML = '<span style="color:'+col+';font-weight:600">'+who+':</span> ' + (window.safeText?safeText(text):text);
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+function copilotSend(btn, cardId) {
+  var panel = document.querySelector('.copilot-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var input = panel.querySelector('.cp-input');
+  var msg = (input.value||'').trim();
+  if (!msg) return;
+  var status = panel.querySelector('.cp-status');
+  _cpAppend(panel, 'user', msg);
+  input.value=''; btn.disabled=true; status.textContent='Thinking…';
+  var body = {message: msg};
+  if (panel.dataset.session) body.session_id = panel.dataset.session;
+  fetch(panel.dataset.assistantUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      btn.disabled=false; status.textContent='';
+      var j = res.j||{};
+      if (!res.ok || j.error) { _cpAppend(panel, 'assistant', j.user_message || j.error || 'Something went wrong'); return; }
+      if (j.session_id) panel.dataset.session = j.session_id;
+      var d = _cpAppend(panel, 'assistant', j.reply || '(no reply)');
+      var extra='';
+      if (j.applied && j.applied.length) extra += '<div style="font-size:11px;color:var(--good);margin-top:2px">&#10003; ' + j.applied.length + ' change(s) applied</div>';
+      if (j.rejected && j.rejected.length) {
+        var reasons = j.rejected.map(function(x){return (x[1]||'');}).join('; ');
+        extra += '<div style="font-size:11px;color:var(--bad);margin-top:2px">Skipped: ' + (window.safeText?safeText(reasons):reasons) + '</div>';
+      }
+      if (j.changed && j.reformat_url && j.format) {
+        var purl = j.reformat_url + '?format=' + encodeURIComponent(j.format);
+        extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:11px;padding:2px 9px" onclick=' + _attrEsc('copilotPreview(this, ' + JSON.stringify(purl) + ')') + '>Preview the edit</button></div>';
+      }
+      extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:10px;padding:2px 8px" onclick="copilotRemember()" title="Save a standing preference the copilot will always respect">Remember a preference&hellip;</button></div>';
+      d.innerHTML += extra;
+      panel.querySelector('.cp-log').scrollTop = panel.querySelector('.cp-log').scrollHeight;
+    })
+    .catch(function(e){ btn.disabled=false; status.textContent=''; _cpAppend(panel,'assistant','Network error: '+e); });
+}
+
+function copilotPreview(btn, url) {
+  var orig = btn.textContent; btn.disabled=true; btn.textContent='Rendering…';
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){ var ct=r.headers.get('Content-Type')||''; if (r.ok && ct.indexOf('image')===0) return r.blob().then(function(b){return {img:URL.createObjectURL(b)};}); return r.json().then(function(j){return {err:(j&&j.user_message)||'preview failed'};}); })
+    .then(function(res){ btn.disabled=false; btn.textContent=orig;
+      var holder=document.createElement('div'); holder.style.marginTop='6px';
+      if (res.err) holder.innerHTML='<div style="font-size:11px;color:var(--bad)">'+res.err+'</div>';
+      else holder.innerHTML='<img src="'+res.img+'" alt="Edited design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />';
+      btn.parentNode.appendChild(holder);
+    })
+    .catch(function(e){ btn.disabled=false; btn.textContent=orig; });
+}
+
+function copilotRemember() {
+  var txt = prompt('Save a standing preference the copilot will always respect (e.g. "never show times for 8-and-unders"):');
+  if (!txt) return;
+  fetch('/api/assistant/memory', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})})
+    .then(function(r){return r.json();})
+    .then(function(j){ if (window.MH && MH.toast) MH.toast(j.ok ? 'Saved — the copilot will remember that.' : (j.user_message||'Could not save'), j.ok?'success':'error', 3000); })
+    .catch(function(){});
+}
+
+function copilotMic(btn, cardId) {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var panel = document.querySelector('.copilot-panel[data-card="' + cardId + '"]');
+  if (!SR) { if (window.MH && MH.toast) MH.toast('Voice input needs a browser with speech recognition — or just type.', 'info', 3500); return; }
+  var rec = new SR(); rec.lang='en-GB'; rec.interimResults=false; rec.maxAlternatives=1;
+  var orig = btn.textContent; btn.textContent='●'; btn.disabled=true;
+  rec.onresult=function(e){ var t=(e.results[0][0]||{}).transcript||''; panel.querySelector('.cp-input').value=t; };
+  rec.onend=function(){ btn.textContent=orig; btn.disabled=false; };
+  rec.onerror=function(){ btn.textContent=orig; btn.disabled=false; };
+  try { rec.start(); } catch(e) { btn.textContent=orig; btn.disabled=false; }
+}
 </script>
 """
 
 
 def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
-    """Render the per-card "Schedule" affordance, plan-gated.
-
-    PC.4 free-tier soft limit: Buffer scheduling is a paid feature. On a Free
-    plan (or signed-out, which resolves to Free) the button is swapped for a
-    non-functional "Upgrade to schedule" link to /pricing — a soft nudge, not a
-    hard lock (the card itself, its caption, graphics and motion all stay
-    usable; only the Buffer hand-off is gated). Premium plans get the live
-    button that opens the schedule modal. Reads the plan from the session via
-    ``auth.current_plan`` so the gate is consistent everywhere a card renders.
+    """Render the per-card "Schedule" affordance as a disabled "Coming soon"
+    chip. Auto scheduling content straight onto a social page has been
+    withdrawn; approved cards are still fully exportable/downloadable for
+    manual posting. The chip keeps the toolbar's shape so the feature can be
+    reintroduced later without a layout change.
     """
     if not card_id_raw:
         return ""
-    if _auth.is_premium(_auth.current_plan()):
-        return (
-            '<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
-            f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, {json.dumps(el_id)})'>"
-            "Schedule&hellip;</button>"
-        )
     return (
-        f'<a class="btn secondary" href="{url_for("pricing_page")}" '
-        'style="font-size:11px;padding:4px 10px" '
-        'title="Buffer scheduling is on the Club plan">Upgrade to schedule</a>'
+        '<span class="btn secondary" aria-disabled="true" '
+        'style="font-size:11px;padding:4px 10px;opacity:0.6;cursor:default" '
+        'title="Auto scheduling to social is coming soon">Schedule &middot; Coming soon</span>'
     )
 
 
@@ -3314,6 +4587,12 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
     _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
     _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
+    _reformat_url = url_for("api_card_reformat", run_id=run_id, card_id=card_id_raw)
+    _formats_url = url_for("api_formats")
+    _assistant_url = url_for("api_card_assistant", run_id=run_id, card_id=card_id_raw)
+    _assistant_suggest_url = url_for(
+        "api_assistant_suggestions", run_id=run_id, card_id=card_id_raw
+    )
 
     _STD_TONES = [
         (
@@ -3321,7 +4600,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "✦ AI",
             True,
             "tone-tab-ai",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--lane)",
             "Live AI caption. Generates fresh each time.",
         ),
@@ -3330,7 +4609,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "Warm",
             False,
             "",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--accent)",
             "Warm & community — friendly, first-name, inclusive.",
         ),
@@ -3339,7 +4618,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "Hype",
             False,
             "",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--accent)",
             "Energetic & hype — race-day language, high energy.",
         ),
@@ -3348,7 +4627,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             "Precise",
             False,
             "",
-            "rgba(212,255,58,0.15)",
+            "color-mix(in oklab, var(--lane) 15%, transparent)",
             "var(--accent)",
             "Data-led — numbers first, sponsor-friendly, no fluff.",
         ),
@@ -3390,7 +4669,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     schedule_btn = _schedule_button_html(run_id, card_id_raw, _wf_card_el_id)
 
     return (
-        f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
+        f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">'
         f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
         f'<div style="margin-bottom:8px">{tabs_html}</div>'
         f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
@@ -3400,6 +4679,8 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -3410,15 +4691,401 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'punchier\')">Punchier</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'add_time\')">Add time</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'tidy\')">Tidy up</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'summarise\')" title="One tight sentence">Summarise</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'expand\')" title="Add one on-brand detail">Expand</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'rewrite\')" title="Fresh angle, same facts">Rewrite</button>'
         f'<input class="assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" aria-label="Custom caption change instruction" style="flex:1;min-width:140px;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
         f'<button class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="captionAssistRun(this, \'{card_uuid}\', \'custom\')">Apply</button>'
         f"</div>"
         f'<div class="assist-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>'
         f"</div>"
-        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
+
+
+# ---------------------------------------------------------------------------
+# UI 1.18 — Inspector / properties panel (Sketch-inspired)
+# ---------------------------------------------------------------------------
+#
+# A lightweight slide-in drawer (ONE shared instance per page) for tweaking a
+# generated card *before* approval: edit the caption, swap the brand-palette
+# accent, toggle elements (photo / sponsor strip), and adjust the crop. Every
+# control posts back to EXISTING routes — create-graphic for the live re-render,
+# live-caption for AI drafts, and the workflow set_edits route for persistence
+# (the same edited_captions bag, under dotted ``insp.*`` keys). No new store.
+
+# 3×3 manual-crop grid → CSS object-position. Mirrors saliency's vocabulary so
+# the override reads the same as the automatic focus it replaces.
+_INSPECTOR_CROP_CELLS = [
+    ("left top", "Top-left"),
+    ("center top", "Top"),
+    ("right top", "Top-right"),
+    ("left center", "Left"),
+    ("center center", "Centre"),
+    ("right center", "Right"),
+    ("left bottom", "Bottom-left"),
+    ("center bottom", "Bottom"),
+    ("right bottom", "Bottom-right"),
+]
+
+
+def _render_inspector_panel(swatches: list[dict]) -> str:
+    """Static markup for the shared inspector drawer + its scrim.
+
+    ``swatches`` are the brand-locked accent options (``[{role, hex}]``) resolved
+    once per page — rendered server-side so the palette shows instantly without a
+    render round-trip. The drawer starts hidden; ``_inspector_js`` wires it up.
+    """
+    swatch_btns = (
+        '<button type="button" class="mh-insp-swatch is-auto" data-accent="" '
+        'aria-pressed="true" title="Automatic — the design director\'s pick">'
+        "Auto</button>"
+    )
+    for sw in swatches or []:
+        hexv = _h(sw.get("hex", ""))
+        role = _h(sw.get("role", ""))
+        swatch_btns += (
+            f'<button type="button" class="mh-insp-swatch" data-accent="{hexv}" '
+            f'aria-pressed="false" title="Brand {role} — {hexv}" '
+            f'style="--sw:{hexv}"><span class="mh-insp-swatch-dot"></span>'
+            f"{role}</button>"
+        )
+
+    crop_btns = (
+        '<button type="button" class="mh-insp-crop is-auto" data-focus="" '
+        'aria-pressed="true" title="Automatic crop (saliency focus)">Auto</button>'
+    )
+    for value, label in _INSPECTOR_CROP_CELLS:
+        crop_btns += (
+            f'<button type="button" class="mh-insp-crop" data-focus="{_h(value)}" '
+            f'aria-pressed="false" title="{_h(label)}" aria-label="Crop: {_h(label)}">'
+            "</button>"
+        )
+
+    return f"""
+<div class="mh-inspector-scrim" id="mh-inspector-scrim" hidden></div>
+<aside class="mh-inspector" id="mh-inspector" role="dialog" aria-modal="true"
+       aria-labelledby="mh-insp-title" aria-hidden="true" hidden>
+  <header class="mh-insp-head">
+    <div>
+      <div class="mh-insp-kicker">Inspector</div>
+      <h3 class="mh-insp-title" id="mh-insp-title">Card</h3>
+    </div>
+    <button type="button" class="mh-insp-close" id="mh-insp-close"
+            aria-label="Close inspector">&times;</button>
+  </header>
+  <div class="mh-insp-body">
+    <div class="mh-insp-preview" id="mh-insp-preview" aria-live="polite">
+      <div class="mh-insp-preview-empty">Apply changes to render a preview.</div>
+    </div>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Caption</div>
+      <textarea id="mh-insp-caption" class="mh-insp-caption" rows="3" dir="auto"
+                maxlength="600" aria-label="Card caption"
+                placeholder="Write a caption, or generate one with AI&hellip;"></textarea>
+      <div class="mh-insp-row">
+        <button type="button" class="btn secondary" id="mh-insp-caption-ai"
+                style="font-size:11px;padding:4px 10px">&#10024; Generate with AI</button>
+        <button type="button" class="btn secondary" id="mh-insp-caption-save"
+                style="font-size:11px;padding:4px 10px">Save caption</button>
+        <span class="mh-insp-mini" id="mh-insp-caption-status"></span>
+      </div>
+    </section>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Brand palette</div>
+      <div class="mh-insp-swatches" id="mh-insp-swatches">{swatch_btns}</div>
+      <div class="mh-insp-mini">Only this club&rsquo;s brand colours &mdash; legibility is checked on render.</div>
+    </section>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Elements</div>
+      <label class="mh-insp-toggle"><input type="checkbox" id="mh-insp-photo" checked>
+        <span>Show athlete photo</span></label>
+      <label class="mh-insp-toggle"><input type="checkbox" id="mh-insp-sponsor" checked>
+        <span>Show sponsor strip</span></label>
+    </section>
+
+    <section class="mh-insp-group">
+      <div class="mh-insp-group-label">Crop &amp; focus</div>
+      <div class="mh-insp-cropgrid" id="mh-insp-cropgrid">{crop_btns}</div>
+    </section>
+  </div>
+  <footer class="mh-insp-foot">
+    <span class="mh-insp-status" id="mh-insp-status" aria-live="polite"></span>
+    <button type="button" class="btn secondary" id="mh-insp-reset"
+            style="font-size:12px;padding:6px 12px">Reset</button>
+    <button type="button" class="btn" id="mh-insp-apply"
+            style="font-size:12px;padding:6px 14px;background:var(--lane);color:var(--lane-ink);border:none">
+      Apply changes</button>
+  </footer>
+</aside>
+"""
+
+
+def _inspector_js() -> str:
+    """Behaviour for the shared inspector drawer (UI 1.18).
+
+    Plain JS (no f-string) so the many braces stay literal. Relies on globals
+    already present on every page via ``_layout``: ``window._API_BASE`` (the
+    workflow POST base) and ``window.MH`` (toast). Reads each card's context +
+    persisted state from the clicked ``[data-mh-inspect]`` button's data-*.
+    """
+    return """
+<script>
+(function(){
+  var drawer = document.getElementById('mh-inspector');
+  var scrim  = document.getElementById('mh-inspector-scrim');
+  if (!drawer || !scrim) return;
+  var ctx = null;            // current card context
+  var pending = {};          // unsaved overrides: accent / photo_pos / hide_sponsor / no_photo
+  var lastFocus = null;      // for focus restoration on close
+
+  var $ = function(id){ return document.getElementById(id); };
+  var apiBase = function(){ return window._API_BASE || ''; };
+  function toast(msg, kind){ if (window.MH && MH.toast) MH.toast(msg, kind || 'info', 3000); }
+  function status(msg){ var s = $('mh-insp-status'); if (s) s.textContent = msg || ''; }
+
+  function setPressed(group, attr, value){
+    var btns = drawer.querySelectorAll(group);
+    btns.forEach(function(b){
+      var on = (b.getAttribute(attr) || '') === (value || '');
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.classList.toggle('is-active', on);
+    });
+  }
+
+  function syncControls(){
+    // Reflect `pending` into the controls.
+    setPressed('.mh-insp-swatch', 'data-accent', pending.accent || '');
+    setPressed('.mh-insp-crop', 'data-focus', pending.photo_pos || '');
+    var photo = $('mh-insp-photo'); if (photo) photo.checked = !pending.no_photo;
+    var spon = $('mh-insp-sponsor'); if (spon) spon.checked = !pending.hide_sponsor;
+  }
+
+  function markDirty(){ status('Unsaved — Apply changes to render & save.'); }
+
+  function openInspector(btn){
+    ctx = {
+      runId: btn.getAttribute('data-run-id'),
+      cardId: btn.getAttribute('data-card-id'),
+      graphicUrl: btn.getAttribute('data-graphic-url'),
+      captionUrl: btn.getAttribute('data-caption-url'),
+      title: btn.getAttribute('data-card-title') || 'Card'
+    };
+    // Seed pending state from the card's persisted inspector data-* attributes.
+    pending = {};
+    var a = btn.getAttribute('data-insp-accent'); if (a) pending.accent = a;
+    var f = btn.getAttribute('data-insp-focus'); if (f) pending.photo_pos = f;
+    if (btn.getAttribute('data-insp-hide-sponsor') === '1') pending.hide_sponsor = true;
+    if (btn.getAttribute('data-insp-no-photo') === '1') pending.no_photo = true;
+    // textContent, NOT innerHTML: getAttribute decodes the server-side HTML
+    // escaping, so innerHTML would re-parse a hostile card title as markup.
+    var titleEl = $('mh-insp-title'); if (titleEl) titleEl.textContent = ctx.title;
+    var capEl = $('mh-insp-caption');
+    if (capEl) capEl.value = btn.getAttribute('data-insp-caption') || '';
+    var capStatus = $('mh-insp-caption-status'); if (capStatus) capStatus.textContent = '';
+    // Reset preview to placeholder each open (a render is on-demand via Apply).
+    var prev = $('mh-insp-preview');
+    if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty">Apply changes to render a preview.</div>';
+    syncControls();
+    status('');
+    lastFocus = btn;
+    drawer.hidden = false; scrim.hidden = false;
+    // rAF so the transition runs from the hidden state.
+    requestAnimationFrame(function(){
+      drawer.classList.add('is-open'); scrim.classList.add('is-open');
+      drawer.setAttribute('aria-hidden', 'false');
+    });
+    var close = $('mh-insp-close'); if (close) close.focus();
+  }
+
+  function closeInspector(){
+    drawer.classList.remove('is-open'); scrim.classList.remove('is-open');
+    drawer.setAttribute('aria-hidden', 'true');
+    var done = function(){ drawer.hidden = true; scrim.hidden = true; };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { done(); }
+    else { setTimeout(done, 220); }
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+    ctx = null;
+  }
+
+  // --- Build the override payload for create-graphic from `pending`. ---
+  function overrideBody(){
+    var body = {};
+    body.accent = pending.accent || '';
+    body.focus = pending.photo_pos || '';
+    body.hide_sponsor = !!pending.hide_sponsor;
+    body.no_photo = !!pending.no_photo;
+    return body;
+  }
+
+  // --- Persist current overrides via the existing workflow set_edits route. ---
+  function persistEdits(extra){
+    if (!ctx) return Promise.resolve();
+    var edits = {
+      'insp.accent': pending.accent || '',
+      'insp.focus': pending.photo_pos || '',
+      'insp.hideSponsor': pending.hide_sponsor ? '1' : '',
+      'insp.noPhoto': pending.no_photo ? '1' : ''
+    };
+    if (extra) { for (var k in extra) { if (extra.hasOwnProperty(k)) edits[k] = extra[k]; } }
+    var url = apiBase() + '/api/workflow/' + encodeURIComponent(ctx.runId) +
+              '/' + encodeURIComponent(ctx.cardId);
+    return fetch(url, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'set_edits', edits: edits})
+    }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); });
+  }
+
+  function renderPreview(){
+    if (!ctx) return;
+    var prev = $('mh-insp-preview');
+    if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty mh-insp-loading">Rendering preview&hellip;</div>';
+    status('Rendering &amp; saving&hellip;');
+    var applyBtn = $('mh-insp-apply'); if (applyBtn) applyBtn.disabled = true;
+    // Persist first (so the override sticks even if the user navigates away
+    // mid-render), then render with the explicit overrides for an instant result.
+    persistEdits().then(function(){
+      return fetch(ctx.graphicUrl, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(overrideBody())
+      });
+    }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+      .then(function(o){
+        if (applyBtn) applyBtn.disabled = false;
+        if (!o.ok || !o.body || o.body.error) {
+          var msg = (o.body && (o.body.error || o.body.message)) || 'render failed';
+          status('Could not render: ' + msg);
+          if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty">Could not render this preview.</div>';
+          toast('Inspector render failed: ' + msg, 'error');
+          return;
+        }
+        var vis = (o.body.visuals || [])[0];
+        var src = vis && (vis.png_url || vis.url || vis.file_url);
+        if (!src && vis && vis.id) {
+          src = apiBase() + '/api/visual/' + encodeURIComponent(vis.id) + '/png';
+        }
+        if (src && prev) {
+          var img = new Image();
+          img.alt = 'Preview of the edited card';
+          img.className = 'mh-insp-preview-img';
+          img.onload = function(){ prev.innerHTML = ''; prev.appendChild(img); };
+          img.onerror = function(){ prev.innerHTML = '<div class="mh-insp-preview-empty">Preview rendered, but the image could not load.</div>'; };
+          img.src = src + (src.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+        } else if (prev) {
+          prev.innerHTML = '<div class="mh-insp-preview-empty">Rendered, but no preview image was returned.</div>';
+        }
+        status('Saved.');
+        // Mark the card edited in the pile so the review counts/badge update.
+        markCardEdited();
+      }).catch(function(e){
+        if (applyBtn) applyBtn.disabled = false;
+        status('Could not render.');
+        toast('Inspector error: ' + (e && e.message || e), 'error');
+      });
+  }
+
+  function markCardEdited(){
+    if (!ctx) return;
+    var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
+    try {
+      document.querySelectorAll('.ach-row [data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+        var row = b.closest('.ach-row');
+        if (row && row.dataset.status === 'queue') { row.dataset.status = 'edited'; }
+        // Update the button's persisted data-* so re-opening reflects the save.
+        b.setAttribute('data-insp-accent', pending.accent || '');
+        b.setAttribute('data-insp-focus', pending.photo_pos || '');
+        b.setAttribute('data-insp-hide-sponsor', pending.hide_sponsor ? '1' : '');
+        b.setAttribute('data-insp-no-photo', pending.no_photo ? '1' : '');
+      });
+      if (window.mhRecountReview) window.mhRecountReview();
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // --- Caption: AI draft (existing live-caption route) ---
+  function generateCaption(){
+    if (!ctx) return;
+    var btn = $('mh-insp-caption-ai'); var cs = $('mh-insp-caption-status');
+    if (btn) btn.disabled = true;
+    if (cs) cs.textContent = 'Generating…';
+    var url = ctx.captionUrl + (ctx.captionUrl.indexOf('?') >= 0 ? '&' : '?') + 'tone=ai';
+    fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (btn) btn.disabled = false;
+        if (j && j.caption) {
+          var ta = $('mh-insp-caption'); if (ta) ta.value = j.caption;
+          if (cs) cs.textContent = j.live ? 'AI draft ready' : '';
+        } else {
+          if (cs) cs.textContent = (j && j.message) ? j.message : 'No caption returned';
+        }
+      }).catch(function(){ if (btn) btn.disabled = false; if (cs) cs.textContent = 'Generation failed'; });
+  }
+
+  function saveCaption(){
+    if (!ctx) return;
+    var ta = $('mh-insp-caption'); var cs = $('mh-insp-caption-status');
+    var text = ta ? ta.value : '';
+    // Persist under every standard tone's headline slot so the user's wording
+    // is honoured at pack build regardless of which tone is exported.
+    var extra = {
+      'warm-club_headline': text, 'hype_headline': text, 'data-led_headline': text
+    };
+    if (cs) cs.textContent = 'Saving…';
+    persistEdits(extra).then(function(o){
+      if (cs) cs.textContent = (o && o.ok) ? 'Caption saved' : 'Save failed';
+      if (o && o.ok) {
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(ctx.cardId) : ctx.cardId;
+        document.querySelectorAll('[data-card-id="' + esc + '"][data-mh-inspect]').forEach(function(b){
+          b.setAttribute('data-insp-caption', text);
+        });
+      }
+    }).catch(function(){ if (cs) cs.textContent = 'Save failed'; });
+  }
+
+  // --- Wiring -------------------------------------------------------------
+  document.addEventListener('click', function(e){
+    var openBtn = e.target.closest('[data-mh-inspect]');
+    if (openBtn) { e.preventDefault(); openInspector(openBtn); return; }
+  });
+  $('mh-insp-close').addEventListener('click', closeInspector);
+  scrim.addEventListener('click', closeInspector);
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && drawer.classList.contains('is-open')) closeInspector();
+  });
+
+  drawer.querySelectorAll('.mh-insp-swatch').forEach(function(b){
+    b.addEventListener('click', function(){
+      var v = b.getAttribute('data-accent') || '';
+      pending.accent = v; setPressed('.mh-insp-swatch', 'data-accent', v); markDirty();
+    });
+  });
+  drawer.querySelectorAll('.mh-insp-crop').forEach(function(b){
+    b.addEventListener('click', function(){
+      var v = b.getAttribute('data-focus') || '';
+      pending.photo_pos = v; setPressed('.mh-insp-crop', 'data-focus', v); markDirty();
+    });
+  });
+  var photoEl = $('mh-insp-photo');
+  if (photoEl) photoEl.addEventListener('change', function(){ pending.no_photo = !photoEl.checked; markDirty(); });
+  var sponEl = $('mh-insp-sponsor');
+  if (sponEl) sponEl.addEventListener('change', function(){ pending.hide_sponsor = !sponEl.checked; markDirty(); });
+
+  $('mh-insp-apply').addEventListener('click', renderPreview);
+  $('mh-insp-reset').addEventListener('click', function(){
+    pending = {}; syncControls(); markDirty();
+  });
+  $('mh-insp-caption-ai').addEventListener('click', generateCaption);
+  $('mh-insp-caption-save').addEventListener('click', saveCaption);
+})();
+</script>
+"""
 
 
 def _render_turn_into_card(run_id: str) -> str:
@@ -3478,7 +5145,7 @@ def _render_turn_into_card(run_id: str) -> str:
     return f"""
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-    <div style="flex:1;min-width:240px">
+    <div style="flex:1;min-width:min(240px,100%)">
       <h2 style="margin-bottom:6px">Turn this meet into more</h2>
       <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
         One click re-uses everything this meet already produced &mdash; the
@@ -3489,8 +5156,10 @@ def _render_turn_into_card(run_id: str) -> str:
       <div>{_ti_chips}</div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
-        &#x2726; Generate the pack
+      <button id="ti-btn" class="btn mh-cta-motion" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink)">
+        <span class="mh-btn-label">&#x2726; Generate the pack</span>
+        <span class="mh-btn-spin" aria-hidden="true"></span>
+        <span class="mh-btn-check" aria-hidden="true">&#x2713;</span>
       </button>
     </div>
   </div>
@@ -3501,12 +5170,13 @@ def _render_turn_into_card(run_id: str) -> str:
 function turnMeetIntoPack() {{
   var btn = document.getElementById('ti-btn');
   var status = document.getElementById('ti-status');
-  var origText = btn.textContent;
   var secs = 0;
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
+  function setState(s) {{ if (window.MH && MH.btnState) MH.btnState(btn, s); }}
+  // Stateful CTA: loading spins the primary action; data-mh-state="loading"
+  // also blocks a second click (pointer-events:none), so no disabled toggle.
+  setState('loading');
   status.style.display = '';
-  status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
+  status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid color-mix(in oklab, var(--lane) 30%, transparent);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
     '<span id="ti-status-text">Drafting every artefact with live AI&hellip;</span>';
   var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
@@ -3516,17 +5186,20 @@ function turnMeetIntoPack() {{
   function _fail(msg) {{
     clearInterval(ticker);
     status.textContent = 'Failed: ' + msg;
-    btn.disabled = false;
-    btn.textContent = origText;
+    setState('idle');
+  }}
+  function _done(packUrl) {{
+    clearInterval(ticker);
+    setState('success');
+    status.textContent = 'Done — opening pack…';
+    window.location.href = packUrl;
   }}
   function _poll(statusUrl) {{
     fetch(statusUrl).then(function(r) {{ return r.json(); }}).then(function(j) {{
       if (j.status === 'running') {{
         setTimeout(function() {{ _poll(statusUrl); }}, 2000);
       }} else if (j.status === 'done' && j.pack_url) {{
-        clearInterval(ticker);
-        status.textContent = 'Done — opening pack…';
-        window.location.href = j.pack_url;
+        _done(j.pack_url);
       }} else {{
         _fail(j.error || 'unknown error');
       }}
@@ -3541,9 +5214,7 @@ function turnMeetIntoPack() {{
       if (j && j.status_url) {{
         setTimeout(function() {{ _poll(j.status_url); }}, 2000);
       }} else if (j && j.pack_url) {{
-        clearInterval(ticker);
-        status.textContent = 'Done — opening pack…';
-        window.location.href = j.pack_url;
+        _done(j.pack_url);
       }} else {{
         _fail(j && j.message ? j.message : 'unknown error');
       }}
@@ -3553,6 +5224,98 @@ function turnMeetIntoPack() {{
     }});
 }}
 </script>"""
+
+
+# ---------------------------------------------------------------------
+# U.4 — first-run sample-to-first-content-pack path
+# ---------------------------------------------------------------------
+#
+# A freshly-onboarded org has its brand kit captured but no results file to
+# hand, so it sees zero content until it sources a real meet export. The
+# sample path closes that gap: one click runs the REAL pipeline on the
+# bundled synthetic meet (the same Children's-Code-clean PDF the public /try
+# demo uses — fictional swimmers, fictional clubs), stamped to the user's own
+# org so captions and graphics come out in *their* brand. It lands on the
+# real /review queue, so the very first thing a new user sees is the whole
+# engine working end-to-end on data, not a marketing mock.
+#
+# The file is committed to the repo, so it ships on every deployment; the
+# route still checks existence and surfaces an honest error if it is missing.
+_SAMPLE_MEET_PDF = Path(__file__).resolve().parents[3] / "samples" / "demo-meet-results.pdf"
+# The meet's namesake club — the one with the two golds and the strongest
+# spread of cards — so the sample pack looks its best out of the box.
+_SAMPLE_MEET_CLUB = "Riverbend SC"
+_SAMPLE_MEET_FILENAME = "Sample meet — Riverbend Autumn Sprint Gala.pdf"
+
+
+def _run_is_sample(run_id: str) -> bool:
+    """True when this run was generated by the U.4 sample path.
+
+    Detected via a tiny sidecar marker written next to the run's input,
+    so the review page can explain that the swimmers are demo data while
+    the branding is the user's own — and point them at uploading a real
+    file when they're ready.
+    """
+    try:
+        return (RUNS_DIR / run_id / "sample.json").exists()
+    except Exception:
+        return False
+
+
+def _mark_run_sample(run_id: str) -> None:
+    """Write the sample marker sidecar for a freshly-started sample run."""
+    try:
+        d = RUNS_DIR / run_id
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "sample.json").write_text(
+            json.dumps({"sample": True, "club": _SAMPLE_MEET_CLUB}),
+            encoding="utf-8",
+        )
+    except Exception:
+        log.warning("could not write sample marker for run %s", run_id, exc_info=True)
+
+
+def _sample_pack_cta(
+    *,
+    heading: str = "No results file to hand?",
+    sub: str = (
+        "Generate a sample content pack from a demo meet and watch the whole "
+        "engine run — detection, ranking, captions and cards — in your brand. "
+        "It lands in your review queue like any real run; delete it whenever."
+    ),
+    button_label: str = "Generate a sample pack →",
+    compact: bool = False,
+) -> str:
+    """Reusable 'try it on a sample meet' call-to-action.
+
+    Renders a POST form to ``/onboarding/sample``; the app's CSRF
+    auto-injection adds the hidden token, so callers don't have to. When
+    the sample file isn't present on the deployment, returns an empty
+    string so the surface simply omits the option rather than offering a
+    button that 404s.
+    """
+    if not _SAMPLE_MEET_PDF.exists():
+        return ""
+    action = url_for("onboarding_sample")
+    if compact:
+        return (
+            f'<form method="post" action="{action}" style="margin:0;display:inline">'
+            f'<button type="submit" class="btn secondary">{_h(button_label)}</button>'
+            "</form>"
+        )
+    return (
+        '<div class="card mh-sample-cta" style="border:1px dashed var(--border);'
+        "background:var(--surface);display:flex;gap:16px;align-items:center;"
+        'flex-wrap:wrap;justify-content:space-between">'
+        '<div style="flex:1;min-width:min(240px,100%)">'
+        f'<h3 style="margin:0 0 6px;font-size:15px">{_h(heading)}</h3>'
+        f'<p class="dim" style="margin:0;font-size:13px;line-height:1.5">{_h(sub)}</p>'
+        "</div>"
+        f'<form method="post" action="{action}" style="margin:0">'
+        f'<button type="submit" class="btn">{_h(button_label)}</button>'
+        "</form>"
+        "</div>"
+    )
 
 
 # ---------------------------------------------------------------------
@@ -3690,6 +5453,29 @@ def _start_run(
                     notify_pack_ready(run_id)
                 except Exception:
                     pass
+                # In-app notifications inbox (UI 1.14) — always-on, no-config:
+                # record the "pack ready" milestone against the owning org so it
+                # lands in the bell dropdown even with no push channel set up.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
+                except Exception:
+                    pass
+            else:
+                # The pipeline reported a terminal error (rather than raising) —
+                # surface it in the inbox so the operator isn't left guessing.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        profile_id,
+                        "Run couldn't be processed",
+                        str(run.error),
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             import traceback
 
@@ -3699,6 +5485,17 @@ def _start_run(
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
             conn.commit()
             conn.close()
+            try:
+                from mediahub.notify import inbox as _inbox
+
+                _inbox.record_error(
+                    profile_id,
+                    "Run couldn't be processed",
+                    str(e),
+                    run_id=run_id,
+                )
+            except Exception:
+                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -4147,7 +5944,11 @@ BASE_CSS = """
   --lane-h:    var(--mh-primary-hover);       /* #E6FF6B — hover lift */
   --lane-deep: var(--mh-primary-pressed);     /* #A8CC2E — pressed/underline */
   --lane-ink:  var(--mh-on-primary);          /* #0A0B11 — text on lane bg */
-  --lane-glow: rgba(212,255,58,0.35);
+  /* The accent glow tracks --lane (← --mh-primary), so every glow/shadow that
+     uses var(--lane-glow) follows the active club's brand colour just like the
+     strokes do — change the club's colours and the whole site's accents recolour
+     together. Falls back to the lane-yellow default when --lane is the default. */
+  --lane-glow: color-mix(in oklab, var(--lane) 35%, transparent);
 
   /* SIGNATURE ACCENT 2 — medal gold.
      Reserved EXCLUSIVELY for athlete achievements (PB, medal, first-time,
@@ -4228,7 +6029,9 @@ html { background: var(--bg-deep); }
 body {
   font-family: var(--font-body);
   background:
-    /* One subtle radial lift at top centre — stadium-light fall-off */
+    /* One subtle radial lift at top centre — stadium-light fall-off.
+       Light mode swaps the cream tint for a faint ink tint so the lift
+       and the grid lattice stay visible on the paper page. */
     radial-gradient(1400px 600px at 50% -10%, rgba(245,242,232,0.04), transparent 70%),
     /* Faint 40px grid lattice — pit-wall / scoreboard substrate */
     linear-gradient(rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
@@ -4246,6 +6049,8 @@ body {
   font-variant-numeric: oldstyle-nums;
 }
 a {
+  /* Dark: pure lane-yellow (unchanged). Light: a dark-olive brand tone
+     (--mh-link) — lane-yellow text is illegible on the paper page. */
   color: var(--lane);
   text-decoration: none;
   transition: color var(--transition);
@@ -4264,7 +6069,8 @@ header.topnav {
   height: 64px;
   border-bottom: 1px solid var(--hairline);
   background: rgba(10,11,17,0.92);
-  /* No blur — glass is banned by every audit. Solid pit-wall instead. */
+  /* No blur — glass is banned by every audit. Solid pit-wall (dark) /
+     solid paper (light) instead. */
   position: sticky;
   top: 0;
   z-index: 100;
@@ -4348,36 +6154,203 @@ header.topnav nav a.live::before {
   margin-right: 8px;
   animation: mh-pulse 1.6s ease-in-out infinite;
 }
-#backend-pill {
-  margin-left: auto;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10.5px;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  padding: 5px 12px;
-  border-radius: 2px;
+/* Invisible flex spacer — absorbs the free space between the primary nav links
+   and the right-hand utility / account cluster (notifications + active-org
+   menu, or the signed-out auth links), pushing the cluster to the right edge.
+   This replaces the old backend "online" pill's margin-left:auto, which used
+   to carry that role before the pill was removed. */
+.mh-nav-spacer { margin-left: auto; }
+/* === UI 1.14 — Notifications inbox (bell + unread badge + dropdown) ===
+   Masthead-consistent: mono labels, --chrome rule, --lane accent. The panel
+   is position:fixed and JS-anchored under the bell so the scrollable /
+   hamburger nav can never clip it. */
+.mh-notif {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 6px;
+}
+.mh-notif-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
   background: transparent;
   border: 1px solid var(--chrome);
+  border-radius: 2px;
   color: var(--ink-muted);
-  text-decoration: none;
+  cursor: pointer;
   transition: border-color var(--transition), color var(--transition);
+}
+.mh-notif-btn:hover,
+.mh-notif-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-notif-btn svg { width: 17px; height: 17px; display: block; }
+.mh-notif-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; line-height: 1;
+  color: #0A0B11;
+  background: var(--lane);
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 10px var(--lane-glow);
+  pointer-events: none;
+}
+.mh-notif-badge[hidden] { display: none; }
+.mh-notif-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  width: 360px; max-width: calc(100vw - 24px);
+  max-height: min(70vh, 480px);
+  display: flex; flex-direction: column;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200;
+  overflow: hidden;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-notif-panel[hidden] { display: none; }
+@keyframes mh-notif-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mh-notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--chrome);
   flex-shrink: 0;
 }
-#backend-pill:hover { border-color: var(--lane); color: var(--ink); text-decoration: none; }
-#backend-pill-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--ink-faint);
-  flex-shrink: 0;
-  transition: background 0.3s, box-shadow 0.3s;
+.mh-notif-h-title {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink);
 }
+.mh-notif-readall {
+  background: transparent; border: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  cursor: pointer; padding: 2px 4px;
+  transition: color var(--transition);
+}
+.mh-notif-readall:hover { color: var(--lane); }
+.mh-notif-readall:disabled { opacity: 0.35; cursor: default; }
+.mh-notif-list { overflow-y: auto; flex: 1; }
+.mh-notif-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  background: transparent; border: 0;
+  border-bottom: 1px solid rgba(245,242,232,0.07);
+  cursor: pointer; color: var(--ink); font: inherit;
+  transition: background var(--transition);
+}
+.mh-notif-item:hover { background: rgba(245,242,232,0.04); }
+.mh-notif-item.is-unread { background: color-mix(in oklab, var(--lane) 5%, transparent); }
+.mh-notif-item.is-unread:hover { background: color-mix(in oklab, var(--lane) 9%, transparent); }
+.mh-notif-dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 5px; background: var(--ink-faint);
+}
+.mh-notif-item[data-level="success"] .mh-notif-dot { background: var(--good); box-shadow: 0 0 8px rgba(94,227,154,0.5); }
+.mh-notif-item[data-level="warning"] .mh-notif-dot { background: var(--warn); }
+.mh-notif-item[data-level="error"]   .mh-notif-dot { background: var(--bad);  box-shadow: 0 0 8px rgba(255,107,107,0.5); }
+.mh-notif-item.is-read .mh-notif-dot { background: var(--ink-faint); box-shadow: none; }
+.mh-notif-text { min-width: 0; flex: 1; }
+.mh-notif-t {
+  display: block;
+  font-size: 13px; font-weight: 600; line-height: 1.3;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.mh-notif-item.is-read .mh-notif-t { color: var(--ink-muted); font-weight: 500; }
+.mh-notif-m {
+  display: block; margin-top: 2px;
+  font-size: 12px; line-height: 1.4;
+  color: var(--ink-muted); overflow-wrap: anywhere;
+}
+.mh-notif-time {
+  display: block; margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.04em;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+.mh-notif-empty {
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 34px 20px 38px; text-align: center;
+}
+.mh-notif-panel.is-empty .mh-notif-empty { display: flex; }
+.mh-notif-panel.is-empty .mh-notif-list { display: none; }
+.mh-notif-empty svg { width: 26px; height: 26px; color: var(--ink-faint); opacity: 0.7; }
+.mh-notif-empty-t { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.mh-notif-empty-s { font-size: 11.5px; color: var(--ink-faint); max-width: 220px; line-height: 1.4; }
+
+/* === Active-org account menu (signed-in) — the chip is a dropdown trigger ===
+   Replaces the old chip's "review brand setup" shortcut. Mirrors the
+   notifications dropdown: a JS-anchored position:fixed panel the scrollable /
+   hamburger nav can never clip. Progressive enhancement — with no JS the menu
+   items render inline (never hidden); .mh-js collapses them into the dropdown. */
+.mh-orgmenu {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 8px;
+}
+.mh-orgmenu-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--chrome, var(--border, rgba(245,242,232,0.14)));
+  border-radius: 999px; color: var(--ink); cursor: pointer;
+  font: inherit; background: rgba(245,242,232,0.03);
+  transition: border-color var(--transition), color var(--transition);
+}
+.mh-orgmenu-btn:hover,
+.mh-orgmenu-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-orgmenu-name {
+  font-weight: 600; letter-spacing: 0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The caret only makes sense as a dropdown affordance, so it ships only when
+   JS can actually open the menu. */
+.mh-orgmenu-caret { display: none; flex-shrink: 0; opacity: 0.7; transition: transform var(--transition); }
+.mh-js .mh-orgmenu-caret { display: block; }
+.mh-orgmenu-btn[aria-expanded="true"] .mh-orgmenu-caret { transform: rotate(180deg); }
+/* No-JS fallback: the items sit inline as a small run of mono nav links. */
+.mh-orgmenu-panel { display: inline-flex; align-items: center; }
+.mh-orgmenu-item {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted);
+  padding: 0 var(--sp-4); white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center;
+  transition: color var(--transition), background var(--transition);
+}
+.mh-orgmenu-item:hover { color: var(--ink); }
+.mh-orgmenu-item.active { color: var(--lane); }
+/* JS present: collapse into a real dropdown anchored under the chip. */
+.mh-js .mh-orgmenu-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  display: none;                       /* shown on .is-open */
+  flex-direction: column; align-items: stretch;
+  width: 220px; max-width: calc(100vw - 24px);
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200; overflow: hidden; padding: 6px;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-js .mh-orgmenu-panel.is-open { display: flex; }
+.mh-js .mh-orgmenu-item {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.10em;
+  padding: 9px 12px; border-radius: 4px;
+}
+.mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
 
 /* MAIN */
-main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
+/* Width comes from --mh-wrap-max (responsive_guardrails.py), which scales the
+   reading column up per viewport tier so the layout fills large monitors
+   instead of stranding a narrow centred column. The fallback keeps a sane
+   vw-bounded width if the token layer is ever absent. */
+main.wrap { max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto; padding: 36px 28px 96px; }
 
 /* FOOTER — masthead rail */
 .mh-footer {
@@ -4387,7 +6360,7 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   position: relative;
 }
 .mh-footer-inner {
-  max-width: 1200px; margin: 0 auto;
+  max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto;
   padding: var(--sp-7) var(--sp-7) var(--sp-8);
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -4440,6 +6413,7 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 }
 .mh-footer-meta {
   display: inline-flex; align-items: center; gap: var(--sp-3);
+  flex-wrap: wrap;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.18em;
@@ -4458,7 +6432,75 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
     gap: var(--sp-4);
     text-align: center;
   }
+  /* Let the stacked grid tracks shrink to the viewport — the mono meta row's
+     min-content (a non-wrapping link strip) was otherwise blowing the footer
+     past the phone viewport and forcing a horizontal scroll on every page. */
+  .mh-footer-inner > * { min-width: 0; }
   .mh-footer-brand, .mh-footer-meta { justify-content: center; }
+}
+
+/* HUD READOUT — live local time + deployment/system status rail (UI 1.5).
+   A mono blueprint strip at the foot of the masthead: a live local clock on
+   the left, a deployment status line (reachability · build · UTC reference)
+   on the right. Fed by the /healthz reachability poll plus a client-side
+   clock — no new backend surface. Since the header "online" pill was removed,
+   this is now the sole reachability indicator. Sits inside .mh-footer so the
+   print rule hides it too. */
+.mh-hud {
+  border-top: 1px solid var(--chrome);
+  background: var(--bg-deep);
+}
+.mh-hud-inner {
+  max-width: var(--mh-wrap-max, min(1400px, 92vw));
+  margin: 0 auto;
+  padding: 9px var(--sp-7);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-hud-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.mh-hud-group--system { flex-wrap: wrap; justify-content: flex-end; }
+.mh-hud-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.mh-hud-label { color: var(--ink-faint); }
+.mh-hud-val   { color: var(--ink-dim); }
+.mh-hud-clock { font-variant-numeric: tabular-nums; letter-spacing: 0.12em; }
+.mh-hud-tz    { color: var(--ink-faint); }
+.mh-hud-sep   { color: var(--ink-faint); opacity: 0.55; }
+.mh-hud-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-faint);
+  flex-shrink: 0;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+/* Reachability states — toggled on .mh-hud by the /healthz poll. (This is the
+   sole reachability indicator now that the header "online" pill was removed.) */
+.mh-hud--online  .mh-hud-dot { background: #5EE39A; box-shadow: 0 0 8px rgba(94,227,154,0.55); }
+.mh-hud--offline .mh-hud-dot { background: #FF6B6B; box-shadow: 0 0 8px rgba(255,107,107,0.55); }
+.mh-hud--offline .mh-hud-status { color: #FF6B6B; }
+@media (max-width: 860px) {
+  .mh-hud-inner {
+    flex-direction: column;
+    gap: 7px;
+    padding: 9px var(--sp-5);
+  }
+  .mh-hud-group--system { justify-content: center; }
 }
 
 /* HEADINGS — clear hierarchy, no ambiguity between h1 and section title */
@@ -4652,6 +6694,32 @@ p:last-child { margin-bottom: 0; }
 .btn.mh-wf-approve:hover { border-color: var(--good); background: rgba(61,220,151,0.08); box-shadow: none; }
 .btn.mh-wf-approve.is-on { background: var(--good); color: var(--lane-ink); border-color: var(--good); cursor: default; }
 .btn.mh-wf-approve.is-on:hover { background: var(--good); transform: none; box-shadow: none; }
+/* UI 1.25 — emoji reaction chips on generated cards + the review queue.
+   Quiet pills that sit beside the approve strip; the active ("you reacted")
+   state picks up the lane accent so a viewer can spot their own taps, and the
+   count only shows once at least one reaction lands. */
+.mh-reactions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mh-react-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 30px; padding: 4px 10px;
+  background: rgba(245,242,232,0.04);
+  color: var(--ink-dim);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 12px; font-weight: 600; line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition),
+              transform var(--transition), color var(--transition);
+}
+.mh-react-btn:hover { background: rgba(245,242,232,0.07); border-color: var(--chrome); transform: translateY(-1px); }
+.mh-react-btn:active { transform: translateY(0); }
+.mh-react-btn:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-react-btn .mh-react-emoji { font-size: 14px; line-height: 1; }
+.mh-react-btn .mh-react-count { font-variant-numeric: tabular-nums; min-width: 7px; text-align: center; color: var(--ink-dim); }
+.mh-react-btn .mh-react-count[hidden] { display: none; }
+.mh-react-btn.is-on { background: color-mix(in oklab, var(--lane) 10%, transparent); border-color: color-mix(in oklab, var(--lane) 45%, transparent); color: var(--lane); }
+.mh-react-btn.is-on .mh-react-count { color: var(--lane); }
 .btn.large { padding: 14px 28px; font-size: 14px; }
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
 .btn.mono {
@@ -4672,6 +6740,20 @@ p:last-child { margin-bottom: 0; }
 @media (max-width: 860px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .row { flex-direction: column; }
+  /* Inline-styled equivalents of .grid-2/.grid-3 — style="grid-template-columns:
+     1fr 1fr" (and the 1fr 1fr 1fr / repeat(3,…) variants) — don't inherit the
+     class collapse above, so they would stay multi-column and overflow narrow
+     screens (this was the /sponsors add-sponsor + exposure-report two-up, and
+     the same two-column pattern recurs on settings / billing / organisation
+     panels). Collapse them to a single column too. Inline styles outrank a
+     class selector, so !important is required here — the same technique the
+     .mh-palette-grid collapse (below) already uses. */
+  [style*="grid-template-columns:1fr 1fr"],
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns:repeat(3,"],
+  [style*="grid-template-columns: repeat(3,"] {
+    grid-template-columns: 1fr !important;
+  }
 }
 .divider { height: 1px; background: var(--border); margin: 20px 0; }
 .muted { color: var(--ink-muted); }
@@ -4700,8 +6782,8 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
   white-space: nowrap;
   line-height: 1.4;
 }
-.tag.lane  { background: rgba(212,255,58,0.10); color: var(--lane);  border-color: rgba(212,255,58,0.40); }
-.tag.live  { background: rgba(212,255,58,0.10); color: var(--lane);  border-color: rgba(212,255,58,0.50); }
+.tag.lane  { background: color-mix(in oklab, var(--lane) 10%, transparent); color: var(--lane);  border-color: color-mix(in oklab, var(--lane) 40%, transparent); }
+.tag.live  { background: color-mix(in oklab, var(--lane) 10%, transparent); color: var(--lane);  border-color: color-mix(in oklab, var(--lane) 50%, transparent); }
 .tag.live::before {
   content: '';
   width: 5px; height: 5px;
@@ -4721,6 +6803,11 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
 }
 /* legacy alias */
 .tag.gold { background: rgba(244,213,141,0.10); color: var(--medal); border-color: rgba(244,213,141,0.40); }
+/* A `<p class="tag">` is a block-level NOTE banner (a full sentence), not an
+   inline status pill — so it must wrap and never exceed its container. The base
+   `.tag` is `white-space:nowrap`, which on a phone pushed the /athletes consent
+   banner ~860px past the right edge. Block usage opts back into normal wrapping. */
+p.tag { white-space: normal; max-width: 100%; }
 
 /* FORMS — mono scoreboard labels, lane-yellow focus */
 label {
@@ -4782,7 +6869,7 @@ input[type=text]:hover, input[type=email]:hover, textarea:hover, select:hover {
 }
 input[type=text]:focus, input[type=email]:focus, input[type=password]:focus, input[type=url]:focus, input[type=number]:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--lane);
-  box-shadow: 0 0 0 2px rgba(212,255,58,0.18);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--lane) 18%, transparent);
   background: rgba(245,242,232,0.04);
 }
 input[type=checkbox], input[type=radio] {
@@ -4898,7 +6985,8 @@ label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio
 
 /* PROGRESS LOG */
 .progress-log {
-  background: rgba(0,0,0,0.3); color: #9EB3C8;
+  background: rgba(0,0,0,0.3);
+  color: #9EB3C8;
   border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px; white-space: pre-wrap; max-height: 360px; overflow-y: auto; line-height: 1.7;
@@ -4931,28 +7019,111 @@ main.wrap > .card:nth-of-type(3) { animation-delay: 0.15s; }
 main.wrap > .card:nth-of-type(4) { animation-delay: 0.20s; }
 main.wrap > .card:nth-of-type(5) { animation-delay: 0.25s; }
 
-/* Single static lane-yellow wash at the top edge — broadcast lower-third feel */
+/* Shared page-header entrance. Almost every surface opens with a `.mh-hero`
+   block (eyebrow -> headline -> lede); give those three a gentle staggered rise
+   so the *whole site* — not just the landing page — settles in with the same
+   editorial cadence. The home hero keeps its bespoke word-cycle / odometer
+   treatment, so it's excluded here. Pure CSS load animation (no persistent
+   hidden state -> nothing can get stuck), and it stands down under
+   prefers-reduced-motion via the reset below. */
+body:not([data-page="home"]) main.wrap .mh-hero > .mh-hero-eyebrow,
+body:not([data-page="home"]) main.wrap .mh-hero > h1,
+body:not([data-page="home"]) main.wrap .mh-hero > .lede {
+  animation: mh-fade-in 0.5s var(--ease-out, ease-out) backwards;
+}
+body:not([data-page="home"]) main.wrap .mh-hero > .mh-hero-eyebrow { animation-delay: 0.04s; }
+body:not([data-page="home"]) main.wrap .mh-hero > h1 { animation-delay: 0.12s; }
+body:not([data-page="home"]) main.wrap .mh-hero > .lede { animation-delay: 0.20s; }
+@media (prefers-reduced-motion: reduce) {
+  body:not([data-page="home"]) main.wrap .mh-hero > .mh-hero-eyebrow,
+  body:not([data-page="home"]) main.wrap .mh-hero > h1,
+  body:not([data-page="home"]) main.wrap .mh-hero > .lede { animation: none; }
+}
+
+/* Single static lane-yellow wash at the top edge — broadcast lower-third feel.
+   The softness is baked into the radial gradient itself (centre lifted above the
+   viewport with a generous falloff) instead of an 80px `filter: blur()`. A blur
+   that large over a fixed, full-width layer is a heavy raster that the browser
+   pays on first paint of EVERY page — and keeps as a needless extra GPU layer —
+   for a glow a soft gradient already gives. Paint-once, no perceptible change. */
 body::before {
   content: ''; position: fixed;
-  top: 0; left: 0; right: 0; height: 320px;
+  top: 0; left: 0; right: 0; height: 360px;
   background:
-    radial-gradient(ellipse 60% 100% at 50% 0%, var(--lane-glow), transparent 70%);
-  opacity: 0.20;
-  filter: blur(80px);
+    radial-gradient(ellipse 78% 118% at 50% -22%, var(--lane-glow), transparent 72%);
+  opacity: 0.18;
   pointer-events: none; z-index: 0;
 }
 
-/* Card hover */
-.card { transition: background var(--transition), border-color var(--transition); }
+/* Signed-in brand backdrop — a soft monochrome "logo wall" built from the
+   active org's uploaded logos (the .mh-bg-logo spans are generated in Python).
+   Each mark paints the logo's SILHOUETTE in one brand-derived tint via CSS
+   mask, so the field reads as a single cohesive branded texture instead of a
+   clash of full-colour marks. A radial vignette keeps the central reading
+   column calm and lets the gutters carry the texture; the whole field drifts
+   slowly as one parallax layer (off under reduced-motion). z-index:0 — behind
+   all content (main.wrap is z-index:1). */
+.mh-bg-logos {
+  position: fixed; inset: -6%; z-index: 0; pointer-events: none; overflow: hidden;
+  /* One tint for the whole wall: brand-derived when the org has a primary
+     colour (--mh-bg-brand set inline), else a neutral ink wash. color-mix
+     keeps it light enough to read on the near-black surface; the plain
+     --mh-bg-tint above is the fallback when color-mix is unsupported. */
+  --mh-bg-tint: var(--ink);
+  --mh-bg-tint: color-mix(in oklab, var(--mh-bg-brand, var(--ink)) 38%, var(--ink));
+  -webkit-mask-image: radial-gradient(120% 96% at 50% 42%,
+        transparent 0%, rgba(0,0,0,0.34) 46%, #000 80%);
+          mask-image: radial-gradient(120% 96% at 50% 42%,
+        transparent 0%, rgba(0,0,0,0.34) 46%, #000 80%);
+  will-change: transform;
+  animation: mh-bg-drift 52s ease-in-out infinite alternate;
+}
+.mh-bg-logo {
+  position: absolute;
+  background-color: var(--mh-bg-tint);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scale(var(--s, 1));
+}
+@keyframes mh-bg-drift {
+  from { transform: translate3d(-9px, 7px, 0) scale(1.03); }
+  to   { transform: translate3d(9px, -11px, 0) scale(1.03); }
+}
+@media (max-width: 720px) {
+  /* Thin the wall on small screens so it stays a whisper, not clutter. */
+  .mh-bg-logo:nth-child(2n) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-bg-logos { animation: none; }
+}
+
+/* Card hover. Interactive cards (links / [data-interactive]) lift a touch and
+   deepen their shadow on hover — the same tactile feedback the activity-feed
+   rows and bento tiles use, applied site-wide so every clickable card on every
+   surface feels alive, not just the landing page. The lift is gated to
+   fine-pointer + motion-allowed so touch and the reduced-motion cohort keep the
+   flat, static card; non-interactive info cards never move (correct affordance). */
+.card { transition: background var(--transition), border-color var(--transition),
+                    box-shadow var(--transition), transform var(--transition); }
 a.card, .card[data-interactive] { cursor: pointer; }
 a.card:hover, .card[data-interactive]:hover {
   border-color: var(--rule);
   background: var(--surface-2);
 }
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  a.card:hover, .card[data-interactive]:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-2, var(--shadow-1));
+  }
+  a.card:active, .card[data-interactive]:active { transform: translateY(0); }
+}
 
 /* Loading overlay */
 #mh-loader {
   position: fixed; inset: 0;
+  /* Light: a translucent paper scrim so the (now dark) loader text
+     stays readable; dark: the original deep-ink scrim. */
   background: rgba(11,18,32,0.78);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   z-index: 9999;
@@ -5001,6 +7172,27 @@ a.card:hover, .card[data-interactive]:hover {
   animation: mh-pulse 2.4s ease-in-out infinite;
 }
 
+/* U.6 — branded render/generation progress (the giant-numeral loading state).
+   Replaces the generic spinner on the long render/generation waits (motion,
+   reels, graphics). The percentage is an honest eased time-estimate for the
+   opaque renders, and a real fraction where the backend reports one; it only
+   reaches 100 when the real result lands (MH.renderProgress.complete). Reuses
+   the .display-num motif for the numeral. */
+.mh-render-prog { padding: 30px 18px 26px; text-align: center; animation: mh-fade-in 0.3s ease-out; }
+.mh-render-prog-num { display: flex; align-items: flex-start; justify-content: center; gap: 4px; }
+.mh-render-prog-pct { font-size: clamp(56px, 15vw, 116px); line-height: 0.82; color: var(--lane); }
+.mh-render-prog-sign { font-family: var(--font-display); font-weight: 900; line-height: 1; font-size: clamp(20px, 5vw, 38px); color: var(--ink-dim); margin-top: 0.3em; }
+.mh-render-prog[data-accent="medal"] .mh-render-prog-pct { color: var(--medal); }
+.mh-render-prog-bar { height: 3px; width: min(280px, 78%); margin: 20px auto 0; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+.mh-render-prog-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--lane); transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
+.mh-render-prog[data-accent="medal"] .mh-render-prog-fill { background: var(--medal); }
+.mh-render-prog-label { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink); margin-top: 18px; }
+.mh-render-prog-sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); margin: 7px auto 0; max-width: 320px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) {
+  .mh-render-prog { animation: none; }
+  .mh-render-prog-fill { transition: none; }
+}
+
 /* Toast */
 #mh-toast-container {
   position: fixed; top: 72px; right: 20px;
@@ -5020,7 +7212,7 @@ a.card:hover, .card[data-interactive]:hover {
 }
 .mh-toast.success { border-color: rgba(34,197,94,0.45); }
 .mh-toast.error   { border-color: rgba(244,63,94,0.45); }
-.mh-toast.info    { border-color: rgba(212,255,58,0.45); }
+.mh-toast.info    { border-color: color-mix(in oklab, var(--lane) 45%, transparent); }
 .mh-toast .mh-toast-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
 .mh-toast.success .mh-toast-icon { color: var(--good); }
 .mh-toast.error   .mh-toast-icon { color: var(--bad); }
@@ -5051,7 +7243,15 @@ a.card:hover, .card[data-interactive]:hover {
   margin-bottom: var(--sp-4);
   position: relative;
   transition: border-color var(--transition), background var(--transition);
+  /* A big meet stacks many of these in one scroll — skip layout+paint for the
+     cards still well off-screen. `auto` makes the browser remember each card's
+     real height after its first render, so the reserved estimate never causes a
+     scroll jump on the way back. Unknown to old engines, which ignore it. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
 }
+/* Belt-and-braces: never let an off-screen card be skipped when printing. */
+@media print { .mh-content-card { content-visibility: visible; } }
 .mh-content-card:hover { background: var(--surface-2); border-left-color: var(--lane-h); }
 .mh-content-card .mh-card-platform {
   display: inline-flex; align-items: center; gap: 8px;
@@ -5085,6 +7285,135 @@ a.card:hover, .card[data-interactive]:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.10em;
 }
+
+/* ---- U.3 — explainability & confidence surfaces -------------------------- */
+/* A self-explaining confidence chip (replaces the bare "conf: medium" tag).
+   Confidence = how sure we are the FACTS are right — a different axis from
+   the worthiness meter (the ranking). The title= carries the plain meaning. */
+.mh-conf-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--hairline); color: var(--ink-dim); cursor: help;
+}
+.mh-conf-chip .mh-conf-chip-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.9;
+}
+.mh-conf-chip.good { color: var(--good); border-color: rgba(94,227,154,0.35); background: var(--good-bg); }
+.mh-conf-chip.warn { color: var(--warn); border-color: rgba(255,180,84,0.35); background: var(--warn-bg); }
+.mh-conf-chip.bad  { color: var(--bad);  border-color: rgba(255,107,107,0.35); background: var(--bad-bg); }
+.mh-conf-chip-pct { font-family: var(--font-mono); opacity: 0.8; }
+
+/* The content-worthiness (ranking) meter — labelled so the bare 0–1 score
+   isn't misread as a second confidence number. */
+.mh-worth { display: inline-flex; align-items: center; gap: 6px; cursor: help; }
+.mh-worth-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-muted);
+}
+.mh-worth-track {
+  width: 72px; height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.mh-worth-fill { display: block; height: 100%; background: var(--accent); }
+.mh-worth-num {
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-dim); min-width: 30px;
+}
+
+/* The plain-English ranking-factor breakdown (replaces the name/value/weight
+   debug table). Each row leads with the ranker's own grounded plain_summary
+   and shows how much that reason counted. */
+.mh-factor-list {
+  list-style: none; margin: 6px 0 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.mh-factor { display: grid; grid-template-columns: 104px 1fr 84px; gap: 12px; align-items: center; }
+.mh-factor-name {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted);
+}
+.mh-factor-why { font-size: 12.5px; color: var(--ink-dim); line-height: 1.35; }
+.mh-factor-track {
+  height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.mh-factor-fill { display: block; height: 100%; background: var(--lane); }
+.mh-factor-mult { font-family: var(--font-mono); font-size: 11px; color: var(--lane); text-align: right; }
+@media (max-width: 640px) {
+  .mh-factor { grid-template-columns: 1fr; gap: 3px; }
+  .mh-factor-track, .mh-factor-mult { max-width: 160px; }
+}
+
+/* "How to read these cards" key — makes the surface read as the intelligence
+   it is to a first-time volunteer. */
+.mh-explain-key {
+  margin: var(--sp-4) 0 0 0; border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm); background: rgba(255,255,255,0.015);
+}
+.mh-explain-key > summary {
+  cursor: pointer; user-select: none; list-style: none; padding: 11px 16px;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 7px;
+}
+.mh-explain-key > summary::-webkit-details-marker { display: none; }
+.mh-explain-key[open] > summary { border-bottom: 1px solid var(--hairline); }
+.mh-key-grid { padding: 13px 16px; display: flex; flex-direction: column; gap: 11px; }
+.mh-key-row { display: grid; grid-template-columns: 124px 1fr; gap: 14px; align-items: baseline; }
+.mh-key-term {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--lane);
+}
+.mh-key-body { font-size: 12.5px; color: var(--ink-dim); line-height: 1.45; }
+.mh-key-body b { color: var(--ink); font-weight: 600; }
+@media (max-width: 640px) { .mh-key-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* The "why not" near-miss discoverability hint under the decision list. */
+.mh-nearmiss-hint {
+  margin-top: var(--sp-4); padding: 10px 14px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.015);
+  font-size: 12.5px; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.mh-nearmiss-hint a { color: var(--lane); }
+.mh-nearmiss-hint .mh-nm-pip {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn); flex: none;
+}
+
+/* ---- U.7 — "focus the facts" caption / explainability highlight ---------- */
+/* Source-grounded entities (athlete / event / time / PB-medal-record) are
+   pill-highlighted and sharp; the connective filler around them recedes to
+   --ink-muted so the facts read first. The spans are injected server-side by
+   _focus_facts_html() and only ever wrap text the structured achievement
+   grounds — never a guess. Inspired by Pedro Duarte (ped.ro); supports U.3. */
+.mh-focus { color: var(--ink-muted); }
+.mh-fact {
+  color: var(--ink);
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(245, 242, 232, 0.06);   /* faint --ink wash */
+  /* clone the pill across wrapped lines and keep the line box tight */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* Athlete — the person: the brightest neutral pill (the hero of the card). */
+.mh-fact--athlete { background: rgba(245, 242, 232, 0.08); }
+/* Event — the race: a quieter neutral pill. */
+.mh-fact--event { background: rgba(245, 242, 232, 0.045); }
+/* Time — the data: monospace + tabular figures with a faint gold edge. */
+.mh-fact--time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in oklab, var(--lane) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--lane) 18%, transparent);
+}
+/* PB / medal / record — the achievement itself: the brand gold-green, loudest. */
+.mh-fact--pb {
+  color: var(--lane);
+  font-weight: 700;
+  background: color-mix(in oklab, var(--lane) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--lane) 30%, transparent);
+}
+
 .mh-card-actions {
   margin-top: var(--sp-4); display: flex; gap: var(--sp-2); flex-wrap: wrap;
   padding-top: var(--sp-4); border-top: 1px solid var(--hairline);
@@ -5105,11 +7434,14 @@ a.card:hover, .card[data-interactive]:hover {
   min-height: 32px;
   border-radius: 2px;
   cursor: pointer;
-  transition: all var(--transition);
+  /* Explicit properties (house rule: never `transition: all`) — these buttons
+     only change colour / border / fill across their hover + primary states. */
+  transition: color var(--transition), border-color var(--transition),
+              background-color var(--transition);
 }
 .mh-card-actions button:hover { color: var(--ink); border-color: var(--rule); }
-.mh-card-actions button.primary { color: var(--lane); border-color: rgba(212,255,58,0.30); }
-.mh-card-actions button.primary:hover { background: rgba(212,255,58,0.08); border-color: var(--lane); }
+.mh-card-actions button.primary { color: var(--lane); border-color: color-mix(in oklab, var(--lane) 30%, transparent); }
+.mh-card-actions button.primary:hover { background: color-mix(in oklab, var(--lane) 8%, transparent); border-color: var(--lane); }
 /* Achievement / medal variant — gold accent for PB / medal / first-time */
 .mh-content-card.medal { border-left-color: var(--medal); }
 .mh-content-card.medal .mh-card-platform { color: var(--medal); }
@@ -5165,7 +7497,7 @@ a.card:hover, .card[data-interactive]:hover {
   color: var(--good); font-size: 13px; font-weight: 700;
 }
 .mh-stage[data-state="active"] {
-  background: rgba(212,255,58,0.05);
+  background: color-mix(in oklab, var(--lane) 5%, transparent);
   border-bottom: 2px solid var(--lane);
 }
 .mh-stage[data-state="active"] .mh-stage-label { color: var(--lane); }
@@ -5214,7 +7546,7 @@ a.card:hover, .card[data-interactive]:hover {
    edge). The base rule must come BEFORE the media query so source order
    doesn't reverse the precedence at narrow widths. */
 #active-org-chip { font-size: 12px; line-height: 1; padding: 5px 10px; }
-#active-org-chip > span:last-child { max-width: 140px; }
+#active-org-chip .mh-orgmenu-name { max-width: 140px; }
 
 /* === Responsive: nav scrollable, hide backend pill on narrow widths ===
    Audit found the topnav overflowed on every viewport between 721 and
@@ -5237,30 +7569,28 @@ a.card:hover, .card[data-interactive]:hover {
     padding: 8px 12px; font-size: 11px;
     flex-shrink: 0;
   }
-  /* Hide the backend pill on narrow widths — it's available on /status */
-  #backend-pill { display: none; }
-  /* Active-org chip shrinks on narrow widths so the brand chip + nav
-     items both fit on one line under iPad / small-laptop viewports.
-     `position: sticky; right: 8px` pins it to the right edge of the
-     scrollable nav viewport — at 1024 px the chip used to render at
-     `right=1052` (off-screen by 28 px); sticky keeps it glued to the
-     visible nav edge so the active organisation is always readable
-     regardless of horizontal scroll position. The opaque background
-     stops other nav items showing through as they scroll under.
-     `!important` is required because the chip's inline `style=` block
-     sets font-size / padding / background directly, and PR #106's
-     responsive shrink had no effect without it. */
-  #active-org-chip {
-    font-size: 11px !important;
-    padding: 4px 8px !important;
+  /* Active-org menu shrinks on narrow widths so the brand chip + nav items
+     both fit on one line under iPad / small-laptop viewports. `position:
+     sticky; right: 8px` on the menu wrapper pins it to the right edge of the
+     scrollable nav viewport — at 1024 px it used to render off-screen; sticky
+     keeps it glued to the visible nav edge so the active organisation is always
+     readable regardless of horizontal scroll position. The opaque background
+     stops other nav items showing through as they scroll under. `!important`
+     on the button is required because PR #106's responsive shrink had no
+     effect against the base #active-org-chip rule without it. */
+  .mh-orgmenu {
     position: sticky; right: 8px;
-    background: var(--bg, #0A0B11) !important;
+    background: var(--bg, #0A0B11);
     z-index: 2;
-    /* Subtle shadow on the left so the chip reads as foreground when
+    /* Subtle shadow on the left so the menu reads as foreground when
        nav items scroll underneath. */
     box-shadow: -8px 0 12px -8px rgba(10,11,17,0.85);
   }
-  #active-org-chip > span:last-child { max-width: 92px !important; }
+  #active-org-chip {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+  }
+  #active-org-chip .mh-orgmenu-name { max-width: 92px !important; }
 }
 /* Phone / tablet (≤860px): every interactive control needs the full
    44px tap area. Card-action utility buttons (Copy caption, etc.) and
@@ -5313,15 +7643,19 @@ a.card:hover, .card[data-interactive]:hover {
   .stat-block { gap: 8px; }
   .stat { padding: 10px 12px; min-width: 0; flex: 1; }
   .mh-hero h1 { font-size: clamp(40px, 11vw, 64px); }
+  /* Tighter hero chrome so the fold isn't dominated by whitespace on a phone. */
+  .mh-hero { padding: 36px 16px 24px; margin-bottom: 24px; }
+  /* Stacked full-bleed CTAs are easier to thumb than centred pills. */
+  .mh-hero-ctas { flex-direction: column; align-items: stretch; }
+  .mh-hero-ctas .btn { width: 100%; justify-content: center; }
 }
-@media (max-width: 480px) {
-  .row { gap: 12px; }
-  .grid-2, .grid-3 { gap: 12px; }
-  .stat-block { gap: 8px; }
-  .stat { padding: 10px 12px; min-width: 0; flex: 1; }
-}
-/* Force inputs/selects to never overflow their container, even with inline max-widths */
-input[type=text], input[type=file], textarea, select { max-width: 100%; }
+/* Force inputs/selects to never overflow their container, even with inline
+   max-widths. Covers every text-like control — including type=date / type=month
+   / type=number / type=email, whose intrinsic min-width otherwise widened the
+   /sponsors date pickers past a phone column. Checkbox / radio / range keep
+   their fixed intrinsic size. */
+input:not([type=checkbox]):not([type=radio]):not([type=range]),
+textarea, select { max-width: 100%; }
 
 /* === Hero (Holo-style) === */
 .mh-hero {
@@ -5333,8 +7667,8 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 .mh-hero-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 999px;
-  background: rgba(212,255,58,0.08);
-  border: 1px solid rgba(212,255,58,0.20);
+  background: color-mix(in oklab, var(--lane) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--lane) 20%, transparent);
   font-size: 12px; font-weight: 600;
   color: var(--accent);
   letter-spacing: 0.02em;
@@ -5385,22 +7719,6 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 
 /* Section heading — centred: titles sit on the page's centre line so the
    page reads tidy on wide screens (body content below stays left-aligned). */
-.mh-section-eyebrow {
-  display: flex; align-items: center; justify-content: center;
-  gap: 14px;
-  font-family: var(--font-mono);
-  font-size: 11px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.22em;
-  color: var(--lane);
-  margin: var(--sp-9) 0 var(--sp-3);
-  text-align: center;
-}
-.mh-section-eyebrow::before {
-  content: '';
-  height: 1px; width: 36px;
-  background: var(--lane);
-}
-.mh-section-eyebrow::after { content: none; }
 .mh-section-title {
   font-family: var(--font-display);
   font-size: clamp(36px, 4.2vw, 56px);
@@ -5423,81 +7741,6 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   padding: 0 0.05em;
   text-transform: none;
   letter-spacing: -0.01em;
-}
-
-/* === Numbered step cards (How it works) — bento-grid, varied weight === */
-.mh-steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0;
-  margin-bottom: var(--sp-9);
-  border: 1px solid var(--hairline);
-  border-radius: 0;
-  background: var(--surface);
-}
-.mh-step {
-  background: transparent;
-  border: 0;
-  border-right: 1px solid var(--hairline);
-  border-bottom: 1px solid var(--hairline);
-  border-radius: 0;
-  padding: var(--sp-6) var(--sp-6) var(--sp-7);
-  position: relative;
-  transition: background var(--transition);
-  overflow: hidden;
-}
-@media (min-width: 760px) {
-  /* No bottom border on the last row, no right border on the last column */
-  .mh-step:nth-child(n+1):nth-last-child(-n+4):nth-child(4n+1) ~ .mh-step:last-child,
-  .mh-step:last-child { border-right: 0; }
-  .mh-step { border-bottom: 0; }
-}
-.mh-step::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0;
-  height: 1px;
-  background: var(--lane);
-  opacity: 0;
-  transition: opacity var(--transition);
-}
-.mh-step:hover {
-  background: rgba(245,242,232,0.025);
-  border-color: var(--hairline);
-}
-.mh-step:hover::before { opacity: 1; }
-.mh-step-num {
-  font-family: var(--font-display);
-  font-weight: 900;
-  font-size: 64px;
-  line-height: 0.8;
-  letter-spacing: -0.04em;
-  color: var(--ink-faint);
-  display: block;
-  margin-bottom: var(--sp-4);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1, 'ss01' 1;
-  transition: color var(--transition);
-}
-.mh-step:hover .mh-step-num { color: var(--lane); }
-.mh-step-num::after {
-  content: '';
-  display: block;
-  width: 24px; height: 1px;
-  background: var(--lane);
-  border-radius: 0;
-  margin-top: var(--sp-3);
-  opacity: 0.7;
-}
-.mh-step h3 {
-  font-family: var(--font-display);
-  font-size: 18px; font-weight: 800; color: var(--ink);
-  letter-spacing: 0.01em; margin: 0 0 var(--sp-2);
-  text-transform: uppercase;
-}
-.mh-step p {
-  font-size: 14px; color: var(--ink-dim);
-  line-height: 1.5; margin: 0;
-  max-width: 36ch;
 }
 
 /* === Hero (rebuilt home page) — sport-editorial cover === */
@@ -5575,6 +7818,12 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   animation: mh-pulse 1.6s ease-in-out infinite;
   margin-left: 4px;
 }
+/* Home masthead kicker: the default navy brand seed makes --lane vanish on
+   the dark hero, so on the landing page only, paint the kicker in muted ink
+   with a gold rule + live dot so the strap (and its pulse) actually read. */
+body[data-page="home"] .mh-hero-eyebrow { color: var(--ink-muted); }
+body[data-page="home"] .mh-hero-eyebrow::before { background: var(--medal); }
+body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
 .mh-hero h1 {
   font-family: var(--font-display);
   font-size: clamp(56px, 9vw, 132px);
@@ -5607,6 +7856,28 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   padding: 0 0.05em;
   display: inline;
   -webkit-text-fill-color: var(--medal);
+}
+/* U.9 — cycling hero accent word. The signed-out hero's content-type noun is
+   the gold serif-italic accent (.editorial, above) and crossfades through what
+   MediaHub makes (stories / reels / graphics / captions). The words stack in a
+   single inline-grid cell so the box auto-sizes to the widest word and the
+   trailing "out." never reflows as the word changes. The crossfade is pure CSS
+   (opacity); a tiny inline script toggles .is-active. With no JavaScript the
+   server-rendered first word stays shown; the global prefers-reduced-motion
+   block below (and the script's matchMedia guard) keep it static when less
+   motion is asked for. */
+.mh-hero h1 .mh-word-cycle {
+  display: inline-grid;
+  justify-items: center;
+  vertical-align: baseline;
+}
+.mh-hero h1 .mh-word-cycle-item {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.mh-hero h1 .mh-word-cycle-item.is-active {
+  opacity: 1;
 }
 /* Lede reads in the body face: the headline's display-caps + serif-italic
    pairing is the one editorial move per hero — a serif lede on top of it
@@ -5662,6 +7933,18 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   border-color: var(--lane);
   color: var(--ink);
   transform: translateY(-1px);
+}
+/* Press + keyboard-focus parity with .btn — the hero CTAs are the most
+   prominent primary actions in the app and were missing both: a press
+   settles the hover lift (so the button feels responsive to the click),
+   and a visible focus ring keeps them keyboard-navigable. */
+.mh-cta-primary:active { transform: translateY(0); background: var(--lane-deep); box-shadow: none; }
+.mh-cta-secondary:active { transform: translateY(0); background: rgba(245,242,232,0.07); }
+.mh-cta-primary:focus-visible,
+.mh-cta-secondary:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .mh-cta-primary, .mh-cta-secondary { transition: background var(--transition), box-shadow var(--transition), border-color var(--transition); }
+  .mh-cta-primary:hover, .mh-cta-secondary:hover, .mh-cta-primary:active, .mh-cta-secondary:active { transform: none; }
 }
 .mh-hero-meta {
   margin-top: var(--sp-7);
@@ -5742,8 +8025,8 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 }
 .mh-profile-card .meta-line .pill {
   padding: 3px 8px;
-  background: rgba(212,255,58,0.10);
-  border: 1px solid rgba(212,255,58,0.30);
+  background: color-mix(in oklab, var(--lane) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--lane) 30%, transparent);
   border-radius: 2px;
   color: var(--lane);
   font-weight: 500;
@@ -5793,7 +8076,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   align-items: center; justify-content: center;
   min-height: 180px;
   background:
-    repeating-linear-gradient(45deg, rgba(212,255,58,0.025) 0 10px, transparent 10px 20px),
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--lane) 2.5%, transparent) 0 10px, transparent 10px 20px),
     var(--surface);
   border: 1px dashed var(--chrome);
   border-radius: var(--radius);
@@ -5810,7 +8093,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 }
 .mh-new-profile:hover {
   background:
-    repeating-linear-gradient(45deg, rgba(212,255,58,0.05) 0 10px, transparent 10px 20px),
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--lane) 5%, transparent) 0 10px, transparent 10px 20px),
     var(--surface-2);
   border-color: var(--lane);
   color: var(--lane);
@@ -5856,6 +8139,12 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   text-decoration: none;
 }
 .mh-template:hover::before { opacity: 1; }
+/* The Create ("Add input") and Settings grids are tile-LINKS — they had a
+   hover state but no keyboard focus ring (a tabbing volunteer saw nothing)
+   and no pressed state. Add both, reusing the lane focus ring used on .btn. */
+.mh-template:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
+.mh-template:focus-visible::before { opacity: 1; }
+.mh-template:active { background: var(--surface-3); }
 .mh-template-icon {
   width: 40px; height: 40px;
   border-radius: 0;
@@ -5894,6 +8183,199 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   font-family: var(--font-body);
   font-size: 13px;
   letter-spacing: 0;
+}
+
+/* === UI 1.10 — Template / archetype gallery ============================== */
+.mh-arch-note {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim); line-height: 1.55;
+  max-width: 64ch; margin: 0 0 var(--sp-5);
+}
+/* Filter chips — server-nav links, JS-upgraded to instant client filtering. */
+.mh-arch-filters {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+}
+.mh-arch-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition),
+              background var(--transition);
+}
+.mh-arch-chip:hover { color: var(--ink); border-color: var(--rule); text-decoration: none; }
+.mh-arch-chip:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-arch-chip.is-active {
+  color: var(--lane-ink, #0A0B11);
+  background: var(--lane);
+  border-color: var(--lane);
+}
+.mh-arch-chip-n {
+  font-size: 10px; opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.mh-arch-chip.is-active .mh-arch-chip-n { opacity: 0.85; }
+/* Visually-hidden text (count read-out for screen readers). */
+.mh-arch-sr {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* Card grid */
+.mh-arch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-7);
+}
+.mh-arch-card {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-card:hover { border-color: var(--rule); background: var(--surface-2); }
+.mh-arch-card.is-hidden { display: none; }
+.mh-arch-thumb {
+  padding: var(--sp-4) var(--sp-4) 0;
+}
+.mh-arch-svg {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.mh-arch-body {
+  display: flex; flex-direction: column;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.mh-arch-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 4px;
+}
+.mh-arch-title {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 800; color: var(--ink);
+  letter-spacing: 0.01em; margin: 0;
+  text-transform: uppercase;
+}
+.mh-arch-tag {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.mh-arch-tag[data-cat="photo"] { color: #7fd4ff; border-color: rgba(127,212,255,0.32); }
+.mh-arch-tag[data-cat="data"] { color: var(--lane); border-color: color-mix(in oklab, var(--lane) 32%, transparent); }
+.mh-arch-tag[data-cat="editorial"] { color: #f6a5d0; border-color: rgba(246,165,208,0.32); }
+.mh-arch-slug {
+  font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--ink-muted, var(--ink-dim));
+  opacity: 0.7;
+  margin-bottom: var(--sp-2);
+  word-break: break-all;
+}
+.mh-arch-summary {
+  font-family: var(--font-body);
+  font-size: 13px; color: var(--ink-dim);
+  line-height: 1.5; margin: 0 0 var(--sp-2);
+}
+.mh-arch-when {
+  font-family: var(--font-body);
+  font-size: 12.5px; color: var(--ink-dim);
+  line-height: 1.5; margin: auto 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hairline);
+}
+.mh-arch-when-label {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--lane);
+  margin-right: 6px;
+}
+.mh-arch-empty {
+  font-family: var(--font-body);
+  font-size: 14px; color: var(--ink-dim);
+  padding: var(--sp-6); text-align: center;
+  border: 1px dashed var(--rule); border-radius: var(--radius);
+  margin-bottom: var(--sp-7);
+}
+/* Bottom CTA strip back into the Create flow. */
+.mh-arch-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-4); flex-wrap: wrap;
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+.mh-arch-cta-text { display: flex; flex-direction: column; gap: 4px; }
+.mh-arch-cta-text strong {
+  font-family: var(--font-display); font-size: 16px; color: var(--ink);
+  text-transform: uppercase; letter-spacing: 0.01em;
+}
+.mh-arch-cta-text span { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
+/* Link from the Create page into the gallery. */
+.mh-arch-gallery-link {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+.mh-arch-gallery-link:hover { border-color: var(--rule); background: var(--surface-2); text-decoration: none; }
+.mh-arch-gallery-link .mh-agl-text { display: flex; flex-direction: column; gap: 2px; }
+.mh-arch-gallery-link .mh-agl-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 800;
+  color: var(--ink); text-transform: uppercase; letter-spacing: 0.02em;
+}
+.mh-arch-gallery-link .mh-agl-sub { font-family: var(--font-body); font-size: 12.5px; color: var(--ink-dim); }
+.mh-arch-gallery-link .mh-agl-cta {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--lane);
+  white-space: nowrap;
+}
+/* Schematic preview parts — scoped to .mh-arch-svg so the short class names
+   never leak. gd = brand ground, sf = surface/secondary zone, ac = accent,
+   ik/ik2 = muted/stronger type bars, ph = photo placeholder, ln = hairline,
+   acln = accent seam, paper/dk/dkln = light editorial ground + dark ink on it,
+   onac = ink on the accent panel, ln-f = ruled cell outline. */
+.mh-arch-svg .gd { fill: var(--surface-3); }
+.mh-arch-svg .sf { fill: var(--bg); }
+.mh-arch-svg .ac { fill: var(--lane); }
+.mh-arch-svg .ik { fill: rgba(245,242,232,0.30); }
+.mh-arch-svg .ik2 { fill: rgba(245,242,232,0.58); }
+.mh-arch-svg .ph { fill: rgba(245,242,232,0.10); }
+.mh-arch-svg .onac { fill: rgba(10,11,17,0.78); }
+.mh-arch-svg .ln { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .acln { fill: none; stroke: var(--lane); stroke-width: 2; }
+.mh-arch-svg .ln-f { fill: none; stroke: rgba(245,242,232,0.22); stroke-width: 1; }
+.mh-arch-svg .paper { fill: rgba(245,242,232,0.92); }
+.mh-arch-svg .dk { fill: rgba(10,11,17,0.55); }
+.mh-arch-svg .dkln { fill: none; stroke: rgba(10,11,17,0.40); stroke-width: 1; }
+@media (max-width: 560px) {
+  .mh-arch-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
 
 /* === Provider badge on home — broadcast pill === */
@@ -5966,6 +8448,105 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
+/* === UI 1.29 — Sticky chaptered scroll-spy nav (Linear-style) ============ */
+/* A side chapter rail that highlights the section currently in view on long
+   pages — wired by a caller via _layout(chapters=…). Pure CSS sticky
+   positioning; the active state is driven by an IntersectionObserver in
+   MH.bindChapterNav. Desktop-only affordance: hidden below 1240px, and with
+   JS off it stays a plain list of in-page anchors (never a load-bearing
+   control). On a chaptered page the wrap widens into a two-column grid so the
+   rail sits in its own gutter column and the reading column keeps ~its
+   original width. */
+.mh-chapter-nav { display: none; }
+.mh-chapnav-content { min-width: 0; }
+
+/* Offset every chapter anchor so a click — or a no-JS "#id" jump — lands the
+   section clear of the 64px sticky masthead instead of behind it. */
+main.wrap.mh-has-chapnav [id^="mh-ch-"] { scroll-margin-top: 84px; }
+
+@media (min-width: 1240px) {
+  main.wrap.mh-has-chapnav {
+    /* --mh-wrap-max-home scales the landing column per viewport tier
+       (responsive_guardrails.py) so it fills wide monitors; the rail keeps
+       its fixed gutter and the reading column takes the rest. */
+    max-width: var(--mh-wrap-max-home, min(1640px, 93vw));
+    display: grid;
+    grid-template-columns: 196px minmax(0, 1fr);
+    column-gap: 44px;
+    align-items: start;
+  }
+  .mh-chapter-nav {
+    display: block;
+    position: sticky;
+    top: 88px;
+    align-self: start;
+    max-height: calc(100vh - 112px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px 4px 10px 0;
+  }
+  .mh-chapter-nav::-webkit-scrollbar { width: 6px; }
+  .mh-chapter-nav::-webkit-scrollbar-thumb {
+    background: var(--hairline); border-radius: 999px;
+  }
+}
+
+.mh-chapter-nav-eyebrow {
+  margin: 0 0 12px;
+  padding: 0 0 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+}
+.mh-chapter-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+/* The vertical rule the active marker rides on. */
+.mh-chapter-nav-list::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 1px;
+  background: var(--hairline);
+}
+.mh-chapter-nav-list > li { margin: 0; }
+.mh-chapter-nav a {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0 8px 16px;
+  margin-left: -1px;
+  border-left: 2px solid transparent;
+  color: var(--ink-muted);
+  text-decoration: none;
+  line-height: 1.3;
+  transition: color var(--transition), border-color var(--transition);
+}
+.mh-chapter-nav a:hover { color: var(--ink); }
+.mh-chapter-nav a:focus-visible { outline-offset: -2px; }
+.mh-chapter-num {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  transition: color var(--transition);
+}
+.mh-chapter-label { font-size: 13px; font-weight: 500; }
+.mh-chapter-nav a.is-active {
+  color: var(--ink);
+  border-left-color: var(--lane);
+}
+.mh-chapter-nav a.is-active .mh-chapter-num { color: var(--lane); }
+.mh-chapter-nav a.is-active .mh-chapter-label { font-weight: 600; }
+
 /* Reduced motion — kill all keyframe animation, freeze pulse dots,
    stop the spinner. Round-1 audit had only zero'd duration; this also
    forces iteration count to 1 and explicitly disables looping pulses. */
@@ -6011,21 +8592,120 @@ select:focus-visible {
 from mediahub.web.theme_tokens import (  # noqa: E402
     THEME_TOKENS_CSS as _MH_TT_CSS,
     THEME_COMPONENTS_CSS as _MH_TC_CSS,
+    THEME_MOTION_CSS as _MH_MOTION_CSS,
 )
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
+from mediahub.web.pipeline_diagram import (  # noqa: E402
+    PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
+    pipeline_diagram_section_html as _pipeline_diagram_section_html,
+)
+from mediahub.web.content_intro import (  # noqa: E402
+    CONTENT_INTRO_CSS as _MH_CI_CSS,
+    presentation_for as _ct_presentation_for,
+    render_content_intro as _render_content_intro,
+    render_plan_intro as _render_plan_intro,
+)
+from mediahub.web.cadence_heatmap import (  # noqa: E402
+    CADENCE_HEATMAP_CSS as _MH_CAD_CSS,
+    cadence_panel_html as _cadence_panel_html,
+    window_start as _cadence_window_start,
+)
+from mediahub.web import code_highlight as _code_hl  # noqa: E402
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
-# only shows up if .mh-audience-icon carries a visible `color`. Pin it to
-# the lane accent. It rides with the components layer (a class + descendant
-# selector out-specifies the bare `svg` reset in the guardrails, which set
-# no colour outside @media print), so the icons stay legible against the
-# dark --surface card background while RESPONSIVE_GUARDRAILS_CSS remains the
-# cascade's final layer (see test_theme_tokens::test_guardrails_appended_last).
-_MH_AUDIENCE_ICON_CSS = (
-    "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
+# only shows up if .mh-audience-icon carries a visible `color`. Paint it in
+# neutral ink, NOT --lane: the default house brand seed resolves --lane to a
+# dark navy that vanishes on the dark card, so the affordance must not depend
+# on the accent's lightness (same rule as .mh-faq-icon). It rides with the
+# components layer (a class + descendant selector out-specifies the bare
+# `svg` reset in the guardrails, which set no colour outside @media print),
+# so the icons stay legible against the dark --surface card background while
+# RESPONSIVE_GUARDRAILS_CSS remains the cascade's final layer (see
+# test_theme_tokens::test_guardrails_appended_last).
+_MH_AUDIENCE_ICON_CSS = "\n.mh-audience-icon { color: var(--ink-dim); }\n.mh-audience-icon svg { color: var(--ink-dim); }\n"
+# Motion / effect kit + the U.8 pipeline-diagram CSS + the UI 1.17
+# cadence-heatmap CSS ride AFTER the components layer (so they can elevate
+# existing component primitives) but BEFORE the guardrails, which must stay the
+# cascade's final layer (test_theme_tokens::test_guardrails_appended_last).
+BASE_CSS = (
+    _MH_TT_CSS
+    + BASE_CSS
+    + _MH_TC_CSS
+    + _MH_AUDIENCE_ICON_CSS
+    + _MH_MOTION_CSS
+    + _MH_PL_CSS
+    + _MH_CI_CSS
+    + _MH_CAD_CSS
+    + _MH_RG_CSS
 )
-BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
+
+
+# Content-hash fingerprint for the progressive-enhancement UI kit. It rides the
+# <script> URL as `?v=…` so the long SEND_FILE_MAX_AGE_DEFAULT browser cache can
+# hold ui-kit.js across navigations, yet a deploy that changes the file ships a
+# new URL and busts that cache immediately. A content hash (not file mtime)
+# means every replica computes the same value, so a load-balanced fleet agrees
+# on the URL. Falls back to a constant only if the file is unreadable at import.
+try:
+    _UI_KIT_VER = hashlib.sha256(
+        (Path(__file__).resolve().parent / "static" / "js" / "ui-kit.js").read_bytes()
+    ).hexdigest()[:10]
+except OSError:
+    _UI_KIT_VER = "static"
+
+
+# U.9 — cycling hero accent word. The content types MediaHub makes, in the
+# order the signed-out landing hero crossfades through them. The first word is
+# the one the server renders active (so it shows with no JavaScript and is the
+# one a screen reader announces); the rest are aria-hidden decorative cycles.
+_HERO_CONTENT_WORDS = ("stories", "reels", "graphics", "captions")
+
+# The script that drives the crossfade. It only toggles `.is-active`; the
+# crossfade itself is the CSS opacity transition on `.mh-word-cycle-item`. It
+# is a no-op when the visitor asks for reduced motion (matchMedia guard) and
+# when there is nothing to cycle, and it pauses while the tab is backgrounded
+# so it isn't running a timer off-screen. Inline is fine: the CSP allows
+# 'unsafe-inline' scripts and the rest of the app already uses inline scripts.
+_HERO_WORD_CYCLE_JS = """<script>
+(function(){
+  var mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (mq && mq.matches) return;
+  var box = document.querySelector('[data-mh-word-cycle]');
+  if (!box) return;
+  var items = box.querySelectorAll('.mh-word-cycle-item');
+  if (items.length < 2) return;
+  var i = 0, timer = null;
+  function step(){
+    items[i].classList.remove('is-active');
+    i = (i + 1) % items.length;
+    items[i].classList.add('is-active');
+  }
+  function start(){ if (timer === null) { timer = window.setInterval(step, 2600); } }
+  function stop(){ if (timer !== null) { window.clearInterval(timer); timer = null; } }
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden) { stop(); } else { start(); }
+  });
+  start();
+})();
+</script>"""
+
+
+def _hero_word_cycle_html() -> str:
+    """The signed-out hero's cycling content-type accent (U.9).
+
+    Returns the ``<span class="mh-word-cycle">`` carrying one
+    ``.editorial`` (gold serif-italic) word per content type. The first word
+    is rendered ``is-active`` so it is the one shown with no JavaScript and the
+    one a screen reader reads; the rest are ``aria-hidden`` decorative cycles.
+    The words are fixed constants — no user input — so no escaping is needed.
+    """
+    spans = []
+    for k, word in enumerate(_HERO_CONTENT_WORDS):
+        cls = "editorial mh-word-cycle-item" + (" is-active" if k == 0 else "")
+        hidden = "" if k == 0 else ' aria-hidden="true"'
+        spans.append(f'<span class="{cls}"{hidden}>{word}</span>')
+    return '<span class="mh-word-cycle" data-mh-word-cycle>' + "".join(spans) + "</span>"
 
 
 def _render_markdown(text: str) -> str:
@@ -6694,6 +9374,115 @@ def _theme_seed_style_block() -> str:
 
 # Self-contained "Create graphic" panel script for pages OTHER than the meet
 # review page (which has its own richer createGraphic with motion + add-to-pack).
+# U.6 — the branded render/generation loading state (inspired by Lusion). One
+# reusable controller, `MH.renderProgress(container, opts)`, shared by every long
+# render/generation wait (motion, reels, graphics). It paints a large editorial
+# %-numeral (reusing the .display-num motif) over a minimal progress bar.
+#
+# Honesty: the renders are opaque (a blocking request, or a running/done poll),
+# so the percentage is an eased *time estimate* that asymptotes BELOW 100 and
+# only snaps to 100 when the real result lands (`complete()`). Where the backend
+# does report real progress (variant batches: done/total), the caller feeds it
+# via `setProgress` and the bar tracks the actual work. The number is monotonic
+# and never claims "done" before the artefact exists.
+#
+# UI1.26 — every renderProgress wait also spawns a cursor-anchored mirror via
+# MH.cursorReadout (ui-kit.js): a small "NN% · phase" chip that follows the
+# pointer during the wait and disappears on complete()/stop(). It is opt-out
+# (opts.cursor === false) and degrades safely if ui-kit.js hasn't loaded yet.
+#
+# Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
+# kept as a module constant so tests can exercise the controller directly.
+_RENDER_PROGRESS_JS = """
+(function(){
+  var MH = window.MH = window.MH || {};
+  if (MH.renderProgress) return;
+  var CEIL = 94;  // eased-estimate asymptote — never reaches 100 on its own
+  var CAP  = 97;  // hard ceiling for a real-progress floor while still running
+  function clamp(v, lo, hi){ return v < lo ? lo : (v > hi ? hi : v); }
+  MH.renderProgress = function(container, opts){
+    opts = opts || {};
+    if (!container) return null;
+    var accent = (opts.accent === 'medal') ? 'medal' : 'lane';
+    var expected = Math.max(2000, opts.expectedMs || 45000);
+    var k = expected * 0.5;  // time constant: ~81% of CEIL at `expected`
+    var ariaLabel = (opts.label ? String(opts.label) : 'Render progress').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    container.innerHTML =
+      '<div class="mh-render-prog" data-accent="' + accent + '" role="progressbar" ' +
+        'aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="' + ariaLabel + '">' +
+        '<div class="mh-render-prog-num">' +
+          '<span class="mh-render-prog-pct display-num">0</span>' +
+          '<span class="mh-render-prog-sign">%</span>' +
+        '</div>' +
+        '<div class="mh-render-prog-bar"><span class="mh-render-prog-fill"></span></div>' +
+        '<div class="mh-render-prog-label" aria-live="polite"></div>' +
+        '<div class="mh-render-prog-sub"></div>' +
+      '</div>';
+    var root  = container.querySelector('.mh-render-prog');
+    var numEl = container.querySelector('.mh-render-prog-pct');
+    var fillEl= container.querySelector('.mh-render-prog-fill');
+    var labEl = container.querySelector('.mh-render-prog-label');
+    var subEl = container.querySelector('.mh-render-prog-sub');
+    // UI1.26 — a cursor-anchored mirror of this readout: a small "NN% · phase"
+    // chip that follows the pointer through the wait and vanishes on completion.
+    // MH.cursorReadout ships in the deferred ui-kit.js and is always loaded by
+    // the time a user triggers a render; opt out with opts.cursor === false.
+    var cursor = (opts.cursor !== false && MH.cursorReadout)
+      ? MH.cursorReadout({ label: opts.label || 'Rendering', accent: accent, percent: 0 })
+      : null;
+    var raf = window.requestAnimationFrame || function(cb){ return setTimeout(function(){ cb(Date.now()); }, 32); };
+    var start = Date.now();
+    var cur = 0, floor = 0, lastShown = -1;
+    var stopped = false, finishing = false, finishFrom = 0, finishStart = 0, finishCb = null;
+    function paint(v){
+      if (v < cur) v = cur;   // monotonic — never tick backwards on a stale frame
+      cur = v;
+      var shown = Math.floor(v);
+      if (shown !== lastShown){ lastShown = shown; numEl.textContent = String(shown); if (cursor) cursor.set(shown); }
+      fillEl.style.width = v.toFixed(1) + '%';
+      if (root) root.setAttribute('aria-valuenow', String(Math.round(v)));
+    }
+    function setText(label, sub){
+      if (label != null) { labEl.textContent = label; if (cursor) cursor.status(label); }
+      if (sub != null) subEl.textContent = sub;
+    }
+    setText(opts.label || 'Rendering', opts.sub || '');
+    function frame(){
+      if (stopped) return;
+      var now = Date.now();
+      if (finishing){
+        var t = clamp((now - finishStart) / 460, 0, 1);
+        paint(finishFrom + (100 - finishFrom) * t);
+        if (t >= 1){
+          stopped = true; paint(100);
+          if (cursor) cursor.done();
+          if (finishCb) setTimeout(finishCb, 170);
+          return;
+        }
+      } else {
+        var eased = CEIL * (1 - Math.exp(-(now - start) / k));
+        paint(clamp(Math.max(eased, floor), 0, CAP));
+      }
+      raf(frame);
+    }
+    raf(frame);
+    return {
+      setPhase: function(label, sub){ setText(label, sub); },
+      setProgress: function(pct){
+        if (typeof pct !== 'number' || isNaN(pct)) return;
+        floor = clamp(Math.max(floor, pct), 0, CAP);  // monotonic real floor
+      },
+      complete: function(cb){
+        if (stopped || finishing){ if (cb) cb(); return; }
+        finishing = true; finishFrom = cur; finishStart = Date.now(); finishCb = cb || null;
+      },
+      stop: function(){ stopped = true; if (cursor) cursor.done(); }
+    };
+  };
+})();
+"""
+
+
 # Exposes window.mhCreateGraphic(btn, createUrl, cardId, fmt): POSTs to createUrl,
 # then renders the returned visual into <div class="visual-panel" data-card="cardId">.
 # Defined once (guarded), no f-string interpolation — embed verbatim via {_VISUAL_PANEL_JS}.
@@ -6707,7 +9496,7 @@ _VISUAL_PANEL_JS = """<script>
   }
   function chipStyle(active){
     return 'font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid '
-      + (active?'var(--lane)':'var(--border)') + ';background:' + (active?'rgba(212,255,58,0.12)':'transparent')
+      + (active?'var(--lane)':'var(--border)') + ';background:' + (active?'color-mix(in oklab, var(--lane) 12%, transparent)':'transparent')
       + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0';
   }
   function render(panel, data){
@@ -6729,7 +9518,7 @@ _VISUAL_PANEL_JS = """<script>
     var formats = [['feed_portrait','Portrait'],['feed_square','Square']];
     var tabs = formats.map(function(f){
       var on = (f[0] === cur);
-      return '<button type="button" class="mh-vbtn" data-fmt="' + f[0] + '" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'rgba(212,255,58,0.15)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
+      return '<button type="button" class="mh-vbtn" data-fmt="' + f[0] + '" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'color-mix(in oklab, var(--lane) 15%, transparent)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
     }).join('');
     var photos = data.available_photos || [];
     var picker = '';
@@ -6750,8 +9539,8 @@ _VISUAL_PANEL_JS = """<script>
     }
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="flex:0 0 200px;max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
-        '<div style="flex:1;min-width:200px">' +
+        '<div style="flex:0 0 min(200px,100%);max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
+        '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + esc(layout || 'auto') + '</div>' +
           (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + esc(why) + '</div>' : '') +
           '<div style="margin-bottom:8px">' + tabs + '</div>' +
@@ -6766,7 +9555,7 @@ _VISUAL_PANEL_JS = """<script>
   function mhGen(panel){
     var st = panel._mh; if (!st || !st.url) return;
     panel.style.display = '';
-    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px"><div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>Generating graphic\\u2026 this may take 5-15 seconds</div>';
+    var prog = MH.renderProgress(panel, {label: 'Designing your graphic', sub: 'Usually 5\\u201315 seconds', expectedMs: 9000, accent: 'lane'});
     var body = {format: st.fmt || 'feed_portrait'};
     if (st.assetId) body.asset_id = st.assetId;
     if (st.noPhoto) body.no_photo = true;
@@ -6774,12 +9563,14 @@ _VISUAL_PANEL_JS = """<script>
       .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
       .then(function(res){
         if (!res.ok || res.body.error){
+          prog.stop();
           panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
           return;
         }
-        render(panel, res.body);
+        prog.complete(function(){ render(panel, res.body); });
       })
       .catch(function(err){
+        prog.stop();
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
       });
   }
@@ -6803,6 +9594,14 @@ _VISUAL_PANEL_JS = """<script>
     var panel = panelFor(cardId);
     if (!panel) return;
     panel._mh = {url: url, cardId: cardId, fmt: fmt || 'feed_portrait', assetId: '', noPhoto: false};
+    mhGen(panel);
+  };
+  // Single-prompt flow: render a card's graphic on page load, optionally with
+  // a pre-attached photo as the background. Same pipeline as the button.
+  window.mhAutoGraphic = function(cardId, url, assetId, fmt){
+    var panel = panelFor(cardId);
+    if (!panel) return;
+    panel._mh = {url: url, cardId: cardId, fmt: fmt || 'feed_portrait', assetId: assetId || '', noPhoto: false};
     mhGen(panel);
   };
 })();
@@ -7067,7 +9866,13 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     }
 
 
-def _layout(title: str, body: str, active: str = "home") -> str:
+def _layout(
+    title: str,
+    body: str,
+    active: str = "home",
+    dock: dict | None = None,
+    chapters: list[tuple[str, str]] | None = None,
+) -> str:
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
@@ -7086,6 +9891,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     signed_in_primary = ""
     signed_in_secondary = ""
     signed_in_logo = ""
+    signed_in_bg_logos: list[str] = []
     if signed_in_pid:
         try:
             _p = load_profile(signed_in_pid)
@@ -7121,16 +9927,140 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                             signed_in_logo = _cap
                 except Exception:
                     signed_in_logo = ""
+                # The org's uploaded logos, surfaced as a soft monochrome
+                # "logo wall" behind every signed-in page (the "team's logos
+                # seamlessly in the background" ask — see the .mh-bg-logos CSS
+                # and the bg_logos_html builder below). Use them ALL, but prefer
+                # transparency-capable formats so the mask-tint reads as a clean
+                # silhouette; only fall back to opaque formats (e.g. JPEG, which
+                # mask to a solid block) if that's all the org uploaded. Served
+                # first-party — the signed-in pid IS the active profile, so the
+                # serve route resolves them.
+                try:
+                    _trans: list[str] = []
+                    _opaque: list[str] = []
+                    for _e in getattr(_p, "brand_logos", None) or []:
+                        if not (isinstance(_e, dict) and _e.get("logo_id")):
+                            continue
+                        _mime = str(_e.get("mime", "")).lower()
+                        if not _mime.startswith("image/"):
+                            continue
+                        _u = url_for("organisation_setup_logo_serve", logo_id=_e["logo_id"], bg=1)
+                        if _mime in (
+                            "image/png",
+                            "image/svg+xml",
+                            "image/webp",
+                            "image/gif",
+                            "image/avif",
+                        ):
+                            _trans.append(_u)
+                        else:
+                            _opaque.append(_u)
+                    # Cap for sanity (the wall samples ~24); keep all that fit.
+                    signed_in_bg_logos = (_trans or _opaque)[:32]
+                except Exception:
+                    signed_in_bg_logos = []
         except Exception:
             signed_in_name = ""
+
+    # Soft monochrome "logo wall" behind every signed-in page, built from the
+    # org's uploaded logos. Each mark paints the logo's silhouette in one
+    # brand-derived tint (CSS mask + background-color, see .mh-bg-logo) so the
+    # field reads as a single cohesive branded texture, not a clash of marks.
+    # Positions are a deterministically-jittered grid seeded by the profile id,
+    # so every uploaded logo is used, repeats are spread out, and the
+    # arrangement is STABLE across page loads (no jarring re-shuffle).
+    bg_logos_html = ""
+    if signed_in_bg_logos:
+        _rng = random.Random("mh-bg:" + (signed_in_pid or "default"))
+        _pool = signed_in_bg_logos
+        _cols, _rows = 6, 4
+        _cells = _cols * _rows
+        # Repeat the pool to fill the field, then shuffle so identical logos
+        # don't line up in a visible grid pattern.
+        _bag = (_pool * (_cells // len(_pool) + 1))[:_cells]
+        _rng.shuffle(_bag)
+        # Depth tiers: (min_px, vw, max_px, base_opacity, blur_px).
+        _tiers = (
+            (120, 15.5, 210, 0.120, 0.0),  # near — crisp, largest, strongest
+            (88, 11.5, 158, 0.095, 0.0),  # mid
+            (60, 8.5, 116, 0.070, 1.0),  # far — small, faint, softened
+        )
+        _marks: list[str] = []
+        for _i in range(_cells):
+            _col, _row = _i % _cols, _i // _cols
+            _x = (_col + 0.5) / _cols * 100.0 + _rng.uniform(-6.5, 6.5)
+            _y = (_row + 0.5) / _rows * 100.0 + _rng.uniform(-9.0, 9.0)
+            _smin, _svw, _smax, _op, _blur = _rng.choices(_tiers, weights=(3, 4, 3))[0]
+            _op = round(_op * _rng.uniform(0.82, 1.12), 4)
+            _rot = round(_rng.uniform(-11.0, 11.0), 2)
+            _scl = round(_rng.uniform(0.92, 1.08), 3)
+            _blur_css = f"filter:blur({_blur}px);" if _blur else ""
+            _src = _h(_bag[_i])
+            _marks.append(
+                '<span class="mh-bg-logo" style="'
+                f"left:{_x:.2f}%;top:{_y:.2f}%;"
+                f"width:clamp({_smin}px,{_svw}vw,{_smax}px);"
+                f"height:clamp({_smin}px,{_svw}vw,{_smax}px);"
+                f"--r:{_rot}deg;--s:{_scl};opacity:{_op};{_blur_css}"
+                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
+                '"></span>'
+            )
+        _brand = (
+            signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
+        )
+        _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
+        bg_logos_html = (
+            f'<div class="mh-bg-logos" aria-hidden="true"{_brand_attr}>'
+            + "".join(_marks)
+            + "</div>"
+        )
+
+    # One-shot success/error toast queued by a prior POST (see _flash_toast).
+    # Popped here so it fires exactly once, on the next page the user sees. The
+    # "in session" guard means the common no-flash render never marks the
+    # session dirty (no spurious Set-Cookie on every page).
+    flash_toast = None
+    try:
+        from flask import has_request_context as _hrc
+
+        if _hrc() and "mh_toast" in session:
+            flash_toast = session.pop("mh_toast", None)
+    except Exception:
+        flash_toast = None
+
+    # UI 1.29 — sticky chaptered scroll-spy nav. A caller (e.g. the long home
+    # page) passes ``chapters`` as ``[(section_id, label), …]``; we render a
+    # sticky side rail of in-page anchors and the body is wrapped so the rail
+    # can sit in its own grid column on wide viewports. The active chapter is
+    # lit by the IntersectionObserver scroll-spy in MH.bindChapterNav. Without
+    # JS (or on narrow screens) it degrades to a plain anchor list / is hidden,
+    # so it is a pure progressive enhancement — never a load-bearing control.
+    chapter_nav_html = ""
+    if chapters:
+        _ch_items = "".join(
+            (
+                f'<li><a href="#{_h(_cid)}" data-mh-chap>'
+                f'<span class="mh-chapter-num" aria-hidden="true">{_idx:02d}</span>'
+                f'<span class="mh-chapter-label">{_h(_label)}</span></a></li>'
+            )
+            for _idx, (_cid, _label) in enumerate(chapters, 1)
+        )
+        chapter_nav_html = (
+            '<nav class="mh-chapter-nav" aria-label="On this page" data-mh-chapnav>'
+            '<p class="mh-chapter-nav-eyebrow" aria-hidden="true">On this page</p>'
+            f'<ol class="mh-chapter-nav-list">{_ch_items}</ol>'
+            "</nav>"
+        )
+
     return render_template_string(
         """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="{{ 'mh-signed-in' if signed_in else '' }}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark light" />
+<meta name="color-scheme" content="dark" />
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
 <title>{{ title }} &mdash; MediaHub</title>
@@ -7167,6 +10097,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     window._API_BASE = m ? m[1] : '';
   })();
 </script>
+<script>{{ render_progress_js | safe }}</script>
 <script>
   // Register the service worker (installable PWA + offline shell). Best-effort:
   // a failure here never affects the page.
@@ -7176,9 +10107,15 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     });
   }
 </script>
+<!-- UI kit — first-party progressive-enhancement behaviours for the motion /
+     effect layer (theme-motion.css). Deferred: runs after parse, in order,
+     before DOMContentLoaded. Self-hosted (no CDN); a load failure leaves every
+     page fully usable (effects are decorative). -->
+<script defer src="{{ ui_kit_js_url }}"></script>
 </head>
-<body>
+<body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
+{{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
   <div class="mh-loader-inner">
     <div class="mh-spinner"></div>
@@ -7193,15 +10130,19 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       <!-- Pit-wall plate — follows the cascade surface so a re-skinned
            chrome shows a proper backplate (Phase 1.6 Stage F3). -->
       <rect x="0.5" y="0.5" width="31" height="31" rx="2" fill="var(--mh-surface)" stroke="var(--mh-outline-rule)" stroke-width="1"/>
-      <!-- Ascending podium bars: silver (ink) / brand primary / brand tertiary.
-           The silver bar uses currentColor so it inherits the link's ink
-           colour (var(--ink)) — Stage F3's "MediaHub's own marks use
-           currentColor + var()" rule. -->
+      <!-- Ascending podium bars: silver (ink) / lane-yellow / medal-gold. The
+           MediaHub logo is the one mark that does NOT re-skin with the club
+           brand — it stays MediaHub's own identity colours so a club always
+           knows whose product they're in (maintainer decision: "the logo is the
+           only thing that doesn't change colour"). The silver bar keeps
+           currentColor (the link's neutral ink, constant); the lane-yellow and
+           medal-gold bars + baseline are pinned, not var(--mh-primary/tertiary),
+           so they never take the active profile's colours. -->
       <rect x="6"  y="20" width="5" height="7"  fill="currentColor" opacity="0.55"/>
-      <rect x="13.5" y="9"  width="5" height="18" fill="var(--mh-primary)"/>
-      <rect x="21" y="14" width="5" height="13" fill="var(--mh-tertiary)"/>
-      <!-- Lane baseline — brand primary stroke -->
-      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="var(--mh-primary)" stroke-width="1"/>
+      <rect x="13.5" y="9"  width="5" height="18" fill="#D4FF3A"/>
+      <rect x="21" y="14" width="5" height="13" fill="#F4D58D"/>
+      <!-- Lane baseline — MediaHub lane-yellow (fixed) -->
+      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="#D4FF3A" stroke-width="1"/>
     </svg>
     MediaHub
   </a>
@@ -7211,19 +10152,32 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   </button>
   <nav id="mh-primary-nav">
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
-    <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
+    {# Plan moved out of the top bar and under Create — it answers "what should
+       we make?", so it lives as the strategic entry point on the Create page
+       (and stays on the g→p keyboard shortcut). #}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
-    <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
+    {# Templates and the design studio are reached from the Create page, not the
+       top bar: the template gallery stays a "browse the card styles" link and
+       the studio is a full Create tile (the live design editor). Keeping both
+       off the top bar leaves the signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('club_data_page') }}" class="{{ 'active' if active=='clubdata' else '' }}">Club data</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
+    {# Spacer — pushes the utility / account cluster to the right edge (it used
+       to be the backend "online" pill's margin-left:auto; the pill is gone). #}
+    <span class="mh-nav-spacer" aria-hidden="true"></span>
+    {# Settings, Switch organisation and Sign out moved into the active-org
+       account menu (the dropdown on the far right) for signed-in users. Signed-
+       out visitors keep a plain Settings + Pricing link here. Pricing is a
+       top-bar item only for signed-out visitors (prospects) — once signed into
+       a club profile it lives in Settings ("Pricing & plans") so the signed-in
+       chrome stays operations-focused, not sales-focused. #}
+    {% if not signed_in %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
-    {% if signed_in %}
-      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
-      <a href="{{ url_for('sign_out') }}">Sign out</a>
-    {% else %}
-      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    {% if account_email %}
+    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    {% endif %}
     {% endif %}
     {% if dev_operator %}
       <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Developer &check;</a>
@@ -7232,52 +10186,102 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       <a href="{{ url_for('logout') }}">Log out</a>
     {% else %}
       <a href="{{ url_for('login_page') }}">Log in</a>
-      <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
+      {# "Developer" sign-in link removed from the top bar — operator sign-in
+         lives in the footer ("Developer access") on the home page. The header
+         "online" status pill was removed too; reachability now lives only in
+         the footer status HUD. #}
     {% endif %}
-    <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
-       title="Backend status (click for full health JSON)">
-      <span id="backend-pill-dot"></span>
-      <span id="backend-pill-text">checking&hellip;</span>
-    </a>
-    {% if signed_in and signed_in_name %}
-    <a id="active-org-chip"
-       href="{{ url_for('organisation_setup') }}"
-       title="Active organisation — click to review brand setup"
-       style="display:inline-flex;align-items:center;gap:8px;
-              border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
-              border-radius:999px;text-decoration:none;color:var(--ink);
-              background:rgba(245,242,232,0.03);margin-left:8px">
-      {% if signed_in_logo %}
-      <span aria-hidden="true"
-            style="display:inline-flex;align-items:center;justify-content:center;
-                   width:20px;height:20px;border-radius:5px;overflow:hidden;
-                   background:#fff;border:1px solid rgba(245,242,232,0.20)">
-        <img src="{{ signed_in_logo }}" alt=""
-             style="width:100%;height:100%;object-fit:contain" />
-      </span>
-      {% endif %}
-      {% if signed_in_primary %}
-      <span aria-hidden="true"
-            style="display:inline-block;width:10px;height:10px;border-radius:50%;
-                   background:{{ signed_in_primary }};
-                   border:1px solid rgba(245,242,232,0.20)"></span>
-      {% endif %}
-      {% if signed_in_secondary %}
-      <span aria-hidden="true"
-            style="display:inline-block;width:10px;height:10px;border-radius:50%;
-                   background:{{ signed_in_secondary }};
-                   border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
-      {% endif %}
-      <span style="font-weight:600;letter-spacing:0.01em;
-                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        {{ signed_in_name }}
-      </span>
-    </a>
+    {% if signed_in %}
+    {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
+       render-complete, pack-ready and error events for the active org, backed
+       by the notify-layer inbox store and polled on the same light cadence as
+       the health pill. The dropdown panel is JS-positioned (fixed) so the
+       scrollable / hamburger nav can never clip it. #}
+    <div id="mh-notif" class="mh-notif">
+      <button id="mh-notif-btn" class="mh-notif-btn" type="button"
+              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-controls="mh-notif-panel"
+              data-list-url="{{ url_for('api_notifications') }}"
+              data-readall-url="{{ url_for('api_notifications_read_all') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
+      </button>
+      <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
+           aria-label="Notifications" hidden>
+        <div class="mh-notif-head">
+          <span class="mh-notif-h-title">Notifications</span>
+          <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
+        </div>
+        <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
+        <div id="mh-notif-empty" class="mh-notif-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="mh-notif-empty-t">You're all caught up</span>
+          <span class="mh-notif-empty-s">Render, pack, and error updates show up here.</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+    {% if signed_in %}
+    {# Active-organisation account menu. The chip itself no longer navigates
+       (its old "review brand setup" shortcut was removed); clicking it opens a
+       dropdown with Settings / Switch organisation / Sign out. Progressive
+       enhancement (mirrors the notifications dropdown): with JS the panel
+       collapses under the chip and is JS-anchored so the scrollable / hamburger
+       nav can never clip it; with no JS the items stay inline so they're never
+       hidden. The id stays "active-org-chip" so the per-profile logo/colours
+       still surface here. #}
+    <div id="mh-orgmenu" class="mh-orgmenu">
+      <button id="active-org-chip" class="mh-orgmenu-btn" type="button"
+              aria-haspopup="menu" aria-expanded="false" aria-controls="mh-orgmenu-panel"
+              title="Account &amp; organisation">
+        {% if signed_in_logo %}
+        <span aria-hidden="true"
+              style="display:inline-flex;align-items:center;justify-content:center;
+                     width:20px;height:20px;border-radius:5px;overflow:hidden;
+                     background:#fff;border:1px solid rgba(245,242,232,0.20)">
+          <img src="{{ signed_in_logo }}" alt=""
+               style="width:100%;height:100%;object-fit:contain" />
+        </span>
+        {% endif %}
+        {% if signed_in_primary %}
+        <span aria-hidden="true"
+              style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                     background:{{ signed_in_primary }};
+                     border:1px solid rgba(245,242,232,0.20)"></span>
+        {% endif %}
+        {% if signed_in_secondary %}
+        <span aria-hidden="true"
+              style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                     background:{{ signed_in_secondary }};
+                     border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
+        {% endif %}
+        <span class="mh-orgmenu-name">{{ signed_in_name or 'Account' }}</span>
+        <svg class="mh-orgmenu-caret" width="12" height="12" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="mh-orgmenu-panel" class="mh-orgmenu-panel" role="menu"
+           aria-label="Account and organisation">
+        <a href="{{ url_for('settings_page') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">Settings</a>
+        <a href="{{ url_for('sign_in_page') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">Switch organisation</a>
+        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">Sign out</a>
+      </div>
+    </div>
     {% endif %}
   </nav>
 </header>
-<main class="wrap" id="mh-main">
-{{ body | safe }}
+<main class="wrap{{ ' mh-has-chapnav' if chapter_nav_html else '' }}" id="mh-main">
+{% if chapter_nav_html %}{{ chapter_nav_html | safe }}<div class="mh-chapnav-content">{{ body | safe }}</div>{% else %}{{ body | safe }}{% endif %}
 </main>
 <footer class="mh-footer">
   <div class="mh-footer-inner">
@@ -7307,9 +10311,45 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
+    </div>
+  </div>
+  {# UI 1.5 — Live local-time + system-status HUD readout. A mono blueprint
+     strip at the foot of the masthead: a live local clock + a deployment
+     status line (reachability · build · UTC), driven by the existing /healthz
+     poll and a client-side clock. The sole reachability indicator now that the
+     header "online" pill was removed. No new backend surface. Decorative dot and
+     separators are aria-hidden; the status word carries the meaning, and the
+     clocks are <time> elements that update without a noisy aria-live region. #}
+  <div id="mh-hud" class="mh-hud">
+    <div class="mh-hud-inner">
+      <div class="mh-hud-group">
+        <span class="mh-hud-field">
+          <span class="mh-hud-label">Local</span>
+          <time id="mh-hud-clock" class="mh-hud-val mh-hud-clock">--:--:--</time>
+          <span id="mh-hud-tz" class="mh-hud-tz"></span>
+        </span>
+      </div>
+      <div class="mh-hud-group mh-hud-group--system">
+        <span class="mh-hud-field">
+          <span id="mh-hud-dot" class="mh-hud-dot" aria-hidden="true"></span>
+          <span id="mh-hud-status" class="mh-hud-val mh-hud-status">Connecting</span>
+        </span>
+        <span class="mh-hud-sep" aria-hidden="true">·</span>
+        <span class="mh-hud-field">
+          <span class="mh-hud-label">Build</span>
+          <span id="mh-hud-build" class="mh-hud-val">&mdash;</span>
+        </span>
+        <span class="mh-hud-sep" aria-hidden="true">·</span>
+        <span class="mh-hud-field">
+          <span class="mh-hud-label">UTC</span>
+          <time id="mh-hud-utc" class="mh-hud-val mh-hud-clock">--:--:--</time>
+        </span>
+      </div>
     </div>
   </div>
 </footer>
@@ -7331,34 +10371,329 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     Settings
   </a>
 </nav>
+{# UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style). Press ? on any
+   page to open it; lists the navigation + general shortcuts, and reveals the
+   review-flow quick keys when a review surface is on the page. Vanilla JS
+   (bindShortcuts) reuses MH.openModal for the focus-trap. Navigation rows are
+   real url_for() links, so the keyboard map is read straight back off the DOM —
+   one source of truth, and the rows still work as a click menu with no JS. #}
+<div class="mh-kbd-overlay" id="mh-shortcuts-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="mh-shortcuts-title" aria-hidden="true">
+  <div class="mh-kbd-overlay-panel" role="document">
+    <button type="button" class="mh-kbd-overlay-close" data-mh-modal-close
+            aria-label="Close keyboard shortcuts">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+    </button>
+    <h3 id="mh-shortcuts-title">Keyboard shortcuts</h3>
+    <section data-mh-shortcuts-group="nav">
+      <h4>Navigation</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>h</kbd></span>
+        <a class="desc" data-mh-go="h" href="{{ url_for('home') }}">Go to Home</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>p</kbd></span>
+        <a class="desc" data-mh-go="p" href="{{ url_for('plan_page') }}">Go to Plan</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>c</kbd></span>
+        <a class="desc" data-mh-go="c" href="{{ url_for('make_page') }}">Go to Create</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>m</kbd></span>
+        <a class="desc" data-mh-go="m" href="{{ url_for('media_library_page') }}">Go to Media library</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>a</kbd></span>
+        <a class="desc" data-mh-go="a" href="{{ url_for('activity_page') }}">Go to Activity</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>s</kbd></span>
+        <a class="desc" data-mh-go="s" href="{{ url_for('settings_page') }}">Go to Settings</a>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="review" hidden>
+      <h4>Review &amp; approve</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>j</kbd></span><span class="desc">Focus next card</span>
+        <span class="keys"><kbd>k</kbd></span><span class="desc">Focus previous card</span>
+        <span class="keys"><kbd>a</kbd></span><span class="desc">Approve the focused card</span>
+        <span class="keys"><kbd>u</kbd></span><span class="desc">Send the focused card back to the queue</span>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="general">
+      <h4>General</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>?</kbd></span><span class="desc">Open or close this help</span>
+        <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close this help</span>
+      </div>
+    </section>
+    <div class="mh-kbd-overlay-foot">Shortcuts pause while you're typing in a field.</div>
+  </div>
+</div>
+{% if dock %}
+<!-- U.13 — Floating mobile action dock. A bottom-centre thumb-reachable
+     capsule for the review/approve flow on mobile (Create / Library /
+     Approve). Replaces the generic bottom-tab bar here (the body.mh-has-dock
+     class hides it) so the two never stack; hidden on desktop. The "Approve"
+     pill acts on the queued card nearest the viewport centre — see the dock
+     script below. Inspired by Duties (duties.xyz); supports U.4. -->
+<nav class="mh-action-dock" aria-label="Quick review actions" data-builder-url="{{ dock.builder }}">
+  <a href="{{ url_for('make_page') }}" aria-label="Create — start a new content pack">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Create
+  </a>
+  <a href="{{ url_for('media_library_page') }}" aria-label="Open the media library">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>
+    Library
+  </a>
+  <button type="button" class="mh-dock-primary" data-mh-dock-approve aria-label="Approve the highlighted card">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+    <span data-mh-dock-label>Approve</span>
+    <span class="mh-dock-count" data-mh-dock-count aria-hidden="true">{{ dock.queue|default(0) }}</span>
+  </button>
+</nav>
+{% endif %}
 <script>
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
+  /* Reachability poll — drives the footer status HUD readout (UI 1.5) from one
+     /healthz fetch. (The header "online" status pill was removed; the HUD is
+     now the sole reachability indicator.) No new backend surface. */
+  function paint(online, version){
+    var hud = document.getElementById('mh-hud');
+    if (hud) {
+      hud.classList.toggle('mh-hud--online', online);
+      hud.classList.toggle('mh-hud--offline', !online);
+      var st = document.getElementById('mh-hud-status');
+      if (st) st.textContent = online ? 'Online' : 'Offline';
+      var bd = document.getElementById('mh-hud-build');
+      if (bd && version) bd.textContent = version;
+    }
+  }
   function check(){
-    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
-      var ok = o.s === 200 && o.j && o.j.ok;
-      var dot = document.getElementById('backend-pill-dot');
-      var txt = document.getElementById('backend-pill-text');
-      if(!dot||!txt) return;
-      if (ok) {
-        dot.style.background = '#5EE39A';
-        dot.style.boxShadow  = '0 0 8px rgba(94,227,154,0.55)';
-        txt.textContent = 'online';
-      } else {
-        dot.style.background = '#FF6B6B';
-        dot.style.boxShadow  = '0 0 8px rgba(255,107,107,0.55)';
-        txt.textContent = 'offline';
-      }
-    }).catch(function(){
-      var dot = document.getElementById('backend-pill-dot');
-      var txt = document.getElementById('backend-pill-text');
-      if(!dot||!txt) return;
-      dot.style.background = '#FF6B6B';
-      dot.style.boxShadow  = '0 0 8px rgba(255,107,107,0.55)';
-      txt.textContent='offline';
-    });
+    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}})
+      .then(r=>r.json().then(j=>({s:r.status,j:j})))
+      .then(o=>{ paint(o.s === 200 && o.j && o.j.ok, o.j && o.j.version); })
+      .catch(function(){ paint(false); });
   }
   check(); setInterval(check, 30000);
+})();
+</script>
+<script>
+/* UI 1.14 — Notifications inbox. Polls /api/notifications on the same light
+   cadence as the health poll, paints the unread badge, and renders the bell
+   dropdown. The panel is position:fixed and anchored under the bell in JS so
+   the scrollable / hamburger nav can never clip it. All notification text is
+   written with textContent (never innerHTML), so a caption or error string can
+   never inject markup. Self-contained — no dependency on the MH framework. */
+(function(){
+  var btn = document.getElementById('mh-notif-btn');
+  if (!btn) return;  // signed out — no bell rendered
+  var panel   = document.getElementById('mh-notif-panel');
+  var list    = document.getElementById('mh-notif-list');
+  var badge   = document.getElementById('mh-notif-badge');
+  var readAll = document.getElementById('mh-notif-readall');
+  var LIST_URL    = btn.getAttribute('data-list-url');
+  var READALL_URL = btn.getAttribute('data-readall-url');
+  var POLL_MS = 30000;
+  var open = false;
+  var lastUnread = 0;
+
+  function ago(iso){
+    var t = Date.parse(iso);
+    if (isNaN(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 45)   return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+    try { return new Date(t).toLocaleDateString(); } catch (e) { return ''; }
+  }
+
+  function paintBadge(n){
+    lastUnread = n;
+    if (n > 0){
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.hidden = false;
+      btn.setAttribute('aria-label', 'Notifications (' + n + ' unread)');
+    } else {
+      badge.hidden = true;
+      btn.setAttribute('aria-label', 'Notifications');
+    }
+    if (readAll) readAll.disabled = (n === 0);
+  }
+
+  function el(tag, cls, text){
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render(items){
+    list.textContent = '';
+    if (!items || !items.length){ panel.classList.add('is-empty'); return; }
+    panel.classList.remove('is-empty');
+    items.forEach(function(it){
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mh-notif-item ' + (it.read ? 'is-read' : 'is-unread');
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-level', it.level || 'info');
+      row.setAttribute('data-id', it.id);
+      if (it.link) row.setAttribute('data-link', it.link);
+      row.appendChild(el('span', 'mh-notif-dot'));
+      var body = el('span', 'mh-notif-text');
+      body.appendChild(el('span', 'mh-notif-t', it.title || ''));
+      if (it.body) body.appendChild(el('span', 'mh-notif-m', it.body));
+      body.appendChild(el('span', 'mh-notif-time', ago(it.created_at)));
+      row.appendChild(body);
+      row.addEventListener('click', function(){ onItem(it); });
+      list.appendChild(row);
+    });
+  }
+
+  function poll(){
+    if (document.hidden && !open) return;
+    fetch(LIST_URL, {cache:'no-store', headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok) return;
+        paintBadge(d.unread || 0);
+        if (open) render(d.items || []);
+      })
+      .catch(function(){ /* offline — leave the last good state */ });
+  }
+
+  function safeLink(u){
+    /* Only ever follow an in-app path ("/review/…") — never an absolute /
+       cross-origin ("//host") or javascript: URL, even though links are
+       server-built today. Defence-in-depth: the text flows through a DB. */
+    if (!u || typeof u !== 'string') return '';
+    return (u.charAt(0) === '/' && u.charAt(1) !== '/') ? u : '';
+  }
+
+  function onItem(it){
+    if (!it.read){
+      fetch(LIST_URL + '/' + encodeURIComponent(it.id) + '/read',
+            {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if (d && typeof d.unread === 'number') paintBadge(d.unread); })
+        .catch(function(){});
+    }
+    var dest = safeLink(it.link);
+    if (dest){ window.location.href = dest; return; }
+    poll();
+  }
+
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.hidden = false;
+      position();
+      poll();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.hidden = true;
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
+  if (readAll){
+    readAll.addEventListener('click', function(e){
+      e.stopPropagation();
+      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(){ paintBadge(0); poll(); })
+        .catch(function(){});
+    });
+  }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+
+  poll();
+  setInterval(poll, POLL_MS);
+})();
+</script>
+<script>
+/* Active-org account menu — the chip opens a dropdown (Settings / Switch
+   organisation / Sign out). Mirrors the notifications dropdown: a position:
+   fixed panel JS-anchored under the chip so the scrollable / hamburger nav can
+   never clip it, with click-outside + Escape to close. Progressive
+   enhancement — the menu links are real <a> elements that work inline with no
+   JS; this only adds the collapse-to-dropdown behaviour. */
+(function(){
+  var btn = document.getElementById('active-org-chip');
+  if (!btn) return;  // signed out — no chip rendered
+  var panel = document.getElementById('mh-orgmenu-panel');
+  if (!panel) return;
+  var open = false;
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.classList.add('is-open');
+      position();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.classList.remove('is-open');
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
+})();
+</script>
+<script>
+/* UI 1.5 — live local clock for the HUD readout. Pure client-side: ticks the
+   visitor's local time + a UTC reference every second, with a short timezone
+   label. Independent of the network so the clock keeps running even when
+   /healthz is unreachable. No aria-live, so the per-second updates never spam
+   a screen reader. */
+(function(){
+  var localEl = document.getElementById('mh-hud-clock');
+  var utcEl   = document.getElementById('mh-hud-utc');
+  var tzEl    = document.getElementById('mh-hud-tz');
+  if (!localEl && !utcEl) return;
+  function p(n){ return (n < 10 ? '0' : '') + n; }
+  if (tzEl) {
+    var tz = '';
+    try {
+      var parts = new Intl.DateTimeFormat([], {timeZoneName:'short'}).formatToParts(new Date());
+      for (var i = 0; i < parts.length; i++) { if (parts[i].type === 'timeZoneName') tz = parts[i].value; }
+    } catch (e) { tz = ''; }
+    tzEl.textContent = tz;
+  }
+  function tick(){
+    var d = new Date();
+    var iso = d.toISOString();
+    if (localEl) {
+      localEl.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+      localEl.setAttribute('datetime', iso);
+    }
+    if (utcEl) {
+      utcEl.textContent = p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+      utcEl.setAttribute('datetime', iso);
+    }
+  }
+  tick(); setInterval(tick, 1000);
 })();
 </script>
 <script>
@@ -7444,74 +10779,6 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   };
 
   // Phase 1.4 — "Use in next caption". Re-runs the caption LLM with
-  // Multi-tenant Buffer connect — called from the inline form that
-  // the schedule modal renders when /api/buffer/channels returns 401.
-  // POSTs the pasted access token to /api/organisation/connect-buffer
-  // which validates against Buffer and persists on the active org's
-  // ClubProfile. On success, the modal silently retries the channel
-  // listing so the user lands in the normal schedule flow.
-  window.mhConnectBufferFromModal = function() {
-    var API_BASE = window._API_BASE || '';
-    var input = document.getElementById('mh-buf-token');
-    var btn = document.getElementById('mh-buf-connect');
-    if (!input || !btn) return;
-    // Helper to surface an error inline. Falls back to MH.toast when the
-    // modal's dedicated error div has been ripped out (e.g. the user
-    // closed the modal mid-request and we still resolved). We deliberately
-    // avoid alert() here — it's jarring relative to the rest of the
-    // modal's UX and steals focus from the connect form.
-    function showError(msg) {
-      var err = document.getElementById('mh-sched-error');
-      if (err) {
-        err.style.display = 'block';
-        err.textContent = msg;
-      } else if (window.MH && typeof window.MH.toast === 'function') {
-        window.MH.toast(msg, 'error');
-      }
-    }
-    // Clear any prior error so the user can tell a retry produced a
-    // fresh outcome rather than staring at a stale message.
-    var errEl = document.getElementById('mh-sched-error');
-    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    var token = (input.value || '').trim();
-    if (!token) {
-      input.focus();
-      showError('Paste your Buffer access token to connect.');
-      return;
-    }
-    var origLabel = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Connecting…';
-    fetch(API_BASE + '/api/organisation/connect-buffer', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({buffer_access_token: token}),
-    }).then(function(r){
-      return r.json().then(function(j){ return {status: r.status, body: j}; }, function(){
-        return {status: r.status, body: {message: 'Server returned an unreadable response.'}};
-      });
-    }).then(function(o){
-      btn.disabled = false;
-      btn.textContent = origLabel;
-      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) {
-        // Token saved. Re-run the channel listing — it'll succeed now.
-        var runId = document.getElementById('mh-sched-run-id').value;
-        var cardId = document.getElementById('mh-sched-card-id').value;
-        var pillId = document.getElementById('mh-sched-pill-id').value;
-        if (typeof window.mhScheduleOpen === 'function') {
-          window.mhScheduleOpen(runId, cardId, pillId);
-        }
-        return;
-      }
-      var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
-      showError(msg);
-    }).catch(function(e){
-      btn.disabled = false;
-      btn.textContent = origLabel;
-      showError('Network error: ' + (e && e.message || e));
-    });
-  };
-
   // the visible explainer text injected as a required content
   // instruction. The result lands in a small panel below the
   // explainer (panel_id), preserving the user's reading flow rather
@@ -7837,7 +11104,86 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     var fracPart = dot < 0 ? '' : s.slice(dot);
     return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + fracPart;
   }
+  // U.12 — odometer numerals: zero-padded digit reels that roll upward and
+  // land EXACTLY on the target. Each column is a strip of cells [0..9,0]; the
+  // trailing 0 makes the 9->0 wrap seamless. Lower-order columns spin more than
+  // higher ones (the authentic odometer cascade); leading-zero columns stay
+  // still. Driven per-frame by requestAnimationFrame, so it needs no CSS
+  // transition. Shares animateCount's reveal trigger + reduced-motion gate.
+  function animateOdometer(el) {
+    var target = Math.round(parseFloat(el.getAttribute('data-mh-count')));
+    if (isNaN(target) || target < 0) target = 0;
+    var pad = parseInt(el.getAttribute('data-mh-count-pad') || '1', 10);
+    var dur = parseInt(el.getAttribute('data-mh-count-dur') || '1100', 10);
+    var s = String(target);
+    var digits = Math.max(pad, s.length);
+    // Most-significant active place (0 = ones). target 0 => nothing rolls.
+    var maxActiveS = target > 0 ? s.length - 1 : -1;
+
+    el.textContent = '';
+    el.classList.add('mh-odo--live');
+    var cols = [];
+    for (var c = 0; c < digits; c++) {
+      var sig = digits - 1 - c;                 // significance of this column
+      var finalDigit = Math.floor(target / Math.pow(10, sig)) % 10;
+      var active = sig <= maxActiveS;           // leading zeros never roll
+      var spins = active ? (1 + (maxActiveS - sig)) : 0;
+      var travel = active ? (spins * 10 + finalDigit) : 0;
+
+      var colEl = document.createElement('span');
+      colEl.className = 'mh-odo-col';
+      colEl.setAttribute('aria-hidden', 'true');
+      // Hidden spacer = one glyph in normal flow: gives the column its width
+      // AND a real text baseline (the absolutely-positioned reel cannot), so
+      // the digits sit on the surrounding text's baseline, font-independently.
+      var spacer = document.createElement('span');
+      spacer.className = 'mh-odo-spacer';
+      spacer.textContent = String(finalDigit);
+      var clip = document.createElement('span');
+      clip.className = 'mh-odo-clip';
+      var strip = document.createElement('span');
+      strip.className = 'mh-odo-strip';
+      for (var d = 0; d <= 10; d++) {
+        var cell = document.createElement('span');
+        cell.className = 'mh-odo-d';
+        cell.textContent = String(d % 10);
+        strip.appendChild(cell);
+      }
+      clip.appendChild(strip);
+      colEl.appendChild(spacer);
+      colEl.appendChild(clip);
+      el.appendChild(colEl);
+      cols.push({strip: strip, travel: travel, finalDigit: finalDigit});
+    }
+
+    function place(prog) {
+      for (var i = 0; i < cols.length; i++) {
+        var off = (cols[i].travel * prog) % 10;       // 0..<10, wraps seamlessly
+        cols[i].strip.style.transform = 'translateY(' + (-off) + 'em)';
+      }
+    }
+    function settle() {
+      for (var i = 0; i < cols.length; i++) {
+        cols[i].strip.style.transform = 'translateY(' + (-cols[i].finalDigit) + 'em)';
+      }
+    }
+    if (prefersReduced) { settle(); return; }
+    var oStart = null;
+    function oTick(ts) {
+      if (oStart === null) oStart = ts;
+      var p = Math.min(1, (ts - oStart) / dur);
+      var eased = 1 - Math.pow(1 - p, 3);            // ease-out cubic
+      if (p < 1) { place(eased); requestAnimationFrame(oTick); }
+      else settle();                                  // exact landing, no jump
+    }
+    requestAnimationFrame(oTick);
+  }
   function animateCount(el) {
+    // Idempotent: the reveal observer + the 1.5s safety net can both fire on
+    // the same element; never restart a counter (or rebuild an odometer).
+    if (el._mhCounted) return;
+    el._mhCounted = true;
+    if (el.hasAttribute('data-mh-odometer')) { animateOdometer(el); return; }
     var target = parseFloat(el.getAttribute('data-mh-count'));
     if (isNaN(target)) return;
     var dur = parseInt(el.getAttribute('data-mh-count-dur') || '900', 10);
@@ -7862,7 +11208,25 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     requestAnimationFrame(tick);
   }
   function bindReveals() {
-    var reveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    var blockReveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    // U.5 — line-by-line reveal: observe each direct child of a
+    // .mh-reveal-lines block on its OWN, so the lines surface one after
+    // another as they each scroll up through the viewport (Opal-style),
+    // rather than all together the moment a single container crosses.
+    var lineItems = [];
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.mh-reveal-lines'),
+      function(grp){
+        Array.prototype.forEach.call(grp.children, function(ln){ lineItems.push(ln); });
+      });
+    // UI 1.6 — animated results/data charts ride this same observer: each
+    // .mh-chart[data-mh-animate] gets .is-in as it scrolls into view, which
+    // drives the pure-CSS bar-grow / area line-draw and the data-mh-count
+    // value count-up inside it (revealEl already fires counters on reveal).
+    var chartEls = document.querySelectorAll('.mh-chart[data-mh-animate]');
+    var reveals = Array.prototype.slice.call(blockReveals)
+      .concat(lineItems)
+      .concat(Array.prototype.slice.call(chartEls));
     var counters = document.querySelectorAll('[data-mh-count]');
     function revealEl(el) {
       el.classList.add('is-in');
@@ -7889,7 +11253,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       io.observe(el);
     });
     counters.forEach(function(el){
-      if (!el.closest('.mh-reveal, .mh-reveal-group')) {
+      if (!el.closest('.mh-reveal, .mh-reveal-group, .mh-reveal-lines')) {
         var r = el.getBoundingClientRect();
         if (r.top < (window.innerHeight || 0) * 0.95) animateCount(el);
         else io.observe(el);
@@ -7903,6 +11267,312 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   if (document.readyState !== 'loading') bindReveals();
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
+
+  // === UI 1.29 — Sticky chaptered scroll-spy nav ===
+  // Lights the side chapter rail's link for the section currently under the
+  // masthead as the reader scrolls a long page (the home page wires it via
+  // _layout(chapters=…)). The rail markup + sticky CSS are server-rendered;
+  // here we (a) smooth-scroll on click with a header offset (reduced-motion
+  // aware) and (b) drive the active state from an IntersectionObserver. Each
+  // time an observed section crosses the activation line we recompute the
+  // winner authoritatively from geometry, so the highlight stays correct
+  // regardless of section height or scroll direction. Progressive enhancement:
+  // with no rail, no resolvable targets, or no IntersectionObserver the links
+  // remain plain in-page anchors.
+  function bindChapterNav() {
+    var navs = document.querySelectorAll('[data-mh-chapnav]');
+    if (!navs.length) return;
+    var HEADER_OFFSET = 84;          // px cleared above a clicked section
+    Array.prototype.forEach.call(navs, function(nav){
+      var chapters = [];
+      Array.prototype.forEach.call(nav.querySelectorAll('a[data-mh-chap]'), function(a){
+        var id = (a.getAttribute('href') || '').replace(/^#/, '');
+        var sec = id && document.getElementById(id);
+        if (sec) chapters.push({ id: id, link: a, sec: sec });
+      });
+      if (!chapters.length) { nav.setAttribute('hidden', ''); return; }
+      var lastId = chapters[chapters.length - 1].id;
+
+      function activate(id) {
+        chapters.forEach(function(c){
+          var on = c.id === id;
+          c.link.classList.toggle('is-active', on);
+          if (on) c.link.setAttribute('aria-current', 'true');
+          else c.link.removeAttribute('aria-current');
+        });
+      }
+
+      // Smooth-scroll on click (reduced-motion ⇒ instant), focus the section
+      // for keyboard users, and reflect it in the URL hash — without the second
+      // jump a bare "#id" would cause behind the sticky masthead.
+      chapters.forEach(function(c){
+        c.link.addEventListener('click', function(ev){
+          ev.preventDefault();
+          var y = c.sec.getBoundingClientRect().top + window.pageYOffset - HEADER_OFFSET;
+          if (y < 0) y = 0;
+          try { window.scrollTo({ top: y, behavior: prefersReduced ? 'auto' : 'smooth' }); }
+          catch (_e) { window.scrollTo(0, y); }
+          activate(c.id);
+          c.sec.setAttribute('tabindex', '-1');
+          try { c.sec.focus({ preventScroll: true }); } catch (_e2) {}
+          if (window.history && history.replaceState) {
+            history.replaceState(null, '', '#' + c.id);
+          }
+        });
+      });
+
+      if (!('IntersectionObserver' in window)) { activate(chapters[0].id); return; }
+
+      // Scroll-spy: a zero-height "activation line" ~32% down the viewport. The
+      // section straddling that line is current. Because a section keeps
+      // straddling the line until its successor reaches it, this stays correct
+      // through sections of ANY height and in both scroll directions — unlike a
+      // top-band observer, which goes stale inside a section taller than the
+      // band (its top can cross the line without firing an event).
+      var activeId = chapters[0].id;
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){ if (en.isIntersecting) activeId = en.target.id; });
+        activate(activeId);
+      }, { rootMargin: '-32% 0px -68% 0px', threshold: 0 });
+      chapters.forEach(function(c){ io.observe(c.sec); });
+
+      // Tail: the final section usually can't scroll its top up to the line
+      // (the page bottoms out first), so light the last chapter once the footer
+      // — the end of the page — comes into view. Without this the last chapter
+      // would never activate.
+      var footer = document.querySelector('.mh-footer');
+      if (footer) {
+        new IntersectionObserver(function(entries){
+          entries.forEach(function(en){
+            if (en.isIntersecting) { activeId = lastId; activate(lastId); }
+          });
+        }, { threshold: 0 }).observe(footer);
+      }
+      activate(activeId);
+    });
+  }
+  if (document.readyState !== 'loading') bindChapterNav();
+  else document.addEventListener('DOMContentLoaded', bindChapterNav);
+  MH.bindChapterNav = bindChapterNav;
+
+  // === Tactile spring-physics micro-interactions (UI 1.4 — inspired by Family) ===
+  // A restrained spring layer on primary buttons, selectable cards and toggles:
+  // a subtle magnetic pull toward the cursor on hover, and a bouncy release on
+  // press. The physics is integrated here in vanilla JS and written out to three
+  // CSS custom properties (--mh-mag-x / --mh-mag-y / --mh-press); the composed
+  // transform lives in theme-components.css so there is one transform owner per
+  // element. Honours prefers-reduced-motion (the shared prefersReduced flag),
+  // needs PointerEvent + requestAnimationFrame, and only does the magnetic part
+  // under a fine (mouse / stylus) pointer where "hover" is meaningful. Anything
+  // unsupported degrades silently to the existing CSS :active feedback.
+  function bindSpring() {
+    if (prefersReduced) return;
+    if (!('PointerEvent' in window) || !('requestAnimationFrame' in window)) return;
+    var finePointer = !window.matchMedia ||
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+    // Underdamped spring constants, tuned restrained: a small, quick overshoot
+    // that settles fast. K = stiffness, ZETA = damping ratio (< 1 so it bounces),
+    // C = the matching damping coefficient.
+    var K = 360, ZETA = 0.62, C = 2 * Math.sqrt(K) * ZETA;
+    var PRESS_DOWN = 0.94;   // scale while held — a gentle dip, never a squash
+    var FOLLOW = 0.32;       // fraction of the cursor offset the pull tracks
+    var POP_KICK = 1.0;      // upward scale velocity for the toggle "pop" (~6%)
+
+    var moving = [];         // controllers currently in motion
+    var raf = 0, lastTs = 0;
+    function frame(ts) {
+      raf = 0;
+      var dt = lastTs ? Math.min(0.034, (ts - lastTs) / 1000) : 0.016;
+      lastTs = ts;
+      var still = [];
+      for (var i = 0; i < moving.length; i++) {
+        if (moving[i].step(dt)) still.push(moving[i]);
+      }
+      moving = still;
+      if (moving.length) raf = requestAnimationFrame(frame);
+      else lastTs = 0;
+    }
+    function wake(ctl) {
+      if (moving.indexOf(ctl) === -1) moving.push(ctl);
+      if (!raf) { lastTs = 0; raf = requestAnimationFrame(frame); }
+    }
+    function clamp(v, m) { return v < -m ? -m : (v > m ? m : v); }
+
+    // One controller per element: three independent springs (press scale, plus
+    // the x / y of the magnetic offset), integrated with a fixed sub-step so the
+    // feel is identical at 60 Hz and 120 Hz.
+    function Ctl(el, mag) {
+      this.el = el; this.mag = mag; this.cap = 5; this.capRead = false;
+      this.cur = { p: 1, x: 0, y: 0 };
+      this.vel = { p: 0, x: 0, y: 0 };
+      this.tgt = { p: 1, x: 0, y: 0 };
+    }
+    Ctl.prototype.step = function(dt) {
+      var SUB = 1 / 240, n = Math.max(1, Math.round(dt / SUB)), h = dt / n;
+      var c = this.cur, v = this.vel, t = this.tgt, axes = ['p', 'x', 'y'];
+      for (var s = 0; s < n; s++) {
+        for (var a = 0; a < 3; a++) {
+          var key = axes[a];
+          var accel = -K * (c[key] - t[key]) - C * v[key];
+          v[key] += accel * h;
+          c[key] += v[key] * h;
+        }
+      }
+      this.el.style.setProperty('--mh-press', c.p.toFixed(4));
+      if (this.mag) {
+        this.el.style.setProperty('--mh-mag-x', c.x.toFixed(2) + 'px');
+        this.el.style.setProperty('--mh-mag-y', c.y.toFixed(2) + 'px');
+      }
+      // Keep ticking while a spring still carries velocity or sits off-target.
+      return Math.abs(v.p) > 0.0008 || Math.abs(c.p - t.p) > 0.0006 ||
+             Math.abs(v.x) > 0.01 || Math.abs(c.x - t.x) > 0.02 ||
+             Math.abs(v.y) > 0.01 || Math.abs(c.y - t.y) > 0.02;
+    };
+
+    function attach(el, mag) {
+      if (el.__mhSpring) return;
+      // [data-mh-spring="press"] opts a wide surface out of the magnetic pull
+      // (a sideways slide reads as a glitch there) — press feedback only.
+      if (el.getAttribute && el.getAttribute('data-mh-spring') === 'press') mag = false;
+      if (!finePointer) mag = false;   // touch has no hover — magnetic is meaningless
+      var ctl = new Ctl(el, mag);
+      el.__mhSpring = ctl;
+      el.classList.add('mh-spring');
+
+      if (mag) {
+        el.addEventListener('pointermove', function(e) {
+          if (e.pointerType === 'touch') return;
+          // Resolve the restrained pull ceiling (the static --mh-mag-pull
+          // token) lazily on first hover — keeps page load free of a
+          // getComputedStyle pass over every bound control.
+          if (!ctl.capRead) {
+            var capRaw = parseFloat(getComputedStyle(el).getPropertyValue('--mh-mag-pull'));
+            if (!isNaN(capRaw)) ctl.cap = capRaw;
+            ctl.capRead = true;
+          }
+          var r = el.getBoundingClientRect();
+          ctl.tgt.x = clamp((e.clientX - (r.left + r.width / 2)) * FOLLOW, ctl.cap);
+          ctl.tgt.y = clamp((e.clientY - (r.top + r.height / 2)) * FOLLOW, ctl.cap);
+          wake(ctl);
+        });
+      }
+      el.addEventListener('pointerleave', function() {
+        ctl.tgt.x = 0; ctl.tgt.y = 0; ctl.tgt.p = 1; wake(ctl);
+      });
+      el.addEventListener('pointerdown', function() {
+        ctl.tgt.p = PRESS_DOWN; wake(ctl);
+      });
+      var release = function() { ctl.tgt.p = 1; wake(ctl); };
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', function() {
+        ctl.tgt.x = 0; ctl.tgt.y = 0; ctl.tgt.p = 1; wake(ctl);
+      });
+      // Keyboard parity: Space / Enter give the same press dip + spring release.
+      el.addEventListener('keydown', function(e) {
+        if ((e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') &&
+            ctl.tgt.p !== PRESS_DOWN) { ctl.tgt.p = PRESS_DOWN; wake(ctl); }
+      });
+      el.addEventListener('keyup', function(e) {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') release();
+      });
+    }
+
+    // Primary buttons, selectable cards and explicit opt-ins → magnetic + press.
+    // (Secondary / ghost / danger / approve / loading buttons keep their lighter
+    // CSS :active scale, so the spring stays reserved for the primary surfaces.)
+    var SEL_FULL = '.btn:not(.secondary):not(.ghost):not(.danger):not(.mh-wf-approve):not(.loading), .mh-template, [data-mh-spring]';
+    document.querySelectorAll(SEL_FULL).forEach(function(el) { attach(el, true); });
+
+    // Toggles — a native checkbox / radio inside a tap-target label. Press, plus
+    // a small "pop" the instant the value flips; no magnetic (these labels can be
+    // wide or inline, where a sideways pull would read as a glitch). :has() is
+    // wrapped so older engines fall back to the explicit .mh-choice labels.
+    var toggleSel = 'label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio])';
+    var toggles;
+    try { toggles = document.querySelectorAll(toggleSel); }
+    catch (e) { toggles = document.querySelectorAll('label.mh-choice'); }
+    toggles.forEach(function(label) {
+      if (label.__mhSpring) return;
+      attach(label, false);
+      var input = label.querySelector('input[type=checkbox], input[type=radio]');
+      if (input) {
+        input.addEventListener('change', function() {
+          var ctl = label.__mhSpring; if (!ctl) return;
+          // Kick the scale velocity upward so it rises past 1 then settles — a
+          // crisp tactile confirmation that the toggle registered.
+          ctl.tgt.p = 1; ctl.vel.p = POP_KICK; wake(ctl);
+        });
+      }
+    });
+  }
+  if (document.readyState !== 'loading') bindSpring();
+  else document.addEventListener('DOMContentLoaded', bindSpring);
+  MH.bindSpring = bindSpring;
+
+  // === Atlas-style 3D tilt on the bento output tiles (U.16) ===
+  // Pointer-tracked perspective tilt + a sheen that follows the cursor,
+  // inspired by atlascard.com. The transform is written inline (so it
+  // beats the reveal-group's own transform without a specificity fight);
+  // CSS owns the sheen fade + the lifted stacking order. Gated to fine,
+  // hover-capable pointers and suppressed entirely under
+  // prefers-reduced-motion — touch and the reduced-motion cohort keep the
+  // static card. Targets .mh-bento-tile plus the reusable [data-mh-tilt]
+  // opt-in (the audience "Made for" cards carry it too).
+  var TILT_REST =
+    'perspective(900px) rotateX(0deg) rotateY(0deg) translate3d(0,0,0) scale(1)';
+  function bindCardTilt() {
+    if (prefersReduced) return;
+    var fine = window.matchMedia &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (!fine) return;
+    var MAX = 7;  // degrees — subtle and premium, never gimmicky
+    document.querySelectorAll('.mh-bento-tile, [data-mh-tilt]').forEach(function(card){
+      var raf = 0, pending = null;
+      function apply(){
+        raf = 0;
+        if (!pending) return;
+        var r = card.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        var px = Math.max(0, Math.min(1, (pending.clientX - r.left) / r.width));
+        var py = Math.max(0, Math.min(1, (pending.clientY - r.top) / r.height));
+        var ry = (px - 0.5) * 2 * MAX;   // pointer right → tilt right edge back
+        var rx = (0.5 - py) * 2 * MAX;   // pointer up → tilt top edge back
+        // Instant transform follow (beats the reveal-group's 520ms transform
+        // transition); keep the border accent on a gentle fade.
+        card.style.transition = 'transform 0s, border-color 200ms';
+        card.style.transform =
+          'perspective(900px) rotateX(' + rx.toFixed(2) + 'deg) rotateY(' +
+          ry.toFixed(2) + 'deg) translate3d(0,-6px,0) scale(1.02)';
+        card.style.setProperty('--mh-gx', (px * 100).toFixed(1) + '%');
+        card.style.setProperty('--mh-gy', (py * 100).toFixed(1) + '%');
+      }
+      card.addEventListener('pointerenter', function(e){
+        if (e.pointerType === 'touch') return;
+        card.classList.add('is-tilting');
+      });
+      card.addEventListener('pointermove', function(e){
+        if (e.pointerType === 'touch') return;
+        pending = e;
+        if (!raf) raf = requestAnimationFrame(apply);
+      });
+      card.addEventListener('pointerleave', function(){
+        pending = null;
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        card.classList.remove('is-tilting');
+        // Settle back to rest on a smooth ease; the inline rest transform
+        // equals the stylesheet rest, so the card is never stuck askew.
+        card.style.transition =
+          'transform 460ms cubic-bezier(0.2,0.7,0.2,1), border-color 200ms';
+        card.style.transform = TILT_REST;
+        card.style.removeProperty('--mh-gx');
+        card.style.removeProperty('--mh-gy');
+      });
+    });
+  }
+  if (document.readyState !== 'loading') bindCardTilt();
+  else document.addEventListener('DOMContentLoaded', bindCardTilt);
+  MH.bindCardTilt = bindCardTilt;
 
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
@@ -7938,6 +11608,13 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     set('mh-wf-n-rejected', nRejected);
     var bar = document.getElementById('mh-wf-bar');
     if (bar) bar.style.width = pct + '%';
+    // UI2.4 — keep the client-side filter tab counts live, then re-sync the tab
+    // filter (visible cards, per-tab empty hint, "N of M shown") so approving or
+    // re-queueing a card updates the tabs with no reload.
+    set('mh-wf-tabcount-all', total);
+    set('mh-wf-tabcount-queue', nQueue);
+    set('mh-wf-tabcount-approved', nApproved);
+    if (window.mhWfTabsSync) window.mhWfTabsSync();
   };
 
   window.mhWorkflowSet = function(runId, cardId, status) {
@@ -8002,6 +11679,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     // progress bar width/percent, Queue/Approved/Rejected tallies) from the
     // current card states so they live-update without a page reload.
     mhRecountReview();
+    // U.13: keep the floating mobile dock's count + highlight in sync (no-op
+    // when the dock isn't on the page).
+    if (window.mhDockSync) window.mhDockSync();
     var origLabel = btn.textContent;
     btn.disabled = true; btn.style.opacity = '0.7';
     window.mhWorkflowSet(runId, cardId, status).then(function(){
@@ -8012,8 +11692,433 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       btn.textContent = origLabel;
     });
   });
+
+  // === UI 1.25 — Emoji reactions (inspired by Liveblocks) =================
+  // Quick 👍 ❤️ 🔥 reactions on generated cards + the review queue. Counts are
+  // tallied server-side and rendered into the page; this enhances each strip so
+  // a tap toggles the current client's reaction via fetch (no page reload). The
+  // client identity is an anonymous random id kept in localStorage — it only
+  // decides which chips show as "yours"; the server holds the authoritative
+  // tally. Delegated, so it covers cards added after load too.
+  (function(){
+    var LS_KEY = 'mh_reactor_id';
+    function reactorId(){
+      var id = null;
+      try { id = window.localStorage.getItem(LS_KEY); } catch(e){}
+      if (!id) {
+        id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+             : ('r-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+        try { window.localStorage.setItem(LS_KEY, id); } catch(e){}
+      }
+      return id;
+    }
+    function base(){ return window._API_BASE || ''; }
+    function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : v; }
+
+    function setCount(btn, n){
+      var c = btn.querySelector('[data-mh-react-count]');
+      if (!c) return;
+      c.textContent = n;
+      if (n > 0) c.removeAttribute('hidden'); else c.setAttribute('hidden', '');
+    }
+    function syncCard(cardId, counts, mine){
+      // `counts` is the authoritative per-card tally (toggle response or the
+      // load reconcile), so an emoji absent from it is genuinely zero — default
+      // missing keys to 0 rather than leaving a stale server-rendered count.
+      counts = counts || {};
+      document.querySelectorAll('.mh-react-btn[data-mh-react-card="' + esc(cardId) + '"]').forEach(function(b){
+        var em = b.getAttribute('data-mh-react-emoji');
+        setCount(b, counts[em] || 0);
+        if (mine) {
+          var on = mine.indexOf(em) !== -1;
+          b.classList.toggle('is-on', on);
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+      });
+    }
+
+    // Load-time reconcile: one fetch per run on the page lights up this
+    // reactor's chips and refreshes counts against the server of record.
+    function loadReactions(){
+      var runs = {};
+      document.querySelectorAll('.mh-react-btn[data-mh-react-run]').forEach(function(b){
+        runs[b.getAttribute('data-mh-react-run')] = true;
+      });
+      var rid = reactorId();
+      Object.keys(runs).forEach(function(runId){
+        var url = base() + '/api/runs/' + encodeURIComponent(runId)
+                + '/reactions?reactor_id=' + encodeURIComponent(rid);
+        fetch(url, {headers: {'Accept': 'application/json'}})
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(j){
+            if (!j || !j.ok) return;
+            var counts = j.counts || {}, mine = j.mine || {};
+            var ids = {};
+            Object.keys(counts).forEach(function(c){ ids[c] = true; });
+            Object.keys(mine).forEach(function(c){ ids[c] = true; });
+            Object.keys(ids).forEach(function(c){ syncCard(c, counts[c] || {}, mine[c] || []); });
+          })
+          .catch(function(){});
+      });
+    }
+
+    document.addEventListener('click', function(e){
+      var btn = e.target.closest('.mh-react-btn');
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      var runId = btn.getAttribute('data-mh-react-run');
+      var cardId = btn.getAttribute('data-mh-react-card');
+      var emoji = btn.getAttribute('data-mh-react-emoji');
+      if (!runId || !cardId || !emoji) return;
+      btn.disabled = true;
+      var url = base() + '/api/runs/' + encodeURIComponent(runId)
+              + '/card/' + encodeURIComponent(cardId) + '/reactions';
+      fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({emoji: emoji, reactor_id: reactorId()})
+      }).then(function(r){
+        return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+      }).then(function(o){
+        btn.disabled = false;
+        if (!o.ok || !o.body || o.body.ok === false) {
+          var msg = (o.body && o.body.error) || 'reaction failed';
+          if (window.MH && MH.toast) MH.toast('Reaction failed: ' + msg, 'error', 3000);
+          return;
+        }
+        syncCard(cardId, o.body.counts || {}, o.body.mine || []);
+      }).catch(function(){
+        btn.disabled = false;
+        if (window.MH && MH.toast) MH.toast('Reaction failed', 'error', 3000);
+      });
+    });
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadReactions);
+    } else {
+      loadReactions();
+    }
+  })();
+
+  // === UI 1.1 — Cycling example-prompt placeholder (inspired by Cosmos) ===
+  // Any field tagged [data-mh-cycle-placeholder="phrase | phrase | …"] types
+  // its example prompts through the placeholder (typewriter cycle: type → hold
+  // → erase → next), guiding first-time users with zero extra chrome. The
+  // static placeholder="" stays as the no-JS / reduced-motion fallback. Pauses
+  // on focus, while the field already holds a value, and when the tab is
+  // hidden; skipped entirely under prefers-reduced-motion. One timer per field,
+  // so state stays fully resumable. Vanilla JS, no deps.
+  function bindCyclePlaceholders() {
+    if (prefersReduced) return; // reduced motion -> keep the static placeholder
+    var CARET = String.fromCharCode(0x2502); // thin typewriter caret
+    var HOLD_TICKS = 7; // ~7 x 285ms = ~2s rest on a fully-typed phrase
+    document.querySelectorAll('[data-mh-cycle-placeholder]').forEach(function(el){
+      if (el.dataset.mhCycleBound === '1') return;
+      el.dataset.mhCycleBound = '1';
+      var phrases = (el.getAttribute('data-mh-cycle-placeholder') || '')
+        .split('|')
+        .map(function(s){ return s.trim(); })
+        .filter(function(s){ return s.length > 0; });
+      if (!phrases.length) return;
+      var staticPh = el.getAttribute('placeholder') || '';
+      var idx = 0, pos = 0, mode = 'typing', caretOn = true, holdTicks = 0;
+      var running = false, timer = null;
+
+      function render(){
+        el.setAttribute('placeholder', phrases[idx].slice(0, pos) + (caretOn ? CARET : ''));
+      }
+      function schedule(ms){ timer = setTimeout(tick, ms); }
+      function tick(){
+        if (!running) return;
+        if (!document.contains(el)) { stop(false); return; } // detached -> give up
+        if (mode === 'typing') {
+          if (pos < phrases[idx].length) {
+            pos++; caretOn = true; render(); schedule(42 + Math.random() * 26);
+          } else {
+            mode = 'holding'; holdTicks = 0; caretOn = true; render(); schedule(420);
+          }
+        } else if (mode === 'holding') {
+          holdTicks++; caretOn = (holdTicks % 2 === 0); render();
+          if (holdTicks >= HOLD_TICKS) { mode = 'erasing'; caretOn = true; render(); schedule(280); }
+          else schedule(285);
+        } else { // erasing
+          if (pos > 0) { pos--; caretOn = true; render(); schedule(24 + Math.random() * 14); }
+          else { idx = (idx + 1) % phrases.length; mode = 'typing'; caretOn = true; schedule(360); }
+        }
+      }
+      function start(){
+        if (running) return;
+        if (el.value) return;                       // user is typing -> leave them be
+        if (document.activeElement === el) return;  // focused -> don't move it behind the cursor
+        if (document.hidden) return;                // background tab -> save CPU
+        running = true; tick();
+      }
+      function stop(restoreStatic){
+        running = false;
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (restoreStatic) {
+          idx = 0; pos = 0; mode = 'typing'; holdTicks = 0; caretOn = false;
+          el.setAttribute('placeholder', staticPh);
+        }
+      }
+      el.addEventListener('focus', function(){ stop(true); });
+      el.addEventListener('blur', function(){ if (!el.value) start(); });
+      el.addEventListener('input', function(){ if (el.value) stop(true); else start(); });
+      document.addEventListener('visibilitychange', function(){
+        if (document.hidden) stop(false);
+        else if (!el.value && document.activeElement !== el) start();
+      });
+      start();
+    });
+  }
+  if (document.readyState !== 'loading') bindCyclePlaceholders();
+  else document.addEventListener('DOMContentLoaded', bindCyclePlaceholders);
+  MH.bindCyclePlaceholders = bindCyclePlaceholders;
+
+  // === UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style) =============
+  // Press '?' on any page to open #mh-shortcuts-overlay. 'g' then a key jumps to
+  // a primary destination — the rows are server-rendered url_for() links, so the
+  // navigation map is read straight back off the DOM (one source of truth). On a
+  // review surface (.ach-row present) j/k move the focus ring and a/u approve or
+  // re-queue the focused card. This is a FUNCTIONAL surface, so — unlike the
+  // decorative motion layers — it must NOT early-return under reduced motion;
+  // only the CSS entrance animation is suppressed there (and the focus-ring
+  // scroll falls back to an instant jump). Reuses MH.openModal for the
+  // focus-trap + Esc/Tab/backdrop close when it is available.
+  function bindShortcuts() {
+    var overlay = document.getElementById('mh-shortcuts-overlay');
+    if (!overlay || overlay.dataset.mhShortcuts === '1') return;
+    overlay.dataset.mhShortcuts = '1';
+
+    // Build the go-to map from the server-rendered links (url_for is the source).
+    var navMap = {};
+    overlay.querySelectorAll('[data-mh-go]').forEach(function(a){
+      var k = (a.getAttribute('data-mh-go') || '').toLowerCase();
+      var href = a.getAttribute('href');
+      if (k && href) navMap[k] = href;
+    });
+
+    // Reveal the review group + arm its keys only when a review surface is here.
+    var reviewActive = !!document.querySelector('.ach-row');
+    var reviewGroup = overlay.querySelector('[data-mh-shortcuts-group="review"]');
+    if (reviewActive && reviewGroup) reviewGroup.hidden = false;
+
+    function isTyping(e) {
+      var t = e.target;
+      if (!t) return false;
+      var tag = (t.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    }
+
+    // ----- open / close (reuse the house focus-trap when present) -----
+    var closeFn = null;
+    function isOpen() { return overlay.classList.contains('is-open'); }
+    function openOverlay() {
+      if (isOpen()) return;
+      if (window.MH && typeof MH.openModal === 'function') {
+        closeFn = MH.openModal(overlay, { onClose: function(){ closeFn = null; } });
+      } else {
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+      }
+    }
+    function closeOverlay() {
+      if (!isOpen()) return;
+      if (closeFn) { var fn = closeFn; closeFn = null; fn(); return; }
+      overlay.classList.remove('is-open');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    function toggleOverlay() { if (isOpen()) closeOverlay(); else openOverlay(); }
+    // Backdrop + close-button wiring for the no-MH.openModal fallback only
+    // (when openModal owns the modal it already wires these).
+    overlay.addEventListener('click', function(e){ if (e.target === overlay && !closeFn) closeOverlay(); });
+    overlay.querySelectorAll('[data-mh-modal-close]').forEach(function(b){
+      b.addEventListener('click', function(){ if (!closeFn) closeOverlay(); });
+    });
+
+    // ----- review focus ring + approve / re-queue -----
+    function cards() {
+      return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
+        .filter(function(el){ return el.offsetParent !== null; });
+    }
+    var focusIdx = -1;
+    function setFocus(idx) {
+      var list = cards();
+      if (!list.length) return;
+      if (idx < 0) idx = 0;
+      if (idx >= list.length) idx = list.length - 1;
+      list.forEach(function(c){ c.classList.remove('mh-kbd-focus'); });
+      var el = list[idx];
+      el.classList.add('mh-kbd-focus');
+      el.scrollIntoView({ block: 'center', behavior: prefersReduced ? 'auto' : 'smooth' });
+      focusIdx = idx;
+    }
+    function clickWf(state) {
+      var list = cards();
+      if (focusIdx < 0 || focusIdx >= list.length) return;
+      var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
+      if (btn) btn.click();
+    }
+
+    // ----- the one global key handler -----
+    var gPending = false, gTimer = null;
+    function clearG() { gPending = false; if (gTimer) { clearTimeout(gTimer); gTimer = null; } }
+
+    document.addEventListener('keydown', function(e){
+      if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // While the help is open only '?'/Esc act (Esc is owned by MH.openModal).
+      if (isOpen()) {
+        if (e.key === '?') { e.preventDefault(); closeOverlay(); }
+        return;
+      }
+
+      // 'g' then <key> — GitHub-style go-to navigation.
+      if (gPending) {
+        var dest = navMap[(e.key || '').toLowerCase()];
+        clearG();
+        if (dest) { e.preventDefault(); window.location.href = dest; return; }
+        // not a nav key -> fall through, let the key act normally below
+      }
+
+      if (e.key === '?') { e.preventDefault(); openOverlay(); return; }
+      if (e.key === 'g' || e.key === 'G') { gPending = true; gTimer = setTimeout(clearG, 1200); return; }
+
+      if (reviewActive) {
+        switch (e.key) {
+          case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
+          case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
+          case 'a': case 'A': if (focusIdx >= 0) { e.preventDefault(); clickWf('approved'); } break;
+          case 'u': case 'U': if (focusIdx >= 0) { e.preventDefault(); clickWf('queue'); } break;
+        }
+      }
+    });
+
+    MH.openShortcuts = openOverlay;
+    MH.closeShortcuts = closeOverlay;
+    MH.toggleShortcuts = toggleOverlay;
+  }
+  if (document.readyState !== 'loading') bindShortcuts();
+  else document.addEventListener('DOMContentLoaded', bindShortcuts);
+  MH.bindShortcuts = bindShortcuts;
 })();
 </script>
+{% if dock %}
+<script>
+/* === U.13 — Floating mobile action dock (review/approve) ===
+   The dock (.mh-action-dock) is a thumb-reachable capsule shown on mobile
+   while reviewing a pack. Create / Library are plain links; the primary
+   "Approve" pill acts on the queued .ach-row card nearest the viewport
+   centre (marked .mh-dock-target), approves it via that card's existing
+   workflow button — so all the optimistic-update + API + recount logic above
+   is reused — then advances to the next queued card. When the queue empties
+   it switches to "Open builder". Feature-detected: a clean no-op on any page
+   that didn't render a dock (and the highlight only paints on mobile). */
+(function(){
+  var dock = document.querySelector('.mh-action-dock');
+  if (!dock) return;
+  var primary = dock.querySelector('[data-mh-dock-approve]');
+  var labelEl = dock.querySelector('[data-mh-dock-label]');
+  var countEl = dock.querySelector('[data-mh-dock-count]');
+  var builder = dock.getAttribute('data-builder-url') || '';
+  var mql = window.matchMedia('(max-width: 720px)');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function queued(){
+    return Array.prototype.slice.call(
+      document.querySelectorAll('.ach-row[data-status="queue"]')
+    ).filter(function(el){ return el.offsetParent !== null; });
+  }
+  function clearTarget(){
+    Array.prototype.slice.call(document.querySelectorAll('.ach-row.mh-dock-target'))
+      .forEach(function(el){ el.classList.remove('mh-dock-target'); });
+  }
+  function setTarget(node){ clearTarget(); if (node) node.classList.add('mh-dock-target'); }
+  // The queued card nearest the vertical centre of the viewport.
+  function nearestQueued(){
+    var list = queued();
+    if (!list.length) return null;
+    var mid = window.innerHeight / 2, best = null, bestD = Infinity;
+    list.forEach(function(el){
+      var r = el.getBoundingClientRect();
+      var d = Math.abs((r.top + r.height / 2) - mid);
+      if (d < bestD) { bestD = d; best = el; }
+    });
+    return best;
+  }
+  function firstQueuedFollowing(node){
+    var list = queued();
+    for (var i = 0; i < list.length; i++){
+      if (node && (node.compareDocumentPosition(list[i]) & Node.DOCUMENT_POSITION_FOLLOWING)) return list[i];
+    }
+    return list[0] || null;  // wrap to the first remaining queued card
+  }
+  function scrollToCard(node){
+    if (node) node.scrollIntoView({block: 'center', behavior: reduce.matches ? 'auto' : 'smooth'});
+  }
+
+  // Keep count + label + done-state + highlight in step with the live pile.
+  // Exposed as window.mhDockSync so the global workflow handler calls it after
+  // every approve / re-queue.
+  function sync(){
+    var n = queued().length;
+    if (countEl) countEl.textContent = n;
+    dock.classList.toggle('is-done', n === 0);
+    if (labelEl) labelEl.textContent = n === 0 ? 'Open builder' : 'Approve';
+    if (primary) primary.setAttribute('aria-label',
+      n === 0 ? 'All cards reviewed — open the content builder'
+              : ('Approve the highlighted card (' + n + ' left in the queue)'));
+    if (mql.matches && n > 0){
+      var cur = document.querySelector('.ach-row.mh-dock-target');
+      if (!cur || cur.getAttribute('data-status') !== 'queue' || cur.offsetParent === null) {
+        setTarget(nearestQueued());
+      }
+    } else {
+      clearTarget();
+    }
+  }
+  window.mhDockSync = sync;
+
+  if (primary){
+    primary.addEventListener('click', function(){
+      if (dock.classList.contains('is-done')){
+        if (builder) window.location.assign(builder);
+        return;
+      }
+      var target = document.querySelector('.ach-row.mh-dock-target') || nearestQueued();
+      if (!target){ sync(); return; }
+      var btn = target.querySelector('[data-mh-wf="approved"]');
+      if (btn) btn.click();  // reuse the global optimistic update + API call + recount
+      // The click flips this row to 'approved' synchronously; the next queued
+      // card becomes the target so the thumb stays put for the next approval.
+      var next = firstQueuedFollowing(target);
+      if (next && next !== target){ setTarget(next); scrollToCard(next); }
+      sync();
+    });
+  }
+
+  // Follow the user's scroll so the highlight tracks the card in view.
+  var ticking = false;
+  function onScroll(){
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(function(){
+      ticking = false;
+      if (mql.matches && !dock.classList.contains('is-done')){
+        var near = nearestQueued();
+        if (near && near !== document.querySelector('.ach-row.mh-dock-target')) setTarget(near);
+      }
+    });
+  }
+  window.addEventListener('scroll', onScroll, {passive: true});
+  window.addEventListener('resize', onScroll, {passive: true});
+  if (mql.addEventListener) mql.addEventListener('change', sync);
+
+  if (document.readyState !== 'loading') sync();
+  else document.addEventListener('DOMContentLoaded', sync);
+})();
+</script>
+{% endif %}
 <script>
 /* === Phase 1.6 Stage E: "Looks right" cascade handler ===
    Any <a> tagged with data-mh-cascade intercepts the click, POSTs to
@@ -8055,6 +12160,135 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   document.addEventListener('click', onClick);
 })();
 </script>
+<script>
+/* === U.14 — Cursor-following hover preview (Christopher Ireland + SuperHi) ===
+   Any element tagged .mh-hp that carries a child <template class="mh-hp-tpl">
+   spawns a floating frame that trails the pointer and cross-dissolves to the
+   next item's preview as you sweep the list (Media library photos; Create
+   output-frame posters). Pure JS + CSS, no dependency.
+
+   Accessibility / cost: the follower is decorative (aria-hidden, no pointer
+   events) and every datum is already in the row/tile, so this only runs where
+   it's an enhancement — fine pointer, hover-capable, motion allowed. Touch,
+   reduced-motion and keyboard users get the page unchanged, and the <template>
+   keeps each preview image inert until the first hover (no eager network). */
+(function(){
+  var mql = window.matchMedia;
+  if (!mql) return;
+  var fine = mql('(hover: hover) and (pointer: fine)').matches;
+  var reduced = mql('(prefers-reduced-motion: reduce)').matches;
+  if (!fine || reduced) return;
+
+  var wrap = null, frame = null, layers = [], host = null;
+  var tx = 0, ty = 0, cx = 0, cy = 0, raf = null, visible = false;
+
+  function build(){
+    wrap = document.createElement('div');
+    wrap.className = 'mh-hover-preview';
+    wrap.setAttribute('aria-hidden', 'true');
+    frame = document.createElement('div');
+    frame.className = 'mh-hp-frame';
+    for (var i = 0; i < 2; i++){
+      var l = document.createElement('div');
+      l.className = 'mh-hp-layer';
+      frame.appendChild(l);
+      layers.push(l);
+    }
+    layers[0].classList.add('is-front');
+    wrap.appendChild(frame);
+    document.body.appendChild(wrap);
+  }
+
+  function tick(){
+    // Lerp current → target so the frame trails the cursor (the SuperHi feel).
+    cx += (tx - cx) * 0.22;
+    cy += (ty - cy) * 0.22;
+    wrap.style.transform = 'translate3d(' + cx.toFixed(1) + 'px,' + cy.toFixed(1) + 'px,0)';
+    raf = visible ? requestAnimationFrame(tick) : null;
+  }
+
+  function position(px, py){
+    var w = wrap.offsetWidth || 240, h = wrap.offsetHeight || 320;
+    var pad = 12, off = 22;
+    var x = px + off;
+    if (x + w + pad > window.innerWidth) x = px - w - off;   // flip to the left
+    if (x < pad) x = pad;
+    var y = py - h * 0.5;                                     // vertically centred on the cursor
+    if (y + h + pad > window.innerHeight) y = window.innerHeight - h - pad;
+    if (y < pad) y = pad;
+    tx = x; ty = y;
+  }
+
+  function show(){
+    if (visible) return;
+    visible = true;
+    cx = tx; cy = ty;            // appear at the cursor, then trail on the next move
+    wrap.style.transform = 'translate3d(' + cx.toFixed(1) + 'px,' + cy.toFixed(1) + 'px,0)';
+    wrap.classList.add('is-visible');
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  function hide(){
+    if (!visible && !host) return;
+    visible = false; host = null;
+    if (wrap) wrap.classList.remove('is-visible');
+  }
+
+  function setContent(h){
+    var tpl = h.querySelector('template.mh-hp-tpl');
+    if (!tpl || !tpl.content) return false;
+    // Derive front/back from the DOM (not a counter) so overlapping swaps —
+    // possible when image decodes resolve out of order under fast hovering —
+    // can never desync which layer is actually shown.
+    var fr = frame.querySelector('.mh-hp-layer.is-front');
+    var back = (layers[0] === fr) ? layers[1] : layers[0];
+    back.innerHTML = '';
+    back.appendChild(tpl.content.cloneNode(true));
+    var swap = function(){
+      back.classList.add('is-front');
+      if (fr) fr.classList.remove('is-front');
+    };
+    var img = back.querySelector('img');
+    // Decode the photo before the dissolve so the new layer never fades in
+    // blank; a broken/unreachable src still swaps (catch) so visibility holds.
+    if (img && !img.complete && img.decode) img.decode().then(swap).catch(swap);
+    else requestAnimationFrame(swap);
+    return true;
+  }
+
+  function onOver(e){
+    var t = e.target;
+    var h = (t && t.closest) ? t.closest('.mh-hp') : null;
+    if (!h){ if (host) hide(); return; }
+    if (h === host) return;                  // same item — don't re-dissolve
+    if (!wrap) build();
+    if (setContent(h)){ host = h; position(e.clientX, e.clientY); show(); }
+  }
+  function onMove(e){ if (visible) position(e.clientX, e.clientY); }
+
+  document.addEventListener('pointerover', onOver, {passive: true});
+  document.addEventListener('pointermove', onMove, {passive: true});
+  document.addEventListener('pointerdown', hide, {passive: true});
+  window.addEventListener('scroll', hide, {passive: true});
+  window.addEventListener('blur', hide);
+})();
+</script>
+{% if flash_toast %}
+<script>
+/* One-shot success/error toast queued server-side by _flash_toast and popped
+   in _layout. Runs after the MH framework above defines window.MH; the small
+   retry covers the framework not having executed yet. tojson escapes the
+   message, so it can never break out of the JS string or the markup. */
+(function(){
+  var f = {msg: {{ flash_toast.msg|tojson }}, kind: {{ flash_toast.kind|tojson }}};
+  function go(){
+    if (window.MH && MH.toast) { MH.toast(f.msg, f.kind); }
+    else { setTimeout(go, 60); }
+  }
+  if (document.readyState !== 'loading') go();
+  else document.addEventListener('DOMContentLoaded', go);
+})();
+</script>
+{% endif %}
 </body>
 </html>
 """,
@@ -8062,6 +12296,10 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         css=BASE_CSS,
         body=body,
         active=active,
+        render_progress_js=_RENDER_PROGRESS_JS,
+        ui_kit_js_url=url_for("static", filename="js/ui-kit.js", v=_UI_KIT_VER),
+        dock=dock,
+        chapter_nav_html=chapter_nav_html,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
         signed_in=bool(signed_in_pid),
@@ -8071,6 +12309,8 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
         signed_in_logo=signed_in_logo,
+        bg_logos_html=bg_logos_html,
+        flash_toast=flash_toast,
         theme_seed_style=_theme_seed_style_block(),
         provider_identity=(
             f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
@@ -8161,6 +12401,470 @@ def _recovery_page(
     return _layout(headline, "".join(sects)), code
 
 
+# --- Honest "AI provider not configured" banner (U.2) -------------------------
+#
+# MediaHub never substitutes a heuristic when the cloud LLM is absent — it
+# surfaces an honest error instead (CLAUDE.md: "Gemini-first, AI required, never
+# heuristic-substituted"). This is the *designed* shape of that error, defined
+# once so the wording and styling stay identical on every primary-flow surface
+# that promises AI output (the review page and both content builders). It used to
+# be hand-inlined three times with copy that had already drifted apart.
+_AI_UNAVAILABLE_DETAIL_FULL = (
+    "Cards show ranker reasoning and grounded source lines only. Captions, "
+    "&ldquo;why this card&rdquo; explanations and performance context need a "
+    "Gemini or Anthropic key set by the deployment operator."
+)
+_AI_UNAVAILABLE_DETAIL_PACK = (
+    "Captions and &ldquo;why this card&rdquo; explanations need a Gemini or "
+    "Anthropic key set by the deployment operator."
+)
+# Warning glyph from the same line-art set as the toast icons, so the banner
+# reads as a designed state rather than a bare strap of text.
+_AI_UNAVAILABLE_ICON = (
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '
+    'style="flex-shrink:0;color:var(--warn)">'
+    '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>'
+    '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+)
+
+
+def _ai_unavailable_banner(detail: str = "") -> str:
+    """Return the honest "AI provider not configured" banner, or "" when a
+    provider IS available — so a call site can drop the result straight into a
+    template with no branching of its own.
+
+    ``detail`` overrides the body copy for surfaces that promise a narrower
+    slice of AI output (the content builders don't show ranker reasoning).
+    """
+    try:
+        from mediahub.media_ai.llm import is_available as _llm_available  # noqa: PLC0415
+
+        if _llm_available():
+            return ""
+    except Exception:  # noqa: BLE001 — a provider probe must never block a page
+        return ""
+    body = detail or _AI_UNAVAILABLE_DETAIL_FULL
+    return (
+        '<div role="status" class="mh-ai-unavailable" '
+        'style="margin-bottom:var(--sp-5);padding:14px 18px;'
+        "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+        "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+        "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+        'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+        f"{_AI_UNAVAILABLE_ICON}"
+        '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+        f'<span style="color:var(--ink-dim)">{body}</span>'
+        "</div>"
+    )
+
+
+# --- Parse-uncertainty / flag-for-review surface (U.2) ------------------------
+#
+# The pipeline never silently guesses: anything it inferred or could not fully
+# resolve is recorded as a ParseWarning and shown to the reviewer. The raw codes
+# are engine vocabulary ("course_inferred", "pb_enrichment_failed") and mean
+# nothing to a committee volunteer, so we map the known ones to plain English and
+# split the serious (error-severity) flags out from the routine "we filled this
+# in" inferences. Unknown codes fall back to a humanised form of the code so a
+# newly-added warning is never shown as raw snake_case.
+_PARSE_NOTE_LABELS: dict[str, str] = {
+    # Inference — a gap filled from the data we had
+    "course_inferred": "Course length inferred",
+    "course_mixed": "Mixed course lengths in file",
+    "start_date_inferred": "Start date inferred",
+    "end_date_inferred": "End date inferred",
+    "host_inferred": "Host club inferred",
+    "gb_inferred": "Governing body assumed",
+    # Ambiguity / partial reads
+    "orphan_swim": "Swim with no swimmer record",
+    "needs_verification": "Swimmer needs verification",
+    "low-confidence-column": "Low-confidence column read",
+    "low-overall-confidence": "Low overall read confidence",
+    "ocr-used": "Read via OCR",
+    "ocr-low-confidence-row": "Low-confidence OCR row",
+    "image-needs-ocr": "Image needs OCR to read",
+    "no-events-detected": "No event headers detected",
+    # Lookups that didn't fully complete (non-fatal)
+    "pb_enrichment_failed": "PB history lookup incomplete",
+    "pb_audit_failed": "PB audit incomplete",
+    # Hard problems (error severity)
+    "decode_failed": "File couldn't be decoded",
+    "parse_failed": "File couldn't be parsed",
+    "no_swims": "No swims found in file",
+    "no_results": "No results found",
+    "no_club_filter": "No club selected",
+}
+
+
+def _humanise_parse_code(code: str) -> str:
+    """Plain-English label for a parse-warning code, falling back to a
+    title-cased form of the raw code for ones we have not named yet."""
+    code = (code or "").strip()
+    if not code:
+        return "Parse note"
+    if code in _PARSE_NOTE_LABELS:
+        return _PARSE_NOTE_LABELS[code]
+    return code.replace("_", " ").replace("-", " ").strip().capitalize() or "Parse note"
+
+
+def _parse_notes_card(warnings: list) -> str:
+    """Render the "Parse notes" card from a run's parse_warnings, or "" when
+    there are none. Error-severity flags lead in a "Needs your attention" block;
+    inferences and ambiguities follow. The point of the surface is that we never
+    silently guess, so it always names both the human label and the raw code."""
+    if not warnings:
+        return ""
+    errs = [w for w in warnings if isinstance(w, dict) and w.get("severity") == "error"]
+    notes = [w for w in warnings if isinstance(w, dict) and w.get("severity") != "error"]
+    if not errs and not notes:
+        return ""
+    _CAP = 12
+    err_shown = errs[:_CAP]
+    note_shown = notes[: max(0, _CAP - len(err_shown))]
+    extra = (len(errs) - len(err_shown)) + (len(notes) - len(note_shown))
+
+    def _row(w: dict) -> str:
+        sev = w.get("severity", "")
+        cls = {"info": "info", "warn": "warn", "error": "bad"}.get(sev, "")
+        label = _humanise_parse_code(w.get("code", ""))
+        msg = (w.get("message") or "").strip()
+        msg_html = f" &mdash; {_h(msg)}" if msg else ""
+        raw = (w.get("code") or "").strip()
+        code_html = (
+            f'<code style="font-size:10.5px;color:var(--ink-faint);margin-left:6px">{_h(raw)}</code>'
+            if raw
+            else ""
+        )
+        return (
+            '<li style="margin-bottom:6px">'
+            f'<span class="tag {cls}">{_h(sev) or "note"}</span> '
+            f"<strong>{_h(label)}</strong>{msg_html}{code_html}</li>"
+        )
+
+    sections = ""
+    if err_shown:
+        sections += (
+            '<div style="margin-top:10px"><div class="strap" '
+            'style="color:var(--bad);margin-bottom:6px">Needs your attention</div>'
+            f'<ul style="margin:0;padding-left:18px">{"".join(_row(w) for w in err_shown)}</ul></div>'
+        )
+    if note_shown:
+        head = (
+            '<div class="strap" style="color:var(--ink-muted);margin:10px 0 6px">'
+            "Inferred &amp; ambiguous</div>"
+            if err_shown
+            else ""
+        )
+        sections += (
+            f"{head}"
+            f'<ul style="margin:0;padding-left:18px">{"".join(_row(w) for w in note_shown)}</ul>'
+        )
+    more_html = (
+        f'<p class="muted" style="font-size:12px;margin-top:8px">+{extra} more '
+        f"note{'s' if extra != 1 else ''} not shown.</p>"
+        if extra > 0
+        else ""
+    )
+    return (
+        '<div class="card"><h2>Parse notes</h2>'
+        '<p class="dim">We never silently guess. Anything we inferred from the source '
+        "file, or couldn&rsquo;t fully resolve, is listed here so you can check it "
+        "before approving.</p>"
+        f"{sections}{more_html}</div>"
+    )
+
+
+def _flash_toast(message: str, kind: str = "success") -> None:
+    """Queue a one-shot toast to show on the next rendered page.
+
+    Mirrors the operator-notice pattern (session-stored, popped on render in
+    ``_layout``). It feeds the existing ``MH.toast`` framework, so a POST that
+    redirects (a run deleted, settings saved) finally gives the user an honest
+    success/error confirmation instead of a silent reload. Best-effort: it
+    never raises into a request handler, and a missing request context is a
+    no-op (so direct ``_layout`` calls in tests stay unaffected)."""
+    try:
+        from flask import has_request_context  # noqa: PLC0415
+
+        if not has_request_context():
+            return
+        session["mh_toast"] = {"msg": str(message), "kind": (kind or "success")}
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# UI 1.9 — Multi-select + bulk actions (Media library + review queue).
+#
+# "Pure HTML form multi-select with progressive JS enhancement": the bulk
+# endpoints are content-negotiated so the SAME route serves a no-JS HTML form
+# POST (redirect + flash) and a fetch() AJAX call (per-item JSON results). The
+# two helpers below are the shared request-shape glue; the CSS/JS constants are
+# the shared front-end. Each surface keeps its own action semantics (the review
+# queue updates workflow state in place; the library removes deleted rows).
+# --------------------------------------------------------------------------- #
+
+
+def _req_wants_json(req) -> bool:
+    """True when a request should get a JSON response, not an HTML redirect.
+
+    A fetch() bulk call sends a JSON body (or an explicit Accept/X-Requested-With
+    header); a classic ``<form method=post>`` submission sends url-encoded form
+    data with the browser's default ``Accept: text/html`` and gets redirected.
+    """
+    ctype = (req.headers.get("Content-Type", "") or "").split(";")[0].strip()
+    if ctype == "application/json":
+        return True
+    if "application/json" in (req.headers.get("Accept", "") or ""):
+        return True
+    return req.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _bulk_ids_from_request(req, *keys: str) -> list[str]:
+    """Collect a de-duplicated, order-preserving id list from a bulk request.
+
+    Accepts either a JSON body (``{"ids": [...]}`` under any of ``keys``) or a
+    classic multi-select form (repeated ``<input name=ids>`` fields), so the
+    progressive-enhancement fetch() and the no-JS form POST share one route.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value) -> None:
+        if value is None:
+            return
+        s = str(value).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    body = req.get_json(silent=True) if getattr(req, "is_json", False) else None
+    if isinstance(body, dict):
+        for k in keys:
+            v = body.get(k)
+            if isinstance(v, (list, tuple)):
+                for item in v:
+                    _add(item)
+            elif v is not None:
+                _add(v)
+    # Form fields (no-JS path). getlist() returns [] when the field is absent.
+    try:
+        for k in keys:
+            for item in req.form.getlist(k):
+                _add(item)
+    except Exception:  # noqa: BLE001 — a malformed body must never 500 the route
+        pass
+    return out
+
+
+# Shared styling for the UI 1.9 bulk-action bar + selection checkboxes. Injected
+# inline per surface (CSP allows `style-src 'unsafe-inline'`); kept self-contained
+# so neither surface has to touch the shared BASE_CSS cascade. The bar is hidden
+# only when JS is present AND nothing is selected (`html.mh-js .is-empty`), so a
+# no-JS visitor always sees the controls.
+_GENERATED_GALLERY_CSS = """
+.mh-gen-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:var(--sp-4)}
+.mh-gen-card{margin:0;background:var(--panel);border:1px solid var(--chrome);
+  border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.mh-gen-card img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;
+  background:var(--bg)}
+.mh-gen-card figcaption{padding:var(--sp-4);display:flex;flex-direction:column;gap:6px}
+.mh-gen-badge{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);
+  border-radius:999px;padding:2px 8px}
+.mh-gen-op{font-weight:600;text-transform:capitalize}
+.mh-gen-prompt{margin:0;font-size:13px;color:var(--ink);line-height:1.4}
+.mh-gen-meta{margin:0;font-size:12px}
+.mh-gen-actions{display:flex;gap:8px;margin-top:var(--sp-2);flex-wrap:wrap}
+"""
+
+_BULK_ACTIONS_CSS = """
+.mh-bulkbar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);
+  background:var(--panel);border:1px solid var(--chrome);border-radius:10px;
+  position:sticky;top:8px;z-index:6}
+html.mh-js .mh-bulkbar.is-empty{display:none}
+.mh-bulkbar-all{display:inline-flex;align-items:center;gap:8px;font-size:13px;
+  color:var(--ink-dim);cursor:pointer;user-select:none}
+.mh-bulkbar-count{font-size:13px;font-weight:600;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.mh-bulkbar-actions{display:inline-flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.mh-bulkbar .btn{font-size:12px;padding:5px 12px;min-height:0}
+.mh-row-check,.mh-check-all{width:18px;height:18px;accent-color:var(--lane);
+  cursor:pointer;margin:0;vertical-align:middle}
+.mh-row-check-wrap{display:inline-flex;align-items:flex-start;padding-top:2px;
+  cursor:pointer}
+td.mh-bulk-cell,th.mh-bulk-cell{width:34px;text-align:center;vertical-align:middle}
+.ach-row.is-selected{background:color-mix(in oklab, var(--lane) 5%, transparent);border-radius:8px}
+@media (max-width:640px){.mh-bulkbar{position:static}
+  .mh-bulkbar-actions{margin-left:0;width:100%}}
+"""
+
+
+# Shared progressive-enhancement JS for every UI 1.9 bulk bar. A plain (non
+# f-string) constant — its braces stay literal when interpolated into a page
+# f-string. It auto-wires any element carrying `data-mh-bulkbar` (value picks the
+# per-surface behaviour) from its data-* config, so no per-page inline config is
+# needed. Destructive/mutating actions go over JSON (CSRF-exempt, per-item
+# results); the Export action is left as a native form submit so the browser
+# downloads the file. Falls back to the no-JS form POST whenever JS is absent.
+_BULK_ACTIONS_JS = r"""
+(function(){
+  function init(bar){
+    var form = document.getElementById(bar.getAttribute('data-form'));
+    if (!form) return;
+    var kind = bar.getAttribute('data-mh-bulkbar') || '';
+    var checkCls = bar.getAttribute('data-check') || 'mh-row-check';
+    var rowSel = bar.getAttribute('data-row') || '';
+    var countEl = document.getElementById(bar.getAttribute('data-count') || '');
+    var allEl = document.getElementById(bar.getAttribute('data-select-all') || '');
+    var toast = function(m, t, ms){ if (window.MH && MH.toast) MH.toast(m, t || 'info', ms); };
+    function boxes(){
+      return Array.prototype.slice.call(form.querySelectorAll('.' + checkCls));
+    }
+    function rowOf(c){ return rowSel ? c.closest(rowSel) : null; }
+    function isVisible(c){ var r = rowOf(c); return r ? r.offsetParent !== null : c.offsetParent !== null; }
+    function visible(){ return boxes().filter(isVisible); }
+    function selected(){ return boxes().filter(function(c){ return c.checked && isVisible(c); }); }
+    function refresh(){
+      var sel = selected();
+      var n = sel.length;
+      if (countEl) countEl.textContent = n + ' selected';
+      bar.classList.toggle('is-empty', n === 0);
+      boxes().forEach(function(c){ var r = rowOf(c); if (r) r.classList.toggle('is-selected', c.checked); });
+      if (allEl){
+        var vis = visible();
+        var on = vis.filter(function(c){ return c.checked; }).length;
+        allEl.checked = vis.length > 0 && on === vis.length;
+        allEl.indeterminate = on > 0 && on < vis.length;
+      }
+    }
+    form.addEventListener('change', function(e){
+      if (e.target && e.target.classList && e.target.classList.contains(checkCls)) refresh();
+    });
+    if (allEl){
+      allEl.addEventListener('change', function(){
+        var on = allEl.checked;
+        visible().forEach(function(c){ c.checked = on; });
+        refresh();
+      });
+    }
+    function applyReviewDom(ids, status){
+      var labelMap = {'queue':'In queue','approved':'Approved','rejected':'Rejected','edited':'Edited'};
+      ids.forEach(function(cid){
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(cid) : cid;
+        document.querySelectorAll('[data-mh-wf-target="' + esc + '"]').forEach(function(el){
+          el.dataset.mhWfState = status;
+          var lbl = el.querySelector('[data-mh-wf-label]');
+          if (lbl) lbl.textContent = labelMap[status] || status;
+        });
+        document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
+          var on = b.getAttribute('data-mh-wf') === status;
+          if (b.classList.contains('mh-wf-approve')){
+            b.classList.toggle('is-on', on);
+            b.classList.toggle('secondary', !on);
+            b.textContent = on ? 'Approved ✓' : 'Approve';
+            if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
+          } else if (on){
+            b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
+          } else {
+            b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
+          }
+        });
+        var row = document.querySelector('.ach-row [name="card_ids"][value="' + (window.CSS && CSS.escape ? CSS.escape(cid) : cid) + '"]');
+        var card = row ? row.closest('.ach-row') : null;
+        if (card) card.dataset.status = status;
+      });
+      if (window.mhRecountReview) window.mhRecountReview();
+      if (window.mhDockSync) window.mhDockSync();
+    }
+    function afterMedia(action, body, ids){
+      if (action === 'delete'){
+        var gone = (body && body.deleted) || ids;
+        gone.forEach(function(id){
+          var box = form.querySelector('.' + checkCls + '[value="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+          var row = box ? box.closest(rowSel || 'tr') : null;
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+        });
+        var left = form.querySelectorAll(rowSel || 'tr.mh-asset-row').length;
+        document.querySelectorAll('[data-mh-asset-count]').forEach(function(el){
+          el.textContent = ('000' + left).slice(-3);
+        });
+        var n = (body && typeof body.n_ok === 'number') ? body.n_ok : gone.length;
+        toast('Deleted ' + n + ' photo' + (n === 1 ? '' : 's') + '.', 'success', 2500);
+        refresh();
+      } else if (action === 'approve'){
+        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : ids.length;
+        var sk = (body && body.n_skipped) || 0;
+        var msg = 'Approved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + '.';
+        if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
+        toast(msg, n2 ? 'success' : 'info', 3000);
+        selected().forEach(function(c){ c.checked = false; });
+        refresh();
+      }
+    }
+    function afterReview(action, body, ids){
+      var status = action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : action);
+      var okIds = (body && body.results ? body.results.filter(function(r){ return r.ok; }).map(function(r){ return r.id; }) : ids);
+      applyReviewDom(okIds, status);
+      var nb = (body && body.n_blocked) || 0;
+      var verb = action === 'approve' ? 'Approved' : 'Rejected';
+      var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
+      if (nb) msg += ' ' + nb + ' blocked by the consent gate.';
+      toast(msg, okIds.length ? 'success' : 'info', 3500);
+      selected().forEach(function(c){ c.checked = false; });
+      refresh();
+    }
+    Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
+      var action = btn.getAttribute('data-mh-bulk');
+      if (action === 'export') return;  // native submit → file download
+      btn.addEventListener('click', function(e){
+        e.preventDefault();
+        var ids = selected().map(function(c){ return c.value; });
+        if (!ids.length){ toast('Select at least one first.', 'info'); return; }
+        var conf = btn.getAttribute('data-confirm');
+        if (conf){
+          conf = conf.replace('{n}', ids.length);
+          if (!window.confirm(conf)) return;
+        }
+        var url = btn.getAttribute('formaction');
+        var payload = {ids: ids};
+        if (btn.value) payload.status = btn.value;
+        var orig = btn.style.opacity;
+        btn.disabled = true; btn.style.opacity = '0.6';
+        fetch((window._API_BASE || '') + url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+          body: JSON.stringify(payload)
+        }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+          .then(function(o){
+            btn.disabled = false; btn.style.opacity = orig;
+            if (!o.ok || !o.body || o.body.ok === false){
+              var m = (o.body && (o.body.reason || o.body.error || o.body.message)) || 'failed';
+              toast('Bulk action failed: ' + m, 'error', 4000);
+              return;
+            }
+            if (kind === 'media') afterMedia(action, o.body, ids);
+            else if (kind === 'review') afterReview(action, o.body, ids);
+          }).catch(function(err){
+            btn.disabled = false; btn.style.opacity = orig;
+            toast('Bulk action failed: ' + ((err && err.message) || err), 'error', 4000);
+          });
+      });
+    });
+    refresh();
+  }
+  function boot(){
+    Array.prototype.slice.call(document.querySelectorAll('[data-mh-bulkbar]')).forEach(init);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+"""
+
+
 # Module-level JS for the palette confirmation form (rendered inside an
 # f-string). Lifted out so we don't have to double every `{` for f-string
 # escaping every time the form is rendered.
@@ -8194,6 +12898,158 @@ _PALETTE_PICKER_JS = """
 """
 
 
+def _hero_product_demo() -> str:
+    """U.10 — the framed, looping in-app product demo for the landing hero.
+
+    A browser-framed mockup that loops the core flow
+    **generate → review → approve**, with a subtle ambient glow behind the
+    frame (inspired by Reflect, reflect.app). Each beat carries its own
+    purposeful micro-motion so the frame never reads as static: the raw
+    results sheet is *read* by a scan line and resolves into detected,
+    ranked moments; a premium branded story card lands while the
+    source-grounded facts highlight in turn and the confidence meter fills;
+    then the human approval gate fans out into the posting-ready formats.
+    It is first-party HTML + CSS only — there is no screen-capture asset to
+    host and no JS framework:
+
+      * the loop is three cross-fading CSS-keyframe scenes (the
+        ``.mh-demo-phase`` tracks in theme-components.css), reused to light
+        the chrome-step dots so the indicator stays perfectly in sync;
+      * it pauses on hover / focus via a pure-CSS ``animation-play-state``
+        toggle, so a visitor can dwell on any scene;
+      * under ``prefers-reduced-motion`` it freezes on the single "Review"
+        scene — no movement at all.
+
+    The block is decorative: the same workflow is conveyed as real text by
+    the four-step explainer further down the page, so the whole demo is
+    ``aria-hidden`` to keep the screen-reader narrative clean. Every value
+    here is static (no user input), so no escaping is required.
+    """
+    check = (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+    )
+    return (
+        '<div class="mh-hero-demo" aria-hidden="true">'
+        '<div class="mh-demo-glow"></div>'
+        '<div class="mh-demo-frame">'
+        # --- Chrome browser chrome: a tab strip + a toolbar with the omnibox
+        # parked on the real deployed URL, so the mockup reads as the live
+        # hosted product open in an actual browser rather than a generic window.
+        '<div class="mh-demo-bar">'
+        # row 1 — macOS traffic lights + the active Chrome tab
+        '<div class="mh-demo-tabstrip">'
+        '<span class="mh-demo-dots"><i></i><i></i><i></i></span>'
+        '<span class="mh-demo-tab">'
+        '<span class="mh-demo-tab-logo"></span>'
+        '<span class="mh-demo-tab-title">MediaHub — Content studio</span>'
+        '<span class="mh-demo-tab-x"></span>'
+        "</span>"
+        '<span class="mh-demo-tab-add"></span>'
+        "</div>"
+        # row 2 — back / forward / reload, the secure omnibox, the overflow menu
+        '<div class="mh-demo-toolbar">'
+        '<span class="mh-demo-nav back"></span>'
+        '<span class="mh-demo-nav fwd"></span>'
+        '<span class="mh-demo-nav reload"></span>'
+        '<span class="mh-demo-omni">'
+        '<span class="mh-demo-lock"></span>'
+        '<span class="mh-demo-url">mediahub-gzwc.onrender.com</span>'
+        "</span>"
+        '<span class="mh-demo-menu"><i></i><i></i><i></i></span>'
+        "</div>"
+        "</div>"
+        # --- screen / cross-fading stage ---
+        '<div class="mh-demo-screen"><div class="mh-demo-stage">'
+        # Scene 1 — Generate: the raw results sheet is read (scan line) and
+        # resolves into detected, ranked moments — input → intelligence.
+        '<div class="mh-demo-phase p1">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">01 · Generate</span>'
+        '<span class="mh-demo-file">spring-open.hy3</span>'
+        "</div>"
+        '<div class="mh-demo-ingest">'
+        '<div class="mh-demo-sheet"><span class="scan"></span>'
+        '<span class="row head"><i>LN</i><i>NAME</i><i>TIME</i></span>'
+        '<span class="row"><i>3</i><i>T. Davies</i><i>52.41</i></span>'
+        '<span class="row"><i>5</i><i>A. Nolan</i><i>59.74</i></span>'
+        '<span class="row"><i>1</i><i>R. Khan</i><i>1:04.2</i></span>'
+        '<span class="row"><i>6</i><i>W. 4&times;100</i><i>4:12.8</i></span>'
+        "</div>"
+        '<div class="mh-demo-finds">'
+        '<div class="mh-demo-find"><span class="badge pb">PB</span>'
+        '<span class="who">Tom Davies · 100m Free</span><b>52.41</b></div>'
+        '<div class="mh-demo-find"><span class="badge gold">1st</span>'
+        '<span class="who">Women&rsquo;s 4&times;100 Relay</span><b>4:12.8</b></div>'
+        '<div class="mh-demo-find"><span class="badge new">NEW</span>'
+        '<span class="who">Aoife Nolan · first sub-1:00</span><b>59.74</b></div>'
+        "</div>"
+        "</div>"
+        '<div class="mh-demo-meter"><span class="bar"><i></i></span>'
+        '<span class="lab">42 swims read · 3 moments ranked</span></div>'
+        "</div>"
+        # Scene 2 — Review (branded story card + caption draft + confidence) —
+        # the richest single frame, so it is the reduced-motion resting state.
+        '<div class="mh-demo-phase p2 is-rest">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">02 · Review</span>'
+        '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
+        "</div>"
+        '<div class="mh-demo-card">'
+        # The OUTPUT — a real, premium branded story card the engine returns.
+        '<div class="mh-demo-thumb">'
+        '<span class="mh-demo-brandmark"></span>'
+        '<span class="mh-demo-flash">PB</span>'
+        '<span class="ev">100m Freestyle</span>'
+        '<span class="tm">52.41</span>'
+        '<span class="nm">Tom Davies</span>'
+        '<span class="mh-demo-delta">&minus;0.74s on his best</span>'
+        '<span class="mh-demo-cardbar"></span>'
+        "</div>"
+        '<div class="mh-demo-cardbody">'
+        '<span class="mh-demo-eyebrow">Story card · caption draft</span>'
+        '<p class="mh-demo-caption">A lifetime best for <mark>Tom Davies</mark>. '
+        "<mark>52.41</mark> in the <mark>100m freestyle</mark>, a clean "
+        "<mark>0.74s</mark> off his old mark.</p>"
+        '<div class="mh-demo-acts"><span>Edit</span>'
+        '<span class="ghost">Reject</span><span class="go">Approve</span></div>'
+        "</div>"
+        "</div>"
+        "</div>"
+        # Scene 3 — Approve: the human gate, then one approval fans out into
+        # the posting-ready formats (nothing leaves the queue without it).
+        '<div class="mh-demo-phase p3">'
+        '<div class="mh-demo-row">'
+        '<span class="mh-demo-eyebrow">03 · Approve</span>'
+        '<span class="mh-demo-state go">Approved</span>'
+        "</div>"
+        '<div class="mh-demo-approve">'
+        f'<span class="mh-demo-check">{check}</span>'
+        '<div class="txt"><b>Approved by you</b>'
+        "<span>Tom Davies · PB 100m Free · ready to export</span></div>"
+        "</div>"
+        '<div class="mh-demo-formats">'
+        '<span class="mh-demo-chip">Story</span>'
+        '<span class="mh-demo-chip">Feed</span>'
+        '<span class="mh-demo-chip">Reel</span>'
+        '<span class="mh-demo-chip">Caption</span>'
+        "</div>"
+        '<div class="mh-demo-meter"><span class="lab">'
+        "Nothing leaves the queue without your approval.</span></div>"
+        "</div>"
+        "</div></div>"  # /stage /screen
+        # --- step indicator (dots lit by the same p1/p2/p3 tracks) ---
+        '<div class="mh-demo-steps">'
+        '<span class="mh-demo-step s1"><span class="dot"><i class="on"></i></span>Generate</span>'
+        '<span class="mh-demo-step s2"><span class="dot"><i class="on"></i></span>Review</span>'
+        '<span class="mh-demo-step s3"><span class="dot"><i class="on"></i></span>Approve</span>'
+        "</div>"
+        "</div>"  # /frame
+        "</div>"  # /hero-demo
+    )
+
+
 # ---------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------
@@ -8214,6 +13070,13 @@ def create_app() -> Flask:
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+    # Let the browser hold static assets (self-hosted fonts, fonts.css, the UI
+    # kit) instead of revalidating each with a conditional GET on every single
+    # navigation. The one mutable asset, ui-kit.js, carries a content-hash `?v=`
+    # cache-buster (see _UI_KIT_VER) so a deploy still lands instantly; the woff2
+    # faces are effectively immutable. Routes that must stay fresh (sw.js,
+    # generated previews) set their own Cache-Control, which overrides this.
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800  # 7 days
     app.url_map.strict_slashes = False
 
     # ---- Web hardening (security/web-hardening, THREAT_MODEL §6) --------
@@ -8467,6 +13330,9 @@ def create_app() -> Flask:
             # passwordless: one click on /developer grants the operator session.
             "developer_login",
             "developer_login_post",
+            # UI 1.11 — the public Developer/API reference (code-example docs).
+            # A docs page, like the legal pages above: readable before sign-up.
+            "api_docs_page",
             # Phase C operator commercial console (PC.4/PC.6) — operator-only
             # (redirects non-operator sessions to the developer sign-in) and
             # org-independent, so it bypasses the org gate exactly like the
@@ -8478,6 +13344,10 @@ def create_app() -> Flask:
             "operator_commercial_lead_update",
             "operator_commercial_ngb",
             "operator_commercial_bind",
+            # Operator-only mobile-parity audit tool — org-independent (it
+            # crawls the app's own pages in a hidden frame), so it bypasses
+            # the org gate exactly like the operator console above.
+            "mobile_parity_tool",
             # /settings now redirects to / so doesn't actually need exempting,
             # but we keep the endpoint name in the allow-list so a directly-
             # hit /settings URL doesn't get caught by the gate before reaching
@@ -8817,13 +13687,25 @@ def create_app() -> Flask:
         existing = list_profiles()
         n_orgs = len(existing)
 
-        # Compute a small run-count for the hero meta line so the page
-        # doesn't feel hollow once the user has activity.
+        # Compute small deployment-wide tallies for the hero meta line so the
+        # page doesn't feel hollow once the user has activity. The third figure
+        # is the REAL engine output — the sum of recognised moments
+        # (n_achievements) — NOT the legacy n_cards column, which the V5
+        # recognition-first pipeline leaves at ~0 and would read as a falsehood
+        # ("0 cards generated"). COALESCE keeps NULL rows (pre-column runs that
+        # were never relisted) as 0: an honest lower bound, never a fabrication.
         n_runs = 0
+        n_moments = 0
         try:
             conn = _db()
-            n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
-            conn.close()
+            try:
+                n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+                n_moments = int(
+                    conn.execute("SELECT COALESCE(SUM(n_achievements), 0) FROM runs").fetchone()[0]
+                    or 0
+                )
+            finally:
+                conn.close()
         except Exception:
             pass
 
@@ -8831,6 +13713,10 @@ def create_app() -> Flask:
         # Lane-number watermark sits behind the headline. The org name stays
         # in default ink (no .grad span) so the only lane-yellow on the page
         # is the live dot + the CTA. Editorial italic does the emphasis work.
+        # U.9 — only the signed-out hero cycles its content-type accent word;
+        # the returning-user "Ready to file." greeting stays static, so the
+        # cycling script ships only when the rotator is actually on the page.
+        word_cycle_js = ""
         if prof and prof.is_ready():
             # Returning user with a pinned org.
             hero_h1 = f'{_h(prof.display_name)}.<br><em class="editorial">Ready</em> to file.'
@@ -8851,7 +13737,10 @@ def create_app() -> Flask:
             lane_no = "04"
         else:
             # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            hero_h1 = 'Results in.<br><em class="editorial">On-brand</em> stories out.'
+            # U.9 — the content-type noun is now the gold serif-italic accent
+            # and crossfades through stories / reels / graphics / captions.
+            hero_h1 = "Results in.<br>On-brand " + _hero_word_cycle_html() + " out."
+            word_cycle_js = _HERO_WORD_CYCLE_JS
             hero_lede = (
                 "MediaHub reads your club website, social profiles, and brand "
                 "guidelines, then writes captions, builds graphics, and renders "
@@ -8859,15 +13748,15 @@ def create_app() -> Flask:
                 "Nothing posts without you."
             )
             if n_orgs > 0:
-                # Signed-out session with organisations on this
-                # deployment: lead with Sign in (pick an existing org),
-                # with Set up my organisation as the secondary path for a
-                # brand-new tenant.
+                # Signed-out session with existing organisations: a first-time
+                # visitor has no account, so onboarding is always the primary
+                # action. Sign in is secondary — visible for returning users
+                # switching tenants, but never the hero emphasis.
                 hero_actions = (
-                    f'<a class="mh-cta-primary" href="{url_for("sign_in_page")}">'
-                    f"Sign in &rarr;</a>"
-                    f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
-                    "Set up my organisation</a>"
+                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
+                    "Set up my organisation &rarr;</a>"
+                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                    "Sign in</a>"
                 )
             else:
                 # Fresh deployment with no organisations yet: lead with
@@ -8880,18 +13769,35 @@ def create_app() -> Flask:
                     f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
                     "Sign in</a>"
                 )
-            eyebrow = "Sport content automation"
+            eyebrow = "The content engine for sports clubs"
             lane_no = "01"
 
         # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
+        # U.12: the live tallies are odometer numerals — zero-padded digit
+        # reels that roll upward on page load + scroll-into-view via the shared
+        # reveal/counter system (data-mh-count + data-mh-odometer). Progressive
+        # enhancement: the padded value is the element's text, so it reads
+        # correctly with JS off; role="img" + aria-label hand assistive tech the
+        # clean (unpadded, comma-grouped) value on both the JS and no-JS paths.
+        def _odometer(value: int, pad: int) -> str:
+            return (
+                f'<b class="mh-odo" role="img" aria-label="{value:,}" '
+                f'data-mh-count="{value}" data-mh-odometer data-mh-count-pad="{pad}">'
+                f"{value:0{pad}d}</b>"
+            )
+
         meta_parts = []
         if n_orgs:
             meta_parts.append(
-                f"<span><b>{n_orgs:02d}</b> {'organisation' if n_orgs == 1 else 'organisations'}</span>"
+                f"<span>{_odometer(n_orgs, 2)} {'organisation' if n_orgs == 1 else 'organisations'}</span>"
             )
         if n_runs:
             meta_parts.append(
-                f"<span><b>{n_runs:03d}</b> total {'run' if n_runs == 1 else 'runs'}</span>"
+                f"<span>{_odometer(n_runs, 3)} total {'run' if n_runs == 1 else 'runs'}</span>"
+            )
+        if n_moments:
+            meta_parts.append(
+                f"<span>{_odometer(n_moments, 3)} {'moment' if n_moments == 1 else 'moments'} detected</span>"
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
             meta_parts.append("<span>Brand voice <b>captured</b></span>")
@@ -8912,8 +13818,27 @@ def create_app() -> Flask:
                 "</p>"
             )
 
+        # U.10 — framed, looping product demo. Relocated out of the hero into
+        # its own "See it work" section just below the engine diagram, so the
+        # diagram (the read -> engine -> write map) is the hero's first visual.
+        # Fresh / signed-out visitors only; a pinned org gets the utilitarian
+        # "Ready to file" hero with no marketing demo.
+        demo_html = "" if (prof and prof.is_ready()) else _hero_product_demo()
+        demo_section_html = ""
+        if demo_html:
+            demo_section_html = (
+                '<section class="mh-section mh-reveal" id="mh-see-it-work">'
+                '<div class="mh-section-eyebrow-strip mh-reveal">'
+                '<span class="label">See it work</span></div>'
+                + _reveal_lines(
+                    ["One result in.", 'A post you <em class="editorial">approve</em>.']
+                )
+                + demo_html
+                + "</section>"
+            )
+
         hero_html = (
-            f'<section class="mh-hero" data-lane="{lane_no}">'
+            f'<section class="mh-hero" id="mh-ch-overview" data-lane="{lane_no}">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
             f"<h1>{hero_h1}</h1>"
             f'<p class="lede">{_h(hero_lede)}</p>'
@@ -8921,86 +13846,98 @@ def create_app() -> Flask:
             f"{demo_line_html}"
             f"{meta_html}"
             "</section>"
+            f"{word_cycle_js}"
         )
 
-        # --- Four-step explainer — sport newsroom workflow ---
-        # Each step now carries an SVG icon and a "time-to" footnote so the
-        # block reads as a real product walkthrough, not a paragraph wall.
-        step_specs = [
-            (
-                "01",
-                "Add an input",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-                "Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.",
-                "~ 30s",
-            ),
-            (
-                "02",
-                "We find the moments",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v3M11 14v.01"/></svg>',
-                "The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.",
-                "~ 45s",
-            ),
-            (
-                "03",
-                "On-brand drafts appear",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19l7-7-3-3-7 7v3z"/><path d="M14 6l3 3"/><path d="M5 21h14"/></svg>',
-                "Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.",
-                "~ 60s",
-            ),
-            (
-                "04",
-                "Approve. Then post.",
-                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
-                "You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.",
-                "Human in the loop",
-            ),
-        ]
-        steps_html = (
-            '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">The workflow</span></div>'
-            '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
-            '<div class="mh-steps mh-reveal-group">'
-            + "".join(
-                f'<div class="mh-step">{icon}'
-                f'<div class="mh-step-num">{num}</div>'
-                f"<h3>{title}</h3><p>{body}</p>"
-                f'<div class="mh-step-foot">{foot}</div></div>'
-                for num, title, icon, body, foot in step_specs
+        # --- UI 1.3 — Inline media thumbnails in a display headline. ---
+        # Samara-style: a large statement sentence with four *real* sample
+        # outputs inlined — the results sheet a club uploads, then the story
+        # card, feed graphic and reel the engine returns. The thumbnails are
+        # first-party SVGs served from /static/samples (no external fetch);
+        # they mirror the same facts/formats as the larger sample row below,
+        # so the band reads as a one-line proof of the whole pipeline.
+        def _inline_thumb(filename: str, kind: str, alt: str) -> str:
+            src = url_for("static", filename="samples/" + filename)
+            return (
+                f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
+                f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
+                f'src="{src}" width="144" height="200" '
+                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+                "</span>"
             )
-            + "</div></section>"
+
+        pipeline_html = (
+            '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
+            '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
+            '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
+            "From a results sheet "
+            + _inline_thumb(
+                "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
+            )
+            + " to a story "
+            + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
+            + ", a feed graphic "
+            + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
+            + " and a reel "
+            + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
+            + "."
+            "</h2>"
+            '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
+            "Every name, time and place comes straight from the file you "
+            "uploaded. Nothing is invented, and nothing posts without you.</p>"
+            "</section>"
         )
 
-        # --- Sample output preview — three mock cards showing the three
-        # default output formats. Pure visual; non-interactive. Helps a
-        # first-time visitor see what they're getting before they upload.
-        sample_html = (
-            '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
-            '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
-            '<div class="mh-sample-row mh-reveal-group">'
-            '<div class="mh-sample story">'
-            '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
-            '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
-            '<div class="mh-sample-time">52.41<span class="mh-sample-delta">−0.74s</span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">A clean, vertical story graphic with the swimmer’s name, event and split — branded with your club’s palette.</p>'
-            '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
-            "</div>"
-            '<div class="mh-sample feed">'
-            '<span class="mh-sample-eyebrow">Feed graphic · 1080×1350</span>'
-            '<div class="mh-sample-title">Top three <em>finals</em></div>'
-            '<div class="mh-sample-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Podium-bar chart of the night’s finals — names, times and lanes from your meet file, dropped into your colour palette.</p>'
-            '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
-            "</div>"
-            '<div class="mh-sample reel">'
-            '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
-            '<div class="mh-sample-title">Match-day <em>highlights</em></div>'
-            '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
-            '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Top three cards stitched together with crossfades, your wordmark, and the day’s headline — rendered server-side.</p>'
-            '<div class="mh-sample-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> 1080×1920</div>'
-            "</div>"
-            "</div>"
+        # --- Engine showcase (UI 1.2, rebuilt) — the "what the engine does"
+        # section now *shows* what MediaHub produces instead of describing it.
+        # Each tile frames a real, deterministic sample output rendered by
+        # web/sample_graphics.py: a story card, a meet reel, a feed graphic,
+        # the detected-&-ranked intelligence read-out, the brand-kit
+        # application and the moment taxonomy. They are first-party inline
+        # SVG (no external fetch) that consume the live brand tokens and
+        # self-hosted fonts, so they mirror the real Playwright/Remotion
+        # output a first-time visitor would get from their own meet file.
+        # The grid + tilt + reveal infrastructure (Umbrel-style bento, U.16
+        # tilt) carries over; the heading reuses the U.5 scroll-reveal helper.
+        bento_html = (
+            '<section class="mh-section" id="mh-ch-engine">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
+            + _reveal_lines(
+                [
+                    "A results sheet in.",
+                    'A <em class="editorial">weekend</em> of content out.',
+                ]
+            )
+            + '<div class="mh-bento mh-reveal-group">'
+            # Story card — the 2×2 showpiece (Tom Davies / 52.41 carries
+            # through from the looping product demo for one coherent story).
+            + '<div class="mh-bento-tile feature is-story">'
+            + _sample_graphics.story_card_svg()
+            + "</div>"
+            # Meet reel poster frame.
+            + '<div class="mh-bento-tile is-reel">'
+            + _sample_graphics.reel_poster_svg()
+            + "</div>"
+            # Feed graphic — top-three finals podium.
+            + '<div class="mh-bento-tile is-feed">'
+            + _sample_graphics.feed_graphic_svg()
+            + "</div>"
+            # Detected & ranked — the intelligence read-out (wide).
+            + '<div class="mh-bento-tile wide is-rank">'
+            + _sample_graphics.detected_ranked_svg()
+            + "</div>"
+            # Your brand, applied.
+            + '<div class="mh-bento-tile is-brand">'
+            + _sample_graphics.brand_kit_svg()
+            + "</div>"
+            # Moments we detect — the taxonomy.
+            + '<div class="mh-bento-tile is-moments">'
+            + _sample_graphics.moments_svg()
+            + "</div>"
+            + "</div>"
+            + '<p class="mh-bento-caption">Real sample output — every name, '
+            "time and place comes from the file you upload, set in your club’s "
+            "palette and type. Nothing is invented.</p>"
             "</section>"
         )
 
@@ -9008,27 +13945,32 @@ def create_app() -> Flask:
         # product story doesn't change between fresh visitors and pinned
         # tenants; this is the "who it's for" reassurance block.
         audience_html = (
-            '<section class="mh-section">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">Made for</span></div>'
-            '<h2 class="mh-section-title">Built for the people who already <em class="editorial">post the results</em>.</h2>'
-            '<div class="mh-audience-row mh-reveal-group">'
-            '<div class="mh-audience">'
+            '<section class="mh-section" id="mh-ch-audience">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
+            + _reveal_lines(
+                [
+                    "Built for the people who",
+                    'already <em class="editorial">post the results</em>.',
+                ]
+            )
+            + '<div class="mh-audience-row mh-reveal-group">'
+            '<div class="mh-audience" data-mh-tilt>'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
             '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
             '<h3 class="mh-audience-title">Club committees</h3>'
             '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
             "</div>"
-            '<div class="mh-audience">'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></span>'
+            '<div class="mh-audience" data-mh-tilt>'
+            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></svg></span>'
             '<span class="mh-audience-role">Coach · Performance · Selection</span>'
             '<h3 class="mh-audience-title">Coaches</h3>'
-            '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts — surfaced before you finish your coffee.</p>'
+            '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
             "</div>"
-            '<div class="mh-audience">'
+            '<div class="mh-audience" data-mh-tilt>'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
             '<span class="mh-audience-role">Society · University · Team</span>'
             '<h3 class="mh-audience-title">University teams</h3>'
-            '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures — all in your colours, with the right tone for an Instagram feed.</p>'
+            '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures, all in your colours, with the right tone for an Instagram feed.</p>'
             "</div>"
             "</div>"
             "</section>"
@@ -9038,14 +13980,17 @@ def create_app() -> Flask:
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
         promise_html = (
-            '<section class="mh-section mh-reveal">'
+            '<section class="mh-section" id="mh-ch-promise">'
             '<div class="mh-promise">'
-            '<h2 class="mh-promise-title">Human in the loop, <em>by design</em>.</h2>'
-            '<p class="mh-promise-lede">'
+            + _reveal_lines(
+                ["Human in the loop,", "<em>by design</em>."],
+                cls="mh-promise-title",
+            )
+            + '<p class="mh-promise-lede mh-reveal">'
             "MediaHub is an intelligence layer, not an auto-poster. Every "
             "piece of content stops at a review queue you control."
             "</p>"
-            '<ul class="mh-promise-list">'
+            '<ul class="mh-promise-list mh-reveal-group">'
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
             "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
@@ -9053,7 +13998,7 @@ def create_app() -> Flask:
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
             "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't auto-post</b><span>No scheduled feed pushes without you saying so. The Buffer connection is opt-in per-card.</span></div></li>"
+            "<div><b>We don't auto-post</b><span>MediaHub never posts to your social channels. You approve, then export or download and post it yourself.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
             "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
@@ -9068,11 +14013,13 @@ def create_app() -> Flask:
         # stripe accent so the page resolves with the same chrome.
         if prof and prof.is_ready():
             final_cta_html = (
-                '<section class="mh-final-cta">'
+                '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
                 "<div>"
-                f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
-                "<em>ready</em> in a sitting.</h2>"
-                '<p class="mh-final-cta-sub">Drop the results file. We\'ll '
+                + _reveal_lines(
+                    ["Next weekend's meet,", "<em>ready</em> in a sitting."],
+                    cls="mh-final-cta-headline",
+                )
+                + '<p class="mh-final-cta-sub mh-reveal">Drop the results file. We\'ll '
                 "rank the moments and write the captions; you spend the "
                 "evening approving instead of opening Photoshop.</p>"
                 "</div>"
@@ -9084,11 +14031,13 @@ def create_app() -> Flask:
             )
         else:
             final_cta_html = (
-                '<section class="mh-final-cta">'
+                '<section class="mh-final-cta mh-reveal" id="mh-ch-start">'
                 "<div>"
-                '<h2 class="mh-final-cta-headline">A minute to set up. '
-                "<em>Then</em> every week is easier.</h2>"
-                '<p class="mh-final-cta-sub">Tell us your club\'s name and '
+                + _reveal_lines(
+                    ["A minute to set up.", "<em>Then</em> every week is easier."],
+                    cls="mh-final-cta-headline",
+                )
+                + '<p class="mh-final-cta-sub mh-reveal">Tell us your club\'s name and '
                 "website. We'll read your brand, palette and voice, and have "
                 "on-brand drafts ready the next time you upload a results file.</p>"
                 "</div>"
@@ -9099,11 +14048,207 @@ def create_app() -> Flask:
                 "</section>"
             )
 
+        # U.8 — animated how-it-works pipeline diagram. Placed explicitly in
+        # the return below (hero -> diagram -> "see it work" demo -> inline-
+        # thumbnail headline), so the diagram is the hero's first visual.
+        # `pipeline_html` here is just the UI 1.3 inline-thumbnail headline
+        # built above.
+
+        # UI 1.29 — sticky chaptered scroll-spy nav. Each (anchor-id, label)
+        # maps to a section id set above; _layout renders the sticky side rail
+        # and the IntersectionObserver scroll-spy wires the active state. The
+        # rail only appears on wide desktop viewports (where there is gutter
+        # room) and degrades to a plain in-page anchor list without JS.
+        home_chapters = [
+            ("mh-ch-overview", "Overview"),
+            ("mh-ch-how", "How it works"),
+            ("mh-ch-engine", "What it does"),
+            ("mh-ch-audience", "Who it's for"),
+            ("mh-ch-promise", "Our promise"),
+            ("mh-ch-start", "Get started"),
+        ]
+
+        # --- UI 1.22 — FAQ accordion (Limitless / status-page inspired). ---
+        # Expandable Q&A that answers the objections a club raises before it
+        # trusts the engine. Built from native <details>/<summary> — NO
+        # JavaScript — so every row is keyboard- and screen-reader-operable
+        # even with JS disabled; the open/close motion is a pure CSS
+        # grid-template-rows transition with a +/- marker (reduced-motion
+        # gated in the stylesheet). Answers are static, trusted product copy,
+        # but routed through _h() so the pattern stays escape-safe. Sits after
+        # the "what we don't do" promise panel and before the final CTA.
+        faq_items = [
+            (
+                "Does anything post to our socials automatically?",
+                "No. MediaHub is an intelligence layer, not an auto-poster. "
+                "Every caption, graphic and reel stops at a review queue you "
+                "control. Nothing leaves this deployment without an explicit "
+                "approval click.",
+            ),
+            (
+                "Will it ever invent a time or a result?",
+                "Never. Every claim on a card is grounded in the result line "
+                "you uploaded. If the file does not contain a time, the caption "
+                "does not claim one; ambiguous rows are flagged for your review "
+                "rather than guessed.",
+            ),
+            (
+                "What files can we upload?",
+                "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
+                "exported result files (HY3, SDIF, SportSystems), plus entry "
+                "lists and heat sheets. The engine parses the file into "
+                "structured results before it writes a single word.",
+            ),
+            (
+                "How does it learn our club brand?",
+                "It reads your club website, social profiles and brand "
+                "guidelines once, then locks your palette, fonts, logo and tone "
+                "onto every card. Set up once, reuse forever, and your data is "
+                "never used to re-train a shared model.",
+            ),
+            (
+                "What can it produce from one upload?",
+                "Posting-ready story cards, feed graphics, athlete spotlights, "
+                "meet recaps and branded motion reels. Every name, time and "
+                "place is sized for the formats your club actually posts.",
+            ),
+            (
+                "Which sports does it work for?",
+                "Swimming is the first wedge, but the engine is sport-agnostic "
+                "by design: athletics, rugby, netball, rowing and more run "
+                "through the same ingest, detect, rank, brand and generate "
+                "pipeline.",
+            ),
+            (
+                "Is our athlete data kept private?",
+                "Yes. Athlete and result data stays on the deployment you "
+                "control and is never sold; content featuring minors never "
+                "auto-publishes. You can audit exactly what is stored on the "
+                "privacy page.",
+            ),
+        ]
+        faq_rows = "".join(
+            (
+                '<details class="mh-faq-item">'
+                '<summary class="mh-faq-q">'
+                f'<span class="mh-faq-q-text">{_h(q)}</span>'
+                '<span class="mh-faq-icon" aria-hidden="true"></span>'
+                "</summary>"
+                '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
+                f"<p>{_h(a)}</p>"
+                "</div></div>"
+                "</details>"
+            )
+            for q, a in faq_items
+        )
+        faq_html = (
+            '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">Common questions</span></div>'
+            + _reveal_lines(
+                ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
+                cls="mh-faq-title",
+                el_id="mh-faq-h",
+            )
+            + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
+            + "</section>"
+        )
+
         return _layout(
             "Home",
-            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
+            '<div class="mh-fx mh-spotlight">'
+            + hero_html
+            + "</div>"
+            + _pipeline_diagram_section_html()
+            + demo_section_html
+            + pipeline_html
+            + bento_html
+            + audience_html
+            + promise_html
+            + faq_html
+            + final_cta_html,
             active="home",
+            chapters=home_chapters,
         )
+
+    # ---- MOBILE PARITY &mdash; operator diagnostic: is the phone as good as PC? ----
+    @app.route("/tools/mobile-parity")
+    def mobile_parity_tool():
+        # Operator-only: the audit crawls every in-app page in a hidden frame,
+        # so it stays behind the developer-operator gate like the other
+        # internal diagnostics.
+        if not _auth.is_dev_operator():
+            abort(404)
+        from mediahub.web.mobile_parity import build_mobile_parity_body
+
+        # Auto-discover the auditable surface from the live URL map: GET pages
+        # with no path parameters, minus machinery (api / webhooks / static /
+        # downloads / auth round-trips / the tool itself). This keeps the audit
+        # honest as routes come and go — nothing to hand-maintain.
+        _SKIP_PREFIX = (
+            "/api",
+            "/webhooks",
+            "/static",
+            "/healthz",
+            "/sw.js",
+            "/robots",
+            "/.well-known",
+            "/tools/mobile-parity",
+            "/logout",
+            "/sign-out",
+            "/auth",
+            "/oauth",
+            "/magic",
+            "/r/",
+            "/embed/",
+        )
+        _SKIP_SUBSTR = (
+            "download",
+            "export",
+            "raw",
+            "render",
+            "motion",
+            "reel",
+            "poster",
+            "preview_image",
+            "thumbnail",
+            "favicon",
+            "manifest",
+            "feed.xml",
+            # Mutation-ish GET endpoints the audit must not trigger by loading.
+            "confirm",
+            "claim",
+            "delete",
+            "checkout",
+            "portal",
+        )
+        seen: set[str] = set()
+        targets: list[dict] = []
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == "static" or rule.arguments:
+                continue
+            methods = rule.methods or set()
+            if "GET" not in methods:
+                continue
+            path = str(rule.rule)
+            if any(path.startswith(p) for p in _SKIP_PREFIX):
+                continue
+            if any(s in rule.endpoint.lower() or s in path.lower() for s in _SKIP_SUBSTR):
+                continue
+            # /health is the deep dependency probe — it returns JSON, not an
+            # HTML page, so it has no place in a UI parity sweep. (The client
+            # audit also skips non-HTML responses defensively.)
+            if path == "/health":
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            label = rule.endpoint.replace("_page", "").replace("_", " ").strip().title() or path
+            targets.append({"label": label, "url": path, "group": ""})
+        targets.sort(key=lambda t: (t["url"] != "/", t["label"]))
+
+        body = build_mobile_parity_body(targets)
+        return _layout("Mobile parity audit", body, active="settings")
 
     # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----
     @app.route("/activity")
@@ -9203,46 +14348,6 @@ def create_app() -> Flask:
             log.warning("activity: runs DB unreachable: %s", e)
             db_failed = True
 
-        # Phase 1.3 — Recent posting activity. Last 20 Buffer attempts for
-        # this organisation. Fail-soft: if the log module isn't available
-        # or the DB lookup errors, the rest of the page still renders.
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
-        except Exception:
-            recent_attempts = []
-
-        # Per-run schedule summary — pulled from the workflow store on
-        # demand. Bounded by len(rows) ≤ 100 so the cost is fine.
-        summaries: dict[str, dict] = {}
-        try:
-            ws = _get_wf_store()
-        except Exception:
-            ws = None
-        if ws is not None:
-            try:
-                from mediahub.workflow.status import ScheduleStatus
-            except Exception:
-                ScheduleStatus = None
-            for r in rows:
-                run_id = r["id"]
-                summary = {"scheduled": 0, "published": 0, "failed": 0}
-                try:
-                    states = ws.load(run_id) or {}
-                    for cs in states.values():
-                        s = getattr(cs, "schedule_status", None)
-                        val = s.value if hasattr(s, "value") else (s or "queued")
-                        if val == "scheduled":
-                            summary["scheduled"] += 1
-                        elif val == "published":
-                            summary["published"] += 1
-                        elif val == "failed":
-                            summary["failed"] += 1
-                except Exception:
-                    pass
-                summaries[run_id] = summary
-
         if not rows:
             if db_failed:
                 # DB on disk but unreadable — surface honestly so the user
@@ -9281,27 +14386,6 @@ def create_app() -> Flask:
                 "</section>"
             )
             return _layout("Activity", empty_body, active="activity")
-
-        def _schedule_summary_html(rid: str) -> str:
-            s = summaries.get(rid) or {}
-            if not (s.get("scheduled") or s.get("published") or s.get("failed")):
-                return '<span class="muted" style="font-size:11px">&mdash;</span>'
-            parts = []
-            if s.get("scheduled"):
-                parts.append(
-                    f'<span class="tag info" style="font-size:11px">'
-                    f"{s['scheduled']} scheduled</span>"
-                )
-            if s.get("published"):
-                parts.append(
-                    f'<span class="tag good" style="font-size:11px">'
-                    f"{s['published']} published</span>"
-                )
-            if s.get("failed"):
-                parts.append(
-                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
-                )
-            return " ".join(parts)
 
         # Phase 5 — group rows by date bucket so the table reads as a
         # newsroom log instead of an undifferentiated 100-row dump.
@@ -9377,7 +14461,6 @@ def create_app() -> Flask:
                     f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                     f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
-                    f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                     f'<td><form method="post" action="{delete_href}" '
                     f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
@@ -9402,46 +14485,6 @@ def create_app() -> Flask:
                         "</details>"
                         "</td></tr>"
                     )
-
-        # Recent posting activity panel — bottom-of-page, collapsed by
-        # default when empty; expanded when there's something to see so
-        # failures aren't hidden behind a click.
-        posting_panel_html = ""
-        if recent_attempts:
-            attempts_rows = ""
-            for a in recent_attempts:
-                status = a.get("status") or ""
-                kind = a.get("error_kind") or ""
-                if status == "ok":
-                    badge_html = '<span class="tag good" style="font-size:11px">ok</span>'
-                else:
-                    label = kind or "failed"
-                    badge_html = f'<span class="tag bad" style="font-size:11px">{_h(label)}</span>'
-                excerpt = (a.get("caption_excerpt") or "")[:120]
-                when = (a.get("attempted_at") or "")[:19]
-                channel = a.get("channel_name") or a.get("channel_id") or "&mdash;"
-                err = a.get("error_message") or ""
-                attempts_rows += (
-                    f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
-                    f'<td style="font-size:12px">{_h(channel)}</td>'
-                    f"<td>{badge_html}</td>"
-                    f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
-                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
-                    f"</tr>"
-                )
-            posting_panel_html = (
-                '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
-                "Recent posting activity</h2>"
-                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f"Last {len(recent_attempts)} Buffer attempts for this organisation. "
-                "Failures stay listed here so you can see what went wrong without "
-                "digging through individual runs.</p>"
-                '<div class="card"><table>'
-                "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
-                "<th>Caption excerpt</th><th>Error</th></tr></thead>"
-                f"<tbody>{attempts_rows}</tbody>"
-                "</table></div>"
-            )
 
         # Phase 1.5 — surface the number of failed runs at the top of the
         # page so an operator triaging issues sees the scope before reading
@@ -9470,6 +14513,20 @@ def create_app() -> Flask:
             summary_html += f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):,}</div></div>'
         summary_html += "</div>"
 
+        # UI 1.17 — content-cadence heatmap. A GitHub-style year grid of this
+        # org's generate/post consistency, rendered server-side as inline SVG
+        # from run history + the posting log. Fail-soft: any trouble drops the
+        # panel rather than breaking the rest of the page.
+        cadence_html = ""
+        try:
+            end_day = datetime.now(timezone.utc).date()
+            _gen, _post = _cadence_activity_counts(prof.profile_id, end_day)
+            if _gen or _post:
+                cadence_html = _cadence_panel_html(_gen, _post, end=end_day)
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("activity: cadence heatmap failed: %s", e)
+            cadence_html = ""
+
         # Toolbar — search input + status segment filter.
         # Filter buttons use ?status= for server-side filtering plus the
         # client-side text search filters in-place. Counts are unfiltered
@@ -9496,9 +14553,10 @@ def create_app() -> Flask:
             )
         toolbar_html = (
             '<div class="mh-toolbar">'
-            '<div class="grow mh-search">'
+            f'<div class="grow mh-search mh-vanish" {_VANISH_PH_ATTR_SEARCH}>'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            '<input id="mh-activity-search" type="search" placeholder="Search meet name, file or run id…" autocomplete="off" />'
+            '<input id="mh-activity-search" type="search" placeholder="" autocomplete="off" aria-label="Search runs by meet name, file or run id" />'
+            f'<span class="mh-vanish__ph" aria-hidden="true">{_h(_VANISH_PH_SEARCH[0])}</span>'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
@@ -9558,19 +14616,579 @@ def create_app() -> Flask:
             f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
             "</div>"
             "</section>"
+            f"{_activity_view_toggle('table')}"
             f"{summary_html}"
+            f"{cadence_html}"
             f"{failure_callout}"
             f"{toolbar_html}"
             '<div class="card"><table class="mh-table-stack">'
             "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Achievements</th><th>Schedule</th>"
+            "<th>Matched</th><th>Achievements</th>"
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
-            f"{posting_panel_html}"
             f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
+
+    # ---- ACTIVITY FEED — unified runs/approvals/exports stream (UI 1.16) ---
+    def _activity_view_toggle(active_view: str) -> str:
+        """Segmented "Runs table | Feed" switch shared by both Activity views."""
+        table_cls = " is-active" if active_view == "table" else ""
+        feed_cls = " is-active" if active_view == "feed" else ""
+        return (
+            '<nav class="mh-segmented" aria-label="Activity view" '
+            'style="margin-bottom:var(--sp-4)">'
+            f'<a class="{table_cls.strip()}" '
+            f'aria-current="{"page" if active_view == "table" else "false"}" '
+            f'href="{url_for("activity_page")}">Runs table</a>'
+            f'<a class="{feed_cls.strip()}" '
+            f'aria-current="{"page" if active_view == "feed" else "false"}" '
+            f'href="{url_for("activity_feed_page")}">Feed</a>'
+            "</nav>"
+        )
+
+    def _render_activity_feed(events) -> str:
+        """Render a list of ActivityEvent objects as date-bucketed feed cards."""
+        from mediahub.web import activity_feed as _af
+
+        # Per-kind glyphs (stroke icons, matching the rest of the chrome).
+        icons = {
+            _af.KIND_RUN: (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                'aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'
+            ),
+            _af.KIND_APPROVAL: (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                'aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+            ),
+            _af.KIND_EXPORT: (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                'aria-hidden="true"><path d="M4 13v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"/>'
+                '<polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>'
+            ),
+        }
+        kind_labels = {
+            _af.KIND_RUN: "Run",
+            _af.KIND_APPROVAL: "Review",
+            _af.KIND_EXPORT: "Export",
+        }
+        now = datetime.now(timezone.utc)
+        # Bucket the (already newest-first) events; insertion order is preserved
+        # within each bucket so the stream stays chronological.
+        grouped: dict[str, list] = {b: [] for b in _af.BUCKET_ORDER}
+        for ev in events:
+            grouped[_af.bucket_for(ev.ts, now=now)].append(ev)
+
+        # Page-scoped styles, deliberately kept out of the shared theme CSS:
+        # the feed is a self-contained surface, and inlining its rules here
+        # means it never collides with other sessions' edits to that hot,
+        # everyone-appends-to-it stylesheet. No CSP forbids inline <style>.
+        feed_style = """<style>
+.mh-feed { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-4); }
+.mh-feed-group-label { display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-5) 0 var(--sp-1); font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; }
+.mh-feed-group-label:first-child { margin-top: 0; }
+.mh-feed-group-label .label { color: var(--ink-dim); font-weight: 600; }
+.mh-feed-group-label .n { color: var(--ink-faint); }
+.mh-feed-group-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); align-self: center; }
+.mh-feed-item { display: flex; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); box-shadow: var(--shadow-1); transition: border-color var(--dur-fast) var(--ease-out-quick), transform var(--dur-fast) var(--ease-out-quick), box-shadow var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-item:hover { border-color: var(--rule); transform: translateY(-1px); box-shadow: var(--shadow-2, var(--shadow-1)); }
+.mh-feed-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-sm); background: rgba(245, 242, 232, 0.04); border: 1px solid var(--hairline); color: var(--ink-dim); }
+.mh-feed-icon svg { width: 18px; height: 18px; }
+.mh-feed-icon[data-tone="good"] { background: var(--good-bg); border-color: rgba(94,227,154,0.30); color: var(--good); }
+.mh-feed-icon[data-tone="bad"]  { background: var(--bad-bg);  border-color: rgba(255,107,107,0.30); color: var(--bad); }
+.mh-feed-icon[data-tone="info"] { background: var(--info-bg); border-color: rgba(77,163,255,0.30); color: var(--info); }
+.mh-feed-icon[data-tone="warn"] { background: var(--warn-bg); border-color: rgba(255,180,84,0.30); color: var(--warn); }
+.mh-feed-body { flex: 1; min-width: 0; }
+.mh-feed-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.mh-feed-kind { font-family: var(--font-mono); font-size: var(--fs-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+.mh-feed-title { margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.mh-feed-title a { color: inherit; text-decoration: none; }
+.mh-feed-title a:hover { color: var(--lane); text-decoration: underline; text-underline-offset: 2px; }
+.mh-feed-time { margin-left: auto; white-space: nowrap; color: var(--ink-faint); font-size: var(--fs-xs); }
+.mh-feed-summary { margin: var(--sp-2) 0 0; color: var(--ink-dim); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.mh-feed-detail { margin-top: var(--sp-3); }
+.mh-feed-detail > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); list-style: none; user-select: none; transition: color var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-detail > summary:hover { color: var(--ink); }
+.mh-feed-detail > summary::-webkit-details-marker { display: none; }
+.mh-feed-detail > summary::before { content: "\\25b8"; font-size: 9px; transition: transform var(--dur-fast) var(--ease-out-quick); }
+.mh-feed-detail[open] > summary::before { transform: rotate(90deg); }
+.mh-feed-dl { margin: var(--sp-3) 0 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-sm); }
+.mh-feed-dl > div { display: contents; }
+.mh-feed-dl dt { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); padding-top: 2px; }
+.mh-feed-dl dd { margin: 0; color: var(--ink-dim); overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .mh-feed-item { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+  .mh-feed-icon { width: 32px; height: 32px; }
+  .mh-feed-icon svg { width: 16px; height: 16px; }
+  .mh-feed-time { margin-left: 0; width: 100%; order: 3; }
+  .mh-feed-dl { grid-template-columns: 1fr; gap: 0 0; }
+  .mh-feed-dl dt { padding-top: var(--sp-2); }
+}
+</style>"""
+        out = [feed_style, '<div class="mh-feed">']
+        for bucket in _af.BUCKET_ORDER:
+            items = grouped[bucket]
+            if not items:
+                continue
+            out.append(
+                '<div class="mh-feed-group-label">'
+                f'<span class="label">{_h(_af.BUCKET_LABELS[bucket])}</span>'
+                f'<span class="n">{len(items):02d}</span>'
+                "</div>"
+            )
+            for ev in items:
+                # Title links into the owning run's review when we have one.
+                if ev.run_id:
+                    title_html = (
+                        f'<a href="{url_for("review", run_id=ev.run_id)}">{_h(ev.title)}</a>'
+                    )
+                else:
+                    title_html = _h(ev.title)
+                # Server-side no-JS fallback text; the mh-rel enhancer replaces
+                # it client-side. An em dash covers a missing/unparseable ts so
+                # the slot is never blank or a raw timestamp dump.
+                rel_fallback = _af.humanize_age(ev.ts, now=now) or "&mdash;"
+                detail_html = ""
+                if ev.detail:
+                    rows = "".join(
+                        f"<div><dt>{_h(label)}</dt><dd>{_h(value)}</dd></div>"
+                        for label, value in ev.detail
+                    )
+                    detail_html = (
+                        '<details class="mh-feed-detail">'
+                        "<summary>Details</summary>"
+                        f'<dl class="mh-feed-dl">{rows}</dl>'
+                        "</details>"
+                    )
+                search_hay = f"{ev.title} {ev.summary} {kind_labels.get(ev.kind, '')}".lower()
+                out.append(
+                    f'<article class="mh-feed-item mh-reveal" data-kind="{_h(ev.kind)}" '
+                    f'data-q="{_h(search_hay)}">'
+                    f'<div class="mh-feed-icon" data-tone="{_h(ev.status_tone)}">'
+                    f"{icons.get(ev.kind, '')}</div>"
+                    '<div class="mh-feed-body">'
+                    '<div class="mh-feed-head">'
+                    f'<span class="mh-feed-kind">{_h(kind_labels.get(ev.kind, ev.kind))}</span>'
+                    f'<h3 class="mh-feed-title">{title_html}</h3>'
+                    f'<span class="tag {_h(ev.status_tone)}">{_h(ev.status_label)}</span>'
+                    f'<time class="mh-rel mh-feed-time" datetime="{_h(ev.ts)}">{rel_fallback}</time>'
+                    "</div>"
+                    + (f'<p class="mh-feed-summary">{_h(ev.summary)}</p>' if ev.summary else "")
+                    + detail_html
+                    + "</div>"
+                    "</article>"
+                )
+        out.append("</div>")
+        return "".join(out)
+
+    @app.route("/activity/feed")
+    def activity_feed_page():
+        from mediahub.web import activity_feed as _af
+
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+
+        # ?kind= filter — whitelist to the three lanes (empty = all).
+        kind_q = (request.args.get("kind") or "").strip().lower()
+        if kind_q not in _af.KINDS:
+            kind_q = ""
+
+        # --- Gather the three EXISTING records (no new data source) ---------
+        # 1. Runs for this org (newest first), fail-soft on a bad DB.
+        rows: list = []
+        ach_by_id_feed: dict[str, int] = {}
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 100",
+                    (prof.profile_id,),
+                ).fetchall()
+                # Backfill n_achievements from the run JSON for pre-column rows
+                # (display-only; mirrors the runs-table view, never writes).
+                for r in rows:
+                    if ("n_achievements" not in r.keys()) or (r["n_achievements"] is None):
+                        _d = _load_run(r["id"]) or {}
+                        ach_by_id_feed[r["id"]] = int(
+                            (_d.get("recognition_report") or {}).get("n_achievements", 0) or 0
+                        )
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("activity feed: runs DB unreachable: %s", e)
+            db_failed = True
+
+        # Normalise rows to plain dicts so the (lazily backfilled) achievement
+        # count rides along and the builder stays storage-agnostic.
+        run_dicts: list[dict] = []
+        for r in rows:
+            d = {k: r[k] for k in r.keys()}
+            if d["id"] in ach_by_id_feed:
+                d["n_achievements"] = ach_by_id_feed[d["id"]]
+            run_dicts.append(d)
+
+        # 2. Workflow states (approvals + posted) for the most recent runs only
+        #    — bound the sidecar reads so the page stays cheap.
+        workflow_by_run: dict[str, dict] = {}
+        ws = None
+        try:
+            ws = _get_wf_store()
+        except Exception as e:
+            # Defensive: the approvals/posted lanes go quiet rather than 500,
+            # but log it so a sidecar-dir permission issue isn't invisible.
+            log.warning("activity feed: workflow store unavailable: %s", e)
+            ws = None
+        if ws is not None:
+            for d in run_dicts[:40]:
+                try:
+                    states = ws.load(d["id"]) or {}
+                except Exception:
+                    states = {}
+                if states:
+                    workflow_by_run[d["id"]] = states
+
+        # --- Build the merged feed (all lanes) for accurate chip counts -----
+        all_events = _af.build_activity_feed(
+            runs=run_dicts,
+            workflow_by_run=workflow_by_run,
+            limit=200,
+        )
+        counts = _af.feed_counts(all_events)
+        events = [e for e in all_events if (not kind_q or e.kind == kind_q)][:120]
+
+        # --- Empty state ----------------------------------------------------
+        if not all_events:
+            if db_failed:
+                empty_body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    '<span class="mh-hero-eyebrow">Activity feed</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">activity</em>.</h1>'
+                    '<p class="lede">The runs database wasn\'t readable on this '
+                    "deployment, so the feed is empty even if work was done "
+                    "earlier. Try refreshing &mdash; if it persists, ask your "
+                    "operator to check the data volume.</p>"
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("activity_feed_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                    "</div></section>"
+                )
+                return _layout("Activity feed", empty_body, active="activity")
+            empty_body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Activity feed</span>'
+                f'<h1>Nothing here yet, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">Runs, review decisions, and publishes will stream '
+                "in here as cards &mdash; newest first, each one expandable for the "
+                "detail behind it. Create your first piece to get started.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Runs table</a>'
+                "</div></section>"
+            )
+            return _layout("Activity feed", empty_body, active="activity")
+
+        # --- Filter chips (server-side ?kind=) ------------------------------
+        chip_specs = [
+            ("", "All", counts["all"]),
+            (_af.KIND_RUN, "Runs", counts[_af.KIND_RUN]),
+            (_af.KIND_APPROVAL, "Approvals", counts[_af.KIND_APPROVAL]),
+            (_af.KIND_EXPORT, "Exports", counts[_af.KIND_EXPORT]),
+        ]
+        chips = ""
+        for val, label, count in chip_specs:
+            is_active = kind_q == val
+            url_arg = f"?kind={val}" if val else ""
+            chips += (
+                f'<a role="tab" aria-selected="{"true" if is_active else "false"}"'
+                f' class="{"is-active" if is_active else ""}"'
+                f' href="{url_for("activity_feed_page")}{url_arg}">'
+                f'{label}<span class="count">{count}</span></a>'
+            )
+        toolbar_html = (
+            '<div class="mh-toolbar">'
+            '<div class="grow mh-search">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+            '<input id="mh-feed-search" type="search" placeholder="Search the activity feed…" autocomplete="off" aria-label="Search the activity feed" />'
+            "</div>"
+            '<nav class="mh-segmented" role="tablist" aria-label="Filter activity by type">'
+            f"{chips}"
+            "</nav>"
+            "</div>"
+            '<div id="mh-feed-empty" class="mh-empty-inline" style="display:none">'
+            "<b>Nothing matches.</b><br>Try clearing the search box or picking a "
+            "different type.</div>"
+        )
+
+        # Client-side text filter over the rendered cards (progressive
+        # enhancement — the server already applied the ?kind= filter).
+        filter_js = """
+<script>
+(function(){
+  var search = document.getElementById('mh-feed-search');
+  var feed = document.querySelector('.mh-feed');
+  var empty = document.getElementById('mh-feed-empty');
+  if (!search || !feed) return;
+  function apply(){
+    var q = (search.value || '').toLowerCase().trim();
+    var items = feed.querySelectorAll('.mh-feed-item');
+    var visible = 0;
+    items.forEach(function(it){
+      var hay = it.getAttribute('data-q') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      it.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    feed.querySelectorAll('.mh-feed-group-label').forEach(function(g){
+      var sib = g.nextElementSibling, any = false;
+      while (sib && !sib.classList.contains('mh-feed-group-label')) {
+        if (sib.classList.contains('mh-feed-item') && sib.style.display !== 'none') { any = true; break; }
+        sib = sib.nextElementSibling;
+      }
+      g.style.display = any ? '' : 'none';
+    });
+    if (empty) empty.style.display = visible === 0 ? '' : 'none';
+  }
+  search.addEventListener('input', apply);
+})();
+</script>"""
+
+        # All events exist, but the active ?kind= chip filtered them all out:
+        # show an honest in-place notice rather than a blank column.
+        if events:
+            feed_html = _render_activity_feed(events)
+        else:
+            feed_html = (
+                '<div class="mh-empty-inline" style="display:block">'
+                f"<b>No {_h(kind_q)} activity yet.</b><br>"
+                "Switch to <i>All</i> above to see everything that's happened."
+                "</div>"
+            )
+        showing = "" if not kind_q else f" &middot; {_h(kind_q)}"
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Activity feed</span>'
+            "<h1>What&rsquo;s happened</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
+            f"<span>{counts['all']:02d} {'event' if counts['all'] == 1 else 'events'}{showing}</span>"
+            "</div>"
+            "</section>"
+            f"{_activity_view_toggle('feed')}"
+            f"{toolbar_html}"
+            f"{feed_html}"
+            f"{filter_js}"
+        )
+        return _layout("Activity feed", body, active="activity")
+
+    # ---- SEASON TIMELINE — meet history as a vertical, scroll-traced view ----
+    # UI2.3 — a read-only "season story" lens on the SAME run history the
+    # Activity log lists, rendered with the kit's `.mh-timeline` node list and
+    # the scroll-driven `.mh-tracing-beam` (ui-kit.js writes `--mh-progress`
+    # as you scroll; the rail fills top->bottom). Distinct from /activity (an
+    # ops table with search / delete / schedule columns): this is the
+    # celebratory, chronological view a club shares round the committee. Both
+    # read the same `runs` rows, scoped to the active org (multi-tenant).
+    @app.route("/season")
+    def season_timeline_page():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+
+        # Fail-soft, org-scoped DB read (WHERE profile_id = ? is the tenant
+        # isolation boundary). A missing / locked data.db must not 500 the
+        # page — fall through to a recovery hero instead.
+        rows = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_achievements, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 200",
+                    (prof.profile_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("season: runs DB unreachable: %s", e)
+            db_failed = True
+
+        eyebrow = '<span class="mh-hero-eyebrow">Season timeline</span>'
+
+        # ---- Empty / recovery states -----------------------------------
+        if not rows:
+            if db_failed:
+                body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    f"{eyebrow}"
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">season</em>.</h1>'
+                    '<p class="lede">The runs database wasn&rsquo;t readable on this '
+                    "deployment, so the timeline is empty even if meets were processed "
+                    "earlier. Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume.</p>"
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("season_timeline_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    "</div></section>"
+                )
+                return _layout("Season timeline", body, active="season")
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                f"{eyebrow}"
+                f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">Process your first meet and it lands on this timeline '
+                "&mdash; every meet a node on the season, with the swims matched and the "
+                "moments detected, and a beam that traces the season as you scroll.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Open activity</a>'
+                "</div></section>"
+            )
+            return _layout("Season timeline", body, active="season")
+
+        # ---- Build the timeline ----------------------------------------
+        from datetime import datetime as _dt
+
+        def _parse(iso):
+            if not iso:
+                return None
+            try:
+                return _dt.fromisoformat(str(iso).replace("Z", "").replace("T", " ")[:19])
+            except Exception:
+                return None
+
+        n_meets = len(rows)
+        total_swims = 0
+        total_moments = 0
+        cur_month = None
+        items_html = ""
+        for r in rows:
+            dt = _parse(r["created_at"])
+            month_label = dt.strftime("%B %Y") if dt else "Undated"
+            if month_label != cur_month:
+                cur_month = month_label
+                items_html += (
+                    '<div class="mh-timeline__head">'
+                    f'<span class="mh-tl-month">{_h(month_label)}</span></div>'
+                )
+
+            if dt:
+                day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
+                iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                full_title = dt.strftime("%A %d %B %Y, %H:%M UTC")
+            else:
+                day_html, iso_attr, full_title = "&mdash;", "", "Date unknown"
+
+            status = r["status"] or ""
+            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                status, ""
+            )
+            swims = int(r["our_swims"] or 0)
+            moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
+            total_swims += swims
+            total_moments += moments
+            title = r["meet_name"] or r["file_name"] or r["id"]
+            review_href = url_for("review", run_id=r["id"])
+
+            stat_bits = [f"{swims:,} {'swim' if swims == 1 else 'swims'} matched"]
+            if moments:
+                stat_bits.append(f"{moments:,} {'moment' if moments == 1 else 'moments'} detected")
+            stats_html = '<span class="sep">&middot;</span>'.join(
+                f"<span>{_h(b)}</span>" for b in stat_bits
+            )
+
+            item = (
+                '<div class="mh-timeline__item">'
+                '<article class="card mh-tl-card">'
+                '<div class="mh-tl-top">'
+                f'<time class="mh-tl-date" datetime="{_h(iso_attr)}" title="{_h(full_title)}">{day_html}</time>'
+                f'<span class="tag {badge}">{_h(status)}</span>'
+                "</div>"
+                f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
+                f'<div class="strap mh-tl-stats">{stats_html}</div>'
+            )
+            if status == "error" and r["error"]:
+                err = str(r["error"])
+                err = err[:400] + ("…" if len(err) > 400 else "")
+                item += (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--bad)">'
+                    "Why did this run fail?</summary>"
+                    '<pre style="margin:8px 0 0;padding:10px 12px;background:rgba(0,0,0,0.25);'
+                    'border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-word">'
+                    f"{_h(err)}</pre></details>"
+                )
+            item += "</article></div>"
+            items_html += item
+
+        # Page-scoped presentation. Kept inline (not in the shared kit CSS) so
+        # the feature is self-contained and parallel-safe; tokens keep it on
+        # brand. The rail-offset centres the 2px beam on the 9px timeline node
+        # dots (dots sit 5px in from the timeline's left edge -> centre ~9px).
+        season_css = (
+            "<style>"
+            ".mh-season-tl{max-width:760px}"
+            ".mh-season-tl .mh-tracing-beam__rail{left:8px}"
+            ".mh-season-tl .mh-timeline__head{margin:var(--sp-5) 0 var(--sp-3)}"
+            ".mh-season-tl .mh-timeline__head:first-child{margin-top:0}"
+            ".mh-season-tl .mh-tl-month{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)}"
+            ".mh-season-tl .mh-tl-card{padding:var(--sp-4) var(--sp-5)}"
+            ".mh-season-tl .mh-tl-top{display:flex;align-items:center;justify-content:space-between;"
+            "gap:var(--sp-3);margin-bottom:6px}"
+            ".mh-season-tl .mh-tl-date{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "color:var(--ink-muted);letter-spacing:.04em;white-space:nowrap}"
+            ".mh-season-tl .mh-tl-title{margin:0 0 8px;font-size:var(--fs-lg);line-height:1.2}"
+            ".mh-season-tl .mh-tl-title a{color:var(--ink);text-decoration:none}"
+            ".mh-season-tl .mh-tl-title a:hover{color:var(--mh-primary)}"
+            ".mh-season-tl .mh-tl-stats{font-size:var(--fs-sm)}"
+            "</style>"
+        )
+
+        # Season totals — count up on scroll-in via the shared motion system.
+        summary_html = (
+            '<div class="mh-activity-summary mh-reveal">'
+            f'<div class="stat live"><div class="l">Meets</div>'
+            f'<div class="v" data-mh-count="{n_meets}">{n_meets:,}</div></div>'
+            f'<div class="stat"><div class="l">Swims matched</div>'
+            f'<div class="v" data-mh-count="{total_swims}">{total_swims:,}</div></div>'
+            f'<div class="stat medal"><div class="l">Moments detected</div>'
+            f'<div class="v" data-mh-count="{total_moments}">{total_moments:,}</div></div>'
+            "</div>"
+        )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            f"{eyebrow}"
+            f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
+            '<span class="sep">&middot;</span>'
+            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            "</div></section>"
+        )
+
+        timeline_html = (
+            '<div class="mh-tracing-beam mh-season-tl">'
+            '<span class="mh-tracing-beam__rail" aria-hidden="true"></span>'
+            '<div class="mh-timeline">'
+            f"{items_html}"
+            "</div></div>"
+        )
+
+        body = season_css + hero + summary_html + timeline_html
+        return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
@@ -9721,7 +15339,7 @@ def create_app() -> Flask:
   <h3 style="margin-top:0;font-family:var(--font-mono);font-size:var(--fs-10);letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:var(--sp-3)">Or paste a results link</h3>
   <p class="lede" style="font-size:var(--fs-14);margin-bottom:var(--sp-4)">Works with results sites for any sport &mdash; including modern app-style sites. We&rsquo;ll gather every result on the site.</p>
   <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:stretch">
-    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
+    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:min(260px,100%);padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
     <button id="mh-url-fetch" class="btn" type="button">Fetch results &rarr;</button>
   </div>
   <div id="mh-url-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Fetch progress" style="margin-top:var(--sp-3)">
@@ -9729,7 +15347,7 @@ def create_app() -> Flask:
       <div id="mh-url-progress-fill" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width 0.45s ease"></div>
     </div>
   </div>
-  <div id="mh-url-status" role="status" aria-live="polite" hidden style="margin-top:var(--sp-3);padding:10px 12px;border-radius:8px;background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.22);font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)"></div>
+  <div id="mh-url-status" role="status" aria-live="polite" hidden style="margin-top:var(--sp-3);padding:10px 12px;border-radius:8px;background:color-mix(in oklab, var(--lane) 6%, transparent);border:1px solid color-mix(in oklab, var(--lane) 22%, transparent);font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)"></div>
   <div id="mh-url-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
 </div>
 <script>
@@ -9744,6 +15362,9 @@ def create_app() -> Flask:
   function show(el, msg){ el.textContent = msg; el.hidden = false; }
   function hide(el){ el.hidden = true; }
   var lastPct = 0;
+  // UI1.26 — cursor-anchored readout for the (long) site-fetch ingest. Created
+  // when the fetch starts, fed the real percent each poll, removed on done/error.
+  var cursor = null;
   function setPct(p){
     if (typeof p !== 'number' || isNaN(p)) return;
     // Monotonic: never let the bar jump backwards on a stale poll.
@@ -9751,12 +15372,14 @@ def create_app() -> Flask:
     lastPct = p;
     if (barWrap) { barWrap.hidden = false; barWrap.setAttribute('aria-valuenow', String(p)); }
     if (barFill) barFill.style.width = p + '%';
+    if (cursor) cursor.set(p);
   }
   function go(){
     var url = (input.value || '').trim();
     hide(errEl);
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
+    cursor = (window.MH && MH.cursorReadout) ? MH.cursorReadout({ label: 'Fetching results', percent: 3 }) : null;
     lastPct = 0; setPct(3);
     var fd = new FormData(); fd.append('url', url);
     fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__', 'Accept': 'application/json' }, body: fd })
@@ -9766,16 +15389,17 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, e.message); });
+      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, e.message); });
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
         if (typeof j.percent === 'number') setPct(j.percent);
-        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, j.error || 'The fetch failed.'); return; }
+        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
+        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, j.error || 'The fetch failed.'); return; }
         show(statusEl, j.progress || 'Reading the site\\u2026');
+        if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
       }).catch(function(){ setTimeout(tick, 2500); });
     };
@@ -9793,11 +15417,13 @@ def create_app() -> Flask:
             )
 
         body = f"""
-<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">
+<div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
+<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
+</div>
 
 <nav class="mh-stepper" aria-label="Upload progress">
   <span class="mh-stepper-item is-active"><span class="num">1</span>Upload</span>
@@ -9832,12 +15458,17 @@ def create_app() -> Flask:
     </div>
     <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-      <button id="mh-upload-submit" class="btn" type="submit">Continue &rarr;</button>
+      <button id="mh-upload-submit" class="btn mh-cta-motion" type="submit">
+        <span class="mh-btn-label">Continue &rarr;</span>
+        <span class="mh-btn-spin" aria-hidden="true"></span>
+        <span class="mh-btn-check" aria-hidden="true">&#x2713;</span>
+      </button>
       <a class="btn ghost" href="{url_for("home")}">Cancel</a>
     </div>
   </form>
 </div>
 {results_url_card}
+{_sample_pack_cta()}
 <div class="mh-next-strip" aria-label="What happens next">
   <div class="cell"><span class="num">2</span><span class="text"><b>Configure</b><br>Pick your club from the parsed list, upload your logo, choose tone, and drop in photos.</span></div>
   <div class="cell"><span class="num">3</span><span class="text"><b>Pipeline runs</b><br>The engine spots PBs, medals, first-times and comebacks. About 30 to 60 seconds.</span></div>
@@ -9900,7 +15531,11 @@ def create_app() -> Flask:
     if (!hasFile()) {{
       e.preventDefault();
       showError('Please choose a results file first.');
+      return;
     }}
+    // Stateful CTA: spin while the file uploads + the parser runs, so the
+    // single primary action shows it's working before the page turns over.
+    if (window.MH && MH.btnState) MH.btnState(btn, 'loading');
   }});
   refresh();
 }})();
@@ -10265,6 +15900,59 @@ def create_app() -> Flask:
 """
         return _layout("Configure run", body, active="create")
 
+    @app.route("/onboarding/sample", methods=["POST"])
+    def onboarding_sample():
+        """U.4 — one-click sample-to-first-content-pack.
+
+        Runs the real pipeline on the bundled synthetic meet, stamped to
+        the signed-in org so the cards come out in the user's brand, and
+        bounces to the standard run-progress page (which advances to the
+        review queue on completion). The org gate already guarantees a
+        ready profile before this route is reachable; the explicit check
+        keeps it honest under TESTING (where the gate is bypassed).
+        """
+        prof = _active_profile()
+        if not (prof and prof.is_ready()):
+            return redirect(url_for("organisation_setup"))
+        if not _SAMPLE_MEET_PDF.exists():
+            return _recovery_page(
+                "Sample meet unavailable",
+                "The bundled sample meet isn't present on this deployment, "
+                "so there's nothing to generate from. Upload your own results "
+                "file to create a content pack.",
+                eyebrow="Sample pack",
+                primary_cta=("Upload results", url_for("upload")),
+                secondary_cta=("Back to create", url_for("make_page")),
+                code=404,
+            )
+        file_bytes = _SAMPLE_MEET_PDF.read_bytes()
+        # Synthetic swimmers — there is nothing to web-verify, so PB fetch is
+        # off (faster, and no third-party calls for demo data). The hero club
+        # is pre-selected so the pack shows its best spread of cards.
+        run_id = _start_run(
+            file_bytes,
+            _SAMPLE_MEET_FILENAME,
+            prof.profile_id,
+            True,  # use_pb_cache
+            False,  # fetch_pbs
+            club_filter=_SAMPLE_MEET_CLUB,
+        )
+        _mark_run_sample(run_id)
+        try:
+            from mediahub.workflow.autonomy import AuditLog
+
+            AuditLog().record(
+                prof.profile_id,
+                f"run:{run_id}",
+                "sample_pack_started",
+                tool="onboarding_sample",
+                args={"run_id": run_id, "club": _SAMPLE_MEET_CLUB},
+                result="started",
+            )
+        except Exception:
+            pass
+        return redirect(url_for("run_status", run_id=run_id))
+
     @app.route("/upload/from-url", methods=["POST"])
     def upload_from_url():
         """Kick off a background results-from-a-link fetch. Returns a job id the
@@ -10428,11 +16116,24 @@ def create_app() -> Flask:
         if request.method == "POST":
             club_filter = (request.form.get("club_filter") or "").strip() or None
             if not club_filter:
+                # Designed error state (U.2), not a dead-end card: the staged
+                # upload is still on disk, so offer a clear way back to re-pick
+                # rather than stranding the volunteer on a one-line error.
                 return _layout(
                     "Configure",
-                    '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>',
+                    _empty_state(
+                        "alert",
+                        "Pick a club to feature",
+                        "Choose which club&rsquo;s swimmers this content pack is about, "
+                        "then start the run &mdash; we never guess the club for you.",
+                        actions=(
+                            f'<a class="btn" href="{url_for("upload_configure", run_id=run_id)}">'
+                            "Back to configure &rarr;</a>"
+                        ),
+                        kind="error",
+                    ),
                     active="create",
-                )
+                ), 400
 
             # Phase 1.5 logo consolidation: logos now live on the active
             # organisation profile, not on individual runs. The configure
@@ -10654,6 +16355,7 @@ def create_app() -> Flask:
 <div class="card">
   <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
+  <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
   <details style="margin-top:var(--sp-5)">
     <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
@@ -10687,6 +16389,12 @@ def create_app() -> Flask:
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
+
+  // The live "engine is generating…" stage label updates each poll.
+  function setStage(txt) {{
+    if (!stage) return;
+    stage.textContent = txt;
+  }}
 
   function fillBar(colour) {{
     if (!bar) return;
@@ -10726,6 +16434,7 @@ def create_app() -> Flask:
     var log = (j && j.log) || [];
     if (logEl && log.length) {{ logEl.textContent = log.join('\\n'); logEl.scrollTop = logEl.scrollHeight; }}
     if (stepEl) stepEl.textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
+    if (window.MH && MH.renderLogSteps) MH.renderLogSteps('mh-steps', log, status);
 
     if (status === 'done') {{
       stopped = true;
@@ -10758,7 +16467,7 @@ def create_app() -> Flask:
       return;
     }}
     // queued / running — keep the indeterminate bar moving.
-    if (stage) stage.textContent = log[log.length - 1] || 'Starting…';
+    setStage(log[log.length - 1] || 'Starting…');
     if (bar) bar.classList.add('indeterminate');
     if (waited > SOFT_CAP_MS && lede) {{
       lede.textContent = "Still working — large meets and personal-best lookups can take a few minutes. This page redirects automatically the moment it's ready.";
@@ -10903,6 +16612,58 @@ def create_app() -> Flask:
         rr = data.get("recognition_report") or {}
         recognition_error = data.get("recognition_error") or ""
 
+        # --- Hard pipeline failure (U.2 error state).
+        # A run that failed terminally persists a top-level ``error`` and
+        # usually has no meet/cards/recognition_report. Rendering the normal
+        # review page for it showed a misleading "(unknown meet)" header and a
+        # "No standout swims" empty state — implying the swimmers simply had no
+        # good results, hiding that the file never processed. Surface the honest
+        # reason instead (never a silent guess), with the parse notes that often
+        # explain why and a clear path to re-run or delete.
+        _run_err = (data.get("error") or "").strip()
+        if _run_err:
+            _file_disp = _h(
+                data.get("file_name")
+                or (data.get("dispatch_log") or {}).get("chosen_filename")
+                or "your file"
+            )
+            _err_body = f"""
+<section class="mh-hero" data-lane="failed" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">
+  <span class="mh-hero-eyebrow">Processing failed</span>
+  <h1>We couldn&rsquo;t finish processing this run</h1>
+  <p class="lede">The pipeline started on <strong>{_file_disp}</strong> but stopped
+    before it could produce any cards. Nothing was guessed &mdash; here&rsquo;s
+    exactly what went wrong.</p>
+  <div class="mh-hero-actions">
+    <a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>
+    <a class="mh-cta-secondary" href="{url_for("activity_page")}">Back to runs</a>
+  </div>
+</section>
+<div class="card" style="border-color:rgba(255,107,107,0.35);border-left:3px solid var(--bad)">
+  <h2 style="margin-top:0">What went wrong</h2>
+  <p style="font-family:var(--font-mono);font-size:13px;color:var(--ink);background:var(--bad-bg);
+            padding:12px 14px;border-radius:var(--radius-sm);white-space:pre-wrap;word-break:break-word">{_h(_run_err)}</p>
+  <p class="dim" style="font-size:13px;margin-bottom:0">Common causes: the file wasn&rsquo;t a
+    readable results export, it was an entry list or heat sheet with no times, or no club was
+    matched. Re-upload and check the file and the club you selected.</p>
+</div>
+{_parse_notes_card(warnings)}
+<div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <p class="muted" style="margin:0;font-size:12px">Removes the failed run. Source files stay
+        on disk and can be re-processed.</p>
+    </div>
+    <form method="post" action="{url_for("privacy_delete_run", run_id=run_id)}"
+          onsubmit="return confirm('Delete this run permanently?')">
+      <button class="btn danger" type="submit">Delete run</button>
+    </form>
+  </div>
+</div>
+"""
+            return _layout(f"Run failed — {meet.get('name') or run_id}", _err_body, active="home")
+
         # --- Header
         _gt_url = url_for("ground_truth", run_id=run_id)
         _export_url = url_for("api_export", run_id=run_id)
@@ -10996,6 +16757,24 @@ def create_app() -> Flask:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
+        # UI 1.18 — brand-locked swatches for the inspector palette, resolved
+        # once per page from this run's brand kit (the same resolver the
+        # create-graphic route uses). Best-effort: any failure yields an empty
+        # palette section rather than breaking the review page.
+        _review_swatches: list[dict] = []
+        try:
+            _insp_profile_id = (
+                data.get("profile_id") or data.get("club_filter") or ("_run_" + run_id)
+            )
+            _insp_profile_id = re.sub(r"[^a-z0-9_-]", "-", str(_insp_profile_id).lower()).strip(
+                "-"
+            ) or ("_run_" + run_id)
+            _review_swatches = _brand_swatches(
+                _resolve_run_brand_kit(_insp_profile_id, run_id, data)
+            )
+        except Exception:
+            _review_swatches = []
+
         # Workflow filter from query param. Triage states only — a malformed
         # or retired (`posted` / `rejected`) ``?wf=`` value falls back to
         # "show all". Reject was removed from the review flow entirely.
@@ -11016,14 +16795,26 @@ def create_app() -> Flask:
         # plain = story / context counts.
         rec_stats_html = "".join(
             [
-                f'<div class="stat medal"><div class="l">Elite</div><div class="v">{n_elite}</div></div>',
-                f'<div class="stat live"><div class="l">Strong</div><div class="v">{n_strong}</div></div>',
-                f'<div class="stat"><div class="l">Story</div><div class="v">{n_story}</div></div>',
-                f'<div class="stat"><div class="l">Total achievements</div><div class="v">{n_total}</div></div>',
-                f'<div class="stat"><div class="l">Swims analysed</div><div class="v">{n_analysed}</div></div>',
-                f'<div class="stat"><div class="l">Cards</div><div class="v">{n_cards}</div></div>',
+                f'<div class="stat medal"><div class="l">Elite</div><div class="v" data-mh-count="{n_elite}">{n_elite}</div></div>',
+                f'<div class="stat live"><div class="l">Strong</div><div class="v" data-mh-count="{n_strong}">{n_strong}</div></div>',
+                f'<div class="stat"><div class="l">Story</div><div class="v" data-mh-count="{n_story}">{n_story}</div></div>',
+                f'<div class="stat"><div class="l">Total achievements</div><div class="v" data-mh-count="{n_total}">{n_total}</div></div>',
+                f'<div class="stat"><div class="l">Swims analysed</div><div class="v" data-mh-count="{n_analysed}">{n_analysed}</div></div>',
+                f'<div class="stat"><div class="l">Cards</div><div class="v" data-mh-count="{n_cards}">{n_cards}</div></div>',
             ]
         )
+
+        # --- UI 1.30 "Weekend at a glance" digest (deterministic; no new LLM
+        # call — surfaces the recognition report the pipeline already produced).
+        # Fail-soft: a summary panel must never 500 the review page, so any
+        # surprise in the run shape collapses to no panel rather than an error.
+        try:
+            weekend_glance_html = _render_weekend_glance_html(_build_weekend_glance(data))
+        except Exception:
+            # The builder is written to be total, but a summary panel must never
+            # be the thing that 500s the review page — degrade to no panel.
+            log.exception("weekend-glance: render failed for run %s", run_id)
+            weekend_glance_html = ""
 
         # --- Meet context card
         mctx = rr.get("meet_context") or {}
@@ -11058,117 +16849,112 @@ def create_app() -> Flask:
   {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + "</div>") if ctx_sources_html else ""}
 </div>"""
 
-        # --- Top achievements panel
+        # The ranked achievements drive the review list, built below as
+        # ``ach_rows_html_wf`` (with its own empty/error states). An older
+        # ``top_achs`` / ``ach_rows_html`` render of the same cards was orphaned
+        # when the workflow list took over this surface — it built a string the
+        # page never inserted — so it's removed here (dead-code sweep), leaving
+        # one source of truth for the card render.
         ranked_achs = rr.get("ranked_achievements") or []
-        top_achs = ranked_achs[:10]
 
-        def band_cls(band):
-            return {
-                "elite": "warn",
-                "strong": "info",
-                "story": "",
-                "nice": "",
-                "not_worthy": "bad",
-            }.get(band, "")
-
-        ach_rows_html = ""
-        for _why_idx, ra in enumerate(top_achs):
-            a = ra.get("achievement", {})
-            band = ra.get("quality_band", "nice")
-            prio = ra.get("priority", 0.0)
-            rank = ra.get("rank", 0)
-            conf_label = a.get("confidence_label", "medium")
-            conf_cls = {"high": "good", "medium": "warn", "low": "bad"}.get(conf_label, "")
-            swimmer = _h(a.get("swimmer_name", ""))
-            event = _h(a.get("event", ""))
-            headline = _h(a.get("headline", ""))
-            atype = _h(_humanise(a.get("type", "")))
-            swim_id = _h(a.get("swim_id", ""))
-            post_type = _h(ra.get("suggested_post_type", ""))
-            prio_bar_pct = int(prio * 100)
-            _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
-
-            # Evidence list
-            ev_html = ""
-            for ev in (a.get("evidence") or [])[:3]:
-                ev_url = ev.get("source_url") or ""
-                ev_src = _h(ev.get("source_name", ""))
-                ev_stmt = _h(ev.get("statement", ""))
-                if ev_url:
-                    ev_html += f'<li><a href="{_h(ev_url)}" target="_blank" rel="noopener">{ev_src}</a>: {ev_stmt}</li>'
-                else:
-                    ev_html += f"<li><strong>{ev_src}</strong>: {ev_stmt}</li>"
-
-            # Factor list
-            factors_html = ""
-            for f in (ra.get("factors") or [])[:6]:
-                fname = _h(f.get("name", ""))
-                fval = f.get("value", 0.0)
-                freason = _h(f.get("reason", ""))
-                factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
-
-            _why_uuid = (
-                str(a.get("swim_id", f"top-{rank}"))
-                .replace(":", "_")
-                .replace(",", "_")
-                .replace("/", "_")
+        # --- UI 1.6 · Animated results/data charts from this run's real data.
+        # Two first-party build-on-scroll figures (web/charts.py): a quality-band
+        # bar chart (how many Elite / Strong / Story moments the deterministic
+        # detectors found) and a content-worthiness area curve (the ranker's
+        # priority score across the top ranked achievements, strongest first).
+        # Presentation-only over already-computed engine output — no new
+        # judgement, no AI, nothing invented. Each chart renders only when it has
+        # real data to draw; with neither, the whole card is omitted.
+        _band_bars = []
+        if n_elite:
+            _band_bars.append({"label": "Elite", "value": n_elite, "tone": "gold"})
+        if n_strong:
+            _band_bars.append({"label": "Strong", "value": n_strong, "tone": "lane"})
+        if n_story:
+            _band_bars.append({"label": "Story", "value": n_story, "tone": "info"})
+        _band_chart_html = ""
+        if _band_bars:
+            _band_chart_html = _chart_card(
+                "Detected &amp; ranked",
+                "Moments by quality band",
+                _charts.bar_chart(
+                    _band_bars,
+                    caption="What the detectors found in this meet",
+                    chart_id=f"run-bands-{run_id}",
+                ),
             )
-            why_html = _render_why_this_card(
-                ra, card_uuid=f"top-{_why_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
+        # Content-worthiness curve — the ranker's priority for each of the top
+        # ranked achievements, strongest first (x = rank, implicit; left = best).
+        _worth_pts = [
+            {"label": "", "value": float(ra.get("priority", 0.0) or 0.0)} for ra in ranked_achs[:12]
+        ]
+        _worth_chart_html = ""
+        if len(_worth_pts) >= 2:
+            _worth_chart_html = _chart_card(
+                "Ranked by the engine",
+                "Content-worthiness by rank",
+                _charts.area_chart(
+                    _worth_pts,
+                    caption="Ranker priority · strongest first",
+                    chart_id=f"run-worth-{run_id}",
+                ),
             )
-            ach_rows_html += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}">
-  <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
-    <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
-    <div style="flex:1">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-        <span class="tag {band_cls(band)}" style="font-size:10px">{band.upper()}</span>
-        <span class="tag info" style="font-size:10px">{atype}</span>
-        <span class="tag {conf_cls}" style="font-size:10px">conf: {conf_label}</span>
-        <span class="tag" style="font-size:10px">{post_type}</span>
-        <div style="flex:1;min-width:80px;max-width:160px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
-        </div>
-        <span class="muted" style="font-size:11px">{prio:.2f}</span>
-      </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
-      <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
-      {why_html}
-      <details style="margin-top:8px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Expand factors &amp; evidence</summary>
-        <div style="margin-top:8px;font-size:12px">
-          <div style="margin-bottom:6px"><strong>Ranking factors:</strong></div>
-          <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
-          <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
-          <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
-          <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
-        </div>
-      </details>
-    </div>
-  </div>
-</div>"""
+        if _band_chart_html or _worth_chart_html:
+            meet_charts_html = (
+                '<div class="card">'
+                '<h2 style="margin-bottom:var(--sp-2)">Meet at a glance</h2>'
+                '<p class="muted" style="margin-bottom:var(--sp-4);font-size:13px">'
+                "Counts and rankings drawn straight from this run — no estimates.</p>"
+                '<div class="mh-charts-grid">'
+                + _band_chart_html
+                + _worth_chart_html
+                + "</div></div>"
+            )
+        else:
+            meet_charts_html = ""
 
-        if not ach_rows_html:
-            if recognition_error:
-                ach_rows_html = (
-                    f'<div class="empty">Recognition engine error: {_h(recognition_error)}</div>'
-                )
-            elif not rr:
-                ach_rows_html = '<div class="empty">No recognition report available. Re-upload the file to generate achievements.</div>'
-            else:
-                ach_rows_html = '<div class="empty">No achievements detected.</div>'
-
-        # --- Not generated panel
+        # --- Not generated panel (the "why not" surface).
+        # The deterministic detectors traced every swim; for the ones that
+        # produced no card we surface the engine's near-miss category in plain
+        # English, leading with the genuine close calls (almost-a-PB, possible
+        # PB we couldn't confirm, an ambiguous swimmer match) so a reviewer can
+        # trust that nothing good was silently dropped. The raw engine summary
+        # stays available, demoted to a tooltip + muted second line for support.
         swim_traces_raw = rr.get("swim_traces") or []
         no_ach_traces = [t for t in swim_traces_raw if t.get("achievement_count", 0) == 0]
+
+        def _nm_sort_key(t):
+            cat = (t.get("near_miss_category") or "lower_priority").strip().lower()
+            try:
+                return _NEAR_MISS_ORDER.index(cat)
+            except ValueError:
+                return len(_NEAR_MISS_ORDER)
+
+        no_ach_sorted = sorted(no_ach_traces, key=_nm_sort_key)
+        _n_close_calls = sum(
+            1 for t in no_ach_traces if _near_miss_is_close_call(t.get("near_miss_category"))
+        )
         not_gen_rows = ""
-        for t in no_ach_traces[:30]:
+        for t in no_ach_sorted[:40]:
+            _cat = (t.get("near_miss_category") or "lower_priority").strip().lower()
+            _nm_label, _nm_blurb = _near_miss_label(_cat)
+            _nm_cls = "warn" if _near_miss_is_close_call(_cat) else ""
+            _raw = (t.get("summary") or "").strip()
+            _raw_line = (
+                f'<div class="muted" style="font-size:11px;margin-top:3px" '
+                f'title="{_h(_raw)}">{_h(_raw[:120])}</div>'
+                if _raw
+                else ""
+            )
             not_gen_rows += (
-                f'<tr data-swimmer="{t.get("swimmer_name", "")}" data-event="{t.get("event", "")}">'
+                f'<tr data-swimmer="{_h(t.get("swimmer_name", ""))}" '
+                f'data-event="{_h(t.get("event", ""))}" data-nearmiss="{_h(_cat)}">'
                 f"<td>{_h(t.get('swimmer_name', ''))}</td>"
                 f"<td>{_h(t.get('event', ''))}</td>"
                 f'<td style="font-family:monospace">{_h(t.get("time_str", ""))}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.get("summary", ""))}</td>'
+                f'<td><span class="tag {_nm_cls}" style="font-size:10px">{_h(_nm_label)}</span>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:3px">{_h(_nm_blurb)}</div>'
+                f"{_raw_line}</td>"
                 f"</tr>"
             )
 
@@ -11211,21 +16997,9 @@ def create_app() -> Flask:
                 f"</div></div>"
             )
 
-        # Warnings
-        warn_html = ""
-        if warnings:
-            items = []
-            for w in warnings[:10]:
-                cls = {"info": "info", "warn": "warn", "error": "bad"}.get(w.get("severity"), "")
-                items.append(
-                    f'<li><span class="tag {cls}">{_h(w.get("severity", ""))}</span> '
-                    f"<strong>{_h(w.get('code', ''))}</strong> &mdash; {_h(w.get('message', ''))}</li>"
-                )
-            warn_html = (
-                '<div class="card"><h2>Parse notes</h2>'
-                '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
-                f"<ul>{''.join(items)}</ul></div>"
-            )
+        # Parse notes — the flag-for-review surface (U.2). Humanised codes,
+        # error-severity flags led out, "+N more" when truncated. See helper.
+        warn_html = _parse_notes_card(warnings)
 
         # --- V6 PB Audit panel
         pb_audit_data = data.get("pb_audit") or {}
@@ -11377,6 +17151,35 @@ def create_app() -> Flask:
         bands_set = ["elite", "strong", "story", "nice", "not_worthy"]
         post_types_set = sorted(set(ra.get("suggested_post_type", "") for ra in ranked_achs))
 
+        # UI2.2: per-swimmer aggregate for the athlete-avatar tooltip — how many
+        # ranked moments this swimmer earned in *this* meet and their best band.
+        # Every figure is read straight from the recognition report (grounded,
+        # never fabricated); hovering any of a swimmer's rows surfaces their haul.
+        _BAND_RANK = {"elite": 4, "strong": 3, "story": 2, "nice": 1, "not_worthy": 0}
+        _sw_agg: dict[str, dict] = {}
+        for _ra in ranked_achs:
+            _aa = _ra.get("achievement", {}) or {}
+            _key = _aa.get("swimmer_name", "") or _aa.get("swimmer_id", "")
+            if not _key:
+                continue
+            _band = _ra.get("quality_band") or "nice"
+            _rec = _sw_agg.setdefault(_key, {"count": 0, "band": "nice"})
+            _rec["count"] += 1
+            if _BAND_RANK.get(_band, 0) > _BAND_RANK.get(_rec["band"], 0):
+                _rec["band"] = _band
+        _run_club = (data.get("profile_display") or data.get("club_filter") or "").strip()
+
+        def _athlete_stat(swimmer_name: str) -> str:
+            agg = _sw_agg.get(swimmer_name) or {}
+            n = agg.get("count", 0)
+            if not n:
+                return ""
+            s = f"{n} moment{'s' if n != 1 else ''}"
+            best = agg.get("band") or ""
+            if best:
+                s += f" · best {best}"
+            return s
+
         def opts(items, label):
             o = f'<option value="">All {label}</option>'
             for item in items:
@@ -11384,40 +17187,66 @@ def create_app() -> Flask:
             return o
 
         # --- V7: build workflow summary card (triage counts)
-        _wf_n_queue = _wf_summary.get("queue", 0)
         _wf_n_approved = _wf_summary.get("approved", 0)
         _wf_n_rejected = _wf_summary.get("rejected", 0)
         _wf_n_total = _wf_summary.get("total", 0)
 
+        # UI2.4 — the filter tab badges + the stat block count from the ACTUAL
+        # rendered cards (each defaults to "queue" with no sidecar state), so
+        # they match the DOM and the live JS recount on first paint. The bare
+        # sidecar summary is empty until the first action, which would otherwise
+        # read "Queue 0" beside a full queue. (The progress strip below keeps its
+        # own store-summary "decided / ranked-total" maths — a separate concept
+        # with its own regression guard.)
+        _wf_card_counts: dict[str, int] = {}
+        for _ra in ranked_achs:
+            _cid = (_ra.get("achievement") or {}).get("swim_id", "")
+            _cst = _wf_states.get(_cid)
+            _cst_val = _cst.status.value if _cst else "queue"
+            _wf_card_counts[_cst_val] = _wf_card_counts.get(_cst_val, 0) + 1
+        _n_queue_cards = _wf_card_counts.get("queue", 0)
+        _n_approved_cards = _wf_card_counts.get("approved", 0)
+
         # Only show workflow card if there's any state or any achievements
         if _wf_summary or ranked_achs:
-            _wf_filter_opts = ""
             _review_base = url_for("review", run_id=run_id)
             _wf_filter_buttons = ""
             _wf_counts = {
                 "": len(ranked_achs) or _wf_n_total,
-                "queue": _wf_n_queue if _wf_summary else len(ranked_achs),
-                "approved": _wf_n_approved,
+                "queue": _n_queue_cards,
+                "approved": _n_approved_cards,
+            }
+            # UI2.4 — the filter is a client-side tab control (kit `.mh-tabs`
+            # sliding indicator): switching shows/hides cards in place with no
+            # full reload. Each tab keeps its `?wf=` href so a no-JS page (or a
+            # deep-link) still filters server-side via `#ach-list[data-wf-filter]`.
+            # The count spans always render (even at 0) with stable ids so the
+            # live recount can update them as cards are approved/re-queued.
+            _wf_tab_count_id = {
+                "": "mh-wf-tabcount-all",
+                "queue": "mh-wf-tabcount-queue",
+                "approved": "mh-wf-tabcount-approved",
             }
             for _wf_opt in [
                 ("", "All"),
                 ("queue", "Queue"),
                 ("approved", "Approved"),
             ]:
-                _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
+                _wf_is_on = _wf_filter == _wf_opt[0]
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
-                _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
-                _wf_btn_cls = " is-active" if _wf_filter == _wf_opt[0] else ""
+                _wf_btn_cls = " is-active" if _wf_is_on else ""
                 _wf_count_for_opt = _wf_counts.get(_wf_opt[0], 0)
-                _wf_count_html = (
-                    f'<span class="count">{_wf_count_for_opt}</span>' if _wf_count_for_opt else ""
-                )
                 _wf_filter_buttons += (
-                    f'<a class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
-                    f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
-                    f"{_wf_opt[1]}{_wf_count_html}</a>"
+                    f'<a role="tab" class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
+                    f'data-wf-filter-to="{_wf_opt[0]}" '
+                    f'aria-selected="{"true" if _wf_is_on else "false"}">'
+                    f"{_wf_opt[1]}"
+                    f'<span class="count" id="{_wf_tab_count_id[_wf_opt[0]]}">{_wf_count_for_opt}</span>'
+                    f"</a>"
                 )
             # Progress maths — how much of the queue has the user actioned?
+            # Denominator is the ranked total (not the store total, which only
+            # counts touched cards); regression-guarded in test_review_body_content.
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
             _wf_grand_total = len(ranked_achs) or _wf_n_total or 0
             _wf_pct = int(round(100 * _wf_decided / _wf_grand_total)) if _wf_grand_total else 0
@@ -11432,13 +17261,13 @@ def create_app() -> Flask:
 
             workflow_summary_card = f"""
 <div class="card" style="border-left:3px solid var(--accent);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-  <div style="flex:1;min-width:240px">
+  <div style="flex:1;min-width:min(240px,100%)">
     <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
     <p class="dim" style="margin:0;font-size:13px;max-width:560px">
       Approve the achievements you want to post — anything you skip simply
       stays in the queue. Approved cards flow into the
       <strong>Content builder</strong>, where you pick a caption, create graphics
-      and video, then schedule to Buffer or download. Nothing is created until
+      and video, then schedule or download. Nothing is created until
       you&rsquo;ve approved it.
     </p>
   </div>
@@ -11454,8 +17283,8 @@ def create_app() -> Flask:
     <div>
       <h2 style="margin-bottom:var(--sp-3)">Workflow</h2>
       <div class="stat-block">
-        <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_wf_n_queue or len(ranked_achs)}</div></div>
-        <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_wf_n_approved}</div></div>
+        <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_n_queue_cards}</div></div>
+        <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_n_approved_cards}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -11493,8 +17322,9 @@ def create_app() -> Flask:
   </script>
   <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span class="muted" style="font-size:12px;font-family:var(--font-mono);letter-spacing:0.14em;text-transform:uppercase">Filter</span>
-    <nav class="mh-segmented" role="tablist" aria-label="Filter cards by workflow status">
+    <nav class="mh-tabs" role="tablist" aria-label="Filter cards by workflow status">
       {_wf_filter_buttons}
+      <span class="mh-tabs__ind" aria-hidden="true"></span>
     </nav>
     <span class="mh-kbd-hint" aria-hidden="true">
       <kbd>J</kbd><kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>?</kbd> help
@@ -11504,8 +17334,13 @@ def create_app() -> Flask:
         else:
             workflow_summary_card = ""
 
-        # --- V7: add status pills to achievement rows
-        # Rebuild ach_rows_html with workflow status pills
+        # --- The review list: one card per ranked achievement, with the
+        # workflow status pill and the U.3 confidence / worthiness / "why this
+        # card" / factor-breakdown surfaces. This is the only card render that
+        # reaches the page (`#ach-list`).
+        # UI 1.25 — tally every card's emoji reactions in one indexed query so
+        # the per-card strips render server-side without a round-trip each.
+        _react_counts = _reaction_counts_for_run(run_id)
         ach_rows_html_wf = ""
         for _why_idx, ra in enumerate(ranked_achs):
             a = ra.get("achievement", {})
@@ -11513,13 +17348,11 @@ def create_app() -> Flask:
             prio = ra.get("priority", 0.0)
             rank = ra.get("rank", 0)
             conf_label = a.get("confidence_label", "medium")
-            conf_cls = {"high": "good", "medium": "warn", "low": "bad"}.get(conf_label, "")
             swimmer = _h(a.get("swimmer_name", ""))
             event = _h(a.get("event", ""))
             headline = _h(a.get("headline", ""))
             atype = _h(_humanise(a.get("type", "")))
             post_type = _h(ra.get("suggested_post_type", ""))
-            prio_bar_pct = int(prio * 100)
             _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
 
             # V7: workflow state for this card
@@ -11527,17 +17360,12 @@ def create_app() -> Flask:
             wf_state = _wf_states.get(card_id_raw)
             wf_status = wf_state.status.value if wf_state else "queue"
 
-            # Skip if filtered
-            if _wf_filter and wf_status != _wf_filter:
-                continue
-
-            band_cls = {
-                "elite": "warn",
-                "strong": "info",
-                "story": "",
-                "nice": "",
-                "not_worthy": "bad",
-            }.get(band, "")
+            # UI2.4 — every card is rendered into the DOM regardless of the
+            # active filter; the Queue/Approved tabs hide/show them client-side
+            # (CSS on `#ach-list[data-wf-filter]`) so switching needs no reload
+            # and a card leaving the queue on approval drops out of the Queue
+            # view live. The no-JS / deep-link path still filters server-side via
+            # the same `data-wf-filter` attribute set from `?wf=` below.
 
             # Evidence list
             ev_html = ""
@@ -11549,14 +17377,6 @@ def create_app() -> Flask:
                     ev_html += f'<li><a href="{_h(ev_url)}" target="_blank" rel="noopener">{ev_src}</a>: {ev_stmt}</li>'
                 else:
                     ev_html += f"<li><strong>{ev_src}</strong>: {ev_stmt}</li>"
-
-            # Factor list
-            factors_html = ""
-            for f in (ra.get("factors") or [])[:7]:
-                fname = _h(f.get("name", ""))
-                fval = f.get("value", 0.0)
-                freason = _h(f.get("reason", ""))
-                factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
             # Caption tone, graphics, motion + scheduling all move to the
             # Content builder (post-approval). Review stays pure triage:
@@ -11572,35 +17392,65 @@ def create_app() -> Flask:
                 ra, card_uuid=f"wf-{card_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
 
+            # UI 1.18 — per-card "Inspect" affordance. Opens the shared
+            # inspector drawer (one instance, injected once below) wired to the
+            # existing create-graphic + live-caption + workflow routes for THIS
+            # card via the data-* attributes. Lightweight: no markup is rendered
+            # per card beyond the button itself.
+            _insp_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
+            _insp_caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
+            # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
+            # Decorative here — the row already shows the name/event/band as
+            # text — so the chip stays aria-hidden and out of the tab order.
+            _sw_key = a.get("swimmer_name", "") or a.get("swimmer_id", "")
+            _row_avatar = _athlete_avatar(
+                a.get("swimmer_name", ""),
+                club=_run_club,
+                stat=_athlete_stat(_sw_key),
+                focusable=False,
+                size=30,
+            )
+
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{_h(a.get("swimmer_name", ""))}" data-event="{_h(a.get("event", ""))}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
+    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-        <span class="tag {band_cls}" style="font-size:10px">{band.upper()}</span>
+        {_band_chip(band)}
         <span class="tag info" style="font-size:10px">{atype}</span>
-        <span class="tag {conf_cls}" style="font-size:10px">conf: {conf_label}</span>
+        {_confidence_chip(conf_label, numeric=a.get("confidence"))}
         <span class="tag" style="font-size:10px">{post_type}</span>
-        <div style="flex:1;min-width:80px;max-width:160px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
-        </div>
-        <span class="muted" style="font-size:11px">{prio:.2f}</span>
+        {_worthiness_meter(prio)}
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        {_row_avatar}
+        <div style="font-size:13px;font-weight:600">{swimmer} &middot; {event}</div>
+      </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
       <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
            all happen later in the Content builder (approved cards only). -->
       <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
+        <button type="button" class="btn secondary mh-inspect-btn" style="font-size:11px;padding:4px 10px"
+                data-mh-inspect data-run-id="{_h(run_id)}" data-card-id="{_h(card_id_raw)}"
+                data-card-uuid="{_h(card_uuid)}" data-graphic-url="{_h(_insp_graphic_url)}"
+                data-caption-url="{_h(_insp_caption_url)}" data-card-title="{swimmer} &middot; {event}"{_inspector_state_attrs(wf_state)}
+                aria-haspopup="dialog" aria-controls="mh-inspector"
+                title="Tweak this card before approval — caption, palette, elements, crop">
+          &#9881; Inspect
+        </button>
+        <span style="flex:1;min-width:8px"></span>
+        {_render_reactions(run_id, card_id_raw, _react_counts)}
       </div>
       <details style="margin-top:10px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">View ranking factors &amp; evidence</summary>
+        <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">How the ranking added up &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
-          <div style="margin-bottom:6px"><strong>Ranking factors:</strong></div>
-          <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
-          <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
+          <div style="margin-bottom:6px"><strong>How the ranking added up:</strong></div>
+          {_render_factor_breakdown(ra.get("factors"))}
+          <div style="margin:12px 0 4px"><strong>Evidence:</strong></div>
           <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
           <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
         </div>
@@ -11610,16 +17460,11 @@ def create_app() -> Flask:
 </div>"""
 
         if not ach_rows_html_wf:
-            if _wf_filter:
-                _all_url = url_for("review", run_id=run_id)
-                ach_rows_html_wf = _empty_state(
-                    "search",
-                    f"No <em>{_h(_wf_filter)}</em> cards",
-                    f"Nothing is in the &ldquo;{_h(_wf_filter)}&rdquo; state right now. "
-                    "Switch the filter to see the rest of the queue.",
-                    actions=f'<a class="btn secondary" href="{_all_url}">Show all cards</a>',
-                )
-            elif recognition_error:
+            # UI2.4 — a per-filter empty view (e.g. "nothing approved yet") is no
+            # longer a server concern: every card renders and the tabs hide/show
+            # them client-side, so emptiness here means there are genuinely no
+            # ranked cards. The client-side tab sync shows the per-tab hint.
+            if recognition_error:
                 ach_rows_html_wf = _empty_state(
                     "alert",
                     "Recognition hit a snag",
@@ -11683,30 +17528,32 @@ def create_app() -> Flask:
                     )
 
         # Single global AI-availability banner — replaces the 177 per-card
-        # "AI UNAVAILABLE" alerts the previous implementation emitted.
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available
+        # "AI UNAVAILABLE" alerts the previous implementation emitted. Now the
+        # one shared honest-error helper (U.2), so the copy can't drift again.
+        _ai_banner_html = _ai_unavailable_banner()
 
-            _ai_banner_html = (
-                ""
-                if _llm_available()
-                else (
-                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
-                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
-                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
-                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                    '<span style="color:var(--ink-dim)">'
-                    "Cards show ranker reasoning and grounded source lines only. "
-                    "Captions, &ldquo;why this card&rdquo; explanations and performance "
-                    "context need a Gemini or Anthropic key set by the deployment operator."
-                    "</span>"
-                    "</div>"
-                )
+        # U.4 — sample-run banner. A sample pack carries the user's brand but
+        # fictional swimmers, so say so plainly (never let a demo masquerade as
+        # the club's own data) and point at the real upload when they're ready.
+        _sample_banner_html = ""
+        if _run_is_sample(run_id):
+            _sample_banner_html = (
+                '<div class="card" style="border:1px solid var(--accent);'
+                "background:var(--surface);display:flex;gap:16px;align-items:center;"
+                'flex-wrap:wrap;justify-content:space-between;margin-bottom:var(--sp-5)">'
+                '<div style="flex:1;min-width:min(240px,100%)">'
+                '<div style="font-family:var(--font-mono);font-size:10.5px;'
+                "letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);"
+                'margin-bottom:6px">Sample meet</div>'
+                '<p style="margin:0;font-size:14px;line-height:1.55;color:var(--ink)">'
+                "This is a demo meet so you can see the whole engine work — the "
+                "cards, captions and ranking are styled in <strong>your</strong> "
+                "brand, but the swimmers and clubs are fictional. When you've got "
+                "a real results file, upload it and your first true pack lands here."
+                "</p></div>"
+                f'<a class="btn" href="{url_for("upload")}">Upload real results &rarr;</a>'
+                "</div>"
             )
-        except Exception:
-            _ai_banner_html = ""
 
         body = f"""
 <style>
@@ -11723,6 +17570,14 @@ def create_app() -> Flask:
 .filters-bar {{ display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);position:sticky;top:56px;z-index:50; }}
 .filters-bar select {{ width:auto;min-width:120px;font-size:13px;padding:6px 10px; }}
 .ach-row.hidden {{ display:none; }}
+/* UI2.4 — client-side workflow tabs. The active tab sets data-wf-filter on
+   #ach-list; these rules hide the cards that don't match, so Queue/Approved
+   switch with no reload. Set server-side from ?wf= too, so the no-JS / deep-
+   link path filters identically. Composes with .ach-row.hidden (the dropdown
+   filters above): a row hidden by either axis stays hidden. */
+#ach-list[data-wf-filter="queue"] .ach-row:not([data-status="queue"]) {{ display:none; }}
+#ach-list[data-wf-filter="approved"] .ach-row:not([data-status="approved"]) {{ display:none; }}
+#mh-wf-empty {{ margin-top: var(--sp-2); }}
 /* Council UI verdict (2026-05-31) — the review list collapses each card's
    reasoning by default for scroll relief (a 249-card meet was a ~70,000px
    wall). These rules keep the reasoning one click away with a clear "show
@@ -11739,6 +17594,24 @@ details.why-card > summary .why-peek {{
 details.why-card > summary .why-peek .why-chev {{ font-size: 9px; text-decoration: none; }}
 details.why-card[open] > summary .why-peek {{ display: none; }}
 @keyframes spin {{ from {{ transform:rotate(0deg) }} to {{ transform:rotate(360deg) }} }}
+/* U.4 — mobile-aware review. Desktop keeps its compact, dense triage row;
+   on a phone the Approve / Re-queue controls grow into full-width, 46px
+   tap targets and the status label takes its own line, so a volunteer can
+   work the queue from the pool deck without pinch-zooming. The inline
+   button sizing on _render_wf_actions is overridden with !important here. */
+@media (max-width: 700px) {{
+  .filters-bar {{ top: 0; padding: 10px 12px; gap: 8px; }}
+  .filters-bar select {{ flex: 1 1 calc(50% - 8px); min-width: 0; }}
+  .ach-row > div {{ gap: 10px !important; }}
+  .wf-actions {{ width: 100%; }}
+  .wf-actions .strap {{ flex: 1 0 100%; }}
+  .wf-actions .btn {{
+    flex: 1 1 auto;
+    min-height: 46px !important;
+    padding: 12px 14px !important;
+    font-size: 14px !important;
+  }}
+}}
 </style>
 
 {_ai_banner_html}
@@ -11755,33 +17628,17 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </div>
 </section>
 
-{_provenance_card}
+{_sample_banner_html}
 
-<div class="card">
-  <h2>Recognition summary</h2>
-  <div class="stat-block">{rec_stats_html}</div>
-  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-    <a class="btn secondary" href="{_export_url}">Download export</a>
-    <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
-      <button class="btn danger" type="submit">Delete run</button>
-    </form>
-  </div>
-  <details style="margin-top:var(--sp-4)">
-    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
-    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
-      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
-      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
-    </div>
-  </details>
-</div>
+{_provenance_card}
 
 {workflow_summary_card}
 
-{meet_ctx_html}
-
-{pb_audit_html}
-
 {warn_html}
+
+{_render_explainability_key()}
+
+{weekend_glance_html}
 
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
@@ -11801,8 +17658,75 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
             style="margin-left:auto;font-size:12px;padding:6px 12px"
             title="Show or hide every card's reasoning at once">Expand all reasoning</button>
   </div>
-  <div id="ach-list">{ach_rows_html_wf}</div>
+  <form id="mh-review-bulk" method="post">
+    <div class="mh-bulkbar is-empty" id="mh-rv-bulkbar" role="group" aria-label="Bulk card actions"
+         data-mh-bulkbar="review" data-form="mh-review-bulk" data-count="mh-rv-count"
+         data-select-all="mh-rv-all" data-check="mh-row-check" data-row=".ach-row">
+      <label class="mh-bulkbar-all"><input type="checkbox" id="mh-rv-all" class="mh-check-all" aria-label="Select all shown cards"> Select all shown</label>
+      <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
+      <div class="mh-bulkbar-actions">
+        <button type="submit" class="btn" data-mh-bulk="approve" name="op" value="approved"
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}">Approve</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
+                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="export"
+                formaction="{url_for("api_cards_bulk_export", run_id=run_id)}">Export</button>
+      </div>
+    </div>
+    <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
+    <div id="mh-wf-empty" class="mh-empty-inline" hidden>
+      <b id="mh-wf-empty-title">Nothing here yet</b><br>
+      <span id="mh-wf-empty-body">Switch the filter to see the rest of the queue.</span>
+    </div>
+  </form>
 </div>
+
+<style>{_BULK_ACTIONS_CSS}</style>
+<script>{_BULK_ACTIONS_JS}</script>
+
+{_render_near_miss_hint(len(no_ach_traces), _n_close_calls)}
+
+<!-- Run detail & diagnostics: the recognition read, meet context, PB audit and
+     raw tables a volunteer rarely needs are demoted below the decision surface,
+     so the page leads with the task (review & approve) rather than the data. -->
+<div style="margin:var(--sp-8) 0 var(--sp-3) 0;display:flex;align-items:center;gap:14px">
+  <span style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);white-space:nowrap">Run detail &amp; diagnostics</span>
+  <span style="flex:1;height:1px;background:var(--hairline)"></span>
+</div>
+
+{meet_charts_html}
+
+<div class="card">
+  <h2>Recognition summary</h2>
+  <div class="stat-block">{rec_stats_html}</div>
+  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn secondary" href="{url_for("run_results_table", run_id=run_id)}">Browse all results &rarr;</a>
+    <a class="btn secondary" href="{_export_url}">Download export</a>
+  </div>
+  <details style="margin-top:var(--sp-4)">
+    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
+    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
+      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
+      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+    <!-- UI2.8 — Codeblock raw parsed-data view. The machine-readable JSON the
+         recognition engine produced, shown inline through the first-party
+         server-side highlighter (no CDN), syntax-coloured and copyable, so a
+         volunteer never has to leave the page or read an unstyled browser tab
+         to see exactly what the engine decided. Whitelisted fields only; the
+         block is server-rendered so it works with JavaScript disabled (only the
+         copy button is a progressive enhancement). -->
+    <div class="mh-machine-readable" id="mh-machine-readable" style="margin-top:var(--sp-4)">
+      <p class="muted" style="font-size:12px;margin:0 0 8px">The machine-readable data the recognition engine produced for this run &mdash; meet context, the parsed and club-matched swim counts and the ranked achievements, in the same JSON shape the export and the downstream content steps consume. Read-only; copy it straight from here.</p>
+      {_code_hl.code_block(_machine_readable_run(data, run_id), "json", label="Recognition data")}
+    </div>
+  </details>
+</div>
+
+{meet_ctx_html}
+
+{pb_audit_html}
 
 <div class="card">
   <details>
@@ -11817,12 +17741,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </details>
 </div>
 
-<div class="card">
-  <details>
-    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements</span></summary>
-    <div style="margin-top:14px">
+<div class="card" id="mh-not-generated">
+  <details{" open" if _n_close_calls else ""}>
+    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements{f", {_n_close_calls} close {'call' if _n_close_calls == 1 else 'calls'}" if _n_close_calls else ""}</span></summary>
+    <div style="margin-top:8px">
+      <p class="muted" style="font-size:12px;margin:0 0 12px">Every swim was traced by the recognition engine. These produced no card &mdash; the close calls are led out first, each with the reason in plain English so you can override if you disagree. Nothing here was silently dropped.</p>
       <table>
-        <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not generated</th></tr></thead>
+        <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not</th></tr></thead>
         <tbody>{not_gen_rows or '<tr><td colspan="4" class="muted">All swims produced achievements, or no trace data available.</td></tr>'}</tbody>
       </table>
     </div>
@@ -11841,7 +17766,23 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </details>
 </div>
 
+<div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <p class="muted" style="margin:0;font-size:12px">Removes the generated cards and review state for this run. Source files stay on disk and can be re-processed.</p>
+    </div>
+    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
+      <button class="btn danger" type="submit">Delete run</button>
+    </form>
+  </div>
+</div>
+
 <script>
+function mhActiveWfFilter() {{
+  var list = document.getElementById('ach-list');
+  return (list && list.getAttribute('data-wf-filter')) || '';
+}}
 function applyFilters() {{
   var fType = document.getElementById('f-type').value;
   var fConf = document.getElementById('f-conf').value;
@@ -11849,9 +17790,14 @@ function applyFilters() {{
   var fEvent = document.getElementById('f-event').value;
   var fBand = document.getElementById('f-band').value;
   var fPost = document.getElementById('f-post').value;
+  var wf = mhActiveWfFilter();
   var rows = document.querySelectorAll('#ach-list .ach-row');
-  var shown = 0;
+  var shown = 0, inTab = 0;
   rows.forEach(function(row) {{
+    // UI2.4 — the workflow tab axis is applied by CSS (#ach-list[data-wf-filter]);
+    // fold it into the count only, so "N of M shown" tracks the active tab.
+    var wfOk = !wf || row.dataset.status === wf;
+    if (wfOk) inTab++;
     var match = true;
     if (fType && row.dataset.type !== fType) match = false;
     if (fConf && row.dataset.conf !== fConf) match = false;
@@ -11859,11 +17805,13 @@ function applyFilters() {{
     if (fEvent && row.dataset.event !== fEvent) match = false;
     if (fBand && row.dataset.band !== fBand) match = false;
     if (fPost && row.dataset.post !== fPost) match = false;
+    // .hidden carries only the dropdown axis so it composes with the CSS tab
+    // hide — a row hidden by either axis stays hidden.
     row.classList.toggle('hidden', !match);
-    if (match) shown++;
+    if (match && wfOk) shown++;
   }});
   var countEl = document.getElementById('f-count');
-  if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
+  if (countEl) countEl.textContent = shown + ' of ' + inTab + ' shown';
 }}
 function clearFilters() {{
   ['f-type','f-conf','f-swimmer','f-event','f-band','f-post'].forEach(function(id) {{
@@ -11873,6 +17821,59 @@ function clearFilters() {{
   applyFilters();
 }}
 applyFilters();
+
+// UI2.4 — client-side workflow filter tabs. The kit (.mh-tabs) already slides
+// the indicator + toggles the active tab on click; this turns that tab into an
+// in-place filter: it sets #ach-list[data-wf-filter] (CSS hides the cards that
+// don't match), keeps the URL's ?wf= in sync without a reload, and refreshes
+// the per-tab empty hint + the "N of M shown" count. Each tab keeps its href so
+// a no-JS page still filters via a normal navigation.
+(function() {{
+  var nav = document.querySelector('.mh-tabs[role="tablist"]');
+  var list = document.getElementById('ach-list');
+  if (!nav || !list) return;
+
+  window.mhWfTabsSync = function() {{
+    var wf = list.getAttribute('data-wf-filter') || '';
+    var rows = document.querySelectorAll('#ach-list .ach-row');
+    var inTab = 0;
+    rows.forEach(function(r) {{ if (!wf || r.dataset.status === wf) inTab++; }});
+    var empty = document.getElementById('mh-wf-empty');
+    if (empty) {{
+      var show = rows.length > 0 && inTab === 0;
+      empty.hidden = !show;
+      if (show) {{
+        var t = document.getElementById('mh-wf-empty-title');
+        var b = document.getElementById('mh-wf-empty-body');
+        if (wf === 'approved') {{
+          if (t) t.textContent = 'Nothing approved yet';
+          if (b) b.textContent = 'Approve cards from the Queue and they move here.';
+        }} else if (wf === 'queue') {{
+          if (t) t.textContent = 'Queue clear';
+          if (b) b.textContent = 'Every card has been reviewed \\u2014 nice work.';
+        }} else {{
+          if (t) t.textContent = 'Nothing here yet';
+          if (b) b.textContent = 'Switch the filter to see the rest of the queue.';
+        }}
+      }}
+    }}
+    if (window.applyFilters) window.applyFilters();
+  }};
+
+  nav.addEventListener('click', function(ev) {{
+    var tab = ev.target.closest('[data-wf-filter-to]');
+    if (!tab || !nav.contains(tab)) return;
+    ev.preventDefault();           // no full reload — the kit moves the indicator
+    var val = tab.getAttribute('data-wf-filter-to') || '';
+    list.setAttribute('data-wf-filter', val);
+    try {{
+      history.replaceState(null, '', location.pathname + (val ? ('?wf=' + encodeURIComponent(val)) : ''));
+    }} catch (e) {{}}
+    window.mhWfTabsSync();
+  }});
+
+  window.mhWfTabsSync();           // initial sync (covers a ?wf= deep-link)
+}})();
 
 // V9: Copy "Why this card?" reasoning to clipboard (for sponsor reports etc.)
 function copyWhyCard(btn, taId) {{
@@ -11973,80 +17974,12 @@ function copyWhyCard(btn, taId) {{
 
 </script>
 
-<!-- Phase 6 — keyboard navigation + bulk approve + help overlay -->
-<div class="mh-kbd-overlay" id="mh-kbd-overlay" role="dialog" aria-modal="true" aria-labelledby="mh-kbd-title" aria-hidden="true">
-  <div class="mh-kbd-overlay-panel">
-    <h3 id="mh-kbd-title">Keyboard shortcuts</h3>
-    <div class="mh-kbd-table">
-      <span class="keys"><kbd>J</kbd></span><span class="desc">Focus next card</span>
-      <span class="keys"><kbd>K</kbd></span><span class="desc">Focus previous card</span>
-      <span class="keys"><kbd>A</kbd></span><span class="desc">Approve the focused card</span>
-      <span class="keys"><kbd>U</kbd></span><span class="desc">Send focused card back to queue</span>
-      <span class="keys"><kbd>?</kbd></span><span class="desc">Toggle this help</span>
-      <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close help</span>
-    </div>
-    <div style="margin-top:var(--sp-5);text-align:right">
-      <button type="button" class="btn secondary" data-mh-kbd-close>Got it</button>
-    </div>
-  </div>
-</div>
-
+<!-- Phase 6 — bulk approve + expand-all reasoning. (Keyboard navigation and the
+     '?' help overlay are now provided globally by the UI 1.28 shortcuts engine
+     in _layout, which detects this review surface via its .ach-row cards — so
+     the review page no longer ships its own '?' handler or modal.) -->
 <script>
 (function(){{
-  // ----- Keyboard navigation across .ach-row cards -----
-  function cards() {{
-    return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
-      .filter(function(el){{ return el.offsetParent !== null; }});
-  }}
-  var focusIdx = -1;
-  function setFocus(idx) {{
-    var list = cards();
-    if (!list.length) return;
-    if (idx < 0) idx = 0;
-    if (idx >= list.length) idx = list.length - 1;
-    list.forEach(function(c){{ c.classList.remove('mh-kbd-focus'); }});
-    var el = list[idx];
-    el.classList.add('mh-kbd-focus');
-    el.scrollIntoView({{block: 'center', behavior: 'smooth'}});
-    focusIdx = idx;
-  }}
-  function clickWf(state) {{
-    var list = cards();
-    if (focusIdx < 0 || focusIdx >= list.length) return;
-    var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
-    if (btn) btn.click();
-  }}
-  function isTyping(e) {{
-    var t = e.target;
-    if (!t) return false;
-    var tag = (t.tagName || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
-  }}
-  var overlay = document.getElementById('mh-kbd-overlay');
-  function toggleHelp(force) {{
-    if (!overlay) return;
-    var open = force !== undefined ? force : !overlay.classList.contains('is-open');
-    overlay.classList.toggle('is-open', open);
-    overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
-  }}
-  if (overlay) {{
-    overlay.addEventListener('click', function(e){{ if (e.target === overlay) toggleHelp(false); }});
-    overlay.querySelectorAll('[data-mh-kbd-close]').forEach(function(b){{
-      b.addEventListener('click', function(){{ toggleHelp(false); }});
-    }});
-  }}
-  document.addEventListener('keydown', function(e){{
-    if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-    switch (e.key) {{
-      case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
-      case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
-      case 'a': case 'A': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('approved'); }} break;
-      case 'u': case 'U': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('queue'); }} break;
-      case '?': e.preventDefault(); toggleHelp(); break;
-      case 'Escape': toggleHelp(false); break;
-    }}
-  }});
-
   // ----- Bulk approve -----
   var bulkBtn = document.getElementById('mh-bulk-approve');
   if (bulkBtn) {{
@@ -12089,8 +18022,310 @@ function copyWhyCard(btn, taId) {{
   }}
 }})();
 </script>
+
+<!-- UI 1.18 — Inspector / properties panel (one shared drawer for the page) -->
+{_render_inspector_panel(_review_swatches)}
+{_inspector_js()}
 """
-        return _layout("Recognition", body, active="home")
+        # U.13: floating mobile action dock for the review/approve flow — only
+        # when there's actually a pack to review (cards present or workflow
+        # state on file). Its "Approve" pill advances through the queue; when
+        # empty it links to the content builder. `queue` is the initial count
+        # (mirrors the page's Queue stat); the dock script keeps it live.
+        _review_dock = (
+            {"builder": _pack_url, "queue": _n_queue_cards}
+            if (_wf_summary or ranked_achs)
+            else None
+        )
+        return _layout("Recognition", body, active="home", dock=_review_dock)
+
+    @app.route("/runs/<run_id>/results")
+    def run_results_table(run_id):
+        """UI 1.12 — Wope-style sortable/filterable parsed-results table.
+
+        A flat, scannable grid of every individual swim in the run, each with a
+        per-athlete progress sparkline and a PB/improvement delta badge. Sort
+        and filter are server-side (this route re-renders from query params); the
+        sparklines are drawn client-side on ``<canvas>`` from an embedded series
+        payload, so the page stays fully usable without JavaScript.
+        """
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
+        if not data:
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                eyebrow="Results table",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+
+        meet = data.get("meet") or {}
+        _review_url = url_for("review", run_id=run_id)
+
+        # Cross-meet history per athlete — read-only registry lookups (resolve by
+        # name, then that athlete's full swim log). Best-effort: a missing/empty
+        # registry just means no prior history yet (the current swim still shows
+        # as the latest point and the badge reads "first on record").
+        pid = _active_profile_id() or (data.get("profile_id") or "")
+        history: dict[str, list[dict]] = {}
+        if pid:
+            try:
+                from mediahub.athletes import athlete_swims as _ath_swims
+                from mediahub.athletes import resolve as _ath_resolve
+
+                swimmers = meet.get("swimmers") or {}
+                for res in meet.get("results") or []:
+                    sk = res.get("swimmer_key") or ""
+                    if not sk or sk in history:
+                        continue
+                    sw = swimmers.get(sk) or {}
+                    name = (
+                        f"{(sw.get('first_name') or '').strip()} "
+                        f"{(sw.get('last_name') or '').strip()}"
+                    ).strip()
+                    rec = _ath_resolve(pid, name) if name else None
+                    history[sk] = _ath_swims(pid, rec.athlete_id) if rec else []
+            except Exception:
+                history = {}
+
+        rows = _rt.build_rows(meet, history, run_id)
+
+        # Empty run (no individual results at all) — honest empty state.
+        if not rows:
+            empty_body = (
+                '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Results table</span>'
+                "<h1>No parsed results on this run</h1>"
+                '<p class="lede">This run has no individual swim results to tabulate &mdash; '
+                "it may have parsed only relays, or failed before extracting results.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{_review_url}">Back to review &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("upload")}">Upload another file</a>'
+                "</div></section>"
+            )
+            return _layout("Results table", empty_body, active="create")
+
+        # ---- server-side sort + filter from query params ----
+        sort, order = _rt.normalise_sort(request.args.get("sort"), request.args.get("order"))
+        f_event = (request.args.get("event") or "").strip()
+        f_q = (request.args.get("q") or "").strip()
+        f_pb = (request.args.get("pb") or "") in ("1", "on", "true")
+        filtered = _rt.filter_rows(rows, event=f_event, query=f_q, pb_only=f_pb)
+        visible = _rt.sort_rows(filtered, sort, order)
+
+        # ---- summary stats (over ALL rows, not the filtered view) ----
+        n_swims = len(rows)
+        n_athletes = len({r.swimmer_key for r in rows if r.swimmer_key})
+        n_pb = sum(1 for r in rows if r.delta.kind == "pb")
+        n_impr = sum(1 for r in rows if r.delta.kind == "improvement")
+
+        # ---- sortable column headers (server-side; toggle asc/desc) ----
+        def _sort_href(col: str) -> str:
+            new_order = "desc" if (sort == col and order == "asc") else "asc"
+            return url_for(
+                "run_results_table",
+                run_id=run_id,
+                sort=col,
+                order=new_order,
+                event=f_event or None,
+                q=f_q or None,
+                pb="1" if f_pb else None,
+            )
+
+        def _th(col: str, label: str) -> str:
+            arrow = ""
+            aria = ""
+            if sort == col:
+                arrow = (
+                    ' <span aria-hidden="true">▲</span>'
+                    if order == "asc"
+                    else ' <span aria-hidden="true">▼</span>'
+                )
+                aria = ' aria-sort="ascending"' if order == "asc" else ' aria-sort="descending"'
+            return (
+                f'<th{aria}><a href="{_sort_href(col)}" '
+                'style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">'
+                f"{label}{arrow}</a></th>"
+            )
+
+        # ---- rows + sparkline payload ----
+        _DELTA_TAG = {
+            "pb": "medal",
+            "improvement": "good",
+            "matched": "info",
+            "first": "",
+            "slower": "bad",
+            "none": "",
+        }
+        spark_payload: dict[str, dict] = {}
+        body_rows = ""
+        for i, r in enumerate(visible):
+            if r.delta.kind == "none" or not r.delta.label:
+                delta_html = '<span class="muted" style="font-size:12px">—</span>'
+            else:
+                cls = _DELTA_TAG.get(r.delta.kind, "")
+                delta_html = f'<span class="tag {cls}" title="{_h(r.delta.title)}">{_h(r.delta.label)}</span>'
+
+            if len(r.series_cs) >= 2:
+                sid = f"s{i}"
+                spark_payload[sid] = _rt.sparkline_series(r)
+                _trend = (
+                    f" ({r.delta.label})"
+                    if r.delta.kind in ("pb", "improvement", "matched")
+                    else ""
+                )
+                aria = _h(f"Progress over {len(r.series_cs)} swims, latest {r.time_str}{_trend}")
+                spark_html = (
+                    f'<canvas class="mh-spark" data-spark="{sid}" role="img" '
+                    f'aria-label="{aria}" width="104" height="28" '
+                    'style="width:104px;height:28px;display:block"></canvas>'
+                )
+            elif len(r.series_cs) == 1:
+                spark_html = '<span class="muted" style="font-size:11px" title="No earlier swim on record yet">1 swim</span>'
+            else:
+                spark_html = '<span class="muted" style="font-size:12px">—</span>'
+
+            gender_html = (
+                f' <span class="muted" style="font-size:11px">{_h(r.gender)}</span>'
+                if r.gender
+                else ""
+            )
+            if r.is_dq:
+                time_cell = f'<span class="tag bad" title="{_h(r.status.upper())}">{_h(r.status.upper() or "DQ")}</span>'
+            else:
+                time_cell = _h(r.time_str)
+            body_rows += (
+                "<tr>"
+                f'<td class="mono" style="color:var(--ink-dim)">{r.place if r.place is not None else "—"}</td>'
+                f"<td><strong>{_h(r.swimmer_name)}</strong></td>"
+                f"<td>{_h(r.event_label)}{gender_html}</td>"
+                f'<td class="muted">{_h(r.age_band or "—")}</td>'
+                f'<td class="mono" style="white-space:nowrap">{time_cell}</td>'
+                f"<td>{delta_html}</td>"
+                f"<td>{spark_html}</td>"
+                "</tr>"
+            )
+
+        # ---- event filter dropdown ----
+        ev_opts = '<option value="">All events</option>'
+        for ek, elabel in _rt.event_options(rows):
+            sel = " selected" if ek == f_event else ""
+            ev_opts += f'<option value="{_h(ek)}"{sel}>{_h(elabel)}</option>'
+
+        any_filter = bool(f_event or f_q or f_pb)
+        clear_link = (
+            f'<a class="btn ghost" style="font-size:13px" '
+            f'href="{url_for("run_results_table", run_id=run_id, sort=sort, order=order)}">Clear filters</a>'
+            if any_filter
+            else ""
+        )
+        count_line = f"Showing <strong>{len(visible)}</strong> of {n_swims} swims" + (
+            " (filtered)" if any_filter else ""
+        )
+        no_match_row = (
+            '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">'
+            "No swims match these filters.</td></tr>"
+        )
+        spark_json = json.dumps(spark_payload)
+
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Results table</span>
+  <h1>{_h(meet.get("name") or "(unknown meet)")}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(meet.get("start_date") or "?")} – {_h(meet.get("end_date") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("course") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("venue") or "venue unknown")}</span>
+  </div>
+  <div class="mh-hero-actions" style="margin-top:var(--sp-4)">
+    <a class="mh-cta-secondary" href="{_review_url}">&larr; Back to review</a>
+  </div>
+</section>
+
+<div class="stat-block" style="margin-bottom:var(--sp-5)">
+  <div class="stat"><div class="l">Swims</div><div class="v" data-mh-count="{n_swims}">{n_swims}</div></div>
+  <div class="stat"><div class="l">Athletes</div><div class="v" data-mh-count="{n_athletes}">{n_athletes}</div></div>
+  <div class="stat"><div class="l">Personal bests</div><div class="v" data-mh-count="{n_pb}" style="color:var(--medal)">{n_pb}</div></div>
+  <div class="stat"><div class="l">Improvements</div><div class="v" data-mh-count="{n_impr}" style="color:var(--good)">{n_impr}</div></div>
+</div>
+
+<div class="card">
+  <form method="get" class="filters-bar" data-no-loader="1" style="margin-bottom:0">
+    <input type="hidden" name="sort" value="{_h(sort)}">
+    <input type="hidden" name="order" value="{_h(order)}">
+    <input type="search" name="q" value="{_h(f_q)}" placeholder="Search swimmer…"
+           style="min-width:180px" aria-label="Search swimmer name">
+    <select name="event" aria-label="Filter by event">{ev_opts}</select>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-dim)">
+      <input type="checkbox" name="pb" value="1"{" checked" if f_pb else ""} style="width:auto">
+      PBs &amp; improvements only
+    </label>
+    <button class="btn secondary" type="submit" style="font-size:13px">Apply</button>
+    {clear_link}
+    <span class="muted" style="font-size:12px;align-self:center;margin-left:auto">{count_line}</span>
+  </form>
+</div>
+
+<div class="card" style="margin-top:var(--sp-4)">
+  <table class="mh-table">
+    <thead><tr>
+      {_th("place", "#")}
+      {_th("name", "Swimmer")}
+      {_th("event", "Event")}
+      {_th("age", "Age")}
+      {_th("time", "Time")}
+      {_th("delta", "Δ vs PB")}
+      <th>Progress</th>
+    </tr></thead>
+    <tbody>{body_rows or no_match_row}</tbody>
+  </table>
+  <p class="muted" style="font-size:11px;margin:12px 2px 0">
+    Sparkline shows this athlete's time for the event over time &mdash; higher is faster.
+    Delta badges compare each swim to the athlete's prior best <em>on record</em>.
+  </p>
+</div>
+
+<script>
+(function(){{
+  var DATA = {spark_json};
+  function cssColor(name, fb){{
+    try {{
+      var el=document.createElement('span');
+      el.style.cssText='color:var('+name+');position:absolute;visibility:hidden';
+      document.body.appendChild(el);
+      var c=getComputedStyle(el).color; document.body.removeChild(el);
+      return c||fb;
+    }} catch(e){{ return fb; }}
+  }}
+  var ACCENT=cssColor('--lane','#D4FF3A'), MEDAL=cssColor('--medal','#F4D58D');
+  function draw(cv){{
+    var s=DATA[cv.getAttribute('data-spark')];
+    if(!s||!s.t||s.t.length<2) return;
+    var dpr=window.devicePixelRatio||1;
+    var w=cv.clientWidth||104, h=cv.clientHeight||28, pad=3;
+    cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+    var ctx=cv.getContext('2d'); if(!ctx) return;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var t=s.t, n=t.length, mn=Math.min.apply(null,t), mx=Math.max.apply(null,t), span=(mx-mn)||1;
+    function X(i){{ return pad + (w-2*pad)*(n===1?0.5:i/(n-1)); }}
+    function Y(v){{ return pad + (h-2*pad)*((v-mn)/span); }}
+    ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.strokeStyle=ACCENT;
+    ctx.beginPath();
+    for(var i=0;i<n;i++){{ var px=X(i), py=Y(t[i]); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }}
+    ctx.stroke();
+    var ci=(s.cur>=0&&s.cur<n)?s.cur:n-1;
+    ctx.fillStyle=(s.kind==='pb'||s.kind==='matched')?MEDAL:ACCENT;
+    ctx.beginPath(); ctx.arc(X(ci),Y(t[ci]),2.4,0,6.2832); ctx.fill();
+  }}
+  function drawAll(){{ var c=document.querySelectorAll('canvas.mh-spark'); for(var i=0;i<c.length;i++) draw(c[i]); }}
+  drawAll();
+  var rt; window.addEventListener('resize', function(){{ clearTimeout(rt); rt=setTimeout(drawAll,150); }});
+}})();
+</script>
+"""
+        return _layout(f"Results — {meet.get('name') or run_id}", body, active="create")
 
     # ---- V5 API ROUTES -------------------------------------------------
     @app.route("/api/runs/<run_id>/recognition")
@@ -13268,6 +19503,402 @@ Relay team broke club record"></textarea>
         )
         return _layout("Research", body, active="research")
 
+    # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
+    @app.route("/developer/api")
+    def api_docs_page():
+        """Public Developer/API reference.
+
+        Documents the real HTTP + JSON endpoints the app exposes, each with a
+        tabbed cURL / Python / JavaScript code-example switcher. Highlighting is
+        rendered server-side by ``code_highlight.py`` (no Prism, no CDN); the
+        language tabs are pure CSS and the copy button is JS-enhanced (UI 1.11).
+        """
+        return _layout("Developer API", _render_api_docs_body(), active="")
+
+    def _render_api_docs_body() -> str:
+        # Concrete base URL for the examples (the deployment the docs render on).
+        base = (request.host_url or "").rstrip("/") or "https://your-mediahub.example"
+
+        def _sub(text: str) -> str:
+            return text.replace("__BASE__", base)
+
+        def _switcher(slug: str, curl: str, python: str, js: str) -> str:
+            return _code_hl.code_switcher(
+                [
+                    ("cURL", "bash", _sub(curl)),
+                    ("Python", "python", _sub(python)),
+                    ("JavaScript", "javascript", _sub(js)),
+                ],
+                group_id=f"ep-{slug}",
+            )
+
+        def _endpoint(
+            method: str,
+            path: str,
+            anchor: str,
+            summary_html: str,
+            *,
+            params=None,
+            curl: str,
+            python: str,
+            js: str,
+            response: str = "",
+            note_html: str = "",
+        ) -> str:
+            sig = (
+                '<div class="mh-api-sig">'
+                f'<span class="mh-method mh-method-{method.lower()}">{_h(method)}</span>'
+                f"<code>{_h(path)}</code></div>"
+            )
+            params_html = ""
+            if params:
+                rows = "".join(
+                    f"<tr><td><code>{_h(name)}</code></td><td>{_h(req)}</td><td>{desc}</td></tr>"
+                    for name, req, desc in params
+                )
+                params_html = (
+                    '<table class="mh-api-params"><thead><tr>'
+                    "<th>Parameter</th><th>Required</th><th>Description</th>"
+                    f"</tr></thead><tbody>{rows}</tbody></table>"
+                )
+            resp_html = (
+                _code_hl.code_block(_sub(response), "json", label="Response") if response else ""
+            )
+            return (
+                f'<section class="card mh-api-endpoint" id="{_h(anchor)}">'
+                f"{sig}"
+                f'<p class="dim">{summary_html}</p>'
+                f"{params_html}"
+                f"{_switcher(anchor, curl, python, js)}"
+                f"{resp_html}"
+                f"{note_html}"
+                "</section>"
+            )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Developer</span>'
+            '<h1>API <em class="editorial">reference</em></h1>'
+            '<p class="lede">Drive MediaHub from your own scripts: poll a run, pull the '
+            "generated cards, export a content pack, or render a reel &mdash; over plain "
+            "HTTP and JSON.</p>"
+            "</section>"
+        )
+
+        intro = (
+            '<section class="card">'
+            "<h2>Overview</h2>"
+            "<p>MediaHub exposes a small HTTP&nbsp;+&nbsp;JSON API &mdash; the same endpoints "
+            "the web app uses to take a run from upload to export. Call them to poll a "
+            "pipeline, pull generated cards, export a content pack, or render a reel.</p>"
+            '<ul class="mh-api-facts">'
+            f"<li><strong>Base URL</strong> &mdash; <code>{_h(base)}</code></li>"
+            "<li><strong>Responses</strong> &mdash; JSON (<code>application/json</code>), except "
+            "media routes, which stream the file (e.g. <code>video/mp4</code>).</li>"
+            "<li><strong>Errors</strong> &mdash; a JSON body with an <code>error</code> key and a "
+            "matching HTTP status (<code>404</code> unknown/forbidden run, <code>202</code> still "
+            "processing).</li>"
+            "</ul>"
+            "</section>"
+        )
+
+        auth = (
+            '<section class="card">'
+            "<h2>Authentication</h2>"
+            "<p>Most endpoints are scoped to your signed-in organisation and authenticate with "
+            "the <strong>session cookie</strong> the app sets when you log in &mdash; send it with "
+            'each request (<code>credentials: "include"</code> in the browser, or a '
+            "<code>Cookie:</code> header from a script). A request for a run that is not yours "
+            "returns <code>404</code> &mdash; never another organisation's data.</p>"
+            "<p><code>/health</code> is the one public endpoint; it needs no session. There is no "
+            "public API-key programme yet &mdash; if you need machine-to-machine access, get in "
+            "touch.</p>"
+            "</section>"
+        )
+
+        quickstart = (
+            '<section class="card" id="quickstart">'
+            "<h2>Quickstart</h2>"
+            '<p class="dim">Poll a run until the recognition&nbsp;+&nbsp;content pipeline '
+            "finishes, then pull the cards it produced.</p>"
+            + _switcher(
+                "quickstart",
+                "# 1. Poll the run until the pipeline finishes…\n"
+                'RUN_ID="run_8f2c1a"\n'
+                'curl -s "__BASE__/api/runs/$RUN_ID/status"\n\n'
+                "# 2. …then pull the generated content cards.\n"
+                'curl -s "__BASE__/api/runs/$RUN_ID/cards"\n',
+                "import time\n"
+                "import requests\n\n"
+                'BASE = "__BASE__"\n'
+                'run_id = "run_8f2c1a"\n\n'
+                "# Poll until the recognition + content pipeline is done.\n"
+                "while True:\n"
+                '    status = requests.get(f"{BASE}/api/runs/{run_id}/status").json()\n'
+                '    if status["status"] in ("done", "error"):\n'
+                "        break\n"
+                "    time.sleep(4)\n\n"
+                'cards = requests.get(f"{BASE}/api/runs/{run_id}/cards").json()\n'
+                'print(f"{len(cards)} cards ready")\n',
+                'const BASE = "__BASE__";\n'
+                'const runId = "run_8f2c1a";\n\n'
+                "// Poll until the pipeline finishes, then fetch the cards.\n"
+                "let status;\n"
+                "do {\n"
+                "  const res = await fetch(`${BASE}/api/runs/${runId}/status`, {\n"
+                '    credentials: "include",\n'
+                "  });\n"
+                "  status = await res.json();\n"
+                '  if (status.status === "running") await new Promise((r) => setTimeout(r, 4000));\n'
+                '} while (status.status !== "done" && status.status !== "error");\n\n'
+                "const cards = await fetch(`${BASE}/api/runs/${runId}/cards`, {\n"
+                '  credentials: "include",\n'
+                "}).then((r) => r.json());\n"
+                "console.log(`${cards.length} cards ready`);\n",
+            )
+            + "</section>"
+        )
+
+        endpoints = [
+            _endpoint(
+                "GET",
+                "/health",
+                "health",
+                "Deployment health and dependency checks. Public &mdash; no session "
+                "required. Returns <code>200</code> when healthy, <code>503</code> when a "
+                "dependency is down.",
+                curl='curl -s "__BASE__/health"\n',
+                python=(
+                    "import requests\n\n"
+                    'health = requests.get("__BASE__/health")\n'
+                    'print(health.status_code, health.json()["ok"])\n'
+                ),
+                js=(
+                    'const res = await fetch("__BASE__/health");\n'
+                    "const health = await res.json();\n"
+                    "console.log(res.status, health.ok);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "ok": true,\n'
+                    '  "checks": {\n'
+                    '    "database": {"ok": true},\n'
+                    '    "data_dir": {"ok": true},\n'
+                    '    "llm_provider": {"ok": true}\n'
+                    "  }\n"
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/status",
+                "run-status",
+                "Poll a run's pipeline status. <code>status</code> is one of "
+                "<code>queued</code>, <code>running</code>, <code>done</code>, "
+                "<code>error</code> or <code>unknown</code>; <code>log</code> streams the "
+                "human-readable progress lines.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/status"\n',
+                python=(
+                    "import requests\n\n"
+                    'status = requests.get("__BASE__/api/runs/run_8f2c1a/status").json()\n'
+                    'print(status["status"], status.get("n_achievements"))\n'
+                ),
+                js=(
+                    'const status = await fetch("__BASE__/api/runs/run_8f2c1a/status", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(status.status, status.n_achievements);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "status": "done",\n'
+                    '  "error": null,\n'
+                    '  "log": [\n'
+                    '    "Parsing results file…",\n'
+                    '    "Detecting achievements…",\n'
+                    '    "Ranking content opportunities…"\n'
+                    "  ],\n"
+                    '  "n_achievements": 12\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/cards",
+                "run-cards",
+                "The generated content cards, ranked by content-worthiness. While the run is "
+                "still processing this returns <code>202</code> with "
+                '<code>{"error": "in_progress", "retry_after": 4}</code> &mdash; retry after '
+                "the given delay.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/cards"\n',
+                python=(
+                    "import requests\n\n"
+                    'cards = requests.get("__BASE__/api/runs/run_8f2c1a/cards").json()\n'
+                    "for card in cards:\n"
+                    '    print(card["post_angle"], round(card["confidence"], 2))\n'
+                ),
+                js=(
+                    'const cards = await fetch("__BASE__/api/runs/run_8f2c1a/cards", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "cards.forEach((c) => console.log(c.post_angle, c.confidence));\n"
+                ),
+                response=(
+                    "[\n"
+                    "  {\n"
+                    '    "id": "ind_0",\n'
+                    '    "post_angle": "personal_best",\n'
+                    '    "confidence": 0.92,\n'
+                    '    "caption": "A new PB for Ava in the 100m Freestyle.",\n'
+                    '    "graphic_text": {\n'
+                    '      "headline_line1": "AVA CARTER",\n'
+                    '      "headline_line2": "100M FREE PB"\n'
+                    "    }\n"
+                    "  }\n"
+                    "]\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/export",
+                "run-export",
+                "The full run document &mdash; parsed results, recognition decisions, ranked "
+                "cards, and the trust report &mdash; as one JSON object. Use it to archive a "
+                "pack or feed a downstream system.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/export" -o pack.json\n',
+                python=(
+                    "import requests\n\n"
+                    'pack = requests.get("__BASE__/api/runs/run_8f2c1a/export").json()\n'
+                    'print(pack["recognition_report"]["n_achievements"], len(pack["cards"]))\n'
+                ),
+                js=(
+                    'const pack = await fetch("__BASE__/api/runs/run_8f2c1a/export", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(pack.cards.length);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "recognition_report": {"n_achievements": 12},\n'
+                    '  "cards": [{"id": "ind_0", "post_angle": "personal_best", "confidence": 0.92}],\n'
+                    '  "trust": {"grounded": true}\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "POST",
+                "/api/runs/{run_id}/reel",
+                "run-reel",
+                "Render the meet reel from the top-ranked cards and stream it back as an MP4 "
+                "(<code>Content-Type: video/mp4</code>). Cache hits return in under 30s; cold "
+                "renders take 30&ndash;90s on the worker.",
+                params=[
+                    (
+                        "format",
+                        "no",
+                        "<code>story</code> (default), <code>portrait</code>, "
+                        "<code>square</code> or <code>landscape</code>.",
+                    ),
+                    (
+                        "n",
+                        "no",
+                        "How many top cards to include &mdash; 1&ndash;5 (default 3).",
+                    ),
+                    (
+                        "cover / outro",
+                        "no",
+                        "Custom cover / outro scene length in seconds (clamped to a "
+                        "readable, render-safe range). Default 2.0 / 1.0.",
+                    ),
+                    (
+                        "weights",
+                        "no",
+                        "Comma-separated per-card beat weights (e.g. "
+                        "<code>2,1,1</code>) &mdash; a weighted card breathes "
+                        "proportionally longer and lengthens the reel honestly. "
+                        "Default: the top card breathes ~25% longer.",
+                    ),
+                ],
+                curl=(
+                    'curl -X POST "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3" \\\n'
+                    "  -o reel.mp4\n"
+                ),
+                python=(
+                    "import requests\n\n"
+                    "reel = requests.post(\n"
+                    '    "__BASE__/api/runs/run_8f2c1a/reel",\n'
+                    '    params={"format": "story", "n": 3},\n'
+                    ")\n"
+                    'with open("reel.mp4", "wb") as fh:\n'
+                    "    fh.write(reel.content)\n"
+                ),
+                js=(
+                    "const res = await fetch(\n"
+                    '  "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3",\n'
+                    '  { method: "POST", credentials: "include" },\n'
+                    ");\n"
+                    "const blob = await res.blob(); // video/mp4\n"
+                ),
+                note_html=(
+                    '<p class="dim" style="margin-top:var(--sp-3)">The matching '
+                    "<code>POST /api/runs/{run_id}/card/{card_id}/motion</code> route renders a "
+                    "single story card with the same <code>format</code> options.</p>"
+                ),
+            ),
+            _endpoint(
+                "POST",
+                "/api/runs/{run_id}/reel-batch",
+                "run-reel-batch",
+                "Render <em>every</em> reel format in one pass &mdash; story, portrait, square "
+                "and landscape &mdash; from a single shaping of the cards, reusing any cut already "
+                "cached. Always asynchronous (four cold renders run several minutes): returns "
+                "<code>202</code> with a <code>job_id</code> and <code>poll_url</code>. Poll that "
+                "URL until <code>status</code> is <code>done</code>; the payload then carries "
+                "<code>video_urls</code> (a map of format &rarr; <code>reel-file</code> URL) and "
+                "<code>formats_failed</code> (the honest reason for any cut the active engine "
+                "could not produce). Stream each cut from its <code>video_urls</code> entry.",
+                params=[
+                    (
+                        "n",
+                        "no",
+                        "How many top cards to include &mdash; 1&ndash;5 (default 3).",
+                    ),
+                ],
+                curl='curl -X POST "__BASE__/api/runs/run_8f2c1a/reel-batch?n=3"\n',
+                python=(
+                    "import requests, time\n\n"
+                    "job = requests.post(\n"
+                    '    "__BASE__/api/runs/run_8f2c1a/reel-batch", params={"n": 3}\n'
+                    ").json()\n"
+                    'poll = "__BASE__" + job["poll_url"]\n'
+                    "while requests.get(poll).json()['status'] == 'running':\n"
+                    "    time.sleep(3)\n"
+                    'urls = requests.get(poll).json().get("video_urls", {})\n'
+                    "for fmt, url in urls.items():\n"
+                    '    print(fmt, "__BASE__" + url)\n'
+                ),
+                js=(
+                    "const job = await fetch(\n"
+                    '  "__BASE__/api/runs/run_8f2c1a/reel-batch?n=3",\n'
+                    '  { method: "POST", credentials: "include" },\n'
+                    ").then((r) => r.json());\n"
+                    "// poll job.poll_url until status === 'done', then read video_urls\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "ok": true,\n'
+                    '  "job_id": "9f2c1a…",\n'
+                    '  "poll_url": "/api/reel-jobs/9f2c1a…"\n'
+                    "}\n"
+                ),
+            ),
+        ]
+
+        endpoints_html = '<h2 style="margin-top:var(--sp-7)">Endpoints</h2>' + "".join(endpoints)
+
+        return hero + intro + auth + quickstart + endpoints_html
+
     # ---- PRIVACY -------------------------------------------------------
     @app.route("/privacy")
     def privacy_page():
@@ -13359,7 +19990,7 @@ Relay team broke club record"></textarea>
       <input type="text" name="run_id" required /></label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
       <input type="text" name="card_id" required /></label>
-    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:220px">What's wrong?
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:min(220px,100%)">What's wrong?
       <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
     <button class="btn secondary" type="submit">Open correction</button>
   </form>
@@ -13470,7 +20101,18 @@ Relay team broke club record"></textarea>
                 active="privacy",
             ), 404
         _delete_run(run_id)
-        return redirect(url_for("home"))
+        # Stay where the delete was triggered. The settings activity table
+        # posts via fetch() and just drops the row in place (the "delete there
+        # and then, stay on the page" ask); a plain form post returns to the
+        # page named in ``next`` (same-site validated), falling back to the
+        # settings page rather than bouncing the user home.
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": True, "deleted": run_id})
+        # Plain form post (e.g. the review-page danger zone) redirects away with
+        # no other signal — a one-shot toast confirms the delete landed (U.2).
+        _flash_toast("Run deleted.")
+        nxt = _safe_next(request.form.get("next") or request.args.get("next"))
+        return redirect(nxt or url_for("settings_page"))
 
     @app.route("/privacy/cache/clear", methods=["POST"])
     def privacy_cache_clear():
@@ -13481,7 +20123,10 @@ Relay team broke club record"></textarea>
                         f.unlink()
                     except Exception:
                         pass
-        return redirect(url_for("privacy_page"))
+        # Return to wherever the clear was triggered (Settings → Privacy or the
+        # standalone /privacy page), not unconditionally to /privacy.
+        nxt = _safe_next(request.form.get("next"))
+        return redirect(nxt or url_for("privacy_page"))
 
     # ---- DATA-PROTECTION COMPLAINTS (s.164A DPA 2018) -------------------
     # From 19 June 2026 controllers must facilitate data-protection
@@ -13721,7 +20366,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Consent",
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
-                active="organisation",
+                active="settings",
             ), 404
         from mediahub.compliance.consent import ConsentRegistry
 
@@ -13848,7 +20493,7 @@ Relay team broke club record"></textarea>
   <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
 </div>
 """
-        return _layout("Consent & lawful basis", body, active="organisation")
+        return _layout("Consent & lawful basis", body, active="settings")
 
     @app.route("/organisation/consent/settings", methods=["POST"])
     def org_consent_settings():
@@ -13917,7 +20562,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Consent",
                 '<div class="card"><p class="tag bad">Athlete name and a valid decision are required.</p></div>',
-                active="organisation",
+                active="settings",
             ), 400
         recorded_by = ""
         try:
@@ -13947,7 +20592,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Athlete rights",
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
-                active="organisation",
+                active="settings",
             ), 404
         from mediahub.compliance.dsr import DsrRequestLog
 
@@ -14030,7 +20675,7 @@ Relay team broke club record"></textarea>
 <div class="card"><h2>Requests</h2>{table}
 <p class="muted">"Run export" downloads a machine-readable JSON of everything held about the athlete. "Run erasure" removes them from runs, rendered cards, caches, the media library and caption memory, keeps a suppression record so they can't reappear, and reports anything it could not reach — honestly.</p></div>
 """
-        return _layout("Athlete rights", body, active="organisation")
+        return _layout("Athlete rights", body, active="settings")
 
     @app.route("/organisation/athlete-rights/open", methods=["POST"])
     def org_dsr_open():
@@ -14045,7 +20690,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Athlete rights",
                 '<div class="card"><p class="tag bad">Athlete name and a valid request type are required.</p></div>',
-                active="organisation",
+                active="settings",
             ), 400
         DsrRequestLog().open(
             profile_id=pid,
@@ -14092,7 +20737,7 @@ Relay team broke club record"></textarea>
                 + _h(json.dumps(report, indent=2))
                 + f'</pre><p><a href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p></div>'
             )
-            return _layout("Erasure report", body, active="organisation")
+            return _layout("Erasure report", body, active="settings")
         if req.request_type == "restriction":
             ConsentRegistry(pid).set_restricted(req.athlete_name, True, recorded_by=recorded_by)
             log_store.complete(request_id, note="restriction applied")
@@ -14380,25 +21025,6 @@ Relay team broke club record"></textarea>
         except Exception:
             pass
 
-    def _wants_html_health() -> bool:
-        """True when the request is a genuine browser navigation that should
-        receive the HTML health page (axe-core document-title, WCAG 2.4.2).
-
-        Compares Accept qualities instead of ``best_match``: fetch()/curl/
-        python-requests send ``Accept: */*``, which matches both candidates
-        at equal quality — ``best_match`` then breaks the tie by list order
-        and misclassifies those API callers as browsers (the nav badge
-        choked on the HTML and painted "offline"). A real navigation ranks
-        text/html (q=1) strictly above ``*/*;q=0.8`` so it still gets HTML;
-        clients with no Accept header score 0 = 0 and stay on JSON.
-        ``Sec-Fetch-Dest: document`` covers proxies that strip Accept.
-        """
-        accept = request.accept_mimetypes
-        return (
-            accept["text/html"] > accept["application/json"]
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-
     @app.route("/health")
     def health():
         import time as _time
@@ -14415,32 +21041,8 @@ Relay team broke club record"></textarea>
                     break
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         status_code = 200 if payload["ok"] else 503
-        # Return HTML (with a valid <title>) when a browser navigates to the
-        # page so that axe-core's document-title rule is satisfied; API and
-        # monitoring clients (Accept: application/json, */*, or no Accept)
-        # get plain JSON — see _wants_html_health.
-        if _wants_html_health():
-            status_label = _h("OK" if payload["ok"] else "Degraded")
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                f"<title>MediaHub Health — {status_label}</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html,
-                status=status_code,
-                mimetype="text/html",
-                headers={"Vary": "Accept, Sec-Fetch-Dest"},
-            )
         resp = jsonify(payload)
         resp.status_code = status_code
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
         return resp
 
     _FAVICON_SVG = (
@@ -14550,24 +21152,6 @@ Relay team broke club record"></textarea>
 
     @app.route("/static/theme/fonts.css")
     def static_fonts_css():
-        # Browser navigations (direct URL, axe-core page.goto) get a minimal
-        # HTML document with a valid <title> so axe-core's document-title rule
-        # (WCAG 2.4.2) is satisfied.  Stylesheet loads (Sec-Fetch-Dest: style
-        # or Accept: text/css) receive the real CSS file.
-        if _wants_html_health():
-            return Response(
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub — Fonts</title>"
-                "</head>"
-                "<body></body>"
-                "</html>",
-                status=200,
-                mimetype="text/html",
-                headers={"Vary": "Accept, Sec-Fetch-Dest"},
-            )
         return app.send_static_file("theme/fonts.css")
 
     @app.route("/healthz")
@@ -14580,50 +21164,12 @@ Relay team broke club record"></textarea>
         started = _time.monotonic()
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
-        # Return HTML (with a valid <title>) for browser navigations so that
-        # axe-core's document-title rule (WCAG 2.4.2) is satisfied. API and
-        # monitoring callers — including the nav badge's fetch(), curl, and
-        # Render's liveness probe — stay on JSON; see _wants_html_health.
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — OK</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/ping")
     def healthz_ping():
         payload = {"pong": True}
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Ping</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/memory")
     def healthz_memory():
@@ -14658,24 +21204,7 @@ Relay team broke club record"></textarea>
             "turn_into_jobs_limit": _TURN_INTO_LIMIT,
             "ts": datetime.now(timezone.utc).isoformat(),
         }
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Memory</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/deps")
     def healthz_deps():
@@ -14765,30 +21294,6 @@ Relay team broke club record"></textarea>
             deps["tts_provider"] = tts_provider_status()
         except Exception as _tts_err:
             deps["tts_provider"] = {"error": str(_tts_err)[:200]}
-        try:
-            from mediahub.publishing.kill_switch import kill_switch_status
-
-            deps["publish_kill_switch"] = kill_switch_status()
-        except Exception as _ks_err:
-            deps["publish_kill_switch"] = {"error": str(_ks_err)[:200]}
-        # Per-type autonomy summary — additive, never affects the ok flag.
-        try:
-            from mediahub.publishing.per_type_policy import policy_summary as _pt_summary
-
-            _active_pid = _active_profile_id()
-            if _active_pid:
-                deps["per_type_autonomy"] = _pt_summary(_active_pid)
-            else:
-                deps["per_type_autonomy"] = {"note": "no active org"}
-        except Exception as _pt_err:
-            deps["per_type_autonomy"] = {"error": str(_pt_err)[:200]}
-        # P2.3 publish-gate summary (thresholds + caps + switch) — additive.
-        try:
-            from mediahub.publishing.publish_gate import publish_gate_status as _pg_status
-
-            deps["publish_gate"] = _pg_status(_active_profile_id() or "")
-        except Exception as _pg_err:
-            deps["publish_gate"] = {"error": str(_pg_err)[:200]}
         # Motion is healthy when the *active* reel engine can render:
         # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
         # makes both optional.
@@ -14798,24 +21303,7 @@ Relay team broke club record"></textarea>
             _motion_ok = bool(_re_status.get("ffmpeg_available"))
         ok = deps["playwright"].get("chromium") and _motion_ok
         payload = {"ok": bool(ok), "deps": deps}
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Deps</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     # ---- /status -------------------------------------------------------
     #
@@ -14885,6 +21373,21 @@ Relay team broke club record"></textarea>
 
     @app.route("/status")
     def status_page():
+        # Public view: just "Website operational" / "Website down". The detailed
+        # uptime/incident/version breakdown is operator-only (also reachable at
+        # Settings → Developer for a signed-in operator).
+        if not _auth.is_dev_operator():
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
+                '<span class="mh-hero-eyebrow">Status</span>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
+                + _render_settings_status_public_section()
+            )
+            resp = make_response(_layout("Status", body, active="status"))
+            resp.headers["Refresh"] = "60"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+
         from mediahub.observability import uptime as _uptime
 
         # Pull three windows so the page reads "24h / 7d / 30d uptime"
@@ -15043,6 +21546,74 @@ Relay team broke club record"></textarea>
             }
         )
 
+    # ---- Notifications inbox (UI 1.14) ---------------------------------
+    #
+    # The bell-icon dropdown in the app chrome: render-complete, pack-ready,
+    # and error events for the active organisation, backed by the notify-layer
+    # inbox store (mediahub.notify.inbox). Polled by the header on a light
+    # cadence; org-scoped via _active_profile_id() so one club never sees
+    # another's events. Deep links are built here (in request context) with
+    # url_for, not persisted, so they always match the live routing.
+    def _notification_link(item: dict) -> str:
+        explicit = (item.get("click_url") or "").strip()
+        if explicit:
+            return explicit
+        rid = (item.get("run_id") or "").strip()
+        if not rid:
+            return ""
+        # A finished render lives on the content-pack page; everything else
+        # (pack-ready / error) points at the review page for that run.
+        endpoint = "content_pack" if item.get("kind") == "render_complete" else "review"
+        try:
+            return url_for(endpoint, run_id=rid)
+        except Exception:
+            return ""
+
+    @app.route("/api/notifications", methods=["GET"])
+    def api_notifications():
+        """List the active org's notifications plus its unread count.
+
+        Signed-out (no active org) returns an empty, zero-unread payload so the
+        header poll is harmless on public pages rather than a 403 the client
+        has to special-case.
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "unread": 0, "items": []})
+        unread_only = (request.args.get("unread") or "").strip().lower() in ("1", "true", "yes")
+        try:
+            limit = int(request.args.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        from mediahub.notify import inbox as _inbox
+
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        for it in items:
+            it["link"] = _notification_link(it)
+        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+
+    @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
+    def api_notifications_read(notif_id: str):
+        """Mark one notification read for the active org (tenant-scoped)."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        changed = _inbox.mark_read(pid, notif_id)
+        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+
+    @app.route("/api/notifications/read-all", methods=["POST"])
+    def api_notifications_read_all():
+        """Mark every unread notification read for the active org."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        n = _inbox.mark_all_read(pid)
+        return jsonify({"ok": True, "marked": n, "unread": 0})
+
     # ---- /healthz/usage ------------------------------------------------
     #
     # Operator-facing LLM usage dashboard. Lives under /healthz/* (same
@@ -15100,24 +21671,7 @@ Relay team broke club record"></textarea>
                 "'open': false means a few errors but no trip yet."
             ),
         }
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Breaker</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/search")
     def healthz_search():
@@ -15242,37 +21796,6 @@ Relay team broke club record"></textarea>
         else:
             err_html = ""
 
-        # 7-day posting log roll-up.
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            # We don't have a profile-scoped count here because /healthz/usage
-            # is operator-facing across all tenants on this instance. For a
-            # single-org deploy that's the right answer. For a future
-            # multi-tenant deploy, expand into per-tenant rows.
-            conn = sqlite3.connect(str(_plog.DB_PATH))
-            cur = conn.execute(
-                "SELECT status, COUNT(*) AS n FROM posting_attempts "
-                "WHERE attempted_at >= datetime('now', '-7 days') "
-                "GROUP BY status"
-            )
-            counts = {r[0]: int(r[1]) for r in cur.fetchall()}
-            conn.close()
-        except Exception:
-            counts = {}
-        post_ok = int(counts.get("ok", 0))
-        post_fail = int(counts.get("failed", 0))
-        post_total = post_ok + post_fail
-        post_html = (
-            '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
-            f'<div style="font-weight:600;margin-bottom:6px">'
-            f"Publishing (7d) &mdash; {post_total} attempts</div>"
-            f'<div style="display:flex;gap:18px;font-size:13px">'
-            f'<span><span class="tag good" style="font-size:11px">{post_ok} ok</span></span>'
-            f'<span><span class="tag bad" style="font-size:11px">{post_fail} failed</span></span>'
-            "</div></div>"
-        )
-
         # 30-day daily breakdown.
         if thirty_d:
             day_rows = ""
@@ -15305,11 +21828,10 @@ Relay team broke club record"></textarea>
         body = (
             '<h1 style="margin-bottom:6px">Usage</h1>'
             '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
-            "LLM call counts, free-tier headroom, recent provider errors, "
-            "and publishing roll-up for this MediaHub deployment.</p>"
+            "LLM call counts, free-tier headroom, and recent provider errors "
+            "for this MediaHub deployment.</p>"
             f"{err_html}"
             f"{headroom_html}"
-            f"{post_html}"
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
             "Today (last 24h)</h2>"
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
@@ -15353,83 +21875,203 @@ Relay team broke club record"></textarea>
     def settings_page():
         return _render_settings_page()
 
-    def _render_settings_page() -> str:
-        """Render the consolidated Settings page.
+    # Settings is a card grid like Create: each heading is a tile you click
+    # into for the detail. The detail pages are served by ``settings_section``
+    # below (plus a few that link straight to an existing full page). This
+    # keeps every heading short and scannable instead of one long scroll.
+    _SETTINGS_ICONS = {
+        "org": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>',
+        "members": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+        "activity": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        "schedule": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
+        "autonomy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></svg>',
+        "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
+        "privacy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+        "billing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
+        "pricing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
+        "sponsors": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.7 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
+        "account": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
+        "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+        "dev": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+    }
 
-        Each section renders independently so a failure inside one
-        (e.g. a missing observability table) doesn't break the rest.
+    def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
+        """(title, description, icon_key, href) for the settings tiles.
+
+        11 cards for everyone, a 12th (Developer) only when an operator is
+        signed in — matching the "11 headings, 12 for a developer" spec. A
+        "Pricing & plans" tile is added when signed into a club profile,
+        because Pricing leaves the top bar for signed-in users and lives
+        here instead (grouped with Billing & plan).
         """
-        prof = _active_profile()
+        cards: list[tuple[str, str, str, str]] = [
+            (
+                "Organisation & brand",
+                "Logos, palette, tone and the brand the engine applies to every card.",
+                "org",
+                url_for("organisation_setup"),
+            ),
+            (
+                "Team members",
+                "Invite teammates and manage who can see and approve content.",
+                "members",
+                url_for("organisation_members_page"),
+            ),
+            (
+                "Activity",
+                "Every run for this organisation — status, matches, and one-click delete.",
+                "activity",
+                url_for("settings_section", section="activity"),
+            ),
+            (
+                "Auto scheduling",
+                "Queueing approved cards straight onto your social channels — coming soon.",
+                "schedule",
+                url_for("settings_section", section="scheduling"),
+            ),
+            (
+                "Autonomy",
+                "Per-content-type publishing levels — what may post without a human — coming soon.",
+                "autonomy",
+                url_for("settings_section", section="autonomy"),
+            ),
+            (
+                "Club data",
+                "Club records and asking questions of your own processed results.",
+                "clubdata",
+                url_for("settings_section", section="clubdata"),
+            ),
+            (
+                "Privacy & data",
+                "What this system stores, athletes & consent, cache clearing, and run deletion.",
+                "privacy",
+                url_for("settings_section", section="privacy"),
+            ),
+            (
+                "Billing & plan",
+                "Your plan, invoices and upgrades.",
+                "billing",
+                url_for("billing_page"),
+            ),
+        ]
+        # Pricing leaves the top bar once signed into a club profile — surface
+        # it here, right after Billing & plan, so signed-in users keep a
+        # one-click route to compare plans. Signed-out visitors use the top nav.
+        if signed_in:
+            cards.append(
+                (
+                    "Pricing & plans",
+                    "Compare plans and what each tier unlocks.",
+                    "pricing",
+                    url_for("pricing_page"),
+                )
+            )
+        cards += [
+            (
+                "Sponsors",
+                "Manage sponsors and the sponsor-safe content they appear in.",
+                "sponsors",
+                url_for("sponsors_page"),
+            ),
+            (
+                "Account",
+                "Two-factor security, data export, and account deletion.",
+                "account",
+                url_for("settings_section", section="account"),
+            ),
+            (
+                "System status",
+                "Whether the site is operational right now.",
+                "status",
+                url_for("settings_section", section="status"),
+            ),
+        ]
+        if is_dev:
+            cards.append(
+                (
+                    "Developer",
+                    "Deployment health, operator dashboards, and uptime detail.",
+                    "dev",
+                    url_for("settings_section", section="developer"),
+                )
+            )
+        return cards
 
-        # ---- Hero + sticky section nav --------------------------------
-        toc_html = (
-            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">'
+    def _render_settings_page() -> str:
+        """Render the Settings landing — a grid of heading cards."""
+        is_dev = _auth.is_dev_operator()
+        signed_in = bool(_active_profile_id())
+        tiles = ""
+        for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
+            icon = _SETTINGS_ICONS.get(icon_key, "")
+            tiles += (
+                f'<a href="{href}" class="mh-template mh-glow-border">'
+                f'<div class="mh-template-icon">{icon}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(title)}</h3>'
+                "</div>"
+                f"<p>{_h(desc)}</p>"
+                '<span class="mh-template-cta">Open</span>'
+                "</a>"
+            )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
             '<h1>Operations &amp; <em class="editorial">data</em></h1>'
-            '<p class="lede">Activity, deployment health, the data this system keeps, '
-            "and how to delete it &mdash; all in one place.</p>"
+            '<p class="lede">Pick a heading to manage it. Each card opens its own '
+            "page so nothing is buried in one long scroll.</p>"
             "</section>"
-            '<nav class="mh-tabnav" id="mh-settings-tabs" aria-label="Settings sections">'
-            '<a href="#activity" class="is-active">Activity</a>'
-            '<a href="#status">Status</a>'
-            '<a href="#autonomy">Autonomy</a>'
-            '<a href="#privacy">Privacy &amp; data</a>'
-            '<a href="#deployment">Deployment</a>'
-            "</nav>"
-        )
-
-        activity_html = _render_settings_activity_section(prof)
-        status_html = _render_settings_status_section()
-        autonomy_html = _render_settings_autonomy_section(prof)
-        privacy_html = _render_settings_privacy_section()
-        deployment_html = _render_settings_deployment_section()
-
-        # Scroll-spy: highlight the tab whose section is in view.
-        spy_js = """
-<script>
-(function(){
-  var nav = document.getElementById('mh-settings-tabs');
-  if (!nav) return;
-  var links = Array.prototype.slice.call(nav.querySelectorAll('a'));
-  var targets = links.map(function(a){
-    var id = a.getAttribute('href').slice(1);
-    return document.getElementById(id);
-  });
-  if (!('IntersectionObserver' in window)) return;
-  var io = new IntersectionObserver(function(entries){
-    entries.forEach(function(en){
-      if (!en.isIntersecting) return;
-      var idx = targets.indexOf(en.target);
-      if (idx < 0) return;
-      links.forEach(function(l){ l.classList.remove('is-active'); });
-      links[idx].classList.add('is-active');
-    });
-  }, {rootMargin: '-30% 0px -60% 0px', threshold: 0});
-  targets.forEach(function(t){ if (t) io.observe(t); });
-})();
-</script>"""
-
-        body = (
-            toc_html
-            + activity_html
-            + status_html
-            + autonomy_html
-            + privacy_html
-            + deployment_html
-            + spy_js
+            f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
         )
         return _layout("Settings", body, active="settings")
+
+    # Detail pages behind the settings cards. ``developer`` is operator-only;
+    # everything else is org-scoped and degrades gracefully with no org.
+    @app.route("/settings/<section>")
+    def settings_section(section):
+        renderers = {
+            "activity": ("Activity", lambda prof: _render_settings_activity_section(prof)),
+            "scheduling": (
+                "Auto scheduling",
+                lambda prof: _render_settings_scheduling_section(prof),
+            ),
+            "autonomy": ("Autonomy", lambda prof: _render_settings_autonomy_section(prof)),
+            "clubdata": ("Club data", lambda prof: _render_settings_clubdata_section()),
+            "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
+            "account": ("Account", lambda prof: _render_settings_account_section()),
+            "status": ("System status", lambda prof: _render_settings_status_public_section()),
+            "developer": ("Developer", lambda prof: _render_settings_developer_section()),
+        }
+        entry = renderers.get(section)
+        if entry is None:
+            return redirect(url_for("settings_page"))
+        if section == "developer" and not _auth.is_dev_operator():
+            return redirect(url_for("settings_page"))
+        title, render = entry
+        prof = _active_profile()
+        back = (
+            f'<a href="{url_for("settings_page")}" '
+            'style="display:inline-flex;align-items:center;gap:6px;font-size:13px;'
+            'color:var(--ink-muted);text-decoration:none;margin-bottom:14px">'
+            "&larr; All settings</a>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-3);margin-bottom:var(--sp-2)">'
+            '<span class="mh-hero-eyebrow">Settings</span>'
+            f'<h1 style="margin-bottom:0">{_h(title)}</h1>'
+            "</section>" + back + render(prof)
+        )
+        return _layout(f"{title} · Settings", body, active="settings")
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
         """Activity section — recent runs for the pinned org.
 
         Mirrors the standalone /activity page but degrades gracefully
         when no profile is pinned (Settings is reachable pre-org-setup).
+        The settings sub-page supplies its own hero title, so this section
+        carries no big header of its own.
         """
-        section_header = (
-            '<h2 id="activity" style="margin:32px 0 6px;font-size:22px;'
-            'scroll-margin-top:80px">Activity</h2>'
-        )
+        section_header = ""
         if prof is None:
             return (
                 f"{section_header}"
@@ -15454,37 +22096,6 @@ Relay team broke club record"></textarea>
         except Exception:
             rows = []
 
-        try:
-            from mediahub.publishing import posting_log as _plog
-
-            recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
-        except Exception:
-            recent_attempts = []
-
-        summaries: dict[str, dict] = {}
-        try:
-            ws = _get_wf_store()
-        except Exception:
-            ws = None
-        if ws is not None:
-            for r in rows:
-                run_id = r["id"]
-                summary = {"scheduled": 0, "published": 0, "failed": 0}
-                try:
-                    states = ws.load(run_id) or {}
-                    for cs in states.values():
-                        s = getattr(cs, "schedule_status", None)
-                        val = s.value if hasattr(s, "value") else (s or "queued")
-                        if val == "scheduled":
-                            summary["scheduled"] += 1
-                        elif val == "published":
-                            summary["published"] += 1
-                        elif val == "failed":
-                            summary["failed"] += 1
-                except Exception:
-                    pass
-                summaries[run_id] = summary
-
         section_intro = (
             f'<p class="dim" style="margin-bottom:14px">Recent runs for '
             f"<b>{_h(prof.display_name)}</b>.</p>"
@@ -15499,27 +22110,6 @@ Relay team broke club record"></textarea>
                 "</div>"
             )
 
-        def _schedule_summary_html(rid: str) -> str:
-            s = summaries.get(rid) or {}
-            if not (s.get("scheduled") or s.get("published") or s.get("failed")):
-                return '<span class="muted" style="font-size:11px">&mdash;</span>'
-            parts = []
-            if s.get("scheduled"):
-                parts.append(
-                    f'<span class="tag info" style="font-size:11px">'
-                    f"{s['scheduled']} scheduled</span>"
-                )
-            if s.get("published"):
-                parts.append(
-                    f'<span class="tag good" style="font-size:11px">'
-                    f"{s['published']} published</span>"
-                )
-            if s.get("failed"):
-                parts.append(
-                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
-                )
-            return " ".join(parts)
-
         rows_html = ""
         n_errored = 0
         for r in rows:
@@ -15531,14 +22121,15 @@ Relay team broke club record"></textarea>
             started = (r["created_at"] or "")[:19]
             started_iso = started.replace(" ", "T") + "Z" if started else ""
             rows_html += (
-                f'<tr><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
                 f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                 f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                 f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
                 f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
-                f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
+                f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
+                f'style="display:inline" data-no-loader="1">'
+                f'<input type="hidden" name="next" value="{_h(request.path)}">'
                 f'<button class="btn danger" type="submit" '
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
                 f"</form></td></tr>"
@@ -15548,7 +22139,7 @@ Relay team broke club record"></textarea>
                 err_text = str(r["error"])
                 truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
                 rows_html += (
-                    '<tr class="run-error-row">'
+                    f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
                     '<td colspan="7" style="padding:6px 14px 14px 14px;'
                     'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                     "<details>"
@@ -15573,40 +22164,39 @@ Relay team broke club record"></textarea>
                 "see the pipeline error.</div>"
             )
 
-        posting_panel_html = ""
-        if recent_attempts:
-            attempts_rows = ""
-            for a in recent_attempts:
-                status = a.get("status") or ""
-                kind = a.get("error_kind") or ""
-                if status == "ok":
-                    badge_html = '<span class="tag good" style="font-size:11px">ok</span>'
-                else:
-                    label = kind or "failed"
-                    badge_html = f'<span class="tag bad" style="font-size:11px">{_h(label)}</span>'
-                excerpt = (a.get("caption_excerpt") or "")[:120]
-                when = (a.get("attempted_at") or "")[:19]
-                channel = a.get("channel_name") or a.get("channel_id") or "&mdash;"
-                err = a.get("error_message") or ""
-                attempts_rows += (
-                    f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
-                    f'<td style="font-size:12px">{_h(channel)}</td>'
-                    f"<td>{badge_html}</td>"
-                    f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
-                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
-                    f"</tr>"
-                )
-            posting_panel_html = (
-                '<h3 style="margin-top:24px;margin-bottom:6px;font-size:16px">'
-                "Recent posting activity</h3>"
-                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f"Last {len(recent_attempts)} Buffer attempts for this organisation.</p>"
-                '<div class="card"><table>'
-                "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
-                "<th>Caption excerpt</th><th>Error</th></tr></thead>"
-                f"<tbody>{attempts_rows}</tbody>"
-                "</table></div>"
-            )
+        # Delete in place: a run row's Delete posts via fetch() and is removed
+        # from the DOM on success, so the user "deletes there and then and stays
+        # on the page" instead of being bounced home. Bound once, delegated, so
+        # it covers every current and future row. No-JS falls back to the form's
+        # ``next`` (this page).
+        run_delete_js = """
+<script>
+(function(){
+  if (window.__mhRunDeleteBound) return; window.__mhRunDeleteBound = true;
+  function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : String(v).replace(/["\\\\]/g,'\\\\$&'); }
+  document.addEventListener('submit', function(e){
+    var form = e.target;
+    if (!form || !form.classList || !form.classList.contains('mh-run-delete')) return;
+    e.preventDefault();
+    if (!window.confirm('Delete this run? This cannot be undone.')) return;
+    var rid = form.getAttribute('data-run-id');
+    var btn = form.querySelector('button');
+    if (btn) btn.disabled = true;
+    fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){ return r.json().catch(function(){ return {}; }); })
+      .then(function(j){
+        if (j && j.ok) {
+          var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
+          var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
+          if (err && err.parentNode) err.parentNode.removeChild(err);
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+          if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
+        } else if (btn) { btn.disabled = false; }
+      })
+      .catch(function(){ if (btn) btn.disabled = false; });
+  }, false);
+})();
+</script>"""
 
         return (
             f"{section_header}"
@@ -15614,11 +22204,11 @@ Relay team broke club record"></textarea>
             f"{failure_callout}"
             '<div class="card"><table class="mh-table-stack">'
             "<thead><tr><th>Input</th><th>Status</th>"
-            "<th>Matched</th><th>Queue / Total</th><th>Schedule</th>"
+            "<th>Matched</th><th>Queue / Total</th>"
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
-            f"{posting_panel_html}"
+            f"{run_delete_js}"
         )
 
     def _render_settings_status_section() -> str:
@@ -15720,287 +22310,164 @@ Relay team broke club record"></textarea>
             f"{last_incident_html}</div>"
         )
 
-    def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
-        """Autonomy section — per-type publishing policy controls (P2.4)."""
-        section_header = (
-            '<h2 id="autonomy" style="margin:40px 0 6px;font-size:22px;'
-            'scroll-margin-top:80px">Autonomy controls</h2>'
-        )
-        if prof is None:
-            return (
-                f"{section_header}"
-                '<p class="dim" style="margin-bottom:14px">'
-                "Sign in to an organisation to manage its publishing autonomy controls.</p>"
-                '<div class="card empty">No organisation pinned.</div>'
-            )
-
-        try:
-            from mediahub.publishing.per_type_policy import load_policy as _load_policy
-            from mediahub.publishing.publish_gate import (
-                DEFAULT_CONFIDENCE_THRESHOLD as _DEF_THRESH,
-            )
-            from mediahub.publishing.publish_gate import load_thresholds as _load_thresholds
-            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
-
-            current_policy = _load_policy(prof.profile_id)
-            current_thresholds = _load_thresholds(prof.profile_id)
-        except Exception as _e:
-            return (
-                f"{section_header}"
-                f'<div class="card empty">Could not load autonomy policy: {_h(str(_e))}</div>'
-            )
-
-        save_url = url_for("api_autonomy_policy_save")
-
-        level_opts = [
-            ("approval_required", "Approval required", "A human must approve before publishing."),
-            (
-                "draft_only",
-                "Draft only",
-                "Generate drafts; never schedule or publish automatically.",
-            ),
-            (
-                "fully_autonomous",
-                "Fully autonomous",
-                "May publish without human approval when all guardrails pass.",
-            ),
-        ]
-
-        rows_html = ""
-        for ct_str, ct_meta in _CT_REGISTRY.items():
-            current_val = current_policy.get(ct_str.value, "approval_required")
-            select_opts = ""
-            for val, label, _ in level_opts:
-                sel = " selected" if current_val == val else ""
-                select_opts += f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
-            thresh_val = current_thresholds.get(ct_str.value, _DEF_THRESH)
-            rows_html += (
-                f"<tr>"
-                f'<td style="font-weight:500">{_h(ct_meta.title)}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted);max-width:220px">{_h(ct_meta.description)}</td>'
-                f"<td>"
-                f'<select name="{_h(ct_str.value)}" '
-                f'style="background:var(--bg);color:var(--ink);'
-                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px">'
-                f"{select_opts}"
-                f"</select>"
-                f"</td>"
-                f"<td>"
-                f'<input type="number" name="threshold_{_h(ct_str.value)}" '
-                f'value="{thresh_val:.2f}" min="0.5" max="1" step="0.05" '
-                f'title="Minimum recognition confidence for autonomous publishing of this type" '
-                f'style="width:74px;background:var(--bg);color:var(--ink);'
-                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px"/>'
-                f"</td>"
-                f"</tr>"
-            )
-
-        warning_html = (
-            '<div id="mh-autonomy-warn" style="display:none;margin-top:12px;padding:12px 18px;'
-            "background:rgba(255,170,58,0.10);border-left:3px solid var(--mh-prim-warning-500);"
-            'border-radius:0 6px 6px 0">'
-            "<b>Warning:</b> Setting any type to <em>Fully autonomous</em> allows MediaHub to "
-            "publish that content without a human approval step, subject to guardrails. "
-            "All other types remain gated. You can revert to <em>Approval required</em> at any time."
-            "</div>"
-        )
-
-        channels_val = _h(", ".join(getattr(prof, "autonomy_channel_ids", []) or []))
-        has_buffer = bool((getattr(prof, "buffer_access_token", "") or "").strip())
-        channels_note = (
-            "Buffer channel ids autonomous posts may go to (comma-separated — ids appear "
-            "in the schedule modal's channel list). Leave empty to let autonomy approve "
-            "gate-passing cards while a human still does all scheduling."
-            if has_buffer
-            else "Connect Buffer (inside any card's schedule modal) before choosing "
-            "autonomous channels — without it, autonomy can approve but never post."
-        )
-        channels_html = (
-            '<div class="card" style="margin-top:14px;padding:16px 18px">'
-            '<label for="mh-autonomy-channels" style="font-weight:600">Autonomous channels</label>'
-            f'<p class="dim" style="font-size:12px;margin:4px 0 8px 0">{channels_note}</p>'
-            f'<input id="mh-autonomy-channels" type="text" name="autonomy_channel_ids" '
-            f'value="{channels_val}" placeholder="e.g. 5f1a…, 5f1b…" '
-            f'style="width:100%;max-width:520px"{"" if has_buffer else " disabled"}/>'
-            "</div>"
-        )
-
-        form_html = (
-            f'<form id="mh-autonomy-form" method="post" action="{save_url}" '
-            f'data-no-loader="1">'
-            f'<div class="card" style="padding:0;overflow:hidden">'
-            f'<table class="mh-table-stack" style="width:100%">'
-            f"<thead><tr>"
-            f"<th>Content type</th><th>Description</th><th>Publishing level</th>"
-            f'<th title="Only used when the level is Fully autonomous">Auto-publish confidence ≥</th>'
-            f"</tr></thead>"
-            f"<tbody>{rows_html}</tbody>"
-            f"</table></div>"
-            f"{channels_html}"
-            f"{warning_html}"
-            f'<div style="margin-top:14px">'
-            f'<button type="submit" class="btn primary">Save autonomy settings</button>'
-            f'<span id="mh-autonomy-saved" style="margin-left:12px;font-size:13px;'
-            f'color:var(--mh-prim-success-400);display:none">Saved.</span>'
-            f"</div>"
-            f"</form>"
-        )
-
-        # JS: warn on fully_autonomous; AJAX save so the page doesn't reload
-        js_html = """
-<script>
-(function(){
-  var form = document.getElementById('mh-autonomy-form');
-  var warn = document.getElementById('mh-autonomy-warn');
-  var saved = document.getElementById('mh-autonomy-saved');
-  if (!form) return;
-  function checkWarn() {
-    var selects = form.querySelectorAll('select');
-    var hasAuto = false;
-    for (var i = 0; i < selects.length; i++) {
-      if (selects[i].value === 'fully_autonomous') { hasAuto = true; break; }
-    }
-    warn.style.display = hasAuto ? '' : 'none';
-  }
-  form.addEventListener('change', checkWarn);
-  checkWarn();
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    saved.style.display = 'none';
-    var data = new FormData(form);
-    fetch(form.action, {method: 'POST', body: data, headers: {'X-Requested-With': 'XMLHttpRequest'}})
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (j && j.ok) { saved.style.display = ''; setTimeout(function(){ saved.style.display='none'; }, 3000); }
-      })
-      .catch(function(){});
-  });
-})();
-window.mhBufferDisconnect = function(btn) {
-  if (!window.confirm('Disconnect Buffer for this organisation? Autonomous and one-click scheduling will stop until a new token is connected.')) return;
-  btn.disabled = true;
-  fetch('REPLACE_DISCONNECT_URL', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      if (j && j.ok) { window.location.reload(); }
-      else { btn.disabled = false; if (window.MH) MH.toast((j && j.error) || 'Could not disconnect Buffer.', 'error'); }
-    })
-    .catch(function(){ btn.disabled = false; if (window.MH) MH.toast('Could not disconnect Buffer.', 'error'); });
-};
-window.mhAutonomySweepNow = function(btn) {
-  var out = document.getElementById('mh-sweep-result');
-  btn.disabled = true; out.textContent = 'Checking recent runs against the publish gate…';
-  fetch('REPLACE_SWEEP_URL', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      btn.disabled = false;
-      if (j && j.ok) {
-        out.textContent = 'Swept ' + (j.swept_runs || 0) + ' recent run(s) · ' + (j.published || 0) + ' card(s) published. Details land in the activity log below after a refresh.';
-      } else { out.textContent = (j && j.error) || 'Sweep failed.'; }
-    })
-    .catch(function(){ btn.disabled = false; out.textContent = 'Sweep failed.'; });
-};
-</script>"""
-        js_html = js_html.replace(
-            "REPLACE_DISCONNECT_URL", url_for("api_disconnect_buffer")
-        ).replace("REPLACE_SWEEP_URL", url_for("api_autonomy_sweep"))
-
-        # Buffer connection + on-demand sweep + cadence state — the operational
-        # half of autonomy: the policy table above decides *if*, this shows
-        # *whether it can actually run* (token, cadence) and lets a human
-        # trigger one cycle now instead of waiting for the hourly task.
-        cadence_on = False
-        try:
-            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
-
-            cadence_on = any(
-                t.task_type == "approval_signal"
-                and (t.params or {}).get("org_id") == prof.profile_id
-                and t.enabled
-                for t in _sched_list_tasks2()
-            )
-        except Exception:
-            pass
-        buffer_status = (
-            '<span style="color:var(--mh-prim-success-400)">Buffer connected</span>'
-            '<button type="button" class="btn secondary" onclick="mhBufferDisconnect(this)" '
-            'style="font-size:11px;padding:3px 10px;margin-left:10px">Disconnect</button>'
-            if has_buffer
-            else '<span class="dim">Buffer not connected — connect inside any card’s schedule modal.</span>'
-        )
-        cadence_status = (
-            '<span style="color:var(--mh-prim-success-400)">active</span> — recent runs are '
-            "checked against the publish gate every hour"
-            if cadence_on
-            else '<span class="dim">off</span> — turns on automatically while any type above '
-            "is <em>Fully autonomous</em>"
-        )
-        ops_html = (
-            '<div class="card" style="margin-top:14px;padding:16px 18px">'
-            '<div style="font-weight:600;margin-bottom:6px">Autonomy operations</div>'
-            f'<p style="font-size:13px;margin:0 0 6px 0">{buffer_status}</p>'
-            f'<p style="font-size:13px;margin:0 0 10px 0">Hourly cadence: {cadence_status}.</p>'
-            '<button type="button" class="btn secondary" onclick="mhAutonomySweepNow(this)" '
-            'style="font-size:12px">Run autonomy check now</button>'
-            '<div id="mh-sweep-result" class="dim" style="font-size:12px;margin-top:8px"></div>'
-            "</div>"
-        )
-
-        # The audit ledger, surfaced — every gate verdict, auto-approval and
-        # publish attempt for this org, newest first. Append-only JSONL via
-        # workflow.autonomy.AuditLog; this is its read surface.
-        audit_rows = ""
-        try:
-            from mediahub.workflow.autonomy import AuditLog as _AuditLog
-
-            entries = _AuditLog().read(prof.profile_id, limit=12)
-            for e in reversed(entries):
-                ts = _h(_humanize_when(str(e.get("ts") or "")))
-                kind = _h(str(e.get("kind") or ""))
-                tool = _h(str(e.get("tool") or ""))
-                result = _h(str(e.get("result") or ""))
-                audit_rows += (
-                    f"<tr><td style='white-space:nowrap;font-size:12px'>{ts}</td>"
-                    f"<td style='font-size:12px'><code>{kind}</code></td>"
-                    f"<td style='font-size:12px'>{tool}</td>"
-                    f"<td style='font-size:12px;color:var(--ink-dim)'>{result}</td></tr>"
-                )
-        except Exception:
-            audit_rows = ""
-        audit_html = (
-            '<div class="card" style="margin-top:14px;padding:16px 18px">'
-            '<div style="font-weight:600;margin-bottom:6px">Autonomy activity log</div>'
-            '<p class="dim" style="font-size:12px;margin:0 0 10px 0">The immutable audit trail '
-            "behind every autonomous decision for this organisation: gate verdicts, "
-            "auto-approvals, publish attempts and blocked actions.</p>"
-            + (
-                f'<div style="overflow-x:auto"><table class="mh-table-stack" style="width:100%">'
-                f"<thead><tr><th>When</th><th>Event</th><th>Tool</th><th>Detail</th></tr></thead>"
-                f"<tbody>{audit_rows}</tbody></table></div>"
-                if audit_rows
-                else '<div class="card empty" style="margin:0">No autonomous activity yet — '
-                "entries appear here once the approval signal runs.</div>"
-            )
-            + "</div>"
-        )
-
+    def _coming_soon_card(title: str, body: str) -> str:
+        """A consistent "Coming soon" placeholder for a withdrawn surface."""
         return (
-            f"{section_header}"
-            f'<p class="dim" style="margin-bottom:14px">Control how much MediaHub may publish '
-            f"on behalf of <b>{_h(prof.display_name)}</b> for each content type. "
-            f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
-            f"without your explicit opt-in.</p>"
-            f"{form_html}"
-            f"{ops_html}"
-            f"{audit_html}"
-            f"{js_html}"
+            '<div class="card" style="padding:22px 20px;max-width:640px">'
+            '<div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:10px">'
+            '<span class="tag" style="background:var(--accent);color:#0b0f17;'
+            'font-weight:700;letter-spacing:0.02em">Coming soon</span></div>'
+            f'<h2 style="margin:0 0 6px 0;font-size:18px">{_h(title)}</h2>'
+            f'<p class="dim" style="margin:0;line-height:1.55">{_h(body)}</p>'
+            "</div>"
         )
+
+    def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
+        """Autonomy settings — a Coming soon placeholder.
+
+        Letting MediaHub publish approved content straight onto a social channel
+        without a human (per-type autonomy levels, the publish gate, and the
+        hourly cadence) has been withdrawn. Cards stay under human approval and
+        export/download for manual posting; the controls return here when the
+        capability is rebuilt.
+        """
+        return _coming_soon_card(
+            "Autonomy",
+            "Per-content-type publishing levels — letting MediaHub post approved "
+            "cards to your channels without a human — are being rebuilt. For now "
+            "every card stays under human approval; export or download to post manually.",
+        )
+
+    def _render_settings_scheduling_section(prof: Optional[ClubProfile]) -> str:
+        """Auto scheduling settings — a Coming soon placeholder.
+
+        Connecting a scheduling account and queueing approved cards straight
+        onto social channels has been withdrawn. Approved cards stay fully
+        exportable/downloadable for manual posting.
+        """
+        return _coming_soon_card(
+            "Auto scheduling",
+            "Connecting a scheduling account to queue approved cards straight onto "
+            "your social channels is being rebuilt. For now, approve a card and use "
+            "Export or Download to post it manually.",
+        )
+
+    def _render_settings_clubdata_section() -> str:
+        """Club data — club records + ask-the-data, relocated from the
+        retired Club-data tab."""
+        return (
+            '<p class="dim" style="margin-bottom:14px">The club&rsquo;s memory: the '
+            "records you keep, and questions you can ask of your own processed results.</p>"
+            '<div class="card">'
+            '<h3 style="margin-top:0">Club records</h3>'
+            '<p class="dim" style="font-size:13px">Import the records sheet once; every '
+            "faster swim becomes a ranked <b>new club record</b> card, and the table "
+            "updates only when you approve it.</p>"
+            f'<a class="btn secondary" href="{url_for("club_records_page")}">Manage club records</a>'
+            "</div>"
+            '<div class="card">'
+            '<h3 style="margin-top:0">Ask the data</h3>'
+            '<p class="dim" style="font-size:13px">Ask a question about your own results '
+            "&mdash; &ldquo;when did Alice last PB in 100 Free?&rdquo; &mdash; answered only "
+            "from the meets MediaHub has processed, with the meets it used cited.</p>"
+            f'<a class="btn secondary" href="{url_for("club_qa_console")}">Open Ask the data</a>'
+            "</div>"
+        )
+
+    def _render_settings_account_section() -> str:
+        """Account — security, data export, account deletion."""
+        try:
+            email = _auth.current_user_email() or ""
+        except Exception:
+            email = ""
+        who = (
+            f'<p class="dim" style="margin-bottom:14px">Signed in as <b>{_h(email)}</b>.</p>'
+            if email
+            else '<p class="dim" style="margin-bottom:14px">These actions apply to your '
+            "MediaHub account.</p>"
+        )
+        return (
+            who + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            '<h3 style="margin-top:0;font-size:16px">Security</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Protect your account with '
+            "a second factor.</p>"
+            f'<a class="btn secondary" href="{url_for("account_2fa")}">Two-factor authentication</a>'
+            "</div>"
+            '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            '<h3 style="margin-top:0;font-size:16px">Your data</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Download everything this '
+            "account holds.</p>"
+            f'<a class="btn secondary" href="{url_for("account_export_route")}">Export my data</a>'
+            "</div>"
+            '<div class="card" style="padding:16px 18px;border-left:2px solid var(--mh-prim-error-500)">'
+            '<h3 style="margin-top:0;font-size:16px">Delete account</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Permanently delete your '
+            "account. This cannot be undone.</p>"
+            '<form method="post" action="'
+            + url_for("account_delete")
+            + '" onsubmit="return confirm(\'Permanently delete your account? This cannot be undone.\')">'
+            '<input type="password" name="password" placeholder="Confirm password" '
+            'style="font-size:13px;padding:8px 10px;border:1px solid var(--panel);border-radius:6px;'
+            'background:var(--bg);color:var(--ink);margin-right:8px"/>'
+            '<button class="btn danger" type="submit" style="font-size:13px">Delete my account</button>'
+            "</form></div>"
+        )
+
+    def _render_settings_status_public_section() -> str:
+        """Public status — just "operational" or "down", nothing more.
+
+        The detailed uptime/incident/version view moved to Developer settings.
+        """
+        operational = True
+        try:
+            from mediahub.observability import uptime as _uptime
+
+            latest = _uptime.latest_heartbeat()
+            if latest is not None:
+                ts_raw = latest["ts"]
+                if ts_raw.endswith("Z"):
+                    ts_raw = ts_raw[:-1] + "+00:00"
+                from datetime import datetime as _dt
+
+                age_s = (datetime.now(timezone.utc) - _dt.fromisoformat(ts_raw)).total_seconds()
+                operational = bool(latest.get("ok")) and age_s <= 1800
+        except Exception:
+            operational = True
+        if operational:
+            return (
+                '<div class="card" style="padding:22px 24px">'
+                '<div style="display:flex;align-items:center;gap:12px">'
+                '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+                'background:#2cc97f;box-shadow:0 0 0 4px rgba(44,201,127,0.18)"></span>'
+                '<span style="font-size:18px;font-weight:600">Website operational</span></div>'
+                '<p class="dim" style="margin:10px 0 0 0;font-size:13px">Everything is running '
+                "normally.</p></div>"
+            )
+        return (
+            '<div class="card" style="padding:22px 24px;border-left:2px solid var(--mh-prim-error-500)">'
+            '<div style="display:flex;align-items:center;gap:12px">'
+            '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+            'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
+            '<span style="font-size:18px;font-weight:600">Website down</span></div>'
+            '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
+            "things back up and running. Please check back shortly.</p></div>"
+        )
+
+    def _render_settings_developer_section() -> str:
+        """Operator-only — deployment health, dashboards, and detailed status."""
+        return _render_settings_status_section() + _render_settings_deployment_section()
 
     def _render_settings_privacy_section() -> str:
-        """Privacy section — inventory + cache-clear, mirrors /privacy."""
-        section_header = (
-            '<h2 id="privacy" style="margin:40px 0 6px;font-size:22px;'
-            'scroll-margin-top:80px">Privacy &amp; data</h2>'
+        """Privacy section — inventory, athletes & consent, cache-clear, deletion."""
+        section_header = ""
+        athletes_card = (
+            '<div class="card">'
+            '<h3 style="margin-top:0">Athletes &amp; consent</h3>'
+            '<p class="dim" style="font-size:13px">Your swimmer roster across every meet — '
+            "merge duplicate names, set photo/name permission per athlete, import the consent "
+            "register, and export it for the welfare officer.</p>"
+            f'<a class="btn secondary" href="{url_for("athletes_page")}">Manage athletes &amp; consent</a>'
+            "</div>"
         )
         try:
             conn = _db()
@@ -16039,11 +22506,13 @@ window.mhAutonomySweepNow = function(btn) {
   </div>
 </div>
 
+{athletes_card}
+
 <div class="card">
   <h3 style="margin-top:0">What we store</h3>
   <ul>
     <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
-    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
+    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Organisation tab.</li>
     <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
     <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
   </ul>
@@ -16051,11 +22520,17 @@ window.mhAutonomySweepNow = function(btn) {
 </div>
 
 <div class="card">
-  <h3 style="margin-top:0">Actions</h3>
-  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
-    <button class="btn secondary" type="submit">Clear PB cache</button>
+  <h3 style="margin-top:0">Clear cache</h3>
+  <p class="dim" style="font-size:13px;margin-bottom:10px">Clear the local cache of public PB-lookup pages for this deployment. Safe to do any time — it just re-fetches on the next run.</p>
+  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the cache?')">
+    <input type="hidden" name="next" value="{url_for("settings_section", section="privacy")}">
+    <button class="btn secondary" type="submit">Clear cache</button>
   </form>
-  <p class="muted" style="margin-top:8px">To delete an individual run, open it from the activity section above and use the Delete button on the row.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Delete runs</h3>
+  <p class="muted" style="margin-top:0">To delete an individual run, open <a href="{url_for("settings_section", section="activity")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
 </div>
 """
 
@@ -16146,7 +22621,59 @@ window.mhAutonomySweepNow = function(btn) {
             " &mdash; Playwright / Node / Remotion availability.</li>"
             f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
             " &mdash; process RSS and active-run counters.</li>"
-            "</ul></div>"
+            f'<li><a href="{url_for("mobile_parity_tool")}">Mobile parity audit</a>'
+            " &mdash; every page scored for phone usability (overflow, tap "
+            "targets, nav reachability) at real device widths.</li>"
+            "</ul></div>" + _render_settings_cache_purge_card()
+        )
+
+    def _render_settings_cache_purge_card() -> str:
+        """Operator-only — clear every re-derivable cache for the whole site.
+
+        A deployment-wide purge across all organisations and runs. Only safe
+        because everything it removes is re-derivable; source data is untouched.
+        Counts the current on-disk cache so the operator sees the scale before
+        clearing.
+        """
+        from mediahub.privacy.cache_purge import cache_roots
+
+        total_files = 0
+        total_bytes = 0
+        for _label, path in cache_roots():
+            try:
+                if not path.exists():
+                    continue
+                for f in path.rglob("*"):
+                    if f.is_file():
+                        total_files += 1
+                        try:
+                            total_bytes += f.stat().st_size
+                        except OSError:
+                            pass
+            except OSError:
+                continue
+        size_mb = total_bytes / (1024 * 1024)
+        return (
+            '<div class="card" style="padding:18px 22px;margin-top:14px;'
+            'border-left:2px solid var(--mh-prim-error-500)">'
+            '<h3 style="margin-top:0;font-size:16px">Clear all caches (site-wide)</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">'
+            "Permanently deletes every <strong>re-derivable</strong> cache for the whole "
+            "deployment — all organisations, all runs: PB lookups, motion &amp; graphic "
+            "renders, brand-DNA captures, narration, and web research — and drops the "
+            "matching in-process caches from this worker's <strong>memory</strong> so "
+            "nothing is served stale. Runs, uploads, the databases, the media library and "
+            "the ledgers are <strong>not</strong> touched; the engine re-derives what it "
+            "needs on the next request. Operator-only.</p>"
+            '<p class="dim" style="font-size:13px;margin-bottom:12px">'
+            f"Currently caching <strong>{total_files:,}</strong> file(s) "
+            f"(<strong>{size_mb:.1f} MB</strong>).</p>"
+            f'<form method="post" action="{url_for("operator_cache_purge")}" style="display:inline" '
+            "onsubmit=\"return confirm('Permanently delete ALL caches for the entire site, "
+            "for all runs? This cannot be undone (but everything is re-derivable).')\">"
+            '<button class="btn secondary" type="submit" '
+            'style="border-color:rgba(255,93,108,0.4)">Clear all caches</button>'
+            "</form></div>"
         )
 
     # ---- /api/settings/llm-status ----
@@ -16188,125 +22715,6 @@ window.mhAutonomySweepNow = function(btn) {
                 "provider_label": provider_label,
             }
         )
-
-    # ---- Per-type autonomy policy API (P2.4) -------------------------
-    #
-    # GET  /api/autonomy/policy  — load the active org's per-type policy
-    # POST /api/autonomy/policy  — save the active org's per-type policy
-    #
-    # Both routes require an active (signed-in) org.  Cross-tenant
-    # isolation is enforced by scoping reads/writes to _active_profile_id()
-    # — a session can only ever see or alter its own org's policy.
-
-    @app.route("/api/autonomy/policy", methods=["GET"])
-    def api_autonomy_policy_load():
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "No organisation active."}), 403
-        try:
-            from mediahub.publishing.per_type_policy import load_policy as _load_policy
-
-            policy = _load_policy(pid)
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
-        return jsonify({"ok": True, "org_id": pid, "policy": policy})
-
-    @app.route("/api/autonomy/policy", methods=["POST"])
-    def api_autonomy_policy_save():
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "No organisation active."}), 403
-        try:
-            from mediahub.publishing.per_type_policy import (
-                load_policy as _load_policy,
-                save_policy as _save_policy,
-            )
-
-            existing = _load_policy(pid)
-            # Accept both JSON body and form data.
-            if request.is_json:
-                incoming = request.get_json(silent=True) or {}
-            else:
-                incoming = dict(request.form)
-            # Split out the P2.3 controls the same form carries: per-type
-            # confidence thresholds (threshold_<slug>) and the autonomous
-            # channel list. What remains is the per-type level policy.
-            thresholds: dict[str, str] = {}
-            channels_raw = None
-            levels: dict[str, str] = {}
-            for k, v in incoming.items():
-                if isinstance(v, list):
-                    v = v[0] if v else ""
-                if k == "autonomy_channel_ids":
-                    channels_raw = str(v)
-                elif k.startswith("threshold_"):
-                    thresholds[k[len("threshold_") :]] = str(v)
-                else:
-                    levels[k] = str(v)
-            # Merge: start from existing (all keys present), override with incoming.
-            merged = dict(existing)
-            merged.update(levels)
-            _save_policy(pid, merged)
-            # Reconcile the org's approval-signal cadence with the new policy:
-            # any fully_autonomous type gets the hourly scheduled sweep that
-            # actually drives auto-approval; reverting to fully gated removes it.
-            try:
-                from mediahub.workflow.approval import ensure_approval_signal_cadence
-
-                ensure_approval_signal_cadence(pid)
-            except Exception:
-                app.logger.exception("approval-signal cadence reconciliation failed")
-            if thresholds:
-                from mediahub.publishing.publish_gate import save_thresholds as _save_thresholds
-
-                _save_thresholds(pid, thresholds)
-            if channels_raw is not None:
-                from mediahub.web.club_profile import load_profile as _lp
-                from mediahub.web.club_profile import save_profile as _sp
-
-                prof = _lp(pid)
-                if prof is not None:
-                    prof.autonomy_channel_ids = [
-                        c.strip() for c in channels_raw.split(",") if c.strip()
-                    ]
-                    _sp(prof)
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
-        return jsonify({"ok": True, "org_id": pid})
-
-    # P2.2 — run the human-approval signal over one run NOW: gated types
-    # report "awaiting human"; a fully_autonomous type's cards go through
-    # the full publish gate and, where allowed, auto-approve (+ publish via
-    # the org's autonomous channels). Org-scoped; everything audited.
-    @app.route("/api/autonomy/sweep", methods=["POST"])
-    def api_autonomy_sweep():
-        pid = _active_profile_id()
-        if not pid:
-            return jsonify({"error": "No organisation active."}), 403
-        body = request.get_json(silent=True) or {}
-        run_id = str(body.get("run_id") or request.form.get("run_id") or "").strip()
-        try:
-            from mediahub.workflow.approval import _recent_run_ids, apply_approval_signal
-
-            if run_id:
-                summary = apply_approval_signal(pid, run_id)
-                status = 200 if summary.get("ok") else 404
-                return jsonify(summary), status
-            # No run_id: sweep the org's recent finished runs — the same
-            # scope the scheduled cadence covers, triggered on demand.
-            run_ids = _recent_run_ids(pid)
-            summaries = [apply_approval_signal(pid, rid) for rid in run_ids]
-            return jsonify(
-                {
-                    "ok": True,
-                    "swept_runs": len(summaries),
-                    "published": sum(int(s.get("published") or 0) for s in summaries),
-                    "runs": summaries,
-                }
-            )
-        except Exception as exc:
-            app.logger.exception("autonomy sweep failed")
-            return jsonify({"error": str(exc)}), 500
 
     # ---- Content plan (P1.3 cross-source planner) ---------------------
     #
@@ -16361,6 +22769,55 @@ window.mhAutonomySweepNow = function(btn) {
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid, "inputs": saved})
 
+    @app.route("/api/plan/interpret", methods=["POST"])
+    def api_plan_interpret():
+        # Free-text → STRUCTURED direct inputs (the Free-Text feature's NL
+        # interpretation + web research, brought to the planner). The AI only
+        # PROPOSES inputs the operator reviews + saves; the deterministic
+        # ranker is untouched. Honest provider errors, no heuristic fallback.
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "Tell the planner what's coming up first."}), 400
+
+        # Resolve the org's sport the same way the page does, so goals can only
+        # ever target a post type this sport actually enables.
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import list_sport_profiles, load_sport_profile
+
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        _avail = {p.sport for p in list_sport_profiles()}
+        _prof = _active_profile()
+        sport = _ORG_TYPE_TO_SPORT.get(getattr(_prof, "org_type", "") or "")
+        if sport not in _avail:
+            sport = str(body.get("sport") or "swimming").strip().lower()
+        try:
+            profile = load_sport_profile(sport)
+            goal_choices = [(spt.slug, spt.title) for spt in post_types_for(profile)]
+        except Exception:
+            goal_choices = []
+
+        from mediahub.ai_core import ProviderError, ProviderNotConfigured
+        from mediahub.content_engine.nl_inputs import interpret_planner_inputs
+
+        try:
+            parsed = interpret_planner_inputs(text, goal_choices=goal_choices)
+        except ProviderNotConfigured as exc:
+            return jsonify({"error": str(exc)}), 503
+        except ProviderError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except Exception as exc:
+            app.logger.exception("plan interpret failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "org_id": pid, "parsed": parsed})
+
     @app.route("/plan")
     def plan_page():
         pid = _active_profile_id()
@@ -16408,7 +22865,7 @@ window.mhAutonomySweepNow = function(btn) {
             )
             sport_control_html = (
                 '<label for="mh-plan-sport" style="font-weight:600">Sport</label>'
-                f'<select id="mh-plan-sport" style="min-width:160px">{_sport_opts}</select>'
+                f'<select id="mh-plan-sport" style="min-width:min(160px,100%)">{_sport_opts}</select>'
                 '<span class="dim" style="font-size:12px">your organisation type doesn&rsquo;t '
                 "pin a sport, so pick one here</span>"
             )
@@ -16449,7 +22906,7 @@ window.mhAutonomySweepNow = function(btn) {
                     else '<span class="tag">Planning only</span>'
                 )
                 items_html += f"""
-<details class="card" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
+<details class="card mh-reveal" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
   <summary style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none">
     <span style="font-family:var(--font-display,inherit);font-size:20px;min-width:34px;color:var(--ink-muted)">#{rank}</span>
     <strong style="flex:1">{_h(item.get("title") or slug)}</strong>
@@ -16488,13 +22945,70 @@ window.mhAutonomySweepNow = function(btn) {
   discovered context and anything you tell it below into a ranked list of what to post next, with the reasoning shown for every item.</p>
 </div>"""
 
-        events_rows = "".join(
-            f'<div class="mh-plan-ev" data-name="{_h(e["name"])}" data-date="{_h(e["date"])}" style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
-            f'<span style="font-variant-numeric:tabular-nums">{_h(e["date"])}</span><span style="flex:1">{_h(e["name"])}</span>'
-            f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button></div>'
-            for e in inputs.get("upcoming_events") or []
-        )
+        def _ev_row(e: dict) -> str:
+            venue = str(e.get("venue") or "")
+            venue_html = (
+                f'<span class="dim" style="font-size:11.5px">{_h(venue)}</span>' if venue else ""
+            )
+            return (
+                f'<div class="mh-plan-ev" data-name="{_h(e["name"])}" data-date="{_h(e["date"])}" '
+                f'data-venue="{_h(venue)}" style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
+                f'<span style="font-variant-numeric:tabular-nums">{_h(e["date"])}</span>'
+                f'<span style="flex:1">{_h(e["name"])}{(" — " + venue_html) if venue else ""}</span>'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button></div>'
+            )
+
+        events_rows = "".join(_ev_row(e) for e in inputs.get("upcoming_events") or [])
         blackout_val = _h(", ".join(inputs.get("blackout_dates") or []))
+
+        # Goals are a real planning lever (the ranker rewards a post type the
+        # operator says they want to push), but the form never surfaced them —
+        # and the old save dropped them on every write. Surface them now, keyed
+        # to the post types this sport actually enables.
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import load_sport_profile
+
+        try:
+            _sport_pts = post_types_for(load_sport_profile(current_sport))
+        except Exception:
+            _sport_pts = []
+        _goal_titles = {spt.slug: spt.title for spt in _sport_pts}
+        goal_opts = "".join(
+            f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in _sport_pts
+        )
+
+        def _goal_row(g: dict) -> str:
+            slug = str(g.get("post_type") or "")
+            title = _goal_titles.get(slug, slug.replace("_", " ").title())
+            note = str(g.get("note") or "")
+            note_html = (
+                f'<span style="flex:1;color:var(--ink-muted)">{_h(note)}</span>'
+                if note
+                else '<span style="flex:1"></span>'
+            )
+            return (
+                f'<div class="mh-plan-goal" data-slug="{_h(slug)}" data-note="{_h(note)}" '
+                f'style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
+                f'<span style="flex:0 0 auto;font-weight:600">{_h(title)}</span>{note_html}'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveGoal(this)">remove</button></div>'
+            )
+
+        goals_rows = "".join(_goal_row(g) for g in inputs.get("goals") or [])
+
+        if goal_opts:
+            goals_add_html = (
+                '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
+                f'<select id="mh-plan-goal-type" style="flex:0 0 auto;min-width:180px">{goal_opts}</select>'
+                '<input type="text" id="mh-plan-goal-note" placeholder="why — e.g. push our new sponsor" style="flex:1;min-width:160px"/>'
+                '<button type="button" class="btn" onclick="mhPlanAddGoal()">Add goal</button>'
+                "</div>"
+            )
+        else:
+            goals_add_html = (
+                '<p class="dim" style="font-size:11.5px;margin:6px 0 0 0">'
+                "No post types are enabled for this sport yet.</p>"
+            )
+        goal_titles_json = json.dumps(_goal_titles)
 
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
@@ -16524,14 +23038,30 @@ window.mhAutonomySweepNow = function(btn) {
 
 <div class="card" style="margin-top:18px">
   <h2 style="margin-top:0">Tell the planner (direct signals)</h2>
-  <p class="dim" style="font-size:12.5px;margin-top:0">Upcoming events boost previews and announcements; blackout dates hold them back. Saved per organisation.</p>
+  <p class="dim" style="font-size:12.5px;margin-top:0">Upcoming events boost previews and announcements; blackout dates hold them back; goals nudge a type you want to push. Saved per organisation.</p>
+
+  <div style="border:1px solid var(--lane);border-radius:10px;padding:14px;background:color-mix(in oklab, var(--lane) 4%, transparent);margin:4px 0 18px 0">
+    <label for="mh-plan-nl" style="font-weight:600;display:flex;align-items:center;gap:8px">
+      <span class="tag live" style="font-size:10px">AI</span>Describe what&rsquo;s coming up
+    </label>
+    <p class="dim" style="font-size:12px;margin:4px 0 8px 0">Type it in your own words and MediaHub turns it into events, blackout dates and goals below &mdash; checking the web for an event&rsquo;s date when it needs to. You review everything before it saves.</p>
+    <textarea id="mh-plan-nl" rows="3" placeholder="e.g. County Champs at Ponds Forge on the 12th, we&rsquo;re shut the bank holiday weekend, and I want to get behind our new sponsor this month."
+      style="width:100%;font-size:13px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <button type="button" class="btn primary" id="mh-plan-nl-btn" onclick="mhPlanInterpret(this)" data-loader-text="Reading your note">Interpret &amp; fill in &rarr;</button>
+      <span class="dim" id="mh-plan-nl-status" style="font-size:12.5px"></span>
+    </div>
+    <div id="mh-plan-nl-result" style="margin-top:10px"></div>
+  </div>
+
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px">
     <div>
       <label style="font-weight:600">Upcoming events</label>
       <div id="mh-plan-events">{events_rows}</div>
-      <div style="display:flex;gap:6px;margin-top:6px">
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
         <input type="date" id="mh-plan-ev-date" style="flex:0 0 auto"/>
-        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1"/>
+        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1;min-width:140px"/>
+        <input type="text" id="mh-plan-ev-venue" placeholder="venue (optional)" style="flex:1;min-width:120px"/>
         <button type="button" class="btn" onclick="mhPlanAddEvent()">Add</button>
       </div>
     </div>
@@ -16541,33 +23071,80 @@ window.mhAutonomySweepNow = function(btn) {
       <p class="dim" style="font-size:11.5px;margin:4px 0 0 0">Comma-separated ISO dates nothing should be scheduled on.</p>
     </div>
   </div>
-  <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+
+  <div style="margin-top:18px">
+    <label style="font-weight:600">Goals &mdash; a type you want to push</label>
+    <p class="dim" style="font-size:11.5px;margin:2px 0 0 0">Each goal gives its post type a ranking nudge, with your note shown as the reason.</p>
+    <div id="mh-plan-goals" style="margin-top:6px">{goals_rows}</div>
+    {goals_add_html}
+  </div>
+
+  <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
     <button type="button" class="btn" onclick="mhPlanSaveInputs(this)">Save inputs</button>
     <span class="dim" id="mh-plan-inputs-status" style="font-size:12.5px"></span>
   </div>
 </div>
 
 <script>
+var MH_GOAL_TITLES = {goal_titles_json};
+function mhPlanEventRow(name, date, venue) {{
+  var row = document.createElement('div');
+  row.className = 'mh-plan-ev';
+  row.dataset.name = name; row.dataset.date = date; row.dataset.venue = venue || '';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
+  var dEl = document.createElement('span'); dEl.style.cssText = 'font-variant-numeric:tabular-nums'; dEl.textContent = date;
+  var label = document.createElement('span'); label.style.flex = '1';
+  label.textContent = venue ? (name + ' — ' + venue) : name;
+  var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn';
+  rm.style.cssText = 'font-size:11px;padding:2px 8px'; rm.textContent = 'remove';
+  rm.setAttribute('onclick', 'mhPlanRemoveEvent(this)');
+  row.appendChild(dEl); row.appendChild(label); row.appendChild(rm);
+  return row;
+}}
 function mhPlanCollectEvents() {{
   return Array.from(document.querySelectorAll('#mh-plan-events .mh-plan-ev')).map(function (el) {{
-    return {{ name: el.dataset.name, date: el.dataset.date }};
+    return {{ name: el.dataset.name, date: el.dataset.date, venue: el.dataset.venue || '' }};
   }});
 }}
 function mhPlanAddEvent() {{
   var d = document.getElementById('mh-plan-ev-date').value;
   var n = document.getElementById('mh-plan-ev-name').value.trim();
+  var v = document.getElementById('mh-plan-ev-venue').value.trim();
   if (!d || !n) return;
-  var row = document.createElement('div');
-  row.className = 'mh-plan-ev';
-  row.dataset.name = n; row.dataset.date = d;
-  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
-  row.innerHTML = '<span style="font-variant-numeric:tabular-nums"></span><span style="flex:1"></span>' +
-    '<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button>';
-  row.children[0].textContent = d; row.children[1].textContent = n;
-  document.getElementById('mh-plan-events').appendChild(row);
+  document.getElementById('mh-plan-events').appendChild(mhPlanEventRow(n, d, v));
   document.getElementById('mh-plan-ev-name').value = '';
+  document.getElementById('mh-plan-ev-venue').value = '';
 }}
 function mhPlanRemoveEvent(btn) {{ btn.closest('.mh-plan-ev').remove(); }}
+function mhPlanGoalRow(slug, title, note) {{
+  var row = document.createElement('div');
+  row.className = 'mh-plan-goal';
+  row.dataset.slug = slug; row.dataset.note = note || '';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
+  var t = document.createElement('span'); t.style.cssText = 'flex:0 0 auto;font-weight:600'; t.textContent = title || slug;
+  var nt = document.createElement('span'); nt.style.cssText = 'flex:1;color:var(--ink-muted)'; nt.textContent = note || '';
+  var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn';
+  rm.style.cssText = 'font-size:11px;padding:2px 8px'; rm.textContent = 'remove';
+  rm.setAttribute('onclick', 'mhPlanRemoveGoal(this)');
+  row.appendChild(t); row.appendChild(nt); row.appendChild(rm);
+  return row;
+}}
+function mhPlanCollectGoals() {{
+  return Array.from(document.querySelectorAll('#mh-plan-goals .mh-plan-goal')).map(function (el) {{
+    return {{ post_type: el.dataset.slug, note: el.dataset.note || '' }};
+  }});
+}}
+function mhPlanAddGoal() {{
+  var sel = document.getElementById('mh-plan-goal-type');
+  if (!sel || !sel.value) return;
+  var slug = sel.value;
+  if (document.querySelector('#mh-plan-goals .mh-plan-goal[data-slug="' + slug + '"]')) return;
+  var note = document.getElementById('mh-plan-goal-note').value.trim();
+  var title = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : slug;
+  document.getElementById('mh-plan-goals').appendChild(mhPlanGoalRow(slug, title, note));
+  document.getElementById('mh-plan-goal-note').value = '';
+}}
+function mhPlanRemoveGoal(btn) {{ btn.closest('.mh-plan-goal').remove(); }}
 function mhPlanSaveInputs(btn) {{
   var status = document.getElementById('mh-plan-inputs-status');
   status.textContent = 'Saving…';
@@ -16575,11 +23152,91 @@ function mhPlanSaveInputs(btn) {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{
       upcoming_events: mhPlanCollectEvents(),
-      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean)
+      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean),
+      goals: mhPlanCollectGoals()
     }})
   }}).then(function(r){{ return r.json(); }}).then(function(j){{
     status.textContent = j.ok ? 'Saved. Regenerate the plan to apply.' : (j.error || 'Save failed');
   }}).catch(function(){{ status.textContent = 'Save failed'; }});
+}}
+function mhPlanMergeParsed(p) {{
+  var added = 0;
+  var have = {{}};
+  Array.from(document.querySelectorAll('#mh-plan-events .mh-plan-ev')).forEach(function (el) {{
+    have[(el.dataset.date || '') + '|' + (el.dataset.name || '').toLowerCase()] = true;
+  }});
+  (p.upcoming_events || []).forEach(function (ev) {{
+    var key = (ev.date || '') + '|' + (ev.name || '').toLowerCase();
+    if (!ev.name || !ev.date || have[key]) return;
+    have[key] = true;
+    document.getElementById('mh-plan-events').appendChild(mhPlanEventRow(ev.name, ev.date, ev.venue || ''));
+    added++;
+  }});
+  var bf = document.getElementById('mh-plan-blackouts');
+  var existing = bf.value.split(',').map(function (s) {{ return s.trim(); }}).filter(Boolean);
+  var seen = {{}}; existing.forEach(function (d) {{ seen[d] = true; }});
+  (p.blackout_dates || []).forEach(function (d) {{ if (d && !seen[d]) {{ existing.push(d); seen[d] = true; added++; }} }});
+  bf.value = existing.join(', ');
+  var haveG = {{}};
+  Array.from(document.querySelectorAll('#mh-plan-goals .mh-plan-goal')).forEach(function (el) {{ haveG[el.dataset.slug] = true; }});
+  (p.goals || []).forEach(function (g) {{
+    if (!g.post_type || haveG[g.post_type]) return;
+    haveG[g.post_type] = true;
+    document.getElementById('mh-plan-goals').appendChild(mhPlanGoalRow(g.post_type, MH_GOAL_TITLES[g.post_type] || g.post_type, g.note || ''));
+    added++;
+  }});
+  return added;
+}}
+function mhPlanRenderNote(p, added) {{
+  var box = document.getElementById('mh-plan-nl-result');
+  box.innerHTML = '';
+  if (p.summary) {{
+    var s = document.createElement('p'); s.className = 'dim'; s.style.cssText = 'font-size:12px;margin:0 0 6px 0';
+    s.textContent = p.summary; box.appendChild(s);
+  }}
+  if (added === 0) {{
+    var none = document.createElement('p'); none.className = 'dim'; none.style.cssText = 'font-size:12px;margin:0';
+    none.textContent = 'Nothing new to add from that — try naming an event and a date, or what you want to push.';
+    box.appendChild(none);
+  }}
+  var research = p.research || [];
+  var hitCount = research.reduce(function (a, r) {{ return a + ((r.hits || []).length); }}, 0);
+  if (hitCount) {{
+    var det = document.createElement('details'); det.style.cssText = 'margin-top:4px';
+    var sum = document.createElement('summary'); sum.style.cssText = 'cursor:pointer;font-size:11.5px;color:var(--ink-muted)';
+    sum.textContent = 'Checked the web (' + hitCount + ' source' + (hitCount === 1 ? '' : 's') + ')';
+    det.appendChild(sum);
+    research.forEach(function (r) {{
+      (r.hits || []).forEach(function (h) {{
+        if (!h.url || String(h.url).slice(0, 4).toLowerCase() !== 'http') return;
+        var a = document.createElement('a'); a.href = h.url; a.target = '_blank'; a.rel = 'noopener';
+        a.style.cssText = 'display:block;font-size:11.5px;margin:3px 0;color:var(--accent);text-decoration:none';
+        a.textContent = (h.title || h.domain || h.url);
+        det.appendChild(a);
+      }});
+    }});
+    box.appendChild(det);
+  }}
+}}
+function mhPlanInterpret(btn) {{
+  var status = document.getElementById('mh-plan-nl-status');
+  var text = document.getElementById('mh-plan-nl').value.trim();
+  if (!text) {{ status.textContent = 'Type a note first.'; return; }}
+  btn.disabled = true; status.textContent = 'Reading your note…';
+  document.getElementById('mh-plan-nl-result').innerHTML = '';
+  fetch({json.dumps(url_for("api_plan_interpret"))}, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ text: text }})
+  }}).then(function (r) {{ return r.json().then(function (j) {{ return {{ ok: r.ok, j: j }}; }}); }})
+    .then(function (res) {{
+      btn.disabled = false;
+      var j = res.j || {{}};
+      if (!res.ok || !j.ok) {{ status.textContent = j.error || 'Could not interpret that.'; return; }}
+      var p = j.parsed || {{}};
+      var added = mhPlanMergeParsed(p);
+      status.textContent = 'Filled in ' + added + ' item' + (added === 1 ? '' : 's') + ' below — review, then Save inputs.';
+      mhPlanRenderNote(p, added);
+    }}).catch(function () {{ btn.disabled = false; status.textContent = 'Could not interpret that.'; }});
 }}
 function mhPlanGenerate(btn) {{
   var status = document.getElementById('mh-plan-status');
@@ -16594,202 +23251,7 @@ function mhPlanGenerate(btn) {{
 }}
 </script>
 """
-        return _layout("Content plan", body, active="plan")
-
-    # ---- Buffer publishing -------------------------------------------
-    #
-    # Multi-tenant publishing model (post-rewrite):
-    #
-    #   1. **Per-profile Buffer token** — each ClubProfile carries its
-    #      own optional `buffer_access_token`. Set via /api/organisation/
-    #      connect-buffer (inline in the publishing flow, no settings
-    #      page). This is the safe multi-tenant pattern: each club
-    #      authenticates with their own Buffer account; content never
-    #      flows through a shared account.
-    #
-    #   2. **Env-var fallback** — `BUFFER_ACCESS_TOKEN` env var is
-    #      consulted only when the active profile has no token. This
-    #      stays as a convenience for single-tenant self-hosted
-    #      deployments where operator IS the user (one club running
-    #      MediaHub on their own infra). It is NOT the multi-tenant
-    #      story.
-    #
-    #   3. **No-Buffer path** — clubs that don't have Buffer can fall
-    #      through to /api/runs/<run>/card/<id>/download which packages
-    #      the caption + visual as a ZIP for manual posting.
-    #
-    # This resolver picks 1 → 2 in priority order. Returns "" when no
-    # token is reachable for the active org; callers surface the
-    # connect-or-download choice.
-    def _resolve_buffer_token() -> str:
-        prof = _active_profile()
-        if prof is not None:
-            tok = (getattr(prof, "buffer_access_token", "") or "").strip()
-            if tok:
-                return tok
-        # Env fallback for single-tenant self-hosted operators.
-        from mediahub.web.secrets_store import get_buffer_access_token
-
-        return (get_buffer_access_token() or "").strip()
-
-    @app.route("/api/buffer/channels")
-    def api_buffer_channels():
-        """List the user's connected Buffer channels.
-
-        Returns 401 when neither the active profile nor the env var
-        has a token, so the UI can show the inline Connect Buffer +
-        Copy/Download alternative instead of opening the schedule modal.
-        """
-        from mediahub.publishing.buffer import (
-            list_channels as _buf_list,
-            BufferAuthError,
-            BufferAPIError,
-        )
-
-        token = _resolve_buffer_token()
-        if not token:
-            return jsonify(
-                {
-                    "connected": False,
-                    "channels": [],
-                    "error": "no_token",
-                    "message": (
-                        "Buffer isn't connected for this organisation. Paste "
-                        "your Buffer access token to enable scheduling, or "
-                        "use the download option to post manually."
-                    ),
-                    "connect_url": url_for("api_connect_buffer"),
-                }
-            ), 401
-        try:
-            channels = _buf_list(token)
-        except BufferAuthError as exc:
-            return jsonify(
-                {
-                    "connected": False,
-                    "channels": [],
-                    "error": "auth",
-                    "message": str(exc),
-                }
-            ), 401
-        except BufferAPIError as exc:
-            return jsonify(
-                {
-                    "connected": True,
-                    "channels": [],
-                    "error": "api",
-                    "message": str(exc),
-                }
-            ), 502
-        return jsonify(
-            {
-                "connected": True,
-                "channels": channels,
-                "count": len(channels),
-            }
-        )
-
-    @app.route("/api/organisation/connect-buffer", methods=["POST"])
-    def api_connect_buffer():
-        """Save a Buffer access token onto the **active organisation**.
-
-        This is the multi-tenant-safe Buffer connection path: each club
-        pastes their own personal access token, which is persisted on
-        their ClubProfile (not in a shared env var, not in a shared
-        secrets file). Their content then flows through THEIR Buffer
-        account, never a shared operator account.
-
-        The token is validated by attempting a `list_channels` probe
-        before saving — a token that Buffer rejects is not persisted,
-        so the user gets immediate feedback rather than a silent fail
-        at schedule time.
-
-        POST body (form or JSON):
-            { "buffer_access_token": "1/..." }
-
-        Returns 200 on success with the connected channel count, or
-        4xx on validation / auth failures.
-        """
-        prof = _active_profile()
-        if prof is None:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_active_profile",
-                    "message": "Set up your organisation before connecting Buffer.",
-                }
-            ), 409
-        # Accept both form-data and JSON for browser-form + fetch use.
-        token = ""
-        if request.is_json:
-            body = request.get_json(silent=True) or {}
-            token = str(body.get("buffer_access_token") or "").strip()
-        if not token:
-            token = (request.form.get("buffer_access_token") or "").strip()
-        if not token:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "missing_token",
-                    "message": "Paste your Buffer access token to connect.",
-                }
-            ), 400
-        if len(token) < 10:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "short_token",
-                    "message": "That doesn't look like a Buffer access token (too short).",
-                }
-            ), 400
-
-        # Validate by probing Buffer for the connected channels. If Buffer
-        # rejects the token we never persist it.
-        from mediahub.publishing.buffer import (
-            list_channels as _buf_list,
-            BufferAuthError,
-            BufferAPIError,
-        )
-
-        try:
-            channels = _buf_list(token)
-        except BufferAuthError as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "auth",
-                    "message": str(exc),
-                }
-            ), 401
-        except BufferAPIError as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "api",
-                    "message": str(exc),
-                }
-            ), 502
-
-        # Persist on the profile.
-        prof.buffer_access_token = token
-        save_profile(prof)
-        return jsonify(
-            {
-                "ok": True,
-                "channel_count": len(channels),
-                "profile_id": prof.profile_id,
-            }
-        )
-
-    @app.route("/api/organisation/disconnect-buffer", methods=["POST"])
-    def api_disconnect_buffer():
-        """Clear the Buffer access token on the active organisation."""
-        prof = _active_profile()
-        if prof is None:
-            return jsonify({"ok": False, "error": "no_active_profile"}), 409
-        prof.buffer_access_token = ""
-        save_profile(prof)
-        return jsonify({"ok": True})
+        return _layout("Content plan", body, active="create")
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
@@ -16798,12 +23260,10 @@ function mhPlanGenerate(btn) {{
     def api_card_download(run_id, card_id):
         """Download a card's caption + visual as a ZIP for manual posting.
 
-        The Buffer-free path: clubs that don't have Buffer (or don't
-        want to use it) can grab a ZIP containing the caption text
-        and the generated visual, then post manually to whatever
-        platform they like. This is the always-safe option — no
-        third-party API touched, no TOS to violate, no scheduler
-        dependency.
+        Clubs grab a ZIP containing the caption text and the generated
+        visual, then post manually to whatever platform they like. This is
+        the always-safe option — no third-party API touched, no TOS to
+        violate.
         """
         from flask import send_file
         import io
@@ -16877,7 +23337,7 @@ function mhPlanGenerate(btn) {{
                     "  open the card in the content builder and click 'Create\n"
                     "  graphic' first.\n\n"
                     "Post the visual + caption to your chosen platform\n"
-                    "manually. No Buffer / third-party scheduler required.\n"
+                    "manually. No third-party scheduler required.\n"
                 ),
             )
         buf.seek(0)
@@ -16888,451 +23348,317 @@ function mhPlanGenerate(btn) {{
             download_name=f"{slug}.zip",
         )
 
-    @app.route(
-        "/api/runs/<run_id>/card/<path:card_id>/schedule",
-        methods=["POST"],
-    )
-    def api_card_schedule(run_id, card_id):
-        """Schedule a card to one or more Buffer channels.
-
-        Body JSON:
-            {
-              "channel_ids":  ["...", ...],   # required, non-empty
-              "scheduled_at": "2026-06-01T10:00:00Z" | null,
-              "caption":      "the edited caption text",
-              "media_url":    "https://..." | null
-            }
-
-        Returns 200 with the per-channel results on success, 4xx on bad
-        input / missing token, 502 if Buffer rejects the call. The
-        user's edited caption is echoed back in `caption` so the UI
-        can preserve it even after a failure.
-        """
-        from mediahub.publishing.buffer import (
-            schedule_post as _buf_schedule,
-            BufferAuthError,
-            BufferAPIError,
-            BufferRateLimitError,
-        )
-        from mediahub.publishing import posting_log as _plog
-
-        # ---- The unbypassable publish gate (THREAT_MODEL §8) ----
-        # This is the route that makes content public. Three server-side
-        # checks no client (human, script, or LLM-authored payload) can
-        # skip: tenant ownership, recorded human APPROVAL, and consent.
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"ok": False, "error": "not_found"}), 404
-        ws = _get_wf_store()
-        state = ws.load(run_id).get(card_id) if ws is not None else None
-        approved = state is not None and state.status in (CardStatus.APPROVED, CardStatus.POSTED)
-        if not approved:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "not_approved",
-                    "message": "This card hasn't been approved. Approve it on the review page first — publishing always follows a human decision.",
-                }
-            ), 409
-        from mediahub.compliance.gate import (
-            consent_block_reason_for_card,
-            find_card_in_run,
-        )
-
-        _card = find_card_in_run(run_data or {}, card_id)
-        _consent_reason = consent_block_reason_for_card(
-            (run_data or {}).get("profile_id", ""), _card
-        )
-        if _consent_reason:
-            from mediahub.compliance.security_log import record_event as _sec_event
-
-            _sec_event(
-                "publish_blocked_consent",
-                profile_id=(run_data or {}).get("profile_id", ""),
-                detail=f"run={run_id} card={card_id}",
-                outcome="blocked",
-            )
-            return jsonify(
-                {"ok": False, "error": "consent_blocked", "reason": _consent_reason}
-            ), 403
-
-        payload = request.get_json(silent=True) or {}
-        channel_ids = payload.get("channel_ids") or []
-        if not isinstance(channel_ids, list) or not channel_ids:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_channels",
-                    "message": "Pick at least one Buffer channel.",
-                    "caption": payload.get("caption", ""),
-                }
-            ), 400
-
-        caption = (payload.get("caption") or "").strip()
-        if not caption:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_caption",
-                    "message": "Caption is required.",
-                    "caption": "",
-                }
-            ), 400
-
-        media_url = (payload.get("media_url") or "").strip()
-        if media_url:
-            # Defence-in-depth: only allow http/https URLs to be passed
-            # through to Buffer. Anything else (file://, javascript:,
-            # data:, internal ips by raw IP) is rejected up front so a
-            # malicious or accidental relative-href can't reach the
-            # upstream API.
-            from urllib.parse import urlparse as _urlparse
-
-            try:
-                parsed = _urlparse(media_url)
-            except Exception:
-                parsed = None
-            scheme_ok = bool(parsed) and parsed.scheme.lower() in ("http", "https")
-            netloc_ok = bool(parsed) and bool((parsed.netloc or "").strip())
-            if not (scheme_ok and netloc_ok):
-                return jsonify(
-                    {
-                        "ok": False,
-                        "error": "bad_media_url",
-                        "message": "Media URL must be a full http/https URL.",
-                        "caption": caption,
-                    }
-                ), 400
-        media_urls = [media_url] if media_url else None
-
-        scheduled_at_iso = (payload.get("scheduled_at") or "").strip()
-        scheduled_at_dt: Optional[datetime] = None
-        if scheduled_at_iso:
-            try:
-                normalised = scheduled_at_iso.replace("Z", "+00:00")
-                scheduled_at_dt = datetime.fromisoformat(normalised)
-                if scheduled_at_dt.tzinfo is None:
-                    scheduled_at_dt = scheduled_at_dt.replace(tzinfo=timezone.utc)
-            except ValueError:
-                return jsonify(
-                    {
-                        "ok": False,
-                        "error": "bad_time",
-                        "message": "Scheduled time was not a valid ISO 8601 datetime.",
-                        "caption": caption,
-                    }
-                ), 400
-
-        token = _resolve_buffer_token()
-        if not token:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_token",
-                    "message": (
-                        "Buffer isn't connected for this organisation. Paste "
-                        "your Buffer access token to enable scheduling, or "
-                        "use the download option to post manually."
-                    ),
-                    "caption": caption,
-                    "connect_url": url_for("api_connect_buffer"),
-                }
-            ), 401
-
-        ws = _get_wf_store()
-        results: list[dict] = []
-        update_ids: list[str] = []
-        failure: Optional[str] = None
-
-        # Resolve profile_id so every posting-log row is scoped to the
-        # right org. Prefer the run's stored profile_id; fall back to
-        # the session-pinned active profile so logs aren't anonymous
-        # when a run pre-dates the profile system.
-        try:
-            run_data = _load_run(run_id) or {}
-        except Exception:
-            run_data = {}
-        profile_id_for_log = (
-            run_data.get("profile_id")
-            or (_active_profile_id() or "")
-            # Sentinel so a scheduled-but-orphaned post still leaves an
-            # audit trail in the posting log. Without this fallback, a
-            # run with no profile_id silently no-ops the log row because
-            # record_attempt rejects empty profile_id.
-            or "_orphaned"
-        )
-        scheduled_at_iso_for_log = scheduled_at_dt.isoformat() if scheduled_at_dt else None
-
-        # Pre-filter empty channel ids so they don't reach _buf_schedule
-        # and produce a per-channel "channel id is required" failure.
-        # Cast every value to str up front for a consistent shape.
-        channel_ids = [str(c).strip() for c in channel_ids if str(c).strip()]
-
-        from mediahub.publishing.kill_switch import publish_kill_switch_engaged
-
-        if publish_kill_switch_engaged():
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "publishing_halted",
-                    "message": (
-                        "Publishing is currently halted by the operator kill switch."
-                        " No post was sent."
-                    ),
-                    "caption": caption,
-                }
-            ), 503
-
-        # W.11: alt text rides the publish payload — the request's value
-        # wins, else the alt the approver saved in review.
-        _sched_alt = (payload.get("alt_text") or "").strip()
-        if not _sched_alt:
-            try:
-                _ws_sched = _get_wf_store()
-                _st_sched = _ws_sched.load(run_id).get(card_id) if _ws_sched is not None else None
-                _sched_alt = ((_st_sched.edited_captions or {}) if _st_sched else {}).get(
-                    "alt_text", ""
-                )
-            except Exception:
-                _sched_alt = ""
-
-        for cid in channel_ids:
-            try:
-                res = _buf_schedule(
-                    token=token,
-                    channel_id=str(cid),
-                    text=caption,
-                    media_urls=media_urls,
-                    scheduled_at=scheduled_at_dt,
-                    alt_text=_sched_alt,
-                )
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": True,
-                        "update_id": res.get("update_id", ""),
-                    }
-                )
-                if res.get("update_id"):
-                    update_ids.append(res["update_id"])
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="ok",
-                    update_id=res.get("update_id", ""),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-                try:
-                    from mediahub.compliance.security_log import record_event as _sec_event
-
-                    _actor = ""
-                    try:
-                        _actor = _auth.current_user_email() or ""
-                    except Exception:
-                        pass
-                    _sec_event(
-                        "publish_scheduled",
-                        actor=_actor,
-                        profile_id=profile_id_for_log or "",
-                        detail=f"run={run_id} card={card_id} channel={cid}",
-                    )
-                except Exception:
-                    pass
-            except BufferAuthError as exc:
-                failure = str(exc)
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": False,
-                        "error": "auth",
-                        "message": str(exc),
-                    }
-                )
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="failed",
-                    error_kind="auth",
-                    error_message=str(exc),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-                break  # Stop early &mdash; token is the same for every channel.
-            except BufferRateLimitError as exc:
-                # Rate-limit is per-account, not per-channel — once we
-                # hit it for one channel we will hit it for every
-                # subsequent one in the loop. Surface the retry hint
-                # to the user and stop early.
-                failure = str(exc)
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": False,
-                        "error": "rate_limited",
-                        "message": str(exc),
-                        "retry_after": exc.retry_after,
-                    }
-                )
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="failed",
-                    error_kind="rate_limited",
-                    error_message=str(exc),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-                break
-            except BufferAPIError as exc:
-                failure = str(exc)
-                results.append(
-                    {
-                        "channel_id": str(cid),
-                        "ok": False,
-                        "error": "api",
-                        "message": str(exc),
-                    }
-                )
-                _plog.record_attempt(
-                    profile_id=profile_id_for_log,
-                    run_id=run_id,
-                    card_id=card_id,
-                    channel_id=str(cid),
-                    status="failed",
-                    error_kind="api",
-                    error_message=str(exc),
-                    caption=caption,
-                    media_url=media_url or None,
-                    scheduled_at=scheduled_at_iso_for_log,
-                )
-
-        any_ok = any(r.get("ok") for r in results)
-        try:
-            from mediahub.workflow.status import ScheduleStatus
-        except Exception:
-            ScheduleStatus = None  # type: ignore
-
-        if ws is not None and ScheduleStatus is not None:
-            if any_ok and not failure:
-                ws.set_schedule(
-                    run_id,
-                    card_id,
-                    schedule_status=ScheduleStatus.SCHEDULED,
-                    buffer_update_id=";".join(update_ids) or None,
-                    scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-                    schedule_error=None,
-                )
-            elif any_ok and failure:
-                # Partial success: at least one channel went through but
-                # another failed. Record the success and surface the
-                # failure to the user.
-                ws.set_schedule(
-                    run_id,
-                    card_id,
-                    schedule_status=ScheduleStatus.SCHEDULED,
-                    buffer_update_id=";".join(update_ids) or None,
-                    scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-                    schedule_error=failure,
-                )
-            else:
-                ws.set_schedule(
-                    run_id,
-                    card_id,
-                    schedule_status=ScheduleStatus.FAILED,
-                    buffer_update_id=None,
-                    scheduled_at=None,
-                    schedule_error=failure or "Scheduling failed.",
-                )
-
-        if not any_ok:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "buffer_failed",
-                    "message": failure or "Buffer rejected the request.",
-                    "results": results,
-                    "caption": caption,
-                }
-            ), 502
-
-        return jsonify(
-            {
-                "ok": True,
-                "schedule_status": "scheduled",
-                "buffer_update_ids": update_ids,
-                "scheduled_at": scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-                "results": results,
-                "caption": caption,
-                "warning": failure,  # non-empty if a partial failure occurred
-            }
-        )
-
-    # ------------------------------------------------------------------
-    # Posting log — Phase 1.3 observability
-    # ------------------------------------------------------------------
-    #
-    # JSON access to the same log surfaced on /activity. Useful for
-    # tests and for any SPA-style UI that wants to poll for fresh
-    # attempts without re-rendering the whole page. Scoped to the
-    # active organisation, never returns a globally-mixed view.
-    @app.route("/api/posting/log", methods=["GET"])
-    def api_posting_log():
-        from mediahub.publishing import posting_log as _plog
-
-        prof = _active_profile()
-        if prof is None:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "no_active_profile",
-                    "attempts": [],
-                }
-            ), 409
-        try:
-            limit_raw = (request.args.get("limit") or "20").strip()
-            limit = max(1, min(200, int(limit_raw)))
-        except (TypeError, ValueError):
-            limit = 20
-        run_id = (request.args.get("run_id") or "").strip() or None
-        card_id = (request.args.get("card_id") or "").strip() or None
-        try:
-            attempts = _plog.recent_attempts(
-                prof.profile_id,
-                limit=limit,
-                run_id=run_id,
-                card_id=card_id,
-            )
-        except Exception as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "log_unavailable",
-                    "message": str(exc),
-                    "attempts": [],
-                }
-            ), 500
-        return jsonify(
-            {
-                "ok": True,
-                "profile_id": prof.profile_id,
-                "count": len(attempts),
-                "attempts": attempts,
-            }
-        )
-
     # ====================================================================
     # V7 NEW ROUTES
     # ====================================================================
+
+    # ---- /templates &mdash; the visual template/archetype gallery (UI 1.10) ---
+    @app.route("/templates")
+    def template_gallery():
+        # Browse-only gallery of the content archetypes the design director
+        # draws from, shown *before* creating a pack. Renders existing data
+        # only (the live archetype catalog + each archetype's authored notes)
+        # with deterministic schematic previews + category filters — no new
+        # API, no external service, and no way to force an archetype (the
+        # engine still picks per moment). All logic lives in the Flask-free
+        # ``template_gallery`` helper so it unit-tests without a request.
+        from mediahub.web import template_gallery as _gallery
+
+        active = _gallery.valid_category(request.args.get("category"))
+        body = _gallery.render_gallery_body(
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            active_category=active,
+            studio_url=url_for("template_preview_gallery"),
+        )
+        return _layout("Templates", body, active="templates")
+
+    # ---- /templates/preview &mdash; G1.26 live archetype × style-pack gallery ---
+    #
+    # Where /templates (UI 1.10) shows schematic wireframes, this surface shows
+    # *live, rendered* preview thumbnails of the full template space (every
+    # archetype × every style pack). It is a two-axis explorer: browse every
+    # archetype against a pinned pack, and every pack (filtered + paginated)
+    # against a pinned archetype. Pure gallery logic lives in the Flask-free
+    # ``template_preview_gallery`` helper; the two render-path closures below
+    # (brand resolution + the disk-cached live render) are the only request-bound
+    # parts. Thumbnails degrade to an honest self-contained schematic when a live
+    # render is unavailable, so the gallery is never broken.
+    _PREVIEW_RENDER_TIMEOUT = float(os.environ.get("MEDIAHUB_PREVIEW_RENDER_TIMEOUT", "20") or "20")
+    # Fixed, representative sample so previews are honest and comparable tile to
+    # tile (only the template changes, never the data). variation_seed is pinned
+    # so the brief is fully deterministic — no LLM, no network.
+    _PREVIEW_ITEM = {
+        "id": "preview",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+        },
+    }
+
+    def _preview_brand_signature(brand_kit) -> str:
+        """Short stable hash of a brand kit's resolved colours — the cache key.
+
+        Keyed on the colours (not the org id) so re-branding invalidates stale
+        previews and two orgs never share a cache entry by accident.
+        """
+        raw = "|".join(
+            str(getattr(brand_kit, attr, "") or "")
+            for attr in (
+                "primary_colour",
+                "secondary_colour",
+                "accent_colour",
+                "short_name",
+                "display_name",
+            )
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+    def _preview_brand_kit():
+        """The brand previews render in: the signed-in org's kit, else a neutral
+        demo brand. Returns ``(brand_kit, signature)``."""
+        prof = _active_profile()
+        if prof is not None:
+            try:
+                bk = prof.get_brand_kit()
+                return bk, _preview_brand_signature(bk)
+            except Exception:
+                pass
+        from mediahub.brand.kit import BrandKit
+
+        bk = BrandKit(
+            profile_id="_preview",
+            display_name="MediaHub",
+            primary_colour="#0E2A47",
+            secondary_colour="#C9A227",
+            accent_colour="#FFFFFF",
+            short_name="MH",
+        )
+        return bk, "demo-" + _preview_brand_signature(bk)
+
+    def _render_template_preview(archetype, pack_id, brand_kit, size, cache_path):
+        """Render one (archetype × pack) sample to ``cache_path`` and return it.
+
+        Deterministic: the same fixed sample brief, with the layout + pack
+        overridden, rendered with no athlete cutout. Holds a render slot so it
+        never thrashes the single-CPU box.
+        """
+        from mediahub.creative_brief.generator import generate
+        from mediahub.graphic_renderer.render import render_brief
+
+        brief = generate(
+            dict(_PREVIEW_ITEM),
+            None,
+            brand_kit,
+            profile_id="_preview",
+            meet_name="Manchester Open",
+            variation_seed=0,
+        )
+        brief.layout_template = archetype
+        brief.style_pack = pack_id
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with _render_slot("preview", f"{archetype}/{pack_id}", timeout=_PREVIEW_RENDER_TIMEOUT):
+            res = render_brief(
+                brief,
+                output_dir=str(cache_path.parent),
+                size=size,
+                brand_kit=brand_kit,
+                skip_cutout=True,
+            )
+        src = Path(res.visual.file_path)
+        if src.exists() and src.resolve() != cache_path.resolve():
+            try:
+                src.replace(cache_path)
+            except OSError:
+                import shutil
+
+                shutil.copyfile(src, cache_path)
+        if cache_path.exists():
+            return cache_path
+        return src if src.exists() else None
+
+    @app.route("/templates/preview")
+    def template_preview_gallery():
+        from mediahub.web import template_preview_gallery as _studio
+
+        state = _studio.normalise_state(request.args)
+
+        def _thumb_url(archetype, pack_id, hero=False):
+            url = url_for("template_preview_thumb", archetype=archetype, pack_id=pack_id)
+            return url + "?hero=1" if hero else url
+
+        body = _studio.render_studio_body(
+            studio_url=url_for("template_preview_gallery"),
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            thumb_url=_thumb_url,
+            state=state,
+        )
+        return _layout("Template previews", body, active="templates")
+
+    @app.route("/templates/preview/thumb/<archetype>/<pack_id>")
+    def template_preview_thumb(archetype: str, pack_id: str):
+        from flask import Response, send_file
+
+        from mediahub.web import template_preview_gallery as _studio
+
+        # Coerce to known catalog members — junk can never render an unknown
+        # layout, 500, or escape the cache dir (no path traversal).
+        archetype = _studio.valid_archetype(archetype)
+        pack_id = _studio.valid_pack(pack_id)
+        size = (560, 700) if request.args.get("hero") == "1" else (384, 480)
+
+        def _schematic_response():
+            resp = Response(_studio.standalone_schematic_svg(archetype), mimetype="image/svg+xml")
+            resp.headers["Cache-Control"] = "public, max-age=300"
+            return resp
+
+        brand_kit, brand_sig = _preview_brand_kit()
+        w, h = size
+        cache_path = (
+            DATA_DIR / "template_previews" / brand_sig / f"{archetype}__{pack_id}__{w}x{h}.png"
+        )
+        if cache_path.exists() and cache_path.stat().st_size > 100:
+            resp = send_file(str(cache_path), mimetype="image/png")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+
+        try:
+            png_path = _render_template_preview(archetype, pack_id, brand_kit, size, cache_path)
+        except _RenderBusy:
+            return _schematic_response()
+        except Exception:
+            log.warning(
+                "template preview render failed for %s/%s", archetype, pack_id, exc_info=True
+            )
+            return _schematic_response()
+        if not png_path or not Path(png_path).exists():
+            return _schematic_response()
+        resp = send_file(str(png_path), mimetype="image/png")
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
+    # ---- /studio &mdash; G1.27 interactive brief/design editor ---------------
+    @app.route("/studio")
+    def design_studio():
+        # The interactive design editor: tweak text layers, palette, archetype
+        # and style pack and watch the card re-render live on the *real* engine
+        # (creative_brief → graphic_renderer.render_brief), distinct from the
+        # browse-only /templates gallery. All page logic lives in the Flask-free
+        # ``design_editor`` helper so it unit-tests without a request; the route
+        # only resolves url_for() links + the active org's palette and wraps the
+        # body with _layout.
+        from mediahub.web import design_editor as _studio
+
+        # Seed the colour controls from the signed-in org's brand kit when
+        # available; the helper re-validates every value, so a missing/odd
+        # colour falls back to the neutral default.
+        seed_palette = None
+        try:
+            _prof = _active_profile()
+            if _prof is not None:
+                _bk = _prof.get_brand_kit()
+                seed_palette = {
+                    "primary": getattr(_bk, "primary_colour", "") or "",
+                    "secondary": getattr(_bk, "secondary_colour", "") or "",
+                    "accent": getattr(_bk, "accent_colour", "") or "",
+                }
+        except Exception:
+            seed_palette = None
+
+        body = _studio.render_editor_body(
+            render_url=url_for("api_studio_render"),
+            gallery_url=url_for("template_gallery"),
+            make_url=url_for("make_page"),
+            palette=seed_palette,
+        )
+        return _layout("Studio", body, active="studio")
+
+    @app.route("/api/studio/render", methods=["POST"])
+    def api_studio_render():
+        # Render one studio brief to a PNG and return it as a base64 data URI
+        # plus its explainability sidecar (resolved --mh-* roles, pack why,
+        # archetype signature, honest legibility/taste notices). JSON-bodied, so
+        # it is CSRF-exempt by content-type. No tenant data is read or written —
+        # the brief is built entirely from the (coerced, renderer-safe) request.
+        import base64 as _b64
+        import tempfile as _tempfile
+        import time as _time
+
+        from mediahub.web import design_editor as _studio
+
+        payload = request.get_json(silent=True)
+        params = _studio.coerce_params(payload if isinstance(payload, dict) else {})
+
+        sig = params.signature()
+        cached = _studio_render_cache.get(sig)
+        if cached is not None:
+            return jsonify(cached)
+
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+        except Exception:  # pragma: no cover - renderer module import failure
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "renderer_unavailable",
+                        "message": "The graphics renderer is unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+
+        brief = _studio.build_brief_from_params(params)
+        brand_kit = _studio.brand_kit_for_params(params)
+        t0 = _time.time()
+        try:
+            with _tempfile.TemporaryDirectory() as _d:
+                result = render_brief(
+                    brief,
+                    output_dir=_d,
+                    size=params.size,
+                    format_name=params.format_id,
+                    brand_kit=brand_kit,
+                )
+                png_bytes = Path(result.visual.file_path).read_bytes()
+        except RuntimeError as exc:
+            # Playwright/Chromium not installed — surface an honest error rather
+            # than ever fabricating a preview image (CLAUDE.md honest-error rule).
+            log.warning("studio render unavailable: %s", exc)
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_unavailable",
+                        "message": "Live rendering is temporarily unavailable on this server.",
+                    }
+                ),
+                503,
+            )
+        except Exception:
+            log.exception("studio render failed")
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "render_failed",
+                        "message": "Could not render this design — try a different combination.",
+                    }
+                ),
+                500,
+            )
+
+        out = {
+            "ok": True,
+            "image": "data:image/png;base64," + _b64.b64encode(png_bytes).decode("ascii"),
+            "meta": _studio.explain(params),
+            "render_ms": int((_time.time() - t0) * 1000),
+        }
+        _studio_render_cache[sig] = out
+        return jsonify(out)
 
     # ---- /make &mdash; the Create tab (single entry point) -------------------
     @app.route("/make")
@@ -17346,28 +23672,34 @@ function mhPlanGenerate(btn) {{
         except ImportError:
             REGISTRY = {}
 
-        # Presentation-only metadata (output formats + rough effort) keyed
-        # by ContentType value. This is UI sugar — it does NOT live on the
-        # registry dataclass, so adding/removing keys here can never affect
-        # the engine. Unknown types fall back to a generic format chip.
-        _ct_presentation = {
-            "meet_recap": (["Caption", "Graphic", "Reel"], "~ 60s"),
-            "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
-            "event_preview": (["Caption", "Graphic"], "~ 40s"),
-            "sponsor_activation": (["Caption", "Graphic"], "~ 30s"),
-            "session_update": (["Caption", "Graphic"], "~ 20s"),
-            "free_text": (["Caption", "Graphic"], "~ 15s"),
-        }
+        # Presentation-only metadata (output formats + rough effort) lives in
+        # mediahub.web.content_intro.PRESENTATION_FORMATS so the Create tiles and
+        # each heading's "how it works" first slide read from one source. UI
+        # sugar only — it does NOT live on the registry dataclass, so it can
+        # never affect the engine. Unknown types fall back to a generic chip.
+
+        # Session Update and Sponsor Post are no longer their own tiles —
+        # Free Text now interprets any such prompt (and adds photos) into a
+        # graphic, so a single "describe it" path covers them. The content
+        # types + their routes stay for deep links/back-compat; they're just
+        # not surfaced as separate Create cards.
+        _hidden_cts = {"session_update", "sponsor_activation"}
 
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so
         # users have a clear primary path instead of six equal-weight options.
         primary_marked = False
         for ct, meta in REGISTRY.items():
-            # Defensive: a stale endpoint name in the content-type
-            # registry must NEVER 500 the whole /make page.
+            if getattr(meta.type, "value", str(ct)) in _hidden_cts:
+                continue
+            ct_val = getattr(meta.type, "value", str(ct))
+            # Defensive: a stale endpoint name in the content-type registry must
+            # NEVER 500 the whole /make page. We resolve the primary route only
+            # to decide Ready-vs-disabled; the tile itself links to the per-type
+            # "how it works" first slide (content_type_intro), whose Start button
+            # carries on to the real route.
             try:
-                route_url = url_for(meta.primary_route_endpoint)
+                url_for(meta.primary_route_endpoint)
                 href_ok = True
             except Exception:
                 log.warning(
@@ -17376,30 +23708,65 @@ function mhPlanGenerate(btn) {{
                     ct,
                     meta.primary_route_endpoint,
                 )
-                route_url = "#"
                 href_ok = False
             if meta.is_implemented and href_ok:
                 badge = '<span class="tag live">Ready</span>'
-                action = f'href="{route_url}"'
+                action = f'href="{url_for("content_type_intro", ct=ct_val)}"'
                 disabled_cls = ""
                 if not primary_marked:
                     disabled_cls = " mh-template-primary"
                     primary_marked = True
             else:
                 badge = '<span class="tag">Coming soon</span>'
-                action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'
+                action = 'href="#" onclick="return false"'
                 disabled_cls = " is-disabled"
 
             # Build the output-format chip row + effort estimate.
-            ct_val = getattr(meta.type, "value", str(ct))
-            formats, effort = _ct_presentation.get(ct_val, (["Caption"], ""))
+            formats, effort = _ct_presentation_for(ct_val)
             fmt_chips = "".join(
                 f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
             )
             effort_html = f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
+            # Pointer-following glow-border (::after — free on .mh-template and
+            # .mh-template-primary) only on live tiles; never on a "Coming soon"
+            # tile, where a glow would falsely imply it's clickable.
+            glow_cls = " mh-glow-border" if (meta.is_implemented and href_ok) else ""
+
+            # U.14 cursor-following preview — implemented tiles spawn a floating
+            # "output frame" poster (orientation + canonical dimensions + format
+            # chips) the static tile can't show. Honest: only real tile data,
+            # clearly a stylised frame (same family as the home samples), no
+            # fabricated content. Coming-soon tiles get no preview.
+            _is_live = bool(meta.is_implemented and href_ok)
+            hp_cls = " mh-hp" if _is_live else ""
+            hp_tpl = ""
+            if _is_live:
+                _f_low = [f.lower() for f in formats]
+                if "reel" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Motion reel", "1080×1920"
+                elif "story" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Story card", "1080×1920"
+                elif "graphic" in _f_low:
+                    _hp_eyebrow, _hp_dims = "Feed graphic", "1080×1350"
+                else:
+                    _hp_eyebrow, _hp_dims = "Caption", "Ready to post"
+                _hp_fmt_chips = "".join(
+                    f'<span class="mh-hp-poster-fmt">{_h(f)}</span>' for f in formats
+                )
+                hp_tpl = (
+                    '<template class="mh-hp-tpl"><div class="mh-hp-poster">'
+                    '<div class="mh-hp-poster-top">'
+                    f'<span class="mh-hp-poster-eyebrow">{_h(_hp_eyebrow)}</span>'
+                    f'<span class="mh-hp-poster-mark">{meta.icon_svg}</span>'
+                    "</div>"
+                    f'<div class="mh-hp-poster-title">{_h(meta.title)}</div>'
+                    f'<div class="mh-hp-poster-dims">{_h(_hp_dims)}</div>'
+                    f'<div class="mh-hp-poster-formats">{_hp_fmt_chips}</div>'
+                    "</div></template>"
+                )
 
             tiles_html += (
-                f'<a {action} class="mh-template{disabled_cls}">'
+                f'<a {action} class="mh-template{glow_cls}{disabled_cls}{hp_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(meta.title)}</h3>'
@@ -17408,6 +23775,84 @@ function mhPlanGenerate(btn) {{
                 f"<p>{_h(meta.description)}</p>"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
+                f"{hp_tpl}"
+                "</a>"
+            )
+
+        # Design studio — a full, first-class Create tile, not the old slim
+        # gallery-link strip. The live design editor (tweak text / palette /
+        # archetype / style pack and watch the card re-render on the real
+        # engine) is a function MediaHub offers in its own right, equal-billing
+        # with the content types, so it earns a tile. Live/Ready, sitting after
+        # the content types and ahead of the disabled coming-soon tiles.
+        _studio_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>'
+            '<line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>'
+            '<line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>'
+            '<line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>'
+            '<line x1="17" y1="16" x2="23" y2="16"/></svg>'
+        )
+        tiles_html += (
+            f'<a href="{_h(url_for("design_studio"))}" class="mh-template mh-glow-border">'
+            f'<div class="mh-template-icon">{_studio_svg}</div>'
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+            '<h3 style="margin:0">Design studio</h3>'
+            '<span class="tag live">Ready</span>'
+            "</div>"
+            "<p>Tweak the text, palette, archetype and style pack and watch the "
+            "card re-render live on the real engine &mdash; your starting point "
+            "for a custom look.</p>"
+            '<div class="mh-template-formats">'
+            '<span class="mh-template-fmt">Live editor</span>'
+            '<span class="mh-template-fmt">Graphic</span>'
+            "</div>"
+            '<span class="mh-template-cta">Open studio</span>'
+            "</a>"
+        )
+
+        # Coming-soon surfaces relocated here from the old Club-data tab —
+        # presented as Create tiles so the whole "what can I make?" catalogue
+        # lives in one place. Disabled until they ship.
+        _live_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/>'
+            '<path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+            '<path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>'
+        )
+        _wraps_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/>'
+            '<line x1="12" y1="22" x2="12" y2="7"/>'
+            '<path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>'
+            '<path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>'
+        )
+        for _cs_title, _cs_desc, _cs_icon in (
+            (
+                "Live meet",
+                "Point MediaHub at the host club's live-results page during a gala; "
+                "new results queue cards for approval as they land.",
+                _live_svg,
+            ),
+            (
+                "Season wraps",
+                "Month-in-numbers and season recap packs built from your stored "
+                "history — PBs, medals, records, debuts, busiest swimmer.",
+                _wraps_svg,
+            ),
+        ):
+            tiles_html += (
+                '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
+                f'<div class="mh-template-icon">{_cs_icon}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
+                '<span class="tag">Coming soon</span>'
+                "</div>"
+                f"<p>{_h(_cs_desc)}</p>"
+                '<span class="mh-template-cta">Soon</span>'
                 "</a>"
             )
 
@@ -17478,6 +23923,76 @@ function mhPlanGenerate(btn) {{
                     f"</div>"
                 )
 
+        # U.4 — first-run nudge. A brand-new org (no completed runs yet) gets
+        # the one-click sample path up top so the very first thing it can do is
+        # see the whole engine run, rather than having to source a results file
+        # before anything appears. Once the org has real runs the nudge retires.
+        first_run_cta = ""
+        if prof_for_strip is not None:
+            _has_done_run = False
+            try:
+                conn = _db()
+                row = conn.execute(
+                    "SELECT 1 FROM runs WHERE profile_id = ? AND status = 'done' LIMIT 1",
+                    (prof_for_strip.profile_id,),
+                ).fetchone()
+                conn.close()
+                _has_done_run = row is not None
+            except Exception:
+                _has_done_run = False
+            if not _has_done_run:
+                first_run_cta = _sample_pack_cta(
+                    heading="New here? See it work in one click.",
+                    sub=(
+                        "Generate a sample content pack from a demo meet and watch "
+                        "detection, ranking, captions and branded cards happen end "
+                        "to end — in your colours and voice. No file needed; it "
+                        "lands in your review queue, and you can delete it after."
+                    ),
+                    button_label="Generate a sample pack →",
+                )
+
+        # Browse-the-templates entry point — lets a user see the card styles
+        # the engine can produce *before* picking a starting point (UI 1.10).
+        gallery_link_html = (
+            f'<a class="mh-arch-gallery-link" href="{_h(url_for("template_gallery"))}">'
+            '<span class="mh-agl-text">'
+            '<span class="mh-agl-title">Browse the template gallery</span>'
+            '<span class="mh-agl-sub">See the 12 card styles your packs are '
+            "composed from — the engine picks the right one per moment.</span>"
+            "</span>"
+            '<span class="mh-agl-cta">View templates &rarr;</span>'
+            "</a>"
+        )
+
+        # Plan moved here from the top bar — it answers this page's own hero
+        # question ("what should we make?"), so it sits at the TOP of Create as
+        # the predominant, strategic entry point into the ranked, explainable
+        # content plan. Like every tile it opens its own how-it-works first slide
+        # (/make/plan); that slide's "Open Plan" CTA continues into the planner.
+        _plan_tile_icon = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<path d="M9 11l3 3L22 4"/>'
+            '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
+            "</svg>"
+        )
+        plan_entry_html = (
+            f'<a href="{_h(url_for("content_type_intro", ct="plan"))}" class="mh-plan-tile">'
+            f'<span class="mh-plan-tile-icon">{_plan_tile_icon}</span>'
+            '<span class="mh-plan-tile-body">'
+            '<span class="mh-plan-tile-eyebrow">Plan &middot; Start here</span>'
+            '<span class="mh-plan-tile-title">Not sure what to post? '
+            '<em class="editorial">Plan your next posts.</em></span>'
+            '<span class="mh-plan-tile-desc">MediaHub ranks what to post next from your '
+            "results, the calendar and what you tell it &mdash; with the reasoning shown for "
+            "every item. Describe what&rsquo;s coming up in your own words and it fills in the "
+            "calendar for you, then jump straight into making the top idea.</span>"
+            "</span>"
+            '<span class="mh-plan-tile-cta">Open Plan &rarr;</span>'
+            "</a>"
+        )
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
@@ -17485,10 +24000,65 @@ function mhPlanGenerate(btn) {{
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
             f"{_free_tier_banner_html()}"
+            f"{plan_entry_html}"
             f"{brand_strip_html}"
+            f"{first_run_cta}"
+            f"{gallery_link_html}"
             f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
+
+    # ---- /make/<ct> — the per-heading "how it works" first slide ------------
+    @app.route("/make/<ct>")
+    def content_type_intro(ct):
+        # Every implemented Create tile links here first. The slide explains, in
+        # the landing page's visual language, what this heading takes in and
+        # produces; its "Start" CTA carries on to the real route. Registry-driven
+        # (mediahub.web.content_intro), so a heading added to the REGISTRY gets a
+        # first slide automatically — no per-heading wiring here.
+        try:
+            from mediahub.club_platform.content_types import REGISTRY
+            from mediahub.club_platform.post_types import canonical_slug, implemented_content_type
+        except ImportError:
+            return redirect(url_for("make_page"))
+
+        # Plan is the predominant non-content-type entry. It gets the same
+        # how-it-works first slide, but its "Open Plan" CTA opens the planner.
+        if canonical_slug(ct) == "plan":
+            try:
+                plan_start = url_for("plan_page")
+            except Exception:
+                plan_start = url_for("make_page")
+            body = _render_plan_intro(start_url=plan_start, back_url=url_for("make_page"))
+            return _layout("Plan", body, active="create")
+
+        ctype = implemented_content_type(ct)
+        if ctype is None or ctype not in REGISTRY:
+            # Unknown / planning-only slug — send them back to the chooser.
+            return redirect(url_for("make_page"))
+        meta = REGISTRY[ctype]
+
+        formats, effort = _ct_presentation_for(ctype.value)
+        # Start → the real flow. Degrade gracefully (a missing endpoint sends the
+        # user back to Create rather than 500ing the intro).
+        try:
+            start_url = url_for(meta.primary_route_endpoint)
+        except Exception:
+            log.warning(
+                "content_type_intro: %r references unknown endpoint %r",
+                ctype.value,
+                meta.primary_route_endpoint,
+            )
+            start_url = url_for("make_page")
+
+        body = _render_content_intro(
+            meta,
+            formats=formats,
+            effort=effort,
+            start_url=start_url,
+            back_url=url_for("make_page"),
+        )
+        return _layout(meta.title, body, active="create")
 
     def _compose_spotlight_caption(run_id: str, swimmer_key: str, tone: str = ""):
         """Compose the single spotlight caption from APPROVED achievements.
@@ -17817,24 +24387,33 @@ function mhPlanGenerate(btn) {{
         _active_pid = _active_profile_id()
         recent_runs: list = []
         db_failed = False
+        # Spotlight is a *fresh-moments* surface: it only offers meets from the
+        # last month of runs. created_at is a tz-aware isoformat() string, so the
+        # cutoff is computed the same way and compared lexically (ISO-8601 sorts
+        # lexically for a fixed shape) — never SQLite datetime(), whose space/no-
+        # offset format wouldn't compare cleanly against the stored "T…+00:00".
+        from datetime import timedelta as _td
+
+        _spot_cutoff = (datetime.now(timezone.utc) - _td(days=31)).isoformat()
         try:
             conn = _db()
             try:
                 if _active_pid:
                     recent_runs = conn.execute(
                         "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND "
+                        "WHERE status='done' AND created_at >= ? AND "
                         "(profile_id = ? OR profile_id IS NULL OR profile_id = '') "
                         "ORDER BY created_at DESC LIMIT 20",
-                        (_active_pid,),
+                        (_spot_cutoff, _active_pid),
                     ).fetchall()
                 else:
                     # No active org (pre-onboarding sandbox / tests):
-                    # nothing to isolate against, so list everything as
-                    # before.
+                    # nothing to isolate against, so list everything in-window.
                     recent_runs = conn.execute(
                         "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' ORDER BY created_at DESC LIMIT 20"
+                        "WHERE status='done' AND created_at >= ? "
+                        "ORDER BY created_at DESC LIMIT 20",
+                        (_spot_cutoff,),
                     ).fetchall()
             finally:
                 conn.close()
@@ -17928,16 +24507,35 @@ function mhPlanGenerate(btn) {{
                     swimmers = []
                 if swimmers:
                     _review_url = url_for("review", run_id=run_id_param)
+                    # UI2.2: the run's club for the athlete-avatar tooltips.
+                    _sp_club = (
+                        run_data.get("profile_display") or run_data.get("club_filter") or ""
+                    ).strip()
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
                     for sw in swimmers:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
+                        _n_ach = sw["n_achievements"]
+                        _ach_label = f"{_n_ach} achievement{'s' if _n_ach != 1 else ''}"
+                        # Decorative chip (it lives inside the card link, so it
+                        # stays aria-hidden / out of the tab order); the link's
+                        # own text carries the same name + count for AT.
+                        _sw_avatar = _athlete_avatar(
+                            sw["swimmer_name"],
+                            club=_sp_club,
+                            stat=_ach_label,
+                            focusable=False,
+                            size=38,
+                        )
                         swimmers_html += f"""
-<a href="{sp_url}" style="display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
-  <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
-  <div style="font-size:12px;color:var(--ink-dim)">{sw["n_achievements"]} achievement{"s" if sw["n_achievements"] != 1 else ""}</div>
+<a href="{sp_url}" style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
+  {_sw_avatar}
+  <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+    <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
+    <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
+  </div>
 </a>"""
                     swimmers_html += "</div></div>"
                 else:
@@ -17953,6 +24551,7 @@ function mhPlanGenerate(btn) {{
 
 <div class="card">
   <h2>Choose a meet</h2>
+  <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
   <form method="get" action="{url_for("spotlight_landing")}">
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
@@ -18029,6 +24628,8 @@ function mhPlanGenerate(btn) {{
                 wf_states = ws.load(run_id)
         except Exception:
             wf_states = {}
+        # UI 1.25 — one indexed query for every card's reaction tally.
+        _react_counts = _reaction_counts_for_run(run_id)
 
         # Render achievements with the same approve strip the meet recap
         # uses (_render_wf_actions): outline "Approve" until approved,
@@ -18077,7 +24678,7 @@ function mhPlanGenerate(btn) {{
                 sp_visual_panel = (
                     f'<div class="visual-panel" data-card="{card_id_safe}" '
                     f'style="display:none;margin-top:10px;padding:12px;'
-                    f"background:rgba(212,255,58,0.04);border:1px solid var(--border);"
+                    f"background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);"
                     f'border-radius:8px"></div>'
                 )
 
@@ -18096,6 +24697,8 @@ function mhPlanGenerate(btn) {{
       {_render_wf_actions(run_id, card_id_raw, wf_status)}
       <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
       {sp_graphic_btn}
+      <span style="flex:1;min-width:8px"></span>
+      {_render_reactions(run_id, card_id_raw, _react_counts)}
       <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
     </div>
     {sp_visual_panel}
@@ -18131,10 +24734,32 @@ function mhPlanGenerate(btn) {{
             for t, m in _SP_TONE_META.items()
         )
 
+        # UI2.2: the hero athlete avatar + tooltip. Standalone, so it's
+        # keyboard-reachable (focusable) and exposes the same grounded summary
+        # to assistive tech via aria-label. Club + haul come from the run and
+        # the spotlight pack's band counts — all real figures, never invented.
+        _hero_club = (run_data.get("profile_display") or run_data.get("club_filter") or "").strip()
+        _hero_n = pack["n_achievements"]
+        _hero_stat = f"{_hero_n} moment{'s' if _hero_n != 1 else ''}"
+        if pack["n_elite"]:
+            _hero_stat = f"{pack['n_elite']} elite · {_hero_stat}"
+        elif pack["n_strong"]:
+            _hero_stat = f"{pack['n_strong']} strong · {_hero_stat}"
+        _hero_avatar = _athlete_avatar(
+            pack["swimmer_name"],
+            club=_hero_club,
+            stat=_hero_stat,
+            focusable=True,
+            size=52,
+        )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
-  <h1>{_h(pack["swimmer_name"])}</h1>
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    {_hero_avatar}
+    <h1 style="margin:0">{_h(pack["swimmer_name"])}</h1>
+  </div>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(pack["meet_name"])}</span><span class="sep">/</span>
     <a href="{_back_url}" style="color:var(--ink-muted);text-decoration:none">&larr; Swimmer list</a><span class="sep">/</span>
@@ -18691,24 +25316,63 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<td class="muted">{_h(ts)}</td></tr>'
             )
         new_url = url_for("free_text_chat_new")
+        quick_url = url_for("free_text_quick_build")
+        quick_err = session.pop("free_text_quick_error", "")
+        quick_err_html = (
+            '<div class="mh-flash error" role="alert" style="margin:0 0 14px;padding:12px 16px;'
+            "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
+            f'background:var(--bad-bg);color:var(--ink);font-size:13px">{_h(quick_err)}</div>'
+            if quick_err
+            else ""
+        )
         body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Free text — chat</span>
-  <h1>Describe the moment.<br><em class="editorial">We brief it.</em></h1>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Free text</span>
+  <h1>Describe it.<br><em class="editorial">Get a graphic.</em></h1>
   <p class="lede">
-  Talk to Claude. Describe what you want to post, answer the assistant's
-  questions, and approve the brief when it's right. The assistant
-  researches the web on its own &mdash; names, venues, PBs, sponsor info &mdash; so
-  the brief is grounded in evidence, not invented.
+  Type what you want &mdash; a shout-out, a sponsor thank-you, a session
+  update, a milestone, anything &mdash; and MediaHub interprets the prompt and
+  builds a branded graphic from it. Add your own photos and it places them in.
+  No forms, no templates: the prompt carries the context.
   </p>
-  <div class="mh-hero-actions">
-    <form method="post" action="{new_url}" style="display:inline">
-      <button type="submit" class="mh-cta-primary" style="border:0">Start a new chat &rarr;</button>
-    </form>
-  </div>
 </section>
 
 {_llm_unavailable_banner()}
+{quick_err_html}
+
+<div class="card" style="padding:20px 22px;margin-bottom:18px">
+  <form method="post" action="{
+            quick_url
+        }" enctype="multipart/form-data" data-loader-text="Building your graphic">
+    <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
+    <textarea id="ft-prompt" name="prompt" rows="4" required {_CYCLE_PH_ATTR_MOMENT}
+      placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
+      style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+        &#x1F4CE; Add photos
+        <input type="file" name="photos" accept="image/*" multiple style="display:none"
+          onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
+      </label>
+      <span id="ft-photo-count" class="dim" style="font-size:12px"></span>
+      <button type="submit" class="mh-cta-primary" style="border:0;margin-left:auto">Generate graphic &rarr;</button>
+    </div>
+    <p class="dim" style="font-size:12px;margin:10px 0 0 0">You'll land on a draft with the graphic rendered &mdash; edit the
+    caption, swap the photo, change format, approve, or export from there.</p>
+  </form>
+</div>
+
+<div class="card" style="padding:16px 20px;margin-bottom:18px">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="font-weight:600">Want to refine it together first?</div>
+      <p class="dim" style="font-size:13px;margin:4px 0 0 0">Chat it through &mdash; the assistant researches names, venues and PBs and proposes a brief you approve before generating.</p>
+    </div>
+    <form method="post" action="{new_url}" style="margin:0">
+      <button type="submit" class="btn secondary" style="border:0;white-space:nowrap">Start a chat &rarr;</button>
+    </form>
+  </div>
+</div>
 
 <div class="card">
   <h2>Past chats</h2>
@@ -18735,6 +25399,118 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </p>
 """
         return _layout("Free text — chat", body, active="create")
+
+    def _quick_save_library_photo(f, profile_id: str):
+        """Save one uploaded photo into the org's media library so it shows up
+        in the per-graphic photo picker. Returns the saved MediaAsset or None."""
+        if not (_v8_ok and _v8_get_media_store is not None and profile_id):
+            return None
+        import uuid as _uuid
+
+        from mediahub.media_library.models import MediaAsset
+
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
+        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
+        f.save(str(dest))
+        store = _v8_get_media_store()
+        asset = MediaAsset(
+            id="",
+            filename=Path(f.filename or dest.name).name,
+            path=str(dest),
+            type="other",
+            description_raw="",
+            profile_id=profile_id,
+        )
+        return store.save(asset)
+
+    @app.route("/free-text/quick-build", methods=["POST"])
+    def free_text_quick_build():
+        """Single prompt → branded graphic.
+
+        The user describes what they want (optionally attaching photos); we
+        interpret it into a brief with one LLM call, save it as a draft pack,
+        and land on the draft with the graphic auto-rendering. This is the
+        ChatGPT-style "describe it and get a graphic" path that supersedes the
+        bespoke Session Update / Sponsor Post forms — the prompt itself carries
+        the context, whatever it is.
+        """
+        from mediahub.free_text_chat.agent import build_brief_from_prompt
+        from mediahub.ai_core import ProviderNotConfigured, ProviderError
+        from mediahub.club_platform.stub_pack_store import save_pack
+
+        prompt = (request.form.get("prompt") or "").strip()
+        if not prompt:
+            return redirect(url_for("free_text_chat_page"))
+        active_pid = _active_profile_id() or ""
+
+        # Uploaded photos → media library so they're available to the graphic
+        # picker; the first becomes the auto-rendered background.
+        uploaded_ids: list[str] = []
+        for f in request.files.getlist("photos"):
+            if not f or not f.filename:
+                continue
+            try:
+                a = _quick_save_library_photo(f, active_pid)
+                if a is not None:
+                    uploaded_ids.append(a.id)
+            except Exception:
+                app.logger.exception("free-text quick-build photo upload failed")
+        picked_ids = [i for i in request.form.getlist("library_asset_id") if i]
+
+        club_brand = _active_club_brand_for_llm()
+        try:
+            brief = build_brief_from_prompt(prompt, club_brand=club_brand)
+        except (ProviderNotConfigured, ProviderError) as e:
+            # Honest error — no fake graphic. Bounce back with the reason.
+            session["free_text_quick_error"] = str(e)
+            return redirect(url_for("free_text_chat_page"))
+
+        caption = "\n\n".join(
+            [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
+        ).strip()
+        card = {
+            "platform": brief.get("platform") or "Instagram",
+            "caption": caption,
+            "hashtags": brief.get("hashtags") or [],
+            "confidence": 0.9,
+            "notes": brief.get("visual_concept", "") or "",
+            "status": "queue",
+        }
+        form_data = {
+            "free_text": prompt,
+            "source": "quick",
+            "title": brief.get("title") or "",
+            "wants_reel": "1" if brief.get("wants_reel") else "",
+        }
+        if active_pid:
+            form_data["profile_id"] = active_pid
+
+        chosen = ""
+        all_ids = uploaded_ids + picked_ids
+        if all_ids and _v8_get_media_store is not None and active_pid:
+            try:
+                store = _v8_get_media_store()
+                resolved = [
+                    a
+                    for a in (store.get(aid) for aid in all_ids)
+                    if a is not None and a.profile_id == active_pid
+                ]
+                if resolved:
+                    form_data["library_asset_ids"] = ",".join(a.id for a in resolved)
+                    form_data["library_asset_paths"] = ",".join(a.path for a in resolved)
+                    form_data["attached_photo_path"] = resolved[0].path
+                    form_data["attached_photo_filename"] = resolved[0].filename
+                    chosen = resolved[0].id
+            except Exception:
+                app.logger.exception("free-text quick-build photo resolve failed")
+
+        saved = save_pack("free_text", form_data, [card], profile_id=active_pid or None)
+        target = url_for("stub_pack_view", pack_id=saved["pack_id"]) + "?autographic=1"
+        if chosen:
+            target += "&photo=" + chosen
+        return redirect(target)
 
     @app.route("/free-text/chat/new", methods=["GET", "POST"])
     def free_text_chat_new():
@@ -18860,7 +25636,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # as the legacy /free-text/quick form.
             chat_picker_html = _render_library_picker_for_active_profile()
             accepted_html = f"""
-<div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:rgba(212,255,58,0.04)">
+<div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <div class="strap live" style="margin-bottom:var(--sp-3)">Accepted brief</div>
   {_format_brief_html(s.accepted_brief)}
   <form method="post" action="{generate_url}" style="margin-top:var(--sp-3)">
@@ -18892,7 +25668,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <form id="chat-form" method="post" action="{send_url}" style="margin-top:var(--sp-5)" data-loader-text="Thinking…">
   <label class="req" for="chat-reply">Your reply</label>
   <textarea id="chat-reply" name="message" placeholder="Tell the assistant what you want to post about…"
-            style="min-height:110px" required></textarea>
+            {_CYCLE_PH_ATTR_MOMENT} style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send reply &rarr;</button>
     <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
@@ -19190,10 +25966,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _graphic_api_base = url_for(
             "api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0
         ).rsplit("/", 2)[0]
-        # Per-card Schedule (plan-gated; free tier sees the upgrade nudge).
-        # Spotlight packs schedule against their source run; pure drafts
-        # (event preview, sponsor, free text) use a synthetic stub run id —
-        # the schedule API only needs the caption + Buffer channels.
+        # Per-card Schedule chip — auto scheduling to social is withdrawn, so
+        # this renders a disabled "Coming soon" affordance that keeps the
+        # toolbar's shape. Drafts stay fully exportable for manual posting.
         _pack_cards = rec.get("cards") or []
         _pack_fd = rec.get("form_data") or {}
         _sched_run_id = str(_pack_fd.get("run_id") or f"_stub_{pack_id}")
@@ -19240,9 +26015,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<span class="tag info">{_h(type_label)}</span> '
             f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
         )
-        # Every saved pack page carries the schedule modal — the per-card
-        # Schedule buttons above need it.
-        spotlight_modal_html = _schedule_modal_html() + _schedule_modal_js()
         # Athlete-spotlight drafts additionally get the meet-recap caption
         # tone rewrite (same approved moments, different register).
         spotlight_tools_html = ""
@@ -19290,14 +26062,27 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             footer,
             1,
         )
+        # Single-prompt flow lands here with ?autographic=1 — render the first
+        # card's graphic on load (with the attached photo as background if one
+        # was passed) so "describe it → get a graphic" needs no extra click.
+        auto_js = ""
+        if request.args.get("autographic") and _pack_cards:
+            _g0 = f"{_graphic_api_base}/0/create-graphic"
+            _photo = (request.args.get("photo") or "").strip()
+            auto_js = (
+                "<script>document.addEventListener('DOMContentLoaded',function(){"
+                "if(window.mhAutoGraphic){window.mhAutoGraphic("
+                f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
+                f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
+            )
         body = (
             header
             + spotlight_tools_html
             + attached_html
             + cards_html
-            + spotlight_modal_html
             + _VISUAL_PANEL_JS
             + _DRAFT_REGEN_JS
+            + auto_js
         )
         return _layout(rec.get("title") or "Draft", body, active="create")
 
@@ -20239,7 +27024,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f"</p>"
                 )
             brand_preview_html = f"""
-<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(212,255,58,0.03)">
+<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:color-mix(in oklab, var(--lane) 3%, transparent)">
   <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Brand DNA preview</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
@@ -20354,7 +27139,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
 </section>
 
-<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(212,255,58,0.04)">
+<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <h2 style="margin-top:0">Re-analyse brand from website + social links</h2>
   <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and/or social profile links. MediaHub reads each link, extracts the palette, tone of voice, characteristic phrases and recent captions, and updates the brand profile below. AI-driven &mdash; no manual style guide needed.</p>
   <form method="POST">
@@ -20656,7 +27441,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             style="border-color:rgba(255,107,107,0.4)">Delete organisation</button>
   </form>
 </div>"""
-        return _layout("Organisation", body, active="organisation")
+        return _layout("Organisation", body, active="settings")
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
     #
@@ -20736,7 +27521,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f"<strong>{headline}</strong> "
             "Free includes 3 content runs a month and a single brand profile. "
             "You can keep working &mdash; nothing is locked &mdash; but for "
-            "unlimited runs and Buffer scheduling, "
+            "unlimited runs and more brand profiles, "
             f'<a href="{pricing_url}" style="color:var(--accent);font-weight:600">'
             "see plans</a>."
             "</div>"
@@ -21699,6 +28484,50 @@ what you're doing, what they should do.</p>
 """
         return _layout("Notify all users", body, active="")
 
+    @app.route("/operator/cache/purge", methods=["POST"])
+    def operator_cache_purge():
+        """Permanently delete every re-derivable cache, site-wide.
+
+        Operator-only: this clears the cache for the whole deployment — all
+        organisations, all runs. Only re-derivable performance caches are
+        touched (PB lookups, motion/graphic renders, brand-DNA captures,
+        narration, web research); runs, uploads, the databases, the media
+        library and the ledgers are never removed. The engine re-derives what
+        it needs on the next request.
+        """
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.privacy.cache_purge import purge_all_caches
+
+        try:
+            report = purge_all_caches()
+        except Exception as e:  # honest failure rather than a silent no-op
+            log.warning("site-wide cache purge failed: %s", e, exc_info=True)
+            _flash_toast(f"Cache purge failed: {e}", "error")
+            return redirect(url_for("settings_section", section="developer"))
+
+        # Drop this process's own derived caches too, so a purge doesn't leave
+        # the worker serving "why this card" / perf-context strings or
+        # design-studio render previews from memory. (The graphic-renderer
+        # module caches are dropped inside purge_all_caches; these BoundedCaches
+        # live in web.py and can't be imported there without a cycle.)
+        try:
+            _perf_context_cache.clear()
+            _explanation_cache.clear()
+            _studio_render_cache.clear()
+        except Exception:
+            pass
+
+        files = int(report.get("files_deleted") or 0)
+        mb = (report.get("bytes_reclaimed") or 0) / (1024 * 1024)
+        _flash_toast(
+            f"Site-wide cache cleared — {files:,} file(s) deleted, {mb:.1f} MB "
+            "reclaimed; in-process caches dropped from memory.",
+            "success",
+        )
+        return redirect(url_for("settings_section", section="developer"))
+
     def _pounds_to_pence(raw: str) -> int:
         from decimal import Decimal, InvalidOperation
 
@@ -21741,7 +28570,7 @@ what you're doing, what they should do.</p>
             colour = "var(--good)" if met else "var(--warn)"
             badge = "MET" if met else "OPEN"
             return (
-                '<div class="card" style="padding:18px 22px;flex:1;min-width:260px">'
+                '<div class="card" style="padding:18px 22px;flex:1;min-width:min(260px,100%)">'
                 f'<h2 style="margin:0 0 6px;font-size:15px">{title}</h2>'
                 f'<div style="font-size:28px;font-weight:700">{n}<span '
                 f'style="font-size:15px;color:var(--ink-muted)"> / {req}</span> '
@@ -21842,7 +28671,7 @@ what you're doing, what they should do.</p>
             '<div><label style="font-size:11px">Annual price (£)</label><br/>'
             '<input name="pounds" required placeholder="588" style="padding:6px 8px;width:90px"/></div>'
             '<div><label style="font-size:11px">Notes</label><br/>'
-            '<input name="notes" style="padding:6px 8px;min-width:200px"/></div>'
+            '<input name="notes" style="padding:6px 8px;min-width:min(200px,100%)"/></div>'
             '<button class="btn" type="submit">Add quote</button></form></div>'
         )
 
@@ -21976,7 +28805,7 @@ what you're doing, what they should do.</p>
                 f'<input type="hidden" name="lead_id" value="{_h(lead.lead_id)}"/>'
                 f'<select name="status" style="padding:3px 6px;font-size:11px">{sel}</select>'
                 f'<input name="intros" placeholder="2 named intros, comma-sep" '
-                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:170px"/>'
+                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:min(170px,100%)"/>'
                 '<button class="btn secondary" style="padding:3px 8px;font-size:11px">Update</button>'
                 "</form></td></tr>"
             )
@@ -22036,7 +28865,7 @@ what you're doing, what they should do.</p>
             f'<select name="status" style="padding:6px 8px">{ngb_opts}</select></div>'
             '<div><label style="font-size:11px">Notes</label><br/>'
             f'<input name="notes" value="{_h(ngb_state["notes"])}" '
-            'style="padding:6px 8px;min-width:260px"/></div>'
+            'style="padding:6px 8px;min-width:min(260px,100%)"/></div>'
             '<button class="btn secondary" type="submit">Save</button></form></div>'
         )
 
@@ -22270,6 +29099,81 @@ what you're doing, what they should do.</p>
         return redirect(url_for("operator_commercial"))
 
     # ---- /pricing -----------------------------------------------------
+    # UI 1.20 — polished pricing page styling (scoped under .mh-pricing /
+    # .mh-compare). Plain strings (not f-strings): the CSS braces are literal.
+    # Reuses the existing token system (--surface, --accent, --good, --lane …)
+    # and the shared .mh-segmented control for the billing-period toggle.
+    _PRICING_CSS = (
+        "<style>"
+        ".mh-billing-toggle{display:flex;justify-content:center;margin-bottom:var(--sp-6)}"
+        ".mh-tier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));"
+        "gap:18px;align-items:stretch}"
+        ".mh-tier{position:relative;display:flex;flex-direction:column;gap:16px;padding:24px;"
+        "background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md)}"
+        ".mh-tier.is-recommended{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}"
+        ".mh-tier-badge{position:absolute;top:-11px;left:24px;background:var(--lane);"
+        "color:var(--lane-ink);font-family:var(--font-mono);font-size:var(--fs-9);font-weight:700;"
+        "letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border-radius:var(--radius-pill)}"
+        ".mh-tier-name{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;"
+        "letter-spacing:.08em;color:var(--ink-muted);margin-bottom:8px}"
+        ".mh-tier-price{min-height:46px}"
+        ".mh-price-fig{font-size:30px;font-weight:800;line-height:1}"
+        ".mh-price-per{font-size:14px;font-weight:600;color:var(--ink-muted);margin-left:2px}"
+        ".mh-price-note{display:block;font-size:12px;color:var(--ink-muted);margin-top:4px}"
+        ".mh-price-tbc{font-size:15px;color:var(--ink-muted)}"
+        ".mh-tier-blurb{font-size:13px;color:var(--ink-muted);margin-top:8px}"
+        ".mh-feat-list{list-style:none;padding:0;margin:0;font-size:13px;flex:1 1 auto;"
+        "display:flex;flex-direction:column;gap:9px}"
+        ".mh-feat{display:flex;align-items:baseline;gap:8px}"
+        ".mh-feat-mark{flex:0 0 auto;font-weight:700;width:1em;text-align:center}"
+        ".mh-feat-yes .mh-feat-mark{color:var(--good)}"
+        ".mh-feat-no{color:var(--ink-faint)}"
+        ".mh-feat-no .mh-feat-mark{color:var(--ink-faint)}"
+        ".mh-feat-val{margin-left:auto;padding-left:10px;font-weight:600;color:var(--ink);text-align:right}"
+        ".mh-feat-no .mh-feat-val{color:var(--ink-faint)}"
+        ".mh-tier-cta{margin-top:4px}"
+        ".mh-cta{width:100%;text-align:center}"
+        ".mh-cta-note{text-align:center;font-size:13px}"
+        ".mh-price-note-banner{font-size:13px;margin-top:24px;text-align:center}"
+        ".mh-pricing [data-pane=monthly]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=annual]{display:none}"
+        ".mh-pricing[data-period=monthly] [data-pane=monthly]{display:inline}"
+        ".mh-compare-title{margin:var(--sp-9) 0 var(--sp-4);text-align:center}"
+        ".mh-compare-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}"
+        ".mh-compare{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}"
+        ".mh-compare th,.mh-compare td{padding:12px 14px;border-bottom:1px solid var(--border)}"
+        ".mh-compare thead th{vertical-align:bottom}"
+        ".mh-th-plan{text-align:center;font-family:var(--font-mono);font-size:13px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.06em}"
+        ".mh-th-rec{display:block;margin-top:4px;color:var(--accent);font-size:9px;letter-spacing:.12em}"
+        ".mh-compare tbody th{text-align:left;font-weight:600;color:var(--ink)}"
+        ".mh-compare td{text-align:center;color:var(--ink-muted)}"
+        ".mh-compare .is-rec{background:color-mix(in oklab, var(--lane) 4.5%, transparent)}"
+        ".mh-compare-group th{padding-top:22px;font-family:var(--font-mono);font-size:11px;"
+        "font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-muted);"
+        "border-bottom-color:var(--border-h)}"
+        ".mh-cell-yes{color:var(--good);font-weight:700}"
+        ".mh-cell-no{color:var(--ink-faint)}"
+        ".mh-cell-val{color:var(--ink)}"
+        ".mh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;"
+        "clip:rect(0,0,0,0);white-space:nowrap;border:0}"
+        "@media(max-width:600px){.mh-tier-grid{grid-template-columns:1fr}}"
+        "</style>"
+    )
+    _PRICING_JS = (
+        "<script>(function(){"
+        "var root=document.getElementById('mh-pricing');if(!root)return;"
+        "var btns=root.querySelectorAll('.mh-segmented [data-period]');"
+        "function set(period){root.setAttribute('data-period',period);"
+        "for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute('data-period')===period;"
+        "btns[i].classList.toggle('is-active',on);"
+        "btns[i].setAttribute('aria-pressed',on?'true':'false');}}"
+        "for(var i=0;i<btns.length;i++){(function(b){"
+        "b.addEventListener('click',function(){set(b.getAttribute('data-period'));});"
+        "})(btns[i]);}"
+        "})();</script>"
+    )
+
     @app.route("/pricing", methods=["GET"])
     def pricing_page():
         from mediahub.commercial.wtp import QuoteStore, public_list_price
@@ -22285,106 +29189,174 @@ what you're doing, what they should do.</p>
         except Exception:
             list_price = None
 
+        _CUR_SYMBOL = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}
+
+        def _figure(symbol: str, pence: int) -> str:
+            # Whole pounds when even, else two decimals. The pence is always
+            # ledger-derived — never a hardcoded amount (ADR-0011 / PC.4).
+            if pence % 100 == 0:
+                return f"{symbol}{pence // 100}"
+            return f"{symbol}{pence / 100:.2f}"
+
+        def _price_block(plan: str) -> str:
+            """Annual + monthly price panes for a tier.
+
+            Honest billing-period toggle (UI 1.20): MediaHub sells annual
+            prepay only (ADR-0011; wtp.Quote.billing_interval == "year"), so the
+            "Monthly" view shows the *same committed annual price expressed per
+            month* (annual ÷ 12), explicitly "billed annually" — never a
+            fabricated monthly SKU or a made-up discount. While the PC.4 gate is
+            unmet there is no committed figure, so both views read "Pricing TBC"
+            and no "/year" or "/mo" suffix is emitted at all.
+            """
+            if plan == _auth.PLAN_FREE:
+                return '<div class="mh-price-fig">Free</div>'
+            if plan == _auth.PLAN_CLUB and list_price is not None:
+                symbol = _CUR_SYMBOL.get(list_price["currency"], "")
+                annual_pence = int(list_price["amount_pence"])
+                monthly_pence = round(annual_pence / 12)
+                annual = (
+                    '<span data-pane="annual">'
+                    f'<span class="mh-price-fig">{_figure(symbol, annual_pence)}'
+                    '<span class="mh-price-per">/year</span></span>'
+                    '<span class="mh-price-note">Billed annually</span></span>'
+                )
+                monthly = (
+                    '<span data-pane="monthly">'
+                    f'<span class="mh-price-fig">{_figure(symbol, monthly_pence)}'
+                    '<span class="mh-price-per">/mo</span></span>'
+                    '<span class="mh-price-note">billed annually</span></span>'
+                )
+                return annual + monthly
+            # Federation (no committed list price) or Club before the gate: the
+            # honest state is "Pricing TBC" — never a guessed number.
+            purchasable = _billing.plan_purchasable(plan)
+            title = (
+                "The exact price is shown at checkout"
+                if purchasable
+                else "Set STRIPE_PRICE_"
+                + ("CLUB" if plan == _auth.PLAN_CLUB else "FEDERATION")
+                + " to enable"
+            )
+            return f'<div class="mh-price-tbc" title="{title}">Pricing TBC</div>'
+
+        def _feature_li(row, plan: str) -> str:
+            val = row.value_for(plan)
+            if val is False:
+                return (
+                    '<li class="mh-feat mh-feat-no">'
+                    '<span class="mh-feat-mark" aria-hidden="true">&times;</span>'
+                    f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                    '<span class="mh-sr">— not included</span></li>'
+                )
+            value_html = (
+                f'<span class="mh-feat-val">{_h(val)}</span>' if isinstance(val, str) else ""
+            )
+            return (
+                '<li class="mh-feat mh-feat-yes">'
+                '<span class="mh-feat-mark" aria-hidden="true">&check;</span>'
+                f'<span class="mh-feat-label">{_h(row.label)}</span>'
+                f'{value_html}<span class="mh-sr">— included</span></li>'
+            )
+
         cards = ""
         for tier in _billing.TIERS:
             is_current = tier.plan == plan_now and signed_in
-            features = "".join(
-                f'<li style="margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
-                '<span aria-hidden="true" style="color:var(--good);flex:0 0 auto">&check;</span>'
-                f"<span>{_h(f)}</span></li>"
-                for f in tier.features
-            )
-            # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
-            if tier.plan == _auth.PLAN_FREE:
-                price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
-            elif tier.plan == _auth.PLAN_CLUB and list_price is not None:
-                # PC.4 gate met: commit the evidence-derived annual price.
-                amount = list_price["amount_pence"]
-                symbol = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}.get(
-                    list_price["currency"], ""
-                )
-                if amount % 100 == 0:
-                    figure = f"{symbol}{amount // 100}"
-                else:
-                    figure = f"{symbol}{amount / 100:.2f}"
-                price_html = (
-                    f'<div style="font-size:30px;font-weight:800;line-height:1">{figure}'
-                    '<span style="font-size:14px;font-weight:600;color:var(--ink-muted)">'
-                    "/year</span></div>"
-                    '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
-                )
-            else:
-                # PC.4 gate unmet (or no evidence for this tier): the honest
-                # state is "Pricing TBC" — never a guessed number. When the
-                # tier is purchasable via an env-configured Stripe Price, the
-                # exact amount still shows at checkout.
-                purchasable = _billing.plan_purchasable(tier.plan)
-                if purchasable:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="The exact price is shown at checkout">Pricing TBC</div>'
-                    )
-                else:
-                    price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)" '
-                        'title="Set STRIPE_PRICE_'
-                        + ("CLUB" if tier.plan == _auth.PLAN_CLUB else "FEDERATION")
-                        + ' to enable">Pricing TBC</div>'
-                    )
+            recommended = tier.plan == _auth.PLAN_CLUB
+            features = "".join(_feature_li(row, tier.plan) for row in _billing.feature_rows())
+            price_html = _price_block(tier.plan)
 
-            # CTA
+            # CTA — purchase/upgrade logic (unchanged from the prior page).
             if is_current:
                 cta = (
-                    '<div class="btn secondary" style="width:100%;text-align:center;'
-                    'pointer-events:none;opacity:0.75">Current plan</div>'
+                    '<div class="btn secondary mh-cta" '
+                    'style="pointer-events:none;opacity:0.75">Current plan</div>'
                 )
             elif tier.plan == _auth.PLAN_FREE:
                 cta = (
-                    f'<a class="btn secondary" href="{url_for("signup_page")}" '
-                    'style="width:100%;text-align:center">Get started free</a>'
+                    f'<a class="btn secondary mh-cta" href="{url_for("signup_page")}">'
+                    "Get started free</a>"
                     if not signed_in
-                    else '<div class="dim" style="text-align:center;font-size:13px">Included</div>'
+                    else '<div class="dim mh-cta-note">Included</div>'
                 )
             else:
                 if not configured:
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6" '
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6" '
                         'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
                     )
                 elif not signed_in:
                     cta = (
-                        f'<a class="btn" href="{url_for("login_page", next=url_for("pricing_page"))}" '
-                        'style="width:100%;text-align:center">Log in to upgrade</a>'
+                        f'<a class="btn mh-cta" '
+                        f'href="{url_for("login_page", next=url_for("pricing_page"))}">'
+                        "Log in to upgrade</a>"
                     )
                 elif not _billing.plan_purchasable(tier.plan):
                     cta = (
-                        '<div class="btn secondary" style="width:100%;text-align:center;'
-                        'pointer-events:none;opacity:0.6">Not yet available</div>'
+                        '<div class="btn secondary mh-cta" '
+                        'style="pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
                     # CCR 2013: route through the pre-contract information
                     # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'<a class="btn mh-cta" '
                         f'href="{url_for("billing_confirm", plan=tier.plan)}">'
                         f"Upgrade to {_h(tier.name)}</a>"
                     )
 
-            highlight = (
-                "border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)"
-                if tier.plan == _auth.PLAN_CLUB
-                else "border:1px solid var(--border)"
-            )
+            badge = '<div class="mh-tier-badge">Recommended</div>' if recommended else ""
+            cls = "mh-tier" + (" is-recommended" if recommended else "")
             cards += (
-                f'<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px;{highlight}">'
-                f'<div><div style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;'
-                f'color:var(--ink-muted);margin-bottom:6px">{_h(tier.name)}</div>{price_html}'
-                f'<div class="dim" style="font-size:13px;margin-top:8px">{_h(tier.blurb)}</div></div>'
-                f'<ul style="list-style:none;padding:0;margin:0;font-size:13px;flex:1">{features}</ul>'
-                f"{cta}"
+                f'<div class="{cls}">{badge}'
+                '<div class="mh-tier-head">'
+                f'<div class="mh-tier-name">{_h(tier.name)}</div>'
+                f'<div class="mh-tier-price">{price_html}</div>'
+                f'<div class="mh-tier-blurb">{_h(tier.blurb)}</div>'
+                "</div>"
+                f'<ul class="mh-feat-list">{features}</ul>'
+                f'<div class="mh-tier-cta">{cta}</div>'
                 "</div>"
             )
+
+        # Feature comparison table — same single-source matrix as the cards.
+        def _cell(val) -> str:
+            if val is True:
+                return (
+                    '<span class="mh-cell-yes" aria-hidden="true">&check;</span>'
+                    '<span class="mh-sr">Included</span>'
+                )
+            if val is False:
+                return (
+                    '<span class="mh-cell-no" aria-hidden="true">&times;</span>'
+                    '<span class="mh-sr">Not included</span>'
+                )
+            return f'<span class="mh-cell-val">{_h(val)}</span>'
+
+        head_cells = ""
+        for t in _billing.TIERS:
+            rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+            tag = '<span class="mh-th-rec">Recommended</span>' if t.plan == _auth.PLAN_CLUB else ""
+            head_cells += f'<th scope="col" class="mh-th-plan{rec}">{_h(t.name)}{tag}</th>'
+        ncols = 1 + len(_billing.TIERS)
+        rows_html = ""
+        for group in _billing.FEATURE_MATRIX:
+            rows_html += (
+                f'<tr class="mh-compare-group"><th colspan="{ncols}" scope="colgroup">'
+                f"{_h(group.title)}</th></tr>"
+            )
+            for row in group.rows:
+                cells = ""
+                for t in _billing.TIERS:
+                    rec = " is-rec" if t.plan == _auth.PLAN_CLUB else ""
+                    cells += f'<td class="{rec.strip()}">{_cell(row.value_for(t.plan))}</td>'
+                rows_html += f'<tr><th scope="row">{_h(row.label)}</th>{cells}</tr>'
+        compare_table = (
+            '<div class="mh-compare-wrap"><table class="mh-compare">'
+            f'<thead><tr><th scope="col"><span class="mh-sr">Feature</span></th>{head_cells}</tr></thead>'
+            f"<tbody>{rows_html}</tbody></table></div>"
+        )
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
@@ -22394,20 +29366,33 @@ what you're doing, what they should do.</p>
                 "Billing is not configured on this deployment, so paid plans "
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
-        note_html = (
-            f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
+        note_html = f'<p class="dim mh-price-note-banner">{note}</p>'
+
+        toggle = (
+            '<div class="mh-billing-toggle">'
+            '<div class="mh-segmented" role="group" aria-label="Billing period">'
+            '<button type="button" class="is-active" data-period="annual" '
+            'aria-pressed="true">Annually</button>'
+            '<button type="button" data-period="monthly" '
+            'aria-pressed="false">Monthly</button>'
+            "</div></div>"
         )
 
         body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
+            _PRICING_CSS
+            + '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Pricing</span>'
             '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
             '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
-            "Annual prepay keeps it cheaper &mdash; ask us.</p>"
+            "Annual prepay keeps it cheaper.</p>"
             "</section>"
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">'
-            f"{cards}</div>"
+            '<div id="mh-pricing" class="mh-pricing" data-period="annual">'
+            f"{toggle}"
+            f'<div class="mh-tier-grid">{cards}</div>'
             f"{note_html}"
+            '<h2 class="mh-compare-title">Compare every plan</h2>'
+            f"{compare_table}"
+            "</div>" + _PRICING_JS
         )
         return _layout("Pricing", body, active="signin")
 
@@ -22463,7 +29448,7 @@ what you're doing, what they should do.</p>
             manage_html = (
                 f'<a class="btn" href="{url_for("pricing_page")}">See plans &rarr;</a>'
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
-                "Upgrade to unlock unlimited runs and Buffer scheduling.</div>"
+                "Upgrade to unlock unlimited runs and more brand profiles.</div>"
             )
 
         body = (
@@ -22795,17 +29780,47 @@ what you're doing, what they should do.</p>
         for p in profiles:
             is_current = p.profile_id == current_id
             logo_html = ""
-            logo_url = (getattr(p, "brand_logo_url", "") or "").strip()
-            if logo_url and (logo_url.startswith("http://") or logo_url.startswith("https://")):
+            # Prefer an uploaded logo served first-party from our own server —
+            # the website-scraped ``brand_logo_url`` is an external link that
+            # often 403s, hot-link-blocks or 404s, which is exactly why "the
+            # logos don't load on the sign-in cards". Fall back to the scraped
+            # URL, then to initials.
+            logo_src = ""
+            _dom_hex = None
+            _uploaded = getattr(p, "brand_logos", None) or []
+            _first = next(
+                (
+                    e
+                    for e in _uploaded
+                    if isinstance(e, dict)
+                    and e.get("logo_id")
+                    and str(e.get("mime", "")).startswith("image/")
+                ),
+                None,
+            )
+            if _first:
+                logo_src = url_for(
+                    "organisation_logo_serve",
+                    profile_id=p.profile_id,
+                    logo_id=_first.get("logo_id"),
+                )
+                _dom = (_first.get("ai_dominant_colours") or [None])[0]
+                _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
+            else:
+                _cap = (getattr(p, "brand_logo_url", "") or "").strip()
+                if _cap.startswith("http://") or _cap.startswith("https://"):
+                    logo_src = _cap
+            if logo_src:
                 # Phase 1.6 Stage F: profile-card logos are tiny
                 # uniform tiles inside a fixed .logo container; force
                 # chip mode for visual consistency across the grid
                 # (sign-in page renders many orgs side-by-side and
                 # one bare logo amid chipped ones reads as a glitch).
                 logo_html = _logo_chip_html(
-                    logo_url,
+                    logo_src,
                     alt="",
                     height=48,
+                    dominant_hex=_dom_hex,
                     force_chip=True,
                 )
             else:
@@ -22837,7 +29852,7 @@ what you're doing, what they should do.</p>
             sign_in_url = url_for("sign_in_post")
             delete_url = url_for("sign_in_delete")
             cards_html += (
-                '<div class="mh-profile-card">'
+                '<div class="mh-profile-card mh-spotlight-card">'
                 f'<div class="logo">{logo_html}</div>'
                 f'<div class="display-name">{_h(p.display_name)}</div>'
                 f'<div class="meta-line">{pill_html}</div>'
@@ -23065,10 +30080,10 @@ what you're doing, what they should do.</p>
                 )
             return (
                 "<tr>"
-                f'<td style="padding:8px 12px">{_h(m.email)}</td>'
-                f'<td style="padding:8px 12px">{role_badge}</td>'
-                f'<td style="padding:8px 12px">{status_badge}</td>'
-                f'<td style="padding:8px 12px;font-size:12px;color:var(--ink-muted)">'
+                f'<td data-label="Email" style="padding:8px 12px">{_h(m.email)}</td>'
+                f'<td data-label="Role" style="padding:8px 12px">{role_badge}</td>'
+                f'<td data-label="Status" style="padding:8px 12px">{status_badge}</td>'
+                f'<td data-label="Invited by" style="padding:8px 12px;font-size:12px;color:var(--ink-muted)">'
                 f"{_h(m.invited_by or '')}</td>"
                 f'<td style="padding:8px 12px;text-align:right">{remove_html}</td>'
                 "</tr>"
@@ -23104,7 +30119,7 @@ what you're doing, what they should do.</p>
                 '<input type="hidden" name="action" value="add"/>'
                 "<div><label>Email</label><br/>"
                 '<input type="email" name="email" required placeholder="coach@club.org" '
-                'style="padding:8px 10px;min-width:260px"/></div>'
+                'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
                 "<div><label>Role</label><br/>"
                 '<select name="role" style="padding:8px 10px">'
                 '<option value="member">Member</option>'
@@ -23134,7 +30149,7 @@ what you're doing, what they should do.</p>
             + state_html
             + flash_html
             + '<div class="card" style="padding:0;overflow:hidden">'
-            '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
             '<thead><tr style="text-align:left;border-bottom:1px solid '
             'rgba(255,255,255,0.08)">'
             '<th style="padding:10px 12px">Email</th>'
@@ -23147,7 +30162,7 @@ what you're doing, what they should do.</p>
             + f'<p style="margin-top:18px"><a class="btn secondary" '
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
-        return _layout("Workspace members", body, active="organisation")
+        return _layout("Workspace members", body, active="settings")
 
     # ---- PC.13 — whole-org takeout + deletion (UK GDPR Arts. 15/17/20) ----
 
@@ -23207,7 +30222,7 @@ what you're doing, what they should do.</p>
                 "Export failed",
                 '<div class="card"><p class="tag bad">The takeout export failed — '
                 "try again, and contact support if it persists.</p></div>",
-                active="organisation",
+                active="settings",
             ), 500
 
         @after_this_request
@@ -23243,7 +30258,7 @@ what you're doing, what they should do.</p>
                 "match — nothing was deleted.</p>"
                 f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
                 "&larr; Back</a></p></div>",
-                active="organisation",
+                active="settings",
             ), 400
         email = _auth.current_user_email()
         if email and not _auth.is_dev_operator():
@@ -23256,7 +30271,7 @@ what you're doing, what they should do.</p>
                     "&mdash; organisation NOT deleted.</p>"
                     f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
                     "&larr; Back</a></p></div>",
-                    active="organisation",
+                    active="settings",
                 ), 403
         from mediahub.privacy import delete_org
 
@@ -23723,7 +30738,7 @@ what you're doing, what they should do.</p>
 
             preview_html = f"""
 <div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
-     background:rgba(212,255,58,0.04)">
+     background:color-mix(in oklab, var(--lane) 4%, transparent)">
   <h3 style="margin-top:0;margin-bottom:8px">What MediaHub learned about {_h(prof.display_name)}</h3>
   <p style="font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 10px 0">
     {_h(prof.brand_voice_summary or "(no voice summary yet — capture again from a richer source)")}</p>
@@ -23740,9 +30755,10 @@ what you're doing, what they should do.</p>
   {confirm_form_html}
   {_repair_callout_html}
   {_audit_panel_html}
-  <div style="margin-top:14px">
+  <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <a class="btn" href="{url_for("make_page")}" data-mh-cascade="finalise">Looks right &mdash; start creating &rarr;</a>
-    <span class="muted" style="margin-left:12px;font-size:12px">Or refine the inputs below and re-analyse.</span>
+    {_sample_pack_cta(compact=True, button_label="See it on a sample meet")}
+    <span class="muted" style="font-size:12px">Or refine the inputs below and re-analyse.</span>
   </div>
 </div>
 """
@@ -23873,7 +30889,7 @@ what you're doing, what they should do.</p>
                 rule_chips = "".join(
                     '<li style="padding:6px 10px;margin:4px 4px 0 0;'
                     "display:inline-block;border-radius:4px;"
-                    "background:rgba(212,255,58,0.08);border:1px solid rgba(212,255,58,0.30);"
+                    "background:color-mix(in oklab, var(--lane) 8%, transparent);border:1px solid color-mix(in oklab, var(--lane) 30%, transparent);"
                     f'color:var(--ink);font-size:11.5px;line-height:1.35;max-width:100%">'
                     f'<strong style="color:var(--lane,var(--accent))">MUST</strong> &middot; {_h(r[:240])}'
                     "</li>"
@@ -24425,7 +31441,7 @@ function mhSetupMode(mode) {{
 }}
 .mh-combobox-options li:hover,
 .mh-combobox-options li.mh-combobox-active {{
-  background: rgba(212,255,58,0.10);
+  background: color-mix(in oklab, var(--lane) 10%, transparent);
   color: var(--lane, var(--accent, #D4FF3A));
 }}
 .mh-combobox-options li.mh-combobox-empty {{
@@ -24446,7 +31462,7 @@ function mhSetupMode(mode) {{
   text-align: center;
   cursor: pointer;
   background:
-    repeating-linear-gradient(45deg, rgba(212,255,58,0.02) 0 10px,
+    repeating-linear-gradient(45deg, color-mix(in oklab, var(--lane) 2%, transparent) 0 10px,
                               transparent 10px 20px),
     var(--surface, var(--panel, #14171F));
   color: var(--ink-dim, var(--ink-muted, #B6B2A6));
@@ -24458,7 +31474,7 @@ function mhSetupMode(mode) {{
 }}
 .mh-drop-zone.is-dragover {{
   border-color: var(--lane, var(--accent, #D4FF3A));
-  background: rgba(212,255,58,0.06);
+  background: color-mix(in oklab, var(--lane) 6%, transparent);
   color: var(--ink, #F5F2E8);
 }}
 .mh-drop-zone-inner strong {{ color: var(--ink, #F5F2E8); font-weight: 600; }}
@@ -24647,7 +31663,7 @@ function mhSetupMode(mode) {{
 }})();
 </script>
 """
-        return _layout("Set up your organisation", body, active="organisation")
+        return _layout("Set up your organisation", body, active="settings")
 
     @app.route("/organisation/setup/capture", methods=["POST"])
     def organisation_setup_capture():
@@ -25369,13 +32385,44 @@ function mhSetupMode(mode) {{
         prof = _active_profile()
         if not prof:
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path
+        from mediahub.brand.logos import resolve_logo_path, logo_bg_silhouette_path
 
+        # ?bg=1 serves the clean-alpha silhouette used by the signed-in logo
+        # wall (transparent for any logo, opaque backgrounds keyed out). It's
+        # cached and immutable per logo_id, so it's safe to cache hard.
+        if request.args.get("bg"):
+            sil = logo_bg_silhouette_path(prof.profile_id, logo_id)
+            if sil:
+                resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                return resp
+            return ("", 404)
         path = resolve_logo_path(prof.profile_id, logo_id)
         if not path:
             return ("", 404)
         # send_from_directory is the safe primitive — it refuses path
         # traversal automatically.
+        return send_from_directory(path.parent, path.name)
+
+    @app.route("/organisation/<profile_id>/logo/<logo_id>", methods=["GET"])
+    def organisation_logo_serve(profile_id, logo_id):
+        """Serve any *session-permitted* org's uploaded logo by id.
+
+        The active-profile route above can only serve the org you're already
+        signed into — useless on the sign-in picker, which renders the logos
+        of every org you may enter *before* one is active. Gating on
+        ``_session_can_use_profile`` keeps the IDOR guard (you only ever see
+        logos for orgs this session is allowed to use) while letting the
+        picker show real, first-party-served logos instead of broken external
+        ones.
+        """
+        if not _session_can_use_profile(profile_id):
+            return ("", 404)
+        from mediahub.brand.logos import resolve_logo_path
+
+        path = resolve_logo_path(profile_id, logo_id)
+        if not path:
+            return ("", 404)
         return send_from_directory(path.parent, path.name)
 
     @app.route("/organisation/setup/reread/<platform>", methods=["POST"])
@@ -25474,7 +32521,7 @@ function mhSetupMode(mode) {{
         """Content builder — the post-approval step.
 
         Shows only APPROVED cards. This is where the user picks a caption
-        tone, creates graphics + motion, then schedules to Buffer or downloads.
+        tone, creates graphics + motion, then schedules or downloads.
         Approval / rejection happens first on the Review page; nothing is
         created here until a card has been approved. The grouped 8-bucket
         recommendation explorer still lives at /pack/<run_id>/grouped.
@@ -25493,6 +32540,11 @@ function mhSetupMode(mode) {{
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        # A terminally-failed run has nothing to build from; the honest "what
+        # went wrong" surface lives on /review (U.2), so send the user there
+        # rather than showing an empty "Nothing approved yet" builder.
+        if (run_data.get("error") or "").strip():
+            return redirect(url_for("review", run_id=run_id))
 
         profile_id = run_data.get("profile_id", "")
         try:
@@ -25517,7 +32569,7 @@ function mhSetupMode(mode) {{
                 '<p class="lede">'
                 f"The content builder holds the cards you approve in <strong>{meet_name}</strong>. "
                 "Approve a few in the review queue and they land here &mdash; ready to caption, turn into "
-                "graphics and video, then schedule to Buffer or download."
+                "graphics and video, then schedule or download."
                 "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{_review_url}">Go to review &amp; approve &rarr;</a>'
@@ -25528,7 +32580,7 @@ function mhSetupMode(mode) {{
             return _layout("Content builder", body, active="home")
 
         # Per-card builder rows: header + the live creative toolbar (caption
-        # tones, create graphic, motion, schedule) + a Buffer-free download.
+        # tones, create graphic, motion) + a download for manual posting.
         cards_html = ""
         for card in approved:
             ach = card.get("achievement") or {}
@@ -25537,15 +32589,6 @@ function mhSetupMode(mode) {{
             headline = _h(ach.get("headline", ""))
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
-            wf = card.get("workflow") or {}
-            sched_state = (wf.get("schedule_status") or "queued").lower()
-            sched_pill_class = {"scheduled": "good", "published": "good", "failed": "bad"}.get(
-                sched_state, ""
-            )
-            sched_pill = (
-                f'<span class="tag {sched_pill_class}" data-schedule-pill="wf-{card_uuid}" '
-                f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
-            )
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
             cards_html += f"""
 <div class="card" id="pc-{_h(card_id_raw)}" style="margin-bottom:14px;page-break-inside:avoid">
@@ -25555,15 +32598,14 @@ function mhSetupMode(mode) {{
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      {sched_pill}
       <span class="tag good">approved</span>
     </div>
   </div>
   {_render_card_creative_toolbar(run_id, card_id_raw)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
-       title="Download caption + visual as a .zip for manual posting (no Buffer needed)">&#x2B07; Download .zip</a>
-    <span class="muted" style="font-size:11px">Pick a tone, create a graphic or motion, then schedule to Buffer or download.</span>
+       title="Download caption + visual as a .zip for manual posting">&#x2B07; Download .zip</a>
+    <span class="muted" style="font-size:11px">Pick a tone, then create a graphic or motion and download.</span>
   </div>
 </div>"""
 
@@ -25575,7 +32617,9 @@ function mhSetupMode(mode) {{
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _export_zip_url = url_for("pack_export_zip", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
+        _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
 
         # W.14: what this club's own approval history says it prefers —
@@ -25604,29 +32648,10 @@ function mhSetupMode(mode) {{
         except Exception:
             _prefs_html = ""
 
-        # Single global AI-availability banner (same pattern as /review).
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available
-
-            _ai_banner_html = (
-                ""
-                if _llm_available()
-                else (
-                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
-                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
-                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
-                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                    '<span style="color:var(--ink-dim)">'
-                    "Captions and &ldquo;why this card&rdquo; explanations need a Gemini or "
-                    "Anthropic key set by the deployment operator."
-                    "</span>"
-                    "</div>"
-                )
-            )
-        except Exception:
-            _ai_banner_html = ""
+        # Single global AI-availability banner (shared helper — U.2). The
+        # content builder promises a narrower slice of AI than /review, so it
+        # passes the shorter body copy.
+        _ai_banner_html = _ai_unavailable_banner(_AI_UNAVAILABLE_DETAIL_PACK)
 
         body = f"""
 <style>
@@ -25650,10 +32675,14 @@ function mhSetupMode(mode) {{
 <div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
     <div style="font-size:13px;font-weight:700">Meet reel</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a branded MP4 reel — one format, or every cut in a single pass.</div>
   </div>
-  <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-          onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
+            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+    <button class="btn secondary" style="font-size:12px;padding:6px 14px"
+            onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
+  </div>
 </div>
 <div id="reel-panel" class="no-print" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
 
@@ -25677,7 +32706,10 @@ function mhSetupMode(mode) {{
     <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
   </div>
-  <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_print_url)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+  </div>
 </div>
 
 <div class="no-print">{_turn_into_html}</div>
@@ -25686,14 +32718,36 @@ function mhSetupMode(mode) {{
 {cards_html}
 
 <div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <a class="btn" href="{_export_zip_url}"
+     title="Every approved card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
   <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
 
-{_schedule_modal_html()}
 <script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
 {_card_creative_js()}
-{_schedule_modal_js()}
+<script>
+// UI 1.8 - on load, if this run already has reel review comments, surface the
+// cached reel (or a comments-only view) so a returning reviewer sees their
+// pinned feedback without re-rendering.
+(function(){{
+  var reelUrl = {json.dumps(_reel_url)};
+  var panel = document.getElementById('reel-panel');
+  if (!panel || typeof mhReelComments !== 'function') return;
+  var fileUrl = reelUrl + '-file?n=3&format=story';
+  fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
+    .then(function(r){{ return r.json(); }})
+    .then(function(j){{
+      var n = (j && j.comments && j.comments.length) || 0;
+      if (!n) return;
+      panel.style.display = '';
+      fetch(fileUrl, {{method:'HEAD'}})
+        .then(function(hr){{ if (hr.ok) mhRenderReel(panel, reelUrl, 'story', fileUrl); else mhRenderReelCommentsOnly(panel, reelUrl, n); }})
+        .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
+    }})
+    .catch(function(){{}});
+}})();
+</script>
 """
         return _layout(f"Content builder — {meet_name}", body, active="home")
 
@@ -25770,6 +32824,289 @@ function mhSetupMode(mode) {{
             return jsonify({"ok": True, "status": "edited"})
 
         return jsonify({"error": "unknown action"}), 400
+
+    @app.route("/api/runs/<run_id>/cards/bulk-status", methods=["POST"])
+    def api_cards_bulk_status(run_id):
+        """UI 1.9 — apply one workflow status to many cards at once.
+
+        Content-negotiated: a fetch() JSON call gets a per-card result list back;
+        a no-JS HTML form POST is redirected to /review with a flash summary.
+        Each card is gated independently, so the consent gate (minors / opted-out
+        athletes) can block a single approval without aborting the whole batch —
+        the same rule the single-card route enforces.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ws = _get_wf_store()
+        if ws is None:
+            return jsonify({"error": "workflow not available"}), 503
+
+        wants_json = _req_wants_json(request)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            payload = {}
+        # Coerce to str before .strip(): a fuzzed/AJAX body may send a non-string
+        # (number, list) under "status" — that must be a clean 400, not a 500.
+        status_str = str(
+            payload.get("status") or request.form.get("status") or request.form.get("op") or ""
+        ).strip()
+        try:
+            status = CardStatus(status_str)
+        except (ValueError, NameError):
+            if wants_json:
+                return jsonify({"error": f"invalid status: {status_str}"}), 400
+            _flash_toast("Couldn't apply that bulk action — unknown status.", "error")
+            return redirect(url_for("review", run_id=run_id))
+
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if wants_json:
+                return (
+                    jsonify(
+                        {"error": "no_selection", "results": [], "summary": ws.summary(run_id)}
+                    ),
+                    400,
+                )
+            _flash_toast("Select at least one card first.", "info")
+            return redirect(url_for("review", run_id=run_id))
+
+        need_consent = status in (CardStatus.APPROVED, CardStatus.POSTED)
+        if need_consent:
+            from mediahub.compliance.gate import (
+                consent_block_reason_for_card,
+                find_card_in_run,
+            )
+        owner_pid = _run_owner_profile_id(run_id) or _active_profile_id() or ""
+        results: list[dict] = []
+        n_ok = 0
+        n_blocked = 0
+        for cid in ids:
+            if need_consent:
+                card = find_card_in_run(run_data or {}, cid)
+                reason = consent_block_reason_for_card((run_data or {}).get("profile_id", ""), card)
+                if reason:
+                    log.info("consent gate blocked bulk approval run=%s card=%s", run_id, cid)
+                    results.append(
+                        {"id": cid, "ok": False, "error": "consent_blocked", "reason": reason}
+                    )
+                    n_blocked += 1
+                    continue
+            ws.set_status(run_id, cid, status)
+            if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
+                _action = {
+                    CardStatus.APPROVED: "approved",
+                    CardStatus.REJECTED: "rejected",
+                    CardStatus.QUEUE: "requeued",
+                }[status]
+                _phase_w_after_status_change(owner_pid, run_id, cid, _action)
+            results.append({"id": cid, "ok": True, "status": status.value})
+            n_ok += 1
+        summary = ws.summary(run_id)
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": status.value,
+                    "results": results,
+                    "summary": summary,
+                    "n_ok": n_ok,
+                    "n_blocked": n_blocked,
+                }
+            )
+        verb = {"approved": "Approved", "rejected": "Rejected", "queue": "Re-queued"}.get(
+            status.value, status.value.capitalize()
+        )
+        msg = f"{verb} {n_ok} card{'' if n_ok == 1 else 's'}."
+        if n_blocked:
+            msg += f" {n_blocked} blocked by the consent gate."
+        _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("review", run_id=run_id))
+
+    @app.route("/api/runs/<run_id>/cards/bulk-export", methods=["POST"])
+    def api_cards_bulk_export(run_id):
+        """UI 1.9 — download the selected cards as one JSON file.
+
+        Scoped sibling of the per-run /export (which dumps the whole run): a
+        reviewer ticks the achievements they want and gets just those, with each
+        card's live workflow status folded in. Always a native attachment
+        download, so it works with or without JS.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one card to export.", "info")
+            return redirect(url_for("review", run_id=run_id))
+        wanted = set(ids)
+        rr = (run_data or {}).get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        ws = _get_wf_store()
+        wf_states = ws.load(run_id) if ws else {}
+        selected: list[dict] = []
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if cid in wanted:
+                st = wf_states.get(cid)
+                selected.append(
+                    {
+                        "card_id": cid,
+                        "status": (st.status.value if st else "queue"),
+                        "rank": ra.get("rank"),
+                        "quality_band": ra.get("quality_band"),
+                        "suggested_post_type": ra.get("suggested_post_type"),
+                        "achievement": ach,
+                        "factors": ra.get("factors"),
+                    }
+                )
+        export = {
+            "run_id": run_id,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "profile_id": (run_data or {}).get("profile_id", ""),
+            "requested": len(wanted),
+            "exported": len(selected),
+            "cards": selected,
+        }
+        fname = (
+            "mediahub-cards-"
+            + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export")
+            + ".json"
+        )
+        return Response(
+            json.dumps(export, indent=2, default=str),
+            mimetype="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    # ---- Emoji reactions (UI 1.25) -------------------------------------
+    @app.route("/api/runs/<run_id>/card/<card_id>/reactions", methods=["POST"])
+    def api_card_reaction_toggle(run_id, card_id):
+        """Toggle one emoji reaction on a card for an anonymous reactor.
+
+        Body (JSON): ``{"emoji": "👍|❤️|🔥", "reactor_id": "<anon client id>"}``.
+        A reactor's first tap on an emoji adds their row; a second tap removes
+        it — so the server-side tally counts each reactor once per emoji and the
+        UI reads as a true toggle. Returns the fresh per-card tally plus the set
+        this reactor now holds, so the client can update without a reload::
+
+            {"ok": true, "counts": {"👍": 2, ...}, "mine": ["👍", ...]}
+
+        Tenant-isolated (same guard as the workflow API), so a reaction can't be
+        cast on a run another organisation owns; a genuinely missing run 404s
+        too, so a ghost id never accretes orphan reaction rows.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+
+        payload = request.get_json(silent=True) or {}
+        emoji = payload.get("emoji", "")
+        reactor = str(payload.get("reactor_id") or "").strip()
+        if emoji not in REACTION_EMOJI:
+            return jsonify({"error": "invalid emoji"}), 400
+        if not reactor or len(reactor) > 64:
+            return jsonify({"error": "invalid reactor_id"}), 400
+        # Card ids are short engine identifiers (swim_id / "sp:type:event"); a
+        # value far longer than that is junk, so reject it rather than store it.
+        if not card_id or len(card_id) > 256:
+            return jsonify({"error": "invalid card_id"}), 400
+
+        try:
+            conn = _db()
+            existing = conn.execute(
+                "SELECT 1 FROM card_reactions "
+                "WHERE run_id=? AND card_id=? AND emoji=? AND reactor_id=?",
+                (run_id, card_id, emoji, reactor),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "DELETE FROM card_reactions "
+                    "WHERE run_id=? AND card_id=? AND emoji=? AND reactor_id=?",
+                    (run_id, card_id, emoji, reactor),
+                )
+            else:
+                conn.execute(
+                    "INSERT OR IGNORE INTO card_reactions "
+                    "(run_id, card_id, emoji, reactor_id, created_at) VALUES (?,?,?,?,?)",
+                    (
+                        run_id,
+                        card_id,
+                        emoji,
+                        reactor,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+            conn.commit()
+            counts = {e: 0 for e in REACTION_EMOJI}
+            for r in conn.execute(
+                "SELECT emoji, COUNT(*) AS n FROM card_reactions "
+                "WHERE run_id=? AND card_id=? GROUP BY emoji",
+                (run_id, card_id),
+            ).fetchall():
+                if r["emoji"] in counts:
+                    counts[r["emoji"]] = r["n"]
+            mine = [
+                r["emoji"]
+                for r in conn.execute(
+                    "SELECT emoji FROM card_reactions "
+                    "WHERE run_id=? AND card_id=? AND reactor_id=?",
+                    (run_id, card_id, reactor),
+                ).fetchall()
+                if r["emoji"] in REACTION_EMOJI
+            ]
+            conn.close()
+        except Exception as e:
+            log.warning("reaction toggle failed run=%s card=%s: %s", run_id, card_id, e)
+            return jsonify({"error": "reaction_failed"}), 500
+
+        return jsonify({"ok": True, "counts": counts, "mine": mine})
+
+    @app.route("/api/runs/<run_id>/reactions", methods=["GET"])
+    def api_run_reactions(run_id):
+        """Reaction state for a whole run, for the review/builder page on load.
+
+        Query: ``?reactor_id=<anon client id>`` (optional). Returns the full
+        per-card tally plus, when a ``reactor_id`` is given, the cards/emoji that
+        reactor holds — so one fetch lets the client both reconcile counts and
+        light up the viewer's own reactions::
+
+            {"ok": true,
+             "counts": {"<card_id>": {"👍": 2, ...}, ...},
+             "mine":   {"<card_id>": ["👍", ...], ...}}
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+
+        reactor = str(request.args.get("reactor_id") or "").strip()
+        counts: dict[str, dict[str, int]] = {}
+        mine: dict[str, list[str]] = {}
+        try:
+            conn = _db()
+            for r in conn.execute(
+                "SELECT card_id, emoji, COUNT(*) AS n FROM card_reactions "
+                "WHERE run_id=? GROUP BY card_id, emoji",
+                (run_id,),
+            ).fetchall():
+                if r["emoji"] in REACTION_EMOJI:
+                    counts.setdefault(r["card_id"], {})[r["emoji"]] = r["n"]
+            if reactor and len(reactor) <= 64:
+                for r in conn.execute(
+                    "SELECT card_id, emoji FROM card_reactions WHERE run_id=? AND reactor_id=?",
+                    (run_id, reactor),
+                ).fetchall():
+                    if r["emoji"] in REACTION_EMOJI:
+                        mine.setdefault(r["card_id"], []).append(r["emoji"])
+            conn.close()
+        except Exception as e:
+            log.warning("reaction fetch failed run=%s: %s", run_id, e)
+            return jsonify({"error": "reaction_failed"}), 500
+
+        return jsonify({"ok": True, "counts": counts, "mine": mine})
 
     # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
@@ -25946,7 +33283,7 @@ function mhSetupMode(mode) {{
             return _layout("Web research", off, active="research"), 404
         body = _WEB_RESEARCH_CONSOLE_BODY.replace(
             "__SUBMIT_URL__", url_for("api_web_research_submit")
-        )
+        ).replace("__CYCLE_PH__", _CYCLE_PH_ATTR_RESEARCH)
         return _layout("Web research", body, active="research")
 
     @app.route("/api/web-research", methods=["POST"])
@@ -26031,8 +33368,10 @@ function mhSetupMode(mode) {{
     @app.route("/club-qa")
     def club_qa_console():
         """Render the "Ask the data" console — Q&A over the org's own runs."""
-        body = _CLUB_QA_CONSOLE_BODY.replace("__SUBMIT_URL__", url_for("api_club_qa_submit"))
-        return _layout("Ask the data", body, active="clubdata")
+        body = _CLUB_QA_CONSOLE_BODY.replace(
+            "__SUBMIT_URL__", url_for("api_club_qa_submit")
+        ).replace("__CYCLE_PH__", _CYCLE_PH_ATTR_ASKDATA)
+        return _layout("Ask the data", body, active="settings")
 
     @app.route("/api/club-qa", methods=["POST"])
     def api_club_qa_submit():
@@ -26555,6 +33894,10 @@ function tiRegenerate() {{
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        # Failed run → the honest error surface on /review (U.2), not an empty
+        # grouped builder.
+        if (run_data.get("error") or "").strip():
+            return redirect(url_for("review", run_id=run_id))
 
         profile_id = run_data.get("profile_id", "")
         meet_name = _h(
@@ -26582,6 +33925,8 @@ function tiRegenerate() {{
                 _wf_states = _ws.load(run_id) or {}
         except Exception:
             _wf_states = {}
+        # UI 1.25 — per-card reaction tallies for this run, in one query.
+        _react_counts = _reaction_counts_for_run(run_id)
 
         try:
             grouped = _build_grouped_pack(run_data, profile_id)
@@ -26632,22 +33977,6 @@ function tiRegenerate() {{
                     wf_status = _card_wf.status.value
                 else:
                     wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
-                # Schedule state pill (queued|scheduled|published|failed).
-                sched_state_raw = (
-                    item.get("schedule_status")
-                    or (item.get("workflow") or {}).get("schedule_status")
-                    or "queued"
-                )
-                sched_state = str(sched_state_raw).lower()
-                sched_pill_class = {
-                    "scheduled": "good",
-                    "published": "good",
-                    "failed": "bad",
-                }.get(sched_state, "")
-                sched_pill_html = (
-                    f'<span class="tag {sched_pill_class}" data-schedule-pill="g-{card_uuid}" '
-                    f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
-                )
                 schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
                 # Per-card motion download — the endpoint renders (or
                 # serves cached) MP4. New tab so the user lands on the
@@ -26721,7 +34050,6 @@ function tiRegenerate() {{
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      {sched_pill_html}
       {f'<span class="tag">{angle}</span>' if angle else ""}
       <span class="tag {s2p_cls}" title="{s2p_reason}">{s2p_level}</span>
       {f'<span class="tag">{band}</span>' if band else ""}
@@ -26730,6 +34058,7 @@ function tiRegenerate() {{
   {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    {_render_reactions(run_id, str(card_id_raw), _react_counts) if card_id_raw else ""}
     <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
     <textarea id="cap-{card_id}-1" style="display:none">{cap_only}</textarea>
@@ -26838,30 +34167,8 @@ function tiRegenerate() {{
         except Exception:
             visuals_strip = ""
 
-        # Single global AI-availability banner (same pattern as /review).
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available
-
-            _ai_banner_html = (
-                ""
-                if _llm_available()
-                else (
-                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
-                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
-                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
-                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                    '<span style="color:var(--ink-dim)">'
-                    "Cards show ranker reasoning and grounded source lines only. "
-                    "Captions, &ldquo;why this card&rdquo; explanations and performance "
-                    "context need a Gemini or Anthropic key set by the deployment operator."
-                    "</span>"
-                    "</div>"
-                )
-            )
-        except Exception:
-            _ai_banner_html = ""
+        # Single global AI-availability banner (shared helper — U.2).
+        _ai_banner_html = _ai_unavailable_banner()
 
         body = f"""
 {_ai_banner_html}
@@ -26908,8 +34215,6 @@ function tiRegenerate() {{
 {_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
 {_section_html("Not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
-{_schedule_modal_html()}
-
 <script>
 function copyText(btn, taId) {{
   var ta = document.getElementById(taId);
@@ -26944,14 +34249,14 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
+  var prog = MH.renderProgress(panel, {{label: 'Producing your ' + fmt + ' reel', sub: 'Top ranked moments \u2014 up to 90 seconds the first time', expectedMs: 60000, accent: 'medal'}});
   var fail = function(msg) {{
+    prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   }};
   var success = function(videoUrl) {{
+    prog.complete(function(){{
     btn.disabled = false; btn.textContent = origLabel;
     var chips = '';
     ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
@@ -26965,15 +34270,16 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
     }});
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 320px;max-width:340px' : 'flex:0 0 220px;max-width:240px') + '">' +
+        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 min(320px,100%);max-width:340px' : 'flex:0 0 min(220px,100%);max-width:240px') + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
-        '<div style="flex:1;min-width:200px">' +
+        '<div style="flex:1;min-width:min(200px,100%)">' +
           '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + chips + '</div>' +
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
         '</div>' +
       '</div>';
+    }});
   }};
   fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {{method:'POST'}})
     .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
@@ -27028,12 +34334,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   // Visual marker on the active sort button.
   var allBtns = section.querySelectorAll('button[onclick*="mhSortPackSection"]');
   Array.prototype.forEach.call(allBtns, function(b) {{
-    b.style.background = (b === btn) ? 'rgba(212,255,58,0.18)' : '';
+    b.style.background = (b === btn) ? 'color-mix(in oklab, var(--lane) 18%, transparent)' : '';
     b.style.color = (b === btn) ? 'var(--accent)' : '';
   }});
 }};
 </script>
-{_schedule_modal_js()}
 """
         return _layout(f"All recommendations — {meet_name}", body, active="home")
 
@@ -27190,33 +34495,145 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
             store_failed = True
         rows_html = ""
+        gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
+            _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
+            # U.14 cursor-following preview: the row shows a 60px chip, so the
+            # floating frame carries the full photo at a useful size plus a
+            # caption (type + athlete/venue). Escaped — parsed metadata is
+            # never trusted into markup. <template> keeps the image inert
+            # until the first hover, so listing 200 assets costs no extra
+            # network up front.
+            _hp_type = (str(ad.get("type", "") or "photo")).replace("_", " ")
+            _hp_subject = athlete_names or (ad.get("linked_venue") or ad.get("linked_event") or "")
+            _hp_subject_html = f"<span>{_h(_hp_subject)}</span>" if _hp_subject else ""
+            _hp_tpl = (
+                '<template class="mh-hp-tpl">'
+                f'<img class="mh-hp-img" src="{_file_url}" alt="" />'
+                f'<span class="mh-hp-cap"><b>{_h(_hp_type)}</b>{_hp_subject_html}</span>'
+                "</template>"
+            )
+            # UI 1.27 — one filmstrip card per asset for the drag-scroll
+            # gallery above the table. Same escaped, parsed-metadata caption
+            # as the row; the photo loads lazily so a 200-asset strip costs
+            # nothing up front beyond what's on screen.
+            gallery_items += (
+                '<figure class="mh-ds-card">'
+                '<div class="mh-ds-card-media">'
+                f'<img src="{_file_url}" loading="lazy" decoding="async" alt="" />'
+                "</div>"
+                '<figcaption class="mh-ds-card-cap">'
+                f'<span class="eyebrow">{_h(_hp_type)}</span>'
+                + (f'<span class="sub">{_h(_hp_subject)}</span>' if _hp_subject else "")
+                + "</figcaption>"
+                "</figure>"
+            )
+            # HTML-escape every parsed-metadata cell: descriptions/links are
+            # user-supplied + AI-parsed, so an unescaped name/venue was a
+            # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr>
-  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
-  <td>{ad.get("type", "")}</td>
-  <td>{athlete_names}</td>
-  <td>{ad.get("linked_venue") or ad.get("linked_event") or ""}</td>
-  <td>{ad.get("permission_status", "")}</td>
-  <td><code>{ad.get("id", "")[:12]}</code></td>
-  <td>
-    <form method="post" action="{_delete_url}" style="display:inline"
-          onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
-      <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
-    </form>
+<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}">
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
+  <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
+  <td data-label="Type">{_h(ad.get("type", ""))}</td>
+  <td data-label="Athlete">{_h(athlete_names)}</td>
+  <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
+  <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
+  <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
+  <td style="white-space:nowrap">
+    <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
+            style="font-size:11px;padding:3px 9px"
+            onclick="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">Delete</button>
   </td>
 </tr>"""
+        # P6.3 — "Generate an image" panel. Shown when the imagine seam is
+        # importable; the Generate control is disabled (with an honest note)
+        # until a provider is actually configured.
+        imagine_panel = ""
+        if _imagine_ok:
+            _img_avail = _imagine.is_available()
+            _gen_url = url_for("api_imagine_generate")
+            from mediahub.media_ai.imagine_providers.gemini_imagine import STYLE_PRESETS
+
+            _style_opts = "".join(
+                '<option value="%s">%s</option>' % (_h(s), _h(s.replace("_", " ").title()))
+                for s in sorted(STYLE_PRESETS)
+            )
+            _dis = "" if _img_avail else "disabled"
+            _note = (
+                ""
+                if _img_avail
+                else (
+                    '<p class="dim" style="margin-bottom:var(--sp-4)">No image provider is '
+                    "configured yet, so generation is disabled. The default backend is the "
+                    "in-house local model (P5.6, coming soon); a Gemini key enables it today.</p>"
+                )
+            )
+            _imagine_js = (
+                "(function(){var go=document.getElementById('mh-imagine-go');if(!go)return;"
+                "go.addEventListener('click',function(){"
+                "var p=(document.getElementById('mh-imagine-prompt').value||'').trim();"
+                "var s=document.getElementById('mh-imagine-status');"
+                "if(!p){s.textContent='Enter a prompt first.';return;}"
+                "go.disabled=true;s.textContent='Generating\\u2026';"
+                "fetch(go.dataset.genUrl,{method:'POST',headers:{'Content-Type':'application/json'},"
+                "body:JSON.stringify({prompt:p,style:document.getElementById('mh-imagine-style').value,"
+                "aspect:document.getElementById('mh-imagine-aspect').value})})"
+                ".then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})"
+                ".then(function(res){if(res.ok&&res.j.ok){s.textContent='Done \\u2014 added to library.';"
+                "location.reload();}else{s.textContent=(res.j&&(res.j.user_message||res.j.error))||"
+                "'Generation failed.';go.disabled=false;}})"
+                ".catch(function(){s.textContent='Network error.';go.disabled=false;});});})();"
+            )
+            _gen_hist_url = url_for("media_library_generated_page")
+            imagine_panel = (
+                '<div class="card" id="mh-imagine">'
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-3);flex-wrap:wrap">'
+                '<h2 style="margin:0">Generate an image <span class="dim" style="font-weight:400">&middot; AI</span></h2>'
+                f'<a href="{_gen_hist_url}">View generated &rarr;</a>'
+                "</div>"
+                '<p class="dim" style="margin:var(--sp-3) 0 var(--sp-5)">Create a brand-fitting backdrop '
+                "or scene from a text prompt. Every image is provenance-stamped as AI-generated "
+                "and saved to this library. People are off by default.</p>"
+                + _note
+                + '<label for="mh-imagine-prompt">Prompt</label>'
+                '<input id="mh-imagine-prompt" type="text" '
+                'placeholder="e.g. abstract navy and gold poolside backdrop, dynamic light" '
+                + _dis
+                + ">"
+                '<label for="mh-imagine-style">Style</label>'
+                '<select id="mh-imagine-style" ' + _dis + ">" + _style_opts + "</select>"
+                '<label for="mh-imagine-aspect">Aspect</label>'
+                '<select id="mh-imagine-aspect" ' + _dis + ">"
+                '<option value="1:1">Square (1:1)</option>'
+                '<option value="3:4">Portrait (3:4)</option>'
+                '<option value="9:16">Story (9:16)</option>'
+                '<option value="16:9">Landscape (16:9)</option>'
+                "</select>"
+                '<div style="margin-top:var(--sp-4)">'
+                '<button type="button" class="btn" id="mh-imagine-go" data-gen-url="'
+                + _gen_url
+                + '" '
+                + _dis
+                + ">Generate image &rarr;</button>"
+                '<span id="mh-imagine-status" class="dim" style="margin-left:var(--sp-3)"></span>'
+                "</div></div><script>" + _imagine_js + "</script>"
+            )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
   <h1>Library</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(profile_id)}</span><span class="sep">·</span>
-    <span>{len(assets):03d} {"asset" if len(assets) == 1 else "assets"}</span>
+    <span><span data-mh-asset-count>{len(assets):03d}</span> {
+            "asset" if len(assets) == 1 else "assets"
+        }</span>
   </div>
 </section>
 
@@ -27243,26 +34660,60 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
   </form>
 </div>
-
+{imagine_panel}
+{
+            (
+                '<div class="card">'
+                '<div class="strap" style="margin-bottom:var(--sp-3)">Browse &middot; drag to scroll</div>'
+                '<div class="mh-ds-gallery-wrap">'
+                '<div class="mh-drag-scroll" tabindex="0" role="group" '
+                'aria-label="Media library photos — drag or scroll to browse">'
+                + gallery_items
+                + "</div>"
+                + _drag_hint("Drag to explore")
+                + "</div></div>"
+            )
+            if gallery_items
+            else ""
+        }
 <div class="card">
-  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {
-            "asset" if len(assets) == 1 else "assets"
-        } in library</div>
-  <table style="width:100%">
-    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
-    <tbody>{
+  <div class="strap" style="margin-bottom:var(--sp-3)"><span data-mh-asset-count>{
+            len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"} in library</div>
+  <form id="mh-ml-bulk" method="post">
+    <div class="mh-bulkbar is-empty" id="mh-ml-bulkbar" role="group" aria-label="Bulk photo actions"
+         data-mh-bulkbar="media" data-form="mh-ml-bulk" data-count="mh-ml-count"
+         data-select-all="mh-ml-all" data-check="mh-row-check" data-row=".mh-asset-row">
+      <span class="mh-bulkbar-count" id="mh-ml-count">0 selected</span>
+      <div class="mh-bulkbar-actions">
+        <button type="submit" class="btn secondary" data-mh-bulk="approve"
+                formaction="{url_for("api_media_library_bulk_approve")}"
+                data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="export"
+                formaction="{url_for("api_media_library_bulk_export")}">Export ZIP</button>
+        <button type="submit" class="btn danger" data-mh-bulk="delete"
+                formaction="{url_for("api_media_library_bulk_delete")}"
+                data-confirm="Delete {{n}} selected photo(s)? Graphics already rendered keep their copy.">Delete</button>
+      </div>
+    </div>
+    <table class="mh-table-stack" style="width:100%">
+      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
+      <tbody>{
             rows_html
             or (
-                '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
                 "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
                 "Uploads above still work; if this persists, ask your operator to check the data volume."
                 "</td></tr>"
                 if store_failed
-                else '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+                else '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
             )
         }</tbody>
-  </table>
+    </table>
+  </form>
 </div>
+
+<style>{_BULK_ACTIONS_CSS}</style>
+<script>{_BULK_ACTIONS_JS}</script>
 """
         return _layout("Media library", body, active="media")
 
@@ -27391,6 +34842,800 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    # -- P6.3 generative imagery ------------------------------------------
+    # The image-AI seam (media_ai.imagine) surfaced on the media library:
+    # text-to-image generate, deterministic subject-lift, and the edit family
+    # (edit/expand/remove/upscale/similar/style_match). Every provider-backed
+    # op is tenancy-guarded, quota-metered, and its output saved as a
+    # provenance-stamped MediaAsset.
+
+    _IMAGINE_ASSET_OPS = {"edit", "expand", "remove", "upscale", "similar", "style_match"}
+
+    def _imagine_dims(data: bytes) -> "tuple[int, int, str]":
+        """(width, height, orientation) of generated bytes — best-effort via PIL."""
+        try:
+            import io as _io
+            from PIL import Image as _Image
+
+            with _Image.open(_io.BytesIO(data)) as im:
+                w, h = int(im.width), int(im.height)
+        except Exception:
+            return 0, 0, "unknown"
+        if w and h:
+            if abs(w - h) <= max(2, int(0.02 * max(w, h))):
+                orient = "square"
+            elif h > w:
+                orient = "portrait"
+            else:
+                orient = "landscape"
+        else:
+            orient = "unknown"
+        return w, h, orient
+
+    def _imagine_persist(result, *, profile_id, prompt="", source_asset=None):
+        """Save an ImagineResult as a provenance-stamped MediaAsset, return it."""
+        store = _v8_get_media_store()
+        op = result.operation
+        # Write under DATA_DIR's persistent uploads tree, exactly like the
+        # upload route (UPLOADS_DIR), so generated assets land on the same disk.
+        import uuid as _uuid
+
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        path = upload_dir / f"imagine_{op}_{_uuid.uuid4().hex[:12]}.{result.ext}"
+        path.write_bytes(result.data)
+        # Provenance: embed IPTC DigitalSourceType + write the sidecar manifest.
+        try:
+            _imagine.stamp_file(path, result, source_asset=source_asset)
+        except Exception:  # pragma: no cover - stamping is best-effort
+            pass
+        w, h, orient = _imagine_dims(result.data)
+        from mediahub.media_library.models import MediaAsset
+
+        model = result.model or ""
+        asset = MediaAsset(
+            id="",
+            filename=path.name,
+            path=str(path),
+            type="ai_generated",
+            description_raw=(prompt or result.manifest.get("prompt", "")),
+            description_parsed={"imagine": result.manifest},
+            profile_id=profile_id,
+            width=w,
+            height=h,
+            orientation=orient,
+            permission_status="internal_only",
+            approval_status="draft",
+            source_attribution=f"Generated with MediaHub ({model})"
+            if model
+            else "Generated with MediaHub",
+            tags=["ai-generated", op],
+            safe_for_minors=True,
+        )
+        return store.save(asset)
+
+    def _imagine_quota_json(pid):
+        q = _imagine.check_quota(pid)
+        return {
+            "limit": q.limit,
+            "used": q.used,
+            "remaining": q.remaining,
+            "unlimited": q.unlimited,
+        }
+
+    def _imagine_error_response(exc):
+        """Map an imagine exception to the house JSON error envelope + status."""
+        if isinstance(exc, _imagine.QuotaExceeded):
+            return jsonify({"error": "quota_exceeded", "user_message": str(exc)}), 429
+        if isinstance(exc, _imagine.ProviderNotConfigured):
+            return jsonify({"error": "provider_not_configured", "user_message": str(exc)}), 503
+        if isinstance(exc, _imagine.ImagineUnsupported):
+            return jsonify({"error": "unsupported", "user_message": str(exc)}), 501
+        if isinstance(exc, _imagine.ImagineError):
+            return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
+        return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
+
+    @app.route("/api/media-library/imagine/info")
+    def api_imagine_info():
+        """Capabilities, active provider, style presets, and this org's quota."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        from mediahub.media_ai.imagine_providers.gemini_imagine import STYLE_PRESETS
+
+        return jsonify(
+            {
+                "available": _imagine.is_available(),
+                "provider": _imagine.active_provider_name(),
+                "operations": sorted(_imagine.available_operations()),
+                "styles": sorted(STYLE_PRESETS.keys()),
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/imagine/generate", methods=["POST"])
+    def api_imagine_generate():
+        """Text → image. Saves the result as a provenance-stamped library asset."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        body = request.get_json(silent=True) or {}
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            return (
+                jsonify({"error": "empty_prompt", "user_message": "Describe the image you want."}),
+                400,
+            )
+        style = (body.get("style") or "").strip() or None
+        aspect = (body.get("aspect") or "1:1").strip()
+        allow_people = bool(body.get("allow_people"))
+        try:
+            results = _imagine.generate(
+                prompt, style=style, aspect=aspect, n=1, allow_people=allow_people, org_id=pid
+            )
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        asset = _imagine_persist(results[0], profile_id=pid, prompt=prompt)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": asset.to_dict(),
+                "url": url_for("api_media_library_file", asset_id=asset.id),
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/imagine/subject-lift", methods=["POST"])
+    def api_imagine_subject_lift(asset_id: str):
+        """Magic Grab — deterministic cutout + saliency framing (not metered)."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        out, status = _v8_ensure_cutout(a)
+        if status == "unavailable":
+            return (
+                jsonify(
+                    {
+                        "error": "cutout_unavailable",
+                        "user_message": "No background remover is available on this deployment.",
+                    }
+                ),
+                503,
+            )
+        if out is None:
+            return jsonify({"error": status or "failed"}), 502
+        body = request.get_json(silent=True) or {}
+        ratio = (body.get("ratio") or "4:5").strip()
+        focus = "center 28%"
+        try:
+            from mediahub.graphic_renderer.saliency import focus_position
+
+            focus = focus_position(out, ratio)
+        except Exception:
+            pass
+        return jsonify(
+            {
+                "ok": True,
+                "status": status,
+                "cutout_url": url_for("api_media_library_cutout", asset_id=asset_id),
+                "focus_position": focus,
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/imagine/<op>", methods=["POST"])
+    def api_imagine_asset_op(asset_id: str, op: str):
+        """Run a provider-backed edit-family op on an existing library asset.
+
+        ``op`` ∈ {edit, expand, remove, upscale, similar, style_match}. The
+        active provider honest-errors (501) for ops it does not support — the
+        local diffusion backend (P5.6) is the one that will cover them all.
+        """
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        if op not in _IMAGINE_ASSET_OPS:
+            return jsonify({"error": "unknown_op"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            data = Path(a.path).read_bytes()
+        except Exception:
+            return jsonify({"error": "no_source"}), 404
+        body = request.get_json(silent=True) or {}
+        import base64 as _b64
+
+        mask = None
+        if body.get("mask_b64"):
+            try:
+                mask = _b64.b64decode(body["mask_b64"])
+            except Exception:
+                mask = None
+        img = _imagine.ImageInput(data=data, mime="image/png", mask=mask)
+        try:
+            if op == "edit":
+                result = _imagine.edit(
+                    img,
+                    (body.get("instruction") or "").strip(),
+                    allow_people=bool(body.get("allow_people")),
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+            elif op == "expand":
+                result = _imagine.expand(
+                    img,
+                    aspect=(body.get("aspect") or "1:1").strip(),
+                    prompt=(body.get("prompt") or "").strip(),
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+            elif op == "remove":
+                result = _imagine.remove(img, org_id=pid, source_asset_id=a.id)
+            elif op == "upscale":
+                result = _imagine.upscale(
+                    img, factor=int(body.get("factor") or 2), org_id=pid, source_asset_id=a.id
+                )
+            elif op == "similar":
+                results = _imagine.similar(
+                    img,
+                    prompt=(body.get("prompt") or "").strip(),
+                    n=1,
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+                result = results[0]
+            else:  # style_match
+                result = _imagine.style_match(
+                    img,
+                    style=(body.get("style") or "editorial").strip(),
+                    palette=body.get("palette") or None,
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        asset = _imagine_persist(
+            result,
+            profile_id=pid,
+            prompt=body.get("instruction") or body.get("prompt") or "",
+            source_asset=a,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "asset": asset.to_dict(),
+                "url": url_for("api_media_library_file", asset_id=asset.id),
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/imagine/grab-text", methods=["POST"])
+    def api_imagine_grab_text(asset_id: str):
+        """Grab Text — vision-OCR the text out of an image into editable blocks."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            grabbed = _imagine.grab_text(a.path, org_id=pid)
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        return jsonify(
+            {
+                "ok": True,
+                "found": grabbed.found,
+                "text": grabbed.text,
+                "blocks": grabbed.blocks,
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/mockup-templates")
+    def api_mockup_templates():
+        """List the deterministic product-mockup templates (for the UI picker)."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        try:
+            from mediahub.mockups import list_templates
+
+            return jsonify({"templates": list_templates()})
+        except Exception:
+            return jsonify({"templates": []})
+
+    def _profile_accent_hex():
+        """Best-effort brand accent for tinting mockup scenes (None if unknown)."""
+        try:
+            prof = _active_profile()
+            bk = getattr(prof, "brand_kit", None) or {}
+            if isinstance(bk, dict):
+                val = bk.get("accent") or bk.get("primary") or bk.get("secondary")
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+        except Exception:
+            pass
+        return None
+
+    @app.route("/api/media-library/<asset_id>/mockup/<template>", methods=["POST", "GET"])
+    def api_media_library_mockup(asset_id: str, template: str):
+        """Composite an asset into a product mockup; serve the PNG directly.
+
+        Deterministic, key-free, brand-tinted — not an AI op, so no quota/stamp.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            from mediahub.mockups import compose_mockup, MockupError
+        except Exception:
+            return jsonify({"error": "mockups_unavailable"}), 503
+        try:
+            art = Path(a.path).read_bytes()
+        except Exception:
+            return jsonify({"error": "no_source"}), 404
+        try:
+            png = compose_mockup(art, template, accent=_profile_accent_hex())
+        except MockupError as e:
+            return jsonify({"error": "unknown_template", "user_message": str(e)}), 404
+        except Exception as e:
+            return jsonify({"error": "mockup_failed", "user_message": str(e)}), 502
+        from flask import Response as _Response
+
+        return _Response(
+            png,
+            mimetype="image/png",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
+    @app.route("/media-library/generated")
+    def media_library_generated_page():
+        """Generation history + provenance viewer for this org's AI imagery."""
+        if not _v8_ok:
+            return redirect(url_for("media_library_page"))
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("media_library_page"))
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(profile_id=pid, asset_type="ai_generated")
+        except Exception:
+            assets = []
+        _ds_label = {
+            "ai_generated": "AI-generated",
+            "ai_composite": "AI-edited",
+        }
+        cards = ""
+        for a in assets[:200]:
+            ad = a.to_dict() if hasattr(a, "to_dict") else a
+            man = (ad.get("description_parsed") or {}).get("imagine") or {}
+            file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
+            op = str(man.get("operation") or "generate")
+            model = str(man.get("model") or "")
+            prompt = str(man.get("prompt") or ad.get("description_raw") or "")
+            dst = _ds_label.get(str(man.get("digital_source_type") or ""), "AI")
+            created = str(man.get("created_at") or ad.get("uploaded_at") or "")[:19].replace(
+                "T", " "
+            )
+            cards += (
+                '<figure class="mh-gen-card">'
+                f'<a href="{file_url}" target="_blank" rel="noopener">'
+                f'<img loading="lazy" src="{file_url}" alt="">'
+                "</a>"
+                "<figcaption>"
+                f'<span class="mh-gen-badge">{_h(dst)}</span>'
+                f'<span class="mh-gen-op">{_h(op)}</span>'
+                f'<p class="mh-gen-prompt">{_h(prompt[:180])}</p>'
+                f'<p class="dim mh-gen-meta">{_h(model)}{" · " if model and created else ""}{_h(created)}</p>'
+                '<div class="mh-gen-actions">'
+                f'<a class="btn secondary" href="{file_url}" download>Download</a>'
+                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id", ""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
+                "</div>"
+                "</figcaption></figure>"
+            )
+        empty = (
+            '<div class="card"><p class="dim" style="text-align:center;padding:var(--sp-7)">'
+            "No AI-generated images yet. Use &ldquo;Generate an image&rdquo; on the "
+            f'<a href="{url_for("media_library_page")}">media library</a> to make one — '
+            "every image you create lands here with its provenance.</p></div>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Media library</span>'
+            "<h1>Generated images</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(pid)}</span><span class="sep">·</span>'
+            f"<span>{len(assets)} AI image{'' if len(assets) == 1 else 's'}</span>"
+            f'<span class="sep">·</span><a href="{url_for("media_library_page")}">&larr; Library</a>'
+            "</div>"
+            '<p class="lede" style="margin-top:var(--sp-3)">Every AI-made image, with the '
+            "operation, model and prompt that produced it. Each file also carries an embedded "
+            "C2PA-class &ldquo;AI&rdquo; provenance tag wherever it travels.</p>"
+            "</section>"
+            + (f'<div class="mh-gen-grid">{cards}</div>' if cards else empty)
+            + f"<style>{_GENERATED_GALLERY_CSS}</style>"
+        )
+        return _layout("Generated images", body, active="media")
+
+    @app.route("/api/media-library/bulk-delete", methods=["POST"])
+    def api_media_library_bulk_delete():
+        """UI 1.9 — delete many library assets at once (record + files on disk).
+
+        Mirrors the single-asset delete, profile-scoped per id so one org can't
+        reach another's photos even if ids leak. Content-negotiated: fetch() gets
+        a per-id result list; a no-JS form POST is redirected with a flash.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            for _p in (a.path, getattr(a, "cutout_path", None)):
+                if not _p:
+                    continue
+                try:
+                    Path(_p).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            store.delete(aid)
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "deleted": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                }
+            )
+        _flash_toast(
+            f"Deleted {n_ok} photo{'' if n_ok == 1 else 's'}.",
+            "success" if n_ok else "info",
+        )
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-approve", methods=["POST"])
+    def api_media_library_bulk_approve():
+        """UI 1.9 — mark many library assets approved at once.
+
+        Sets ``approval_status='approved'`` (the deterministic photo selector
+        weights approved shots highest). Safeguarding: an asset with a hard
+        permission block (``do_not_use`` / ``needs_parental_consent``) or one
+        flagged not ``safe_for_minors`` is SKIPPED, never silently promoted —
+        resolving that block is a deliberate human call, not a bulk one.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        n_skipped = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            if a.permission_status in ("do_not_use", "needs_parental_consent") or not getattr(
+                a, "safe_for_minors", True
+            ):
+                results.append({"id": aid, "ok": False, "error": "safeguarding_block"})
+                n_skipped += 1
+                continue
+            store.update_fields(aid, {"approval_status": "approved"})
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "approved": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                    "n_skipped": n_skipped,
+                }
+            )
+        msg = f"Approved {n_ok} photo{'' if n_ok == 1 else 's'}."
+        if n_skipped:
+            msg += f" {n_skipped} skipped (safeguarding)."
+        _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-export", methods=["POST"])
+    def api_media_library_bulk_export():
+        """UI 1.9 — download the selected library photos as one ZIP.
+
+        Streams the original files (profile-scoped per id; assets from another
+        org or with a missing file are simply skipped). Always a native
+        attachment download, so it works with or without JS.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        import io as _io
+        import zipfile as _zip
+
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one photo to export.", "info")
+            return redirect(url_for("media_library_page"))
+        buf = _io.BytesIO()
+        used: set[str] = set()
+        n = 0
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for aid in ids:
+                a = store.get(aid)
+                if not a or not _session_can_access_profile(a.profile_id):
+                    continue
+                src = a.path
+                if not src or not Path(src).exists():
+                    continue
+                base = (
+                    re.sub(r"[^A-Za-z0-9_.-]+", "_", (a.filename or Path(src).name or aid)) or aid
+                )
+                name = base
+                i = 1
+                while name in used:
+                    stem, dot, ext = base.rpartition(".")
+                    name = f"{stem}_{i}.{ext}" if dot else f"{base}_{i}"
+                    i += 1
+                used.add(name)
+                try:
+                    zf.write(src, arcname=name)
+                    n += 1
+                except Exception:
+                    continue
+        if n == 0:
+            if _req_wants_json(request):
+                return jsonify({"error": "nothing_to_export"}), 404
+            _flash_toast("None of the selected photos could be exported.", "error")
+            return redirect(url_for("media_library_page"))
+        pid = _active_profile_id() or "library"
+        fname = (
+            "mediahub-photos-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", pid)[:40] or "library") + ".zip"
+        )
+        return Response(
+            buf.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    @app.route("/api/media-library/cutout/<asset_id>")
+    def api_media_library_cutout(asset_id: str):
+        """Serve the background-removed cut-out PNG for one asset (UI2.1).
+
+        Generated on first request and cached/persisted, then profile-scoped
+        exactly like the original-file route. Returns an honest 503 when no
+        background remover is available rather than a fake (pass-through)
+        cut-out, and 404 when there is no source or generation produced
+        nothing usable.
+        """
+        if not _v8_ok:
+            return "", 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return "", 404
+        if not _session_can_access_profile(a.profile_id):
+            return "", 403
+        path, status = _v8_ensure_cutout(a)
+        if path is None:
+            return "", (503 if status == "unavailable" else 404)
+        from flask import send_file
+
+        try:
+            resp = send_file(str(path), mimetype="image/png")
+            # Derived asset — let the browser cache it; it only changes if the
+            # source is re-uploaded (which mints a new asset id).
+            resp.headers["Cache-Control"] = "private, max-age=3600"
+            return resp
+        except Exception:
+            return "", 404
+
+    @app.route("/media-library/<asset_id>/cutout")
+    def media_library_cutout_page(asset_id: str):
+        """Before/after cut-out preview (UI2.1).
+
+        Drag the `.mh-compare` slider to see *exactly* what background removal
+        knocked out: the original photo on the left, the cut-out (subject on a
+        transparency checkerboard) on the right. Fails honestly — if no real
+        remover is available it shows the original with a plain explanation,
+        never a fake cut-out.
+        """
+        if not _v8_ok:
+            return _recovery_page(
+                "Media library unavailable",
+                "The V8 media engine isn't enabled on this deployment, so cut-out "
+                "previews can't be generated. Ask your operator to enable it.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library &mdash; it may have been deleted, "
+                "or the link might be out of date.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation, so it isn't "
+                "available from your current session.",
+                eyebrow="Cut-out preview",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+
+        ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+        subject = (
+            ", ".join(ad.get("linked_athlete_names") or [])
+            or ad.get("linked_venue")
+            or ad.get("linked_event")
+            or ad.get("filename")
+            or "this photo"
+        )
+        orig_url = url_for("api_media_library_file", asset_id=a.id)
+        cutout_url = url_for("api_media_library_cutout", asset_id=a.id)
+        back_url = url_for("media_library_page")
+
+        # Pixel-perfect alignment: size the slider to the photo's own aspect
+        # ratio so the before/after halves line up. Falls back to a portrait
+        # default when the file can't be measured (e.g. a placeholder blob).
+        aspect = "4 / 5"
+        try:
+            from PIL import Image
+
+            with Image.open(a.path) as _im:
+                _iw, _ih = _im.size
+            if _iw > 0 and _ih > 0:
+                aspect = f"{_iw} / {_ih}"
+        except Exception:
+            pass
+
+        path, status = _v8_ensure_cutout(a)
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Cut-out preview</span>'
+            f"<h1>{_h(subject)}</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(ad.get("type", "photo"))}</span><span class="sep">·</span>'
+            "<span>before &rarr; after background removal</span>"
+            "</div>"
+            "</section>"
+        )
+
+        if path is not None:
+            provider = _cutout_provider_label()
+            compare = (
+                '<div class="card">'
+                '<p class="dim" style="margin-bottom:var(--sp-4)">'
+                "Drag the handle to wipe between the original photo (left) and the "
+                "cut-out (right). The checkerboard is transparency &mdash; that&rsquo;s "
+                "exactly what was removed."
+                "</p>"
+                '<figure class="mh-compare" data-mh-pos="50" '
+                'aria-label="Before and after background removal" '
+                f'style="aspect-ratio:{aspect};max-width:560px;width:100%;margin:0 auto">'
+                f'<img src="{orig_url}" alt="Original photo of {_h(subject)}, background intact" />'
+                '<div class="mh-compare__after mh-compare__after--checker">'
+                f'<img src="{cutout_url}" alt="{_h(subject)} with the background removed" />'
+                "</div>"
+                '<div class="mh-compare__handle"></div>'
+                "</figure>"
+                '<p class="dim" style="margin-top:var(--sp-4);font-size:13px">'
+                f"Cut out by {_h(provider)} on MediaHub&rsquo;s servers &mdash; the same "
+                "background removal composited into your branded graphics."
+                "</p>"
+                "</div>"
+            )
+            body = hero + compare
+        else:
+            # Honest fallback — no fabricated cut-out (CLAUDE.md honest-error rule).
+            if status == "unavailable":
+                detail = (
+                    "Background removal isn&rsquo;t available on this deployment, so "
+                    "there&rsquo;s no cut-out to compare yet. Your operator can enable it "
+                    "(the on-server rembg model, or a Photoroom / Replicate key). The "
+                    "original photo is shown below."
+                )
+            elif status == "no_source":
+                detail = (
+                    "The original file for this photo is missing, so there&rsquo;s "
+                    "nothing to preview. Try re-uploading it to the library."
+                )
+            else:  # failed
+                detail = (
+                    "We couldn&rsquo;t produce a cut-out for this photo. The original is "
+                    "shown below &mdash; a clearer subject-on-background shot usually cuts "
+                    "out cleanly."
+                )
+            note = (
+                '<div class="card">'
+                '<div role="status" class="mh-ai-unavailable" '
+                'style="margin-bottom:var(--sp-4);padding:14px 18px;'
+                "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                'display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap">'
+                f"{_AI_UNAVAILABLE_ICON}"
+                '<span class="strap" style="color:var(--warn)">No cut-out to show</span>'
+                f'<span style="color:var(--ink-dim)">{detail}</span>'
+                "</div>"
+            )
+            if status != "no_source":
+                note += (
+                    f'<img src="{orig_url}" alt="Original photo of {_h(subject)}" '
+                    f'style="max-width:560px;width:100%;border-radius:var(--radius-md);display:block" />'
+                )
+            note += "</div>"
+            body = hero + note
+
+        body += (
+            '<div style="margin-top:var(--sp-5)">'
+            f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
+            "</div>"
+        )
+        return _layout("Cut-out preview", body, active="media")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):
@@ -27652,7 +35897,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if hook:
                 hooks.append(hook)
             # Cap at 12 entries — the AI / picker only ever looks at the
-            # most recent 6 so this gives a comfortable buffer.
+            # most recent 6 so this gives a comfortable scheduler.
             sigs = sigs[-12:]
             hooks = hooks[-12:]
             p.write_text(json.dumps({"signatures": sigs, "hooks": hooks}), encoding="utf-8")
@@ -27862,6 +36107,50 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             chosen_asset_id = (_req.args.get("asset_id") or "").strip() or None
         if not force_no_photo:
             force_no_photo = (_req.args.get("no_photo") or "").lower() in ("1", "true", "yes")
+
+        # UI 1.18 — inspector overrides (accent swatch / manual crop / sponsor
+        # toggle). Persisted per-card in the workflow store under ``insp.*`` keys
+        # (no new persistence layer — same edited_captions bag as captions), so
+        # a tweak made before approval also re-applies on every later render
+        # (content builder included). An explicit value in *this* request wins
+        # over the stored one; both are honoured deterministically by
+        # ``create_visual_for_item`` (the AI director still picks the design).
+        _persisted_insp = _inspector_overrides_for_card(run_id, card_id)
+        user_overrides = dict(_persisted_insp)
+
+        def _ov(key):
+            v = None
+            try:
+                if _req.is_json and _req.json and _req.json.get(key) is not None:
+                    v = _req.json.get(key)
+            except Exception:
+                v = None
+            if v is None:
+                v = _req.args.get(key)
+            return v
+
+        _req_accent = _ov("accent")
+        if _req_accent is not None:
+            user_overrides["accent"] = str(_req_accent).strip()
+        _req_focus = _ov("focus")
+        if _req_focus is not None:
+            user_overrides["photo_pos"] = str(_req_focus).strip()
+        _req_hide_sponsor = _ov("hide_sponsor")
+        if _req_hide_sponsor is not None:
+            user_overrides["hide_sponsor"] = str(_req_hide_sponsor).lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+        # ``no_photo`` is parsed above. Fold the persisted default in so the
+        # inspector's "Show photo" toggle sticks across renders — but only when
+        # THIS request didn't speak to it (an explicit request value always
+        # wins, true or false).
+        if _ov("no_photo") is None and not force_no_photo and _persisted_insp.get("no_photo"):
+            force_no_photo = True
+            chosen_asset_id = None
+
         forced_hero_asset_id = None
         choice_allowed_families = None
         if force_no_photo:
@@ -28064,6 +36353,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     forced_hero_asset_id=forced_hero_asset_id,
                     sponsor_name=rotated_sponsor_name,
                     sponsor_logo_path=rotated_sponsor_logo_path,
+                    user_overrides=user_overrides,
                 )
         except _RenderBusy:
             return _render_busy_response("graphic")
@@ -28094,6 +36384,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "chosen_asset_id": chosen_asset_id,
                 "no_photo": force_no_photo,
                 "card_athlete": _card_athlete,
+                # UI 1.18 inspector state: the brand-locked swatches it may pick
+                # from, plus the overrides actually in force for this render.
+                "brand_swatches": _brand_swatches(brand_kit),
+                "inspector": user_overrides,
                 **res,
             }
         )
@@ -28382,10 +36676,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             )
             rows += (
                 "<tr>"
-                f"<td><b>{_h(s['name'])}</b></td>"
-                f"<td>{_h(s['tier'])}</td>"
-                f"<td>{window}</td>"
-                f"<td>{state}</td>"
+                f'<td data-label="Sponsor"><b>{_h(s["name"])}</b></td>'
+                f'<td data-label="Tier">{_h(s["tier"])}</td>'
+                f'<td data-label="Window">{window}</td>'
+                f'<td data-label="State">{state}</td>'
                 f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0">'
                 f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
                 '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
@@ -28425,7 +36719,7 @@ where they appeared, ready to forward.</p>
 
 <div class="card" style="margin-bottom:20px">
   <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor registry</h3>
-  <table style="width:100%;border-collapse:collapse;font-size:14px">
+  <table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:14px">
     <thead><tr style="text-align:left;color:var(--ink-dim);font-size:12px;text-transform:uppercase">
       <th style="padding:6px 8px">Sponsor</th><th>Tier</th><th>Active window</th><th>State</th><th></th>
     </tr></thead>
@@ -28535,7 +36829,6 @@ where they appeared, ready to forward.</p>
     <div><div style="font-size:26px;font-weight:800">{s["cards"]}</div><div class="dim">cards carried the slot</div></div>
     <div><div style="font-size:26px;font-weight:800">{s["approved"]}</div><div class="dim">approved</div></div>
     <div><div style="font-size:26px;font-weight:800">{s["posted"]}</div><div class="dim">posted</div></div>
-    <div><div style="font-size:26px;font-weight:800">{s["publish_attempts_ok"]}</div><div class="dim">publish attempts OK</div></div>
   </div>
   <p class="dim" style="font-size:12px;margin-bottom:0">Runs: {runs_list}</p>
 </div>"""
@@ -28752,7 +37045,8 @@ ever appear; queued, edited and rejected cards never do.</p>
   header{{padding:28px 24px 8px;border-bottom:3px solid {_h(primary)}}}
   header h1{{margin:0;font-size:24px}}
   header p{{margin:4px 0 16px;color:#93a1b3}}
-  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;padding:24px}}
+  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:18px;padding:18px}}
+  @media (max-width:420px){{.grid{{gap:12px;padding:14px}}header{{padding:20px 16px 6px}}}}
   .wall-card{{margin:0;background:#131a24;border:1px solid #233042;border-radius:12px;overflow:hidden}}
   .wall-card img{{width:100%;height:auto;display:block}}
   .wall-card figcaption{{padding:10px 12px}}
@@ -29183,11 +37477,22 @@ ever appear; queued, edited and rejected cards never do.</p>
                 explanation = _build_card_explanation(c["ra"]) or {}
             except Exception:
                 explanation = {}
+            # U.7 — the same source-grounded "focus the facts" highlight the
+            # logged-in review uses, on the public preview: the athlete, event,
+            # time and PB/medal markers light up in both the caption and the
+            # reasoning so the demo reads as the intelligence layer it is.
+            _demo_facts = _card_facts(ach)
             why_bits = ""
             if explanation.get("headline"):
-                why_bits += f"<p style='margin:6px 0'><b>{_h(explanation['headline'])}</b></p>"
+                why_bits += (
+                    f"<p style='margin:6px 0'><b>"
+                    f"{_focus_facts_html(explanation['headline'], phrases=_demo_facts)}</b></p>"
+                )
             for b in (explanation.get("bullets") or [])[:3]:
-                why_bits += f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; {_h(b)}</p>'
+                why_bits += (
+                    f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; '
+                    f"{_focus_facts_html(b, phrases=_demo_facts)}</p>"
+                )
             if explanation.get("ai_error"):
                 why_bits += (
                     f'<p class="dim" style="font-size:12px">AI explainer unavailable: '
@@ -29195,7 +37500,8 @@ ever appear; queued, edited and rejected cards never do.</p>
                 )
             img_url = url_for("try_demo_card_png", run_id=run_id, card_id=c["card_id"])
             caption_html = (
-                f'<p style="font-size:14px;white-space:pre-wrap">{_h(caption)}</p>'
+                f'<p style="font-size:14px;white-space:pre-wrap">'
+                f"{_focus_facts_html(caption, phrases=_demo_facts)}</p>"
                 if caption
                 else ""
             )
@@ -29955,6 +38261,417 @@ voice, and queues them for one-click approval.</p>
         except Exception as e:
             return jsonify({"error": f"manifest_unreadable: {e}"}), 500
 
+    _FORMAT_CATEGORY_LABELS = {
+        "social_size": "Social sizes",
+        "carousel": "Carousel",
+        "poster": "Posters & flyers",
+        "certificate": "Certificates",
+        "card": "Cards",
+        "document": "Documents",
+        "calendar": "Calendars",
+        "wallpaper": "Wallpapers",
+        "custom": "Custom",
+    }
+
+    @app.route("/api/formats")
+    def api_formats():
+        """The P6.1 smart format catalogue as JSON, grouped by category.
+
+        Pure static data (canvas sizes + metadata for every club design
+        format). ``?sport=<slug>`` filters to the formats that sport's profile
+        enables — the per-sport availability the catalogue sources from
+        ``sport_profiles``; omitted returns the whole catalogue.
+        """
+        from mediahub.club_platform import format_catalog as _fc
+
+        sport = (request.args.get("sport") or "").strip() or None
+        specs = _fc.formats_for_sport(sport) if sport else list(_fc.all_formats())
+        by_cat: dict[str, list] = {}
+        for s in specs:
+            by_cat.setdefault(s.category, []).append(s.to_dict())
+        groups = [
+            {
+                "category": c,
+                "label": _FORMAT_CATEGORY_LABELS.get(c, c.replace("_", " ").title()),
+                "formats": by_cat[c],
+            }
+            for c in _fc.categories()
+            if c in by_cat
+        ]
+        return jsonify({"groups": groups, "n": len(specs), "sport": sport or ""})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/reformat", methods=["POST", "GET"])
+    def api_card_reformat(run_id: str, card_id: str):
+        """P6.1 format transformer — re-target an approved card to any format.
+
+        Loads the card's most recent ``CreativeBrief`` (the approved design),
+        re-lays it out for the target format via ``turn_into.transform_design``
+        (the design-spec director with the deterministic per-aspect picker as
+        the honest floor — never a fabricated layout), renders it at the
+        format's canvas size through the existing ``graphic_renderer`` (which
+        already adapts the composition to the aspect, so this re-lays-out rather
+        than scaling), and serves the PNG directly.
+
+        Query params:
+          * ``format=<slug>``          — a catalogue format (see ``/api/formats``)
+          * ``w=&h=&unit=px|mm|cm|in`` — a custom canvas size instead
+          * ``blank=1``                — start on-brand from brand tokens, not
+                                         from an approved design
+          * ``ai=1``                   — let the director pick the re-layout
+                                         (default: deterministic + cached)
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import send_file
+
+        # Runs are stored flat (runs_v4/<id>.json); also accept the legacy
+        # nested runs_v4/<id>/run.json layout (mirrors api_create_graphic).
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception:
+                    return jsonify({"error": "run_not_found"}), 404
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Resolve the target format: a catalogue slug, or a custom canvas.
+        from mediahub.club_platform import format_catalog as _fc
+
+        fmt_slug = (request.args.get("format") or "").strip()
+        w_raw = request.args.get("w")
+        h_raw = request.args.get("h")
+        spec = None
+        try:
+            if w_raw and h_raw:
+                spec = _fc.custom_format(
+                    float(w_raw),
+                    float(h_raw),
+                    unit=(request.args.get("unit") or "px"),
+                    slug=(fmt_slug or "custom"),
+                )
+            elif fmt_slug:
+                spec = _fc.format_for(fmt_slug)
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": "bad_format", "user_message": str(e)}), 400
+        if spec is None:
+            return jsonify(
+                {"error": "unknown_format", "user_message": "Pick a format from the catalogue."}
+            ), 400
+
+        # Profile + brand kit + media library (mirrors api_create_graphic).
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        media_assets: list = []
+        try:
+            if _v8_get_media_store is not None:
+                media_assets = [
+                    a.to_dict() if hasattr(a, "to_dict") else a
+                    for a in _v8_get_media_store().list(profile_id=profile_id)
+                ]
+        except Exception:
+            media_assets = []
+
+        use_ai = (request.args.get("ai") or "").lower() in ("1", "true", "yes")
+        blank = (request.args.get("blank") or "").lower() in ("1", "true", "yes")
+
+        from mediahub.turn_into import transform_design, blank_brief_for_format
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        if blank:
+            new_brief = blank_brief_for_format(
+                spec, brand_kit, content_item_id=str(card_id), profile_id=profile_id
+            )
+        else:
+            bdict = _latest_brief_for_card(run_id, card_id)
+            if not bdict:
+                return jsonify(
+                    {
+                        "error": "no_design",
+                        "user_message": (
+                            "Create a graphic for this card first, then reformat it "
+                            "— or start blank."
+                        ),
+                    }
+                ), 409
+            src = CreativeBrief.from_dict(bdict)
+            if src is None:
+                return jsonify({"error": "brief_unreadable"}), 500
+            try:
+                tr = transform_design(
+                    source_brief=src,
+                    target_format=spec,
+                    brand_kit=brand_kit,
+                    use_ai_director=use_ai,
+                )
+            except ValueError as e:
+                return jsonify({"error": "transform_failed", "user_message": str(e)}), 400
+            new_brief = tr.brief
+
+        # Deterministic renders cache on (card, format, chosen layout); the
+        # AI-directed path varies per call, so it skips the cache.
+        import hashlib as _hl
+
+        key = _hl.sha256(
+            f"{card_id}|{spec.slug}|{spec.width}x{spec.height}|"
+            f"{new_brief.layout_template}|{'blank' if blank else 'tx'}".encode("utf-8")
+        ).hexdigest()[:20]
+        out_dir = RUNS_DIR / run_id / "reformat" / key
+        cache_png = out_dir / f"{spec.render_name}.png"
+        if cache_png.exists() and not use_ai:
+            return send_file(str(cache_png), mimetype="image/png")
+
+        # Resolve the hero photo (from the approved brief's stored assets) and
+        # the brand logo — everything else rides the brief.
+        athlete_path = None
+        hero_id = (new_brief.sourced_asset_ids or [None])[0]
+        if hero_id:
+            for a in media_assets:
+                ad = a if isinstance(a, dict) else {}
+                if str(ad.get("id")) == str(hero_id):
+                    athlete_path = ad.get("path") or ad.get("file_path")
+                    break
+        logo_path = None
+        bk_logo = getattr(brand_kit, "logo_path", None)
+        if bk_logo:
+            try:
+                if Path(bk_logo).exists():
+                    logo_path = str(bk_logo)
+            except Exception:
+                logo_path = None
+
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+
+            out_dir.mkdir(parents=True, exist_ok=True)
+            skip_cutout = (
+                getattr(new_brief, "photo_treatment", "") == "no-photo" or not athlete_path
+            )
+            with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                res = render_brief(
+                    new_brief,
+                    output_dir=out_dir,
+                    size=spec.size,
+                    format_name=spec.render_name,
+                    athlete_path=(None if skip_cutout else athlete_path),
+                    logo_path=logo_path,
+                    brand_kit=brand_kit,
+                    image_format="png",
+                )
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception as e:
+            return jsonify(_reformat_error_payload(e)), 500
+        return send_file(str(res.visual.file_path), mimetype="image/png")
+
+    def _reformat_error_payload(e: Exception) -> dict:
+        """User-friendly JSON for a reformat render failure (Playwright/Chromium
+        not installed is the common deploy gap; everything else is internal)."""
+        detail = str(e)
+        low = detail.lower()
+        if (
+            "playwright" in low
+            or "chromium" in low
+            or "executable doesn't exist" in low
+            or "browsertype.launch" in low
+            or "install" in low
+            and "browser" in low
+        ):
+            return {
+                "error": "render_failed",
+                "kind": "infra_missing",
+                "detail": detail,
+                "user_message": (
+                    "Graphic rendering isn't available on this deployment "
+                    "(Playwright/Chromium isn't installed). The operator needs "
+                    "to run 'playwright install chromium'."
+                ),
+            }
+        return {
+            "error": "render_failed",
+            "kind": "internal",
+            "detail": detail,
+            "user_message": "Reformatting this design failed. Try again, or pick another format.",
+        }
+
+    def _run_data_any(run_id: str):
+        """Load a run from either the flat or nested layout (or None)."""
+        rd = _load_run(run_id)
+        if rd is not None:
+            return rd
+        nested = RUNS_DIR / run_id / "run.json"
+        if nested.exists():
+            try:
+                return json.loads(nested.read_text())
+            except Exception:
+                return None
+        return None
+
+    def _assistant_card_facts(run_data: dict, card_id: str) -> dict:
+        """The verified, read-only facts for one card (for the copilot).
+
+        Named distinctly from the module-level ``_card_facts(achievement)`` so
+        this nested helper does not shadow it inside ``create_app``.
+        """
+        rr = run_data.get("recognition_report") or {}
+        for ra in rr.get("ranked_achievements") or []:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                facts = dict(ach)
+                if ra.get("priority") is not None:
+                    facts["why"] = f"ranked at priority {ra.get('priority')}"
+                return facts
+        return {}
+
+    def _assistant_profile_id(run_id: str, run_data: dict) -> str:
+        pid = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
+        return re.sub(r"[^a-z0-9_-]", "-", pid.lower()).strip("-") or ("_run_" + run_id)
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/assistant", methods=["POST"])
+    def api_card_assistant(run_id: str, card_id: str):
+        """P6.2 — one conversational copilot turn editing this card's design.
+
+        The assistant reads the design/brand/facts and proposes structured,
+        validated edits (never paints pixels, never publishes). Applied edits
+        persist as a new brief version so the next render/reformat reflects
+        them. Honest no-provider error keeps the manual controls working.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _run_data_any(run_id)
+        if run_data is None:
+            return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        message = (body.get("message") or "").strip()
+        if not message:
+            return jsonify(
+                {"error": "empty_message", "user_message": "Type what you'd like to change."}
+            ), 400
+        session_id = (body.get("session_id") or "").strip()
+
+        profile_id = _assistant_profile_id(run_id, run_data)
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+
+        bdict = _latest_brief_for_card(run_id, card_id)
+        if not bdict:
+            return jsonify(
+                {
+                    "error": "no_design",
+                    "user_message": (
+                        "Create a graphic for this card first, then ask the copilot to refine it."
+                    ),
+                }
+            ), 409
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        src = CreativeBrief.from_dict(bdict)
+        if src is None:
+            return jsonify({"error": "brief_unreadable"}), 500
+
+        from mediahub.assistant import copilot as _acop
+        from mediahub.assistant import session as _asess
+
+        sess = _asess.get_or_create(run_id, card_id, session_id, profile_id=profile_id)
+        turn = _acop.run_turn(
+            session=sess,
+            user_message=message,
+            brief=src,
+            brand_kit=brand_kit,
+            facts=_assistant_card_facts(run_data, card_id),
+            profile_id=profile_id,
+        )
+        # Persist the edited brief so the existing render / reformat surfaces
+        # pick it up (they read the most-recent brief for the card).
+        if turn.changed:
+            try:
+                from mediahub.content_pack_visual.integration import briefs_dir_for_run
+
+                bdir = briefs_dir_for_run(run_id)
+                (bdir / f"{turn.brief.id}.json").write_text(
+                    json.dumps(turn.brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                )
+            except Exception:
+                pass
+
+        resp = turn.to_dict()
+        resp.update(
+            {
+                "session_id": sess.session_id,
+                "brief_id": turn.brief.id,
+                "format": (turn.brief.format_priority or ["story"])[0],
+                "reformat_url": url_for("api_card_reformat", run_id=run_id, card_id=card_id),
+            }
+        )
+        return jsonify(resp)
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/assistant/suggestions")
+    def api_assistant_suggestions(run_id: str, card_id: str):
+        """Planner-seeded prompt chips for the copilot (non-generic)."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _run_data_any(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        profile_id = _assistant_profile_id(run_id, run_data)
+        sport = str(run_data.get("sport") or run_data.get("engine_sport") or "")
+        from mediahub.assistant.copilot import suggested_prompts
+
+        return jsonify({"suggestions": suggested_prompts(profile_id, sport)})
+
+    @app.route("/api/assistant/memory", methods=["GET", "POST"])
+    def api_assistant_memory():
+        """The org's assistant preference book — list (GET) or remember (POST).
+
+        Writes are the explicit "remember this" action; the list is the
+        org-visible, deletable record the spec calls for. Org-scoped to the
+        active profile."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from mediahub.assistant import memory as _amem
+
+        pid = _active_profile_id() or ""
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            item = _amem.remember(pid, (body.get("text") or ""))
+            if item is None:
+                return jsonify({"error": "empty", "user_message": "Nothing to remember."}), 400
+            return jsonify({"ok": True, "item": item.to_dict()})
+        return jsonify({"items": [i.to_dict() for i in _amem.list_items(pid)]})
+
+    @app.route("/api/assistant/memory/<item_id>/delete", methods=["POST"])
+    def api_assistant_memory_delete(item_id: str):
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from mediahub.assistant import memory as _amem
+
+        return jsonify({"ok": _amem.forget(_active_profile_id() or "", item_id)})
+
+    @app.route("/api/assistant/transcribe", methods=["POST"])
+    def api_assistant_transcribe():
+        """Server ASR seam for uploaded audio — honest error until a provider
+        lands (the browser's on-device speech capture is the live voice path)."""
+        from mediahub.assistant.asr import ASRUnavailable, transcribe
+
+        try:
+            text = transcribe(request.get_data() or b"", content_type=request.content_type or "")
+            return jsonify({"ok": True, "text": text})
+        except ASRUnavailable as e:
+            return jsonify({"error": "asr_unavailable", "user_message": str(e)}), 503
+
     def _assemble_reel_inputs(run_id: str):
         """Shared validation + payload assembly for the reel routes.
 
@@ -29997,6 +38714,40 @@ voice, and queues them for one-click approval.</p>
                 400,
             )
 
+        # R1.12 — optional beat-rhythm & duration customisation. Bad numbers are
+        # an honest 400 rather than a silently-ignored param; absent params keep
+        # the default skeleton (normalise_reel_rhythm returns None).
+        rhythm_raw: dict = {}
+
+        def _arg_float(key: str):
+            raw = request.args.get(key)
+            if raw is None or not str(raw).strip():
+                return None
+            return float(raw)  # ValueError caught below
+
+        try:
+            for key in ("cover", "outro", "beat"):
+                val = _arg_float(key)
+                if val is not None:
+                    rhythm_raw[key] = val
+            weights_arg = (request.args.get("weights") or "").strip()
+            if weights_arg:
+                rhythm_raw["weights"] = [float(w) for w in weights_arg.split(",") if w.strip()]
+        except (TypeError, ValueError):
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_rhythm",
+                        "detail": (
+                            "cover/outro/beat must be numbers and weights a "
+                            "comma-separated list of numbers"
+                        ),
+                    }
+                ),
+                400,
+            )
+        rhythm = _motion.normalise_reel_rhythm(rhythm_raw, n)
+
         rr = run_data.get("recognition_report") or {}
         ranked = rr.get("ranked_achievements") or []
         # ranked_achievements is generally already sorted; sort defensively.
@@ -30034,6 +38785,24 @@ voice, and queues them for one-click approval.</p>
         except Exception:
             brand_kit = None
 
+        # R1.30 — honest sponsor for the reel's outro close: the club's active
+        # sponsor (registry first, then the legacy single sponsor_name field),
+        # or "" when none is configured. Never fabricated — a club with no
+        # sponsor simply gets the follow-the-club close.
+        sponsor_name = ""
+        try:
+            prof = load_profile(profile_id)
+            if prof is not None:
+                from mediahub.club_platform.sponsors import active_sponsors
+
+                actives = active_sponsors(prof)
+                if actives:
+                    sponsor_name = str(actives[0].get("name") or "").strip()
+                if not sponsor_name:
+                    sponsor_name = str(getattr(prof, "sponsor_name", "") or "").strip()
+        except Exception:
+            sponsor_name = ""
+
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
         # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
@@ -30056,6 +38825,8 @@ voice, and queues them for one-click approval.</p>
                 "out_path": out_path,
                 "meet_name": meet_name,
                 "briefs": brief_list,
+                "rhythm": rhythm,
+                "sponsor": sponsor_name,
             },
             None,
         )
@@ -30087,6 +38858,8 @@ voice, and queues them for one-click approval.</p>
                     meet_name=inputs["meet_name"],
                     briefs=inputs["briefs"],
                     format_name=inputs["format"],
+                    rhythm=inputs["rhythm"],
+                    sponsor=inputs.get("sponsor", ""),
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -30163,11 +38936,26 @@ voice, and queues them for one-click approval.</p>
                         meet_name=inputs["meet_name"],
                         briefs=inputs["briefs"],
                         format_name=inputs["format"],
+                        rhythm=inputs["rhythm"],
+                        sponsor=inputs.get("sponsor", ""),
                     )
                 if not Path(mp4).exists():
                     raise RuntimeError("mp4 missing after render")
                 job["status"] = "done"
                 job["video_url"] = file_url
+                # Render-complete milestone in the in-app inbox (UI 1.14). The
+                # async reel render is the "kick it off and walk away" flow, so
+                # this is the notification a user actually wants when they come
+                # back. Scoped to the org that owns the job; a no-op when signed
+                # out (empty owner_pid).
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel"
+                    )
+                except Exception:
+                    pass
             except _RenderBusy:
                 job["status"] = "error"
                 job["error"] = "renderer_busy"
@@ -30179,6 +38967,17 @@ voice, and queues them for one-click approval.</p>
                 job["status"] = "error"
                 job["error"] = str(_payload.get("detail") or e)
                 job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
             _variant_job_save(job)
 
         threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()
@@ -30193,11 +38992,144 @@ voice, and queues them for one-click approval.</p>
             202,
         )
 
+    @app.route("/api/runs/<run_id>/reel-batch", methods=["POST"])
+    def api_run_reel_batch(run_id: str):
+        """Render + cache every reel format in one pass (R1.15); returns
+        ``{job_id, poll_url}``.
+
+        The single ``/reel`` / ``/reel-job`` routes produce one cut per
+        request. This kicks off one background job that shapes the cards once
+        and renders all four cuts (story / portrait / square / landscape),
+        reusing any cut already in the motion cache so only the missing ones
+        cost a render. Always async — four cold renders run several minutes —
+        and the finished cuts stream from the existing ``reel-file`` route per
+        format. Poll ``api_reel_job_status``: on ``done`` it carries
+        ``video_urls`` (one per produced cut) and ``formats_failed`` (the
+        honest reason for any cut the active engine couldn't produce — e.g.
+        the ffmpeg fallback's non-story cuts).
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_reel_inputs(run_id)
+        if err is not None:
+            return err
+
+        n = inputs["n"]
+        out_dir = Path(inputs["out_path"]).parent
+        base_name = f"reel_{n}"
+        # url_for needs the request context — resolve every cut's file URL now,
+        # before the worker thread (which has none).
+        file_urls = {
+            fmt: url_for("api_run_reel_file", run_id=run_id, n=n, format=fmt)
+            for fmt in _motion.MOTION_FORMATS
+        }
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "reel-batch",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "video_urls": {},
+            "formats_failed": {},
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                # Per-cut render slot: a multi-minute batch on a single-slot box
+                # yields the render gate between cuts instead of hogging it for
+                # the whole run, so a foreground single render can interleave.
+                result = _motion.render_meet_reel_all_formats(
+                    inputs["cards"],
+                    inputs["brand_kit"],
+                    out_dir,
+                    meet_name=inputs["meet_name"],
+                    briefs=inputs["briefs"],
+                    base_name=base_name,
+                    render_slot=lambda fmt: _render_slot(
+                        "reel", f"{run_id}:{fmt}", timeout=_RENDER_QUEUE_TIMEOUT
+                    ),
+                )
+                rendered = result.get("rendered") or {}
+                errors = result.get("errors") or {}
+                if not rendered:
+                    # Not one cut produced — surface an honest reason rather
+                    # than reporting a successful job with no video.
+                    reason = next(iter(errors.values()), "no reel formats could be rendered")
+                    raise RuntimeError(reason)
+                video_urls = {fmt: file_urls[fmt] for fmt in rendered if fmt in file_urls}
+                job["status"] = "done"
+                job["video_urls"] = video_urls
+                # Keep the legacy single field on the story cut (or the first
+                # produced) so a single-format poller still gets a video_url.
+                job["video_url"] = video_urls.get("story") or next(iter(video_urls.values()), "")
+                job["formats_failed"] = dict(errors)
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel (all formats)"
+                    )
+                except Exception:
+                    pass
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel batch render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"reelbatch-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
     @app.route("/api/reel-jobs/<job_id>", methods=["GET"])
     def api_reel_job_status(job_id: str):
-        """Progress + outcome for a background reel job (same gating as variants)."""
+        """Progress + outcome for a background reel job (same gating as variants).
+
+        Serves both the single-format ``reel`` job and the multi-format
+        ``reel-batch`` job (R1.15). For a batch, ``video_urls`` maps each
+        produced cut to its ``reel-file`` URL and ``formats_failed`` carries
+        the honest reason for any cut the active engine couldn't produce;
+        ``video_url`` stays populated (the story cut) so single-format
+        pollers keep working unchanged.
+        """
         job = _variant_job_load(job_id)
-        if job is None or job.get("kind") != "reel":
+        if job is None or job.get("kind") not in ("reel", "reel-batch"):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
             return jsonify({"error": "job_not_found"}), 404
@@ -30214,6 +39146,8 @@ voice, and queues them for one-click approval.</p>
                 "job_id": job_id,
                 "status": status,
                 "video_url": job.get("video_url") or "",
+                "video_urls": job.get("video_urls") or {},
+                "formats_failed": job.get("formats_failed") or {},
                 "error": error,
                 "user_message": job.get("user_message") or "",
             }
@@ -30272,6 +39206,120 @@ voice, and queues them for one-click approval.</p>
             if fmt != "story"
             else f"meet_reel_{run_id}.mp4",
         )
+
+    # ---- UI 1.8: timestamp-anchored reel review comments ----------------
+    # Frame.io-style feedback markers pinned to a moment on a generated reel
+    # (or a single story card) in the content-builder review surface. Stored
+    # per run/target in SQLite (workflow.review_comments), replayed as overlays
+    # on the video scrubber. State-changing calls are plain JSON POSTs, which
+    # are CSRF-exempt by content-type (see _csrf_protect).
+    def _reel_comments_run(run_id: str):
+        """Resolve+access-gate a run for the comment routes.
+
+        Returns ``(run_data, None)`` when the caller may touch this run's
+        comments, or ``(None, (response, status))`` to short-circuit. The run
+        must exist on disk — we never pin a marker to a phantom run id.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None:
+            alt = RUNS_DIR / run_id / "run.json"
+            if alt.exists():
+                try:
+                    run_data = json.loads(alt.read_text())
+                except Exception:
+                    run_data = None
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        return run_data, None
+
+    @app.route("/api/runs/<run_id>/reel/comments", methods=["GET", "POST"])
+    def api_reel_comments(run_id: str):
+        """List (GET) or pin (POST) review comments for a run's reel/card.
+
+        GET  ?target=<reel|card:ID>&resolved=0|1  -> {ok, target, comments:[…]}
+        POST {target?, t_ms, body, author?}        -> {ok, comment:{…}}  (201)
+        """
+        _run_data, err = _reel_comments_run(run_id)
+        if err is not None:
+            return err
+        try:
+            from mediahub.workflow import review_comments as _rc
+        except Exception as e:
+            return jsonify({"error": f"comments_unavailable: {e}"}), 503
+
+        if request.method == "GET":
+            target = request.args.get("target")
+            include_resolved = (request.args.get("resolved") or "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            try:
+                rows = _rc.list_comments(run_id, target, include_resolved=include_resolved)
+            except _rc.ReelCommentError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            return jsonify(
+                {
+                    "ok": True,
+                    "target": target or None,
+                    "comments": [c.to_dict() for c in rows],
+                }
+            )
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            comment = _rc.add_comment(
+                run_id,
+                payload.get("target"),
+                payload.get("t_ms"),
+                payload.get("body"),
+                author=payload.get("author"),
+            )
+        except _rc.ReelCommentError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify({"ok": True, "comment": comment.to_dict()}), 201
+
+    @app.route("/api/runs/<run_id>/reel/comments/<comment_id>", methods=["POST"])
+    def api_reel_comment_mutate(run_id: str, comment_id: str):
+        """Resolve / reopen / edit / delete a single review comment.
+
+        Body JSON: ``{action: 'resolve'|'reopen'|'edit'|'delete', body?}``.
+        Mirrors api_workflow_set's action-in-body style so one JSON POST
+        (CSRF-exempt by content-type) covers every mutation. The comment id is
+        scoped to ``run_id`` so it can only be touched under its own run.
+        """
+        _run_data, err = _reel_comments_run(run_id)
+        if err is not None:
+            return err
+        try:
+            from mediahub.workflow import review_comments as _rc
+        except Exception as e:
+            return jsonify({"error": f"comments_unavailable: {e}"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        action = (payload.get("action") or "").strip().lower()
+
+        if action == "delete":
+            if not _rc.delete_comment(comment_id, run_id=run_id):
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "deleted": comment_id})
+
+        if action in {"resolve", "reopen"}:
+            updated = _rc.update_comment(comment_id, resolved=(action == "resolve"), run_id=run_id)
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        if action == "edit":
+            try:
+                updated = _rc.update_comment(comment_id, body=payload.get("body"), run_id=run_id)
+            except _rc.ReelCommentError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
     def api_card_voiceover(run_id: str, card_id: str):
@@ -30629,6 +39677,124 @@ voice, and queues them for one-click approval.</p>
             mimetype="application/zip",
         )
 
+    @app.route("/pack/<run_id>/export.zip")
+    def pack_export_zip(run_id: str):
+        """G1.15 — batch ZIP of a pack's EVERY rendered format + a metadata.json manifest.
+
+        Distinct from ``content_pack_zip`` (which groups PNGs by destination
+        bucket + an approval-summary.json): this export groups by card with
+        every size together (square / portrait / story), writes a real
+        ``metadata.json`` manifest (layout, palette, dimensions, per-format
+        sha256, confidence, design reasoning, and honest format-coverage), and
+        a plain-English README. Built by ``graphic_renderer.pack_export``.
+
+        Packaging only — it bundles what the generation pipeline already
+        rendered; it never re-renders (no Chromium in the request path).
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        from mediahub.graphic_renderer import pack_export as _pack_export
+
+        visuals_dir = RUNS_DIR / run_id / "visuals"
+        if not visuals_dir.is_dir() or not any(visuals_dir.iterdir()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        run_data = run_data or {}
+        meet = run_data.get("meet") or {}
+        run_meta = {
+            "name": meet.get("name") or run_data.get("profile_display") or "",
+            "venue": meet.get("venue") or run_data.get("venue") or "",
+            "date": meet.get("date") or meet.get("start_date") or "",
+        }
+
+        profile_id = run_data.get("profile_id") or _active_profile_id() or ""
+        club: dict = {}
+        try:
+            from mediahub.brand.store import load_brand
+
+            kit, _tone, _tpl = load_brand(profile_id)
+            if kit is not None:
+                club = {
+                    "name": getattr(kit, "display_name", "") or "",
+                    "primary_colour": getattr(kit, "primary_colour", "") or "",
+                    "secondary_colour": getattr(kit, "secondary_colour", "") or "",
+                }
+        except Exception:
+            club = {}
+
+        # Real approved captions + ranking from the content pack (the manifest's
+        # caption source — the visual sidecar carries none). Keyed by card id,
+        # which matches the visual's content_item_id in the normal flow.
+        captions: dict[str, str] = {}
+        order: list[str] = []
+        try:
+            from mediahub.workflow.pack import build_content_pack as _bcp
+
+            for _card in _bcp(run_id, profile_id, RUNS_DIR):
+                _cid = str(_card.get("_card_id") or "")
+                if not _cid:
+                    continue
+                order.append(_cid)
+                _active = _card.get("active_caption") or {}
+                if isinstance(_active, dict):
+                    captions[_cid] = " ".join(
+                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
+                    )
+        except Exception:
+            captions, order = {}, []
+
+        # Approver-edited alt text + approval status from the workflow sidecar.
+        alt_texts: dict[str, str] = {}
+        statuses: dict[str, str] = {}
+        try:
+            _ws = _get_wf_store()
+            if _ws is not None:
+                for _cid, _st in (_ws.load(run_id) or {}).items():
+                    if not _st:
+                        continue
+                    _alt = (_st.edited_captions or {}).get("alt_text", "")
+                    if _alt:
+                        alt_texts[_cid] = _alt
+                    try:
+                        statuses[_cid] = _st.status.value
+                    except Exception:
+                        statuses[_cid] = str(getattr(_st, "status", ""))
+        except Exception:
+            alt_texts, statuses = {}, {}
+
+        result = _pack_export.build_pack_export(
+            run_id,
+            visuals_dir=visuals_dir,
+            run_meta=run_meta,
+            club=club,
+            captions=captions,
+            alt_texts=alt_texts,
+            statuses=statuses,
+            order=order,
+        )
+
+        from flask import send_file
+        import io as _io
+
+        return send_file(
+            _io.BytesIO(result.zip_bytes),
+            as_attachment=True,
+            download_name=f"content-pack-{run_id}-all-formats.zip",
+            mimetype="application/zip",
+        )
+
     # ---- Global error handlers &mdash; keep tracebacks out of the UI ---------
     @app.errorhandler(404)
     def _not_found_page(e):
@@ -30715,60 +39881,11 @@ voice, and queues them for one-click approval.</p>
 
     @app.route("/club-data")
     def club_data_page():
-        pid = _phase_w_org()
-        if not pid:
-            return _layout("Club data", _PW_NO_ORG, active="clubdata")
-        tiles = [
-            (
-                url_for("athletes_page"),
-                "Athletes &amp; consent",
-                "Your swimmer roster across every meet — merge duplicate names, "
-                "set photo/name permission per athlete, import the consent "
-                "register, export it for the welfare officer.",
-            ),
-            (
-                url_for("club_records_page"),
-                "Club records",
-                "Import the records sheet once; every faster swim becomes a "
-                "ranked NEW CLUB RECORD card, and the table updates only when "
-                "you approve it.",
-            ),
-            (
-                url_for("live_meet_page"),
-                "Live meet",
-                "Point MediaHub at the host club's live-results page during a "
-                "gala. New results queue cards for approval as they land — "
-                "nothing posts itself.",
-            ),
-            (
-                url_for("season_wraps_page"),
-                "Season wraps",
-                "Month-in-numbers and season recap packs built from your stored "
-                "history — PBs, medals, records, debuts, busiest swimmer.",
-            ),
-            (
-                url_for("club_qa_console"),
-                "Ask the data",
-                "Ask a question about your own results — &ldquo;when did Alice "
-                "last PB in 100 Free?&rdquo; — answered only from the meets "
-                "MediaHub has processed, with the meets it used cited.",
-            ),
-        ]
-        body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Club data</span>'
-            '<h1>The club&rsquo;s <em class="editorial">memory</em></h1>'
-            '<p class="lede">Athletes, consent, records and history — the layer that '
-            "makes milestone, record and recap content possible.</p></section>"
-            '<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">'
-            + "".join(
-                f'<a class="card" href="{href}" style="display:block;text-decoration:none">'
-                f'<h2 style="margin-top:0">{title}</h2><p class="dim">{desc}</p></a>'
-                for href, title, desc in tiles
-            )
-            + "</div>"
-        )
-        return _layout("Club data", body, active="clubdata")
+        # The Club-data top-nav tab was retired: club records + "Ask the data"
+        # live under Settings → Club data, athletes & consent under Settings →
+        # Privacy, and live meet / season wraps moved to Create (coming soon).
+        # This route stays only as a redirect so old links/bookmarks resolve.
+        return redirect(url_for("settings_section", section="clubdata"))
 
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
@@ -30776,7 +39893,7 @@ voice, and queues them for one-click approval.</p>
     def athletes_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Athletes", _PW_NO_ORG, active="clubdata")
+            return _layout("Athletes", _PW_NO_ORG, active="settings")
         from mediahub.athletes import list_athletes
         from mediahub.safeguarding import LEVEL_LABELS, list_consent, regime_active
 
@@ -30803,16 +39920,16 @@ voice, and queues them for one-click approval.</p>
             aliases = ", ".join(a for a in rec.aliases if a != rec.canonical_name.casefold())
             rows.append(
                 "<tr>"
-                f"<td><strong>{_h(rec.canonical_name)}</strong>"
+                f'<td data-label="Athlete"><strong>{_h(rec.canonical_name)}</strong>'
                 + (
                     f'<br/><span class="muted" style="font-size:11px">also seen as: {_h(aliases)}</span>'
                     if aliases
                     else ""
                 )
                 + "</td>"
-                f"<td>{rec.race_count}</td>"
-                f"<td>{_h(str(rec.birth_year or ''))}</td>"
-                f'<td><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
+                f'<td data-label="Races">{rec.race_count}</td>'
+                f'<td data-label="Born">{_h(str(rec.birth_year or ""))}</td>'
+                f'<td data-label="Permission"><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
                 f'<input type="hidden" name="action" value="set_consent"/>'
                 f'<input type="hidden" name="athlete_id" value="{_h(rec.athlete_id)}"/>'
                 f'<select name="level" style="font-size:12px">{unknown_opt}{opts}</select>'
@@ -30863,7 +39980,7 @@ voice, and queues them for one-click approval.</p>
 </div>
 <div class="card" style="margin-bottom:16px">
   <h2 style="margin-top:0">Roster</h2>
-  <table class="mh-table" style="width:100%">
+  <table class="mh-table mh-table-stack" style="width:100%">
     <thead><tr><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
@@ -30894,7 +40011,7 @@ voice, and queues them for one-click approval.</p>
   </form>
 </div>
 """
-        return _layout("Athletes & consent", body, active="clubdata")
+        return _layout("Athletes & consent", body, active="settings")
 
     @app.route("/athletes/action", methods=["POST"])
     def athletes_action():
@@ -30966,7 +40083,7 @@ voice, and queues them for one-click approval.</p>
     def club_records_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Club records", _PW_NO_ORG, active="clubdata")
+            return _layout("Club records", _PW_NO_ORG, active="settings")
         from mediahub.club_records import list_records
 
         msg = (request.args.get("msg") or "").strip()
@@ -31024,7 +40141,7 @@ voice, and queues them for one-click approval.</p>
   </form>
 </div>
 """
-        return _layout("Club records", body, active="clubdata")
+        return _layout("Club records", body, active="settings")
 
     @app.route("/records/action", methods=["POST"])
     def club_records_action():
@@ -31079,7 +40196,7 @@ voice, and queues them for one-click approval.</p>
     def live_meet_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Live meet", _PW_NO_ORG, active="clubdata")
+            return _layout("Live meet", _PW_NO_ORG, active="create")
         from mediahub.results_fetch.live_watch import list_watches
 
         msg = (request.args.get("msg") or "").strip()
@@ -31143,7 +40260,7 @@ voice, and queues them for one-click approval.</p>
   </table>
 </div>
 """
-        return _layout("Live meet", body, active="clubdata")
+        return _layout("Live meet", body, active="create")
 
     @app.route("/live/action", methods=["POST"])
     def live_meet_action():
@@ -31203,7 +40320,7 @@ voice, and queues them for one-click approval.</p>
     def season_wraps_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Season wraps", _PW_NO_ORG, active="clubdata")
+            return _layout("Season wraps", _PW_NO_ORG, active="create")
         from mediahub.season_wrap import list_drafts
 
         msg = (request.args.get("msg") or "").strip()
@@ -31262,7 +40379,7 @@ voice, and queues them for one-click approval.</p>
   </table>
 </div>
 """
-        return _layout("Season wraps", body, active="clubdata")
+        return _layout("Season wraps", body, active="create")
 
     @app.route("/wraps/action", methods=["POST"])
     def season_wraps_action():
@@ -31329,7 +40446,7 @@ voice, and queues them for one-click approval.</p>
     def season_wrap_view(draft_id: str):
         pid = _phase_w_org()
         if not pid:
-            return _layout("Season wrap", _PW_NO_ORG, active="clubdata")
+            return _layout("Season wrap", _PW_NO_ORG, active="create")
         from mediahub.season_wrap import load_draft
 
         draft = load_draft(pid, draft_id)
@@ -31359,8 +40476,9 @@ voice, and queues them for one-click approval.</p>
   noticeboard poster, or use the highlights to build posts.</p>
 </section>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">{chips}</div>
-<div class="card" style="margin-bottom:16px">
+<div class="card" style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap">
   <a class="btn" href="{url_for("season_wrap_poster", draft_id=draft_id)}">Print A4 noticeboard poster (PDF)</a>
+  <a class="btn secondary" href="{url_for("season_wrap_poster", draft_id=draft_id, print=1)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop version (bleed + crop marks)</a>
 </div>
 <div class="card">
   <h2 style="margin-top:0">Highlights</h2>
@@ -31370,7 +40488,7 @@ voice, and queues them for one-click approval.</p>
   </table>
 </div>
 """
-        return _layout(draft.get("title", "Season wrap"), body, active="clubdata")
+        return _layout(draft.get("title", "Season wrap"), body, active="create")
 
     @app.route("/wraps/<draft_id>/poster.pdf")
     def season_wrap_poster(draft_id: str):
@@ -31379,6 +40497,7 @@ voice, and queues them for one-click approval.</p>
             abort(403)
         from mediahub.graphic_renderer.print_export import (
             build_poster_html,
+            export_poster_print_pdf,
             render_html_to_pdf,
         )
         from mediahub.season_wrap import load_draft
@@ -31402,7 +40521,7 @@ voice, and queues them for one-click approval.</p>
             }
             for h in (draft.get("highlights") or [])[:10]
         ]
-        html = build_poster_html(
+        poster_kwargs = dict(
             title=draft.get("title", "Club wrap"),
             meet_name=", ".join((draft.get("stats") or {}).get("meet_names", [])[:3]),
             stat_lines=[(str(k), str(v)) for k, v in (draft.get("stat_chips") or [])],
@@ -31410,14 +40529,21 @@ voice, and queues them for one-click approval.</p>
             club_name=(prof.display_name if prof else pid),
             brand=brand,
         )
+        # G1.17: ?print=1 emits a print-shop-ready poster (bleed + crop marks).
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
         out = DATA_DIR / "print_exports" / f"wrap-{pid}-{draft_id}.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
-        render_html_to_pdf(html, out)
+        if print_mode:
+            bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+            crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+            export_poster_print_pdf(out, bleed_mm=bleed_mm, crop_marks=crop_marks, **poster_kwargs)
+        else:
+            render_html_to_pdf(build_poster_html(**poster_kwargs), out)
         return send_file(
             out,
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"{draft_id}-poster.pdf",
+            download_name=f"{draft_id}-poster{'-print' if print_mode else ''}.pdf",
         )
 
     # ---- W.9: magic-link mobile approvals -----------------------------------
@@ -31506,6 +40632,20 @@ voice, and queues them for one-click approval.</p>
             + list(pack.get("stories") or [])
             + list(pack.get("needs_review") or [])
         )
+
+        # Lite, self-contained chips. The desktop confidence/band helpers paint
+        # with app CSS classes + vars that don't exist on this chrome-free page,
+        # so the phone surface gets its own inline-styled equivalents — enough
+        # signal to approve with confidence, none of the weight.
+        _band_colors = {
+            "elite": ("#3a2d00", "#ffd54f", "#7a5c00"),
+            "strong": ("#10243a", "#9cc4ff", "#274b73"),
+            "story": ("#1a1c26", "#c7c3b8", "#3a3c46"),
+            "nice": ("#1a1c26", "#9a968c", "#3a3c46"),
+        }
+        _conf_colors = {"high": "#7bd88a", "medium": "#ffd54f", "low": "#ff8a80"}
+
+        n_total = n_appr = n_rej = 0
         cards_html = []
         for item in items:
             a = item.get("achievement") or {}
@@ -31513,6 +40653,11 @@ voice, and queues them for one-click approval.</p>
             if not card_id:
                 continue
             status = item.get("wf_status", "queue")
+            n_total += 1
+            if status == "approved":
+                n_appr += 1
+            elif status == "rejected":
+                n_rej += 1
             consent = item.get("consent") or {}
             blocked = bool(item.get("consent_blocked"))
             caption = item.get("caption_only") or a.get("headline") or ""
@@ -31526,12 +40671,37 @@ voice, and queues them for one-click approval.</p>
                 if blocked
                 else ""
             )
+            # Band + confidence chips so a phone reviewer sees how strong the
+            # card is and how sure the engine is, the same two axes the desktop
+            # review surfaces — without a graphic render on one bar of signal.
+            band = (item.get("quality_band") or "nice").strip().lower()
+            _bg, _fg, _bd = _band_colors.get(band, _band_colors["nice"])
+            conf_label = (a.get("confidence_label") or "medium").strip().lower()
+            _cc = _conf_colors.get(conf_label, "#ffd54f")
+            meta_html = (
+                '<div class="meta">'
+                f'<span class="band" style="background:{_bg};color:{_fg};'
+                f'border-color:{_bd}">{_h(band.upper().replace("_", " "))}</span>'
+                f'<span class="conf"><span class="dot" style="background:{_cc}">'
+                f"</span>{_h(conf_label.capitalize())} confidence</span>"
+                "</div>"
+            )
+            # "What to check" — the deterministic safe-to-post reason, surfaced
+            # only when the card isn't already a clean high-confidence post, so
+            # the reviewer gets the glance-before-approving the desktop page gives.
+            s2p = item.get("safe_to_post") or {}
+            reason = (s2p.get("reason") or "").strip()
+            why_html = (
+                f'<p class="why">{_h(reason)}</p>' if reason and s2p.get("level") != "safe" else ""
+            )
             action_url = url_for("magic_card_action", token=token, card_id=card_id)
             cards_html.append(
                 f"""
 <div class="card{" is-blocked" if blocked else ""}">
   <div class="card-top">{pill}<span class="evt">{_h(a.get("event", ""))}</span></div>
+  {meta_html}
   <h2>{_h(a.get("headline", ""))}</h2>
+  {why_html}
   {block_html}
   <form method="POST" action="{action_url}">
     <textarea name="caption" rows="3" dir="auto" {"disabled" if blocked else ""}>{_h(caption)}</textarea>
@@ -31543,6 +40713,37 @@ voice, and queues them for one-click approval.</p>
   </form>
 </div>"""
             )
+
+        # Run-level summary so the reviewer sees progress at a glance instead of
+        # scrolling a flat list. Counts come from the same workflow states the
+        # cards render, so the bar can't drift from the pills.
+        n_wait = max(0, n_total - n_appr - n_rej)
+        pct = int(round((n_appr / n_total) * 100)) if n_total else 0
+        _rej_chip = f'<span class="bad"><b>{n_rej}</b> rejected</span>' if n_rej else ""
+        summary_html = (
+            (
+                '<div class="summary">'
+                '<div class="counts">'
+                f"<span><b>{n_wait}</b> to review</span>"
+                f'<span class="ok"><b>{n_appr}</b> approved</span>'
+                f"{_rej_chip}"
+                "</div>"
+                f'<div class="bar"><span style="width:{pct}%"></span></div>'
+                "</div>"
+            )
+            if n_total
+            else ""
+        )
+        # Brand signal — the club's own name, so the reviewer knows whose queue
+        # this is (a volunteer may help several clubs).
+        org_name = ""
+        try:
+            _mp = load_profile(ctx.get("profile_id") or "")
+            org_name = (_mp.display_name or "") if _mp else ""
+        except Exception:
+            org_name = ""
+        org_html = f'<p class="org">{_h(org_name)}</p>' if org_name else ""
+
         meet_name = ((data.get("meet") or {}).get("name")) or data.get("file_name") or run_id
         flash_html = f'<p class="flash">{_h(flash)}</p>' if flash else ""
         return f"""<!DOCTYPE html>
@@ -31557,11 +40758,24 @@ voice, and queues them for one-click approval.</p>
   body {{ margin:0; padding:14px; background:#0A0B11; color:#F5F2E8;
          font:16px/1.45 system-ui, -apple-system, sans-serif; }}
   h1 {{ font-size:20px; margin:6px 0 2px; }}
+  .org {{ color:#c7c3b8; font-size:13px; font-weight:600; margin:0 0 6px; }}
   .sub {{ color:#9a968c; font-size:13px; margin:0 0 14px; }}
+  .summary {{ border:1px solid #2a2c36; border-radius:12px; padding:12px 14px; margin-bottom:16px; background:#11131c; }}
+  .counts {{ display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:#c7c3b8; margin-bottom:10px; }}
+  .counts b {{ color:#F5F2E8; }}
+  .counts .ok b {{ color:#7bd88a; }}
+  .counts .bad b {{ color:#ff8a80; }}
+  .bar {{ height:8px; border-radius:999px; background:#1c1e28; overflow:hidden; }}
+  .bar > span {{ display:block; height:100%; background:#3ddc97; border-radius:999px; transition:width .3s; min-width:2px; }}
   .card {{ border:1px solid #2a2c36; border-radius:12px; padding:14px; margin-bottom:14px; background:#11131c; }}
   .card.is-blocked {{ opacity:0.75; border-color:#7a2733; }}
   .card-top {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }}
   .evt {{ color:#9a968c; font-size:12px; }}
+  .meta {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }}
+  .band {{ font-size:10px; font-weight:700; letter-spacing:0.08em; padding:3px 8px; border-radius:6px; border:1px solid #3a3c46; }}
+  .conf {{ font-size:11px; color:#c7c3b8; display:inline-flex; align-items:center; gap:6px; }}
+  .conf .dot {{ width:8px; height:8px; border-radius:999px; display:inline-block; }}
+  .why {{ font-size:12px; color:#9a968c; margin:0 0 8px; line-height:1.45; }}
   h2 {{ font-size:16px; margin:0 0 8px; }}
   .pill {{ font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid #444; }}
   .pill.ok {{ border-color:#2e7d32; color:#7bd88a; }}
@@ -31580,10 +40794,12 @@ voice, and queues them for one-click approval.</p>
   .flash {{ background:#1d4d27; border:1px solid #2e7d32; padding:10px 12px; border-radius:8px; }}
   .done {{ color:#9a968c; font-size:13px; text-align:center; margin:20px 0; }}
 </style></head><body>
+{org_html}
 <h1>{_h(meet_name)}</h1>
 <p class="sub">Approve from your phone — changes save instantly. This link expires
 and can be revoked by the club.</p>
 {flash_html}
+{summary_html}
 {"".join(cards_html) or '<p class="done">Nothing waiting for review.</p>'}
 <p class="done">MediaHub &middot; secure review link</p>
 </body></html>"""
@@ -31705,6 +40921,8 @@ and can be revoked by the club.</p>
         from mediahub.content_pack.builder import build_grouped_pack
         from mediahub.graphic_renderer.print_export import (
             build_certificate_html,
+            export_certificate_print_pdf,
+            ghostscript_available,
             render_html_to_pdf,
         )
 
@@ -31737,6 +40955,25 @@ and can be revoked by the club.</p>
         meet = data.get("meet") or {}
         meet_name = meet.get("name") or data.get("file_name") or run_id
         meet_date = str(meet.get("start_date") or "")
+        # G1.17: print-production mode (?print=1) adds bleed + crop marks; an
+        # optional ?cmyk=1 converts to DeviceCMYK via Ghostscript when present.
+        print_mode = (request.args.get("print") or "").strip().lower() in _TRUTHY
+        bleed_mm = _clamp_float(request.args.get("bleed"), default=3.0, lo=0.0, hi=10.0)
+        crop_marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        colour_bar = (
+            request.args.get("colorbar") or request.args.get("colourbar") or "1"
+        ).strip().lower() in _TRUTHY
+        want_cmyk = (request.args.get("cmyk") or "").strip().lower() in _TRUTHY
+        do_cmyk = print_mode and want_cmyk and ghostscript_available()
+        cmyk_note = None
+        if print_mode and want_cmyk and not do_cmyk:
+            cmyk_note = (
+                "CMYK conversion was requested but Ghostscript is not installed on "
+                "the server, so these PDFs are RGB (the 3mm bleed and crop marks are "
+                "intact). Most digital print shops convert RGB to CMYK with their own "
+                "press/paper ICC profile, which is more accurate than a generic "
+                "conversion would be.\n"
+            )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
         buf = _io.BytesIO()
@@ -31746,7 +40983,7 @@ and can be revoked by the club.</p>
                 name = a.get("swimmer_name") or "Swimmer"
                 facts = a.get("raw_facts") or {}
                 time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
-                html = build_certificate_html(
+                cert_kwargs = dict(
                     swimmer_name=name,
                     event_label=a.get("event", ""),
                     time_str=str(time_str),
@@ -31758,15 +40995,67 @@ and can be revoked by the club.</p>
                     detail_line=a.get("angle_hint", ""),
                 )
                 pdf_path = out_dir / f"cert-{i:02d}.pdf"
-                render_html_to_pdf(html, pdf_path)
+                if print_mode:
+                    export_certificate_print_pdf(
+                        pdf_path,
+                        bleed_mm=bleed_mm,
+                        crop_marks=crop_marks,
+                        colour_bar=colour_bar,
+                        cmyk=do_cmyk,
+                        **cert_kwargs,
+                    )
+                else:
+                    render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
                 safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
                 zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+            if cmyk_note:
+                zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
         buf.seek(0)
+        kind = "print" if print_mode else "certificates"
         return send_file(
             buf,
             mimetype="application/zip",
             as_attachment=True,
-            download_name=f"certificates-{run_id}.zip",
+            download_name=f"{kind}-{run_id}.zip",
+        )
+
+    @app.route("/pack/<run_id>/print/separations.json")
+    def pack_print_separations(run_id: str):
+        """G1.17: the CMYK separations report for a run's brand colours.
+
+        Machine-readable breakdown a club can hand to a print shop: each brand
+        role's hex + uncalibrated CMYK percentages, the default print geometry,
+        and whether the server can do a true DeviceCMYK conversion.
+        """
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.graphic_renderer.print_export import (
+            cmyk_separations,
+            geometry_for,
+            ghostscript_available,
+        )
+
+        pid = _run_owner_profile_id(run_id) or ""
+        prof = load_profile(pid) if pid else None
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        geom = geometry_for("A4")
+        return jsonify(
+            {
+                "run_id": run_id,
+                "colour_mode": "CMYK (uncalibrated device preview)",
+                "ghostscript_available": ghostscript_available(),
+                "geometry": {
+                    "paper": "A4",
+                    "trim_mm": [geom.trim_w_mm, geom.trim_h_mm],
+                    "bleed_mm": geom.bleed_mm,
+                    "crop_mark_mm": geom.mark_len_mm,
+                    "media_mm": [geom.media_w_mm, geom.media_h_mm],
+                },
+                "separations": cmyk_separations(brand),
+            }
         )
 
     # ---- W.6: entry-file parsing for the event preview -----------------------
@@ -31839,21 +41128,10 @@ and can be revoked by the club.</p>
     try:
         from mediahub.autonomy.app_env import register_autonomy_task
         from mediahub.scheduler import start_scheduler
-        from mediahub.workflow.approval import register_approval_signal_task
 
         # Register the (off-by-default) autonomy task type before the tick loop
         # starts, so a scheduled "prepare my pack for review" run can fire.
         register_autonomy_task()
-        # P2.2: the approval-signal task — inert for fully-gated orgs (every
-        # card just reports awaiting_human); a fully_autonomous type's cards
-        # ride the publish gate on a cadence.
-        register_approval_signal_task()
-        # Make each org's cadence task match its saved policy (covers orgs
-        # that opted into fully_autonomous before policy-save reconciliation
-        # existed; policy saves keep it in sync from here on).
-        from mediahub.workflow.approval import reconcile_all_approval_signal_cadences
-
-        reconcile_all_approval_signal_cadences()
         # W.7: live-meet watch polling — cards queue for approval only;
         # the runner re-runs the pipeline into the watch's fixed run id.
         try:

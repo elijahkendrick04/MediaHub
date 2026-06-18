@@ -1,9 +1,14 @@
-"""Stage F — MediaHub's own marks must use currentColor / var(--mh-…).
+"""MediaHub chrome marks + the fixed product logo.
 
-F3 contract: MediaHub-authored SVGs in the chrome (topnav + footer)
-bind to the cascade through currentColor + var(--mh-…) so they
-re-skin alongside everything else. Uploaded SVGs are NEVER touched
-— the serve route returns bytes byte-for-byte.
+The footer mark and the logo backplate/ink bar still bind to the cascade
+(currentColor / var(--mh-surface)) so the surrounding chrome re-skins. The
+MediaHub *logo* identity bars (lane-yellow + medal-gold) and baseline are
+the one exception: they are PINNED to MediaHub's own colours and never take
+the active club's brand — maintainer decision, "the logo is the only thing
+that doesn't change colour", so a club always knows whose product they're
+in. (This deliberately overrides the earlier Stage-F3 "all authored marks
+re-skin" rule for the logo only.) Uploaded SVGs are NEVER touched — the
+serve route returns bytes byte-for-byte.
 """
 from __future__ import annotations
 
@@ -57,16 +62,20 @@ class TestTopnavSVG:
         body = client.get("/status").get_data(as_text=True)
         assert _topnav_svg(body), "topnav SVG missing from rendered page"
 
-    def test_no_hardcoded_brand_palette_hex(self, app_client):
-        """The four Stage A primary palette hex values must not appear
-        as raw fill attributes in the topnav SVG."""
+    def test_logo_does_not_theme_with_the_club_brand(self, app_client):
+        """The logo is the one mark that does NOT re-skin: its identity bars +
+        baseline must NOT bind to the themeable brand tokens, so a club's
+        colours never recolour the product logo."""
         client, _, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
         svg = _topnav_svg(body)
-        for old_hex in ("#0A0B11", "#F5F2E8", "#D4FF3A", "#F4D58D"):
-            assert old_hex not in svg, (
-                f"hardcoded {old_hex} still in topnav SVG:\n{svg[:300]}"
-            )
+        assert 'fill="var(--mh-primary)"' not in svg
+        assert 'fill="var(--mh-tertiary)"' not in svg
+        assert 'stroke="var(--mh-primary)"' not in svg
+        # The neutral ink (#0A0B11) and paper (#F5F2E8) are still never raw
+        # fills — the ink bar binds to currentColor, the plate to a token.
+        assert "#0A0B11" not in svg
+        assert "#F5F2E8" not in svg
 
     def test_backplate_uses_surface_token(self, app_client):
         client, _, _, _ = app_client
@@ -84,23 +93,24 @@ class TestTopnavSVG:
             "paper-cream bar should bind to currentColor"
         )
 
-    def test_brand_bar_uses_primary_var(self, app_client):
+    def test_brand_bar_is_pinned_lane_yellow(self, app_client):
+        # The lane-yellow bar is MediaHub's fixed identity, not the club's primary.
         client, _, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
         svg = _topnav_svg(body)
-        assert 'fill="var(--mh-primary)"' in svg
+        assert 'fill="#D4FF3A"' in svg
 
-    def test_tertiary_bar_uses_tertiary_var(self, app_client):
+    def test_tertiary_bar_is_pinned_medal_gold(self, app_client):
         client, _, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
         svg = _topnav_svg(body)
-        assert 'fill="var(--mh-tertiary)"' in svg
+        assert 'fill="#F4D58D"' in svg
 
-    def test_baseline_uses_primary_stroke(self, app_client):
+    def test_baseline_is_pinned_lane_yellow(self, app_client):
         client, _, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
         svg = _topnav_svg(body)
-        assert 'stroke="var(--mh-primary)"' in svg
+        assert 'stroke="#D4FF3A"' in svg
 
 
 class TestFooterSVG:

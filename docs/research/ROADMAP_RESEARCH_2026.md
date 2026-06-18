@@ -1,14 +1,14 @@
 # MediaHub Roadmap Rebuild — Strategy, Architecture & Open-Source "What to Steal" Catalogue
 
 ## TL;DR
-- **Build MediaHub as a content-strategy brain, not a results parser.** No mature open-source project today combines (a) autonomous multi-sport content strategy, (b) per-content-type automation toggles, and (c) truly-free self-hosting — that gap is MediaHub's differentiation. Assemble the product from the ~55 catalogued building blocks below rather than adopting any single platform.
-- **The no-hidden-fees constraint is satisfiable but requires discipline.** The truly-free permissive core is: hytek-parser / tdsmith-sdif (parsing), Satori (graphics), Piper / whisper.cpp (audio), Ollama / llama.cpp (LLM), rembg / MODNet (cutout), nba_api / openfootball (data), Temporal (orchestration). The traps to design around are Remotion (commercial Company License — Creators $25/seat/mo, Automators $0.01/render with a $100/mo minimum, Enterprise $500/mo minimum), Postiz / MediaCMS / MinIO (AGPL network-copyleft), Mixpost (open-core, Pro forbids SaaS), Coqui XTTS (non-commercial model), n8n (source-available Sustainable Use License), and every default that assumes a paid OpenAI / Gemini / MuAPI key.
-- **Phase the rebuild:** Phase 0 de-risk licensing/cost; Phase 1 strategy brain + post-type taxonomy + sport profiles; Phase 2 autonomy toggles on a Temporal backbone; Phase 3 broaden ingestion beyond swimming; Phase 4 drop Buffer for direct platform APIs; Phase 5 local-AI substitution to guarantee zero hidden cost.
+- **Build MediaHub as a content-strategy brain, not a results parser.** No mature open-source project today combines (a) multi-sport content strategy, (b) per-content-type review-disposition defaults, and (c) truly-free self-hosting — that gap is MediaHub's differentiation. Assemble the product from the ~55 catalogued building blocks below rather than adopting any single platform.
+- **The no-hidden-fees constraint is satisfiable but requires discipline.** The truly-free permissive core is: hytek-parser / tdsmith-sdif (parsing), Satori (graphics), Piper / whisper.cpp (audio), Ollama / llama.cpp (LLM), rembg / MODNet (cutout), nba_api / openfootball (data), Temporal (orchestration). The traps to design around are Remotion (commercial Company License — Creators $25/seat/mo, Automators $0.01/render with a $100/mo minimum, Enterprise $500/mo minimum), MediaCMS / MinIO (AGPL network-copyleft), Coqui XTTS (non-commercial model), n8n (source-available Sustainable Use License), and every default that assumes a paid OpenAI / Gemini / MuAPI key.
+- **Phase the rebuild:** Phase 0 de-risk licensing/cost; Phase 1 strategy brain + post-type taxonomy + sport profiles; Phase 2 review-disposition defaults on a Temporal backbone; Phase 3 broaden ingestion beyond swimming; Phase 5 local-AI substitution to guarantee zero hidden cost.
 
 ## Key Findings
-1. **An end-to-end autonomous multi-sport social media manager does NOT exist in open source.** The closest agents (langchain-ai/social-media-agent, Social-GPT/agent, crewAI flows) are AI-content-niche, human-in-the-loop, and depend on paid APIs. The integrated product is whitespace.
+1. **An end-to-end multi-sport content-strategy engine does NOT exist in open source.** The closest agents (langchain-ai/social-media-agent, Social-GPT/agent, crewAI flows) are AI-content-niche, human-in-the-loop, and depend on paid APIs. The integrated strategy-and-content product (ingest → detect → rank → brand → generate → review → export) is whitespace.
 2. **MediaHub's current video engine (Remotion) is the single biggest hidden-cost liability.** It is free only for individuals and for-profit companies of up to 3 people; beyond that a Company License applies (Creators $25/seat/mo; Automators $0.01/render with a $100/mo minimum; Enterprise $500/mo minimum). From Remotion 5.0, telemetry via `licenseKey` is mandatory for the Automators (render-based) tier.
-3. **The best publishing reuse (Postiz) is AGPL-3.0.** Its README states the source "is available under the AGPL-3.0 license" and "the self-hosted version has no feature limitations compared to the cloud version." Fine to self-host; viral if you fork/embed its code into a distributed product.
+3. **The strongest multi-tenant reference architecture (Postiz) is AGPL-3.0.** Its README states the source "is available under the AGPL-3.0 license" and "the self-hosted version has no feature limitations compared to the cloud version." Fine to study/self-host as a separate service; viral if you fork/embed its code into a distributed product. Use it as a multi-tenant org-schema reference, not a codebase to vendor.
 4. **Every "brand-DNA / campaign" generator that looks ideal (Open-Pomelli) routes all AI calls through a paid API (MuAPI).** Free substitutes (Ollama, Piper, rembg, Satori) exist for each call.
 5. **A clean three-source intelligence model** (own signals + external signals + direct input) maps onto a hub-and-spoke architecture orchestrated by Temporal (MIT), which is already battle-tested ("every Snap story uses Temporal"; 3,000+ paying customers including Nvidia, Netflix, Snap and Stripe).
 
@@ -17,12 +17,12 @@
 ## PART A — STRATEGY
 
 ### A.1 Product thesis (new direction)
-MediaHub is a **content-strategy brain** for sports teams. The hub is an intelligence layer that assesses what a given team should post, drafts it, and (where permitted) publishes it autonomously. Results ingestion is **one spoke among many**, not the core. The product is **multi-sport** and **multi-tenant** (one workspace per team), **human-approval-gated by default**, with a **per-content-type toggle** that can flip any single post type to fully autonomous.
+MediaHub is a **content-strategy brain** for sports teams. The hub is an intelligence layer that assesses what a given team should post, drafts it, and readies it for a human to review, then export or download for manual posting. Results ingestion is **one spoke among many**, not the core. The product is **multi-sport** and **multi-tenant** (one workspace per team), **human-approval-gated by default**, with a **per-content-type review-disposition default** that sets whether a given post type is held as a plain draft or routed for human approval before it is exported.
 
-This reframes MediaHub away from "swimming results → social posts" toward "any sports team → the right posts, mostly on autopilot." Swimming becomes the first reference implementation of a generic pattern, not the product's identity.
+This reframes MediaHub away from "swimming results → social posts" toward "any sports team → the right posts, ready to review and export." Swimming becomes the first reference implementation of a generic pattern, not the product's identity. MediaHub does not publish or schedule to social channels itself; approved content is exported or downloaded for manual posting.
 
 ### A.2 Cross-sport post-type taxonomy
-A **"sport profile"** is a configuration object that parameterises four things per post type: (1) whether it is enabled, (2) what data inputs feed it, (3) which template set renders it, and (4) its default autonomy level.
+A **"sport profile"** is a configuration object that parameterises four things per post type: (1) whether it is enabled, (2) what data inputs feed it, (3) which template set renders it, and (4) its default review disposition (draft-only vs requires human approval before export).
 
 **Universal post types (sport-agnostic, ~70% of volume):** fixture/event announcements, results/score recaps, player/athlete spotlights, birthdays, signings/recruitment, sponsor activation, ticket/merch promos, behind-the-scenes, milestone celebrations, season recaps, "this day in history."
 
@@ -34,11 +34,11 @@ A **"sport profile"** is a configuration object that parameterises four things p
 
 The **sport profile** model means adding a sport = authoring a config + a parser + a template set, not rewriting the engine.
 
-### A.3 Autonomy model
-- **Default = gated.** The brain produces a content plan + drafts; a human approves before publish.
-- **Per-type toggle.** Each content type carries an `autonomy_level` ∈ {`draft_only`, `approval_required`, `fully_autonomous`}. A team can set "final-score posts" to fully autonomous while keeping "signings" gated.
-- **What the toggle controls:** whether the publish step requires a human-approval activity, the confidence threshold required to auto-publish, and which guardrails run.
-- **Guardrails for autonomous posting:** data-provenance verification (the existing trust-ledger pattern), template/profanity/brand-safety checks, rate limiting, a global "kill switch," and an immutable audit trail. Temporal's human-in-the-loop **signal** pattern is the reference implementation: a workflow pauses on a signal for gated types and skips the wait for autonomous types.
+### A.3 Review-disposition model
+- **Default = gated.** The brain produces a content plan + drafts; a human approves before the content is exported or downloaded for manual posting.
+- **Per-type review disposition.** Each content type carries a `review_disposition` ∈ {`draft_only`, `approval_required`}. A team can hold "behind-the-scenes" as a plain draft while routing "signings" through an explicit approval step before export.
+- **What the disposition controls:** whether a content type is held as a plain draft or routed for a human-approval activity before it can be exported, the confidence threshold below which a draft is flagged for closer review, and which quality checks run.
+- **Quality checks before approval:** data-provenance verification (the existing trust-ledger pattern), template/profanity/brand-safety checks, and an immutable audit trail. Temporal's human-in-the-loop **signal** pattern is the reference implementation: a workflow pauses on a signal so a human can approve a card before it is exported.
 
 ### A.4 Three-source intelligence model
 - **Own signals:** past social history, engagement data, brand DNA (logos/colours/fonts/voice). Feeds tone learning + best-time-to-post (derive from the team's own history rather than a third-party dataset).
@@ -55,15 +55,15 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 1. **Strategy brain (hub):** an LLM-agent planner (CrewAI / LangGraph pattern) that fuses the three sources into a ranked content plan. Runs on a local LLM (Ollama) to stay free.
 2. **Ingestion spokes:** results parsers (swimming today), sports-data APIs (nba_api, openfootball), news/peer scrapers. Each spoke normalises to a typed schema.
 3. **Asset-generation engines:** graphics (Satori → PNG), video/reels (Remotion today — flag), captions (local LLM), theming (material-color-utilities), TTS (Piper), cutout (rembg/MODNet).
-4. **Publishing layer:** direct platform APIs (to replace Buffer), or self-hosted Postiz adapters.
-5. **Orchestration backbone:** Temporal workflows; each content type is a workflow with an optional human-approval signal — this is what physically implements the autonomy toggle.
+4. **Export/download layer:** approved content is packaged for human review and exported or downloaded for manual posting — MediaHub does not post to social channels itself.
+5. **Orchestration backbone:** Temporal workflows; each content type is a workflow with an optional human-approval signal — this is what physically implements the per-type review disposition (draft-only vs approval-before-export).
 6. **Multi-tenancy:** workspace/org isolation (Postiz and Mixpost both demonstrate org-partitioned Postgres schemas).
 7. **Local-AI substitution layer:** Ollama (LLM), Piper/whisper.cpp (speech), rembg/MODNet (cutout), Satori (graphics) — guarantees zero per-call cost.
 8. **Storage/DAM:** S3-compatible object storage (MinIO — flag AGPL) or cloud S3, plus a media library.
 
 ### B.2 Component → building-block map
 - Strategy brain → crewAI / langchain social-media-agent (patterns) + Ollama
-- Orchestration / autonomy toggle → temporalio/temporal
+- Orchestration / review-disposition signal → temporalio/temporal
 - Results ingestion → hytek-parser, tdsmith/sdif, SwimmeR; nba_api, openfootball, StatsBomb
 - Graphics → vercel/satori, Agamnentzar/ag-psd, Pillow/node-canvas
 - Video → Remotion (flag) / openshorts / short-video-maker
@@ -72,7 +72,6 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 - ASR / captioning → whisper.cpp, faster-whisper, openai/whisper, WhisperX
 - Cutout → rembg, MODNet
 - Theming → material-color-utilities, palx
-- Publishing → Postiz (AGPL), Mixpost (open-core), direct APIs
 - Multi-tenancy → Postiz / Mixpost reference schemas
 - Storage → MinIO (AGPL) / cloud S3
 
@@ -84,12 +83,12 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 - **langchain-ai/social-media-agent** — Agent that sources, curates and schedules posts with human-in-the-loop. *Steal:* the human-in-the-loop "Agent Inbox," few-shot voice examples (`TWEET_EXAMPLES`), business-context prompt (`BUSINESS_CONTEXT`). *Differs:* TypeScript/LangGraph, AI-content-niche. *License:* MIT-family (verify). *Hidden fees:* depends on FireCrawl + Arcade (free tiers then paid) and an LLM key. *Relevance:* general tooling.
 - **Social-GPT/agent** — Autonomously strategizes + executes a campaign from a brand description; generates topic lists and per-topic ideas. *Hidden fees:* requires a GPT-3/4 key (paid). *Substitute:* Ollama.
 - **kevingil/social-media-agent** — Autonomous marketing agents on LangChain (hackathon-grade; reference only).
-- **Prem95/socialautonomies** — MIT. X/Twitter AI agent: post/schedule/auto-reply via X API + browser cookies. *Steal:* scheduling + auto-engage loops. *Note:* ships Stripe plan scaffolding (it is a SaaS starter).
+- **Prem95/socialautonomies** — MIT. X/Twitter AI agent: post/schedule/auto-reply via X API + browser cookies. *Note:* a competitor reference only — its posting/auto-reply loops are out of scope (MediaHub exports for manual posting); it also ships Stripe plan scaffolding (it is a SaaS starter).
 - **crewAIInc/crewAI** — Standalone multi-agent orchestration (Crews + Flows), human-in-the-loop triggers, RBAC/audit in enterprise tier. *Steal:* the planner/researcher/writer crew pattern for the strategy brain. *License:* open-source (verify MIT). *Hidden fees:* framework free; LLM calls cost unless local.
 - **crewAIInc/crewAI-examples** — Content Creator Flow (multi-crew blog/LinkedIn generation), Lead Score Flow (human-in-the-loop review). *Steal:* directly adaptable content-flow templates.
 
 ### C.2 Workflow orchestration & scheduling
-- **temporalio/temporal** — **MIT.** Durable execution / workflow engine; automatic retries, long-running workflows, human-in-the-loop signals. *Steal:* this is the autonomy-toggle backbone. Very mature — 3,000+ paying customers including Nvidia, Netflix, Snap and Stripe. Truly free to self-host. *Relevance:* core infra.
+- **temporalio/temporal** — **MIT.** Durable execution / workflow engine; automatic retries, long-running workflows, human-in-the-loop signals. *Steal:* this is the review-disposition orchestration backbone (the human-approval signal that gates a card before export). Very mature — 3,000+ paying customers including Nvidia, Netflix, Snap and Stripe. Truly free to self-host. *Relevance:* core infra.
 - **temporalio/sdk-typescript, sdk-php, sdk-python** — MIT SDKs (TS, PHP, Python all confirmed MIT).
 - **n8n-io/n8n** — ⚠️ **Sustainable Use License (fair-code, NOT OSI open-source).** Free for internal self-host and personal use; commercial-product/resale use restricted; files containing `.ee.` require the n8n Enterprise License. ~108k+ stars. *Steal:* visual workflow patterns. *Flag prominently:* not safe as the embedded engine of a product you sell.
 - *Fully-open alternatives for the scheduling layer:* Windmill, Apache Airflow, Prefect, Celery, BullMQ.
@@ -117,7 +116,7 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 ### C.5 Social graphic / data-to-image generators
 - **vercel/satori** — **MPL-2.0.** HTML/CSS (JSX) → SVG → PNG; ~100× lighter than headless Chromium; React-Native Flexbox layout engine. *Steal:* replace Playwright card rendering. Truly free. Core building block.
 - **Agamnentzar/ag-psd** — JS library to read/write Photoshop PSD files. *Steal:* let teams upload PSD templates, bind data to layers, auto-render. Verify MIT. Sport-agnostic.
-- **ajamous1/nba-gameday-generator** — FastAPI + React + nba_api + Playwright + Node/ag-psd; renders NBA gameday posters and one-click posts to IG/Reddit; custom-PSD upload (beta). *Steal:* the entire data→poster→publish pipeline pattern. Verify license. Basketball but generalisable. (Its README's "$200/mo X write access" note is now outdated — see C.12.)
+- **ajamous1/nba-gameday-generator** — FastAPI + React + nba_api + Playwright + Node/ag-psd; renders NBA gameday posters from live data; custom-PSD upload (beta). *Steal:* the data→poster rendering pipeline pattern (its own one-click-posting step is out of scope — MediaHub exports the rendered poster for manual posting). Verify license. Basketball but generalisable.
 - **chrisvxd/puppeteer-social-image** — Puppeteer HTML→social image. Verify license.
 - **macleod-ee/auto-social-images** — Automated social-image generation. Verify license.
 
@@ -129,7 +128,7 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 
 ### C.7 Programmatic video & reels
 - **remotion-dev/remotion** — ⚠️ **Source-available, NOT free for larger for-profit orgs.** Free only for individuals, ≤3-employee for-profits, non-profits, and evaluation. Otherwise a Company License: **Creators $25/seat/mo (no minimum); Automators $0.01/render with a $100/mo minimum; Enterprise $500/mo minimum.** From v5.0, telemetry via `licenseKey` is mandatory for the Automators tier. MediaHub's current engine — **flag as top cost liability.**
-- **mutonby/openshorts** — **MIT.** Clip + publish shorts. Truly free.
+- **mutonby/openshorts** — **MIT.** Short-form clip generation (its repo also bundles a posting step, which is out of scope — MediaHub adopts only the clip-generation side). Truly free.
 - **GabrielLaxy/TikTokAIVideoGenerator**, **steinathan/reelsmaker**, **gyoridavid/short-video-maker**, **IgorShadurin/app.yumcut.com**, **vvinniev34/RedditReels** — verify licenses + paid-API deps individually.
 
 ### C.8 TTS / voiceover
@@ -154,38 +153,31 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 - **ollama/ollama** — **MIT.** One-command local LLM runtime; OpenAI-compatible API; ~170k+ stars; runs Llama/Qwen/Gemma/DeepSeek/gpt-oss. *Steal:* the zero-cost brain backend. Truly free. Core building block.
 - **ggerganov/llama.cpp** (MIT), **vLLM**, **LocalAI**, **oobabooga/text-generation-webui** — local serving alternatives. **LM Studio** is proprietary freeware — flag.
 
-### C.12 Platform publishing libraries (replace Buffer)
-- **gitroomhq/postiz-app** — ⚠️ **AGPL-3.0.** 30+ platforms, uncapped self-host with no feature limits vs cloud, multi-tenant org schema (Prisma/Postgres), Temporal-based scheduling, public REST API + Node SDK, n8n/Make/Zapier connectors. Star count is point-in-time (cited anywhere from ~20k to ~31k across directories). *Steal:* publishing adapters + multi-tenancy + scheduling. *Flag:* AGPL virality if you fork/embed; calling it over its API/network is lower-risk than forking source.
-- **gitroomhq/postiz-agent** — Postiz Agents CLI for AI agents (AGPL family).
-- **inovector/mixpost** — ⚠️ **Open-core.** Lite = MIT (feature-limited); Pro/Enterprise are commercial (license code required at install). **Pro license explicitly forbids building a SaaS** ("a Mixpost app Pro license cannot be used to build a SaaS platform"); Enterprise is required for per-workspace billing/SaaS. One-time pricing model. *Steal:* the workspace model. *Flag:* the SaaS prohibition.
-- **socioboard/Socioboard-5.0** — **GPLv3.** Microservices, RSS curation. Flag copyleft.
-- **Direct-API references to build:** Instagram Graph API, Facebook Pages, TikTok Content Posting API, YouTube Data API, X API, LinkedIn, Mastodon, Bluesky (AT Protocol — free/open). **X API pricing update:** as of 6 Feb 2026 pay-per-use is the default for new developers ($0.01 per post created; standard writes ~$0.015/request, posts containing a URL ~$0.20/request; the free tier discontinued; the legacy $200/mo Basic tier remains only for existing subscribers). Postiz's adapters are the best reference implementation; Bluesky/Mastodon are the genuinely-free posting targets.
+### C.12 Social analytics / best-time-to-post
+- Open, well-licensed tools are **scarce**; most best-time data is proprietary (third-party agency blog reports). Small reference repos exist (e.g. an `InstagramBestTimePost`) but lack clear licensing/stars. **Recommendation:** derive a suggested best-time-to-post from the team's OWN historical engagement to inform a human's manual posting timing rather than adopting a library — this is also more defensible and tenant-specific.
 
-### C.13 Social analytics / best-time-to-post
-- Open, well-licensed tools are **scarce**; most best-time data is proprietary (Buffer/Later blog reports). Small reference repos exist (e.g. an `InstagramBestTimePost`) but lack clear licensing/stars. **Recommendation:** derive best-time-to-post from the team's OWN historical engagement rather than adopting a library — this is also more defensible and tenant-specific.
-
-### C.14 Multi-tenancy / RBAC references
-- **gitroomhq/postiz-app** — org/workspace partitioning, RBAC, multi-tenant Postgres schema (Prisma), state machine for posts (DRAFT/QUEUE/PUBLISHED). Strongest reference architecture.
+### C.13 Multi-tenancy / RBAC references
+- **gitroomhq/postiz-app** — org/workspace partitioning, RBAC, multi-tenant Postgres schema (Prisma). Strongest reference architecture for tenant isolation. *(Reference its org/workspace schema only — its posting pipeline is out of scope for MediaHub.)*
 - **inovector/mixpost** — unlimited isolated workspaces; Enterprise adds per-workspace billing/onboarding.
 
-### C.15 DAM / media storage
+### C.14 DAM / media storage
 - **minio/minio** — ⚠️ **AGPLv3** (community edition now source-only; commercial AIStor is a separate paid product; community edition entered maintenance/archival flux in late-2025/early-2026 per community trackers). S3-compatible object storage. *Steal:* free Cloudinary replacement for brand assets + generated content. *Flag:* AGPL + maintenance concerns; **cloud S3 is the lower-risk alternative** if you want to avoid AGPL entirely.
 - **mediacms-io/mediacms** — ⚠️ **AGPL-3.0.** Django/React media CMS, local Whisper transcription, RBAC, HLS; ~2.3k+ stars; actively maintained (Python 3.13). Note as a heavyweight media-CMS reference, not sports-specific. Flag AGPL.
 
-### C.16 Lineup / tactical generators
+### C.15 Lineup / tactical generators
 - **remidej/11-builder** — Visual football XI builder (React/Cheerio). Football. Verify license.
 - **ashhhlynn/optimize-fantasy-football** — lp-solver.js lineup optimisation.
 - **DimaKudosh/pydfs-lineup-optimizer** — Python DFS optimiser (multi-sport). **n-roth12/DFSLineupOptimizer** — similar.
 - **bwiggs/dodgeball-lineup**, **sports-club-manager/leaguesort** (league-table sorting). Verify licenses. *(This category is peripheral to the content-strategy thesis; treat as optional "interactive post" generators.)*
 
-### C.17 Sports club / league management references
+### C.16 Sports club / league management references
 - **ChanMeng666/countryside-community-swimming-club** — **Apache-2.0.** Resolves the prior-report disagreement: the repo was **rewritten** from the original Python/Flask/MySQL to **Next.js 16 / React 19 / Neon Postgres / Drizzle / Better Auth on Cloudflare Workers** (the stale GitHub "About" blurb still says Flask/MySQL; the current code is ~86% TypeScript). ~4 stars. Reference only.
 - **tktintin/swim-team-management-system** — Java desktop, swimming. Reference.
 - **wp-plugins/wp-swimteam** — **GPL** WordPress plugin; swim-team admin, SDIF/HY3 CSV export. Flag GPL.
 - **JimmyRowland/team_sporty** — team pages, rosters, availability. Verify license.
 - **Br0kenByDesign/HydroHero** — swim performance tracking, pool-course time normalisation. **PeterK-end/swim-data-analyser** — client-side Garmin FIT parsing (useful pattern for running/athletics ingestion).
 
-### C.18 Generic CMS / design-editor references (mostly off-target)
+### C.17 Generic CMS / design-editor references (mostly off-target)
 - **wastech/content-management-system** — **MIT,** NestJS headless CMS. Generic; weak fit.
 - **clawnify/open-design** — open-source Canva alternative (Fabric.js v6, AI-agent-optimised UI mode). Verify license/cost. Useful only if MediaHub adds an in-app editor.
 - **lidojs/canva-clone** — ⚠️ React Canva clone, but a **custom "use at your own risk" license, and the download/export feature is NOT included in the package** (effectively a freemium source-teaser). Flag.
@@ -223,8 +215,8 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 | remotion-dev/remotion | Video | Source-available ⚠️ | No (for-profit >3) | Company license $100+/mo | Very high | Sport-agnostic |
 | mutonby/openshorts | Video | MIT | Yes | No | Med | Sport-agnostic |
 | SamurAIGPT/AI-Youtube-Shorts-Generator | Video/highlights | MIT | Yes (local mode) | MuAPI (api mode) | Active (~3.3k★) | Sport-agnostic |
-| gitroomhq/postiz-app | Publishing | AGPL-3.0 ⚠️ | Yes | No (optional AI) | High (~20–31k★) | Sport-agnostic |
-| inovector/mixpost | Publishing | Open-core ⚠️ | Lite only | Pro/Ent commercial | High | Sport-agnostic |
+| gitroomhq/postiz-app | Multi-tenancy ref | AGPL-3.0 ⚠️ | Yes | No (optional AI) | High (~20–31k★) | Sport-agnostic |
+| inovector/mixpost | Multi-tenancy ref | Open-core ⚠️ | Lite only | Pro/Ent commercial | High | Sport-agnostic |
 | minio/minio | Storage | AGPLv3 ⚠️ | Yes | No | High (maint. flux) | Infra |
 | mediacms-io/mediacms | Media CMS | AGPL-3.0 ⚠️ | Yes | No | Med (~2.3k★) | Reference |
 | crewAIInc/crewAI | Agent framework | Open (verify MIT) | Yes | LLM cost unless local | High | Strategy brain |
@@ -240,10 +232,10 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 **ADOPT NOW (permissive, truly free):** temporalio/temporal, ollama/ollama, ggerganov/llama.cpp, vercel/satori, rhasspy/piper, danielgatis/rembg, ZHKKKe/MODNet, openai/whisper + whisper.cpp + faster-whisper, material-color-utilities, jxnblk/palx, SwimComm/hytek-parser, tdsmith/sdif, gpilgrim2670/SwimmeR, swar/nba_api, openfootball/football.json, ndPPPhz/Fixture-Generator, mutonby/openshorts.
 
 **ADOPT WITH CAUTION (license/cost caveat, usable if respected):**
-- **Postiz (AGPL)** — run as a separate self-hosted service / call over its API; do NOT fork its code into MediaHub's own distributed binary unless you will comply with AGPL source-disclosure.
+- **Postiz (AGPL)** — study its multi-tenant org schema as a reference architecture only; do NOT fork its code into MediaHub's own distributed binary unless you will comply with AGPL source-disclosure.
 - **MediaCMS / MinIO (AGPL)** — same network-copyleft caution; prefer cloud S3 over MinIO to avoid AGPL entirely.
 - **crewAI / langchain social-media-agent** — free frameworks, but pair with Ollama so LLM calls cost nothing.
-- **ag-psd / nba-gameday-generator pattern** — excellent for autonomous graphics; confirm ag-psd's MIT.
+- **ag-psd / nba-gameday-generator pattern** — excellent for auto-generated graphics; confirm ag-psd's MIT.
 - **Coqui toolkit** — use only VITS/Tacotron backends commercially; XTTS-v2 weights are non-commercial.
 
 **AUDIT BEFORE USE (license unconfirmed or partial):** AkhilNam/Sports-Highlight-Detector, matija2209/sports-highlights-generator, the swimming scrapers (Swimrankings/SwimScraper/swimset/swimulator), stfnwp & Michi83 fixture tools, the reels tools (GabrielLaxy/steinathan/gyoridavid/IgorShadurin/vvinniev34), clawnify/open-design, WhisperX, pybaseball, TheSportsDB (free-tier limits), JimmyRowland/team_sporty.
@@ -258,24 +250,23 @@ The brain fuses all three into a ranked content plan; newsworthiness ranking (al
 - **ANAS727189/MediaHub** — explicitly excluded (misidentification; unrelated React/Node video-vault project).
 
 ### D.3 Highest-value features to steal
-1. **Human-in-the-loop "Agent Inbox" + per-type approval** (langchain social-media-agent + Temporal signals) → the autonomy toggle.
+1. **Human-in-the-loop "Agent Inbox" + per-type approval** (langchain social-media-agent + Temporal signals) → the per-type review disposition (draft-only vs approval-before-export).
 2. **Brand-DNA-from-URL extraction** (Open-Pomelli) re-implemented with local scrape + Ollama + material-color-utilities.
 3. **Virality scoring with score+hook+reason per clip** (AI-Youtube-Shorts-Generator).
 4. **PSD-template binding for auto-graphics** (ag-psd / nba-gameday-generator).
 5. **Satori-based card rendering** to drop headless-Chromium weight (~100× lighter).
-6. **Postiz's multi-tenant org schema + publishing adapters** as the publishing reference.
-7. **Trust-ledger verification pattern** extended into autonomous-publish guardrails.
+6. **Postiz's multi-tenant org schema** as the workspace-isolation reference.
+7. **Trust-ledger verification pattern** extended into pre-export approval quality checks.
 
 ### D.4 Proposed roadmap phases
 - **Phase 0 — De-risk licensing/cost:** replace the Remotion plan (or budget the Company License), isolate AGPL services (Postiz/MinIO/MediaCMS) behind network boundaries, default every AI call to a local model. *Exit criterion:* zero mandatory paid API in the critical path.
 - **Phase 1 — Strategy brain + taxonomy + sport profiles:** build the planner (crewAI/LangGraph + Ollama), the cross-sport post-type taxonomy, and the sport-profile config object. Ship swimming + one other sport profile (football or basketball).
-- **Phase 2 — Autonomy toggles + orchestration:** put every content type on Temporal with an optional human-approval signal; implement guardrails + kill switch + audit trail; expose `autonomy_level` per type in the workspace UI.
+- **Phase 2 — Review dispositions + orchestration:** put every content type on Temporal with an optional human-approval signal that gates a card before export; implement the pre-export quality checks + audit trail; expose `review_disposition` (draft-only vs approval-required) per type in the workspace UI.
 - **Phase 3 — Broaden ingestion spokes:** add nba_api, openfootball, fixture generators, FIT/CSV parsers; normalise to the typed schema.
-- **Phase 4 — Direct-to-platform publishing:** replace Buffer with Instagram Graph / Facebook / TikTok / YouTube / Bluesky / Mastodon adapters (Postiz adapters as reference), prioritising the genuinely-free targets (Bluesky/Mastodon) and budgeting for X's new pay-per-use pricing.
 - **Phase 5 — Local-AI substitution everywhere:** Ollama (LLM), Piper (TTS), whisper.cpp (ASR), rembg/MODNet (cutout), Satori (graphics) — guaranteeing zero hidden cost.
 
 ### D.5 Negative findings / whitespace
-- **No open-source end-to-end autonomous multi-sport social media manager exists.** The pieces exist; the integrated product does not. That is MediaHub's core differentiation.
+- **No open-source end-to-end multi-sport content-strategy engine exists.** The pieces exist; the integrated intelligence-layer product (ingest → detect → rank → brand → generate → review → export) does not. That is MediaHub's core differentiation.
 - **Open-source "best-time-to-post" and "content-repurposing" tooling is weak** — mostly commercial SaaS or paid-API-dependent (OpenAI/Gemini). Build best-time from the team's own engagement history; build repurposing in-house on the local-AI stack.
 - **Sport-specific result ingestion outside swimming/football/basketball is sparse** — running/athletics and minor sports will need custom parsers (the swim-data-analyser FIT pattern is a useful starting point).
 - **The "brand/campaign generator" space is dominated by paid-API wrappers** — the free, fully-local version is unbuilt and worth owning.
