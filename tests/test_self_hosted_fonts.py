@@ -93,6 +93,10 @@ class TestWebRenderedHead:
         # Regression: fraunces-latin-italic-400-900.woff2 returned 502 on /dpa
         # (2026-06-13, Render cold-start) and was absent from MIME coverage.
         "fraunces-latin-italic-400-900.woff2",
+        # Regression: bigshoulders-latin-normal-600.woff2 returned net::ERR_ABORTED
+        # on /account/2fa (2026-06-18) — 600-weight was absent from MIME coverage
+        # even though 800-weight was tested.
+        "bigshoulders-latin-normal-600.woff2",
     ])
     def test_woff2_served_as_font_mimetype(self, app, font_file):
         # Regression: Python's mimetypes omits font/woff2 on some Linux
