@@ -21,15 +21,25 @@ Schema (per JSON file):
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
+log = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_DISCOVERED_ROOT = _REPO_ROOT / "data" / "discovered" / "clubs"
+
+def _clubs_root() -> Path:
+    """Writable clubs store, under the shared ``DATA_DIR/discovered`` tree (the
+    same resolver pb_discovery and the context engine use) — never the
+    read-only package source. On the hosted deployment DATA_DIR is the mounted
+    disk, so this resolves to a writable path instead of
+    ``/app/src/mediahub/data`` (read-only → Permission denied)."""
+    from mediahub.context_engine.cache import _data_root
+
+    return _data_root() / "discovered" / "clubs"
 
 
 def _slugify(value: str) -> str:
@@ -55,9 +65,17 @@ def record_clubs(
     Append-record each unique club name. Returns the list of file paths
     written. Idempotent: re-recording an existing club just appends the
     run_id (deduplicated) and updates ``last_seen``.
+
+    Best-effort: club discovery feeds the universal picker but is never a parse
+    dependency, so a read-only / unavailable store is logged and skipped — it
+    must never abort the meet recap that triggered it.
     """
-    base = Path(root) if root else _DISCOVERED_ROOT
-    _ensure_dir(base)
+    try:
+        base = Path(root) if root else _clubs_root()
+        _ensure_dir(base)
+    except OSError as exc:
+        log.warning("Club discovery store unavailable, skipping: %s", exc)
+        return []
 
     now_iso = datetime.now(timezone.utc).isoformat()
     written: list[Path] = []
@@ -71,30 +89,34 @@ def record_clubs(
             continue
         path = base / f"{slug}.json"
 
-        if path.exists():
-            try:
-                doc = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+        try:
+            if path.exists():
+                try:
+                    doc = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    doc = {}
+            else:
                 doc = {}
-        else:
-            doc = {}
 
-        doc.setdefault("name", name)
-        doc.setdefault("slug", slug)
-        slugs_seen = set(doc.get("slugs_seen", []))
-        slugs_seen.add(slug)
-        doc["slugs_seen"] = sorted(slugs_seen)
+            doc.setdefault("name", name)
+            doc.setdefault("slug", slug)
+            slugs_seen = set(doc.get("slugs_seen", []))
+            slugs_seen.add(slug)
+            doc["slugs_seen"] = sorted(slugs_seen)
 
-        meets = list(doc.get("meets_seen_in", []))
-        if run_id and run_id not in meets:
-            meets.append(run_id)
-        doc["meets_seen_in"] = meets
+            meets = list(doc.get("meets_seen_in", []))
+            if run_id and run_id not in meets:
+                meets.append(run_id)
+            doc["meets_seen_in"] = meets
 
-        doc.setdefault("first_seen", now_iso)
-        doc["last_seen"] = now_iso
+            doc.setdefault("first_seen", now_iso)
+            doc["last_seen"] = now_iso
 
-        path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-        written.append(path)
+            path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+            written.append(path)
+        except OSError as exc:
+            log.warning("Could not record discovered club %r: %s", name, exc)
+            continue
 
     return written
 
@@ -104,7 +126,10 @@ def list_discovered_clubs(root: Optional[Path] = None) -> list[dict]:
     Return every recorded club document, sorted by name. Used by the
     universal club picker.
     """
-    base = Path(root) if root else _DISCOVERED_ROOT
+    try:
+        base = Path(root) if root else _clubs_root()
+    except OSError:
+        return []
     if not base.exists():
         return []
     docs: list[dict] = []
