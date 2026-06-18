@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `8e107dcb9` · Merge pull request #811 from elijahkendrick04/claude/happy-feynman-6avte1
+**Last updated:** 2026-06-18 · `3cd8a3b31` · Merge PR #802: a11y — label empty pricing comparison table header
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1180,7 +1180,6 @@ list and the auto table below, not here.
 | 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
 | 2026-06-18 | `9279ddd8c` | style(p6.1): apply ruff-format + drop unused import (pre-commit hygiene) |
 | 2026-06-18 | `b6508062c` | feat(p6.1): smart format catalogue + format transformer |
+| 2026-06-18 | `57291136e` | fix: a11y: Table header text should not be empty (empty-table-hea |
 | 2026-06-17 | `1bd179d44` | Apply ruff-format to mobile-parity additions |
-| 2026-06-17 | `081519f50` | Add mobile-parity audit tool + close real phone-usability gaps |
-| 2026-06-17 | `381bb633d` | Redesign hero demo chrome as an authentic Chrome browser frame |
 <!-- /ROADMAP:ACTIVITY -->
