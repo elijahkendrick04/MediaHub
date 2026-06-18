@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `3cd8a3b31` · Merge PR #802: a11y — label empty pricing comparison table header
+**Last updated:** 2026-06-18 · `01a0241c2` · Merge PR #788: home hero — make onboarding the primary CTA for signed-out visitors
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
