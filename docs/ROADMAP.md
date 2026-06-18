@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `c1d12bb7a` · Redesign hero demo chrome as an authentic Chrome browser frame (#799)
+**Last updated:** 2026-06-18 · `98a5045f1` · Merge pull request #801 from elijahkendrick04/claude/mobile-ui-ux-parity-w56xbk
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1173,6 +1173,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-17 | `1bd179d44` | Apply ruff-format to mobile-parity additions |
+| 2026-06-17 | `081519f50` | Add mobile-parity audit tool + close real phone-usability gaps |
 | 2026-06-17 | `381bb633d` | Redesign hero demo chrome as an authentic Chrome browser frame |
 | 2026-06-17 | `f9260f6e3` | Perf: cache static assets, coalesce scroll handler, skip off-screen card paint |
 | 2026-06-17 | `a4d470ec4` | Apply ruff-format (collapse single-line audience-icon CSS string) |
@@ -1182,5 +1184,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `778d5f43d` | Promote design studio to a Create tile; tidy the top-bar nav |
 | 2026-06-17 | `aac0efef2` | Fix dock-class regression: carry mh-signed-in on <html>, not <body> |
 | 2026-06-17 | `dee74b698` | Brand colours: signed-in follows the club everywhere; logo stays fixed |
-| 2026-06-17 | `fa42eed2e` | Brand colours: club graphics follow the profile brand, site-wide |
 <!-- /ROADMAP:ACTIVITY -->
