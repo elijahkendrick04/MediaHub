@@ -13748,15 +13748,15 @@ def create_app() -> Flask:
                 "Nothing posts without you."
             )
             if n_orgs > 0:
-                # Signed-out session with organisations on this
-                # deployment: lead with Sign in (pick an existing org),
-                # with Set up my organisation as the secondary path for a
-                # brand-new tenant.
+                # Signed-out session with existing organisations: a first-time
+                # visitor has no account, so onboarding is always the primary
+                # action. Sign in is secondary — visible for returning users
+                # switching tenants, but never the hero emphasis.
                 hero_actions = (
-                    f'<a class="mh-cta-primary" href="{url_for("sign_in_page")}">'
-                    f"Sign in &rarr;</a>"
-                    f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
-                    "Set up my organisation</a>"
+                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
+                    "Set up my organisation &rarr;</a>"
+                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                    "Sign in</a>"
                 )
             else:
                 # Fresh deployment with no organisations yet: lead with
