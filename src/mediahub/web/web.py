@@ -37975,8 +37975,12 @@ voice, and queues them for one-click approval.</p>
                 return None
         return None
 
-    def _card_facts(run_data: dict, card_id: str) -> dict:
-        """The verified, read-only facts for one card (for the copilot)."""
+    def _assistant_card_facts(run_data: dict, card_id: str) -> dict:
+        """The verified, read-only facts for one card (for the copilot).
+
+        Named distinctly from the module-level ``_card_facts(achievement)`` so
+        this nested helper does not shadow it inside ``create_app``.
+        """
         rr = run_data.get("recognition_report") or {}
         for ra in rr.get("ranked_achievements") or []:
             ach = ra.get("achievement") or {}
@@ -38047,7 +38051,7 @@ voice, and queues them for one-click approval.</p>
             user_message=message,
             brief=src,
             brand_kit=brand_kit,
-            facts=_card_facts(run_data, card_id),
+            facts=_assistant_card_facts(run_data, card_id),
             profile_id=profile_id,
         )
         # Persist the edited brief so the existing render / reformat surfaces
