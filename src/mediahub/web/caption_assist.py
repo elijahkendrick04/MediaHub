@@ -12,6 +12,11 @@ surface — only a faster way to nudge wording on the review screen.
 from __future__ import annotations
 
 # Preset one-click transforms (slug -> instruction). `custom` is free text.
+# The Magic-Write-class operations (P6.2) — summarise / expand / rewrite — join
+# the original review-screen nudges; all run through the same "revise, don't
+# regenerate, keep every fact" requirements channel. A tone shift is not a
+# preset: it's the ``tone=`` argument (warm-club / hype / data-led), so the same
+# text can be re-voiced without a new instruction.
 PRESETS = {
     "shorter": "Make it shorter and punchier — keep only the essentials.",
     "fuller": "Add a little more warmth and detail, without padding.",
@@ -19,6 +24,10 @@ PRESETS = {
     "calmer": "Make it warmer and more understated.",
     "add_time": "Make sure the swimmer's time is mentioned naturally.",
     "tidy": "Tidy the grammar and flow without changing the meaning.",
+    # --- P6.2 Magic-Write text tools ---
+    "summarise": "Summarise it to one tight, punchy sentence — the single most important point.",
+    "expand": "Expand it with one more relevant, on-brand detail — no padding, no invented facts.",
+    "rewrite": "Rewrite it from a fresh angle while keeping every fact and the same meaning.",
 }
 
 # Short labels for the review-screen buttons.
@@ -29,6 +38,9 @@ PRESET_LABELS = {
     "calmer": "Calmer",
     "add_time": "Add time",
     "tidy": "Tidy up",
+    "summarise": "Summarise",
+    "expand": "Expand",
+    "rewrite": "Rewrite",
 }
 
 

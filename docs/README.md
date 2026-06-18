@@ -28,3 +28,6 @@ explain the project in plain English.
   formats a club can make (per-channel social sizes + posters, certificates,
   cards, calendars, wallpapers) and how an approved design is re-laid-out into
   any of them — [`FORMAT_CATALOGUE.md`](FORMAT_CATALOGUE.md).
+- **Conversational creative assistant (P6.2):** the club content copilot — edit a
+  design by talking to it; it proposes safe, on-brand, validated changes (never
+  paints pixels, never publishes) — [`CONVERSATIONAL_ASSISTANT.md`](CONVERSATIONAL_ASSISTANT.md).
