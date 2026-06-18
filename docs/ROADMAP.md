@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `b740252ec` · Merge pull request #824 from elijahkendrick04/claude/youthful-cannon-2rp3by
+**Last updated:** 2026-06-18 · `efd3e7c3c` · Merge pull request #823: Speed up "results from a link" with concurrent read-ahead + richer progress
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,15 +1226,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `62c05457d` | Fix CI: keep ENV_INVENTORY fresh by sourcing the crawl timeout canonically |
 | 2026-06-18 | `5e5b7a079` | fix(legal): declare MEDIAHUB_IMAGINE_LOCAL_TOKEN as a non-subprocessor env |
+| 2026-06-18 | `bad77511a` | Fix CI: ruff-format fetch.py + keep cursor dismissed on all 3 ingest branches |
 | 2026-06-18 | `7687e782b` | style(imagine): ruff-format the local backend (wrap one long line) |
 | 2026-06-18 | `477a4912f` | feat(imagine): in-house local diffusion image backend (roadmap 1.1) |
+| 2026-06-18 | `597ba2e7d` | Speed up "results from a link" with concurrent read-ahead + richer progress UI |
 | 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
 | 2026-06-18 | `b67dd26e8` | docs(roadmap): renumber forward plan into dependency-correct build order |
 | 2026-06-18 | `b0957d122` | Detect A/B finals from SportSystems event headers and carry on each result |
 | 2026-06-18 | `a3bee2c50` | Reject heat/lane artifacts (e.g. 'H-7 L') as swimmer names |
-| 2026-06-18 | `3e9edbceb` | style(P6.3): ruff-format web.py generated-images route |
-| 2026-06-18 | `e66295c0f` | feat(P6.3): Build 2 — grab-text, deterministic mockups, generation history |
-| 2026-06-18 | `3a744c01f` | fix(P6.3): declare imagine env keys (subprocessor register + env inventory) |
-| 2026-06-18 | `e9c80fab2` | feat(P6.3): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
 <!-- /ROADMAP:ACTIVITY -->
