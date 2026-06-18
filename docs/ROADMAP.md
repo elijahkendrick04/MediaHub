@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `16127b988` · Merge pull request #830: Restore the standard centred content width
+**Last updated:** 2026-06-18 · `e72a16e33` · Merge pull request #832: Move Templates into Settings; drop Create-page brand strip & gallery link
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `827ad9d7c` | Move Templates into Settings; drop Create-page brand strip & gallery link |
 | 2026-06-18 | `85a9170a1` | Fix sign-in cards showing broken club logos (serve them first-party) |
 | 2026-06-18 | `a00643abc` | Restore the standard centred content width |
 | 2026-06-18 | `62c05457d` | Fix CI: keep ENV_INVENTORY fresh by sourcing the crawl timeout canonically |
@@ -1236,6 +1237,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `597ba2e7d` | Speed up "results from a link" with concurrent read-ahead + richer progress UI |
 | 2026-06-18 | `38170fdab` | ci(unit-suite): widen shard timeout to clear cold-cache Chromium installs |
 | 2026-06-18 | `63189c842` | ci: exclude tool-generated .test_durations from end-of-file-fixer |
-| 2026-06-18 | `d7e714e94` | ci(unit-suite): commit pytest-split duration map for balanced shards |
-| 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
 <!-- /ROADMAP:ACTIVITY -->
