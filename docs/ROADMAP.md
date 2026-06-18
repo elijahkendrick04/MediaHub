@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `e1bfbbe47` · feat(P6.2): conversational creative assistant (club content copilot) (#809)
+**Last updated:** 2026-06-18 · `8e107dcb9` · Merge pull request #811 from elijahkendrick04/claude/happy-feynman-6avte1
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -136,7 +136,7 @@ Phase 6 are hard-gated** (🔒): they don't begin until Phases 1–4 are complet
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **P6.3** · Phase 2 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam, with an **in-house local-model backend the default** (a licence-clean self-hosted diffusion model — the P5.6 path; cloud generators optional on the same seam): generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · ❌ **NOT STARTED**
+- **P6.3** · Phase 2 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam, with an **in-house local-model backend the default** (a licence-clean self-hosted diffusion model — the P5.6 path; cloud generators optional on the same seam): generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · 🔵 **IN PROGRESS**
 - **P6.4** · Phase 2 (Creative suite) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
 - **P6.5** · Phase 2 (Creative suite) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
 - **P6.6** · Phase 2 (Creative suite) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
@@ -1171,6 +1171,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `3e9edbceb` | style(P6.3): ruff-format web.py generated-images route |
+| 2026-06-18 | `e66295c0f` | feat(P6.3): Build 2 — grab-text, deterministic mockups, generation history |
+| 2026-06-18 | `3a744c01f` | fix(P6.3): declare imagine env keys (subprocessor register + env inventory) |
+| 2026-06-18 | `e9c80fab2` | feat(P6.3): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
 | 2026-06-18 | `f35a53327` | fix(p6.2): rename nested _card_facts → _assistant_card_facts; refresh env inventory |
 | 2026-06-18 | `156f9616d` | feat(p6.2): conversational creative assistant (club content copilot) |
 | 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
@@ -1179,7 +1183,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `1bd179d44` | Apply ruff-format to mobile-parity additions |
 | 2026-06-17 | `081519f50` | Add mobile-parity audit tool + close real phone-usability gaps |
 | 2026-06-17 | `381bb633d` | Redesign hero demo chrome as an authentic Chrome browser frame |
-| 2026-06-17 | `f9260f6e3` | Perf: cache static assets, coalesce scroll handler, skip off-screen card paint |
-| 2026-06-17 | `a4d470ec4` | Apply ruff-format (collapse single-line audience-icon CSS string) |
-| 2026-06-17 | `3f29519c1` | Tidy up the home page: fix invisible navy elements, wrong icon, unstyled kickers |
 <!-- /ROADMAP:ACTIVITY -->
