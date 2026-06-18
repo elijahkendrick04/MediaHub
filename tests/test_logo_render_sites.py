@@ -85,8 +85,13 @@ class TestDetectedLogoSite:
         assert 'alt="Detected logo"' in body, (
             "Detected logo img not in rendered /organisation page"
         )
-        # The src should be the URL we seeded.
-        assert "https://example.com/logo.png" in body
+        # The img is served FIRST-PARTY via the mirror route, never the raw
+        # external URL: the CSP pins img-src 'self', so a cross-origin <img>
+        # renders as a broken image. (The external URL still appears in the
+        # page's hidden brand_logo_url form input — so assert on the img src,
+        # not bare presence.)
+        assert "/organisation/logo-test/brand-logo" in body
+        assert 'src="https://example.com/logo.png"' not in body
 
     def test_no_logo_no_chip(self, app_client):
         """When the profile has no brand_logo_url, no chip render is
@@ -117,7 +122,12 @@ class TestProfileCardSite:
         assert "mh-logo-chip" in body, (
             "profile-card logo not wrapped in .mh-logo-chip"
         )
-        assert 'src="https://example.com/club.png"' in body
+        # A detected (external) logo is served FIRST-PARTY via the mirror
+        # route — never the raw cross-origin URL, which the CSP img-src 'self'
+        # would block (broken image). And the onerror→initials net is wired.
+        assert "/organisation/logo-test/brand-logo" in body
+        assert "https://example.com/club.png" not in body
+        assert "mh-logo-fallback" in body
 
 
 class TestRenderHelper:

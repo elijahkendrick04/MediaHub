@@ -8033,6 +8033,15 @@ body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
 .mh-profile-card .logo img {
   width: 100%; height: 100%; object-fit: cover;
 }
+/* onerror fallback: a logo that fails to load (dead detected URL, deleted
+   file) flips the tile to the org initials instead of a broken-image icon. */
+.mh-profile-card .logo .mh-logo-fallback { display: none; }
+.mh-profile-card .logo.mh-logo-failed .mh-logo-chip,
+.mh-profile-card .logo.mh-logo-failed img { display: none; }
+.mh-profile-card .logo.mh-logo-failed .mh-logo-fallback {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+}
 .mh-profile-card .display-name {
   font-family: var(--font-display);
   font-size: 22px;
@@ -9938,9 +9947,11 @@ def _layout(
                 except Exception:
                     pass
                 # Surface the org's logo in the signed-in chrome the same
-                # way the brand colours are. Prefer an uploaded logo
-                # (served per-profile, IDOR-guarded) and fall back to the
-                # logo URL captured from the org's website.
+                # way the brand colours are. Prefer an uploaded logo (served
+                # per-profile, IDOR-guarded) and fall back to the website logo
+                # captured from the org's site — but route THAT through the
+                # first-party mirror, never the raw external URL: the CSP pins
+                # ``img-src 'self'`` so a cross-origin <img> renders broken.
                 try:
                     _uploaded = getattr(_p, "brand_logos", None) or []
                     _first = _uploaded[0] if _uploaded else None
@@ -9953,7 +9964,9 @@ def _layout(
                     else:
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
                         if _cap.startswith("http://") or _cap.startswith("https://"):
-                            signed_in_logo = _cap
+                            signed_in_logo = url_for(
+                                "organisation_logo_mirror", profile_id=signed_in_pid
+                            )
                 except Exception:
                     signed_in_logo = ""
                 # The org's uploaded logos, surfaced as a soft monochrome
@@ -10277,6 +10290,7 @@ def _layout(
                      width:20px;height:20px;border-radius:5px;overflow:hidden;
                      background:#fff;border:1px solid rgba(245,242,232,0.20)">
           <img src="{{ signed_in_logo }}" alt=""
+               onerror="this.closest('span').style.display='none'"
                style="width:100%;height:100%;object-fit:contain" />
         </span>
         {% endif %}
@@ -27124,10 +27138,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 # Phase 1.6 Stage F: wrap detected logo in a neutral
                 # chip by default; auto-drop if the dominant colour
                 # is visually distinct from the active surface.
+                #
+                # Serve it through the first-party mirror, never the raw
+                # external URL: the CSP pins ``img-src 'self'`` so a
+                # cross-origin <img> would render as a broken image.
                 _extracted = profile.brand_palette_extracted or {}
                 _dominant = (_extracted.get("primary") or "").strip() or None
                 logo_html = _logo_chip_html(
-                    profile.brand_logo_url,
+                    url_for("organisation_logo_mirror", profile_id=profile.profile_id),
                     alt="Detected logo",
                     height=60,
                     dominant_hex=_dominant,
@@ -29901,11 +29919,15 @@ what you're doing, what they should do.</p>
         for p in profiles:
             is_current = p.profile_id == current_id
             logo_html = ""
-            # Prefer an uploaded logo served first-party from our own server —
-            # the website-scraped ``brand_logo_url`` is an external link that
-            # often 403s, hot-link-blocks or 404s, which is exactly why "the
-            # logos don't load on the sign-in cards". Fall back to the scraped
-            # URL, then to initials.
+            # Every on-card logo is served FIRST-PARTY. The app CSP pins
+            # ``img-src 'self'``, so a website-scraped ``brand_logo_url`` (an
+            # external origin) can never render here — the browser blocks it
+            # and the card shows a broken-image icon. That is exactly why "the
+            # logos sometimes don't load on the sign-in cards": orgs with an
+            # uploaded logo worked; orgs that only have a detected website logo
+            # didn't. So: uploaded logo → per-profile serve route; else the
+            # detected logo → first-party mirror route (downloads + caches the
+            # bytes on first request); else initials.
             logo_src = ""
             _dom_hex = None
             _uploaded = getattr(p, "brand_logos", None) or []
@@ -29930,19 +29952,34 @@ what you're doing, what they should do.</p>
             else:
                 _cap = (getattr(p, "brand_logo_url", "") or "").strip()
                 if _cap.startswith("http://") or _cap.startswith("https://"):
-                    logo_src = _cap
+                    logo_src = url_for("organisation_logo_mirror", profile_id=p.profile_id)
+                    _ext_pal = getattr(p, "brand_palette_extracted", None) or {}
+                    _dom = (_ext_pal.get("primary") or "").strip() or None
+                    _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
             if logo_src:
                 # Phase 1.6 Stage F: profile-card logos are tiny
                 # uniform tiles inside a fixed .logo container; force
                 # chip mode for visual consistency across the grid
                 # (sign-in page renders many orgs side-by-side and
                 # one bare logo amid chipped ones reads as a glitch).
-                logo_html = _logo_chip_html(
+                #
+                # Robustness net: if the image still fails to load (a dead
+                # detected URL, a deleted file), ``onerror`` flags the tile so
+                # the CSS swaps in the initials — a broken-image icon never
+                # reaches the user. CSP allows inline handlers (script-src
+                # 'unsafe-inline').
+                _chip = _logo_chip_html(
                     logo_src,
                     alt="",
                     height=48,
                     dominant_hex=_dom_hex,
                     force_chip=True,
+                    extra_attrs=" onerror=\"this.closest('.logo').classList.add('mh-logo-failed')\"",
+                )
+                logo_html = (
+                    f"{_chip}"
+                    f'<span class="mh-logo-fallback" aria-hidden="true">'
+                    f"{_h(_initials(p.display_name))}</span>"
                 )
             else:
                 logo_html = _h(_initials(p.display_name))
@@ -32545,6 +32582,43 @@ function mhSetupMode(mode) {{
         if not path:
             return ("", 404)
         return send_from_directory(path.parent, path.name)
+
+    @app.route("/organisation/<profile_id>/brand-logo", methods=["GET"])
+    def organisation_logo_mirror(profile_id):
+        """Serve a session-permitted org's *website-detected* logo, mirrored
+        first-party.
+
+        Brand capture stores the club's website logo as an external URL
+        (``brand_logo_url``) — never the bytes. The app CSP pins
+        ``img-src 'self'``, so that cross-origin URL can't render in our own
+        pages (it shows as a broken-image icon); many club sites also
+        hot-link-block or 403 a bare <img>. This mirrors the bytes to our own
+        origin once (cached, SSRF-safe) so the sign-in picker, signed-in
+        chrome, and settings preview show the real logo. A 404 here lets the
+        caller's ``onerror`` swap fall back to the org's initials.
+
+        IDOR-gated identically to the sibling route: a session only ever sees
+        logos for orgs it is permitted to use.
+        """
+        if not _session_can_use_profile(profile_id):
+            return ("", 404)
+        prof = load_profile(profile_id)
+        if not prof:
+            return ("", 404)
+        url = (getattr(prof, "brand_logo_url", "") or "").strip()
+        if not url:
+            return ("", 404)
+        from mediahub.brand.logos import mirror_external_logo, mirror_content_type
+
+        path = mirror_external_logo(profile_id, url)
+        if not path:
+            return ("", 404)
+        resp = send_from_directory(path.parent, path.name)
+        # Set the type explicitly — the response carries nosniff, so an
+        # extension Flask can't map (e.g. .avif) must not be left to guess.
+        resp.headers["Content-Type"] = mirror_content_type(path)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
     @app.route("/organisation/setup/reread/<platform>", methods=["POST"])
     def organisation_setup_reread(platform):
