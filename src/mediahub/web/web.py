@@ -13369,6 +13369,9 @@ def create_app() -> Flask:
             # UI 1.11 — the public Developer/API reference (code-example docs).
             # A docs page, like the legal pages above: readable before sign-up.
             "api_docs_page",
+            # Public adapter-roadmap page — informational, no org context
+            # needed (shows supported file formats and planned adapters).
+            "research_page",
             # Phase C operator commercial console (PC.4/PC.6) — operator-only
             # (redirects non-operator sessions to the developer sign-in) and
             # org-independent, so it bypasses the org gate exactly like the

@@ -130,6 +130,16 @@ class TestExemptRoutesReachable:
         resp = c.get("/healthz")
         assert resp.status_code == 200
 
+    def test_research_page_loads_without_org(self, gated_client):
+        """/research is a public informational page (supported formats + adapter
+        roadmap); it must be reachable before sign-in, not redirected to setup."""
+        c, _ = gated_client
+        resp = c.get("/research", follow_redirects=False)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "research" in body.lower()
+        assert "Adapter" in body
+
 
 # ---------------------------------------------------------------------------
 # 4. After capture, the gate lifts within the same session
