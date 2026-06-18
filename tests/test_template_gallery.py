@@ -3,7 +3,7 @@
 Covers the pure ``mediahub.web.template_gallery`` helper (categories, schematic
 previews, catalog assembly, the body renderer), the ``archetype_summary``
 catalog line it leans on, and the ``/templates`` route + its wiring into the
-Create page (reached from there, not the top bar). The gallery renders *existing* archetype data only —
+Settings grid (reached from there, not the top bar). The gallery renders *existing* archetype data only —
 these tests pin that contract: every registered archetype is represented,
 categorised, and given a distinct schematic, and category filtering works both
 server-side (the no-JS path) and via the client-side enhancement.
@@ -288,10 +288,10 @@ def test_route_works_with_gen_v2_enabled(client, monkeypatch):
 
 
 def test_templates_not_in_top_bar_nav(client):
-    # Templates was removed from the top bar — it's reached from the Create
-    # page's "browse the card styles" link instead, keeping the signed-in
-    # chrome focused on the core workflow. The /templates route still serves
-    # (the request below renders the full layout, nav included).
+    # Templates was removed from the top bar — it's reached from the Settings
+    # grid's "Templates" tile instead, keeping the signed-in chrome focused on
+    # the core workflow. The /templates route still serves (the request below
+    # renders the full layout, nav included).
     html = client.get("/templates").get_data(as_text=True)
     nav_start = html.find('id="mh-primary-nav"')
     assert nav_start != -1, "top bar primary nav missing"
@@ -300,19 +300,24 @@ def test_templates_not_in_top_bar_nav(client):
     assert 'href="/templates"' not in nav
 
 
-def test_make_page_links_to_gallery(client):
+def test_make_page_no_longer_links_to_gallery(client):
+    # The template gallery moved off the Create page into Settings (where it's
+    # available as a tile), so the Create page no longer carries the
+    # "Browse the template gallery" link. (The shared stylesheet still defines
+    # the .mh-arch-gallery-link rule used by the gallery page itself, so we
+    # match the rendered anchor — not the bare class string.)
     html = client.get("/make").get_data(as_text=True)
-    assert "mh-arch-gallery-link" in html
+    assert not re.search(r'<a [^>]*class="mh-arch-gallery-link"', html)
+    assert "Browse the template gallery" not in html
+    assert 'href="/templates"' not in html
+
+
+def test_settings_links_to_template_gallery(client):
+    # Templates is reached from Settings now — a tile in the settings grid
+    # links straight to the /templates gallery.
+    html = client.get("/settings").get_data(as_text=True)
     assert 'href="/templates"' in html
-    assert "Browse the template gallery" in html
-
-
-def test_make_gallery_link_is_not_a_hover_preview_tile(client):
-    # The Create page's hover-preview tests scan `.mh-template` anchors; the
-    # gallery link must NOT masquerade as one (it has no poster preview).
-    html = client.get("/make").get_data(as_text=True)
-    m = re.search(r'<a class="mh-arch-gallery-link"[^>]*>', html)
-    assert m and "mh-template" not in m.group(0)
+    assert "Templates" in html
 
 
 # ---------------------------------------------------------------------------

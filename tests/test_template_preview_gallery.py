@@ -428,9 +428,9 @@ def test_studio_route_renders(client):
 
 
 def test_preview_gallery_not_in_top_bar_nav(client):
-    # Templates (and its preview gallery) left the top bar — both are reached
-    # from the Create page now. The route still serves and renders the layout,
-    # but the top-bar nav no longer carries a Templates link to highlight.
+    # Templates (and its preview gallery) left the top bar — Templates is
+    # reached from the Settings grid now. The route still serves and renders
+    # the layout, but the top-bar nav no longer carries a Templates link.
     html = client.get("/templates/preview").get_data(as_text=True)
     nav_start = html.find('id="mh-primary-nav"')
     assert nav_start != -1, "top bar primary nav missing"
