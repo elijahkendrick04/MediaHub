@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `ca9dd0f15` · Merge pull request #831: Fix sign-in cards showing broken club logos (serve them first-party)
+**Last updated:** 2026-06-18 · `16127b988` · Merge pull request #830: Restore the standard centred content width
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-18 | `85a9170a1` | Fix sign-in cards showing broken club logos (serve them first-party) |
+| 2026-06-18 | `a00643abc` | Restore the standard centred content width |
 | 2026-06-18 | `62c05457d` | Fix CI: keep ENV_INVENTORY fresh by sourcing the crawl timeout canonically |
 | 2026-06-18 | `5e5b7a079` | fix(legal): declare MEDIAHUB_IMAGINE_LOCAL_TOKEN as a non-subprocessor env |
 | 2026-06-18 | `bad77511a` | Fix CI: ruff-format fetch.py + keep cursor dismissed on all 3 ingest branches |
@@ -1237,5 +1238,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `63189c842` | ci: exclude tool-generated .test_durations from end-of-file-fixer |
 | 2026-06-18 | `d7e714e94` | ci(unit-suite): commit pytest-split duration map for balanced shards |
 | 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
-| 2026-06-18 | `d820b0767` | ci(unit-suite): shard the full pytest gate across a matrix for ~linear speedup |
 <!-- /ROADMAP:ACTIVITY -->
