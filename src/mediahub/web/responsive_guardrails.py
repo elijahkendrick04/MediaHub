@@ -199,6 +199,21 @@ img, video { block-size: auto; }
     min-height: var(--mh-touch-min);
     min-width:  var(--mh-touch-min);
   }
+  /* Text-entry fields (text / email / search / password / number / date /
+     tel / url …), multi-line text areas and selects are the controls a
+     volunteer actually taps INTO on a phone. The button rule above only
+     guards button-style and tick-box inputs, so a bare text field could
+     still render ~20px tall (audit found this on the sponsor form). Give
+     every typed field the comfortable 44px target — native mobile inputs
+     are already ~44px, so this only lifts the under-sized ones and is
+     scoped to coarse pointers, leaving the desktop mouse layout untouched.
+     The :not() chain excludes the button-ish + decorative input types the
+     rule above (or the browser) sizes intentionally. */
+  input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="range"]):not([type="color"]):not([type="image"]),
+  textarea,
+  select {
+    min-height: var(--mh-touch-comfortable);
+  }
 }
 
 /* ---------------------------------------------------------------------

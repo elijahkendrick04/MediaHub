@@ -95,6 +95,22 @@ class TestTouchTargetCompliance:
         )
         assert coarse_block is not None, "touch-min rule not scoped to pointer:coarse"
 
+    def test_text_inputs_get_comfortable_target_on_coarse_pointer(self, guardrails_css):
+        # Mobile-parity fix: bare text fields / textarea / select must reach
+        # the comfortable 44px target on phones — the button-only rule above
+        # left typed fields rendering ~20px tall (audit found this on the
+        # sponsor form). Scoped to coarse pointers so desktop is untouched.
+        assert 'input:not([type="button"])' in guardrails_css
+        assert "textarea," in guardrails_css
+        # The comfortable-target rule for typed fields must live after the
+        # pointer:coarse declaration and before the next top-level @media,
+        # so it only ever applies to touch devices.
+        coarse_at = guardrails_css.index("@media (pointer: coarse)")
+        next_media = guardrails_css.index("@media", coarse_at + 1)
+        block = guardrails_css[coarse_at:next_media]
+        assert "min-height: var(--mh-touch-comfortable)" in block
+        assert 'input:not([type="button"])' in block
+
 
 class TestFluidTypography:
     """Six steps of fluid type built with clamp(rem, rem+vw, rem)."""
