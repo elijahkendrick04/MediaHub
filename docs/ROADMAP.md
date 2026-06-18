@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `1a86876ee` · Merge pull request #815 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-18 · `14322b4c6` · Merge pull request #819 from elijahkendrick04/claude/roadmap-changelog-tidy
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
 | 2026-06-18 | `b67dd26e8` | docs(roadmap): renumber forward plan into dependency-correct build order |
 | 2026-06-18 | `b0957d122` | Detect A/B finals from SportSystems event headers and carry on each result |
 | 2026-06-18 | `a3bee2c50` | Reject heat/lane artifacts (e.g. 'H-7 L') as swimmer names |
@@ -1236,5 +1237,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `e9c80fab2` | feat(P6.3): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
 | 2026-06-18 | `f35a53327` | fix(p6.2): rename nested _card_facts → _assistant_card_facts; refresh env inventory |
 | 2026-06-18 | `156f9616d` | feat(p6.2): conversational creative assistant (club content copilot) |
-| 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
 <!-- /ROADMAP:ACTIVITY -->
