@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `98a5045f1` · Merge pull request #801 from elijahkendrick04/claude/mobile-ui-ux-parity-w56xbk
+**Last updated:** 2026-06-18 · `9501dd5b9` · feat(P6.1): smart format catalogue + format transformer (#805)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -136,7 +136,6 @@ Phase 6 are hard-gated** (🔒): they don't begin until Phases 1–4 are complet
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **P6.1** · Phase 2 (Creative suite) — Smart format catalogue + format transformer: every Canva/Adobe-class design type as a data-driven club `FormatSpec` (certificates, posters, programmes, yearbooks, per-channel sizes); `turn_into` v2 re-targets any approved design · ❌ **NOT STARTED**
 - **P6.2** · Phase 2 (Creative suite) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam · ❌ **NOT STARTED**
 - **P6.3** · Phase 2 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam, with an **in-house local-model backend the default** (a licence-clean self-hosted diffusion model — the P5.6 path; cloud generators optional on the same seam): generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · ❌ **NOT STARTED**
 - **P6.4** · Phase 2 (Creative suite) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
@@ -699,7 +698,7 @@ in place when editing.
 -->
 
 <!-- ROADMAP:PHASE 2 -->
-### Phase 2 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · ❌ **NOT STARTED**
+### Phase 2 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · 🔵 **IN PROGRESS**
 
 **Goal.** Build **MediaHub's own first-party version of every
 content-creation capability Canva and Adobe Express ship** — re-expressed
@@ -1173,6 +1172,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `9279ddd8c` | style(p6.1): apply ruff-format + drop unused import (pre-commit hygiene) |
+| 2026-06-18 | `b6508062c` | feat(p6.1): smart format catalogue + format transformer |
 | 2026-06-17 | `1bd179d44` | Apply ruff-format to mobile-parity additions |
 | 2026-06-17 | `081519f50` | Add mobile-parity audit tool + close real phone-usability gaps |
 | 2026-06-17 | `381bb633d` | Redesign hero demo chrome as an authentic Chrome browser frame |
@@ -1181,7 +1182,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `3f29519c1` | Tidy up the home page: fix invisible navy elements, wrong icon, unstyled kickers |
 | 2026-06-17 | `8844c7a45` | Apply ruff-format to sample_graphics |
 | 2026-06-17 | `52091bb6e` | Show real sample outputs in the landing engine showcase |
-| 2026-06-17 | `778d5f43d` | Promote design studio to a Create tile; tidy the top-bar nav |
-| 2026-06-17 | `aac0efef2` | Fix dock-class regression: carry mh-signed-in on <html>, not <body> |
-| 2026-06-17 | `dee74b698` | Brand colours: signed-in follows the club everywhere; logo stays fixed |
 <!-- /ROADMAP:ACTIVITY -->
