@@ -4436,6 +4436,118 @@ function _runReformat(panel, btn, url, label) {
       if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">Network error: ' + e + '</div>';
     });
 }
+
+// ---- P6.2 — conversational copilot (chat → validated spec-patch edits) ----
+// Plain-words editing of an approved design: the server runs a bounded tool
+// loop, applies only validated, on-brand, legible edits, and persists a new
+// brief version; we show what changed and offer a live preview.
+function copilotToggle(btn, cardId) {
+  var panel = document.querySelector('.copilot-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  if (panel.dataset.built === '1') return;
+  panel.dataset.built = '1'; panel.dataset.session = '';
+  panel.innerHTML =
+    '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Copilot &mdash; edit by conversation</div>' +
+    '<div class="cp-suggest" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px"></div>' +
+    '<div class="cp-log" style="max-height:240px;overflow:auto;margin-bottom:8px"></div>' +
+    '<div style="display:flex;gap:5px;align-items:center">' +
+      '<input class="cp-input" type="text" placeholder="e.g. make the headline punchier, more navy" aria-label="Message the copilot" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />' +
+      '<button class="btn secondary cp-mic" style="font-size:12px;padding:5px 9px" title="Speak (your browser transcribes on-device)" onclick=' + _attrEsc('copilotMic(this, ' + JSON.stringify(cardId) + ')') + '>&#127908;</button>' +
+      '<button class="btn cp-send" style="font-size:12px;padding:5px 12px;background:var(--lane);color:var(--lane-ink);border:none" onclick=' + _attrEsc('copilotSend(this, ' + JSON.stringify(cardId) + ')') + '>Send</button>' +
+    '</div>' +
+    '<div class="cp-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>';
+  fetch(panel.dataset.suggestUrl).then(function(r){return r.json();}).then(function(j){
+    var box = panel.querySelector('.cp-suggest');
+    (j.suggestions||[]).forEach(function(s){
+      var b=document.createElement('button'); b.className='btn secondary'; b.style.cssText='font-size:10px;padding:2px 8px';
+      b.textContent=s; b.onclick=function(){ panel.querySelector('.cp-input').value=s; panel.querySelector('.cp-input').focus(); };
+      box.appendChild(b);
+    });
+  }).catch(function(){});
+  panel.querySelector('.cp-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ copilotSend(panel.querySelector('.cp-send'), cardId); }});
+}
+
+function _cpAppend(panel, role, text) {
+  var log = panel.querySelector('.cp-log');
+  var who = role==='user' ? 'You' : 'Copilot';
+  var col = role==='user' ? 'var(--ink)' : 'var(--lane)';
+  var div = document.createElement('div'); div.style.cssText='margin-bottom:6px;font-size:12px';
+  div.innerHTML = '<span style="color:'+col+';font-weight:600">'+who+':</span> ' + (window.safeText?safeText(text):text);
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+function copilotSend(btn, cardId) {
+  var panel = document.querySelector('.copilot-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var input = panel.querySelector('.cp-input');
+  var msg = (input.value||'').trim();
+  if (!msg) return;
+  var status = panel.querySelector('.cp-status');
+  _cpAppend(panel, 'user', msg);
+  input.value=''; btn.disabled=true; status.textContent='Thinking…';
+  var body = {message: msg};
+  if (panel.dataset.session) body.session_id = panel.dataset.session;
+  fetch(panel.dataset.assistantUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      btn.disabled=false; status.textContent='';
+      var j = res.j||{};
+      if (!res.ok || j.error) { _cpAppend(panel, 'assistant', j.user_message || j.error || 'Something went wrong'); return; }
+      if (j.session_id) panel.dataset.session = j.session_id;
+      var d = _cpAppend(panel, 'assistant', j.reply || '(no reply)');
+      var extra='';
+      if (j.applied && j.applied.length) extra += '<div style="font-size:11px;color:var(--good);margin-top:2px">&#10003; ' + j.applied.length + ' change(s) applied</div>';
+      if (j.rejected && j.rejected.length) {
+        var reasons = j.rejected.map(function(x){return (x[1]||'');}).join('; ');
+        extra += '<div style="font-size:11px;color:var(--bad);margin-top:2px">Skipped: ' + (window.safeText?safeText(reasons):reasons) + '</div>';
+      }
+      if (j.changed && j.reformat_url && j.format) {
+        var purl = j.reformat_url + '?format=' + encodeURIComponent(j.format);
+        extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:11px;padding:2px 9px" onclick=' + _attrEsc('copilotPreview(this, ' + JSON.stringify(purl) + ')') + '>Preview the edit</button></div>';
+      }
+      extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:10px;padding:2px 8px" onclick="copilotRemember()" title="Save a standing preference the copilot will always respect">Remember a preference&hellip;</button></div>';
+      d.innerHTML += extra;
+      panel.querySelector('.cp-log').scrollTop = panel.querySelector('.cp-log').scrollHeight;
+    })
+    .catch(function(e){ btn.disabled=false; status.textContent=''; _cpAppend(panel,'assistant','Network error: '+e); });
+}
+
+function copilotPreview(btn, url) {
+  var orig = btn.textContent; btn.disabled=true; btn.textContent='Rendering…';
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){ var ct=r.headers.get('Content-Type')||''; if (r.ok && ct.indexOf('image')===0) return r.blob().then(function(b){return {img:URL.createObjectURL(b)};}); return r.json().then(function(j){return {err:(j&&j.user_message)||'preview failed'};}); })
+    .then(function(res){ btn.disabled=false; btn.textContent=orig;
+      var holder=document.createElement('div'); holder.style.marginTop='6px';
+      if (res.err) holder.innerHTML='<div style="font-size:11px;color:var(--bad)">'+res.err+'</div>';
+      else holder.innerHTML='<img src="'+res.img+'" alt="Edited design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />';
+      btn.parentNode.appendChild(holder);
+    })
+    .catch(function(e){ btn.disabled=false; btn.textContent=orig; });
+}
+
+function copilotRemember() {
+  var txt = prompt('Save a standing preference the copilot will always respect (e.g. "never show times for 8-and-unders"):');
+  if (!txt) return;
+  fetch('/api/assistant/memory', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})})
+    .then(function(r){return r.json();})
+    .then(function(j){ if (window.MH && MH.toast) MH.toast(j.ok ? 'Saved — the copilot will remember that.' : (j.user_message||'Could not save'), j.ok?'success':'error', 3000); })
+    .catch(function(){});
+}
+
+function copilotMic(btn, cardId) {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var panel = document.querySelector('.copilot-panel[data-card="' + cardId + '"]');
+  if (!SR) { if (window.MH && MH.toast) MH.toast('Voice input needs a browser with speech recognition — or just type.', 'info', 3500); return; }
+  var rec = new SR(); rec.lang='en-GB'; rec.interimResults=false; rec.maxAlternatives=1;
+  var orig = btn.textContent; btn.textContent='●'; btn.disabled=true;
+  rec.onresult=function(e){ var t=(e.results[0][0]||{}).transcript||''; panel.querySelector('.cp-input').value=t; };
+  rec.onend=function(){ btn.textContent=orig; btn.disabled=false; };
+  rec.onerror=function(){ btn.textContent=orig; btn.disabled=false; };
+  try { rec.start(); } catch(e) { btn.textContent=orig; btn.disabled=false; }
+}
 </script>
 """
 
@@ -4467,6 +4579,10 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
     _reformat_url = url_for("api_card_reformat", run_id=run_id, card_id=card_id_raw)
     _formats_url = url_for("api_formats")
+    _assistant_url = url_for("api_card_assistant", run_id=run_id, card_id=card_id_raw)
+    _assistant_suggest_url = url_for(
+        "api_assistant_suggestions", run_id=run_id, card_id=card_id_raw
+    )
 
     _STD_TONES = [
         (
@@ -4554,6 +4670,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -4564,6 +4681,9 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'punchier\')">Punchier</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'add_time\')">Add time</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'tidy\')">Tidy up</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'summarise\')" title="One tight sentence">Summarise</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'expand\')" title="Add one on-brand detail">Expand</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'rewrite\')" title="Fresh angle, same facts">Rewrite</button>'
         f'<input class="assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" aria-label="Custom caption change instruction" style="flex:1;min-width:140px;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
         f'<button class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="captionAssistRun(this, \'{card_uuid}\', \'custom\')">Apply</button>'
         f"</div>"
@@ -4572,6 +4692,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
 
@@ -37840,6 +37961,172 @@ voice, and queues them for one-click approval.</p>
             "detail": detail,
             "user_message": "Reformatting this design failed. Try again, or pick another format.",
         }
+
+    def _run_data_any(run_id: str):
+        """Load a run from either the flat or nested layout (or None)."""
+        rd = _load_run(run_id)
+        if rd is not None:
+            return rd
+        nested = RUNS_DIR / run_id / "run.json"
+        if nested.exists():
+            try:
+                return json.loads(nested.read_text())
+            except Exception:
+                return None
+        return None
+
+    def _card_facts(run_data: dict, card_id: str) -> dict:
+        """The verified, read-only facts for one card (for the copilot)."""
+        rr = run_data.get("recognition_report") or {}
+        for ra in rr.get("ranked_achievements") or []:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                facts = dict(ach)
+                if ra.get("priority") is not None:
+                    facts["why"] = f"ranked at priority {ra.get('priority')}"
+                return facts
+        return {}
+
+    def _assistant_profile_id(run_id: str, run_data: dict) -> str:
+        pid = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
+        return re.sub(r"[^a-z0-9_-]", "-", pid.lower()).strip("-") or ("_run_" + run_id)
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/assistant", methods=["POST"])
+    def api_card_assistant(run_id: str, card_id: str):
+        """P6.2 — one conversational copilot turn editing this card's design.
+
+        The assistant reads the design/brand/facts and proposes structured,
+        validated edits (never paints pixels, never publishes). Applied edits
+        persist as a new brief version so the next render/reformat reflects
+        them. Honest no-provider error keeps the manual controls working.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _run_data_any(run_id)
+        if run_data is None:
+            return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        message = (body.get("message") or "").strip()
+        if not message:
+            return jsonify(
+                {"error": "empty_message", "user_message": "Type what you'd like to change."}
+            ), 400
+        session_id = (body.get("session_id") or "").strip()
+
+        profile_id = _assistant_profile_id(run_id, run_data)
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+
+        bdict = _latest_brief_for_card(run_id, card_id)
+        if not bdict:
+            return jsonify(
+                {
+                    "error": "no_design",
+                    "user_message": (
+                        "Create a graphic for this card first, then ask the copilot "
+                        "to refine it."
+                    ),
+                }
+            ), 409
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        src = CreativeBrief.from_dict(bdict)
+        if src is None:
+            return jsonify({"error": "brief_unreadable"}), 500
+
+        from mediahub.assistant import copilot as _acop
+        from mediahub.assistant import session as _asess
+
+        sess = _asess.get_or_create(run_id, card_id, session_id, profile_id=profile_id)
+        turn = _acop.run_turn(
+            session=sess,
+            user_message=message,
+            brief=src,
+            brand_kit=brand_kit,
+            facts=_card_facts(run_data, card_id),
+            profile_id=profile_id,
+        )
+        # Persist the edited brief so the existing render / reformat surfaces
+        # pick it up (they read the most-recent brief for the card).
+        if turn.changed:
+            try:
+                from mediahub.content_pack_visual.integration import briefs_dir_for_run
+
+                bdir = briefs_dir_for_run(run_id)
+                (bdir / f"{turn.brief.id}.json").write_text(
+                    json.dumps(turn.brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                )
+            except Exception:
+                pass
+
+        resp = turn.to_dict()
+        resp.update(
+            {
+                "session_id": sess.session_id,
+                "brief_id": turn.brief.id,
+                "format": (turn.brief.format_priority or ["story"])[0],
+                "reformat_url": url_for("api_card_reformat", run_id=run_id, card_id=card_id),
+            }
+        )
+        return jsonify(resp)
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/assistant/suggestions")
+    def api_assistant_suggestions(run_id: str, card_id: str):
+        """Planner-seeded prompt chips for the copilot (non-generic)."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _run_data_any(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        profile_id = _assistant_profile_id(run_id, run_data)
+        sport = str(run_data.get("sport") or run_data.get("engine_sport") or "")
+        from mediahub.assistant.copilot import suggested_prompts
+
+        return jsonify({"suggestions": suggested_prompts(profile_id, sport)})
+
+    @app.route("/api/assistant/memory", methods=["GET", "POST"])
+    def api_assistant_memory():
+        """The org's assistant preference book — list (GET) or remember (POST).
+
+        Writes are the explicit "remember this" action; the list is the
+        org-visible, deletable record the spec calls for. Org-scoped to the
+        active profile."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from mediahub.assistant import memory as _amem
+
+        pid = _active_profile_id() or ""
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            item = _amem.remember(pid, (body.get("text") or ""))
+            if item is None:
+                return jsonify({"error": "empty", "user_message": "Nothing to remember."}), 400
+            return jsonify({"ok": True, "item": item.to_dict()})
+        return jsonify({"items": [i.to_dict() for i in _amem.list_items(pid)]})
+
+    @app.route("/api/assistant/memory/<item_id>/delete", methods=["POST"])
+    def api_assistant_memory_delete(item_id: str):
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from mediahub.assistant import memory as _amem
+
+        return jsonify({"ok": _amem.forget(_active_profile_id() or "", item_id)})
+
+    @app.route("/api/assistant/transcribe", methods=["POST"])
+    def api_assistant_transcribe():
+        """Server ASR seam for uploaded audio — honest error until a provider
+        lands (the browser's on-device speech capture is the live voice path)."""
+        from mediahub.assistant.asr import ASRUnavailable, transcribe
+
+        try:
+            text = transcribe(request.get_data() or b"", content_type=request.content_type or "")
+            return jsonify({"ok": True, "text": text})
+        except ASRUnavailable as e:
+            return jsonify({"error": "asr_unavailable", "user_message": str(e)}), 503
 
     def _assemble_reel_inputs(run_id: str):
         """Shared validation + payload assembly for the reel routes.

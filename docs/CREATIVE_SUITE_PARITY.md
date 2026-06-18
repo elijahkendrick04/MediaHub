@@ -226,21 +226,39 @@ writes gated behind explicit "remember this" + an org-visible memory list
 ranked items, not generic. Provider order Gemini→Anthropic as everywhere;
 no provider → honest error, the UI's manual controls keep working.
 
+**Status — shipped v1 (2026-06-18).** The copilot and its surfaces are live:
+`assistant/` package — `patch.py` (closed-vocabulary `SpecPatch` +
+deterministic validator/applier; out-of-vocabulary ops dropped, colour-role
+edits re-checked against the APCA gate and reverted if illegible; every edit
+applied/rejected-with-reason and reversible), `tools.py` (bounded read/propose
+allow-list for `ask_with_tools` — no publish/post/fetch tool exists),
+`copilot.py` (one-turn orchestrator; honest no-provider error leaves the design
+untouched), `session.py` (per-card chat + edit log) and `memory.py` (org
+preference book — explicit "remember this", inspect/delete, deterministic recall
+needing no embedding provider). Magic-Write caption tools (Summarise / Expand /
+Rewrite) added to `web/caption_assist.py`; voice via the browser's on-device
+speech + an honest server ASR seam (`assistant/asr.py`). Web: a per-card
+**Copilot…** panel + `POST …/card/<card>/assistant`, planner-seeded
+`…/assistant/suggestions`, `/api/assistant/memory` (+ delete),
+`/api/assistant/transcribe`. Deferred to owners: generative image edits →
+P6.3/P6.4, languages → P6.23, review-thread @assistant → P6.17, MCP exposure →
+P6.20.
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
-| C2 | Canva AI conversational assistant (text/voice/media prompts; "Design for me") | 🆕 P6.2 club content copilot on `free_text_chat` + `ai_core.ask_with_tools` |
-| C2 | Canva AI 2.0 — conversational design, iterative agentic editing, layered object intelligence, persistent Memory Library | 🆕 P6.2 spec-patch agentic loop + org assistant memory (extends `memory/`); layer-aware edits via the DesignSpec's structured layers |
+| C2 | Canva AI conversational assistant (text/voice/media prompts; "Design for me") | ✅ P6.2 club content copilot on `ai_core.ask_with_tools` (spec-patch editing) |
+| C2 | Canva AI 2.0 — conversational design, iterative agentic editing, layered object intelligence, persistent Memory Library | ✅ P6.2 spec-patch agentic loop + org assistant memory (inspect/delete); layer-aware edits via the DesignSpec's structured fields |
 | C2 | Canva AI 2.0 six workflows | split: connectors ↗ P6.20 · scheduling ↗ P6.16 · web research ✅ shipped (`web_research/`) · brand intelligence ↗ P6.11 · Sheets AI ↗ P6.15 · Code 2.0 ↗ P6.13 |
 | C2 | Canva Design Model (design-aware model: structure, layering, hierarchy, branding → fully editable output) | 🔵 partial — the Tier B design-spec director is exactly this pattern (LLM emits structured, editable specs; deterministic render); P6.2 extends it from generate-time to edit-time. "Available inside ChatGPT/Claude/Gemini" ↗ P6.20 (MCP server) |
 | C2 | Magic Design (AI layout from prompt or uploaded media) | 🔵 partial — director generates from data; 🆕 P6.2 adds prompt-/photo-first entry ("here's a photo, make something") routed into the same brief flow |
-| C2 | Magic Write (generate/summarise/expand/rewrite; tone adjustment; context awareness; 100+ languages) | 🔵 captions shipped (`web/ai_caption.py`, tone via voice profile) → 🆕 P6.2 editor text-tools (summarise/expand/rewrite/tone-shift) on any text block; languages ↗ P6.23 |
+| C2 | Magic Write (generate/summarise/expand/rewrite; tone adjustment; context awareness; 100+ languages) | ✅ P6.2 caption text-tools shipped (summarise/expand/rewrite on `web/caption_assist.py`; tone-shift via the tone arg); languages ↗ P6.23 |
 | C2 | Brand Voice (writes in your brand's tone) | ✅ shipped — `brand/voice_imitation.py` + learned voice store + few-shot caption examples |
 | C2 | Guided Presentations (conversational goal/story/structure flow) | ↗ P6.12, driven by this assistant |
 | C2 | Ask @Canva (tag the AI in a comment for feedback/generation) | ↗ P6.17 (assistant joins review threads) |
 | A2 | AI Assistant beta (conversational create/edit; generate images; change backgrounds/text; replace objects; position/align/stylise; edit individual layers; toggle on/off; smart prompt suggestions; Imaging Subagent) | 🆕 P6.2 — same copilot; image operations delegate to P6.3 providers; assistant is per-org toggleable; suggestions seeded from the planner |
-| A2 | Voice commands via microphone | 🆕 P6.2 voice input over the ASR provider seam (P5.3) |
+| A2 | Voice commands via microphone | ✅ P6.2 mic input via browser on-device speech; server ASR seam (`assistant/asr.py`) honest-errors until a provider lands (P5.3) |
 | A2 | Generate captions / Caption Writer for social posts | ✅ shipped — `web/ai_caption.py` (few-shot brand voice, generate-many-then-dedupe, per-platform variants, AI-tell ban-list, approval loop) |
 | A2 | Rewrite / text variations | 🆕 P6.2 text-tools (variations = the shipped generate-many-then-dedupe pattern applied to any text block) |
 | A2 | Text to Template (generate fully editable template from a prompt) | 🆕 P6.2 prompt → `FormatSpec` + design spec (editable, brand-locked); catalogue home ↗ P6.1 |
