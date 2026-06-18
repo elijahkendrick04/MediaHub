@@ -61,7 +61,13 @@ jobs:
   shard:
     name: Suite shard ${{ matrix.group }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # ~7 min on a warm Playwright cache (≈4 min tests + setup). The headroom is
+    # for a COLD cache: each shard does its own `playwright install`, and a
+    # cold-cache run can hit a slow apt/CDN fetch (observed ~10 min once) — the
+    # timeout must clear that worst case so transient install slowness can never
+    # falsely fail a shard. The browser binary is cached across runs, so the
+    # steady state stays fast.
+    timeout-minutes: 20
     strategy:
       # One shard failing must NOT cancel the others — we want every failure in
       # one run, not just the first shard to go red.
