@@ -21,6 +21,11 @@ repos:
       - id: trailing-whitespace
         exclude: '\.md$'              # .editorconfig keeps trailing spaces in markdown
       - id: end-of-file-fixer
+        # .test_durations is a tool-generated map (pytest-split --store-durations,
+        # see pyproject/unit-suite.yml). pytest-split writes it with no trailing
+        # newline, so this hook would rewrite it on every refresh — commit it
+        # verbatim instead, like the other machine-owned files excluded above.
+        exclude: '^\.test_durations$'
       - id: check-added-large-files
         args: ["--maxkb=1500"]        # web.py (~908KB) + sample PDFs pass; blocks new giants
       - id: check-yaml
