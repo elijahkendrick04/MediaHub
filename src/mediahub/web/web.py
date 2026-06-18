@@ -9895,6 +9895,222 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     }
 
 
+def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
+    """Spotlight builder — the post-build surface for an athlete-spotlight
+    composite post.
+
+    Mirrors the Content builder's structure (hero + creative card + download
+    footer) but is scoped to the single composite the spotlight produced, and
+    titled *Spotlight builder*. It runs off the same base generators the rest
+    of the app uses: the caption registers come from the spotlight retone
+    (``_compose_spotlight_caption`` → the cloud LLM) and the graphic from
+    ``create_visual_for_item`` via ``api_stub_pack_create_graphic`` — the same
+    renderer the meet-recap and Content-builder cards use. Replaces the generic
+    saved-draft card layout for spotlight packs.
+    """
+    import html as _html
+
+    from mediahub.brand.tone import TONE_META as _TM
+
+    fd = rec.get("form_data") or {}
+    cards = rec.get("cards") or []
+    card = cards[0] if cards else {}
+
+    swimmer = str(fd.get("swimmer_name") or rec.get("title") or "Spotlight").strip()
+    meet = str(fd.get("meet_name") or "").strip()
+    run_id = str(fd.get("run_id") or "")
+    swimmer_key = str(fd.get("swimmer_key") or "")
+    try:
+        n_approved = int(fd.get("n_approved") or 0)
+    except (TypeError, ValueError):
+        n_approved = 0
+    cur_tone = str(fd.get("tone") or "")
+
+    caption = str(card.get("caption") or "").strip()
+    hashtags = card.get("hashtags") or []
+    notes = str(card.get("notes") or "").strip()
+    status = str(card.get("status") or "queue").lower()
+    if status not in ("queue", "approved", "rejected"):
+        status = "queue"
+
+    # Nav targets — back to the spotlight (re-pick moments / rebuild) and the
+    # saved-drafts list, mirroring the Content builder's strap links.
+    _spotlight_url = (
+        url_for("spotlight_view", run_id=run_id, swimmer_key=swimmer_key)
+        if run_id and swimmer_key
+        else url_for("spotlight_landing")
+    )
+    _drafts_url = url_for("stub_packs_list")
+    _export_url = url_for("stub_pack_export", pack_id=pack_id)
+    _retone_url = url_for("spotlight_pack_retone", pack_id=pack_id)
+    _graphic_url = url_for("api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0)
+    _status_url = url_for("api_stub_pack_card_status", pack_id=pack_id, card_idx=0)
+
+    # Same honest AI-unavailable banner the Content builder shows.
+    _ai_banner_html = _ai_unavailable_banner(_AI_UNAVAILABLE_DETAIL_PACK)
+
+    # Caption-tone tabs: Brand voice + the three registers, styled like the
+    # Content builder's tone row but wired to the spotlight retone (each is a
+    # form POST that recomposes the same approved moments in a new register).
+    tone_tabs = ""
+    for _t, _label in [(None, "Brand voice")] + [(t, m["label"]) for t, m in _TM.items()]:
+        _val = _t.value if _t is not None else ""
+        _on = _val == cur_tone
+        _bg = "color-mix(in oklab, var(--lane) 15%, transparent)" if _on else "transparent"
+        _fg = "var(--lane)" if _on else "var(--ink-dim)"
+        _weight = "600" if _on else "400"
+        tone_tabs += (
+            f'<form method="post" action="{_h(_retone_url)}" style="display:inline" '
+            f'data-loader-text="Rewriting in {_h(_label)}">'
+            f'<input type="hidden" name="tone" value="{_h(_val)}"/>'
+            f'<button type="submit" '
+            f"style=\"font-size:11px;padding:3px 10px;border-radius:999px;"
+            f"border:1px solid var(--border);cursor:pointer;background:{_bg};"
+            f'color:{_fg};font-family:inherit;margin:0 4px 4px 0;font-weight:{_weight}"'
+            f'{" disabled" if _on else ""}>{_h(_label)}</button></form>'
+        )
+
+    # Real, grounded moments going into the post (event + time per approved
+    # achievement) — source-grounding, mirroring the headline line the
+    # Content-builder cards carry.
+    moment_lines = [
+        ln.strip() for ln in str(fd.get("results_lines") or "").splitlines() if ln.strip()
+    ]
+    moments_html = ""
+    if moment_lines:
+        _items = "".join(
+            f'<li style="margin:2px 0">{_h(ln)}</li>' for ln in moment_lines[:6]
+        )
+        moments_html = (
+            '<div style="margin-top:10px;font-size:12px;color:var(--ink-dim)">'
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);'
+            'letter-spacing:0.5px;margin-bottom:4px">Moments in this post</div>'
+            f'<ul style="margin:0;padding-left:18px">{_items}</ul></div>'
+        )
+
+    tag_chips = ""
+    for tag in list(hashtags)[:8]:
+        t = str(tag).strip().lstrip("#")
+        if t:
+            tag_chips += f'<span class="mh-card-tag">#{_h(t)}</span>'
+    tags_html = (
+        f'<div class="mh-card-tags" style="margin-top:8px">{tag_chips}</div>' if tag_chips else ""
+    )
+
+    notes_html = (
+        f'<div style="margin-top:10px;font-size:12px;color:var(--ink-muted)"><em>{_h(notes)}</em></div>'
+        if notes
+        else ""
+    )
+
+    g_card_id = f"{pack_id}-0"
+    caption_for_copy = _html.escape(json.dumps(caption), quote=True)
+
+    # Approve pill — same endpoint + approve-only cycle as the saved-draft list.
+    _pill_style = {
+        "queue": ("rgba(255,174,59,0.18)", "#ffae3b"),
+        "approved": ("rgba(74,222,128,0.18)", "#4ade80"),
+        "rejected": ("rgba(244,63,94,0.18)", "#f43f5e"),
+    }
+    _pbg, _pfg = _pill_style.get(status, _pill_style["queue"])
+    approve_pill = (
+        f'<button type="button" class="sp-wf-pill" data-status="{_h(status)}" '
+        f'data-url="{_h(_status_url)}" '
+        f"style=\"border:none;cursor:pointer;padding:3px 12px;border-radius:999px;"
+        f"font-size:11px;font-weight:600;background:{_pbg};color:{_pfg};font-family:inherit\" "
+        f'title="Click: queue → approved → queue. Right-click to reset.">{_h(status)}</button>'
+    )
+
+    _sub_bits = []
+    if n_approved:
+        _sub_bits.append(
+            f"Composed from {n_approved} approved moment{'s' if n_approved != 1 else ''}"
+        )
+    sub_line = " &middot; ".join(_sub_bits) if _sub_bits else "Athlete spotlight"
+
+    _strap_bits = []
+    if meet:
+        _strap_bits.append(f"<span>{_h(meet)}</span>")
+    _strap_bits.append(
+        f'<a href="{_h(_spotlight_url)}" style="color:var(--ink-muted);text-decoration:none">'
+        "&larr; Back to spotlight</a>"
+    )
+    _strap_bits.append(
+        f'<a href="{_h(_drafts_url)}" style="color:var(--ink-muted);text-decoration:none">'
+        "All drafts</a>"
+    )
+    strap_html = '<span class="sep">/</span>'.join(_strap_bits)
+
+    _caption_block = (
+        _h(caption)
+        if caption
+        else '<span style="color:var(--ink-muted);font-style:italic">No caption — pick a tone to compose one.</span>'
+    )
+
+    return f"""
+{_ai_banner_html}
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Spotlight builder</span>
+  <h1>{_h(swimmer)}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">{strap_html}</div>
+</section>
+
+<div class="card" style="margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:700">{_h(swimmer)} &middot; Instagram</div>
+      <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{sub_line}</div>
+    </div>
+    {approve_pill}
+  </div>
+
+  <div class="tone-picker" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">
+    <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>
+    <div style="margin-bottom:10px;display:flex;flex-wrap:wrap;align-items:center">{tone_tabs}</div>
+    <div class="caption-text" style="font-size:13px;color:var(--ink);white-space:pre-wrap;line-height:1.5">{_caption_block}</div>
+    {tags_html}
+    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px"
+        onclick='(function(b){{
+          var c = {caption_for_copy};
+          if (navigator.clipboard) {{ navigator.clipboard.writeText(c).then(function(){{ window.MH && MH.toast("Caption copied", "success"); }}); }}
+          else {{ window.MH && MH.toast("Clipboard not available", "error"); }}
+        }})(this)'>Copy caption</button>
+      <button type="button" class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none"
+        onclick="mhCreateGraphic(this, {repr(_graphic_url)}, '{_h(g_card_id)}')">&#x2726; Create graphic</button>
+      <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_export_url)}"
+        title="Download the caption as .txt for manual posting">&#x2B07; Export caption</a>
+      {_schedule_button_html(f"_stub_{pack_id}", f"stub:{pack_id}:0", g_card_id)}
+    </div>
+    <div class="visual-panel" data-card="{_h(g_card_id)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>
+  </div>
+  {moments_html}
+  {notes_html}
+</div>
+
+<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <a class="btn secondary" href="{_h(_export_url)}">Export as text</a>
+  <a class="btn secondary" href="{_h(_spotlight_url)}">&larr; Back to spotlight</a>
+  <a class="btn secondary" href="{_h(_drafts_url)}">All drafts</a>
+</div>
+
+{_VISUAL_PANEL_JS}
+<script>
+(function(){{
+  // Approve-only flow, same cycle as the saved-draft card pill.
+  var NEXT = {{queue:'approved', approved:'queue', rejected:'queue'}};
+  var STYLE = {{queue:['rgba(255,174,59,0.18)','#ffae3b'],approved:['rgba(74,222,128,0.18)','#4ade80'],rejected:['rgba(244,63,94,0.18)','#f43f5e']}};
+  function apply(btn,status){{var s=STYLE[status]||STYLE.queue;btn.style.background=s[0];btn.style.color=s[1];btn.dataset.status=status;btn.textContent=status;}}
+  function send(btn,status){{var prev=btn.dataset.status;apply(btn,status);var fd=new FormData();fd.append('status',status);
+    fetch(btn.dataset.url,{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(r){{if(!r.ok)throw 0;return r.json();}})
+    .then(function(j){{if(j&&j.status)apply(btn,j.status);}}).catch(function(){{apply(btn,prev);window.MH&&MH.toast('Could not save status','error');}});}}
+  document.addEventListener('click',function(e){{var btn=e.target.closest('.sp-wf-pill');if(!btn)return;e.preventDefault();send(btn,NEXT[btn.dataset.status]||'approved');}});
+  document.addEventListener('contextmenu',function(e){{var btn=e.target.closest('.sp-wf-pill');if(!btn)return;e.preventDefault();send(btn,'queue');}});
+}})();
+</script>
+"""
+
+
 def _layout(
     title: str,
     body: str,
@@ -26076,6 +26292,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 secondary_cta=("Start a new draft", url_for("make_page")),
             )
 
+        # Athlete-spotlight packs get the dedicated Spotlight builder — the
+        # Content-builder structure, scoped to the single composite post, run
+        # off the same base generators (retone caption + create_visual_for_item
+        # graphic) — instead of the generic saved-draft card layout.
+        if (rec.get("form_data") or {}).get("source") == "athlete_spotlight":
+            _sp_name = (rec.get("form_data") or {}).get("swimmer_name") or "Spotlight"
+            return _layout(
+                f"Spotlight builder — {_sp_name}",
+                _render_spotlight_builder(pack_id, rec),
+                active="create",
+            )
+
         stub_type = rec.get("stub_type", "other")
         type_label = _STUB_TYPE_LABEL.get(stub_type, stub_type)
         # We pass back = saved-list so "Start over" goes somewhere sensible.
@@ -26136,36 +26364,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<span class="tag info">{_h(type_label)}</span> '
             f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
         )
-        # Athlete-spotlight drafts additionally get the meet-recap caption
-        # tone rewrite (same approved moments, different register).
-        spotlight_tools_html = ""
-        _fd = _pack_fd
-        if _fd.get("source") == "athlete_spotlight":
-            from mediahub.brand.tone import TONE_META as _TM
-
-            _retone_url = url_for("spotlight_pack_retone", pack_id=pack_id)
-            _cur_tone = str(_fd.get("tone") or "")
-            _tone_btns = ""
-            for _t, _m in [(None, {"label": "Brand voice"})] + list(_TM.items()):
-                _val = _t.value if _t is not None else ""
-                _on = _val == _cur_tone
-                _tone_btns += (
-                    f'<form method="post" action="{_retone_url}" style="display:inline" '
-                    f'data-loader-text="Rewriting in {_h(_m["label"])}">'
-                    f'<input type="hidden" name="tone" value="{_h(_val)}"/>'
-                    f'<button type="submit" class="btn{"" if _on else " secondary"}" '
-                    f'style="font-size:11px;padding:4px 12px"{" disabled" if _on else ""}>'
-                    f"{_h(_m['label'])}</button></form> "
-                )
-            spotlight_tools_html = (
-                '<div class="card" style="margin-bottom:14px">'
-                '<div style="font-size:13px;font-weight:700;margin-bottom:4px">Caption tone</div>'
-                '<div style="font-size:12px;color:var(--ink-dim);margin-bottom:10px">'
-                "Rewrite the post in a different register — same approved moments, "
-                "same brand grounding.</div>"
-                f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">{_tone_btns}</div>'
-                "</div>"
-            )
         # Show any media-library assets the draft was created with so the
         # user can see which photos are attached without re-opening the
         # source form. Profile-scoped: only assets that still belong to
@@ -26198,7 +26396,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         body = (
             header
-            + spotlight_tools_html
             + attached_html
             + cards_html
             + _VISUAL_PANEL_JS
