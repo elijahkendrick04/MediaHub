@@ -20,6 +20,7 @@ ASSET_TYPES = (
     "sponsor_logo",
     "brand_pattern",
     "exemplar_post",
+    "ai_generated",  # P6.3: produced/edited by the generative-imagery seam
     "other",
 )
 

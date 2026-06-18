@@ -305,6 +305,23 @@ strictly opt-in like `MEDIAHUB_GEN_BG`. Layer extraction (Magic Layers) is the
 inverse-render problem — scope to AI-image outputs only, where the provider
 returns layers natively.
 
+**Build status (2026-06-18) — 🔵 Build 1 of 2 shipped.** The seam and the solid
+services are in: `media_ai/imagine.py` (provider-agnostic facade) +
+`media_ai/imagine_providers/` (`base`, `gemini_imagine`, `local_imagine`);
+working `generate` + `similar` via Gemini Imagen (sport-editorial style presets,
+aspect ratios, no-people default); deterministic `subject_lift` (cutout +
+saliency); per-output provenance (IPTC `DigitalSourceType` embedded losslessly +
+a `<file>.imagine.json` manifest); a per-org quota ledger
+(`observability/imagine_usage.py`); media-library JSON routes + a "Generate an
+image" UI panel; and the `MEDIAHUB_GEN_BG` Imagen call generalised behind the
+seam (byte-identical renders). The edit family (`edit`/`expand`/`remove`/
+`upscale`/`style_match`) is defined in the seam and **honest-errors by
+capability** — the in-house local backend (P5.6) is the default that will fill
+them. **Build 2** carries the studio UI (mask-brush, expand handles, history
+gallery), grab-text (vision OCR), mockups, text-to-video b-roll, layer
+extraction, and 3D (deferred-last). See
+[`adr/0023-p6-3-generative-imagery-seam.md`](adr/0023-p6-3-generative-imagery-seam.md).
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
