@@ -24,3 +24,7 @@ explain the project in plain English.
   session re-checks a PR while it's alive (the in-session Monitor) and across
   sessions (Anthropic Routines) — first-party only, no extra service, no cost —
   [`SEND_LATER.md`](SEND_LATER.md).
+- **Format catalogue & "turn this into that" (P6.1):** the master list of design
+  formats a club can make (per-channel social sizes + posters, certificates,
+  cards, calendars, wallpapers) and how an approved design is re-laid-out into
+  any of them — [`FORMAT_CATALOGUE.md`](FORMAT_CATALOGUE.md).
