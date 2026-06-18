@@ -9958,7 +9958,7 @@ def _layout(
     {% endif %}
     {% endif %}
     {% if dev_operator %}
-      <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Developer &check;</a>
+      <a href="{{ url_for('logout') }}" title="Operator mode — unrestricted, no paywall">Log out</a>
     {% elif account_email %}
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
       <a href="{{ url_for('logout') }}">Log out</a>
