@@ -168,6 +168,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.1** · Graphic generator sprint — Eight new v2 archetype families (timeline-progression, radial competition ring, vertical stat-tower, three-card editorial grid, staggered-diagonal offset, full-height portrait split, ribbon-banner, contact-sheet), role-token + autofit-var only. *Build: one new `layouts/v2/<name>.html` + `.notes.md` per family (auto-scanned by `archetypes.list_archetypes()`), plus a matching `remotion/.../sprint/scenes/<archetype>.tsx` for motion parity — new files only.* · ❌ **NOT STARTED** · 🟢 ISOLATED *(completed 2026-06-17)*
 - ✅ **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **P6.1** · Phase 2 (Creative suite) — Smart format catalogue + format transformer: every Canva/Adobe-class design type as a data-driven club `FormatSpec` (certificates, posters, programmes, yearbooks, per-channel sizes); `turn_into` v2 re-targets any approved design *(completed 2026-06-18)*
+- ✅ **P6.2** · Phase 2 (Creative suite) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam *(completed 2026-06-18)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
