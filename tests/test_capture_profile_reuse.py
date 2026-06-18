@@ -156,7 +156,11 @@ class TestSignedInNavShowsLogo:
             with c.session_transaction() as s:
                 s["active_profile_id"] = "beta"
             body = c.get("/").get_data(as_text=True)
-        assert "https://example.com/logo.png" in body
+        # The detected website logo is served FIRST-PARTY via the mirror
+        # route, never the raw external URL: the CSP pins img-src 'self', so a
+        # cross-origin <img> would render as a broken image in the chrome.
+        assert "/organisation/beta/brand-logo" in body
+        assert "https://example.com/logo.png" not in body
 
     def test_no_logo_chip_when_signed_out(self, app):
         _seed()

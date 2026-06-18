@@ -31,6 +31,7 @@ renderers downstream.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import mimetypes
@@ -41,6 +42,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urljoin, urlparse
 
 log = logging.getLogger(__name__)
 
@@ -351,6 +353,171 @@ def resolve_logo_path(profile_id: str, logo_id: str) -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
+# Mirror an externally-hosted logo into first-party storage.
+#
+# Brand-DNA capture records the club's *website* logo as an external URL
+# (``ClubProfile.brand_logo_url``) — it never downloads the bytes. That URL
+# cannot be shown inside the app's own pages: the Content-Security-Policy pins
+# ``img-src 'self'``, so a cross-origin <img> is blocked by the browser and
+# renders as a broken-image icon (and many club sites hot-link-block or 403 a
+# bare <img> anyway). This mirrors the bytes to our OWN origin once, cached by
+# URL hash, so the sign-in picker / signed-in chrome / settings preview can
+# serve the real logo first-party instead of a broken cross-origin link.
+#
+# Raster only, on purpose: auto-downloading a remote SVG and serving it from
+# our origin would add a script-execution surface (SVGs can carry <script>).
+# A club whose only logo is an SVG simply degrades to the initials tile — the
+# deliberately-uploaded-logo path at /organisation/setup still renders SVG.
+# SSRF-safe (host re-validated on every redirect hop), size-capped, content-
+# type-validated. Never raises.
+# ---------------------------------------------------------------------------
+
+_MIRROR_MAX_BYTES = 8 * 1024 * 1024  # 8 MB — a web logo is far smaller
+_MIRROR_TIMEOUT = 10  # seconds
+_MIRROR_MAX_HOPS = 4
+_MIRROR_UA = "MediaHubLogoMirror/1.0 (+https://mediahub.example/about)"
+
+# Browser-renderable raster content-types we accept, mapped to the stored
+# extension. Anything else (text/html error pages, SVG, octet-stream) is
+# refused so a mirrored file is always a real image the picker can display.
+_MIRROR_CT_EXT: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/avif": "avif",
+    "image/x-icon": "ico",
+    "image/vnd.microsoft.icon": "ico",
+}
+_MIRROR_EXTS: frozenset[str] = frozenset(_MIRROR_CT_EXT.values())
+
+
+def _logo_cache_dir(profile_id: str) -> Path:
+    safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
+    if not safe:
+        raise ValueError("profile_id required to resolve logo cache dir")
+    d = _data_dir() / "club_logo_cache" / safe
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def mirror_external_logo(profile_id: str, url: str) -> Optional[Path]:
+    """Download an external logo ``url`` into first-party cache; return the
+    cached path (or ``None``).
+
+    Idempotent — keyed on the URL hash, so a second call is a cheap disk hit
+    with no network. SSRF-safe (http(s) only, host re-validated on every
+    redirect hop), size-capped, raster-image-only. Never raises.
+    """
+    if not profile_id or not url:
+        return None
+    url = url.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return None
+    try:
+        cache_dir = _logo_cache_dir(profile_id)
+    except Exception:
+        return None
+    key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    # Cache hit: any extension already written for this URL.
+    for ext in _MIRROR_EXTS:
+        p = cache_dir / f"{key}.{ext}"
+        if p.exists():
+            return p
+    # Cache miss: fetch SSRF-safely, re-validating every redirect hop so a
+    # public URL can never 302 the mirror onto a private/loopback address.
+    try:
+        import requests  # already a project dep
+    except Exception:
+        return None
+    try:
+        from mediahub.web_research.safe_fetch import is_url_safe
+    except Exception:  # pragma: no cover - safe_fetch is a core module
+        return None
+    current = url
+    for _ in range(_MIRROR_MAX_HOPS):
+        if not is_url_safe(current):
+            log.debug("logo mirror blocked (unsafe host): %s", current)
+            return None
+        try:
+            r = requests.get(
+                current,
+                headers={"User-Agent": _MIRROR_UA, "Accept": "image/*,*/*;q=0.8"},
+                timeout=_MIRROR_TIMEOUT,
+                allow_redirects=False,
+                stream=True,
+            )
+        except Exception as e:
+            log.debug("logo mirror fetch failed for %s: %s", current, e)
+            return None
+        if r.status_code in (301, 302, 303, 307, 308):
+            nxt = r.headers.get("Location", "")
+            if not nxt:
+                return None
+            current = urljoin(current, nxt)
+            continue
+        if r.status_code != 200:
+            return None
+        ct = (r.headers.get("Content-Type", "") or "").split(";")[0].strip().lower()
+        ext = _MIRROR_CT_EXT.get(ct)
+        if not ext:
+            # Server didn't send a usable image content-type — fall back to the
+            # URL path's extension, but only if it's a format we accept.
+            path_ext = _ext(urlparse(current).path)
+            if path_ext == "jpeg":
+                path_ext = "jpg"
+            ext = path_ext if path_ext in _MIRROR_EXTS else None
+        if not ext:
+            log.debug("logo mirror refused non-image content (%r) for %s", ct, current)
+            return None
+        # Read with a hard size cap so a hostile/huge response can't fill disk.
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            for chunk in r.iter_content(64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > _MIRROR_MAX_BYTES:
+                    log.debug("logo mirror exceeded %d-byte cap for %s", _MIRROR_MAX_BYTES, current)
+                    return None
+                chunks.append(chunk)
+        except Exception as e:
+            log.debug("logo mirror read failed for %s: %s", current, e)
+            return None
+        data = b"".join(chunks)
+        if not data:
+            return None
+        target = cache_dir / f"{key}.{ext}"
+        try:
+            target.write_bytes(data)
+        except Exception as e:
+            log.debug("logo mirror write failed for %s: %s", target, e)
+            return None
+        return target
+    return None  # too many redirects
+
+
+def mirror_content_type(path: Path) -> str:
+    """Correct image content-type for a mirrored-logo path (extension-keyed).
+
+    The serve route sets this explicitly because the response also carries
+    ``X-Content-Type-Options: nosniff`` — a wrong/empty type would make the
+    browser refuse to render the image.
+    """
+    by_ext = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "avif": "image/avif",
+        "ico": "image/x-icon",
+    }
+    return by_ext.get(path.suffix.lstrip(".").lower(), "application/octet-stream")
+
+
+# ---------------------------------------------------------------------------
 # Background "logo wall" silhouette (signed-in chrome).
 #
 # The signed-in app paints a soft, brand-tinted wall of the org's logos behind
@@ -455,6 +622,8 @@ __all__ = [
     "store_logo",
     "delete_logo",
     "resolve_logo_path",
+    "mirror_external_logo",
+    "mirror_content_type",
     "logo_bg_silhouette_path",
     "describe_logo_with_ai",
 ]
