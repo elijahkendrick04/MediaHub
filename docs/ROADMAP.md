@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `ac7088c4e` · Merge pull request #835 from elijahkendrick04/claude/awesome-ptolemy-0sn2q1
+**Last updated:** 2026-06-18 · `d4ab5a49f` · Merge pull request #833: mask-brush image studio UI (roadmap 1.2)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.2** · Phase 1 (Product) — Generative imagery **edit-family** on the `imagine` seam: edit / fill / expand / remove / upscale / style-match + mask-brush studio UI; default backend the in-house local model (1.1), cloud optional. (Seam + generate / subject-lift / grab-text / mockups / provenance / per-org quotas already shipped — see [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)) · ❌ **NOT STARTED**
 - **1.3** · Phase 1 (Product) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
 - **1.4** · Phase 1 (Product) — whisper.cpp / faster-whisper local ASR for reel captions / word-level burn-in (unblocks the video suite's captions, 1.6) · ❌ **NOT STARTED**
 - **1.5** · Phase 1 (Product) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
@@ -1229,11 +1228,10 @@ list and the auto table below, not here.
 | 2026-06-18 | `cc574272f` | Fold para-class clubs into parent; recover club from collapsed swimmer rows |
 | 2026-06-18 | `778000f38` | Apply ruff-format to the run-status page edits |
 | 2026-06-18 | `4b1715fe7` | Fix meet-recap permission errors; give customers a friendly progress screen |
+| 2026-06-18 | `8753ee981` | feat(1.2): mask-brush image studio UI for the generative-imagery edit family |
 | 2026-06-18 | `827ad9d7c` | Move Templates into Settings; drop Create-page brand strip & gallery link |
 | 2026-06-18 | `85a9170a1` | Fix sign-in cards showing broken club logos (serve them first-party) |
 | 2026-06-18 | `a00643abc` | Restore the standard centred content width |
 | 2026-06-18 | `eb83fb51c` | fix: a11y: Form elements must have labels (label) |
 | 2026-06-18 | `70bd5d6bc` | fix: font failed on /account/2fa |
-| 2026-06-18 | `62c05457d` | Fix CI: keep ENV_INVENTORY fresh by sourcing the crawl timeout canonically |
-| 2026-06-18 | `5e5b7a079` | fix(legal): declare MEDIAHUB_IMAGINE_LOCAL_TOKEN as a non-subprocessor env |
 <!-- /ROADMAP:ACTIVITY -->
