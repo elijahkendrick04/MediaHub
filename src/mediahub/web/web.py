@@ -6375,11 +6375,7 @@ header.topnav nav a.live::before {
 .mh-js .mh-orgmenu-item:hover { background: rgba(245,242,232,0.05); color: var(--ink); }
 
 /* MAIN */
-/* Width comes from --mh-wrap-max (responsive_guardrails.py), which scales the
-   reading column up per viewport tier so the layout fills large monitors
-   instead of stranding a narrow centred column. The fallback keeps a sane
-   vw-bounded width if the token layer is ever absent. */
-main.wrap { max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto; padding: 36px 28px 96px; }
+main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 
 /* FOOTER — masthead rail */
 .mh-footer {
@@ -6389,7 +6385,7 @@ main.wrap { max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto; pa
   position: relative;
 }
 .mh-footer-inner {
-  max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto;
+  max-width: 1200px; margin: 0 auto;
   padding: var(--sp-7) var(--sp-7) var(--sp-8);
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -6480,7 +6476,7 @@ main.wrap { max-width: var(--mh-wrap-max, min(1400px, 92vw)); margin: 0 auto; pa
   background: var(--bg-deep);
 }
 .mh-hud-inner {
-  max-width: var(--mh-wrap-max, min(1400px, 92vw));
+  max-width: 1200px;
   margin: 0 auto;
   padding: 9px var(--sp-7);
   display: flex;
@@ -8495,10 +8491,7 @@ main.wrap.mh-has-chapnav [id^="mh-ch-"] { scroll-margin-top: 84px; }
 
 @media (min-width: 1240px) {
   main.wrap.mh-has-chapnav {
-    /* --mh-wrap-max-home scales the landing column per viewport tier
-       (responsive_guardrails.py) so it fills wide monitors; the rail keeps
-       its fixed gutter and the reading column takes the rest. */
-    max-width: var(--mh-wrap-max-home, min(1640px, 93vw));
+    max-width: 1440px;
     display: grid;
     grid-template-columns: 196px minmax(0, 1fr);
     column-gap: 44px;
