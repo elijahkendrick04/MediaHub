@@ -169,6 +169,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **G1.26** · Graphic generator sprint — Archetype × style-pack gallery UI — browse every archetype and pack with live preview thumbnails + filters. *Build: new `web/web.py` route + template (distinct route from G1.27).* · ❌ **NOT STARTED** · 🟡 DISTINCT-REGION *(completed 2026-06-17)*
 - ✅ **P6.1** · Phase 2 (Creative suite) — Smart format catalogue + format transformer: every Canva/Adobe-class design type as a data-driven club `FormatSpec` (certificates, posters, programmes, yearbooks, per-channel sizes); `turn_into` v2 re-targets any approved design *(completed 2026-06-18)*
 - ✅ **P6.2** · Phase 2 (Creative suite) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam *(completed 2026-06-18)*
+- ✅ **1.1** · Phase 1 (Product) — Local generative-image backend behind the `media_ai` seam (a licence-clean self-hosted diffusion model, e.g. FLUX.1-schnell, Apache-2.0): the **default in-house backend** for the imagery suite (1.2) so generate / edit / fill / expand run with no cloud key; cloud generators stay optional on the same seam *(completed 2026-06-18)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)

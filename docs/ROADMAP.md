@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `14322b4c6` · Merge pull request #819 from elijahkendrick04/claude/roadmap-changelog-tidy
+**Last updated:** 2026-06-18 · `b740252ec` · Merge pull request #824 from elijahkendrick04/claude/youthful-cannon-2rp3by
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.1** · Phase 1 (Product) — Local generative-image backend behind the `media_ai` seam (a licence-clean self-hosted diffusion model, e.g. FLUX.1-schnell, Apache-2.0): the **default in-house backend** for the imagery suite (1.2) so generate / edit / fill / expand run with no cloud key; cloud generators stay optional on the same seam · ❌ **NOT STARTED**
 - **1.2** · Phase 1 (Product) — Generative imagery **edit-family** on the `imagine` seam: edit / fill / expand / remove / upscale / style-match + mask-brush studio UI; default backend the in-house local model (1.1), cloud optional. (Seam + generate / subject-lift / grab-text / mockups / provenance / per-org quotas already shipped — see [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)) · ❌ **NOT STARTED**
 - **1.3** · Phase 1 (Product) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
 - **1.4** · Phase 1 (Product) — whisper.cpp / faster-whisper local ASR for reel captions / word-level burn-in (unblocks the video suite's captions, 1.6) · ❌ **NOT STARTED**
@@ -1227,6 +1226,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `5e5b7a079` | fix(legal): declare MEDIAHUB_IMAGINE_LOCAL_TOKEN as a non-subprocessor env |
+| 2026-06-18 | `7687e782b` | style(imagine): ruff-format the local backend (wrap one long line) |
+| 2026-06-18 | `477a4912f` | feat(imagine): in-house local diffusion image backend (roadmap 1.1) |
 | 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
 | 2026-06-18 | `b67dd26e8` | docs(roadmap): renumber forward plan into dependency-correct build order |
 | 2026-06-18 | `b0957d122` | Detect A/B finals from SportSystems event headers and carry on each result |
@@ -1235,6 +1237,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `e66295c0f` | feat(P6.3): Build 2 — grab-text, deterministic mockups, generation history |
 | 2026-06-18 | `3a744c01f` | fix(P6.3): declare imagine env keys (subprocessor register + env inventory) |
 | 2026-06-18 | `e9c80fab2` | feat(P6.3): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
-| 2026-06-18 | `f35a53327` | fix(p6.2): rename nested _card_facts → _assistant_card_facts; refresh env inventory |
-| 2026-06-18 | `156f9616d` | feat(p6.2): conversational creative assistant (club content copilot) |
 <!-- /ROADMAP:ACTIVITY -->
