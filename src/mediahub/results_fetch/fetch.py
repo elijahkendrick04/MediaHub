@@ -380,9 +380,7 @@ class StaticBackend:
                 except Exception:  # pragma: no cover - requests is a hard dependency
                     return None
                 s = requests.Session()
-                adapter = HTTPAdapter(
-                    pool_connections=4, pool_maxsize=_POOL_MAXSIZE, max_retries=0
-                )
+                adapter = HTTPAdapter(pool_connections=4, pool_maxsize=_POOL_MAXSIZE, max_retries=0)
                 s.mount("http://", adapter)
                 s.mount("https://", adapter)
                 s.headers.update(_HEADERS)

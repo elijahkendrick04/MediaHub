@@ -15500,11 +15500,11 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ fail(e.message); });
+      .catch(function(e){ if (cursor) cursor.done(); fail(e.message); });
   }
   function fail(msg){
     btn.disabled = false; input.disabled = false;
-    stopActive(); if (panel) panel.hidden = true; if (cursor) { cursor.done(); cursor = null; }
+    stopActive(); if (panel) panel.hidden = true; cursor = null;
     if (errEl){ errEl.textContent = msg; errEl.hidden = false; }
   }
   function poll(jobId){
@@ -15514,7 +15514,7 @@ def create_app() -> Flask:
         if (typeof j.percent === 'number') setPct(j.percent);
         setStats(j.stats);
         if (j.status === 'done' && j.redirect) { setPct(100); setPhase(null, true); stopActive(); setText(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { fail(j.error || 'The fetch failed.'); return; }
+        if (j.status === 'error') { if (cursor) cursor.done(); fail(j.error || 'The fetch failed.'); return; }
         if (j.phase) setPhase(j.phase, false);
         setText(statusEl, j.progress || 'Reading the site\\u2026');
         if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
