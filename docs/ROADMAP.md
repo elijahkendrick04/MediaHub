@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `ab8b8bb44` · Merge pull request #822: shard the unit-test gate for ~linear speedup [skip render]
+**Last updated:** 2026-06-18 · `ca9dd0f15` · Merge pull request #831: Fix sign-in cards showing broken club logos (serve them first-party)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `85a9170a1` | Fix sign-in cards showing broken club logos (serve them first-party) |
 | 2026-06-18 | `62c05457d` | Fix CI: keep ENV_INVENTORY fresh by sourcing the crawl timeout canonically |
 | 2026-06-18 | `5e5b7a079` | fix(legal): declare MEDIAHUB_IMAGINE_LOCAL_TOKEN as a non-subprocessor env |
 | 2026-06-18 | `bad77511a` | Fix CI: ruff-format fetch.py + keep cursor dismissed on all 3 ingest branches |
@@ -1237,5 +1238,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `d7e714e94` | ci(unit-suite): commit pytest-split duration map for balanced shards |
 | 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
 | 2026-06-18 | `d820b0767` | ci(unit-suite): shard the full pytest gate across a matrix for ~linear speedup |
-| 2026-06-18 | `b67dd26e8` | docs(roadmap): renumber forward plan into dependency-correct build order |
 <!-- /ROADMAP:ACTIVITY -->
