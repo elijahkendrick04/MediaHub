@@ -69,7 +69,10 @@ def _normalise_reaction(raw: str) -> tuple[str | None, float]:
 
 def _normalise_name(raw: str) -> tuple[str | None, float]:
     s = raw.strip()
-    if len(s) >= 3 and re.search(r"[A-Za-z]", s):
+    # A real competitor name has letters and NO digits — a token like "H-7 L"
+    # or "Heat 7" is a heat/lane/relay-leg artifact, not a swimmer, and must not
+    # surface as a result.
+    if len(s) >= 3 and re.search(r"[A-Za-z]", s) and not re.search(r"\d", s):
         return s, 0.80
     return None, 0.0
 
