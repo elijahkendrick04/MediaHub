@@ -32,6 +32,7 @@ data/discovered/swimmers/*.json
 data/discovered/meets/*.json
 data/discovered/pbs/*.json
 data/discovered/search_cache/
+data/discovered/discovered_sources.jsonl
 !data/discovered/**/.gitkeep
 data/cache/
 data/verify_variation/

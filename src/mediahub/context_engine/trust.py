@@ -1,7 +1,8 @@
 """
 context_engine/trust.py — Per-domain trust ledger.
 
-The ledger is stored as append-only JSONL at data/discovered_sources.jsonl.
+The ledger is stored as append-only JSONL under the writable DATA_DIR tree at
+discovered/discovered_sources.jsonl (see ``_ledger_path``).
 Domains are scored using Laplace-smoothed success rate:
     score = (successes + 1) / (attempts + 2)
 
@@ -26,10 +27,20 @@ _LEDGER_LOCK = threading.Lock()
 
 
 def _ledger_path() -> Path:
-    here = Path(__file__).resolve().parent.parent
-    p = here / "data" / "discovered_sources.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    return p
+    """Append-only trust ledger, stored beside the discovered-source caches
+    under the writable ``DATA_DIR/discovered`` tree — never the read-only
+    package source. On the hosted deployment DATA_DIR is the mounted disk, so
+    this resolves to a writable path instead of ``/app/src/mediahub/data``
+    (read-only), where the eager mkdir here used to raise PermissionError and
+    abort every PB lookup.
+
+    The directory is created best-effort by ``_save_record`` at write time, not
+    here, so on a read-only disk a read simply finds no file (empty ledger) and
+    a write fails soft — PB ranking degrades to the neutral prior rather than
+    crashing the recognition run."""
+    from mediahub.context_engine.cache import _data_root
+
+    return _data_root() / "discovered" / "discovered_sources.jsonl"
 
 
 def _load_ledger() -> dict[str, dict]:
@@ -82,10 +93,11 @@ def _save_record(record: dict) -> None:
     # reader (score_domain / rank_candidates) always sees a complete ledger,
     # never a truncated mid-write one.
     try:
+        p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}")
         tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.replace(tmp, p)
-    except Exception:
+    except OSError:
         pass
 
 

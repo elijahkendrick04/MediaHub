@@ -83,6 +83,7 @@ from .bounded_cache import BoundedCache
 from . import auth as _auth
 from . import billing as _billing
 from . import charts as _charts
+from . import recap_progress as _recap_progress
 from . import sample_graphics as _sample_graphics
 from . import legal as _legal
 from . import tenancy as _tenancy
@@ -16476,22 +16477,40 @@ def create_app() -> Flask:
                 )
         except Exception:
             pass
+        # Operators (the signed-in developer) get the raw, engineer-facing step
+        # log + technical detail; a customer sees only a clean percentage bar and
+        # a plain-English phase describing what the engine is doing — never the
+        # raw steps or internal error text.
+        _is_dev = _auth.is_dev_operator()
+        _dev_stepcount = (
+            '<span class="sep">·</span><span id="mh-step-count">0 steps</span>' if _is_dev else ""
+        )
+        _dev_steploader = (
+            '<div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>'
+            if _is_dev
+            else ""
+        )
+        _dev_techlog = (
+            '<details style="margin-top:var(--sp-5)">'
+            '<summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>'
+            '<div class="progress-log" id="log" style="margin-top:var(--sp-3)">Starting&hellip;</div>'
+            "</details>"
+            if _is_dev
+            else ""
+        )
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Pipeline running</span>
   <h1>Processing run</h1>
-  <p class="lede">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds. This page will redirect you to the review queue the moment it's ready.</p>
+  <p class="lede">We're reading your results, finding the standout moments and drafting your content. Usually 20&ndash;60 seconds. This page opens your review queue the moment it's ready.</p>
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
+  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span>{_dev_stepcount}</div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
-  <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
-
-  <details style="margin-top:var(--sp-5)">
-    <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
-    <div class="progress-log" id="log" style="margin-top:var(--sp-3)">Starting&hellip;</div>
-  </details>
+  <div id="mh-percent" aria-live="polite" style="margin-top:var(--sp-2);font-size:13px;color:var(--ink-dim);font-variant-numeric:tabular-nums">0%</div>
+  {_dev_steploader}
+  {_dev_techlog}
 
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
@@ -16504,10 +16523,10 @@ def create_app() -> Flask:
 (function() {{
   var STATUS_URL = {json.dumps(_status_url)};
   var REVIEW_URL = {json.dumps(_review_url)};
-  // Poll cadence. The previous build polled every 800ms with no cap and
-  // no terminal handling for unknown/error responses — a stuck or missing
-  // run span the spinner forever, and the request flood helped trip
-  // gunicorn's --max-requests recycle (which then killed in-flight runs).
+  var IS_DEV = {("true" if _is_dev else "false")};
+  // Poll cadence. Bounded backoff + a hard cap so a stuck/missing run can't
+  // spin the spinner forever (the unbounded earlier version also helped trip
+  // gunicorn's --max-requests recycle, which killed in-flight runs).
   var BASE_MS = 1500, SLOW_MS = 8000, MAX_BACKOFF_MS = 6000;
   var SOFT_CAP_MS = 90000;     // reassure the user it's still working
   var HARD_CAP_MS = 480000;    // 8 min: slow down, keep going (big meets)
@@ -16516,29 +16535,26 @@ def create_app() -> Flask:
   var stage = document.getElementById('mh-current-stage');
   var stepEl = document.getElementById('mh-step-count');
   var logEl = document.getElementById('log');
+  var pctEl = document.getElementById('mh-percent');
   var bar = document.querySelector('.mh-progress-bar');
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
 
-  // The live "engine is generating…" stage label updates each poll.
-  function setStage(txt) {{
-    if (!stage) return;
-    stage.textContent = txt;
-  }}
-
-  function fillBar(colour) {{
+  function setStage(txt) {{ if (stage) stage.textContent = txt; }}
+  // Drive the determinate progress bar + numeric readout from a 0–100 percent.
+  function setBar(pct, colour) {{
     if (!bar) return;
     bar.classList.remove('indeterminate');
-    if (bar.firstElementChild) {{
-      if (colour) bar.firstElementChild.style.background = colour;
-      bar.firstElementChild.style.width = '100%';
-    }}
+    var v = Math.max(0, Math.min(100, (typeof pct === 'number' ? pct : 0)));
+    var s = bar.firstElementChild;
+    if (s) {{ if (colour) s.style.background = colour; s.style.width = Math.max(2, v) + '%'; }}
+    if (pctEl) pctEl.textContent = Math.round(v) + '%';
   }}
   function showStuck(msg) {{
     stopped = true;
-    if (stage) stage.textContent = 'Stopped';
-    fillBar('var(--bad)');
+    setStage('Stopped');
+    setBar(100, 'var(--bad)');
     if (reviewLink) reviewLink.style.display = 'inline-flex';
     if (retryLink) retryLink.style.display = 'inline-flex';
     if (lede) lede.textContent = msg;
@@ -16563,19 +16579,27 @@ def create_app() -> Flask:
     fails = 0;
     var status = (j && j.status) || 'unknown';
     var log = (j && j.log) || [];
-    if (logEl && log.length) {{ logEl.textContent = log.join('\\n'); logEl.scrollTop = logEl.scrollHeight; }}
-    if (stepEl) stepEl.textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
-    if (window.MH && MH.renderLogSteps) MH.renderLogSteps('mh-steps', log, status);
+    var pct = (j && typeof j.percent === 'number') ? j.percent : null;
+    var phase = (j && j.phase) || null;
+
+    // Developer-only raw detail: the verbatim step log, the live step list and
+    // the technical-log panel. These elements aren't rendered for customers, so
+    // the engineer-facing lines and internal error text stay operator-only.
+    if (IS_DEV) {{
+      if (logEl && log.length) {{ logEl.textContent = log.join('\\n'); logEl.scrollTop = logEl.scrollHeight; }}
+      if (stepEl) stepEl.textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
+      if (window.MH && MH.renderLogSteps) MH.renderLogSteps('mh-steps', log, status);
+    }}
 
     if (status === 'done') {{
       stopped = true;
       var nAch = (j && j.n_achievements != null) ? j.n_achievements : null;
       var achLabel = (nAch !== null && nAch > 0)
         ? nAch + ' moment' + (nAch === 1 ? '' : 's') + ' found — ready to review'
-        : 'Processing complete — ready to review';
-      if (stage) stage.textContent = achLabel;
-      if (lede) lede.textContent = achLabel + '. Opening the review queue…';
-      fillBar(null);
+        : 'All done — ready to review';
+      setStage(achLabel);
+      if (lede) lede.textContent = achLabel + '. Opening your content…';
+      setBar(100, null);
       if (reviewLink) reviewLink.style.display = 'inline-flex';
       if (window.MH) MH.toast(achLabel, 'success', 2500);
       setTimeout(function() {{ location.replace(REVIEW_URL); }}, 900);
@@ -16583,25 +16607,33 @@ def create_app() -> Flask:
     }}
     if (status === 'error') {{
       stopped = true;
-      if (stage) stage.textContent = 'Run failed';
-      fillBar('var(--bad)');
+      setBar(100, 'var(--bad)');
       if (retryLink) retryLink.style.display = 'inline-flex';
-      var emsg = (j && j.error) || 'unknown';
-      if (logEl) logEl.textContent += '\\n\\nERROR: ' + emsg;
-      if (lede) lede.textContent = 'The pipeline stopped before it could finish. ' + emsg;
-      if (window.MH) MH.toast('Run failed: ' + emsg, 'error', 9000);
+      if (IS_DEV) {{
+        setStage('Run failed');
+        var emsg = (j && j.error) || 'unknown';
+        if (logEl) logEl.textContent += '\\n\\nERROR: ' + emsg;
+        if (lede) lede.textContent = 'The pipeline stopped before it could finish. ' + emsg;
+        if (window.MH) MH.toast('Run failed: ' + emsg, 'error', 9000);
+      }} else {{
+        setStage('Something went wrong');
+        if (lede) lede.textContent = "We hit a snag finishing your recap. Please try uploading your file again — nothing you did was lost.";
+        if (window.MH) MH.toast('Your recap could not be completed', 'error', 7000);
+      }}
       return;
     }}
     if (status === 'unknown') {{
-      // Row is gone (cleared, deleted, or a different deployment). Don't spin.
-      showStuck("We can't find this run any more — it may have been cleared. Please upload the file again.");
+      showStuck(IS_DEV
+        ? "This run isn't in memory or on disk any more (cleared, deleted, or a different deployment)."
+        : "We can't find this run any more — it may have been cleared. Please upload your file again.");
       return;
     }}
-    // queued / running — keep the indeterminate bar moving.
-    setStage(log[log.length - 1] || 'Starting…');
-    if (bar) bar.classList.add('indeterminate');
+    // queued / running — drive the determinate bar from the server's percent,
+    // falling back to the indeterminate sweep until the first percent arrives.
+    if (pct != null) {{ setBar(pct, null); }} else if (bar) {{ bar.classList.add('indeterminate'); }}
+    setStage(phase || (IS_DEV ? (log[log.length - 1] || 'Starting…') : 'Working…'));
     if (waited > SOFT_CAP_MS && lede) {{
-      lede.textContent = "Still working — large meets and personal-best lookups can take a few minutes. This page redirects automatically the moment it's ready.";
+      lede.textContent = "Still working — large meets and personal-best lookups can take a little longer. This page updates automatically and opens your content the moment it's ready.";
     }}
     setTimeout(poll, waited > HARD_CAP_MS ? SLOW_MS : BASE_MS);
   }}
@@ -16660,6 +16692,10 @@ def create_app() -> Flask:
                     snap["error"] = _STALE_ERR
             if snap.get("status") == "done":
                 snap["n_achievements"] = _n_achievements_from_run(_run_data)
+            # Customer-facing percent + plain-English phase (additive; the raw
+            # `log`/`error` stay for operators and documented API clients).
+            _pct, _phase = _recap_progress.recap_progress(snap.get("log"), snap.get("status"))
+            snap["percent"], snap["phase"] = _pct, _phase
             return jsonify(snap)
 
         # Fallback to persisted status — this is the path every poll takes
@@ -16686,6 +16722,8 @@ def create_app() -> Flask:
         payload = {"status": status, "error": error, "log": plog}
         if status == "done":
             payload["n_achievements"] = _n_achievements_from_run(_run_data)
+        _pct, _phase = _recap_progress.recap_progress(plog, status)
+        payload["percent"], payload["phase"] = _pct, _phase
         return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/why/<int:ach_index>")
@@ -19828,7 +19866,8 @@ Relay team broke club record"></textarea>
                 "Poll a run's pipeline status. <code>status</code> is one of "
                 "<code>queued</code>, <code>running</code>, <code>done</code>, "
                 "<code>error</code> or <code>unknown</code>; <code>log</code> streams the "
-                "human-readable progress lines.",
+                "human-readable progress lines. <code>percent</code> (0&ndash;100) and "
+                "<code>phase</code> give a customer-friendly progress summary.",
                 curl='curl -s "__BASE__/api/runs/run_8f2c1a/status"\n',
                 python=(
                     "import requests\n\n"
@@ -19850,6 +19889,8 @@ Relay team broke club record"></textarea>
                     '    "Detecting achievements…",\n'
                     '    "Ranking content opportunities…"\n'
                     "  ],\n"
+                    '  "percent": 100,\n'
+                    '  "phase": "Ready",\n'
                     '  "n_achievements": 12\n'
                     "}\n"
                 ),
