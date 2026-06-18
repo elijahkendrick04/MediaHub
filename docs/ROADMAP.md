@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `e72a16e33` · Merge pull request #832: Move Templates into Settings; drop Create-page brand strip & gallery link
+**Last updated:** 2026-06-18 · `da537cf2a` · Merge pull request #826 from elijahkendrick04/autotest/fix-81e1363aa958
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1229,12 +1229,12 @@ list and the auto table below, not here.
 | 2026-06-18 | `827ad9d7c` | Move Templates into Settings; drop Create-page brand strip & gallery link |
 | 2026-06-18 | `85a9170a1` | Fix sign-in cards showing broken club logos (serve them first-party) |
 | 2026-06-18 | `a00643abc` | Restore the standard centred content width |
+| 2026-06-18 | `eb83fb51c` | fix: a11y: Form elements must have labels (label) |
+| 2026-06-18 | `70bd5d6bc` | fix: font failed on /account/2fa |
 | 2026-06-18 | `62c05457d` | Fix CI: keep ENV_INVENTORY fresh by sourcing the crawl timeout canonically |
 | 2026-06-18 | `5e5b7a079` | fix(legal): declare MEDIAHUB_IMAGINE_LOCAL_TOKEN as a non-subprocessor env |
 | 2026-06-18 | `bad77511a` | Fix CI: ruff-format fetch.py + keep cursor dismissed on all 3 ingest branches |
 | 2026-06-18 | `7687e782b` | style(imagine): ruff-format the local backend (wrap one long line) |
 | 2026-06-18 | `477a4912f` | feat(imagine): in-house local diffusion image backend (roadmap 1.1) |
 | 2026-06-18 | `597ba2e7d` | Speed up "results from a link" with concurrent read-ahead + richer progress UI |
-| 2026-06-18 | `38170fdab` | ci(unit-suite): widen shard timeout to clear cold-cache Chromium installs |
-| 2026-06-18 | `63189c842` | ci: exclude tool-generated .test_durations from end-of-file-fixer |
 <!-- /ROADMAP:ACTIVITY -->
