@@ -9964,10 +9964,10 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
             f'data-loader-text="Rewriting in {_h(_label)}">'
             f'<input type="hidden" name="tone" value="{_h(_val)}"/>'
             f'<button type="submit" '
-            f"style=\"font-size:11px;padding:3px 10px;border-radius:999px;"
+            f'style="font-size:11px;padding:3px 10px;border-radius:999px;'
             f"border:1px solid var(--border);cursor:pointer;background:{_bg};"
             f'color:{_fg};font-family:inherit;margin:0 4px 4px 0;font-weight:{_weight}"'
-            f'{" disabled" if _on else ""}>{_h(_label)}</button></form>'
+            f"{' disabled' if _on else ''}>{_h(_label)}</button></form>"
         )
 
     # Real, grounded moments going into the post (event + time per approved
@@ -9978,9 +9978,7 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     ]
     moments_html = ""
     if moment_lines:
-        _items = "".join(
-            f'<li style="margin:2px 0">{_h(ln)}</li>' for ln in moment_lines[:6]
-        )
+        _items = "".join(f'<li style="margin:2px 0">{_h(ln)}</li>' for ln in moment_lines[:6])
         moments_html = (
             '<div style="margin-top:10px;font-size:12px;color:var(--ink-dim)">'
             '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);'
@@ -10016,8 +10014,8 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     approve_pill = (
         f'<button type="button" class="sp-wf-pill" data-status="{_h(status)}" '
         f'data-url="{_h(_status_url)}" '
-        f"style=\"border:none;cursor:pointer;padding:3px 12px;border-radius:999px;"
-        f"font-size:11px;font-weight:600;background:{_pbg};color:{_pfg};font-family:inherit\" "
+        f'style="border:none;cursor:pointer;padding:3px 12px;border-radius:999px;'
+        f'font-size:11px;font-weight:600;background:{_pbg};color:{_pfg};font-family:inherit" '
         f'title="Click: queue → approved → queue. Right-click to reset.">{_h(status)}</button>'
     )
 
@@ -26394,14 +26392,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
                 f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
             )
-        body = (
-            header
-            + attached_html
-            + cards_html
-            + _VISUAL_PANEL_JS
-            + _DRAFT_REGEN_JS
-            + auto_js
-        )
+        body = header + attached_html + cards_html + _VISUAL_PANEL_JS + _DRAFT_REGEN_JS + auto_js
         return _layout(rec.get("title") or "Draft", body, active="create")
 
     def _render_pack_attached_media(rec: dict) -> str:
