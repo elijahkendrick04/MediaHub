@@ -58,13 +58,14 @@ class FakeResponse:
 
 
 def _install_requests(monkeypatch, handler):
-    """Patch ``requests.get`` (imported lazily inside StaticBackend.fetch)."""
+    """Patch ``requests.Session.get`` — StaticBackend fetches through one pooled,
+    keep-alive session (a fresh ``requests.get`` per page would re-handshake)."""
     import requests
 
-    def fake_get(url, **kwargs):
+    def fake_get(self, url, **kwargs):  # bound method: self is the Session
         return handler(url, kwargs)
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests.Session, "get", fake_get)
 
 
 def _allow_all_hosts(monkeypatch):

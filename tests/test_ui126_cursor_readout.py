@@ -159,7 +159,10 @@ def test_render_controller_spawns_and_dismisses_cursor():
 
 
 def test_upload_ingest_wires_cursor():
-    body = _slice(_src(), "var btn = document.getElementById('mh-url-fetch');")
+    # Window spans the whole ingest IIFE (it grew with the richer progress UI —
+    # phase stepper, live percent, stat chips — so 3200 chars no longer reach the
+    # poll loop where the cursor is fed and dismissed).
+    body = _slice(_src(), "var btn = document.getElementById('mh-url-fetch');", n=6000)
     # Created when the fetch starts, fed the real percent, given the phase text,
     # and dismissed on every terminal branch (done, error, network catch).
     assert "MH.cursorReadout(" in body

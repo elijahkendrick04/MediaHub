@@ -31,14 +31,17 @@ import json
 import logging
 import os
 import re
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
-from . import ReadResult, read_page
+from . import ReadResult, escalate_static
 from .fetch import (
+    FetchedPage,
     FetchLimits,
     StaticBackend,
     count_result_shaped_tokens,
@@ -62,6 +65,7 @@ def _is_data_file(url: str) -> bool:
 __all__ = [
     "CrawlLimits",
     "CrawlResult",
+    "CrawlProgress",
     "FileProvenance",
     "crawl_results_site",
     "shape_gate",
@@ -141,6 +145,13 @@ class CrawlLimits:
     politeness_delay_s: float = 0.3
     respect_robots: bool = True
     max_ai_candidates: int = 60
+    # How many static fetches the crawl may have in flight at once. The static
+    # tier is independent, read-only I/O, so reading the frontier's upcoming pages
+    # concurrently overlaps network latency without changing WHICH pages are kept
+    # (the render tier and every keep/discover decision stay single-threaded and
+    # in deterministic order). Also bounds simultaneous requests to one host, so
+    # it doubles as the politeness ceiling. 1 ⇒ fully serial (legacy behaviour).
+    fetch_concurrency: int = 8
     fetch: FetchLimits = field(default_factory=FetchLimits)
 
     @classmethod
@@ -149,6 +160,7 @@ class CrawlLimits:
             max_pages=_int_env("MEDIAHUB_RESULTS_FETCH_MAX_PAGES", 400),
             max_total_bytes=_int_env("MEDIAHUB_RESULTS_FETCH_MAX_TOTAL_MB", 50) * 1024 * 1024,
             timeout_s=float(_int_env("MEDIAHUB_RESULTS_FETCH_TIMEOUT_S", 180)),
+            fetch_concurrency=_int_env("MEDIAHUB_RESULTS_FETCH_CONCURRENCY", 8),
             fetch=FetchLimits.from_env(),
         )
 
@@ -203,6 +215,36 @@ class CrawlResult:
     @property
     def is_empty(self) -> bool:
         return not self.files
+
+
+@dataclass(frozen=True)
+class CrawlProgress:
+    """A live snapshot handed to ``progress_cb`` once per fetched page.
+
+    A crawl has no fixed total up front — the frontier grows as pages are
+    discovered — so an honest "how far in" reading combines two signals the
+    caller can blend: ``pages_visited`` (work done) against
+    ``frontier_remaining`` (in-scope links discovered but not yet read). When the
+    frontier drains toward zero the crawl is genuinely near done; while it keeps
+    growing the caller can fall back to the elapsed-vs-timeout fraction so the bar
+    never stalls. ``kept`` and ``total_bytes`` carry the real counters for the
+    status text.
+    """
+
+    pages_visited: int
+    kept: int
+    total_bytes: int
+    frontier_remaining: int = 0
+    discovered_total: int = 0
+    phase: str = "fetching"
+
+    @property
+    def fraction(self) -> float:
+        """Fraction of *discovered* work done (0..1). 0 when nothing yet found."""
+        denom = self.pages_visited + self.frontier_remaining
+        if denom <= 0:
+            return 0.0
+        return min(1.0, self.pages_visited / denom)
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +429,75 @@ def _load_robots(entry_url: str, raw: Optional[str]) -> Optional[RobotFileParser
 
 
 # ---------------------------------------------------------------------------
+# Concurrent static read-ahead
+# ---------------------------------------------------------------------------
+
+
+class _StaticPrefetcher:
+    """Fetch upcoming frontier pages' *static* bytes concurrently, ahead of the
+    deterministic consumer.
+
+    Only Tier A (static HTTP, thread-safe ``requests``) runs in parallel — the
+    render tier and every keep/discover/enqueue decision stay single-threaded in
+    the crawl loop, so WHICH pages are kept is byte-identical to a serial crawl;
+    only network wait overlaps. Futures are deduplicated by URL (a page is never
+    fetched twice), a per-worker politeness lead-in bounds the request rate, and
+    any fetch error is captured in its future and surfaces to the consumer as
+    "no page" — exactly the skip a serial failure produces.
+    """
+
+    def __init__(
+        self,
+        static_fetch: Callable[[str], Optional[FetchedPage]],
+        *,
+        width: int,
+        politeness_s: float,
+    ) -> None:
+        self._static_fetch = static_fetch
+        self._politeness_s = max(0.0, politeness_s)
+        self._pool = ThreadPoolExecutor(
+            max_workers=max(1, width), thread_name_prefix="mh-rf-prefetch"
+        )
+        self._futures: dict[str, Future] = {}
+        self._lock = threading.Lock()
+
+    def _job(self, url: str) -> Optional[FetchedPage]:
+        # Politeness rides inside the worker so the delays overlap rather than
+        # serialising (the concurrency width is the real per-host ceiling).
+        if self._politeness_s > 0:
+            time.sleep(self._politeness_s)
+        try:
+            return self._static_fetch(url)
+        except Exception:  # never let a fetch error escape a pool thread
+            return None
+
+    def submit(self, url: str) -> None:
+        """Start fetching ``url`` if it isn't already in flight (idempotent)."""
+        with self._lock:
+            if url not in self._futures:
+                self._futures[url] = self._pool.submit(self._job, url)
+
+    def get(self, url: str) -> Optional[FetchedPage]:
+        """Block for ``url``'s static page, submitting it inline if read-ahead
+        never queued it. Returns ``None`` on any failure (consumer skips)."""
+        with self._lock:
+            fut = self._futures.get(url)
+            if fut is None:
+                fut = self._pool.submit(self._job, url)
+                self._futures[url] = fut
+        try:
+            return fut.result()
+        except Exception:
+            return None
+
+    def close(self) -> None:
+        try:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:  # pragma: no cover - cancel_futures is py3.9+
+            self._pool.shutdown(wait=False)
+
+
+# ---------------------------------------------------------------------------
 # The crawl
 # ---------------------------------------------------------------------------
 
@@ -396,18 +507,30 @@ def crawl_results_site(
     *,
     limits: Optional[CrawlLimits] = None,
     fetch_page: Optional[Callable[[str], ReadResult]] = None,
+    static_fetch: Optional[Callable[[str], Optional[FetchedPage]]] = None,
+    rendered: Optional[RenderedBackend] = None,
     robots_txt: Optional[str] = None,
-    progress_cb: Optional[Callable[[int, int, int], None]] = None,
+    progress_cb: Optional[Callable[["CrawlProgress"], None]] = None,
 ) -> CrawlResult:
     """Walk the results site at ``entry_url`` and return a kept-file mirror.
 
-    ``fetch_page`` and ``robots_txt`` are injection seams for tests; in
-    production a shared static + rendered backend pair drives one browser across
-    the whole crawl, and robots.txt is fetched (SSRF-safely) from the host root.
+    Two read paths, same deterministic walk:
 
-    ``progress_cb(pages_visited, kept, total_bytes)`` is an optional best-effort
-    hook fired once per fetched page so a caller can surface live progress; it
-    must never affect the crawl, so any exception it raises is swallowed.
+      * **Production / concurrent (default).** The static tier is fetched with
+        read-ahead across ``limits.fetch_concurrency`` threads while the render
+        tier and every keep/discover/enqueue decision stay single-threaded and in
+        frontier order — so WHICH pages are kept is identical to a serial crawl;
+        only network wait overlaps. ``static_fetch`` (a URL → ``FetchedPage``
+        callable) and ``rendered`` (a shared :class:`RenderedBackend`) are
+        injection seams for testing this path without a network or a browser.
+      * **Legacy / serial.** Passing a combined ``fetch_page`` (URL →
+        ``ReadResult``) drives the original strictly-sequential walk unchanged —
+        the seam the deterministic-walk tests use.
+
+    ``robots_txt`` injects robots rules for tests. ``progress_cb(CrawlProgress)``
+    is an optional best-effort hook fired once per fetched page (after discovery,
+    so the frontier count is live) — any exception it raises is swallowed so it
+    can never affect the crawl.
     """
     limits = limits or CrawlLimits.from_env()
     scope: Scope = scope_for(entry_url)
@@ -423,16 +546,41 @@ def crawl_results_site(
         except Exception:
             return True
 
-    # Default reader: one StaticBackend + one RenderedBackend (one browser/crawl).
+    # Wire up the read path. ``own_*`` are the backends THIS call created and must
+    # therefore tear down; ``render_backend`` is whichever rendered backend
+    # escalation uses (injected or own), tracked for the render budget.
+    prefetcher: Optional[_StaticPrefetcher] = None
+    own_static: Optional[StaticBackend] = None
     own_rendered: Optional[RenderedBackend] = None
-    if fetch_page is None:
-        own_rendered = RenderedBackend(limits.fetch)
-        static_backend = StaticBackend(limits.fetch)
+    render_backend: Optional[RenderedBackend] = None
 
-        def _default_fetch(url: str) -> ReadResult:
-            return read_page(url, limits=limits.fetch, static=static_backend, rendered=own_rendered)
+    if fetch_page is not None:
+        # Legacy serial path — the combined reader is the whole tier stack.
+        def _obtain(u: str) -> ReadResult:
+            return fetch_page(u)
 
-        fetch_page = _default_fetch
+    else:
+        # Concurrent path: one pooled StaticBackend (read-ahead) + one shared
+        # RenderedBackend (single browser, render budget).
+        if static_fetch is None:
+            own_static = StaticBackend(limits.fetch)
+            static_fetch = own_static.fetch
+        render_backend = rendered
+        if render_backend is None:
+            own_rendered = RenderedBackend(limits.fetch)
+            render_backend = own_rendered
+        prefetcher = _StaticPrefetcher(
+            static_fetch,
+            width=limits.fetch_concurrency,
+            politeness_s=limits.politeness_delay_s,
+        )
+
+        def _obtain(u: str) -> ReadResult:
+            # Static bytes come warm from read-ahead; the render escalation runs
+            # here, in the single consumer thread, so the browser is never shared.
+            return escalate_static(
+                u, prefetcher.get(u), limits=limits.fetch, rendered=render_backend
+            )
 
     used_paths: set[str] = set()
     visited: set[str] = set()
@@ -443,6 +591,17 @@ def crawl_results_site(
     offprefix_allowed: set[str] = set()
     frontier: list[tuple[str, int]] = [(entry_url, 0)]
     started = time.monotonic()
+
+    def _enqueue(link: str, next_depth: int) -> None:
+        """Add a follow-up link to the frontier (data files first so a budget-
+        limited crawl gets the real results before navigation HTML) and start its
+        static read-ahead, so by the time the consumer pops it the bytes are warm."""
+        if _is_data_file(link):
+            frontier.insert(0, (link, next_depth))
+        else:
+            frontier.append((link, next_depth))
+        if prefetcher is not None and link not in visited and _allowed_by_robots(link):
+            prefetcher.submit(link)
 
     try:
         while frontier:
@@ -466,113 +625,118 @@ def crawl_results_site(
                 result.blocked += 1
                 continue
 
-            if limits.politeness_delay_s > 0:
+            # In the concurrent path politeness rides inside the read-ahead
+            # workers (overlapping); only the serial path sleeps in-loop.
+            if prefetcher is None and limits.politeness_delay_s > 0:
                 time.sleep(limits.politeness_delay_s)
 
-            read = fetch_page(norm_url)
+            read = _obtain(norm_url)
             result.pages_visited += 1
-            if own_rendered is not None and own_rendered.budget_hit:
+            if render_backend is not None and render_backend.budget_hit:
                 result.render_budget_hit = True
-
-            if progress_cb is not None:
-                try:
-                    progress_cb(result.pages_visited, result.kept, result.total_bytes)
-                except Exception:  # noqa: BLE001 — progress is best-effort, never fatal
-                    pass
 
             page = read.page
             if page is None:
                 result.skipped += 1
-                continue
+            else:
+                is_entry = norm_url == entry_url
+                kept_this_page = _keep_page(result, read, scope, used_paths, limits, is_entry)
 
-            is_entry = norm_url == entry_url
-            kept_this_page = _keep_page(result, read, scope, used_paths, limits, is_entry)
+                # Captured data APIs (already in hand from the render) → mirror files.
+                if isinstance(page, RenderedPage):
+                    for cap in page.captures:
+                        _keep_capture(result, cap, used_paths, limits)
+                    if page.screenshot:
+                        shot_path = _mirror_path(norm_url, "image/jpeg", used_paths)
+                        result.screenshots[shot_path] = page.screenshot
 
-            # Captured data APIs (already in hand from the render) → mirror files.
-            if isinstance(page, RenderedPage):
-                for cap in page.captures:
-                    _keep_capture(result, cap, used_paths, limits)
-                if page.screenshot:
-                    shot_path = _mirror_path(norm_url, "image/jpeg", used_paths)
-                    result.screenshots[shot_path] = page.screenshot
-
-            if (
-                not kept_this_page
-                and _is_ai_candidate(page)
-                and (len(result.ai_candidates) < limits.max_ai_candidates)
-            ):
-                result.ai_candidates.append(read)
-
-            # Discover follow-ups from the (rendered when available) DOM, unioned
-            # with the static HTML's links so a render that drops or rewrites
-            # anchors can't zero out discovery.
-            if _is_html(page.content_type) and depth < limits.max_depth:
-                discovery_base = _discovery_base(norm_url, page.final_url)
-                discovered = _discover_links(page.content, discovery_base)
-                static_page = read.static_page
                 if (
-                    static_page is not None
-                    and static_page is not page
-                    and _is_html(static_page.content_type)
+                    not kept_this_page
+                    and _is_ai_candidate(page)
+                    and (len(result.ai_candidates) < limits.max_ai_candidates)
                 ):
-                    seen = set(discovered)
-                    for link in _discover_links(static_page.content, discovery_base):
-                        if link not in seen:
-                            seen.add(link)
-                            discovered.append(link)
+                    result.ai_candidates.append(read)
 
-                in_scope_links = [link for link in discovered if in_scope(link, scope)]
-                follow = list(in_scope_links)
-                if is_entry:
-                    result.entry_tier = page.tier
-                    result.entry_final_url = page.final_url
-                    result.entry_links_found = len(discovered)
-                    result.entry_links_in_scope = len(in_scope_links)
-                    # Some meet hubs route each event's results to a SIBLING
-                    # path on the same host, outside the entry's path-prefix
-                    # (e.g. a /meets/<id>/results hub whose event pages live at
-                    # /events/<id>/results — same host, different top-level
-                    # path). Follow those same-host, off-prefix links found on
-                    # the ENTRY page so the hub can reach its event pages.
-                    #
-                    # This stays bounded and sport/vendor-agnostic: only entry-
-                    # page links qualify (a child page never widens the crawl),
-                    # each reached page is kept solely if it is itself result-
-                    # shaped (the shape gate decides — no domain/word matching),
-                    # the pages they reach enqueue in-scope links only, and every
-                    # existing budget (max_pages, max_total_bytes, timeout,
-                    # robots, SSRF) still applies. A large multi-meet host is
-                    # therefore never crawled wholesale — its off-prefix nav
-                    # pages are fetched at most once, fail the shape gate, and
-                    # spawn no further off-prefix following.
-                    for link in discovered:
-                        if (
-                            in_scope(link, scope)
-                            or not _same_host(link, entry_url)
-                            or link in offprefix_allowed
-                        ):
+                # Discover follow-ups from the (rendered when available) DOM,
+                # unioned with the static HTML's links so a render that drops or
+                # rewrites anchors can't zero out discovery.
+                if _is_html(page.content_type) and depth < limits.max_depth:
+                    discovery_base = _discovery_base(norm_url, page.final_url)
+                    discovered = _discover_links(page.content, discovery_base)
+                    static_page = read.static_page
+                    if (
+                        static_page is not None
+                        and static_page is not page
+                        and _is_html(static_page.content_type)
+                    ):
+                        seen = set(discovered)
+                        for link in _discover_links(static_page.content, discovery_base):
+                            if link not in seen:
+                                seen.add(link)
+                                discovered.append(link)
+
+                    in_scope_links = [link for link in discovered if in_scope(link, scope)]
+                    follow = list(in_scope_links)
+                    if is_entry:
+                        result.entry_tier = page.tier
+                        result.entry_final_url = page.final_url
+                        result.entry_links_found = len(discovered)
+                        result.entry_links_in_scope = len(in_scope_links)
+                        # Some meet hubs route each event's results to a SIBLING
+                        # path on the same host, outside the entry's path-prefix
+                        # (e.g. a /meets/<id>/results hub whose event pages live at
+                        # /events/<id>/results — same host, different top-level
+                        # path). Follow those same-host, off-prefix links found on
+                        # the ENTRY page so the hub can reach its event pages.
+                        #
+                        # This stays bounded and sport/vendor-agnostic: only entry-
+                        # page links qualify (a child page never widens the crawl),
+                        # each reached page is kept solely if it is itself result-
+                        # shaped (the shape gate decides — no domain/word matching),
+                        # the pages they reach enqueue in-scope links only, and every
+                        # existing budget (max_pages, max_total_bytes, timeout,
+                        # robots, SSRF) still applies. A large multi-meet host is
+                        # therefore never crawled wholesale — its off-prefix nav
+                        # pages are fetched at most once, fail the shape gate, and
+                        # spawn no further off-prefix following.
+                        for link in discovered:
+                            if (
+                                in_scope(link, scope)
+                                or not _same_host(link, entry_url)
+                                or link in offprefix_allowed
+                            ):
+                                continue
+                            offprefix_allowed.add(link)
+                            follow.append(link)
+                    for link in follow:
+                        if link in visited:
                             continue
-                        offprefix_allowed.add(link)
-                        follow.append(link)
-                # Frontier ordering: fetch cheap, high-value DATA files (PDF /
-                # CSV / JSON / spreadsheets) BEFORE expensive HTML pages. HTML
-                # may escalate to a headless render (~25-31s each) and burn the
-                # render budget; a results PDF is a fast static fetch. On a large
-                # meet this means the actual results land within budget instead
-                # of the budget being spent rendering navigation pages (the
-                # "only 3/4 of the results came through" failure).
-                for link in follow:
-                    if link in visited:
-                        continue
-                    if _is_data_file(link):
-                        frontier.insert(0, (link, depth + 1))
-                    else:
-                        frontier.append((link, depth + 1))
+                        _enqueue(link, depth + 1)
+
+            # One progress beat per visited page (skips included), fired AFTER
+            # discovery so ``frontier_remaining`` reflects this page's new links.
+            if progress_cb is not None:
+                try:
+                    progress_cb(
+                        CrawlProgress(
+                            pages_visited=result.pages_visited,
+                            kept=result.kept,
+                            total_bytes=result.total_bytes,
+                            frontier_remaining=len(frontier),
+                            discovered_total=result.pages_visited + len(frontier),
+                        )
+                    )
+                except Exception:  # noqa: BLE001 — progress is best-effort, never fatal
+                    pass
     finally:
+        if render_backend is not None and render_backend.budget_hit:
+            result.render_budget_hit = True
+        if prefetcher is not None:
+            prefetcher.close()
         if own_rendered is not None:
-            if own_rendered.budget_hit:
-                result.render_budget_hit = True
             own_rendered.close()
+        if own_static is not None:
+            own_static.close()
 
     return result
 

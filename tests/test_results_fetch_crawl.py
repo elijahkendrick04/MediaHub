@@ -15,7 +15,12 @@ sport-agnostic (no site-specific code):
 from __future__ import annotations
 
 from mediahub.results_fetch import ReadResult
-from mediahub.results_fetch.crawl import CrawlLimits, crawl_results_site, shape_gate
+from mediahub.results_fetch.crawl import (
+    CrawlLimits,
+    CrawlProgress,
+    crawl_results_site,
+    shape_gate,
+)
 from mediahub.results_fetch.fetch import FetchedPage, visible_text
 from mediahub.results_fetch.rendered import CapturedResponse, RenderedPage
 
@@ -512,7 +517,7 @@ def test_progress_cb_fires_per_page():
         base + "index.htm",
         limits=_fast_limits(),
         fetch_page=_site_reader(pages),
-        progress_cb=lambda p, k, b: seen.append((p, k, b)),
+        progress_cb=lambda pr: seen.append((pr.pages_visited, pr.kept, pr.total_bytes)),
     )
     # One callback per fetched page, and the page counter is monotonic.
     assert len(seen) == result.pages_visited >= 3
@@ -589,3 +594,221 @@ def test_shape_gate_requires_structure_and_tokens():
     assert shape_gate(js, "application/json") is True
     # JSON without an object array → not structural
     assert shape_gate(b'{"note":"3 - 1, 2 - 0, 1 - 4, 5 - 2"}', "application/json") is False
+
+
+# ---------------------------------------------------------------------------
+# (e) Concurrent static read-ahead (the production path)
+#
+# The concurrent path fetches the static tier with a thread pool while keeping
+# every keep/discover/enqueue decision single-threaded and in frontier order, so
+# WHICH pages land in the mirror is identical to a serial crawl — only network
+# wait overlaps. These tests drive it through the ``static_fetch`` seam (raw
+# bytes, real render_trigger/shape_gate) — no network, no browser.
+# ---------------------------------------------------------------------------
+
+import threading  # noqa: E402
+import time  # noqa: E402
+
+# A trigger-free result page: padded past the thin-body threshold and carrying a
+# real table with ≥4 result-shaped tokens, so it is kept as static and never
+# escalates to a render (keeping these tests pure-static and deterministic).
+_FILLER = "Full results for this event are listed in the table below. " * 5
+
+
+def _result_html(n: int) -> str:
+    return (
+        f"<html><body><h1>Event {n} 100m Freestyle</h1><p>{_FILLER}</p><table>"
+        "<tr><th>Place</th><th>Name</th><th>Club</th><th>Time</th></tr>"
+        "<tr><td>1</td><td>Ada Lovelace</td><td>Bton</td><td>1:02.34</td></tr>"
+        "<tr><td>2</td><td>Bea Carr</td><td>Wgan</td><td>1:03.11</td></tr>"
+        "<tr><td>3</td><td>Cy Diaz</td><td>Hova</td><td>1:04.50</td></tr>"
+        "</table></body></html>"
+    )
+
+
+def _static_page(url: str, html: str) -> FetchedPage:
+    return FetchedPage(
+        content=html.encode(),
+        final_url=url,
+        content_type="text/html",
+        tier="static",
+        text=visible_text(html),
+    )
+
+
+def _static_fetcher(pages: dict[str, str], *, record=None, peak=None):
+    """A ``static_fetch`` over a fixed mini-site (url → html); missing → ``None``.
+
+    Optionally records per-URL call counts (``record``) and the peak number of
+    concurrent in-flight fetches (``peak`` — a one-element list), with a tiny
+    sleep so genuine read-ahead overlap is observable.
+    """
+    lock = threading.Lock()
+    inflight = [0]
+
+    def _fetch(url: str):
+        if record is not None:
+            with lock:
+                record[url] = record.get(url, 0) + 1
+        if peak is not None:
+            with lock:
+                inflight[0] += 1
+                peak[0] = max(peak[0], inflight[0])
+            time.sleep(0.02)
+            with lock:
+                inflight[0] -= 1
+        html = pages.get(url)
+        return _static_page(url, html) if html is not None else None
+
+    return _fetch
+
+
+class _NoRender:
+    """A render backend that yields nothing — the index/nav pages here carry no
+    result-shaped tokens (so they escalate), but we want the tests to stay off a
+    real Chromium. Returning None makes escalation fall back to the static page,
+    exactly as a missing browser would, without launching anything."""
+
+    budget_hit = False
+
+    def fetch(self, url: str):
+        return None
+
+
+def _concurrent_limits(**kw) -> CrawlLimits:
+    return CrawlLimits(politeness_delay_s=0.0, respect_robots=False, **kw)
+
+
+def _build_site() -> dict[str, str]:
+    base = "https://swim.test/meet/"
+    links = " ".join(f'<a href="{base}e{i}.htm">Event {i}</a>' for i in range(12))
+    site = {base + "index.htm": f"<html><body><h1>Meet</h1><p>{_FILLER}</p>{links}</body></html>"}
+    for i in range(12):
+        site[base + f"e{i}.htm"] = _result_html(i)
+    return site
+
+
+def test_concurrent_path_kept_set_matches_serial_byte_for_byte():
+    """The concurrent static path must keep exactly the same files (same bytes,
+    same provenance source URLs) a strictly-serial walk would — concurrency
+    changes wall-clock, never WHICH pages are harvested."""
+    site = _build_site()
+    entry = "https://swim.test/meet/index.htm"
+
+    # Serial reference: the legacy fetch_page seam returns pre-decided static reads.
+    def _serial_reader(url: str) -> ReadResult:
+        html = site.get(url)
+        if html is None:
+            return ReadResult(url=url, page=None, tier="static", trigger=None)
+        return ReadResult(url=url, page=_static_page(url, html), tier="static", trigger=None)
+
+    serial = crawl_results_site(entry, limits=_concurrent_limits(), fetch_page=_serial_reader)
+    concurrent = crawl_results_site(
+        entry,
+        limits=_concurrent_limits(fetch_concurrency=8),
+        static_fetch=_static_fetcher(site),
+        rendered=_NoRender(),
+    )
+
+    assert concurrent.files == serial.files
+    assert concurrent.kept == serial.kept == 12  # 12 event pages (the index has no table)
+    assert {p.source_url for p in concurrent.provenance.values()} == {
+        p.source_url for p in serial.provenance.values()
+    }
+
+
+def test_concurrent_path_actually_overlaps_and_dedupes():
+    """Read-ahead must fetch independent pages in parallel (peak in-flight > 1)
+    while fetching each URL exactly once (the prefetcher dedupes by URL)."""
+    site = _build_site()
+    record: dict[str, int] = {}
+    peak = [0]
+    result = crawl_results_site(
+        "https://swim.test/meet/index.htm",
+        limits=_concurrent_limits(fetch_concurrency=8),
+        static_fetch=_static_fetcher(site, record=record, peak=peak),
+        rendered=_NoRender(),
+    )
+    assert result.kept == 12
+    assert peak[0] > 1, "static fetches never overlapped — read-ahead is serial"
+    # Every page fetched exactly once, even though links repeat across pages.
+    assert record and all(n == 1 for n in record.values())
+
+
+def test_concurrent_path_respects_page_cap():
+    """The single-threaded consumer still enforces max_pages exactly; read-ahead
+    overshoot is discarded, never kept."""
+    site = _build_site()
+    result = crawl_results_site(
+        "https://swim.test/meet/index.htm",
+        limits=_concurrent_limits(fetch_concurrency=8, max_pages=5),
+        static_fetch=_static_fetcher(site),
+        rendered=_NoRender(),
+    )
+    assert result.pages_visited <= 5
+
+
+def test_concurrent_path_progress_reports_live_frontier():
+    """progress_cb receives a CrawlProgress whose frontier_remaining is populated
+    once discovery starts, so the bar can show a real fraction (not just a page
+    count). The page counter stays monotonic and fires once per visited page."""
+    site = _build_site()
+    seen: list[CrawlProgress] = []
+    result = crawl_results_site(
+        "https://swim.test/meet/index.htm",
+        limits=_concurrent_limits(fetch_concurrency=4),
+        static_fetch=_static_fetcher(site),
+        rendered=_NoRender(),
+        progress_cb=seen.append,
+    )
+    assert len(seen) == result.pages_visited
+    assert [pr.pages_visited for pr in seen] == sorted(pr.pages_visited for pr in seen)
+    # After the entry page discovers the 12 event links, the frontier is non-empty
+    # and the reported fraction is a real 0<f<1 (not pinned at 0 or 1).
+    assert any(pr.frontier_remaining > 0 for pr in seen)
+    assert any(0.0 < pr.fraction < 1.0 for pr in seen)
+
+
+class _FakeRendered:
+    """A duck-typed RenderedBackend for the concurrent path: returns a canned
+    rendered DOM per URL, with the budget attribute the crawl reads."""
+
+    budget_hit = False
+
+    def __init__(self, doms: dict[str, str]):
+        self._doms = doms
+
+    def fetch(self, url: str):
+        dom = self._doms.get(url)
+        if dom is None:
+            return None
+        return RenderedPage(
+            content=dom.encode(),
+            final_url=url,
+            content_type="text/html",
+            tier="rendered",
+            text=visible_text(dom),
+            screenshot=b"\xff\xd8\xffjpg",
+            screenshot_mime="image/jpeg",
+            captures=[],
+        )
+
+
+def test_concurrent_path_still_escalates_to_render():
+    """A static JS-shell entry must still escalate to the (single, shared) render
+    backend on the concurrent path — read-ahead only parallelises the static tier;
+    the render decision and call stay in the consumer."""
+    entry = "https://spa.test/board/"
+    shell = '<html><body><div id="app"></div></body></html>'  # js_shell → render
+    rendered_dom = _result_html(7)
+    result = crawl_results_site(
+        entry,
+        limits=_concurrent_limits(fetch_concurrency=4),
+        static_fetch=_static_fetcher({entry: shell}),
+        rendered=_FakeRendered({entry: rendered_dom}),
+    )
+    assert result.kept >= 1
+    blob = b"\n".join(result.files.values())
+    assert b"Ada Lovelace" in blob and b"1:02.34" in blob
+    assert any(p.tier == "rendered" for p in result.provenance.values())
+    assert result.screenshots  # the render's screenshot rode along

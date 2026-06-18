@@ -45,6 +45,7 @@ from .rendered import (
 
 __all__ = [
     "read_page",
+    "escalate_static",
     "ReadResult",
     "FetchLimits",
     "FetchedPage",
@@ -97,6 +98,56 @@ class ReadResult:
         return list(page.captures) if isinstance(page, RenderedPage) else []
 
 
+def escalate_static(
+    url: str,
+    static_page: Optional[FetchedPage],
+    *,
+    limits: FetchLimits,
+    rendered: Optional[RenderedBackend] = None,
+) -> ReadResult:
+    """Decide and apply the Tier A→B escalation for an *already-fetched* static
+    page, returning the final :class:`ReadResult`.
+
+    Split out of :func:`read_page` so the crawler can run the cheap static fetch
+    concurrently (read-ahead) yet keep this render step — which shares one browser
+    and one render budget — single-threaded and in deterministic frontier order.
+    Same decision as before: only HTML that is thin / a JS shell / result-shapeless
+    escalates; a failed render falls back to the static page with ``render_failed``
+    flagged honestly.
+    """
+    if static_page is None:
+        return ReadResult(url=url, page=None, tier="static", trigger=None)
+
+    trigger = render_trigger(static_page, limits)
+    if trigger is None:
+        return ReadResult(url=url, page=static_page, tier="static", trigger=None)
+
+    backend = rendered
+    own_backend = False
+    if backend is None:
+        backend = RenderedBackend(limits)
+        own_backend = True
+    try:
+        rendered_page = backend.fetch(url)
+    finally:
+        if own_backend:
+            backend.close()
+
+    if rendered_page is None:
+        # Escalation was warranted but the render didn't land — keep the static
+        # page (better than nothing) and flag the failure honestly.
+        return ReadResult(
+            url=url, page=static_page, tier="static", trigger=trigger, render_failed=True
+        )
+    return ReadResult(
+        url=url,
+        page=rendered_page,
+        tier="rendered",
+        trigger=trigger,
+        static_page=static_page,
+    )
+
+
 def read_page(
     url: str,
     *,
@@ -114,34 +165,5 @@ def read_page(
     """
     limits = limits or FetchLimits.from_env()
     static = static or StaticBackend(limits)
-
     fetched = static.fetch(url)
-    if fetched is None:
-        return ReadResult(url=url, page=None, tier="static", trigger=None)
-
-    trigger = render_trigger(fetched, limits)
-    if trigger is None:
-        return ReadResult(url=url, page=fetched, tier="static", trigger=None)
-
-    backend = rendered
-    own_backend = False
-    if backend is None:
-        backend = RenderedBackend(limits)
-        own_backend = True
-    try:
-        rendered_page = backend.fetch(url)
-    finally:
-        if own_backend:
-            backend.close()
-
-    if rendered_page is None:
-        # Escalation was warranted but the render didn't land — keep the static
-        # page (better than nothing) and flag the failure honestly.
-        return ReadResult(url=url, page=fetched, tier="static", trigger=trigger, render_failed=True)
-    return ReadResult(
-        url=url,
-        page=rendered_page,
-        tier="rendered",
-        trigger=trigger,
-        static_page=fetched,
-    )
+    return escalate_static(url, fetched, limits=limits, rendered=rendered)

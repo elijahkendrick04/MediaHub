@@ -5792,22 +5792,42 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
     try:
         from mediahub.media_ai.llm import ClaudeUnavailableError
         from mediahub.results_fetch.ai_read import ai_read_candidates
-        from mediahub.results_fetch.crawl import crawl_results_site
+        from mediahub.results_fetch.crawl import CrawlLimits, crawl_results_site
         from mediahub.results_fetch.package import package_mirror
 
-        def _on_progress(pages: int, kept: int, total_bytes: int) -> None:
-            # Coarse, honest progress: the crawl has no fixed total (frontier +
-            # budgets), so the bar creeps with pages fetched and caps at 70%
-            # before the read/package phases take it home. The text carries the
-            # real live counters.
+        # Honest live percent for the fetching phase. A crawl has no fixed total
+        # up front, so we blend two real signals: the fraction of the *discovered*
+        # frontier already read (leads while the site is being mapped) and the
+        # elapsed share of the crawl's own time budget (pulls the bar forward so a
+        # deep site never feels stuck). The bar is held monotonic client-side. The
+        # budget comes from the crawl's own canonical config (one source of truth).
+        _fetch_t0 = time.monotonic()
+        _timeout_budget = CrawlLimits.from_env().timeout_s or 180.0
+        _FETCH_LO, _FETCH_HI = 8, 72
+
+        def _on_progress(progress) -> None:
+            pages = progress.pages_visited
+            discovered = max(progress.discovered_total, pages)
+            elapsed = time.monotonic() - _fetch_t0
+            time_frac = min(1.0, elapsed / _timeout_budget)
+            # Cap the time signal just under 1 so elapsed alone never reads "done".
+            blended = max(progress.fraction, 0.85 * time_frac)
+            percent = int(_FETCH_LO + blended * (_FETCH_HI - _FETCH_LO))
+            kb = progress.total_bytes // 1024
             _url_job_set(
                 job_id,
                 phase="fetching",
                 progress=(
-                    f"Fetched {pages} page{'s' if pages != 1 else ''} · "
-                    f"{kept} kept · {total_bytes // 1024} KB"
+                    f"Reading the site — page {pages} of ~{discovered} · "
+                    f"{progress.kept} with results · {kb} KB"
                 ),
-                percent=min(70, 10 + pages),
+                percent=max(_FETCH_LO, min(_FETCH_HI, percent)),
+                # Structured counters so the UI renders live stat chips without
+                # parsing the human text.
+                pages=pages,
+                discovered=discovered,
+                kept=progress.kept,
+                kb=kb,
             )
 
         crawl = crawl_results_site(url, progress_cb=_on_progress)
@@ -5820,7 +5840,16 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
         )
         if crawl.render_budget_hit:
             summary += " · render budget reached"
-        _url_job_set(job_id, phase="reading", progress=summary, percent=75)
+        _url_job_set(
+            job_id,
+            phase="reading",
+            progress=summary,
+            percent=75,
+            pages=crawl.pages_visited,
+            discovered=crawl.pages_visited,
+            kept=crawl.kept,
+            kb=crawl.total_bytes // 1024,
+        )
 
         # "No results" = nothing the engine could keep. The entry landing page is
         # always recorded for provenance, so ``is_empty`` can be False even when
@@ -15335,50 +15364,128 @@ def create_app() -> Flask:
             results_url_card = (
                 (
                     """
-<div class="card" style="margin-top:var(--sp-4)">
+<style>
+  .mh-rf-card .mh-rf-inputrow{display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:stretch}
+  #mh-url-input{flex:1;min-width:min(260px,100%);padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box;transition:border-color 160ms ease, box-shadow 160ms ease}
+  #mh-url-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent)}
+  #mh-url-fetch{transition:transform 140ms cubic-bezier(0.23,1,0.32,1)}
+  #mh-url-fetch:active{transform:scale(0.97)}
+  .mh-rf-panel{margin-top:var(--sp-4);padding:var(--sp-4) var(--sp-4) calc(var(--sp-4) - 2px);border:1px solid var(--border);border-radius:14px;background:color-mix(in oklab, var(--lane) 5%, transparent);animation:mh-rf-in 360ms cubic-bezier(0.23,1,0.32,1) both}
+  @keyframes mh-rf-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .mh-rf-steps{display:flex;list-style:none;margin:0 0 var(--sp-4);padding:0}
+  .mh-rf-steps li{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;position:relative;font-family:var(--font-mono);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;text-align:center;color:var(--ink-muted);opacity:0.5;transition:opacity 220ms ease,color 220ms ease}
+  .mh-rf-steps li .dot{width:11px;height:11px;border-radius:999px;border:2px solid color-mix(in oklab, var(--ink-muted) 45%, transparent);background:transparent;position:relative;z-index:1;transition:background 240ms cubic-bezier(0.23,1,0.32,1),border-color 240ms ease,box-shadow 240ms ease}
+  .mh-rf-steps li:not(:last-child)::after{content:'';position:absolute;top:5px;left:50%;width:100%;height:2px;background:color-mix(in oklab, var(--ink-muted) 20%, transparent);z-index:0;transition:background 240ms ease}
+  .mh-rf-steps li.is-active{opacity:1;color:var(--ink)}
+  .mh-rf-steps li.is-active .dot{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in oklab, var(--accent) 20%, transparent)}
+  .mh-rf-steps li.is-done{opacity:1}
+  .mh-rf-steps li.is-done .dot{background:var(--accent);border-color:var(--accent)}
+  .mh-rf-steps li.is-done::after{background:var(--accent)}
+  .mh-rf-meter{display:flex;align-items:center;gap:var(--sp-4)}
+  .mh-rf-pct{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:600;line-height:1;color:var(--ink);min-width:3.4ch;text-align:right}
+  .mh-rf-pct i{font-size:15px;color:var(--ink-muted);font-style:normal;margin-left:2px}
+  .mh-rf-track{position:relative;flex:1;height:10px;border-radius:999px;background:rgba(255,255,255,0.07);overflow:hidden}
+  .mh-rf-fill{position:absolute;top:0;bottom:0;left:0;width:0%;border-radius:999px;background:linear-gradient(90deg, color-mix(in oklab, var(--accent) 72%, #000), var(--accent));transition:width 560ms cubic-bezier(0.23,1,0.32,1)}
+  .mh-rf-track.is-active::after{content:'';position:absolute;top:0;bottom:0;left:0;right:0;background:linear-gradient(90deg, transparent, rgba(255,255,255,0.20), transparent);transform:translateX(-100%);animation:mh-rf-shimmer 1.4s linear infinite}
+  @keyframes mh-rf-shimmer{to{transform:translateX(100%)}}
+  .mh-rf-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:var(--sp-4)}
+  .mh-rf-chip{font-family:var(--font-mono);font-size:12px;color:var(--ink-muted);padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,0.03)}
+  .mh-rf-chip b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+  .mh-rf-status{margin-top:var(--sp-3);font-family:var(--font-mono);font-size:12px;color:var(--ink-muted);min-height:1.2em}
+  @media (prefers-reduced-motion: reduce){
+    .mh-rf-panel{animation:none}
+    .mh-rf-fill{transition:width 200ms ease}
+    .mh-rf-track.is-active::after{display:none}
+  }
+</style>
+<div class="card mh-rf-card" style="margin-top:var(--sp-4)">
   <h3 style="margin-top:0;font-family:var(--font-mono);font-size:var(--fs-10);letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:var(--sp-3)">Or paste a results link</h3>
-  <p class="lede" style="font-size:var(--fs-14);margin-bottom:var(--sp-4)">Works with results sites for any sport &mdash; including modern app-style sites. We&rsquo;ll gather every result on the site.</p>
-  <div style="display:flex;gap:var(--sp-3);flex-wrap:wrap;align-items:stretch">
-    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:min(260px,100%);padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
+  <p class="lede" style="font-size:var(--fs-14);margin-bottom:var(--sp-4)">Works with results sites for any sport &mdash; including modern app-style sites. We&rsquo;ll read every result on the site, fast.</p>
+  <div class="mh-rf-inputrow">
+    <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" />
     <button id="mh-url-fetch" class="btn" type="button">Fetch results &rarr;</button>
   </div>
-  <div id="mh-url-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Fetch progress" style="margin-top:var(--sp-3)">
-    <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden">
-      <div id="mh-url-progress-fill" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width 0.45s ease"></div>
+  <div id="mh-url-panel" class="mh-rf-panel" hidden>
+    <ol id="mh-url-steps" class="mh-rf-steps">
+      <li data-phase="fetching"><span class="dot"></span>Reading site</li>
+      <li data-phase="reading"><span class="dot"></span>Extracting</li>
+      <li data-phase="packaging"><span class="dot"></span>Packaging</li>
+      <li data-phase="done"><span class="dot"></span>Ready</li>
+    </ol>
+    <div class="mh-rf-meter">
+      <div class="mh-rf-pct"><span id="mh-url-pct">0</span><i>%</i></div>
+      <div id="mh-url-progress" class="mh-rf-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Fetch progress">
+        <div id="mh-url-progress-fill" class="mh-rf-fill"></div>
+      </div>
     </div>
+    <div class="mh-rf-stats">
+      <span class="mh-rf-chip"><b id="mh-url-stat-pages">0</b> pages read</span>
+      <span class="mh-rf-chip"><b id="mh-url-stat-kept">0</b> with results</span>
+      <span class="mh-rf-chip"><b id="mh-url-stat-size">0 KB</b> mirrored</span>
+    </div>
+    <div id="mh-url-status" class="mh-rf-status" role="status" aria-live="polite"></div>
   </div>
-  <div id="mh-url-status" role="status" aria-live="polite" hidden style="margin-top:var(--sp-3);padding:10px 12px;border-radius:8px;background:color-mix(in oklab, var(--lane) 6%, transparent);border:1px solid color-mix(in oklab, var(--lane) 22%, transparent);font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)"></div>
   <div id="mh-url-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
 </div>
 <script>
 (function(){
   var btn = document.getElementById('mh-url-fetch');
   var input = document.getElementById('mh-url-input');
+  var panel = document.getElementById('mh-url-panel');
   var statusEl = document.getElementById('mh-url-status');
   var errEl = document.getElementById('mh-url-error');
-  var barWrap = document.getElementById('mh-url-progress');
-  var barFill = document.getElementById('mh-url-progress-fill');
+  var track = document.getElementById('mh-url-progress');
+  var fill = document.getElementById('mh-url-progress-fill');
+  var pctNum = document.getElementById('mh-url-pct');
+  var steps = panel ? panel.querySelectorAll('#mh-url-steps li') : [];
+  var statPages = document.getElementById('mh-url-stat-pages');
+  var statKept = document.getElementById('mh-url-stat-kept');
+  var statSize = document.getElementById('mh-url-stat-size');
   if (!btn || !input) return;
-  function show(el, msg){ el.textContent = msg; el.hidden = false; }
-  function hide(el){ el.hidden = true; }
+  var PHASES = ['fetching','reading','packaging','done'];
   var lastPct = 0;
-  // UI1.26 — cursor-anchored readout for the (long) site-fetch ingest. Created
-  // when the fetch starts, fed the real percent each poll, removed on done/error.
+  // Cursor-anchored readout for the (long) site-fetch ingest: created when the
+  // fetch starts, fed the real percent each poll, removed on done/error.
   var cursor = null;
+  function setText(el, msg){ if (el){ el.textContent = msg; } }
   function setPct(p){
     if (typeof p !== 'number' || isNaN(p)) return;
     // Monotonic: never let the bar jump backwards on a stale poll.
     if (p < lastPct) p = lastPct;
     lastPct = p;
-    if (barWrap) { barWrap.hidden = false; barWrap.setAttribute('aria-valuenow', String(p)); }
-    if (barFill) barFill.style.width = p + '%';
+    var r = Math.round(p);
+    if (track) track.setAttribute('aria-valuenow', String(r));
+    if (fill) fill.style.width = p + '%';
+    if (pctNum) pctNum.textContent = String(r);
     if (cursor) cursor.set(p);
   }
+  function setPhase(ph, allDone){
+    var idx = (ph === 'queued') ? 0 : PHASES.indexOf(ph);
+    if (!allDone && idx < 0) return;
+    for (var i = 0; i < steps.length; i++){
+      var active = !allDone && i === idx;
+      var done = allDone ? true : (i < idx);
+      steps[i].classList.toggle('is-active', active);
+      steps[i].classList.toggle('is-done', done && !active);
+    }
+  }
+  function fmtSize(kb){ kb = kb || 0; return kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB'; }
+  function setStats(s){
+    if (!s) return;
+    if (statPages) statPages.textContent = s.discovered ? (s.pages + ' / ~' + s.discovered) : (s.pages || 0);
+    if (statKept) statKept.textContent = s.kept || 0;
+    if (statSize) statSize.textContent = fmtSize(s.kb);
+  }
+  function resetStats(){ if (statPages) statPages.textContent = '0'; if (statKept) statKept.textContent = '0'; if (statSize) statSize.textContent = '0 KB'; }
+  function stopActive(){ if (track) track.classList.remove('is-active'); }
   function go(){
     var url = (input.value || '').trim();
-    hide(errEl);
-    if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
-    btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
+    if (errEl) errEl.hidden = true;
+    if (!/^https?:\\/\\//i.test(url)) { if (errEl){ errEl.textContent = 'Enter a full URL starting with http:// or https://'; errEl.hidden = false; } return; }
+    btn.disabled = true; input.disabled = true;
+    if (panel) panel.hidden = false;
+    if (track) track.classList.add('is-active');
+    resetStats(); setPhase('fetching', false); setText(statusEl, 'Starting\\u2026');
     cursor = (window.MH && MH.cursorReadout) ? MH.cursorReadout({ label: 'Fetching results', percent: 3 }) : null;
     lastPct = 0; setPct(3);
     var fd = new FormData(); fd.append('url', url);
@@ -15389,16 +15496,23 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, e.message); });
+      .catch(function(e){ if (cursor) cursor.done(); fail(e.message); });
+  }
+  function fail(msg){
+    btn.disabled = false; input.disabled = false;
+    stopActive(); if (panel) panel.hidden = true; cursor = null;
+    if (errEl){ errEl.textContent = msg; errEl.hidden = false; }
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
         if (typeof j.percent === 'number') setPct(j.percent);
-        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); if (cursor) cursor.done(); show(errEl, j.error || 'The fetch failed.'); return; }
-        show(statusEl, j.progress || 'Reading the site\\u2026');
+        setStats(j.stats);
+        if (j.status === 'done' && j.redirect) { setPct(100); setPhase(null, true); stopActive(); setText(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
+        if (j.status === 'error') { if (cursor) cursor.done(); fail(j.error || 'The fetch failed.'); return; }
+        if (j.phase) setPhase(j.phase, false);
+        setText(statusEl, j.progress || 'Reading the site\\u2026');
         if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
       }).catch(function(){ setTimeout(tick, 2500); });
@@ -16033,6 +16147,13 @@ def create_app() -> Flask:
             "phase": entry.get("phase", ""),
             "progress": entry.get("progress", ""),
             "percent": entry.get("percent", 0),
+            # Live counters for the progress UI's stat chips (absent → zeros).
+            "stats": {
+                "pages": entry.get("pages", 0),
+                "discovered": entry.get("discovered", 0),
+                "kept": entry.get("kept", 0),
+                "kb": entry.get("kb", 0),
+            },
         }
         if status == "done" and entry.get("run_id"):
             payload["redirect"] = url_for("upload_configure", run_id=entry["run_id"])
