@@ -26,8 +26,8 @@ legal-compliance baseline have all shipped (the full record is in
 possibly be — genuinely something clubs *want* to use — before we
 commercialise.** So the plan is reordered: every piece of work that improves the
 product's usability is pulled forward, and the **last three things, in this
-order, are (1) rebrand, (2) add a second sport, (3) go to market.** Everything
-those three depend on is sequenced with them, last.
+order, are (1) rebrand, (2) go to market — sell the swimming wedge, then (3) add
+a second sport.** Everything those three depend on is sequenced with them, last.
 
 **Two hard rules were added on 2026-06-13.** First, **everything is built
 in-house:** every capability is MediaHub's own first-party code, and every AI
@@ -35,35 +35,40 @@ call has a zero-cost local path (Phase 3). An outside service is used only as an
 optional, swappable adapter for the one *unavoidable* final hop to someone
 else's network — taking a card payment or sending to a physical printer — never
 for the intelligence, the content, the data, or the branding (rule 11). Second,
-**the second sport (Phase 5) and going to market (Phase 6) do not start until
-every phase above them is finished** — Phases 1–4: product polish, the creative
-suite, zero-cost local AI, and the rebrand (rule 12). Those two phases are marked
-🔒 throughout.
+**going to market (Phase 3) and the second sport (Phase 4) do not start until
+the product and the rebrand are finished** — go-to-market is gated on Phases 1–2,
+and the second sport follows it (Phase 4, gated on Phases 1–3), so the swimming
+wedge is proven and selling before we broaden (rule 12). Those two phases are
+marked 🔒 throughout.
 
 **The phases, in priority order:**
 
-- **Phase 1 — Product polish & usability** · make the core flow excellent (Home,
-  Add Input, the content-pack review, the autonomy controls; every
-  empty/loading/error/success state; explainability + confidence).
-- **Phase 2 — Creative-suite breadth** · MediaHub's own first-party version of
-  the content types clubs reach for (charts, documents, photo/video editing,
-  templates, planner, collaboration, microsites…).
-- **Phase 3 — Zero-cost local AI** · give every AI call a free local path
-  (operator-margin work, invisible to clubs — so it sits behind the user-facing
-  phases).
-- **Phase 4 — Rebrand & identity** · pick the real company name, register it,
-  buy the domain, and sweep the new brand through every surface.
-- **Phase 5 — Second sport** · 🔒 *gated on Phases 1–4* · prove the engine
-  beyond swimming end-to-end.
-- **Phase 6 — Go to market** · 🔒 *gated on Phases 1–4* · pricing discovery, the
-  first paying clubs, and the lawful-to-sell / payments / hosting groundwork —
-  deliberately the **last** thing we do.
+- **Phase 1 — Product** · MediaHub's own first-party creative suite **and the
+  local-AI foundation that powers it** — imagery, photo/video/audio editing,
+  charts, documents, templates, planner, collaboration, microsites… plus the
+  zero-cost local backends, each sequenced **in front of** the feature that needs
+  it (the local image model before the imagery edit-family, local ASR before
+  video captions, local TTS before the voice layer).
+- **Phase 2 — Rebrand & identity** · pick the real company name, register it, buy
+  the domain, and sweep the new brand through every surface.
+- **Phase 3 — Go to market** · 🔒 *gated on Phases 1–2* · pricing discovery, the
+  first paying clubs, and the lawful-to-sell / payments / hosting groundwork — we
+  **optimise and sell the swimming wedge first**.
+- **Phase 4 — Second sport** · 🔒 *gated on Phases 1–3* · prove the engine beyond
+  swimming end-to-end — **after** the swimming wedge is proven and selling.
 
-Phases are renumbered into this priority order. **Item IDs are kept stable as
-identifiers** (`U.*` the new polish work; `P6.*` creative suite, `P5.*`
-local-AI, `P3.*` second sport, `PC.*`/`F.*` the commercial + founder work) so
-cross-references, the auto-update directives, and the shipped record all stay
-valid — only the *order* and the phase numbers changed.
+(The earlier product-polish / usability work and the whole detection→render
+engine have already shipped; that history lives in
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md).)
+
+Items are **renumbered into this build order** — `1.1`, `1.2`, … through the last
+to-do item — so that **nothing is built before something it depends on**. The
+previous family-prefixed IDs (`P6.*` creative suite, `P5.*` local-AI, `P3.*`
+second sport, `PC.15`/`PC.16` commercial code halves) map to the new numbers in
+the **ID map** at the end of this document. The founder track keeps its stable
+`F.*` ids; shipped items keep their original ids in `ROADMAP_BUILT.md`; and
+cross-references in dated ADRs and other docs stay on the old ids, bridged by
+that map.
 
 Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started. (✅
 "done" never appears here — finished work moves to
@@ -91,8 +96,8 @@ badge in "The plan in depth" is derived from its items in the lists below, so it
 can never drift out of sync with them. To move an item, put a directive line in
 any commit message:
 
-> `roadmap: <ID> <status>` — `<ID>` is an item ID from the lists below (`U.2`,
-> `P6.1`, `P6.3` …); `<status>` is `done` · `wip` · `blocked` · `todo`. `done`
+> `roadmap: <ID> <status>` — `<ID>` is an item ID from the lists below (`1.2`,
+> `3.1`, `F.9` …); `<status>` is `done` · `wip` · `blocked` · `todo`. `done`
 > **moves the item to the Completed list in `ROADMAP_BUILT.md`** (date-stamped);
 > any other status sets the badge in place (`F.*` ids live on the founder list,
 > everything else on the build list).
@@ -117,14 +122,15 @@ _No open production findings — the log sentinel has nothing filed._
 
 ## To do — things to build (priority order)
 
-Ask in any build session ("build P6.1"). In priority order: **Phase 2**
-creative-suite breadth (P6.*) makes MediaHub do far more; **Phase 3** local-AI
-(P5.*) is operator-margin work. Then the deliberately-last trio: **Phase 4**
-rebrand (PC.15), **Phase 5** second sport (P3.*), **Phase 6** go-to-market ops
-(PC.16). Every item is first-party/in-house — an external service only ever sits
-behind a swappable seam for the unavoidable final hop (rule 11). **Phase 5 and
-Phase 6 are hard-gated** (🔒): they don't begin until Phases 1–4 are complete
-(rule 12). (**Phase 1** product polish is complete — shipped and moved to
+Ask in any build session ("build 1.2"). In priority order: **Phase 1** — the
+product: the creative suite **and the local-AI foundation that powers it**
+(1.1–1.27) — makes MediaHub do far more. Then the deliberately-last trio:
+**Phase 2** rebrand (2.1), **Phase 3** go-to-market ops (3.1), **Phase 4** second
+sport (4.1–4.4). Every item is first-party/in-house — an external service only
+ever sits behind a swappable seam for the unavoidable final hop (rule 11).
+**Phases 3 and 4 are hard-gated** (🔒): go-to-market waits on Phases 1–2, and the
+second sport on Phases 1–3 — the swimming wedge is sold before we broaden
+(rule 12). (Earlier product-polish work has shipped — moved to
 [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md).)
 
 > **Shipped and moved off this plan:** the **60-item Generator Upgrade Sprint**
@@ -136,47 +142,48 @@ Phase 6 are hard-gated** (🔒): they don't begin until Phases 1–4 are complet
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **P6.3** · Phase 2 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam, with an **in-house local-model backend the default** (a licence-clean self-hosted diffusion model — the P5.6 path; cloud generators optional on the same seam): generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · 🔵 **IN PROGRESS**
-- **P6.4** · Phase 2 (Creative suite) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
-- **P6.5** · Phase 2 (Creative suite) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
-- **P6.6** · Phase 2 (Creative suite) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
-- **P6.7** · Phase 2 (Creative suite) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
-- **P6.8** · Phase 2 (Creative suite) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
-- **P6.9** · Phase 2 (Creative suite) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
-- **P6.10** · Phase 2 (Creative suite) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
-- **P6.11** · Phase 2 (Creative suite) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
-- **P6.12** · Phase 2 (Creative suite) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
-- **P6.13** · Phase 2 (Creative suite) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
-- **P6.14** · Phase 2 (Creative suite) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
-- **P6.15** · Phase 2 (Creative suite) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
-- **P6.16** · Phase 2 (Creative suite) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
-- **P6.17** · Phase 2 (Creative suite) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens · ❌ **NOT STARTED**
-- **P6.18** · Phase 2 (Creative suite) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities · ❌ **NOT STARTED**
-- **P6.19** · Phase 2 (Creative suite) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
-- **P6.20** · Phase 2 (Creative suite) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
-- **P6.21** · Phase 2 (Creative suite) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
-- **P6.22** · Phase 2 (Creative suite) — AI governance: per-org/per-feature quota ledger on `observability/`, generative moderation, provenance manifests on AI media, role-based feature permissions · ❌ **NOT STARTED**
-- **P6.23** · Phase 2 (Creative suite) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
-- **P6.24** · Phase 2 (Creative suite) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
-- **P5.1** · Phase 3 (Local AI) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
-- **P5.2** · Phase 3 (Local AI) — Piper local TTS replaces edge-tts · ❌ **NOT STARTED**
-- **P5.3** · Phase 3 (Local AI) — whisper.cpp / faster-whisper local ASR for reel captions · ❌ **NOT STARTED**
-- **P5.4** · Phase 3 (Local AI) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
-- **P5.6** · Phase 3 (Local AI) — Local generative-image backend behind the `media_ai` seam (a licence-clean self-hosted diffusion model, e.g. FLUX.1-schnell, Apache-2.0): gives P6.3's imagery suite a zero-cost in-house path so generate/edit/fill/expand run with no cloud key; cloud generators stay optional on the same seam · ❌ **NOT STARTED**
-- **PC.15** · Phase 4 (Rebrand) — Rebrand sweep, waits on F.9's name: one product-name source of truth threaded through every customer-facing surface (UI chrome, legal pages, wall badge + embeds, email from-name, `/try`, README) plus the F.11 canonical-host redirect; `mediahub` package/env names stay internal · ❌ **NOT STARTED**
-- **P3.1** · Phase 5 (Second sport · 🔒 gated: Phases 1–4 first) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
-- **P3.2** · Phase 5 (Second sport · 🔒 gated: Phases 1–4 first) — Sports-data spokes, in-house first: vendor the public-domain/open datasets (openfootball, MIT fixture generators) into the repo as curated, versioned, provenance-stamped data like the qualifying-time packs; a live external sports API (`nba_api`) is an optional flag-gated spoke behind a seam, never required; all normalised to `canonical.*` · ❌ **NOT STARTED**
-- **P3.3** · Phase 5 (Second sport · 🔒 gated: Phases 1–4 first) — Running/athletics parsers (chip-timing CSV, client-side FIT) — first-party, no external API · ❌ **NOT STARTED**
-- **P3.4** · Phase 5 (Second sport · 🔒 gated: Phases 1–4 first) — Normalise all spokes to the canonical schema; flag ambiguous rows for review · ❌ **NOT STARTED**
-- **PC.16** · Phase 6 (Go to market · 🔒 gated: Phases 1–4 first) — Hosting-cutover code half, waits on F.12's go decision: VPS deploy template (compose + reverse-proxy TLS on the same Dockerfile), off-site backup-target preflight, log-sentinel log-source seam (Render-API-free), staged subprocessor-register + privacy-notice hosting/region update, written cutover runbook · ❌ **NOT STARTED**
+- **1.1** · Phase 1 (Product) — Local generative-image backend behind the `media_ai` seam (a licence-clean self-hosted diffusion model, e.g. FLUX.1-schnell, Apache-2.0): the **default in-house backend** for the imagery suite (1.2) so generate / edit / fill / expand run with no cloud key; cloud generators stay optional on the same seam · ❌ **NOT STARTED**
+- **1.2** · Phase 1 (Product) — Generative imagery **edit-family** on the `imagine` seam: edit / fill / expand / remove / upscale / style-match + mask-brush studio UI; default backend the in-house local model (1.1), cloud optional. (Seam + generate / subject-lift / grab-text / mockups / provenance / per-org quotas already shipped — see [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)) · ❌ **NOT STARTED**
+- **1.3** · Phase 1 (Product) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
+- **1.4** · Phase 1 (Product) — whisper.cpp / faster-whisper local ASR for reel captions / word-level burn-in (unblocks the video suite's captions, 1.6) · ❌ **NOT STARTED**
+- **1.5** · Phase 1 (Product) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
+- **1.6** · Phase 1 (Product) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
+- **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · ❌ **NOT STARTED**
+- **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
+- **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
+- **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
+- **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
+- **1.12** · Phase 1 (Product) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
+- **1.13** · Phase 1 (Product) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
+- **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
+- **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
+- **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
+- **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
+- **1.18** · Phase 1 (Product) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens · ❌ **NOT STARTED**
+- **1.19** · Phase 1 (Product) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities · ❌ **NOT STARTED**
+- **1.20** · Phase 1 (Product) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
+- **1.21** · Phase 1 (Product) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
+- **1.22** · Phase 1 (Product) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
+- **1.23** · Phase 1 (Product) — AI governance: per-org/per-feature quota ledger on `observability/`, generative moderation, provenance manifests on AI media, role-based feature permissions · ❌ **NOT STARTED**
+- **1.24** · Phase 1 (Product) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
+- **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
+- **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
+- **1.27** · Phase 1 (Product) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
+- **2.1** · Phase 2 (Rebrand) — Rebrand sweep, waits on F.9's name: one product-name source of truth threaded through every customer-facing surface (UI chrome, legal pages, wall badge + embeds, email from-name, `/try`, README) plus the F.11 canonical-host redirect; `mediahub` package/env names stay internal · ❌ **NOT STARTED**
+- **3.1** · Phase 3 (Go to market · 🔒 gated: Phases 1–2 first) — Hosting-cutover code half, waits on F.12's go decision: VPS deploy template (compose + reverse-proxy TLS on the same Dockerfile), off-site backup-target preflight, log-sentinel log-source seam (Render-API-free), staged subprocessor-register + privacy-notice hosting/region update, written cutover runbook · ❌ **NOT STARTED**
+- **4.1** · Phase 4 (Second sport · 🔒 gated: Phases 1–3 first) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
+- **4.2** · Phase 4 (Second sport · 🔒 gated: Phases 1–3 first) — Sports-data spokes, in-house first: vendor the public-domain/open datasets (openfootball, MIT fixture generators) into the repo as curated, versioned, provenance-stamped data like the qualifying-time packs; a live external sports API (`nba_api`) is an optional flag-gated spoke behind a seam, never required; all normalised to `canonical.*` · ❌ **NOT STARTED**
+- **4.3** · Phase 4 (Second sport · 🔒 gated: Phases 1–3 first) — Running/athletics parsers (chip-timing CSV, client-side FIT) — first-party, no external API · ❌ **NOT STARTED**
+- **4.4** · Phase 4 (Second sport · 🔒 gated: Phases 1–3 first) — Normalise all spokes to the canonical schema; flag ambiguous rows for review · ❌ **NOT STARTED**
 <!-- /ROADMAP:TODO -->
 
 ## To do — things only you can do (the rebrand + go-to-market motion — last)
 
 Claude Code cannot register a business, sign a contract, spend your money, or sit in
-front of a swim-club committee. These are **the rebrand + go-to-market motion —
-deliberately the last things we do**, after the product is excellent (Phases
-1–3) and proven on a second sport (Phase 5). Each item has a **step-by-step
+front of a swim-club committee. These are **the rebrand + go-to-market motion**,
+after the product is excellent (Phase 1). The second sport (Phase 4) is sequenced
+**last of all** — after this go-to-market push, so the swimming wedge is proven
+and selling first. Each item has a **step-by-step
 guide** below. Order: settle the **identity first** (F.9 real name → F.10
 company → F.11 domain), since every later filing embeds it; then the
 lawful-to-sell / payments / ops groundwork (F.1–F.7, F.13, F.12); then the
@@ -194,9 +201,9 @@ selling motion itself (PC.4 pricing, PC.6 the first ~10 clubs).
 - **F.6** · Production ops decisions: retention period, breach owner named in the runbook, insurance, Remotion licence (or the free ffmpeg engine), Render snapshots + off-site backup target · ❌ **NOT STARTED**
 - **F.7** · Each season: refresh the qualifying-time tables (recurring; runbook in `data/standards/README.md`) · ❌ **NOT STARTED**
 - **F.13** · Take the GitHub repo private again (public today; the children's-data fixtures' lawful-basis note assumes a private repo): pre-flight sweep, CI-minutes plan, the Settings flip, integration re-checks — at the latest before the first club pays · ❌ **NOT STARTED**
-- **F.12** · 🔒 Gated (Phases 1–4 first) — Decide and execute the cheaper-hosting move off Render (≈£20/mo → ≈£4–8/mo VPS) via the rehearsed backup-restore cutover — after F.11, never ahead of selling · ❌ **NOT STARTED**
-- **PC.4** · Phase 6 (Go to market · 🔒 gated: Phases 1–4 first) — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–4 land) · 🔵 **IN PROGRESS**
-- **PC.6** · Phase 6 (Go to market · 🔒 gated: Phases 1–4 first) — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–4 land) · 🔵 **IN PROGRESS**
+- **F.12** · 🔒 Gated (Phases 1–2 first) — Decide and execute the cheaper-hosting move off Render (≈£20/mo → ≈£4–8/mo VPS) via the rehearsed backup-restore cutover — after F.11, never ahead of selling · ❌ **NOT STARTED**
+- **PC.4** · Phase 3 (Go to market · 🔒 gated: Phases 1–2 first) — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–2 land) · 🔵 **IN PROGRESS**
+- **PC.6** · Phase 3 (Go to market · 🔒 gated: Phases 1–2 first) — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–2 land) · 🔵 **IN PROGRESS**
 <!-- /ROADMAP:TODO_FOUNDER -->
 
 ### Step-by-step guides (one per item above)
@@ -257,7 +264,7 @@ in the order below.
    clubs.
 9. **Verify:** the name passes all four registers (Companies House, trade
    marks, domain, handles), with screenshots/notes kept in one folder — then
-   tell Claude Code the chosen name so the rebrand sweep (PC.15) can be built and
+   tell Claude Code the chosen name so the rebrand sweep (2.1) can be built and
    F.2's legal placeholders get the real value.
 
 #### F.10 — Register the company at Companies House
@@ -341,7 +348,7 @@ it.
    records your email provider gives you (`MEDIAHUB_EMAIL_FROM` — mail from
    your own domain lands in inboxes; mail from borrowed domains lands in
    spam).
-6. Ask Claude Code for the small code half (rides with PC.15): a canonical-host
+6. Ask Claude Code for the small code half (rides with 2.1): a canonical-host
    redirect so the old `*.onrender.com` URLs 301 to the new domain — every
    old link keeps working forever.
 7. **Verify:** `https://www.<name>.co.uk` serves the app with a padlock and
@@ -373,7 +380,7 @@ and the backup/restore drill (PC.14) already rehearses the actual move.
    **(c) Stay on Render and revisit at traction** — £0 effort, a legitimate
    choice while selling time is the binding constraint. If (c): stop here
    and diary it for after the first ~3 paying clubs.
-2. If (a) or (b): ask Claude Code to build **PC.16** (the code half) — the
+2. If (a) or (b): ask Claude Code to build **3.1** (the code half) — the
    compose + reverse-proxy TLS template, the off-site backup-target
    preflight, the log-sentinel log-source seam (it currently reads logs via
    the Render API and must honest-disable or grow a journald/file source off
@@ -396,7 +403,7 @@ and the backup/restore drill (PC.14) already rehearses the actual move.
 7. **Verify:** a full green week on the new host (uptime, scheduler runs,
    off-site backups arriving, one real run end-to-end); the DPA's
    subprocessor register and the Privacy Notice name the new host and
-   region (PC.16); and the bill actually dropped.
+   region (3.1); and the bill actually dropped.
 
 #### F.1 — Turn payments on
 
@@ -689,15 +696,14 @@ hidden registry comment that follows maps each phase to its item ids — leave i
 in place when editing.
 
 <!-- ROADMAP:PHASES
-2 = P6.
-3 = P5.
-4 = F.9, F.10, F.11, PC.15
-5 = P3.
-6 = PC.4, PC.6, PC.16, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.12, F.13
+1 = 1., P6.1, P6.2
+2 = 2., F.9, F.10, F.11
+3 = 3., PC.4, PC.6, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.12, F.13
+4 = 4.
 -->
 
-<!-- ROADMAP:PHASE 2 -->
-### Phase 2 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · 🔵 **IN PROGRESS**
+<!-- ROADMAP:PHASE 1 -->
+### Phase 1 — Product: creative suite + local-AI foundation · 🔵 **IN PROGRESS**
 
 **Goal.** Build **MediaHub's own first-party version of every
 content-creation capability Canva and Adobe Express ship** — re-expressed
@@ -708,7 +714,7 @@ shop. The evidence base is two exhaustive competitor inventories
 [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)); **every
 bullet in both** is mapped — feature by feature, with a completeness index —
 in [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). The 24 one-line
-work packages (P6.1–P6.24) are in the build to-do list above; the companion
+work packages (P6.1–1.25) are in the build to-do list above; the companion
 doc carries each package's build depth and per-item exit criterion.
 
 **Order within the phase.** Within the
@@ -720,9 +726,9 @@ self-hosted fonts, and the GWS / 9router exclusions. **In-house first (rule 11):
 capability here is MediaHub's own first-party code; an external service appears
 only as an optional, flag-gated, swappable slot behind our own interface, and
 only for a genuinely-unavoidable final hop — never for the intelligence or the
-data. That includes generative imagery (P6.3), whose **default backend is a
-licence-clean local diffusion model** filled by the Phase-4 **P5.6** path, and
-the platform surface (P6.20), whose MCP server is one MediaHub *exposes*, not one
+data. That includes generative imagery (1.2), whose **default backend is a
+licence-clean local diffusion model** filled by the Phase-4 **1.1** path, and
+the platform surface (1.21), whose MCP server is one MediaHub *exposes*, not one
 it depends on. The narrow set of unavoidable externals: model hosting (with the
 in-house local path the default), platform-publish APIs, print fulfilment, and
 music rights.
@@ -741,15 +747,13 @@ reel engines (P0.1), the cutout layer, the TTS/ASR/LLM provider slots (P0.4),
 [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
 
 **Dependencies.** No longer gated behind commercialisation (reprioritised 2026-06-13).
-P6.2 voice input and P6.5 captions need the **P5.3** ASR seam filled (or a
+P6.2 voice input and 1.6 captions need the **1.4** ASR seam filled (or a
 cloud provider on the same seam). Feeds back into **PC.4** packaging
 (quotas/tiers).
 
----
-<!-- /ROADMAP:PHASE 2 -->
+#### Local-AI foundation — zero-cost local backends
 
-<!-- ROADMAP:PHASE 3 -->
-### Phase 3 — Zero-cost local AI everywhere · P5 · 🔵 **IN PROGRESS**
+The local backends that complete the no-hidden-fees discipline. The three the creative suite depends on are sequenced **in front of their consumers** in the to-do list above: the local image backend (1.1) before the imagery edit-family (1.2), local ASR (1.4) before the video suite's captions (1.6), and local TTS (1.7) before the audio voice layer (1.8). The remaining two (Ollama LLM 1.26, Satori graphics 1.27) are operator-margin / performance plays with no hard consumer, so they sit at the tail.
 
 **Goal.** Give every AI call a zero-cost local path, completing the
 no-hidden-fees discipline for the hosted deployment's margins.
@@ -759,33 +763,33 @@ no-hidden-fees discipline for the hosted deployment's margins.
 **locally end-to-end** — honest-erroring only where a local model is genuinely
 unavailable.
 
-- **P5.1 — Ollama LLM provider.** Both wrappers already accept a keyless
+- **1.26 — Ollama LLM provider.** Both wrappers already accept a keyless
   OpenAI-compatible endpoint (`MEDIAHUB_LLM_ENDPOINTS=http://localhost:11434/v1`
   reaches a running Ollama today — P0.4); what remains is shipping/operating
   the model runtime, model-selection defaults, and the operator workflow.
-- **P5.2 — Piper TTS replaces edge-tts.** The provider slot is already
+- **1.7 — Piper TTS replaces edge-tts.** The provider slot is already
   registered (`MEDIAHUB_TTS_PROVIDER=piper` honest-errors until this lands) —
-  P5.2 fills the slot with the real backend.
-- **P5.3 — whisper.cpp / faster-whisper ASR.** Local transcription for reel
+  1.7 fills the slot with the real backend.
+- **1.4 — whisper.cpp / faster-whisper ASR.** Local transcription for reel
   captions / word-level burn-in. Must land behind a provider seam — the P0.4
   guard fails the build on any unslotted ASR import.
-- **P5.4 — Satori graphics fast-path.** ~100× lighter card rendering than
+- **1.27 — Satori graphics fast-path.** ~100× lighter card rendering than
   headless Chromium. A *performance* play, not a licensing one (P0.1's ffmpeg
   engine already removed the Remotion requirement); slots into the same
   `MEDIAHUB_REEL_ENGINE` seam. (The placeholder `satori` engine name was
   removed in the dormant-features audit — register it again when the engine
   actually ships.)
-- **P5.6 — Local generative-image backend.** Fills the `media_ai` image seam
-  P6.3 builds against with a **licence-clean self-hosted diffusion model**
+- **1.1 — Local generative-image backend.** Fills the `media_ai` image seam
+  1.2 builds against with a **licence-clean self-hosted diffusion model**
   (e.g. FLUX.1-schnell, Apache-2.0), so generate / edit / fill / expand / remove
   run with **no cloud key**. Cloud generators (Imagen/etc.) stay optional on the
-  same seam; provenance manifests (P6.22) stamp every output regardless of
+  same seam; provenance manifests (1.23) stamp every output regardless of
   backend. Licence-vetted per `DEPENDENCY_LICENSING.md` — avoid OpenRAIL /
   non-commercial weights, prefer an Apache-2.0/MIT model.
 
 **Building blocks.** All **ADOPT-NOW** licences: Ollama (MIT), Piper (MIT),
 whisper.cpp / faster-whisper (MIT), Satori (MPL-2.0), and a permissively-licenced
-local image model for P5.6 (FLUX.1-schnell, Apache-2.0). ⚠️ Avoid Coqui XTTS
+local image model for 1.1 (FLUX.1-schnell, Apache-2.0). ⚠️ Avoid Coqui XTTS
 weights commercially (CPML, non-commercial) — Piper instead; and avoid OpenRAIL /
 non-commercial image weights — pick an Apache-2.0/MIT model.
 
@@ -795,10 +799,10 @@ default; see [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md).
 
 
 ---
-<!-- /ROADMAP:PHASE 3 -->
+<!-- /ROADMAP:PHASE 1 -->
 
-<!-- ROADMAP:PHASE 4 -->
-### Phase 4 — Rebrand & identity · F.9–F.11 + PC.15 · ❌ **NOT STARTED**
+<!-- ROADMAP:PHASE 2 -->
+### Phase 2 — Rebrand & identity · F.9–F.11 + 2.1 · ❌ **NOT STARTED**
 
 **Goal.** Retire the "MediaHub" working title for the real, defensible company
 name, register it, own the domain, and sweep the new brand through every
@@ -807,16 +811,16 @@ genuinely wanted, before a second sport and before selling.
 
 **Exit criterion.** The chosen name passes the four-register diligence (F.9), the
 company is registered (F.10) and owns its `.co.uk` (F.11), and the rebrand sweep
-(PC.15) has threaded one product-name source of truth through the UI chrome,
+(2.1) has threaded one product-name source of truth through the UI chrome,
 legal pages, wall badge + embeds, email from-name, `/try` and the README, with
 the old `*.onrender.com` URLs 301-redirecting.
 
 The founder half (F.9 name → F.10 company → F.11 domain) is on the founder list
-above with full step-by-step guides; **PC.15** (the code sweep) waits on F.9's
+above with full step-by-step guides; **2.1** (the code sweep) waits on F.9's
 chosen name. Why the name is upstream of every filing, and why the domain comes
 before any host move:
 
-#### F.9–F.12 — Business identity, own domain, cheaper hosting · founder work (guides above; added & prioritised 2026-06-12) + PC.15/PC.16 code halves
+#### F.9–F.12 — Business identity, own domain, cheaper hosting · founder work (guides above; added & prioritised 2026-06-12) + 2.1/3.1 code halves
 
 Why this workstream jumped to the head of the founder list:
 
@@ -852,7 +856,7 @@ Why this workstream jumped to the head of the founder list:
   (compose + `fly.toml` templates exist), all state lives under `DATA_DIR`,
   and PC.14 shipped daily backups with a restore drill rehearsed on every
   test run — restoring a production backup onto a new box *is* the
-  migration. PC.16 packages the remainder: reverse-proxy TLS template,
+  migration. 3.1 packages the remainder: reverse-proxy TLS template,
   off-site backup preflight, a Render-API-free log-sentinel source, the
   staged subprocessor/privacy updates, and the cutover runbook.
 - **What this is *not*:** a self-host tier. ADR-0011's hosted-only principle
@@ -860,58 +864,14 @@ Why this workstream jumped to the head of the founder list:
   customers still only ever get a URL.
 
 ---
-<!-- /ROADMAP:PHASE 4 -->
+<!-- /ROADMAP:PHASE 2 -->
 
-<!-- ROADMAP:PHASE 5 -->
-### Phase 5 — Second sport (broaden ingestion spokes) · P3 · 🔒 gated on Phases 1–4 · ❌ **NOT STARTED**
-
-**Goal.** Ingest beyond swimming and normalise every spoke to the canonical
-schema, so a second sport produces real content end-to-end.
-
-**Exit criterion.** **≥1 non-swimming sport** produces real content
-end-to-end from a real data source (football via openfootball, or basketball
-via nba_api), with a registered `recognition_<sport>` adapter and its sport
-profile wired in.
-
-- **P3.1 — Second-sport engine adapter.** `recognition_football` or
-  `recognition_basketball` + `register_sport(...)` (the seam exists —
-  [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). Bind `engine_sport` in the
-  profile.
-- **P3.2 — Sports-data spokes (in-house first).** Vendor the public-domain /
-  open datasets — `openfootball` (public domain), MIT fixture generators — into
-  the repo as curated, versioned, provenance-stamped data, exactly like the
-  qualifying-time packs (W.4) and the open-collection stock pools (P6.8). A live
-  external sports API (`nba_api` → stats.nba.com) is an **optional, flag-gated
-  spoke behind a seam, never required**; each spoke normalises to `canonical.*`.
-- **P3.3 — Running/athletics parsers.** Chip-timing CSV + client-side Garmin
-  `FIT` parsing. This sport needs custom parsers — open-source coverage is
-  sparse.
-- **P3.4 — Normalise all spokes to the canonical schema.** Separate raw
-  extraction from cleaned canonical data; flag ambiguous rows for review.
-
-**Building blocks.** `openfootball` (**public domain**) and
-`ndPPPhz/Fixture-Generator` (MIT) — both **vendored into the repo as in-house
-data/code**, the default path; `swar/nba_api` (open, keyless — *verify*) only as
-the optional live external spoke. ⚠️ `statsbomb/open-data` is a **non-OSS data
-agreement** — use openfootball as the free default.
-([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md))
-
-**Dependencies.** 🔒 **Hard-gated (rule 12): does not start until Phases 1–4 are
-complete** — product polish, the creative suite, zero-cost local AI, and the
-rebrand all land first (founder directive 2026-06-13). Also needs **P1** (sport
-profiles + taxonomy). Note: `results_fetch/` already does sport-agnostic
-*ingestion* from a URL; P3 adds the per-sport *detector* quality.
-
-
----
-<!-- /ROADMAP:PHASE 5 -->
-
-<!-- ROADMAP:PHASE 6 -->
-### Phase 6 — Go to market · PC.4 / PC.6 + F.1–F.7 / F.13 / F.12 + PC.16 · 🔒 gated on Phases 1–4 · 🔵 **IN PROGRESS**
+<!-- ROADMAP:PHASE 3 -->
+### Phase 3 — Go to market · PC.4 / PC.6 + F.1–F.7 / F.13 / F.12 + 3.1 · 🔒 gated on Phases 1–2 · 🔵 **IN PROGRESS**
 
 **Goal.** Commercialise — lawfully and without the founder in the loop — once the
-product is excellent, rebranded and proven on a second sport. **The last thing we
-do.**
+product is excellent and rebranded. Done **before** broadening to a second sport —
+we optimise and sell the swimming wedge first.
 
 **Why last (reprioritised 2026-06-13).** The earlier plan put commercialise first
 ([ADR-0011](adr/0011-commercial-reconcile-revenue-reality.md),
@@ -925,9 +885,9 @@ product gaps" remains the standing caution this phase exists to answer.
 by that name — they mean this phase.)
 
 **Upstream of all three: the product-completion gate (rule 12).** This whole
-phase is 🔒 hard-gated — it does not begin until **Phases 1–4 are complete**
-(product polish, the creative suite, zero-cost local AI, the rebrand) and the
-second sport (Phase 5) has landed. Warm groundwork (PC.4 quotes, PC.6 funnel)
+phase is 🔒 hard-gated — it does not begin until **Phases 1–2 are complete**
+(the product and the rebrand). The second sport (Phase 4) comes *after* this —
+we prove and sell the swimming wedge first. Warm groundwork (PC.4 quotes, PC.6 funnel)
 may keep moving, but the full go-to-market push waits. The three gates below
 then define "ready to sell" within this phase (they no longer gate the earlier
 build phases — those ship first regardless):
@@ -951,7 +911,7 @@ build phases — those ship first regardless):
 
 The founder-side selling, payments, legal sign-off, ops, repo-private and hosting
 tasks are on the founder list above (F.1–F.7, F.13, F.12) with step-by-step
-guides; **PC.16** is the buildable hosting-cutover half. The pricing and
+guides; **3.1** is the buildable hosting-cutover half. The pricing and
 distribution detail:
 
 #### PC.4 — Pricing by revealed willingness-to-pay · founder work (guide above)
@@ -1026,15 +986,109 @@ network boundary (never embed AGPL —
 [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
 
 
-**Dependencies.** 🔒 **Hard-gated (rule 12): does not start until Phases 1–4 are
-complete** (product polish, the creative suite, zero-cost local AI, the
-rebrand), and still sequenced **after** Phase 5 — the second sport lands before
-the go-to-market push too. As with the compliance gate, warm relationships and
+**Dependencies.** 🔒 **Hard-gated (rule 12): does not start until Phases 1–2 are
+complete** (the product and the rebrand), and sequenced **before** Phase 4 —
+the swimming wedge is proven and sold before a second sport. As with the compliance gate, warm relationships and
 groundwork (PC.4 quotes, PC.6 funnel) may keep moving, but no full GTM push and
 no paid conversion proceed until the product is complete. The selling, payments,
 legal sign-off, ops, repo-private and hosting tasks (F.1–F.7, F.13, F.12) and
-the PC.16 hosting-cutover half all sit behind this gate.
-<!-- /ROADMAP:PHASE 6 -->
+the 3.1 hosting-cutover half all sit behind this gate.
+<!-- /ROADMAP:PHASE 3 -->
+
+<!-- ROADMAP:PHASE 4 -->
+### Phase 4 — Second sport (broaden ingestion spokes) · P3 · 🔒 gated on Phases 1–3 · ❌ **NOT STARTED**
+
+**Goal.** Ingest beyond swimming and normalise every spoke to the canonical
+schema, so a second sport produces real content end-to-end.
+
+**Exit criterion.** **≥1 non-swimming sport** produces real content
+end-to-end from a real data source (football via openfootball, or basketball
+via nba_api), with a registered `recognition_<sport>` adapter and its sport
+profile wired in.
+
+- **4.1 — Second-sport engine adapter.** `recognition_football` or
+  `recognition_basketball` + `register_sport(...)` (the seam exists —
+  [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). Bind `engine_sport` in the
+  profile.
+- **4.2 — Sports-data spokes (in-house first).** Vendor the public-domain /
+  open datasets — `openfootball` (public domain), MIT fixture generators — into
+  the repo as curated, versioned, provenance-stamped data, exactly like the
+  qualifying-time packs (W.4) and the open-collection stock pools (1.10). A live
+  external sports API (`nba_api` → stats.nba.com) is an **optional, flag-gated
+  spoke behind a seam, never required**; each spoke normalises to `canonical.*`.
+- **4.3 — Running/athletics parsers.** Chip-timing CSV + client-side Garmin
+  `FIT` parsing. This sport needs custom parsers — open-source coverage is
+  sparse.
+- **4.4 — Normalise all spokes to the canonical schema.** Separate raw
+  extraction from cleaned canonical data; flag ambiguous rows for review.
+
+**Building blocks.** `openfootball` (**public domain**) and
+`ndPPPhz/Fixture-Generator` (MIT) — both **vendored into the repo as in-house
+data/code**, the default path; `swar/nba_api` (open, keyless — *verify*) only as
+the optional live external spoke. ⚠️ `statsbomb/open-data` is a **non-OSS data
+agreement** — use openfootball as the free default.
+([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md))
+
+**Dependencies.** 🔒 **Hard-gated (rule 12): does not start until Phases 1–3 are
+complete** — the product, the rebrand, and the go-to-market push (the swimming
+wedge proven and selling) all land first (founder directive 2026-06-13). Also needs **P1** (sport
+profiles + taxonomy). Note: `results_fetch/` already does sport-agnostic
+*ingestion* from a URL; P3 adds the per-sport *detector* quality.
+
+
+---
+<!-- /ROADMAP:PHASE 4 -->
+
+## ID map (old → new)
+
+The forward to-do plan was **renumbered into build order on 2026-06-18** so that
+nothing is built before a dependency (the local image / ASR / TTS backends now
+sit in front of the features that need them, and go-to-market is sequenced before
+a second sport). New ids are flat `<phase>.<n>`. The founder track keeps its
+stable `F.*` ids; shipped work keeps its original ids in
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). Dated ADRs and other docs were left on
+the old ids — use this map to bridge them.
+
+| New | Old | Item |
+|---|---|---|
+| **1.1** | P5.6 | Local generative-image backend (the in-house default for imagery) |
+| **1.2** | P6.3 | Generative imagery **edit-family** (generate / subject-lift / grab-text / mockups already shipped) |
+| **1.3** | P6.4 | Photo editor (deterministic edit recipes) |
+| **1.4** | P5.3 | Local ASR (whisper.cpp / faster-whisper) |
+| **1.5** | P6.10 | Motion vocabulary (animation presets/transitions) |
+| **1.6** | P6.5 | Video suite (EDL timeline, captions, reframe) |
+| **1.7** | P5.2 | Local TTS (Piper) |
+| **1.8** | P6.6 | Audio engine (music/SFX pools, voice layer) |
+| **1.9** | P6.7 | Typography system |
+| **1.10** | P6.8 | Element & stock libraries |
+| **1.11** | P6.9 | Charts & insights |
+| **1.12** | P6.11 | Brand platform depth |
+| **1.13** | P6.15 | Data hub + bulk personalisation |
+| **1.14** | P6.16 | Planner calendar/board |
+| **1.15** | P6.12 | Document engine |
+| **1.16** | P6.13 | Club microsites + forms + widgets |
+| **1.17** | P6.14 | Email & newsletter composer |
+| **1.18** | P6.17 | Collaboration & review |
+| **1.19** | P6.18 | Export & conversion engine |
+| **1.20** | P6.19 | Print & merch pipeline |
+| **1.21** | P6.20 | Platform surface (API / webhooks / MCP) |
+| **1.22** | P6.21 | Mobile PWA |
+| **1.23** | P6.22 | AI governance (quotas / moderation / provenance) |
+| **1.24** | P6.23 | Localisation |
+| **1.25** | P6.24 | Pro editor & round-trip |
+| **1.26** | P5.1 | Ollama local LLM |
+| **1.27** | P5.4 | Satori graphics fast-path |
+| **2.1** | PC.15 | Rebrand sweep (code half) |
+| **3.1** | PC.16 | Hosting-cutover code half |
+| **4.1** | P3.1 | Second-sport engine adapter |
+| **4.2** | P3.2 | Sports-data spokes |
+| **4.3** | P3.3 | Running/athletics parsers |
+| **4.4** | P3.4 | Normalise spokes to canonical |
+
+**Unchanged:** the founder track (`F.1`–`F.13`) and the founder-owned commercial
+items (`PC.4` pricing, `PC.6` distribution) keep their ids; everything already
+shipped (`P6.1`, `P6.2`, `P5.5`, `PC.1`–`PC.14`, `U.*`, `P0.*`, `P1.*`, `G1.*`,
+`W.*`) keeps its id in `ROADMAP_BUILT.md`.
 
 ## The rules we build by
 
@@ -1061,7 +1115,7 @@ short note of a decision and why, kept in [`docs/adr/`](adr/).)
    ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md))
 4. **Make it genuinely wanted, then sell** *(reprioritised 2026-06-13).*
    Product polish and the capability gaps that make clubs actually *want*
-   MediaHub (Phases 1–3) come **before** the selling motion (Phase 6). This
+   MediaHub (Phase 1) come **before** the selling motion (Phase 3). This
    reverses the earlier "stop polishing and sell" stance — the generative
    engine cleared the "sellable wedge" bar (P1.4), but the founder has chosen
    to make the whole product excellent before commercialising.
@@ -1108,7 +1162,7 @@ short note of a decision and why, kept in [`docs/adr/`](adr/).)
     *(added 2026-06-13, founder directive).* Every roadmap capability is
     MediaHub's own first-party code, and every AI call has a zero-cost local
     path (Phase 3 — caption, cutout, voice, graphics, reels, and generative
-    imagery via P5.6). An outside service is allowed **only** as an optional,
+    imagery via 1.1). An outside service is allowed **only** as an optional,
     flag-gated, swappable adapter behind a first-party seam, and **only** for a
     genuinely-unavoidable final hop to a third party's own network: processing a
     card payment (Stripe — one cannot lawfully be one's own card processor), or
@@ -1116,15 +1170,17 @@ short note of a decision and why, kept in [`docs/adr/`](adr/).)
     scheduling, gating and audit are always in-house; data we can hold
     (openfootball, fixtures, stock, fonts, music) is **vendored**, not called.
     MediaHub **depends on no external MCP** — it may *expose* a first-party MCP
-    server (P6.20) for outside agents to drive. This hardens the standing
+    server (1.21) for outside agents to drive. This hardens the standing
     "external services only behind our own interfaces" convention into a rule.
     (See [`../CLAUDE.md`](../CLAUDE.md).)
-12. **Second sport + go-to-market are hard-gated on a complete product**
-    *(added 2026-06-13, founder directive).* Phase 5 (second sport, P3.*) and
-    Phase 6 (go-to-market, PC.4 / PC.6 / PC.16 + F.1–F.7 / F.12 / F.13) do
-    **not** begin until **Phases 1–4 are complete** — product polish, the
-    creative suite, zero-cost local AI, and the rebrand — and Phase 6 still
-    follows Phase 5. Warm groundwork may continue, but no full GTM push or paid
+12. **Go-to-market + second sport are hard-gated on a complete product**
+    *(added 2026-06-13, founder directive; reordered 2026-06-18 — sell swimming
+    before broadening).* Go-to-market (Phase 3: PC.4 / PC.6 / 3.1 + F.1–F.7 /
+    F.12 / F.13) does **not** begin until **Phases 1–2 are complete** — the
+    product (creative suite + local-AI foundation) and the rebrand. The second
+    sport (Phase 4: 4.1–4.4) is sequenced **last of all**, after the go-to-market
+    push — gated on **Phases 1–3** — so the swimming wedge is proven and selling
+    before we broaden. Warm groundwork may continue, but no full GTM push or paid
     conversion proceeds ahead of the gate. This formalises the build-first
     ordering of rules 2 & 4 into a hard gate on the last two phases; the gated
     items are marked 🔒 throughout.
@@ -1153,17 +1209,17 @@ list and the auto table below, not here.
 | Date | Change | Read more |
 |---|---|---|
 | 2026-06-17 | **Roadmap auto-maintenance extended to the whole forward plan + builder framing made model-agnostic:** the "plan in depth" used to hand-maintain a status badge per phase, which silently rotted (the completed Phase 1 + the 60-item generator sprint still read NOT STARTED below the to-do lists while every one of their items had shipped). Now each phase sits in a `<!-- ROADMAP:PHASE N -->` block with a hidden item-id registry, and on every push the bot recomputes each phase's badge from the lists and **moves any fully-complete phase off this plan into [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)** — so nothing already-built lingers here. The completed Phase 1 + sprint were relocated, Phase 4/7 badges corrected to IN PROGRESS, and the per-item drift badges removed from the in-depth sub-headers. Separately, the decommissioned "Fable 5" builder references were replaced with model-agnostic wording. | *Status* section · [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py) |
-| 2026-06-13 | **In-house-first hardened + second-sport/GTM hard-gated (founder directive):** every roadmap idea is now explicitly first-party — an external service is allowed only as an optional swappable adapter for the unavoidable final hop (Stripe card rails, physical print), never for intelligence / content / data. Concrete closes: generative imagery (P6.3) gains an in-house local-diffusion backend (**new P5.6**, FLUX.1-schnell-class, Apache-2.0); second-sport data (P3.2) is vendored public-domain / open data with live APIs optional; the P6.20 MCP server is clarified as one MediaHub *exposes* (it depends on no external MCP). New **rule 11** (in-house first) + **rule 12** (Phase 5 second sport & Phase 6 go-to-market 🔒 gated until Phases 1–4 complete). | Rules 11 & 12 · P5.6 · P6.3 |
+| 2026-06-13 | **In-house-first hardened + second-sport/GTM hard-gated (founder directive):** every roadmap idea is now explicitly first-party — an external service is allowed only as an optional swappable adapter for the unavoidable final hop (Stripe card rails, physical print), never for intelligence / content / data. Concrete closes: generative imagery (1.2) gains an in-house local-diffusion backend (**new 1.1**, FLUX.1-schnell-class, Apache-2.0); second-sport data (4.2) is vendored public-domain / open data with live APIs optional; the 1.21 MCP server is clarified as one MediaHub *exposes* (it depends on no external MCP). New **rule 11** (in-house first) + **rule 12** (Phase 5 second sport & Phase 6 go-to-market 🔒 gated until Phases 1–4 complete). | Rules 11 & 12 · 1.1 · 1.2 |
 | 2026-06-13 | **Roadmap reordered — build-first, market-last (founder directive):** usability + capability work pulled to the front (Phase 1 product polish · 2 creative-suite breadth · 3 zero-cost local AI); the three deliberately-last things sequenced at the end, in order — **4 rebrand · 5 second sport · 6 go to market.** Phases renumbered into priority order (item IDs kept stable); the gating that made P3–P6 wait on paying clubs is lifted. Everything already shipped moved out of this file into [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md), so no completed items / no ✅ ticks remain on the roadmap. Reverses the commercialise-first *ordering* of rules 2/4 + ADR-0011/0015 — the prior decision's evidence stands. | Rules 2 & 4 · [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md) |
 | 2026-06-12 | **Daily scan — Swim England platform move (material):** Swim England announced (4 Mar 2026) a Sport:80-built membership platform launching Autumn 2026, with a new **Rankings API** for verified swim times and a swimmingresults.org integration underway, and a SportsEngine integration announcement expected later in 2026. F.5’s application route should be re-verified against this programme before submitting (dated note added to the F.5 guide); the Swim England↔SportsEngine tie-up is also a fresh input to the queued Route C go/no-go. Competitor watch otherwise quiet (Gipper/SwimTopia/TeamUnify/Swimcloud: no results-ingestion or auto-graphics move); IG Graph API and TikTok Content Posting API policies stable. ⚠️ *Flagged for founder review (not adopted):* PR #418’s public passwordless operator sign-in is an owner-decided demo convenience, but it exposes every tenant’s data and the operator consoles — re-lock it at the latest alongside F.13, before the first club pays (ADR-0015 gate 3). | [Sport:80 announcement](https://www.swimming.org/swimengland/sport80-membership-platform/) · F.5 guide |
 | 2026-06-12 | **Repo privacy queued as founder work (F.13):** the GitHub repo is public today and must return to private — at the latest before the first club pays, because the lawful-basis note for the real-children's-data parser fixtures (OPEN_LEGAL_QUESTIONS Q13 / DATA_MAP §6) assumes a private repo, and ADR-0011's hosted-only stance treats the source as the product. The new guide covers the one real cost (private-repo Actions minutes — trim the CI schedules or GitHub Pro), the visibility flip, integration re-verification (Render, Claude Code, CI, Dependabot), and recording the public window honestly in the compliance docs. | Founder guide F.13 · [Q13](compliance/OPEN_LEGAL_QUESTIONS.md) |
 | 2026-06-12 | **Sell-gate items closed out + the roadmap now keeps itself honest:** PC.9 and PC.11–PC.14 verified fully shipped on the code side (all 55 pinning tests green) and moved to Completed; their remaining halves are founder-only and live on the founder list with updated step-by-step guides (F.6 gains the breach-owner + off-site-backup steps). The auto-update bot gained a **completed-item sweep**: any to-do item marked ✅ moves itself to Completed on the next push to `main`, and a declared human remainder is kept on — or filed into — the founder list, so finished items can no longer squat on a to-do list. | *Status* section · [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py) |
-| 2026-06-12 | **Business identity, own domain & cheaper hosting prioritised (F.9–F.12 + PC.15/PC.16):** the real company name comes before any further filings (MediaHub is an indefensible filler), then Companies House registration (£100 digital; director ID-verification mandatory since Nov 2025), then the .co.uk domain wired to the live app — so Stripe/ICO/solicitor/Swim England paperwork files **once**, under the real name, and every printed/shared link survives any future host. The Render→VPS move (≈£20/mo → ≈£4–8/mo, prices verified June 2026) is sequenced last, as a DNS flip, and must never displace selling. | Founder guides F.9–F.12 · Phase C section |
+| 2026-06-12 | **Business identity, own domain & cheaper hosting prioritised (F.9–F.12 + 2.1/3.1):** the real company name comes before any further filings (MediaHub is an indefensible filler), then Companies House registration (£100 digital; director ID-verification mandatory since Nov 2025), then the .co.uk domain wired to the live app — so Stripe/ICO/solicitor/Swim England paperwork files **once**, under the real name, and every printed/shared link survives any future host. The Render→VPS move (≈£20/mo → ≈£4–8/mo, prices verified June 2026) is sequenced last, as a DNS flip, and must never displace selling. | Founder guides F.9–F.12 · Phase C section |
 | 2026-06-12 | **Sell-gate code remainders + referral engine shipped (PC.9, PC.11–PC.14 code halves):** subprocessor-register guard test (caught 3 undisclosed flows) + unlicensed vendor dirs removed; W.2 consent enforced on the public wall + Children's-Code pass recorded (synthetic `/try` sample replaces real minors' data); whole-org deletion + takeout ZIP; transactional-email seam (password reset / verification / invites / breach channel), daily backups + rehearsed restore, incident runbook; in-product referral engine with auto-granted Stripe rewards. Remaining on the sell gate is founder-only (F.1–F.7). | Phase C section · [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) · [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) |
 | 2026-06-12 | **UK legal compliance baseline shipped (PR #352):** in-product Terms / accurate Privacy Notice / Cookie Policy / Art. 28 DPA with versioned, recorded acceptance; erasure cascades, account deletion + export; correction/takedown workflow; retention sweep; CCR/DMCCA pre-contract checkout; auth rate-limiting + security headers; DPIA draft. PC.11/PC.13 mostly delivered, PC.12/PC.14 started; the founder half became the F.* list above. | [COMPLIANCE_AUDIT](COMPLIANCE_AUDIT.md) · [COMPLIANCE_HANDOVER](COMPLIANCE_HANDOVER.md) |
 | 2026-06-12 | **Compliance-readiness audit:** Phase C had been pushing "go sell" with zero legal surface — compliance had no owning channel because Phase C was composed from a revenue diligence. Fix: a third **lawful-to-sell exit gate** + four sell-gate items **PC.11–PC.14**; no paid contract before gate 3 holds. | [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) |
 | 2026-06-11 | **Phase C build-out:** PC.7 try-before-signup demo, PC.8 sponsor manager + exposure reports, PC.10 public achievements wall shipped; `/pricing` now enforces PC.4's revealed-WTP gate (≥5 paid annual); PC.6 audited build-complete. What remains on PC.4/PC.6 is the founder's selling motion. | Phase C section |
-| 2026-06-11 | **Phase 6 added:** every content-creation feature in the two competitor inventories (Canva, Adobe Express) gets a MediaHub-shaped, first-party build plan — 24 gated work packages (P6.1–P6.24) with a coverage index. | [CREATIVE_SUITE_PARITY](CREATIVE_SUITE_PARITY.md) |
+| 2026-06-11 | **Phase 6 added:** every content-creation feature in the two competitor inventories (Canva, Adobe Express) gets a MediaHub-shaped, first-party build plan — 24 gated work packages (P6.1–1.25) with a coverage index. | [CREATIVE_SUITE_PARITY](CREATIVE_SUITE_PARITY.md) |
 | 2026-06-11 | **Daily scan — no material change:** competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion move; platform policies unchanged; Swim England club-API news only reinforces the queued Route C go/no-go. | [ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md) |
 
 ### Recent code activity (auto-updated — newest first)
@@ -1171,10 +1227,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-18 | `3e9edbceb` | style(P6.3): ruff-format web.py generated-images route |
-| 2026-06-18 | `e66295c0f` | feat(P6.3): Build 2 — grab-text, deterministic mockups, generation history |
-| 2026-06-18 | `3a744c01f` | fix(P6.3): declare imagine env keys (subprocessor register + env inventory) |
-| 2026-06-18 | `e9c80fab2` | feat(P6.3): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
+| 2026-06-18 | `3e9edbceb` | style(1.2): ruff-format web.py generated-images route |
+| 2026-06-18 | `e66295c0f` | feat(1.2): Build 2 — grab-text, deterministic mockups, generation history |
+| 2026-06-18 | `3a744c01f` | fix(1.2): declare imagine env keys (subprocessor register + env inventory) |
+| 2026-06-18 | `e9c80fab2` | feat(1.2): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
 | 2026-06-18 | `f35a53327` | fix(p6.2): rename nested _card_facts → _assistant_card_facts; refresh env inventory |
 | 2026-06-18 | `156f9616d` | feat(p6.2): conversational creative assistant (club content copilot) |
 | 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
