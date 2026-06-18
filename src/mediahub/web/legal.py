@@ -225,6 +225,13 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "disclosed in Privacy Notice §3–4. A public search engine is not an "
         "Art. 28 sub-processor; queries are transient and uncontracted."
     ),
+    "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT": (
+        "the operator's own self-hosted local diffusion image backend (P6.3 "
+        "imagine seam, the in-house default; filled by P5.6). Inference runs on "
+        "the operator's own infrastructure — a self-hosted model is not an "
+        "Art. 28 sub-processor. Cloud image generation uses GEMINI_API_KEY "
+        "(Google, already a declared sub-processor)."
+    ),
 }
 
 

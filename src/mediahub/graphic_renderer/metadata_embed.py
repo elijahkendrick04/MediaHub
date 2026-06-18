@@ -74,13 +74,31 @@ __all__ = [
     "read_metadata",
     "metadata_from_brief",
     "metadata_from_asset",
+    "metadata_for_generated",
     "build_xmp_packet",
     "SOFTWARE_NAME",
+    "DIGITAL_SOURCE_TYPES",
 ]
 
 # The CreatorTool / Software string stamped on every export. Not the model id —
 # this is product provenance the customer is happy to carry.
 SOFTWARE_NAME = "MediaHub"
+
+# IPTC "Digital Source Type" controlled-vocabulary URIs — the standards-based way
+# to declare that an image was made (or composited) with generative AI. Pro
+# tooling, platforms and journalists read this property to label synthetic media.
+# This is MediaHub's provenance stamp for P6.3 generative imagery (the C2PA-class
+# "this was AI-generated" signal), carried losslessly in the XMP packet.
+DIGITAL_SOURCE_TYPES = {
+    # A straight digital photograph — no AI involvement.
+    "digital_capture": "http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture",
+    # Created wholesale by a generative model (text-to-image).
+    "ai_generated": "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia",
+    # A real image with AI-generated elements added/edited in (edit/expand/remove).
+    "ai_composite": (
+        "http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"
+    ),
+}
 
 # Canonical xpacket id (the constant Adobe uses); keeps the XMP wrapper stable.
 _XPACKET_ID = "W5M0MpCehiHzreSzNTczkc9d"
@@ -126,6 +144,9 @@ class ImageMetadata:
     rights_marked: Optional[bool] = None  # xmpRights:Marked (True = rights-managed)
     software: str = SOFTWARE_NAME  # EXIF Software / xmp:CreatorTool
     create_date: str = ""  # ISO-8601; embedded only when supplied
+    # IPTC DigitalSourceType — either a key of DIGITAL_SOURCE_TYPES (e.g.
+    # "ai_generated") or a full controlled-vocabulary URI. Empty = not declared.
+    digital_source_type: str = ""
 
     def is_empty(self) -> bool:
         """True when there is nothing worth embedding beyond the software tag."""
@@ -142,8 +163,20 @@ class ImageMetadata:
                 self.licence.strip(),
                 self.web_statement.strip(),
                 self.create_date.strip(),
+                self.digital_source_type.strip(),
             )
         )
+
+    def digital_source_uri(self) -> str:
+        """Resolve ``digital_source_type`` to its controlled-vocabulary URI.
+
+        Accepts either a short key (``"ai_generated"``) or an already-resolved
+        URI; returns ``""`` when nothing is declared.
+        """
+        v = (self.digital_source_type or "").strip()
+        if not v:
+            return ""
+        return DIGITAL_SOURCE_TYPES.get(v, v)
 
     def clean_keywords(self) -> list[str]:
         """De-duplicated, order-preserving, whitespace-trimmed keyword list."""
@@ -258,6 +291,9 @@ def build_xmp_packet(meta: ImageMetadata) -> str:
         body.append(_simple("xmpRights:WebStatement", meta.web_statement.strip()))
     if meta.rights_marked is not None:
         body.append(_simple("xmpRights:Marked", "True" if meta.rights_marked else "False"))
+    ds_uri = meta.digital_source_uri()
+    if ds_uri:
+        body.append(_simple("Iptc4xmpExt:DigitalSourceType", ds_uri))
 
     return (
         f'<?xpacket begin="﻿" id="{_XPACKET_ID}"?>\n'
@@ -267,6 +303,7 @@ def build_xmp_packet(meta: ImageMetadata) -> str:
         '    xmlns:dc="http://purl.org/dc/elements/1.1/"\n'
         '    xmlns:xmp="http://ns.adobe.com/xap/1.0/"\n'
         '    xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"\n'
+        '    xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/"\n'
         '    xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/">\n'
         f"{''.join(body)}"
         "  </rdf:Description>\n"
@@ -670,6 +707,9 @@ def read_metadata(image_path: str | Path) -> ImageMetadata:
         meta.web_statement = (
             _parse_xmp_field(xmp_raw, "xmpRights:WebStatement") or meta.web_statement
         )
+        meta.digital_source_type = (
+            _parse_xmp_field(xmp_raw, "Iptc4xmpExt:DigitalSourceType") or meta.digital_source_type
+        )
         import re as _re
 
         kw_block = _re.search(r"<dc:subject>(.*?)</dc:subject>", xmp_raw, _re.DOTALL)
@@ -754,6 +794,35 @@ def metadata_from_asset(asset: Any) -> ImageMetadata:
         web_statement=source_url,
         rights_marked=True if (licence or photographer) else None,
     )
+
+
+def metadata_for_generated(
+    operation: str,
+    *,
+    model: str = "",
+    description: str = "",
+    base: Optional[ImageMetadata] = None,
+) -> ImageMetadata:
+    """Build provenance metadata for an AI-generated / AI-edited image (P6.3).
+
+    Sets the IPTC ``DigitalSourceType`` so the file self-declares as synthetic
+    media wherever it travels: a wholesale ``generate`` / ``similar`` is
+    ``ai_generated`` (trainedAlgorithmicMedia); an edit of a real photo
+    (``edit`` / ``expand`` / ``remove`` / ``style_match`` / ``upscale``) is
+    ``ai_composite`` (compositeWithTrainedAlgorithmicMedia). ``base`` lets an
+    edit carry forward the source photo's credit chain.
+    """
+    wholesale = operation in ("generate", "similar")
+    meta = base or ImageMetadata()
+    meta.digital_source_type = "ai_generated" if wholesale else "ai_composite"
+    if description and not meta.description.strip():
+        meta.description = description
+    # Honest, human-readable software/source note naming the model — not a key.
+    mdl = (model or "").strip()
+    meta.software = f"{SOFTWARE_NAME} ({mdl})" if mdl else SOFTWARE_NAME
+    if wholesale and not meta.source.strip():
+        meta.source = "Generated with MediaHub"
+    return meta
 
 
 def metadata_from_brief(

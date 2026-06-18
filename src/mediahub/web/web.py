@@ -1489,6 +1489,16 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
+# P6.3: generative-imagery seam (imagine). Guards the image-AI routes/UI.
+try:
+    from mediahub.media_ai import imagine as _imagine
+
+    _imagine_ok = True
+except ImportError:
+    _imagine_ok = False
+    _imagine = None
+
+
 def _cutout_provider_label() -> str:
     """Friendly name of the background remover that produces cut-outs.
 
@@ -12653,6 +12663,23 @@ def _bulk_ids_from_request(req, *keys: str) -> list[str]:
 # so neither surface has to touch the shared BASE_CSS cascade. The bar is hidden
 # only when JS is present AND nothing is selected (`html.mh-js .is-empty`), so a
 # no-JS visitor always sees the controls.
+_GENERATED_GALLERY_CSS = """
+.mh-gen-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:var(--sp-4)}
+.mh-gen-card{margin:0;background:var(--panel);border:1px solid var(--chrome);
+  border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.mh-gen-card img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;
+  background:var(--bg)}
+.mh-gen-card figcaption{padding:var(--sp-4);display:flex;flex-direction:column;gap:6px}
+.mh-gen-badge{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);
+  border-radius:999px;padding:2px 8px}
+.mh-gen-op{font-weight:600;text-transform:capitalize}
+.mh-gen-prompt{margin:0;font-size:13px;color:var(--ink);line-height:1.4}
+.mh-gen-meta{margin:0;font-size:12px}
+.mh-gen-actions{display:flex;gap:8px;margin-top:var(--sp-2);flex-wrap:wrap}
+"""
+
 _BULK_ACTIONS_CSS = """
 .mh-bulkbar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
   padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);
@@ -34524,6 +34551,80 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             onclick="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">Delete</button>
   </td>
 </tr>"""
+        # P6.3 — "Generate an image" panel. Shown when the imagine seam is
+        # importable; the Generate control is disabled (with an honest note)
+        # until a provider is actually configured.
+        imagine_panel = ""
+        if _imagine_ok:
+            _img_avail = _imagine.is_available()
+            _gen_url = url_for("api_imagine_generate")
+            from mediahub.media_ai.imagine_providers.gemini_imagine import STYLE_PRESETS
+
+            _style_opts = "".join(
+                '<option value="%s">%s</option>' % (_h(s), _h(s.replace("_", " ").title()))
+                for s in sorted(STYLE_PRESETS)
+            )
+            _dis = "" if _img_avail else "disabled"
+            _note = (
+                ""
+                if _img_avail
+                else (
+                    '<p class="dim" style="margin-bottom:var(--sp-4)">No image provider is '
+                    "configured yet, so generation is disabled. The default backend is the "
+                    "in-house local model (P5.6, coming soon); a Gemini key enables it today.</p>"
+                )
+            )
+            _imagine_js = (
+                "(function(){var go=document.getElementById('mh-imagine-go');if(!go)return;"
+                "go.addEventListener('click',function(){"
+                "var p=(document.getElementById('mh-imagine-prompt').value||'').trim();"
+                "var s=document.getElementById('mh-imagine-status');"
+                "if(!p){s.textContent='Enter a prompt first.';return;}"
+                "go.disabled=true;s.textContent='Generating\\u2026';"
+                "fetch(go.dataset.genUrl,{method:'POST',headers:{'Content-Type':'application/json'},"
+                "body:JSON.stringify({prompt:p,style:document.getElementById('mh-imagine-style').value,"
+                "aspect:document.getElementById('mh-imagine-aspect').value})})"
+                ".then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})"
+                ".then(function(res){if(res.ok&&res.j.ok){s.textContent='Done \\u2014 added to library.';"
+                "location.reload();}else{s.textContent=(res.j&&(res.j.user_message||res.j.error))||"
+                "'Generation failed.';go.disabled=false;}})"
+                ".catch(function(){s.textContent='Network error.';go.disabled=false;});});})();"
+            )
+            _gen_hist_url = url_for("media_library_generated_page")
+            imagine_panel = (
+                '<div class="card" id="mh-imagine">'
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-3);flex-wrap:wrap">'
+                '<h2 style="margin:0">Generate an image <span class="dim" style="font-weight:400">&middot; AI</span></h2>'
+                f'<a href="{_gen_hist_url}">View generated &rarr;</a>'
+                "</div>"
+                '<p class="dim" style="margin:var(--sp-3) 0 var(--sp-5)">Create a brand-fitting backdrop '
+                "or scene from a text prompt. Every image is provenance-stamped as AI-generated "
+                "and saved to this library. People are off by default.</p>"
+                + _note
+                + '<label for="mh-imagine-prompt">Prompt</label>'
+                '<input id="mh-imagine-prompt" type="text" '
+                'placeholder="e.g. abstract navy and gold poolside backdrop, dynamic light" '
+                + _dis
+                + ">"
+                '<label for="mh-imagine-style">Style</label>'
+                '<select id="mh-imagine-style" ' + _dis + ">" + _style_opts + "</select>"
+                '<label for="mh-imagine-aspect">Aspect</label>'
+                '<select id="mh-imagine-aspect" ' + _dis + ">"
+                '<option value="1:1">Square (1:1)</option>'
+                '<option value="3:4">Portrait (3:4)</option>'
+                '<option value="9:16">Story (9:16)</option>'
+                '<option value="16:9">Landscape (16:9)</option>'
+                "</select>"
+                '<div style="margin-top:var(--sp-4)">'
+                '<button type="button" class="btn" id="mh-imagine-go" data-gen-url="'
+                + _gen_url
+                + '" '
+                + _dis
+                + ">Generate image &rarr;</button>"
+                '<span id="mh-imagine-status" class="dim" style="margin-left:var(--sp-3)"></span>'
+                "</div></div><script>" + _imagine_js + "</script>"
+            )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
@@ -34559,6 +34660,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
   </form>
 </div>
+{imagine_panel}
 {
             (
                 '<div class="card">'
@@ -34740,6 +34842,445 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    # -- P6.3 generative imagery ------------------------------------------
+    # The image-AI seam (media_ai.imagine) surfaced on the media library:
+    # text-to-image generate, deterministic subject-lift, and the edit family
+    # (edit/expand/remove/upscale/similar/style_match). Every provider-backed
+    # op is tenancy-guarded, quota-metered, and its output saved as a
+    # provenance-stamped MediaAsset.
+
+    _IMAGINE_ASSET_OPS = {"edit", "expand", "remove", "upscale", "similar", "style_match"}
+
+    def _imagine_dims(data: bytes) -> "tuple[int, int, str]":
+        """(width, height, orientation) of generated bytes — best-effort via PIL."""
+        try:
+            import io as _io
+            from PIL import Image as _Image
+
+            with _Image.open(_io.BytesIO(data)) as im:
+                w, h = int(im.width), int(im.height)
+        except Exception:
+            return 0, 0, "unknown"
+        if w and h:
+            if abs(w - h) <= max(2, int(0.02 * max(w, h))):
+                orient = "square"
+            elif h > w:
+                orient = "portrait"
+            else:
+                orient = "landscape"
+        else:
+            orient = "unknown"
+        return w, h, orient
+
+    def _imagine_persist(result, *, profile_id, prompt="", source_asset=None):
+        """Save an ImagineResult as a provenance-stamped MediaAsset, return it."""
+        store = _v8_get_media_store()
+        op = result.operation
+        # Write under DATA_DIR's persistent uploads tree, exactly like the
+        # upload route (UPLOADS_DIR), so generated assets land on the same disk.
+        import uuid as _uuid
+
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        path = upload_dir / f"imagine_{op}_{_uuid.uuid4().hex[:12]}.{result.ext}"
+        path.write_bytes(result.data)
+        # Provenance: embed IPTC DigitalSourceType + write the sidecar manifest.
+        try:
+            _imagine.stamp_file(path, result, source_asset=source_asset)
+        except Exception:  # pragma: no cover - stamping is best-effort
+            pass
+        w, h, orient = _imagine_dims(result.data)
+        from mediahub.media_library.models import MediaAsset
+
+        model = result.model or ""
+        asset = MediaAsset(
+            id="",
+            filename=path.name,
+            path=str(path),
+            type="ai_generated",
+            description_raw=(prompt or result.manifest.get("prompt", "")),
+            description_parsed={"imagine": result.manifest},
+            profile_id=profile_id,
+            width=w,
+            height=h,
+            orientation=orient,
+            permission_status="internal_only",
+            approval_status="draft",
+            source_attribution=f"Generated with MediaHub ({model})"
+            if model
+            else "Generated with MediaHub",
+            tags=["ai-generated", op],
+            safe_for_minors=True,
+        )
+        return store.save(asset)
+
+    def _imagine_quota_json(pid):
+        q = _imagine.check_quota(pid)
+        return {
+            "limit": q.limit,
+            "used": q.used,
+            "remaining": q.remaining,
+            "unlimited": q.unlimited,
+        }
+
+    def _imagine_error_response(exc):
+        """Map an imagine exception to the house JSON error envelope + status."""
+        if isinstance(exc, _imagine.QuotaExceeded):
+            return jsonify({"error": "quota_exceeded", "user_message": str(exc)}), 429
+        if isinstance(exc, _imagine.ProviderNotConfigured):
+            return jsonify({"error": "provider_not_configured", "user_message": str(exc)}), 503
+        if isinstance(exc, _imagine.ImagineUnsupported):
+            return jsonify({"error": "unsupported", "user_message": str(exc)}), 501
+        if isinstance(exc, _imagine.ImagineError):
+            return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
+        return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
+
+    @app.route("/api/media-library/imagine/info")
+    def api_imagine_info():
+        """Capabilities, active provider, style presets, and this org's quota."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        from mediahub.media_ai.imagine_providers.gemini_imagine import STYLE_PRESETS
+
+        return jsonify(
+            {
+                "available": _imagine.is_available(),
+                "provider": _imagine.active_provider_name(),
+                "operations": sorted(_imagine.available_operations()),
+                "styles": sorted(STYLE_PRESETS.keys()),
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/imagine/generate", methods=["POST"])
+    def api_imagine_generate():
+        """Text → image. Saves the result as a provenance-stamped library asset."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        body = request.get_json(silent=True) or {}
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            return (
+                jsonify({"error": "empty_prompt", "user_message": "Describe the image you want."}),
+                400,
+            )
+        style = (body.get("style") or "").strip() or None
+        aspect = (body.get("aspect") or "1:1").strip()
+        allow_people = bool(body.get("allow_people"))
+        try:
+            results = _imagine.generate(
+                prompt, style=style, aspect=aspect, n=1, allow_people=allow_people, org_id=pid
+            )
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        asset = _imagine_persist(results[0], profile_id=pid, prompt=prompt)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": asset.to_dict(),
+                "url": url_for("api_media_library_file", asset_id=asset.id),
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/imagine/subject-lift", methods=["POST"])
+    def api_imagine_subject_lift(asset_id: str):
+        """Magic Grab — deterministic cutout + saliency framing (not metered)."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        out, status = _v8_ensure_cutout(a)
+        if status == "unavailable":
+            return (
+                jsonify(
+                    {
+                        "error": "cutout_unavailable",
+                        "user_message": "No background remover is available on this deployment.",
+                    }
+                ),
+                503,
+            )
+        if out is None:
+            return jsonify({"error": status or "failed"}), 502
+        body = request.get_json(silent=True) or {}
+        ratio = (body.get("ratio") or "4:5").strip()
+        focus = "center 28%"
+        try:
+            from mediahub.graphic_renderer.saliency import focus_position
+
+            focus = focus_position(out, ratio)
+        except Exception:
+            pass
+        return jsonify(
+            {
+                "ok": True,
+                "status": status,
+                "cutout_url": url_for("api_media_library_cutout", asset_id=asset_id),
+                "focus_position": focus,
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/imagine/<op>", methods=["POST"])
+    def api_imagine_asset_op(asset_id: str, op: str):
+        """Run a provider-backed edit-family op on an existing library asset.
+
+        ``op`` ∈ {edit, expand, remove, upscale, similar, style_match}. The
+        active provider honest-errors (501) for ops it does not support — the
+        local diffusion backend (P5.6) is the one that will cover them all.
+        """
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        if op not in _IMAGINE_ASSET_OPS:
+            return jsonify({"error": "unknown_op"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            data = Path(a.path).read_bytes()
+        except Exception:
+            return jsonify({"error": "no_source"}), 404
+        body = request.get_json(silent=True) or {}
+        import base64 as _b64
+
+        mask = None
+        if body.get("mask_b64"):
+            try:
+                mask = _b64.b64decode(body["mask_b64"])
+            except Exception:
+                mask = None
+        img = _imagine.ImageInput(data=data, mime="image/png", mask=mask)
+        try:
+            if op == "edit":
+                result = _imagine.edit(
+                    img,
+                    (body.get("instruction") or "").strip(),
+                    allow_people=bool(body.get("allow_people")),
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+            elif op == "expand":
+                result = _imagine.expand(
+                    img,
+                    aspect=(body.get("aspect") or "1:1").strip(),
+                    prompt=(body.get("prompt") or "").strip(),
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+            elif op == "remove":
+                result = _imagine.remove(img, org_id=pid, source_asset_id=a.id)
+            elif op == "upscale":
+                result = _imagine.upscale(
+                    img, factor=int(body.get("factor") or 2), org_id=pid, source_asset_id=a.id
+                )
+            elif op == "similar":
+                results = _imagine.similar(
+                    img,
+                    prompt=(body.get("prompt") or "").strip(),
+                    n=1,
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+                result = results[0]
+            else:  # style_match
+                result = _imagine.style_match(
+                    img,
+                    style=(body.get("style") or "editorial").strip(),
+                    palette=body.get("palette") or None,
+                    org_id=pid,
+                    source_asset_id=a.id,
+                )
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        asset = _imagine_persist(
+            result,
+            profile_id=pid,
+            prompt=body.get("instruction") or body.get("prompt") or "",
+            source_asset=a,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "asset": asset.to_dict(),
+                "url": url_for("api_media_library_file", asset_id=asset.id),
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/imagine/grab-text", methods=["POST"])
+    def api_imagine_grab_text(asset_id: str):
+        """Grab Text — vision-OCR the text out of an image into editable blocks."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            grabbed = _imagine.grab_text(a.path, org_id=pid)
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        return jsonify(
+            {
+                "ok": True,
+                "found": grabbed.found,
+                "text": grabbed.text,
+                "blocks": grabbed.blocks,
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/mockup-templates")
+    def api_mockup_templates():
+        """List the deterministic product-mockup templates (for the UI picker)."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        try:
+            from mediahub.mockups import list_templates
+
+            return jsonify({"templates": list_templates()})
+        except Exception:
+            return jsonify({"templates": []})
+
+    def _profile_accent_hex():
+        """Best-effort brand accent for tinting mockup scenes (None if unknown)."""
+        try:
+            prof = _active_profile()
+            bk = getattr(prof, "brand_kit", None) or {}
+            if isinstance(bk, dict):
+                val = bk.get("accent") or bk.get("primary") or bk.get("secondary")
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+        except Exception:
+            pass
+        return None
+
+    @app.route("/api/media-library/<asset_id>/mockup/<template>", methods=["POST", "GET"])
+    def api_media_library_mockup(asset_id: str, template: str):
+        """Composite an asset into a product mockup; serve the PNG directly.
+
+        Deterministic, key-free, brand-tinted — not an AI op, so no quota/stamp.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            from mediahub.mockups import compose_mockup, MockupError
+        except Exception:
+            return jsonify({"error": "mockups_unavailable"}), 503
+        try:
+            art = Path(a.path).read_bytes()
+        except Exception:
+            return jsonify({"error": "no_source"}), 404
+        try:
+            png = compose_mockup(art, template, accent=_profile_accent_hex())
+        except MockupError as e:
+            return jsonify({"error": "unknown_template", "user_message": str(e)}), 404
+        except Exception as e:
+            return jsonify({"error": "mockup_failed", "user_message": str(e)}), 502
+        from flask import Response as _Response
+
+        return _Response(
+            png,
+            mimetype="image/png",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
+    @app.route("/media-library/generated")
+    def media_library_generated_page():
+        """Generation history + provenance viewer for this org's AI imagery."""
+        if not _v8_ok:
+            return redirect(url_for("media_library_page"))
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("media_library_page"))
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(profile_id=pid, asset_type="ai_generated")
+        except Exception:
+            assets = []
+        _ds_label = {
+            "ai_generated": "AI-generated",
+            "ai_composite": "AI-edited",
+        }
+        cards = ""
+        for a in assets[:200]:
+            ad = a.to_dict() if hasattr(a, "to_dict") else a
+            man = (ad.get("description_parsed") or {}).get("imagine") or {}
+            file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
+            op = str(man.get("operation") or "generate")
+            model = str(man.get("model") or "")
+            prompt = str(man.get("prompt") or ad.get("description_raw") or "")
+            dst = _ds_label.get(str(man.get("digital_source_type") or ""), "AI")
+            created = str(man.get("created_at") or ad.get("uploaded_at") or "")[:19].replace(
+                "T", " "
+            )
+            cards += (
+                '<figure class="mh-gen-card">'
+                f'<a href="{file_url}" target="_blank" rel="noopener">'
+                f'<img loading="lazy" src="{file_url}" alt="">'
+                "</a>"
+                "<figcaption>"
+                f'<span class="mh-gen-badge">{_h(dst)}</span>'
+                f'<span class="mh-gen-op">{_h(op)}</span>'
+                f'<p class="mh-gen-prompt">{_h(prompt[:180])}</p>'
+                f'<p class="dim mh-gen-meta">{_h(model)}{" · " if model and created else ""}{_h(created)}</p>'
+                '<div class="mh-gen-actions">'
+                f'<a class="btn secondary" href="{file_url}" download>Download</a>'
+                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id", ""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
+                "</div>"
+                "</figcaption></figure>"
+            )
+        empty = (
+            '<div class="card"><p class="dim" style="text-align:center;padding:var(--sp-7)">'
+            "No AI-generated images yet. Use &ldquo;Generate an image&rdquo; on the "
+            f'<a href="{url_for("media_library_page")}">media library</a> to make one — '
+            "every image you create lands here with its provenance.</p></div>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Media library</span>'
+            "<h1>Generated images</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(pid)}</span><span class="sep">·</span>'
+            f"<span>{len(assets)} AI image{'' if len(assets) == 1 else 's'}</span>"
+            f'<span class="sep">·</span><a href="{url_for("media_library_page")}">&larr; Library</a>'
+            "</div>"
+            '<p class="lede" style="margin-top:var(--sp-3)">Every AI-made image, with the '
+            "operation, model and prompt that produced it. Each file also carries an embedded "
+            "C2PA-class &ldquo;AI&rdquo; provenance tag wherever it travels.</p>"
+            "</section>"
+            + (f'<div class="mh-gen-grid">{cards}</div>' if cards else empty)
+            + f"<style>{_GENERATED_GALLERY_CSS}</style>"
+        )
+        return _layout("Generated images", body, active="media")
 
     @app.route("/api/media-library/bulk-delete", methods=["POST"])
     def api_media_library_bulk_delete():
@@ -38031,8 +38572,7 @@ voice, and queues them for one-click approval.</p>
                 {
                     "error": "no_design",
                     "user_message": (
-                        "Create a graphic for this card first, then ask the copilot "
-                        "to refine it."
+                        "Create a graphic for this card first, then ask the copilot to refine it."
                     ),
                 }
             ), 409

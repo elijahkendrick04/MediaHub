@@ -305,6 +305,27 @@ strictly opt-in like `MEDIAHUB_GEN_BG`. Layer extraction (Magic Layers) is the
 inverse-render problem — scope to AI-image outputs only, where the provider
 returns layers natively.
 
+**Build status (2026-06-18) — 🔵 Builds 1 + 2 shipped.** **Build 1** (the seam +
+solid services + governance): `media_ai/imagine.py` (provider-agnostic facade) +
+`media_ai/imagine_providers/` (`base`, `gemini_imagine`, `local_imagine`);
+working `generate` + `similar` via Gemini Imagen (sport-editorial style presets,
+aspect ratios, no-people default); deterministic `subject_lift` (cutout +
+saliency); per-output provenance (IPTC `DigitalSourceType` embedded losslessly +
+a `<file>.imagine.json` manifest); a per-org quota ledger
+(`observability/imagine_usage.py`); media-library JSON routes + a "Generate an
+image" UI panel; and the `MEDIAHUB_GEN_BG` Imagen call generalised behind the
+seam (byte-identical renders). **Build 2** (working surfaces that need no P5.6):
+**Grab Text** (`imagine.grab_text`, vision-OCR transcribe → editable blocks,
+metered); **deterministic product mockups** (`mockups/` — poster/framed-print/
+phone-post/flatlay, key-free, brand-tinted, byte-deterministic; feeds P6.19);
+and a **generation-history + provenance viewer** (`/media-library/generated`).
+The generative **edit family** (`edit`/`expand`/`remove`/`upscale`/
+`style_match`) is defined in the seam and **honest-errors by capability** — the
+in-house local backend (P5.6) is the default that will fill it (then the
+mask-brush studio UI lands). Text-to-video b-roll (↗ P6.5), layer extraction,
+and 3D (deferred-last) remain. See
+[`adr/0023-p6-3-generative-imagery-seam.md`](adr/0023-p6-3-generative-imagery-seam.md).
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
