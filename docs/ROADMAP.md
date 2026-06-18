@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `9501dd5b9` · feat(P6.1): smart format catalogue + format transformer (#805)
+**Last updated:** 2026-06-18 · `2081e297c` · Merge pull request #806: docs(readme) refresh to current repo [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1172,6 +1172,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
 | 2026-06-18 | `9279ddd8c` | style(p6.1): apply ruff-format + drop unused import (pre-commit hygiene) |
 | 2026-06-18 | `b6508062c` | feat(p6.1): smart format catalogue + format transformer |
 | 2026-06-17 | `1bd179d44` | Apply ruff-format to mobile-parity additions |
