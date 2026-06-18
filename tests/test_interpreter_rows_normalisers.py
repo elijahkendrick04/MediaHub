@@ -255,3 +255,33 @@ class TestNormaliseClub:
         # never surface as clubs (the picker was filling with '1350m 13:53.80').
         v, _ = _normalise_club(raw)
         assert v is None
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # Para "Class" column (S14/SM14 etc.) absorbed into the club: fold the
+            # para sub-group into its parent club.
+            ("Co Cardiff 14", "Co Cardiff"),
+            ("Swansea Uni 14", "Swansea Uni"),
+            ("Team Bath AS 6", "Team Bath AS"),
+            ("UoAPS 10", "UoAPS"),
+        ],
+    )
+    def test_para_class_suffix_folds_into_parent_club(self, raw: str, expected: str) -> None:
+        v, _ = _normalise_club(raw)
+        assert v == expected
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # A whole "Name AaD Club" row collapsed into the club cell — recover
+            # the actual club (the text after the age), so a swimmer never shows
+            # up as a club in the picker.
+            ("Dion Edwards 19 Swansea Uni", "Swansea Uni"),
+            ("Chloe Morris 15 Millfield", "Millfield"),
+            ("Donatas Dragasius 22 Chelsea&West", "Chelsea&West"),
+        ],
+    )
+    def test_collapsed_name_age_club_recovers_club(self, raw: str, expected: str) -> None:
+        v, _ = _normalise_club(raw)
+        assert v == expected
