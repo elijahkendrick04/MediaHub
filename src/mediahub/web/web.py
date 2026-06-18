@@ -5792,21 +5792,17 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
     try:
         from mediahub.media_ai.llm import ClaudeUnavailableError
         from mediahub.results_fetch.ai_read import ai_read_candidates
-        from mediahub.results_fetch.crawl import crawl_results_site
+        from mediahub.results_fetch.crawl import CrawlLimits, crawl_results_site
         from mediahub.results_fetch.package import package_mirror
 
         # Honest live percent for the fetching phase. A crawl has no fixed total
         # up front, so we blend two real signals: the fraction of the *discovered*
         # frontier already read (leads while the site is being mapped) and the
         # elapsed share of the crawl's own time budget (pulls the bar forward so a
-        # deep site never feels stuck). The bar is held monotonic client-side.
+        # deep site never feels stuck). The bar is held monotonic client-side. The
+        # budget comes from the crawl's own canonical config (one source of truth).
         _fetch_t0 = time.monotonic()
-        try:
-            _timeout_budget = float(os.environ.get("MEDIAHUB_RESULTS_FETCH_TIMEOUT_S", "") or 180)
-            if _timeout_budget <= 0:
-                _timeout_budget = 180.0
-        except (TypeError, ValueError):
-            _timeout_budget = 180.0
+        _timeout_budget = CrawlLimits.from_env().timeout_s or 180.0
         _FETCH_LO, _FETCH_HI = 8, 72
 
         def _on_progress(progress) -> None:
