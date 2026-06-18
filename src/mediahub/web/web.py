@@ -8366,7 +8366,7 @@ body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
   text-transform: uppercase; letter-spacing: 0.01em;
 }
 .mh-arch-cta-text span { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
-/* Link from the Create page into the gallery. */
+/* Used by the template gallery page's own studio link. */
 .mh-arch-gallery-link {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3); flex-wrap: wrap;
@@ -10191,10 +10191,10 @@ def _layout(
        we make?", so it lives as the strategic entry point on the Create page
        (and stays on the g→p keyboard shortcut). #}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
-    {# Templates and the design studio are reached from the Create page, not the
-       top bar: the template gallery stays a "browse the card styles" link and
-       the studio is a full Create tile (the live design editor). Keeping both
-       off the top bar leaves the signed-in chrome focused on the core workflow. #}
+    {# Templates and the design studio stay off the top bar: the template gallery
+       is reached from Settings (a tile in the settings grid) and the studio is a
+       full Create tile (the live design editor). Keeping both off the top bar
+       leaves the signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
