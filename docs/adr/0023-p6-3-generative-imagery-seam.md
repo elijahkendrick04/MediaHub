@@ -1,6 +1,6 @@
 # ADR 0023 — P6.3 generative-imagery seam (`media_ai.imagine`)
 
-- **Status:** Accepted (Build 1 of 2)
+- **Status:** Accepted (Build 1 + Build 2 delivered)
 - **Date:** 2026-06-18
 - **Roadmap item:** P6.3 — Generative imagery & image-AI services (Phase 2, Creative suite)
 
@@ -33,11 +33,28 @@ for breadth. This ADR records the **two-build split** and the Build-1 design.
   deterministic `subject_lift`); provenance stamping; the per-org quota ledger;
   media-library JSON routes + a minimal "Generate image" UI panel; and
   generalising the existing `MEDIAHUB_GEN_BG` Imagen call behind the seam.
-- **Build 2 (next session): the studio surfaces + heavy/opt-in providers.**
-  Mask-brush canvas (edit/remove/fill), expand handles, upscale, full
-  style-match UI, grab-text (vision OCR), mockups, text-to-video b-roll
-  reel-scene provider, layer extraction, 3D (deferred-last), generation-history
-  gallery, card-editor background actions, batch.
+- **Build 2 (delivered): the working surfaces that don't need P5.6.** Re-scoped
+  to what genuinely works today (the generative *edit family* needs an
+  edit-capable backend, which Gemini's public Imagen `:predict` is not — so a
+  mask-brush UI in front of it would only honest-error). Build 2 ships:
+  - **`grab_text`** (Grab Text) — vision-OCR via the existing vision LLM
+    (transcribe-only, never fabricate/translate); metered; honest-errors with no
+    vision provider. Route + per-asset action.
+  - **Deterministic mockups** (`src/mediahub/mockups/`) — Smartmockups-class
+    product previews (poster/framed-print/phone-post/flatlay) drawn from
+    first-party PIL primitives. Key-free, byte-deterministic, brand-tinted, **not**
+    behind the AI seam (it generates nothing) — so it is allowed to be
+    deterministic under the engine rules. Feeds P6.19 print/merch previews.
+  - **Generation history + provenance viewer** (`/media-library/generated`) —
+    every `ai_generated` asset with its operation/model/prompt and the embedded
+    C2PA-class AI tag.
+
+  **Deferred (await a capable backend / later packages):** the generative edit
+  family's working implementation + mask-brush/expand studio UI (P5.6 or a
+  verified edit-capable provider), text-to-video b-roll (↗ P6.5), layer
+  extraction, 3D (deferred-last), deep card-editor integration, and batch
+  (↗ P6.15). The seam already exposes the edit family and honest-errors by
+  capability, so filling P5.6 lights them up with no facade/route change.
 
 ### Provider doctrine (in-house first, honest fall-through)
 
@@ -103,8 +120,9 @@ request payload are unchanged, so rendered backgrounds stay byte-identical
   detectors / ranker / colour-science are untouched), so no Council gate applied;
   the architecture is a decided roadmap direction.
 
-## Non-goals (Build 1)
+## Non-goals (still open after Build 2)
 
-Mask-brush UI, the edit family's working cloud implementation, text-to-video,
-grab-text, mockups, layer extraction, 3D, batch — all Build 2 or later. The
-deterministic engine is not AI-replaced.
+The edit family's working implementation + mask-brush/expand studio UI (needs
+P5.6 or a verified edit-capable provider), text-to-video b-roll (↗ P6.5), layer
+extraction, 3D (deferred-last), deep card-editor integration, and batch
+(↗ P6.15). The deterministic engine is not AI-replaced.

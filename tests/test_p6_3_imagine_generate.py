@@ -15,9 +15,14 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, tmp_path):
-    for var in ("GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_IMAGINE_PROVIDER",
-                "MEDIAHUB_IMAGINE_QUOTA_MONTHLY", "MEDIAHUB_IMAGINE_MODEL",
-                "MEDIAHUB_IMAGEN_MODEL"):
+    for var in (
+        "GOOGLE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MEDIAHUB_IMAGINE_PROVIDER",
+        "MEDIAHUB_IMAGINE_QUOTA_MONTHLY",
+        "MEDIAHUB_IMAGINE_MODEL",
+        "MEDIAHUB_IMAGEN_MODEL",
+    ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -127,7 +132,9 @@ def test_imagen_predict_request_shape(monkeypatch):
         def json():
             import base64
 
-            return {"predictions": [{"bytesBase64Encoded": base64.b64encode(_png_bytes()).decode()}]}
+            return {
+                "predictions": [{"bytesBase64Encoded": base64.b64encode(_png_bytes()).decode()}]
+            }
 
     def fake_post(url, headers=None, data=None, timeout=None):
         import json

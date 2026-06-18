@@ -28,8 +28,13 @@ def app_env(tmp_path, monkeypatch):
     for d in ("uploads_v4", "club_profiles", "runs_v4"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
     # Clear keys/quota for a known baseline.
-    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY",
-                "MEDIAHUB_IMAGINE_PROVIDER", "MEDIAHUB_IMAGINE_QUOTA_MONTHLY"):
+    for var in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MEDIAHUB_IMAGINE_PROVIDER",
+        "MEDIAHUB_IMAGINE_QUOTA_MONTHLY",
+    ):
         monkeypatch.delenv(var, raising=False)
 
     import mediahub.web.secrets_store as ss
@@ -75,8 +80,9 @@ def _seed_asset(st, tmp_path, profile_id="club-x"):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(_png_bytes())
     return st.get_store().save(
-        MediaAsset(id="", filename="seed.png", path=str(p), type="athlete_action",
-                   profile_id=profile_id)
+        MediaAsset(
+            id="", filename="seed.png", path=str(p), type="athlete_action", profile_id=profile_id
+        )
     )
 
 

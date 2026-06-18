@@ -12663,6 +12663,23 @@ def _bulk_ids_from_request(req, *keys: str) -> list[str]:
 # so neither surface has to touch the shared BASE_CSS cascade. The bar is hidden
 # only when JS is present AND nothing is selected (`html.mh-js .is-empty`), so a
 # no-JS visitor always sees the controls.
+_GENERATED_GALLERY_CSS = """
+.mh-gen-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:var(--sp-4)}
+.mh-gen-card{margin:0;background:var(--panel);border:1px solid var(--chrome);
+  border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.mh-gen-card img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;
+  background:var(--bg)}
+.mh-gen-card figcaption{padding:var(--sp-4);display:flex;flex-direction:column;gap:6px}
+.mh-gen-badge{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);
+  border-radius:999px;padding:2px 8px}
+.mh-gen-op{font-weight:600;text-transform:capitalize}
+.mh-gen-prompt{margin:0;font-size:13px;color:var(--ink);line-height:1.4}
+.mh-gen-meta{margin:0;font-size:12px}
+.mh-gen-actions{display:flex;gap:8px;margin-top:var(--sp-2);flex-wrap:wrap}
+"""
+
 _BULK_ACTIONS_CSS = """
 .mh-bulkbar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
   padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);
@@ -34573,10 +34590,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "'Generation failed.';go.disabled=false;}})"
                 ".catch(function(){s.textContent='Network error.';go.disabled=false;});});})();"
             )
+            _gen_hist_url = url_for("media_library_generated_page")
             imagine_panel = (
                 '<div class="card" id="mh-imagine">'
-                '<h2>Generate an image <span class="dim" style="font-weight:400">&middot; AI</span></h2>'
-                '<p class="dim" style="margin-bottom:var(--sp-5)">Create a brand-fitting backdrop '
+                '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-3);flex-wrap:wrap">'
+                '<h2 style="margin:0">Generate an image <span class="dim" style="font-weight:400">&middot; AI</span></h2>'
+                f'<a href="{_gen_hist_url}">View generated &rarr;</a>'
+                "</div>"
+                '<p class="dim" style="margin:var(--sp-3) 0 var(--sp-5)">Create a brand-fitting backdrop '
                 "or scene from a text prompt. Every image is provenance-stamped as AI-generated "
                 "and saved to this library. People are off by default.</p>"
                 + _note
@@ -35102,6 +35123,162 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "quota": _imagine_quota_json(pid),
             }
         )
+
+    @app.route("/api/media-library/<asset_id>/imagine/grab-text", methods=["POST"])
+    def api_imagine_grab_text(asset_id: str):
+        """Grab Text — vision-OCR the text out of an image into editable blocks."""
+        if not (_v8_ok and _imagine_ok):
+            return jsonify({"error": "imagine_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_profile"}), 403
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            grabbed = _imagine.grab_text(a.path, org_id=pid)
+        except Exception as exc:
+            return _imagine_error_response(exc)
+        return jsonify(
+            {
+                "ok": True,
+                "found": grabbed.found,
+                "text": grabbed.text,
+                "blocks": grabbed.blocks,
+                "quota": _imagine_quota_json(pid),
+            }
+        )
+
+    @app.route("/api/media-library/mockup-templates")
+    def api_mockup_templates():
+        """List the deterministic product-mockup templates (for the UI picker)."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        try:
+            from mediahub.mockups import list_templates
+
+            return jsonify({"templates": list_templates()})
+        except Exception:
+            return jsonify({"templates": []})
+
+    def _profile_accent_hex():
+        """Best-effort brand accent for tinting mockup scenes (None if unknown)."""
+        try:
+            prof = _active_profile()
+            bk = getattr(prof, "brand_kit", None) or {}
+            if isinstance(bk, dict):
+                val = bk.get("accent") or bk.get("primary") or bk.get("secondary")
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+        except Exception:
+            pass
+        return None
+
+    @app.route("/api/media-library/<asset_id>/mockup/<template>", methods=["POST", "GET"])
+    def api_media_library_mockup(asset_id: str, template: str):
+        """Composite an asset into a product mockup; serve the PNG directly.
+
+        Deterministic, key-free, brand-tinted — not an AI op, so no quota/stamp.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        try:
+            from mediahub.mockups import compose_mockup, MockupError
+        except Exception:
+            return jsonify({"error": "mockups_unavailable"}), 503
+        try:
+            art = Path(a.path).read_bytes()
+        except Exception:
+            return jsonify({"error": "no_source"}), 404
+        try:
+            png = compose_mockup(art, template, accent=_profile_accent_hex())
+        except MockupError as e:
+            return jsonify({"error": "unknown_template", "user_message": str(e)}), 404
+        except Exception as e:
+            return jsonify({"error": "mockup_failed", "user_message": str(e)}), 502
+        from flask import Response as _Response
+
+        return _Response(
+            png,
+            mimetype="image/png",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
+    @app.route("/media-library/generated")
+    def media_library_generated_page():
+        """Generation history + provenance viewer for this org's AI imagery."""
+        if not _v8_ok:
+            return redirect(url_for("media_library_page"))
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("media_library_page"))
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(profile_id=pid, asset_type="ai_generated")
+        except Exception:
+            assets = []
+        _ds_label = {
+            "ai_generated": "AI-generated",
+            "ai_composite": "AI-edited",
+        }
+        cards = ""
+        for a in assets[:200]:
+            ad = a.to_dict() if hasattr(a, "to_dict") else a
+            man = (ad.get("description_parsed") or {}).get("imagine") or {}
+            file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
+            op = str(man.get("operation") or "generate")
+            model = str(man.get("model") or "")
+            prompt = str(man.get("prompt") or ad.get("description_raw") or "")
+            dst = _ds_label.get(str(man.get("digital_source_type") or ""), "AI")
+            created = str(man.get("created_at") or ad.get("uploaded_at") or "")[:19].replace("T", " ")
+            cards += (
+                '<figure class="mh-gen-card">'
+                f'<a href="{file_url}" target="_blank" rel="noopener">'
+                f'<img loading="lazy" src="{file_url}" alt="">'
+                "</a>"
+                '<figcaption>'
+                f'<span class="mh-gen-badge">{_h(dst)}</span>'
+                f'<span class="mh-gen-op">{_h(op)}</span>'
+                f'<p class="mh-gen-prompt">{_h(prompt[:180])}</p>'
+                f'<p class="dim mh-gen-meta">{_h(model)}{" · " if model and created else ""}{_h(created)}</p>'
+                "<div class=\"mh-gen-actions\">"
+                f'<a class="btn secondary" href="{file_url}" download>Download</a>'
+                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id",""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
+                "</div>"
+                "</figcaption></figure>"
+            )
+        empty = (
+            '<div class="card"><p class="dim" style="text-align:center;padding:var(--sp-7)">'
+            "No AI-generated images yet. Use &ldquo;Generate an image&rdquo; on the "
+            f'<a href="{url_for("media_library_page")}">media library</a> to make one — '
+            "every image you create lands here with its provenance.</p></div>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Media library</span>'
+            "<h1>Generated images</h1>"
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f"<span>{_h(pid)}</span><span class=\"sep\">·</span>"
+            f'<span>{len(assets)} AI image{"" if len(assets)==1 else "s"}</span>'
+            f'<span class="sep">·</span><a href="{url_for("media_library_page")}">&larr; Library</a>'
+            "</div>"
+            '<p class="lede" style="margin-top:var(--sp-3)">Every AI-made image, with the '
+            "operation, model and prompt that produced it. Each file also carries an embedded "
+            "C2PA-class &ldquo;AI&rdquo; provenance tag wherever it travels.</p>"
+            "</section>"
+            + (f'<div class="mh-gen-grid">{cards}</div>' if cards else empty)
+            + f"<style>{_GENERATED_GALLERY_CSS}</style>"
+        )
+        return _layout("Generated images", body, active="media")
 
     @app.route("/api/media-library/bulk-delete", methods=["POST"])
     def api_media_library_bulk_delete():

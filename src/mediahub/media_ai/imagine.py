@@ -114,12 +114,25 @@ class SubjectLift:
     status: str  # "generated" | "cached" | "failed" | "unavailable"
 
 
+@dataclass
+class GrabbedText:
+    """Grab-Text result: text lifted out of an image, ready to re-set on-brand."""
+
+    text: str
+    blocks: list[str] = field(default_factory=list)
+
+    @property
+    def found(self) -> bool:
+        return bool(self.text.strip())
+
+
 # ---------------------------------------------------------------------------
 # Availability / capabilities
 # ---------------------------------------------------------------------------
 
-# The full P6.3 operation vocabulary the seam advertises (subject_lift is always
-# available because it is deterministic, not provider-backed).
+# The full P6.3 operation vocabulary the seam advertises (subject_lift and
+# grab_text are always available when their backend is — they are not Imagen
+# image-generation ops).
 ALL_OPERATIONS = (
     "generate",
     "similar",
@@ -129,6 +142,7 @@ ALL_OPERATIONS = (
     "upscale",
     "style_match",
     "subject_lift",
+    "grab_text",
 )
 
 
@@ -142,12 +156,24 @@ def active_provider_name() -> str:
     return p.name if p is not None else ""
 
 
+def vision_available() -> bool:
+    """True when a vision-capable LLM (for grab_text) is configured."""
+    try:
+        from mediahub.media_ai import llm
+
+        return bool(llm.is_available())
+    except Exception:
+        return False
+
+
 def available_operations() -> set[str]:
-    """Operations runnable right now: provider capabilities + deterministic ones."""
+    """Operations runnable right now: provider caps + deterministic/vision ones."""
     ops = {"subject_lift"}
     p = get_imagine_provider()
     if p is not None:
         ops |= set(p.capabilities())
+    if vision_available():
+        ops.add("grab_text")
     return ops
 
 
@@ -594,6 +620,62 @@ def subject_lift(
 
 
 # ---------------------------------------------------------------------------
+# Vision operation — grab text (Grab Text)
+# ---------------------------------------------------------------------------
+
+# A fixed, literal instruction — we transcribe what is in the image, never
+# invent or translate it. The deterministic-engine / honest rules apply: this
+# reads pixels, it does not fabricate copy.
+_GRAB_TEXT_PROMPT = (
+    "Transcribe every piece of visible text in this image exactly as written, "
+    "preserving wording, capitalisation and punctuation. Put each distinct text "
+    "block (heading, line, label) on its own line, top to bottom. Do not "
+    "translate, summarise, correct, or add anything. If there is no legible "
+    "text, reply with nothing."
+)
+
+
+def grab_text(
+    image_path: str | Path,
+    *,
+    org_id: Optional[str] = None,
+) -> GrabbedText:
+    """Lift the text out of an image via vision OCR (Grab Text).
+
+    Uses the configured vision LLM (Gemini/Anthropic) — it transcribes, it does
+    not generate imagery — so it is gated on a vision provider, not the image
+    provider. Honest-errors (:class:`ProviderNotConfigured`) when no vision LLM
+    is configured. Metered against the org quota (a billed vision call).
+    """
+    src = Path(image_path)
+    if not src.exists():
+        raise ImagineError("The image to grab text from does not exist.")
+
+    from mediahub.media_ai import llm
+    from mediahub.media_ai.llm import ClaudeUnavailableError
+
+    if not llm.is_available():
+        raise ProviderNotConfigured(
+            "Grab Text needs a vision-capable AI provider (Gemini or Anthropic). "
+            "None is configured on this deployment."
+        )
+    if org_id:
+        _enforce_quota(org_id, "grab_text")
+    try:
+        raw = llm.generate_vision([str(src)], _GRAB_TEXT_PROMPT)
+    except ClaudeUnavailableError as e:
+        _record(org_id, "grab_text", "vision", "", ok=False, error=e)
+        raise ProviderNotConfigured(str(e))
+    except Exception as e:
+        _record(org_id, "grab_text", "vision", "", ok=False, error=e)
+        raise ImagineError(f"Grab Text failed: {e}")
+    _record(org_id, "grab_text", "vision", "", ok=True)
+    text = (raw or "").strip()
+    blocks = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return GrabbedText(text=text, blocks=blocks)
+
+
+# ---------------------------------------------------------------------------
 # Provenance stamping
 # ---------------------------------------------------------------------------
 
@@ -656,11 +738,14 @@ __all__ = [
     "ImagineResult",
     "QuotaStatus",
     "SubjectLift",
+    "GrabbedText",
     "ImageInput",
     "ALL_OPERATIONS",
     "is_available",
     "active_provider_name",
+    "vision_available",
     "available_operations",
+    "grab_text",
     "monthly_quota",
     "check_quota",
     "generate",

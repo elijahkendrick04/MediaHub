@@ -124,6 +124,14 @@ def test_available_operations_includes_gemini_caps(monkeypatch):
 
 def test_all_operations_constant_is_the_full_vocabulary():
     im = _imagine()
-    for op in ("generate", "similar", "edit", "expand", "remove", "upscale",
-               "style_match", "subject_lift"):
+    for op in (
+        "generate",
+        "similar",
+        "edit",
+        "expand",
+        "remove",
+        "upscale",
+        "style_match",
+        "subject_lift",
+    ):
         assert op in im.ALL_OPERATIONS
