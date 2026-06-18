@@ -85,7 +85,11 @@ def _person_name(raw: str) -> str:
 
 def _normalise_name(raw: str) -> tuple[str | None, float]:
     s = _person_name(raw)
-    if len(s) >= 3 and re.search(r"[^\W\d_]", s):
+    # A real competitor name has letters and NO digits — a token like "H-7 L"
+    # or "Heat 7" is a heat/lane/relay-leg artifact, not a swimmer, and must not
+    # surface as a result. The letter test is Unicode-aware so accented names
+    # ("José", "Siân") survive.
+    if len(s) >= 3 and re.search(r"[^\W\d_]", s) and not re.search(r"\d", s):
         return s, 0.80
     return None, 0.0
 

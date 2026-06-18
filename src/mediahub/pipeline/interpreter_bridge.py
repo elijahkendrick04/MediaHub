@@ -170,6 +170,33 @@ def _slugify(value: str) -> str:
     return cleaned.lower() or "club"
 
 
+# SportSystems encodes finals in the event header: "EVENT 132 B FINAL OF EVENT
+# 101 …" (B final), "EVENT 131 FINAL OF EVENT 101 …" (the A/main final). Heats
+# carry no "FINAL" token. We surface the round so the summary can say which final
+# a result came from, and rank the A-final above the B/C-final for posting.
+_FINAL_LETTER_RE = re.compile(r"\b([ABC])\s+FINAL\b", re.IGNORECASE)
+_FINAL_OF_RE = re.compile(r"\bFINAL\s+OF\s+EVENT\b|\bFINAL\b", re.IGNORECASE)
+
+
+def _detect_final_round(raw_header: Optional[str]) -> tuple[str, int]:
+    """Return ``(label, rank)`` for an event header.
+
+    rank: 1 = A/main final (highest posting priority), 2 = B final, 3 = C final,
+    0 = heat / single timed final (no explicit final round).
+    """
+    h = (raw_header or "").strip()
+    if not h:
+        return "", 0
+    m = _FINAL_LETTER_RE.search(h)
+    if m:
+        letter = m.group(1).upper()
+        return f"{letter} Final", {"A": 1, "B": 2, "C": 3}[letter]
+    if _FINAL_OF_RE.search(h):
+        # "FINAL OF EVENT …" with no A/B/C qualifier is the main (A) final.
+        return "A Final", 1
+    return "", 0
+
+
 def _club_code(club_name: Optional[str]) -> str:
     """
     Derive a short stable code for a club from its name.
@@ -261,6 +288,7 @@ def interpreted_to_canonical(
         ev_course = _course_code(event.course) if event.course else course_default
         ev_gender = _gender_code(event.gender)
         ev_age_band = event.age_band or ""
+        ev_final_label, ev_final_rank = _detect_final_round(event.raw_header)
 
         for swim in event.swims or []:
             time_cs = _time_to_cs(swim.time)
@@ -324,6 +352,12 @@ def interpreted_to_canonical(
                     "interpreter_confidence": swim.confidence,
                     "raw_row": swim.raw_row,
                     "field_confidence": dict(swim.field_confidence or {}),
+                    # Round/final provenance: a swim from a B-final must read
+                    # as "B Final", not be confused with the A-final win, and
+                    # the A-final (rank 1) outranks the B-final (rank 2) for
+                    # posting. Empty label / rank 0 = heat or single timed final.
+                    "final_label": ev_final_label,
+                    "final_rank": ev_final_rank,
                 },
             )
             meet.results.append(result)

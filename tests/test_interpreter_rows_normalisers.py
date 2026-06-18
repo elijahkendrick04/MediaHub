@@ -180,6 +180,14 @@ class TestNormaliseName:
         assert v is None
         assert c == 0.0
 
+    @pytest.mark.parametrize("raw", ["H-7 L", "Heat 7", "Lane 4", "H-7", "1. Foo"])
+    def test_names_with_digits_are_rejected(self, raw: str) -> None:
+        # Heat/lane/relay-leg fragments (which contain digits) are not swimmers
+        # and must never surface as results (the "H-7 L" in the review summary).
+        v, c = _normalise_name(raw)
+        assert v is None
+        assert c == 0.0
+
 
 # ---------------------------------------------------------------------------
 # _normalise_club
