@@ -75,7 +75,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `2081e297c` · Merge pull request #806: docs(readme) refresh to current repo [skip render]
+**Last updated:** 2026-06-18 · `e1bfbbe47` · feat(P6.2): conversational creative assistant (club content copilot) (#809)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -136,7 +136,6 @@ Phase 6 are hard-gated** (🔒): they don't begin until Phases 1–4 are complet
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **P6.2** · Phase 2 (Creative suite) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam · ❌ **NOT STARTED**
 - **P6.3** · Phase 2 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam, with an **in-house local-model backend the default** (a licence-clean self-hosted diffusion model — the P5.6 path; cloud generators optional on the same seam): generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · ❌ **NOT STARTED**
 - **P6.4** · Phase 2 (Creative suite) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
 - **P6.5** · Phase 2 (Creative suite) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
@@ -1172,6 +1171,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `f35a53327` | fix(p6.2): rename nested _card_facts → _assistant_card_facts; refresh env inventory |
+| 2026-06-18 | `156f9616d` | feat(p6.2): conversational creative assistant (club content copilot) |
 | 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
 | 2026-06-18 | `9279ddd8c` | style(p6.1): apply ruff-format + drop unused import (pre-commit hygiene) |
 | 2026-06-18 | `b6508062c` | feat(p6.1): smart format catalogue + format transformer |
@@ -1181,6 +1182,4 @@ list and the auto table below, not here.
 | 2026-06-17 | `f9260f6e3` | Perf: cache static assets, coalesce scroll handler, skip off-screen card paint |
 | 2026-06-17 | `a4d470ec4` | Apply ruff-format (collapse single-line audience-icon CSS string) |
 | 2026-06-17 | `3f29519c1` | Tidy up the home page: fix invisible navy elements, wrong icon, unstyled kickers |
-| 2026-06-17 | `8844c7a45` | Apply ruff-format to sample_graphics |
-| 2026-06-17 | `52091bb6e` | Show real sample outputs in the landing engine showcase |
 <!-- /ROADMAP:ACTIVITY -->
