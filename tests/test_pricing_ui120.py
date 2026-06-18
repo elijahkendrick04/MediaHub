@@ -292,3 +292,20 @@ def test_value_for_unknown_plan_is_false():
 
     row = billing.feature_rows()[0]
     assert row.value_for("nonsense-plan") is False
+
+
+# --------------------------------------------------------------------------
+# a11y regression: empty-table-header (axe rule)
+# --------------------------------------------------------------------------
+
+
+def test_comparison_table_first_header_not_empty(monkeypatch, tmp_path):
+    """The first <th scope="col"> in the comparison table must not be empty.
+
+    axe-core 'empty-table-header' fires when a <th> has no accessible text.
+    The feature-label column has no visible heading by design, so we supply a
+    visually-hidden label via the .mh-sr span.
+    """
+    html = _get(_make_app(monkeypatch, tmp_path, with_stripe=False))
+    # The first th in the comparison thead carries a .mh-sr label.
+    assert 'scope="col"><span class="mh-sr">Feature</span>' in html
