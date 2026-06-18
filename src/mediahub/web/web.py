@@ -16473,19 +16473,20 @@ def create_app() -> Flask:
         # raw steps or internal error text.
         _is_dev = _auth.is_dev_operator()
         _dev_stepcount = (
-            '<span class="sep">·</span><span id="mh-step-count">0 steps</span>'
-            if _is_dev else ""
+            '<span class="sep">·</span><span id="mh-step-count">0 steps</span>' if _is_dev else ""
         )
         _dev_steploader = (
             '<div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>'
-            if _is_dev else ""
+            if _is_dev
+            else ""
         )
         _dev_techlog = (
             '<details style="margin-top:var(--sp-5)">'
             '<summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>'
             '<div class="progress-log" id="log" style="margin-top:var(--sp-3)">Starting&hellip;</div>'
             "</details>"
-            if _is_dev else ""
+            if _is_dev
+            else ""
         )
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
@@ -16512,7 +16513,7 @@ def create_app() -> Flask:
 (function() {{
   var STATUS_URL = {json.dumps(_status_url)};
   var REVIEW_URL = {json.dumps(_review_url)};
-  var IS_DEV = {('true' if _is_dev else 'false')};
+  var IS_DEV = {("true" if _is_dev else "false")};
   // Poll cadence. Bounded backoff + a hard cap so a stuck/missing run can't
   // spin the spinner forever (the unbounded earlier version also helped trip
   // gunicorn's --max-requests recycle, which killed in-flight runs).
