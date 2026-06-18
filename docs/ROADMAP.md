@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `efd3e7c3c` · Merge pull request #823: Speed up "results from a link" with concurrent read-ahead + richer progress
+**Last updated:** 2026-06-18 · `ab8b8bb44` · Merge pull request #822: shard the unit-test gate for ~linear speedup [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1232,8 +1232,10 @@ list and the auto table below, not here.
 | 2026-06-18 | `7687e782b` | style(imagine): ruff-format the local backend (wrap one long line) |
 | 2026-06-18 | `477a4912f` | feat(imagine): in-house local diffusion image backend (roadmap 1.1) |
 | 2026-06-18 | `597ba2e7d` | Speed up "results from a link" with concurrent read-ahead + richer progress UI |
+| 2026-06-18 | `38170fdab` | ci(unit-suite): widen shard timeout to clear cold-cache Chromium installs |
+| 2026-06-18 | `63189c842` | ci: exclude tool-generated .test_durations from end-of-file-fixer |
+| 2026-06-18 | `d7e714e94` | ci(unit-suite): commit pytest-split duration map for balanced shards |
 | 2026-06-18 | `a81ba2d1c` | docs(roadmap): keep dated Changelog entries on their original IDs |
+| 2026-06-18 | `d820b0767` | ci(unit-suite): shard the full pytest gate across a matrix for ~linear speedup |
 | 2026-06-18 | `b67dd26e8` | docs(roadmap): renumber forward plan into dependency-correct build order |
-| 2026-06-18 | `b0957d122` | Detect A/B finals from SportSystems event headers and carry on each result |
-| 2026-06-18 | `a3bee2c50` | Reject heat/lane artifacts (e.g. 'H-7 L') as swimmer names |
 <!-- /ROADMAP:ACTIVITY -->
