@@ -35239,20 +35239,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             model = str(man.get("model") or "")
             prompt = str(man.get("prompt") or ad.get("description_raw") or "")
             dst = _ds_label.get(str(man.get("digital_source_type") or ""), "AI")
-            created = str(man.get("created_at") or ad.get("uploaded_at") or "")[:19].replace("T", " ")
+            created = str(man.get("created_at") or ad.get("uploaded_at") or "")[:19].replace(
+                "T", " "
+            )
             cards += (
                 '<figure class="mh-gen-card">'
                 f'<a href="{file_url}" target="_blank" rel="noopener">'
                 f'<img loading="lazy" src="{file_url}" alt="">'
                 "</a>"
-                '<figcaption>'
+                "<figcaption>"
                 f'<span class="mh-gen-badge">{_h(dst)}</span>'
                 f'<span class="mh-gen-op">{_h(op)}</span>'
                 f'<p class="mh-gen-prompt">{_h(prompt[:180])}</p>'
                 f'<p class="dim mh-gen-meta">{_h(model)}{" · " if model and created else ""}{_h(created)}</p>'
-                "<div class=\"mh-gen-actions\">"
+                '<div class="mh-gen-actions">'
                 f'<a class="btn secondary" href="{file_url}" download>Download</a>'
-                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id",""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
+                f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id", ""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
                 "</div>"
                 "</figcaption></figure>"
             )
@@ -35267,8 +35269,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             '<span class="mh-hero-eyebrow">Media library</span>'
             "<h1>Generated images</h1>"
             '<div class="strap" style="margin-top:var(--sp-3)">'
-            f"<span>{_h(pid)}</span><span class=\"sep\">·</span>"
-            f'<span>{len(assets)} AI image{"" if len(assets)==1 else "s"}</span>'
+            f'<span>{_h(pid)}</span><span class="sep">·</span>'
+            f"<span>{len(assets)} AI image{'' if len(assets) == 1 else 's'}</span>"
             f'<span class="sep">·</span><a href="{url_for("media_library_page")}">&larr; Library</a>'
             "</div>"
             '<p class="lede" style="margin-top:var(--sp-3)">Every AI-made image, with the '
