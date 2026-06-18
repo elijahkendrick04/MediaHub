@@ -1158,7 +1158,7 @@ def _band_chip(band: str) -> str:
     meaning = _BAND_MEANING.get(b, "")
     return (
         f'<span class="tag {cls}" style="font-size:10px" title="{_h(meaning)}">'
-        f'{_h(b.upper().replace("_", " "))}</span>'
+        f"{_h(b.upper().replace('_', ' '))}</span>"
     )
 
 
@@ -1342,7 +1342,7 @@ _NEAR_MISS: dict[str, tuple[str, str]] = {
     ),
     "ambiguous_swimmer_match": (
         "Swimmer unconfirmed",
-        "We couldn't be sure which swimmer this was, so we held it back " "rather than guess.",
+        "We couldn't be sure which swimmer this was, so we held it back rather than guess.",
     ),
     "good_placing_weak_field": (
         "Good place, light field",
@@ -12431,7 +12431,7 @@ def _parse_notes_card(warnings: list) -> str:
         )
     more_html = (
         f'<p class="muted" style="font-size:12px;margin-top:8px">+{extra} more '
-        f'note{"s" if extra != 1 else ""} not shown.</p>'
+        f"note{'s' if extra != 1 else ''} not shown.</p>"
         if extra > 0
         else ""
     )
@@ -14462,7 +14462,7 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity</span>'
-            '<h1>Recent runs</h1>'
+            "<h1>Recent runs</h1>"
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
             f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
@@ -14621,7 +14621,7 @@ def create_app() -> Flask:
                     f'<article class="mh-feed-item mh-reveal" data-kind="{_h(ev.kind)}" '
                     f'data-q="{_h(search_hay)}">'
                     f'<div class="mh-feed-icon" data-tone="{_h(ev.status_tone)}">'
-                    f'{icons.get(ev.kind, "")}</div>'
+                    f"{icons.get(ev.kind, '')}</div>"
                     '<div class="mh-feed-body">'
                     '<div class="mh-feed-head">'
                     f'<span class="mh-feed-kind">{_h(kind_labels.get(ev.kind, ev.kind))}</span>'
@@ -14828,7 +14828,7 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity feed</span>'
-            '<h1>What&rsquo;s happened</h1>'
+            "<h1>What&rsquo;s happened</h1>"
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
             f"<span>{counts['all']:02d} {'event' if counts['all'] == 1 else 'events'}{showing}</span>"
@@ -17026,7 +17026,7 @@ def create_app() -> Flask:
             n = agg.get("count", 0)
             if not n:
                 return ""
-            s = f'{n} moment{"s" if n != 1 else ""}'
+            s = f"{n} moment{'s' if n != 1 else ''}"
             best = agg.get("band") or ""
             if best:
                 s += f" · best {best}"
@@ -17092,7 +17092,7 @@ def create_app() -> Flask:
                     f'<a role="tab" class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
                     f'data-wf-filter-to="{_wf_opt[0]}" '
                     f'aria-selected="{"true" if _wf_is_on else "false"}">'
-                    f'{_wf_opt[1]}'
+                    f"{_wf_opt[1]}"
                     f'<span class="count" id="{_wf_tab_count_id[_wf_opt[0]]}">{_wf_count_for_opt}</span>'
                     f"</a>"
                 )
@@ -17391,7 +17391,7 @@ def create_app() -> Flask:
         if _run_is_sample(run_id):
             _sample_banner_html = (
                 '<div class="card" style="border:1px solid var(--accent);'
-                'background:var(--surface);display:flex;gap:16px;align-items:center;'
+                "background:var(--surface);display:flex;gap:16px;align-items:center;"
                 'flex-wrap:wrap;justify-content:space-between;margin-bottom:var(--sp-5)">'
                 '<div style="flex:1;min-width:min(240px,100%)">'
                 '<div style="font-family:var(--font-mono);font-size:10.5px;'
@@ -17518,12 +17518,12 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
       <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
       <div class="mh-bulkbar-actions">
         <button type="submit" class="btn" data-mh-bulk="approve" name="op" value="approved"
-                formaction="{url_for('api_cards_bulk_status', run_id=run_id)}">Approve</button>
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}">Approve</button>
         <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
-                formaction="{url_for('api_cards_bulk_status', run_id=run_id)}"
+                formaction="{url_for("api_cards_bulk_status", run_id=run_id)}"
                 data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
         <button type="submit" class="btn secondary" data-mh-bulk="export"
-                formaction="{url_for('api_cards_bulk_export', run_id=run_id)}">Export</button>
+                formaction="{url_for("api_cards_bulk_export", run_id=run_id)}">Export</button>
       </div>
     </div>
     <div id="ach-list" data-wf-filter="{_h(_wf_filter)}">{ach_rows_html_wf}</div>
@@ -19405,8 +19405,7 @@ Relay team broke club record"></textarea>
             params_html = ""
             if params:
                 rows = "".join(
-                    f"<tr><td><code>{_h(name)}</code></td><td>{_h(req)}</td>"
-                    f"<td>{desc}</td></tr>"
+                    f"<tr><td><code>{_h(name)}</code></td><td>{_h(req)}</td><td>{desc}</td></tr>"
                     for name, req, desc in params
                 )
                 params_html = (
@@ -24371,7 +24370,7 @@ function mhPlanGenerate(btn) {{
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
                         _n_ach = sw["n_achievements"]
-                        _ach_label = f'{_n_ach} achievement{"s" if _n_ach != 1 else ""}'
+                        _ach_label = f"{_n_ach} achievement{'s' if _n_ach != 1 else ''}"
                         # Decorative chip (it lives inside the card link, so it
                         # stays aria-hidden / out of the tab order); the link's
                         # own text carries the same name + count for AT.
@@ -24593,11 +24592,11 @@ function mhPlanGenerate(btn) {{
         # the spotlight pack's band counts — all real figures, never invented.
         _hero_club = (run_data.get("profile_display") or run_data.get("club_filter") or "").strip()
         _hero_n = pack["n_achievements"]
-        _hero_stat = f'{_hero_n} moment{"s" if _hero_n != 1 else ""}'
+        _hero_stat = f"{_hero_n} moment{'s' if _hero_n != 1 else ''}"
         if pack["n_elite"]:
-            _hero_stat = f'{pack["n_elite"]} elite · {_hero_stat}'
+            _hero_stat = f"{pack['n_elite']} elite · {_hero_stat}"
         elif pack["n_strong"]:
-            _hero_stat = f'{pack["n_strong"]} strong · {_hero_stat}'
+            _hero_stat = f"{pack['n_strong']} strong · {_hero_stat}"
         _hero_avatar = _athlete_avatar(
             pack["swimmer_name"],
             club=_hero_club,
@@ -34410,7 +34409,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <h1>Library</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(profile_id)}</span><span class="sep">·</span>
-    <span><span data-mh-asset-count>{len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"}</span>
+    <span><span data-mh-asset-count>{len(assets):03d}</span> {
+            "asset" if len(assets) == 1 else "assets"
+        }</span>
   </div>
 </section>
 
@@ -34453,9 +34454,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             else ""
         }
 <div class="card">
-  <div class="strap" style="margin-bottom:var(--sp-3)"><span data-mh-asset-count>{len(assets):03d}</span> {
-            "asset" if len(assets) == 1 else "assets"
-        } in library</div>
+  <div class="strap" style="margin-bottom:var(--sp-3)"><span data-mh-asset-count>{
+            len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"} in library</div>
   <form id="mh-ml-bulk" method="post">
     <div class="mh-bulkbar is-empty" id="mh-ml-bulkbar" role="group" aria-label="Bulk photo actions"
          data-mh-bulkbar="media" data-form="mh-ml-bulk" data-count="mh-ml-count"
@@ -34463,12 +34463,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       <span class="mh-bulkbar-count" id="mh-ml-count">0 selected</span>
       <div class="mh-bulkbar-actions">
         <button type="submit" class="btn secondary" data-mh-bulk="approve"
-                formaction="{url_for('api_media_library_bulk_approve')}"
+                formaction="{url_for("api_media_library_bulk_approve")}"
                 data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
         <button type="submit" class="btn secondary" data-mh-bulk="export"
-                formaction="{url_for('api_media_library_bulk_export')}">Export ZIP</button>
+                formaction="{url_for("api_media_library_bulk_export")}">Export ZIP</button>
         <button type="submit" class="btn danger" data-mh-bulk="delete"
-                formaction="{url_for('api_media_library_bulk_delete')}"
+                formaction="{url_for("api_media_library_bulk_delete")}"
                 data-confirm="Delete {{n}} selected photo(s)? Graphics already rendered keep their copy.">Delete</button>
       </div>
     </div>
@@ -37703,7 +37703,9 @@ voice, and queues them for one-click approval.</p>
 
         # Profile + brand kit + media library (mirrors api_create_graphic).
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
-        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
         brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
@@ -37789,7 +37791,9 @@ voice, and queues them for one-click approval.</p>
             from mediahub.graphic_renderer.render import render_brief
 
             out_dir.mkdir(parents=True, exist_ok=True)
-            skip_cutout = getattr(new_brief, "photo_treatment", "") == "no-photo" or not athlete_path
+            skip_cutout = (
+                getattr(new_brief, "photo_treatment", "") == "no-photo" or not athlete_path
+            )
             with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
                 res = render_brief(
                     new_brief,
