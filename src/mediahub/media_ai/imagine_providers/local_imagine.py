@@ -332,7 +332,11 @@ def _images_from_response(r) -> list[GeneratedImage]:
     ctype = (r.headers.get("Content-Type") or "").lower()
     if ctype.startswith("image/"):
         data = r.content or b""
-        return [GeneratedImage(data=data, mime=ctype.split(";")[0].strip() or _sniff_mime(data))] if data else []
+        return (
+            [GeneratedImage(data=data, mime=ctype.split(";")[0].strip() or _sniff_mime(data))]
+            if data
+            else []
+        )
 
     try:
         body = r.json()
