@@ -92,6 +92,15 @@ render = [
 dev = [
   "pytest>=9.0.3",
   "pytest-xdist>=3.8.0",
+  # pytest-split shards the full suite across CI matrix jobs (unit-suite.yml):
+  # `--splits N --group G` deterministically partitions the collected tests into
+  # N balanced groups (by the committed `.test_durations` map), so N runners each
+  # take ~1/N of the wall-clock. Coverage is total — every collected test lands in
+  # exactly one group, and tests absent from the durations map are still run (they
+  # just fall back to an average-time estimate for balancing). Refresh the map with
+  # `pytest tests/ --ignore-glob='tests/test_autotest_*.py' --store-durations` and
+  # commit `.test_durations`. MIT-licensed.
+  "pytest-split>=0.10.0",
   # reportlab is used by test_interpreter_corpus to synthesise PDF
   # fixtures so the corpus tests can run without external sample files.
   "reportlab>=4.5.1",
