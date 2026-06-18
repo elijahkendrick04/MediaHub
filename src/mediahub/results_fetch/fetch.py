@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, runtime_checkable
 from urllib.parse import urljoin, urlparse
@@ -320,6 +321,12 @@ _HEADERS = {
 
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 
+# Keep-alive connection-pool size. A results crawl hits one host many times, so a
+# pooled session reuses TCP+TLS connections (a fresh ``requests.get`` per page
+# pays a full handshake every time). Sized comfortably above the crawl's default
+# static-fetch concurrency so parallel read-ahead never starves on connections.
+_POOL_MAXSIZE = 24
+
 
 def _read_capped(response, cap: int) -> Optional[bytes]:
     """Stream up to ``cap`` bytes; ``None`` if the body exceeds the cap."""
@@ -343,15 +350,59 @@ class StaticBackend:
     Mirrors ``safe_fetch``'s philosophy — manual redirect following with the host
     re-validated at every hop — but returns raw *bytes* (not stripped text) so a
     PDF/CSV/JSON/XLSX/image download survives intact for the interpreter.
+
+    One backend == one crawl: a single pooled, keep-alive ``requests.Session`` is
+    shared across every page (and across the crawl's parallel read-ahead threads —
+    a Session is safe for concurrent requests), so repeated hits on the same host
+    reuse connections instead of re-handshaking TCP+TLS each time. ``fetch`` itself
+    is unchanged in behaviour: same SSRF re-validation, same allowlist, same byte
+    cap — only the transport is pooled.
     """
 
     limits: FetchLimits = field(default_factory=FetchLimits)
     tier: str = "static"
+    _session: object = field(default=None, init=False, repr=False, compare=False)
+    _session_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+
+    def _get_session(self):
+        """The shared keep-alive session, built once (thread-safe), or ``None``
+        when ``requests`` is unavailable so the caller falls back gracefully."""
+        sess = self._session
+        if sess is not None:
+            return sess
+        with self._session_lock:
+            if self._session is None:
+                try:
+                    import requests  # noqa: PLC0415
+                    from requests.adapters import HTTPAdapter  # noqa: PLC0415
+                except Exception:  # pragma: no cover - requests is a hard dependency
+                    return None
+                s = requests.Session()
+                adapter = HTTPAdapter(
+                    pool_connections=4, pool_maxsize=_POOL_MAXSIZE, max_retries=0
+                )
+                s.mount("http://", adapter)
+                s.mount("https://", adapter)
+                s.headers.update(_HEADERS)
+                self._session = s
+            return self._session
+
+    def close(self) -> None:
+        """Release the pooled connections. Idempotent; safe to call once a crawl
+        finishes. A new ``fetch`` after close lazily rebuilds the session."""
+        sess = self._session
+        self._session = None
+        if sess is not None:
+            try:
+                sess.close()
+            except Exception:  # pragma: no cover - best-effort teardown
+                pass
 
     def fetch(self, url: str) -> Optional[FetchedPage]:
-        try:
-            import requests  # noqa: PLC0415
-        except Exception:  # pragma: no cover - requests is a hard dependency
+        session = self._get_session()
+        if session is None:  # pragma: no cover - requests is a hard dependency
             return None
 
         current = (url or "").strip()
@@ -359,12 +410,11 @@ class StaticBackend:
             if not is_url_safe(current):
                 return None
             try:
-                resp = requests.get(
+                resp = session.get(
                     current,
                     timeout=self.limits.static_timeout_s,
                     allow_redirects=False,  # follow manually, re-validating each hop
                     stream=True,
-                    headers=_HEADERS,
                 )
             except Exception:
                 return None

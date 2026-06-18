@@ -139,6 +139,69 @@ def test_status_endpoint_redirects_to_configure(app_mod, monkeypatch):
     assert wm._url_job_get(job_id)["run_id"] in payload["redirect"]
 
 
+def test_job_progress_percent_reflects_live_frontier(app_mod, monkeypatch):
+    """The fetching-phase percent is driven by the crawl's live ``CrawlProgress``
+    (fraction of the discovered frontier read), and the status text uses the
+    'page N of ~M · K with results' shape the redesigned UI parses."""
+    app, wm = app_mod
+    from mediahub.results_fetch.crawl import CrawlProgress, CrawlResult, FileProvenance
+
+    def _fake(url, **kwargs):
+        cb = kwargs.get("progress_cb")
+        if cb is not None:
+            cb(
+                CrawlProgress(
+                    pages_visited=8,
+                    kept=6,
+                    total_bytes=4096,
+                    frontier_remaining=2,
+                    discovered_total=10,
+                )
+            )
+        return CrawlResult(
+            files={"agb/e1.html": _EVENT_HTML.encode()},
+            provenance={
+                "agb/e1.html": FileProvenance(
+                    source_url=url + "e1",
+                    tier="static",
+                    trigger=None,
+                    content_type="text/html",
+                    fetched_at=0.0,
+                )
+            },
+            entry_url=url,
+            pages_visited=10,
+            kept=1,
+            total_bytes=len(_EVENT_HTML),
+        )
+
+    monkeypatch.setattr("mediahub.results_fetch.crawl.crawl_results_site", _fake)
+
+    calls: list[dict] = []
+    orig_set = wm._url_job_set
+
+    def _recording_set(job_id, **fields):
+        calls.append(dict(fields))
+        return orig_set(job_id, **fields)
+
+    monkeypatch.setattr(wm, "_url_job_set", _recording_set)
+
+    job_id = "abc123abc123"
+    wm._url_job_set(job_id, status="queued")
+    wm._run_url_fetch_job(job_id, "https://results.swim.test/agb/", None)
+
+    fetching = [c for c in calls if c.get("phase") == "fetching"]
+    assert fetching, "no fetching-phase progress was emitted"
+    snap = fetching[-1]
+    # 8 of 10 frontier read → ~59%, inside the fetching band, never the full bar.
+    assert 8 <= snap["percent"] <= 72
+    assert "page 8 of ~10" in snap["progress"]
+    assert "6 with results" in snap["progress"]
+    # The job still completes and the bar reaches 100 at done.
+    assert wm._url_job_get(job_id)["status"] == "done"
+    assert wm._url_job_get(job_id)["percent"] == 100
+
+
 def test_route_starts_background_job(app_mod, monkeypatch):
     app, wm = app_mod
     monkeypatch.setattr(
