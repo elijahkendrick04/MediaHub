@@ -133,11 +133,28 @@ nothing; (5) custom-size + blank-start escape hatch that still seeds from brand
 tokens. Multi-page formats (programmes, yearbooks, photo books) compose
 existing single-card renders into a paged PDF via the P6.12 document engine.
 
+**Status — shipped v1 (2026-06-18).** The catalogue and transformer are live:
+`club_platform/format_catalog.py` (typed `FormatSpec` registry — per-channel
+sizes for every social platform + off-feed club formats: poster, flyer,
+certificate, coach card, athlete one-pager, season calendar, wallpapers — with
+per-sport availability sourced from the sport profile, `custom_format()` for
+any px/mm/cm/in size, and `aspect_class` parity-tested against the renderer);
+`turn_into/transform.py` (`transform_design` re-targets an approved design's
+brief to any format by re-laying-out the composition for the new aspect through
+the design-spec director, with the deterministic per-aspect picker as the
+honest floor, preserving the approved palette/headline/stats/photo;
+`blank_brief_for_format` is the blank-start escape hatch); the web surface is
+`GET /api/formats` + the per-card **Reformat…** control posting to
+`POST /api/runs/<run_id>/card/<card_id>/reformat` (serves the re-rendered PNG).
+Deferred by design to their owning packages: multi-page composition → P6.12,
+print-ready CMYK/bleed output → P6.19, free-form manual element editing →
+P6.24, save-as-org-format presets and bulk autofill → P6.11/P6.15.
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
-| C1 | Social posts for every platform (IG posts/Stories/Reels, FB posts/covers, TikTok, YouTube thumbnails/banners, X, Pinterest, LinkedIn posts/banners, Tumblr, Lemon8) | 🔵 feed/story/reel shipped for IG-class sizes → 🆕 P6.1 per-channel `FormatSpec` presets for the rest |
+| C1 | Social posts for every platform (IG posts/Stories/Reels, FB posts/covers, TikTok, YouTube thumbnails/banners, X, Pinterest, LinkedIn posts/banners, Tumblr, Lemon8) | ✅ P6.1 per-channel `FormatSpec` presets shipped for IG/FB/X/LinkedIn/Pinterest/TikTok/YouTube sizes (Tumblr/Lemon8 are one more `FormatSpec` row each when asked) |
 | C1 | Posters · Flyers · Banners/yard signs (digital design side) | 🆕 P6.1 formats (`poster`, `flyer`, `event_banner`) from meet/fixture data; print output ↗ P6.19 |
 | C1 | Business cards | 🆕 P6.1 `coach_card` / committee contact card from roster + brand kit; print ↗ P6.19 |
 | C1 | Invitations · Greeting/thank-you cards · Postcards | 🆕 P6.1 club-event formats (awards night invite, volunteer thank-you, sponsor thank-you postcard) fed by `manual_entry` + sponsor kit |
@@ -150,14 +167,14 @@ existing single-card renders into a paged PDF via the P6.12 document engine.
 | C1 | Menus | 🆕 P6.1 `event_programme` (gala day programme/canteen sheet) from meet schedule |
 | C1 | Photo books | 🆕 P6.1 `season_yearbook` (multi-page, media-library-driven; composed via P6.12) |
 | C1 | Logos | 🆕 P6.1 crest/lockup variant generation (monochrome, knockout, badge forms) on top of the shipped DesignTokens lockup vocabulary — assistive, never replacing a club's crest |
-| C1 | Custom-size designs (px/mm/in) | 🆕 P6.1 custom `FormatSpec` dimensions incl. print units |
+| C1 | Custom-size designs (px/mm/in) | ✅ P6.1 `custom_format()` — any px/mm/cm/in canvas, bounds-checked |
 | C1 | Multi-design projects ("One Design") | 🆕 P6.1 — a content pack already groups mixed outputs; add mixed-format packs (e.g. recap + poster + certificate batch in one pack) |
-| C1 | Blank designs from scratch (preset/custom dimensions) | 🆕 P6.1 blank-start escape hatch seeded from brand tokens; manual editing ↗ P6.24 |
+| C1 | Blank designs from scratch (preset/custom dimensions) | ✅ P6.1 `blank_brief_for_format()` blank-start seeded from brand tokens; manual editing ↗ P6.24 |
 | C10 | 1M+ template library · templates by type/category | 🚫 adapted — archetype catalogue growth (12 → per-format sets) + format catalogue; deliberately *not* a template marketplace |
 | C10 | AI template generation from prompt | ✅ shipped — the Tier B design-spec director generates layout specs from data/brief (`creative_brief/ai_director.py`); prompt-first entry ↗ P6.2 |
 | C10 | Quick Create | 🆕 P6.1 one-click "make the obvious pack" per event, riding the P1.3 planner's top item |
 | C10 | Brand Templates / bulk template autofill | ↗ P6.11 (locked brand formats) + P6.15 (autofill at scale) |
-| C2 | Magic Switch (convert design to another format / resize / reformat; deck→doc transforms) | 🆕 P6.1 format transformer (`turn_into` v2 through the director); translation half ↗ P6.23 |
+| C2 | Magic Switch (convert design to another format / resize / reformat; deck→doc transforms) | ✅ P6.1 format transformer shipped (`turn_into.transform_design` re-lays-out through the director, deterministic floor); translation half ↗ P6.23 |
 | A1 | 220,000+ professional templates | 🚫 adapted — same as C10: archetypes + formats, not blanks |
 | A1 | Template categories (social, flyers, posters, banners, logos, invitations, cards, business cards, resumes, cover letters, brochures, menus, pamphlets, leaflets, certificates, worksheets, class schedules, book covers, album covers, product labels, gift certificates, ads, memes, collages, wallpapers, t-shirts) | 🆕 P6.1 — each becomes a `FormatSpec` where it has a club meaning (class schedule → training schedule; book/album cover → yearbook/season-mix cover; gift certificate → fundraiser voucher; meme → `meme` format with club in-jokes via caption engine; ads ↗ P6.16; collages ↗ P6.4; t-shirts ↗ P6.19; product labels ↗ P6.19) |
 | A1 | Presentations, documents, web pages, carousels | carousels 🆕 P6.1 multi-image carousel format; presentations/docs ↗ P6.12; web pages ↗ P6.13 |
@@ -168,7 +185,7 @@ existing single-card renders into a paged PDF via the P6.12 document engine.
 | A1 | Quick replace (swap content fast) | 🆕 P6.1 re-run a saved format against new data (the data-driven analogue of quick-replace) |
 | A1 | Brand-controlled / locked templates with style restrictions | ↗ P6.11 brand controls |
 | A8 | Switch between presentation and design | 🆕 P6.1 format transformer covers deck↔card transforms |
-| A18 | Resize design for any channel (one click) | 🆕 P6.1 per-channel re-render from the persisted CreativeBrief (not pixel scaling) |
+| A18 | Resize design for any channel (one click) | ✅ P6.1 per-channel re-render from the persisted CreativeBrief (re-layout, not pixel scaling) |
 | A2 | Generate coloring pages (text → printable line art) | 🆕 P6.1 `kids_activity_sheet` format (mascot/venue colouring pages for junior sections) via the P6.3 image provider with line-art style |
 | A10 | Drawing worksheets (100+ templates) · combine into coloring books | 🆕 P6.1 same `kids_activity_sheet` family; multi-page book via P6.12 |
 

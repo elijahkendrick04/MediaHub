@@ -4349,6 +4349,93 @@ function addGraphicToPack(btn, visualId) {
   _tick();
   setInterval(_tick, 30000);
 })();
+
+// ---- P6.1 — format catalogue picker + reformat ("turn this into that") ----
+// Re-target an approved card design to any catalogue size/format. The server
+// re-lays-out the approved brief for the new aspect (director + deterministic
+// floor) and returns a PNG; we show it inline with a download link.
+var _formatCatalogCache = null;
+function reformatToggle(btn, cardId) {
+  var panel = document.querySelector('.reformat-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  // First click: inline style is "none"; data-open tracks the toggle state.
+  var showing = panel.getAttribute('data-open') === '1';
+  if (showing) { panel.style.display = 'none'; panel.setAttribute('data-open', '0'); return; }
+  panel.style.display = ''; panel.setAttribute('data-open', '1');
+  if (panel.dataset.built === '1') return;
+  panel.innerHTML = '<div style="font-size:12px;color:var(--ink-muted)">Loading formats…</div>';
+  var build = function(cat) { _formatCatalogCache = cat; panel.dataset.built = '1'; _renderReformatPicker(panel, cardId, cat); };
+  if (_formatCatalogCache) { build(_formatCatalogCache); return; }
+  fetch(panel.dataset.formatsUrl).then(function(r){ return r.json(); }).then(build).catch(function(e){
+    panel.innerHTML = '<div style="font-size:12px;color:var(--bad)">Could not load formats: ' + e + '</div>';
+  });
+}
+
+function _renderReformatPicker(panel, cardId, cat) {
+  var html = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Reformat this design</div>';
+  (cat.groups || []).forEach(function(g){
+    html += '<div style="margin:6px 0 3px;font-size:11px;font-weight:600;color:var(--ink-dim)">' + g.label + '</div><div style="display:flex;gap:5px;flex-wrap:wrap">';
+    (g.formats || []).forEach(function(f){
+      var ttl = f.title + ' · ' + f.width + '×' + f.height + (f.requires_post_types && f.requires_post_types.length ? ' (needs result data)' : '');
+      html += '<button class="btn secondary" style="font-size:10px;padding:3px 8px" title="' + ttl + '" onclick=' + _attrEsc('reformatCard(this, ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f.slug) + ')') + '>' + f.title + '</button>';
+    });
+    html += '</div>';
+  });
+  html += '<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap;align-items:center">' +
+    '<input class="rf-w" type="number" min="200" max="10000" placeholder="W" aria-label="Custom width" style="width:62px;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit" />' +
+    '<span style="color:var(--ink-muted)">×</span>' +
+    '<input class="rf-h" type="number" min="200" max="10000" placeholder="H" aria-label="Custom height" style="width:62px;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit" />' +
+    '<select class="rf-unit" aria-label="Unit" style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"><option value="px">px</option><option value="mm">mm</option><option value="cm">cm</option><option value="in">in</option></select>' +
+    '<button class="btn secondary" style="font-size:10px;padding:3px 8px" onclick=' + _attrEsc('reformatCustom(this, ' + JSON.stringify(cardId) + ')') + '>Custom size</button>' +
+    '<label style="font-size:11px;color:var(--ink-dim);display:inline-flex;align-items:center;gap:4px;margin-left:6px" title="Let the AI art director pick the best layout for the new shape"><input class="rf-ai" type="checkbox" /> AI re-layout</label>' +
+    '</div>';
+  html += '<div class="rf-result" style="margin-top:10px"></div>';
+  panel.innerHTML = html;
+}
+
+function reformatCard(btn, cardId, slug) {
+  var panel = document.querySelector('.reformat-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var aiEl = panel.querySelector('.rf-ai');
+  var url = panel.dataset.reformatUrl + '?format=' + encodeURIComponent(slug) + ((aiEl && aiEl.checked) ? '&ai=1' : '');
+  _runReformat(panel, btn, url, slug.replace(/_/g, ' '));
+}
+
+function reformatCustom(btn, cardId) {
+  var panel = document.querySelector('.reformat-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var w = panel.querySelector('.rf-w').value, h = panel.querySelector('.rf-h').value;
+  var unit = panel.querySelector('.rf-unit').value;
+  if (!w || !h) { if (window.MH && MH.toast) MH.toast('Enter a width and height', 'error', 2500); return; }
+  var aiEl = panel.querySelector('.rf-ai');
+  var url = panel.dataset.reformatUrl + '?w=' + encodeURIComponent(w) + '&h=' + encodeURIComponent(h) + '&unit=' + encodeURIComponent(unit) + ((aiEl && aiEl.checked) ? '&ai=1' : '');
+  _runReformat(panel, btn, url, 'custom ' + w + '×' + h + unit);
+}
+
+function _runReformat(panel, btn, url, label) {
+  var result = panel.querySelector('.rf-result');
+  var orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  if (result) result.innerHTML = '<div style="font-size:12px;color:var(--ink-muted)">Reformatting to ' + label + '… (5–20s)</div>';
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){
+      var ct = r.headers.get('Content-Type') || '';
+      if (r.ok && ct.indexOf('image') === 0) { return r.blob().then(function(b){ return {img: URL.createObjectURL(b)}; }); }
+      return r.json().then(function(j){ return {err: (j && j.user_message) || (j && j.error) || 'Reformat failed'}; });
+    })
+    .then(function(res){
+      btn.disabled = false; btn.textContent = orig;
+      if (res.err) { if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">' + res.err + '</div>'; return; }
+      if (result) result.innerHTML =
+        '<div style="font-size:11px;color:var(--ink-muted);margin-bottom:4px">' + label + '</div>' +
+        '<img src="' + res.img + '" alt="Reformatted design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />' +
+        '<div style="margin-top:6px"><a class="btn secondary" style="font-size:11px;padding:3px 10px" href="' + res.img + '" download="reformat.png">Download .png</a></div>';
+    })
+    .catch(function(e){
+      btn.disabled = false; btn.textContent = orig;
+      if (result) result.innerHTML = '<div style="font-size:12px;color:var(--bad)">Network error: ' + e + '</div>';
+    });
+}
 </script>
 """
 
@@ -4378,6 +4465,8 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
     _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
     _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
+    _reformat_url = url_for("api_card_reformat", run_id=run_id, card_id=card_id_raw)
+    _formats_url = url_for("api_formats")
 
     _STD_TONES = [
         (
@@ -4464,6 +4553,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -4481,6 +4571,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f"</div>"
         f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
 
@@ -37507,6 +37598,244 @@ voice, and queues them for one-click approval.</p>
             return jsonify(json.loads(sidecar.read_text(encoding="utf-8")))
         except Exception as e:
             return jsonify({"error": f"manifest_unreadable: {e}"}), 500
+
+    _FORMAT_CATEGORY_LABELS = {
+        "social_size": "Social sizes",
+        "carousel": "Carousel",
+        "poster": "Posters & flyers",
+        "certificate": "Certificates",
+        "card": "Cards",
+        "document": "Documents",
+        "calendar": "Calendars",
+        "wallpaper": "Wallpapers",
+        "custom": "Custom",
+    }
+
+    @app.route("/api/formats")
+    def api_formats():
+        """The P6.1 smart format catalogue as JSON, grouped by category.
+
+        Pure static data (canvas sizes + metadata for every club design
+        format). ``?sport=<slug>`` filters to the formats that sport's profile
+        enables — the per-sport availability the catalogue sources from
+        ``sport_profiles``; omitted returns the whole catalogue.
+        """
+        from mediahub.club_platform import format_catalog as _fc
+
+        sport = (request.args.get("sport") or "").strip() or None
+        specs = _fc.formats_for_sport(sport) if sport else list(_fc.all_formats())
+        by_cat: dict[str, list] = {}
+        for s in specs:
+            by_cat.setdefault(s.category, []).append(s.to_dict())
+        groups = [
+            {
+                "category": c,
+                "label": _FORMAT_CATEGORY_LABELS.get(c, c.replace("_", " ").title()),
+                "formats": by_cat[c],
+            }
+            for c in _fc.categories()
+            if c in by_cat
+        ]
+        return jsonify({"groups": groups, "n": len(specs), "sport": sport or ""})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/reformat", methods=["POST", "GET"])
+    def api_card_reformat(run_id: str, card_id: str):
+        """P6.1 format transformer — re-target an approved card to any format.
+
+        Loads the card's most recent ``CreativeBrief`` (the approved design),
+        re-lays it out for the target format via ``turn_into.transform_design``
+        (the design-spec director with the deterministic per-aspect picker as
+        the honest floor — never a fabricated layout), renders it at the
+        format's canvas size through the existing ``graphic_renderer`` (which
+        already adapts the composition to the aspect, so this re-lays-out rather
+        than scaling), and serves the PNG directly.
+
+        Query params:
+          * ``format=<slug>``          — a catalogue format (see ``/api/formats``)
+          * ``w=&h=&unit=px|mm|cm|in`` — a custom canvas size instead
+          * ``blank=1``                — start on-brand from brand tokens, not
+                                         from an approved design
+          * ``ai=1``                   — let the director pick the re-layout
+                                         (default: deterministic + cached)
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import send_file
+
+        # Runs are stored flat (runs_v4/<id>.json); also accept the legacy
+        # nested runs_v4/<id>/run.json layout (mirrors api_create_graphic).
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception:
+                    return jsonify({"error": "run_not_found"}), 404
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Resolve the target format: a catalogue slug, or a custom canvas.
+        from mediahub.club_platform import format_catalog as _fc
+
+        fmt_slug = (request.args.get("format") or "").strip()
+        w_raw = request.args.get("w")
+        h_raw = request.args.get("h")
+        spec = None
+        try:
+            if w_raw and h_raw:
+                spec = _fc.custom_format(
+                    float(w_raw),
+                    float(h_raw),
+                    unit=(request.args.get("unit") or "px"),
+                    slug=(fmt_slug or "custom"),
+                )
+            elif fmt_slug:
+                spec = _fc.format_for(fmt_slug)
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": "bad_format", "user_message": str(e)}), 400
+        if spec is None:
+            return jsonify(
+                {"error": "unknown_format", "user_message": "Pick a format from the catalogue."}
+            ), 400
+
+        # Profile + brand kit + media library (mirrors api_create_graphic).
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        media_assets: list = []
+        try:
+            if _v8_get_media_store is not None:
+                media_assets = [
+                    a.to_dict() if hasattr(a, "to_dict") else a
+                    for a in _v8_get_media_store().list(profile_id=profile_id)
+                ]
+        except Exception:
+            media_assets = []
+
+        use_ai = (request.args.get("ai") or "").lower() in ("1", "true", "yes")
+        blank = (request.args.get("blank") or "").lower() in ("1", "true", "yes")
+
+        from mediahub.turn_into import transform_design, blank_brief_for_format
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        if blank:
+            new_brief = blank_brief_for_format(
+                spec, brand_kit, content_item_id=str(card_id), profile_id=profile_id
+            )
+        else:
+            bdict = _latest_brief_for_card(run_id, card_id)
+            if not bdict:
+                return jsonify(
+                    {
+                        "error": "no_design",
+                        "user_message": (
+                            "Create a graphic for this card first, then reformat it "
+                            "— or start blank."
+                        ),
+                    }
+                ), 409
+            src = CreativeBrief.from_dict(bdict)
+            if src is None:
+                return jsonify({"error": "brief_unreadable"}), 500
+            try:
+                tr = transform_design(
+                    source_brief=src,
+                    target_format=spec,
+                    brand_kit=brand_kit,
+                    use_ai_director=use_ai,
+                )
+            except ValueError as e:
+                return jsonify({"error": "transform_failed", "user_message": str(e)}), 400
+            new_brief = tr.brief
+
+        # Deterministic renders cache on (card, format, chosen layout); the
+        # AI-directed path varies per call, so it skips the cache.
+        import hashlib as _hl
+
+        key = _hl.sha256(
+            f"{card_id}|{spec.slug}|{spec.width}x{spec.height}|"
+            f"{new_brief.layout_template}|{'blank' if blank else 'tx'}".encode("utf-8")
+        ).hexdigest()[:20]
+        out_dir = RUNS_DIR / run_id / "reformat" / key
+        cache_png = out_dir / f"{spec.render_name}.png"
+        if cache_png.exists() and not use_ai:
+            return send_file(str(cache_png), mimetype="image/png")
+
+        # Resolve the hero photo (from the approved brief's stored assets) and
+        # the brand logo — everything else rides the brief.
+        athlete_path = None
+        hero_id = (new_brief.sourced_asset_ids or [None])[0]
+        if hero_id:
+            for a in media_assets:
+                ad = a if isinstance(a, dict) else {}
+                if str(ad.get("id")) == str(hero_id):
+                    athlete_path = ad.get("path") or ad.get("file_path")
+                    break
+        logo_path = None
+        bk_logo = getattr(brand_kit, "logo_path", None)
+        if bk_logo:
+            try:
+                if Path(bk_logo).exists():
+                    logo_path = str(bk_logo)
+            except Exception:
+                logo_path = None
+
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+
+            out_dir.mkdir(parents=True, exist_ok=True)
+            skip_cutout = getattr(new_brief, "photo_treatment", "") == "no-photo" or not athlete_path
+            with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                res = render_brief(
+                    new_brief,
+                    output_dir=out_dir,
+                    size=spec.size,
+                    format_name=spec.render_name,
+                    athlete_path=(None if skip_cutout else athlete_path),
+                    logo_path=logo_path,
+                    brand_kit=brand_kit,
+                    image_format="png",
+                )
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception as e:
+            return jsonify(_reformat_error_payload(e)), 500
+        return send_file(str(res.visual.file_path), mimetype="image/png")
+
+    def _reformat_error_payload(e: Exception) -> dict:
+        """User-friendly JSON for a reformat render failure (Playwright/Chromium
+        not installed is the common deploy gap; everything else is internal)."""
+        detail = str(e)
+        low = detail.lower()
+        if (
+            "playwright" in low
+            or "chromium" in low
+            or "executable doesn't exist" in low
+            or "browsertype.launch" in low
+            or "install" in low
+            and "browser" in low
+        ):
+            return {
+                "error": "render_failed",
+                "kind": "infra_missing",
+                "detail": detail,
+                "user_message": (
+                    "Graphic rendering isn't available on this deployment "
+                    "(Playwright/Chromium isn't installed). The operator needs "
+                    "to run 'playwright install chromium'."
+                ),
+            }
+        return {
+            "error": "render_failed",
+            "kind": "internal",
+            "detail": detail,
+            "user_message": "Reformatting this design failed. Try again, or pick another format.",
+        }
 
     def _assemble_reel_inputs(run_id: str):
         """Shared validation + payload assembly for the reel routes.
