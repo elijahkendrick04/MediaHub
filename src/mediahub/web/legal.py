@@ -232,6 +232,12 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "sub-processor. Cloud image generation uses GEMINI_API_KEY (Google, "
         "already a declared sub-processor)."
     ),
+    "MEDIAHUB_IMAGINE_LOCAL_TOKEN": (
+        "optional bearer token guarding the operator's own self-hosted local "
+        "diffusion endpoint (above). It authenticates MediaHub to the operator's "
+        "own infrastructure — no third party, so not an Art. 28 sub-processor; "
+        "the token is redacted from logs and error text."
+    ),
 }
 
 
