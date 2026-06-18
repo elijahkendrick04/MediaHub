@@ -29030,7 +29030,7 @@ what you're doing, what they should do.</p>
                 rows_html += f'<tr><th scope="row">{_h(row.label)}</th>{cells}</tr>'
         compare_table = (
             '<div class="mh-compare-wrap"><table class="mh-compare">'
-            f'<thead><tr><th scope="col"></th>{head_cells}</tr></thead>'
+            f'<thead><tr><th scope="col"><span class="mh-sr">Feature</span></th>{head_cells}</tr></thead>'
             f"<tbody>{rows_html}</tbody></table></div>"
         )
 
