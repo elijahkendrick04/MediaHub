@@ -85,6 +85,10 @@ class ImagineProvider(ABC):
         """True when this provider can plausibly run (key/endpoint present)."""
         return False
 
+    def default_model(self) -> str:
+        """The model id recorded in provenance for this backend (``""`` if n/a)."""
+        return ""
+
     def capabilities(self) -> set[str]:
         """The subset of :data:`OPERATIONS` this provider implements."""
         return set()
@@ -158,7 +162,7 @@ class ImagineProvider(ABC):
         return ImagineUnsupported(
             f"The configured image provider ({self.name!r}) does not support "
             f"the {operation!r} operation. Configure a provider that does "
-            f"(e.g. the local diffusion backend, P5.6)."
+            f"(e.g. the in-house local diffusion backend)."
         )
 
 

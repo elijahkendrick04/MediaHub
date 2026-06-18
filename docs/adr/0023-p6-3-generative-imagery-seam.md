@@ -115,7 +115,9 @@ request payload are unchanged, so rendered backgrounds stay byte-identical
   governed home. With no key configured, the surface honest-errors and only
   deterministic `subject_lift` is offered.
 - P5.6 lights up the full edit family by filling the `local` slot — no facade or
-  route changes needed.
+  route changes needed. **Done:** the in-house local diffusion backend (roadmap
+  1.1) now fills that slot — see
+  [`0024-local-diffusion-image-backend.md`](0024-local-diffusion-image-backend.md).
 - This is an **AI surface** (`media_ai`), not the deterministic engine (parsers /
   detectors / ranker / colour-science are untouched), so no Council gate applied;
   the architecture is a decided roadmap direction.

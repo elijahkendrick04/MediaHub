@@ -48,6 +48,7 @@ Parts C & D. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
 | `rhasspy/piper` | Local neural TTS (voiceover) | MIT |
 | `danielgatis/rembg` | Background removal / cutout | MIT |
 | `ZHKKKe/MODNet` | Portrait matting (code + models) | Apache-2.0 (PPM dataset CC BY-NC-SA) |
+| `black-forest-labs/FLUX.1-schnell` (weights) | Local generative-image backend — text→image + inpaint/outpaint for the imagine seam (roadmap 1.1). Self-hosted by the operator behind `MEDIAHUB_IMAGINE_LOCAL_ENDPOINT`; MediaHub ships **no weights** and adds **no new dependency** (HTTP client only). | **Apache-2.0** (avoid the OpenRAIL/non-commercial FLUX.1-dev weights) |
 | `openai/whisper`, `whisper.cpp`, `faster-whisper` | ASR / captioning | MIT |
 | `material-color-utilities`, `jxnblk/palx` | Theming / palette | Apache-2.0 / MIT |
 | `SwimComm/hytek-parser` | Swimming HY3/HYV ingest | MIT |
