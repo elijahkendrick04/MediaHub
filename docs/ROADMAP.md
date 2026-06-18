@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `01a0241c2` · Merge PR #788: home hero — make onboarding the primary CTA for signed-out visitors
+**Last updated:** 2026-06-18 · `57fa76ae3` · Merge pull request #816 from elijahkendrick04/claude/roadmap-reorder
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,15 +1227,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-18 | `3e9edbceb` | style(1.2): ruff-format web.py generated-images route |
-| 2026-06-18 | `e66295c0f` | feat(1.2): Build 2 — grab-text, deterministic mockups, generation history |
-| 2026-06-18 | `3a744c01f` | fix(1.2): declare imagine env keys (subprocessor register + env inventory) |
-| 2026-06-18 | `e9c80fab2` | feat(1.2): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
+| 2026-06-18 | `b67dd26e8` | docs(roadmap): renumber forward plan into dependency-correct build order |
+| 2026-06-18 | `3e9edbceb` | style(P6.3): ruff-format web.py generated-images route |
+| 2026-06-18 | `e66295c0f` | feat(P6.3): Build 2 — grab-text, deterministic mockups, generation history |
+| 2026-06-18 | `3a744c01f` | fix(P6.3): declare imagine env keys (subprocessor register + env inventory) |
+| 2026-06-18 | `e9c80fab2` | feat(P6.3): generative-imagery seam — imagine providers, provenance, quotas (Build 1/2) |
 | 2026-06-18 | `f35a53327` | fix(p6.2): rename nested _card_facts → _assistant_card_facts; refresh env inventory |
 | 2026-06-18 | `156f9616d` | feat(p6.2): conversational creative assistant (club content copilot) |
 | 2026-06-18 | `8c2c20d5e` | docs(readme): refresh to reflect the current repo |
 | 2026-06-18 | `9279ddd8c` | style(p6.1): apply ruff-format + drop unused import (pre-commit hygiene) |
 | 2026-06-18 | `b6508062c` | feat(p6.1): smart format catalogue + format transformer |
-| 2026-06-18 | `57291136e` | fix: a11y: Table header text should not be empty (empty-table-hea |
-| 2026-06-17 | `1bd179d44` | Apply ruff-format to mobile-parity additions |
 <!-- /ROADMAP:ACTIVITY -->
