@@ -322,11 +322,17 @@ metered); **deterministic product mockups** (`mockups/` — poster/framed-print/
 phone-post/flatlay, key-free, brand-tinted, byte-deterministic; feeds 1.20);
 and a **generation-history + provenance viewer** (`/media-library/generated`).
 The generative **edit family** (`edit`/`expand`/`remove`/`upscale`/
-`style_match`) is defined in the seam and **honest-errors by capability** — the
-in-house local backend (1.1) is the default that will fill it (then the
-mask-brush studio UI lands). Text-to-video b-roll (↗ 1.6), layer extraction,
-and 3D (deferred-last) remain. See
-[`adr/0023-p6-3-generative-imagery-seam.md`](adr/0023-p6-3-generative-imagery-seam.md).
+`style_match`) is defined in the seam and **honest-errors by capability**. **The
+in-house local backend (1.1) has shipped** — a licence-clean self-hosted
+diffusion model (FLUX.1-schnell, Apache-2.0) reached over HTTP at
+`MEDIAHUB_IMAGINE_LOCAL_ENDPOINT`, the zero-cloud-key default that lights up the
+whole edit family (generate / similar / edit / fill / expand / remove /
+style-match), metered and provenance-stamped like the cloud path. **Still open
+as 1.2:** the mask-brush / expand **studio UI** and deep card-editor integration
+in front of it. Text-to-video b-roll (↗ 1.6), layer extraction, and 3D
+(deferred-last) remain. See
+[`adr/0023-p6-3-generative-imagery-seam.md`](adr/0023-p6-3-generative-imagery-seam.md)
+and [`adr/0024-local-diffusion-image-backend.md`](adr/0024-local-diffusion-image-backend.md).
 
 **Coverage.**
 

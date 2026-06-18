@@ -34,6 +34,9 @@ def app_env(tmp_path, monkeypatch):
         "ANTHROPIC_API_KEY",
         "MEDIAHUB_IMAGINE_PROVIDER",
         "MEDIAHUB_IMAGINE_QUOTA_MONTHLY",
+        "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT",
+        "MEDIAHUB_IMAGINE_LOCAL_TOKEN",
+        "MEDIAHUB_IMAGINE_LOCAL_CAPABILITIES",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -269,3 +272,89 @@ def test_remove_no_provider_503(app_env):
     c = _client(app)
     r = c.post(f"/api/media-library/{a.id}/imagine/remove", json={})
     assert r.status_code == 503
+
+
+# --- edit family lit up by the in-house local backend (roadmap 1.1) ---------
+
+
+def _fake_local_post(monkeypatch, png):
+    """Patch requests.post so the local diffusion endpoint returns ``png``."""
+    import base64
+
+    import requests
+
+    class _R:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"images": [base64.b64encode(png).decode()]}
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _R())
+
+
+def test_info_reflects_local_backend(app_env, monkeypatch):
+    app, wm, *_ = app_env
+    monkeypatch.setenv("MEDIAHUB_IMAGINE_LOCAL_ENDPOINT", "http://imagine:8800")
+    c = _client(app)
+    j = c.get("/api/media-library/imagine/info").get_json()
+    assert j["available"] is True
+    assert j["provider"] == "local"
+    for op in ("generate", "edit", "expand", "remove", "style_match"):
+        assert op in j["operations"]
+
+
+def test_edit_via_local_creates_composite_asset(app_env, monkeypatch):
+    app, wm, tmp_path, iu, st = app_env
+    monkeypatch.setenv("MEDIAHUB_IMAGINE_LOCAL_ENDPOINT", "http://imagine:8800")
+    a = _seed_asset(st, tmp_path)
+    _fake_local_post(monkeypatch, _png_bytes((120, 90, 30)))
+    c = _client(app)
+    r = c.post(
+        f"/api/media-library/{a.id}/imagine/edit",
+        json={"instruction": "add a lane rope"},
+    )
+    assert r.status_code == 200, r.get_json()
+    asset = r.get_json()["asset"]
+    assert asset["type"] == "ai_generated"
+    imagine = asset["description_parsed"]["imagine"]
+    assert imagine["operation"] == "edit"
+    assert imagine["provider"] == "local"
+    assert imagine["model"] == "flux.1-schnell"
+    # Composite provenance (a real photo with AI-edited pixels) on the file.
+    from pathlib import Path
+
+    from mediahub.graphic_renderer import metadata_embed as me
+
+    stored = Path(st.get_store().get(asset["id"]).path)
+    assert "compositeWithTrainedAlgorithmicMedia" in me.read_metadata(stored).digital_source_type
+    assert iu.count_for_org("club-x") == 1
+
+
+def test_remove_via_local(app_env, monkeypatch):
+    app, wm, tmp_path, iu, st = app_env
+    monkeypatch.setenv("MEDIAHUB_IMAGINE_LOCAL_ENDPOINT", "http://imagine:8800")
+    a = _seed_asset(st, tmp_path)
+    _fake_local_post(monkeypatch, _png_bytes((7, 7, 7)))
+    c = _client(app)
+    r = c.post(f"/api/media-library/{a.id}/imagine/remove", json={})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["asset"]["description_parsed"]["imagine"]["operation"] == "remove"
+
+
+def test_generate_via_local_no_cloud_key(app_env, monkeypatch):
+    """The headline of 1.1: generation runs with no cloud key configured."""
+    app, wm, tmp_path, iu, st = app_env
+    monkeypatch.setenv("MEDIAHUB_IMAGINE_LOCAL_ENDPOINT", "http://imagine:8800")
+    _fake_local_post(monkeypatch, _png_bytes((50, 100, 150)))
+    c = _client(app)
+    r = c.post(
+        "/api/media-library/imagine/generate",
+        json={"prompt": "navy and gold poolside backdrop", "aspect": "9:16"},
+    )
+    assert r.status_code == 200, r.get_json()
+    asset = r.get_json()["asset"]
+    assert asset["description_parsed"]["imagine"]["provider"] == "local"
+    assert iu.count_for_org("club-x") == 1

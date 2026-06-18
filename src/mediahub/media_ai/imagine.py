@@ -4,8 +4,9 @@ One provider-agnostic facade behind which every generative-image capability
 sits, mirroring the LLM wrapper's provider doctrine (``media_ai/llm.py``):
 
 * **In-house first.** The default backend is a licence-clean, self-hosted
-  diffusion model (``local``, the P5.6 path); cloud generators (Gemini/Imagen)
-  are optional on the same seam. Resolution and fall-through live in
+  diffusion model (``local``, roadmap 1.1 — reached over HTTP at
+  ``MEDIAHUB_IMAGINE_LOCAL_ENDPOINT``); cloud generators (Gemini/Imagen) are
+  optional on the same seam. Resolution and fall-through live in
   :mod:`mediahub.media_ai.imagine_providers`.
 * **Honest errors, never a fake.** No provider → :class:`ProviderNotConfigured`.
   Provider can't do the op → :class:`ImagineUnsupported`. Over budget →
@@ -181,24 +182,25 @@ def _require_provider(operation: str):
     p = get_imagine_provider()
     if p is None:
         raise ProviderNotConfigured(
-            "No image provider is configured. The default is the local "
-            "diffusion backend (P5.6, not yet available); configure a Gemini "
-            "key or set MEDIAHUB_IMAGINE_PROVIDER to use generative imagery."
+            "No image provider is configured. The default is the in-house local "
+            "diffusion backend — set MEDIAHUB_IMAGINE_LOCAL_ENDPOINT to your "
+            "self-hosted server, or configure a Gemini key, to use generative "
+            "imagery."
         )
-    # An explicitly-selected-but-unavailable provider (e.g. the local slot
-    # before P5.6, or gemini without a key) gets the actionable "not configured"
+    # An explicitly-selected-but-unavailable provider (e.g. the local slot with
+    # no endpoint, or gemini without a key) gets the actionable "not configured"
     # error rather than a capability complaint.
     if not p.is_available():
         raise ProviderNotConfigured(
-            f"The selected image provider ({p.name!r}) is not available. The "
-            f"local diffusion backend (P5.6) is not built yet; configure a "
-            f"Gemini key, or set MEDIAHUB_IMAGINE_PROVIDER, to generate imagery."
+            f"The selected image provider ({p.name!r}) is not available. Set "
+            f"MEDIAHUB_IMAGINE_LOCAL_ENDPOINT for the in-house local backend, or "
+            f"configure a Gemini key, to generate imagery."
         )
     if not p.supports(operation):
         raise ImagineUnsupported(
             f"The active image provider ({p.name!r}) does not support "
-            f"{operation!r}. The local diffusion backend (P5.6) will; cloud "
-            f"providers vary."
+            f"{operation!r}. The in-house local diffusion backend covers the "
+            f"full edit family; cloud providers vary."
         )
     return p
 
@@ -276,7 +278,12 @@ def _record(
 def _redact(text: Optional[str]) -> str:
     """Mask any provider key that may have leaked into prompt/error text."""
     s = text or ""
-    for env_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
+    for env_name in (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MEDIAHUB_IMAGINE_LOCAL_TOKEN",
+    ):
         v = os.environ.get(env_name)
         if v and v in s:
             s = s.replace(v, "***")
@@ -331,15 +338,11 @@ def _result(
 
 
 def _model_of(provider) -> str:
-    # Providers expose their default model via a module helper; fall back to "".
+    # Providers expose their default model id for provenance; fall back to "".
     try:
-        if provider.name == "gemini":
-            from .imagine_providers.gemini_imagine import _default_model
-
-            return _default_model()
+        return provider.default_model()
     except Exception:
-        pass
-    return ""
+        return ""
 
 
 # ---------------------------------------------------------------------------

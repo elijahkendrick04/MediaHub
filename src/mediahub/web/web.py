@@ -34570,8 +34570,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 if _img_avail
                 else (
                     '<p class="dim" style="margin-bottom:var(--sp-4)">No image provider is '
-                    "configured yet, so generation is disabled. The default backend is the "
-                    "in-house local model (P5.6, coming soon); a Gemini key enables it today.</p>"
+                    "configured yet, so generation is disabled. The default is the in-house "
+                    "local model (set MEDIAHUB_IMAGINE_LOCAL_ENDPOINT); a Gemini key also "
+                    "enables cloud generation.</p>"
                 )
             )
             _imagine_js = (
@@ -35038,7 +35039,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         ``op`` ∈ {edit, expand, remove, upscale, similar, style_match}. The
         active provider honest-errors (501) for ops it does not support — the
-        local diffusion backend (P5.6) is the one that will cover them all.
+        in-house local diffusion backend (roadmap 1.1) covers the full family.
         """
         if not (_v8_ok and _imagine_ok):
             return jsonify({"error": "imagine_unavailable"}), 503

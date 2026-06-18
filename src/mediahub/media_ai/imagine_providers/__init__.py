@@ -1,16 +1,17 @@
 """Image-AI providers for the P6.3 ``imagine`` seam.
 
 MediaHub's in-house-first rule makes a licence-clean, self-hosted diffusion model
-the **default** backend (``local``, the P5.6 path); cloud generators are optional
-on the same seam. Until P5.6 lands the local slot is empty and honest-errors, so
-an operator with a Gemini key falls through to the cloud provider.
+the **default** backend (``local``, roadmap 1.1 — reached over HTTP at
+``MEDIAHUB_IMAGINE_LOCAL_ENDPOINT``); cloud generators are optional on the same
+seam. With no local endpoint configured the slot is unavailable, so an operator
+with a Gemini key falls through to the cloud provider.
 
 Resolution order (first usable wins):
 
 1. ``MEDIAHUB_IMAGINE_PROVIDER`` env var, in ``{local, gemini}``. An explicit
-   choice is honoured even if it is not yet available — the caller gets an
-   honest "not configured" error rather than a silent switch to a billed cloud
-   call they did not ask for.
+   choice is honoured even if it is not available — the caller gets an honest
+   "not configured" error rather than a silent switch to a billed cloud call
+   they did not ask for.
 2. Unset → prefer ``local`` (the intended default) when it is available, else
    fall through to ``gemini`` when a Gemini key is present.
 3. Nothing usable → the facade raises ``ProviderNotConfigured``.
@@ -58,7 +59,7 @@ def get_imagine_provider() -> Optional[ImagineProvider]:
     """Return the active image-AI provider, or ``None`` if none is configured.
 
     An explicit ``MEDIAHUB_IMAGINE_PROVIDER`` is always honoured (returned even
-    when not yet available, so its operations honest-error rather than silently
+    when not available, so its operations honest-error rather than silently
     falling to a different backend). With no explicit choice, prefer the local
     default when available, else a key-configured Gemini, else ``None``.
     """

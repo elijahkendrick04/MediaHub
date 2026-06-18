@@ -17,10 +17,10 @@ What this provider does today (honestly):
 
 The editing family (edit / expand / remove / upscale / style_match) is **not**
 claimed here: Imagen's public ``:predict`` surface does not expose mask-based
-inpaint / outpaint uniformly, so the facade honest-errors for those until the
-local diffusion backend (P5.6) — the intended default — fills them. Over-
-claiming a capability and returning a stubbed image would violate MediaHub's
-honest-error rule.
+inpaint / outpaint uniformly, so the facade honest-errors for those unless the
+in-house local diffusion backend (roadmap 1.1) — the intended default — covers
+them. Over-claiming a capability and returning a stubbed image would violate
+MediaHub's honest-error rule.
 
 ``imagen_predict`` is the shared low-level client: it is the one place the Imagen
 HTTP shape lives, so :mod:`mediahub.visual.ai_background` calls it too and the
@@ -36,6 +36,11 @@ import os
 from typing import Optional
 
 from .base import GeneratedImage, ImageInput, ImagineProvider
+
+# Curated sport-editorial style presets, shared with the in-house local backend
+# so both read the same vocabulary. Re-exported in ``__all__`` for back-compat
+# (the web layer imports ``STYLE_PRESETS`` from this module).
+from .styles import DEFAULT_STYLE, STYLE_PRESETS, compose_prompt as _compose_prompt
 
 log = logging.getLogger(__name__)
 
@@ -177,6 +182,9 @@ class GeminiImagineProvider(ImagineProvider):
     def is_available(self) -> bool:
         return bool(resolve_gemini_key())
 
+    def default_model(self) -> str:
+        return _default_model()
+
     def capabilities(self) -> set[str]:
         # Honest: only the operations the public Imagen :predict surface does.
         return {"generate", "similar"}
@@ -226,47 +234,12 @@ class GeminiImagineProvider(ImagineProvider):
             raise ImagineError(
                 "The Gemini provider needs a text description to make on-style "
                 "variations (it cannot condition on the reference image's "
-                "pixels). Provide a prompt, or use the local backend (P5.6)."
+                "pixels). Provide a prompt, or use the in-house local backend "
+                "(roadmap 1.1), which conditions on the reference pixels."
             )
         return self.generate(
             prompt, aspect="1:1", n=max(1, min(int(n), 4)), allow_people=allow_people
         )
-
-
-# ---------------------------------------------------------------------------
-# Style presets — curated sport-editorial looks (no "3D clay" gimmicks by default)
-# ---------------------------------------------------------------------------
-
-STYLE_PRESETS = {
-    "editorial": (
-        "premium sports-magazine editorial photography, cinematic lighting, "
-        "high contrast, shallow depth of field, atmospheric"
-    ),
-    "abstract": (
-        "abstract editorial sports background, dynamic geometric forms, "
-        "gradient lighting, subtle motion blur, clean negative space"
-    ),
-    "poster": (
-        "bold modern sports poster art, strong graphic shapes, flat colour "
-        "blocking, screen-print texture"
-    ),
-    "duotone": ("high-contrast duotone treatment, two-colour gradient, editorial poster feel"),
-    "line_art": (
-        "clean black-and-white line art, printable colouring-page style, bold "
-        "outlines, no shading, white background"
-    ),
-}
-
-DEFAULT_STYLE = "editorial"
-
-
-def _compose_prompt(prompt: str, style: Optional[str]) -> str:
-    base = (prompt or "").strip()
-    key = (style or "").strip().lower() or DEFAULT_STYLE
-    suffix = STYLE_PRESETS.get(key)
-    if not suffix:
-        return base
-    return f"{base}. Style: {suffix}." if base else suffix
 
 
 __all__ = [
