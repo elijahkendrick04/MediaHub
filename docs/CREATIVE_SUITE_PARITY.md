@@ -307,7 +307,7 @@ strictly opt-in like `MEDIAHUB_GEN_BG`. Layer extraction (Magic Layers) is the
 inverse-render problem — scope to AI-image outputs only, where the provider
 returns layers natively.
 
-**Build status (2026-06-18) — 🔵 Builds 1 + 2 shipped.** **Build 1** (the seam +
+**Build status (2026-06-18) — ✅ 1.2 complete (Builds 1–3 shipped).** **Build 1** (the seam +
 solid services + governance): `media_ai/imagine.py` (provider-agnostic facade) +
 `media_ai/imagine_providers/` (`base`, `gemini_imagine`, `local_imagine`);
 working `generate` + `similar` via Gemini Imagen (sport-editorial style presets,
@@ -327,10 +327,20 @@ in-house local backend (1.1) has shipped** — a licence-clean self-hosted
 diffusion model (FLUX.1-schnell, Apache-2.0) reached over HTTP at
 `MEDIAHUB_IMAGINE_LOCAL_ENDPOINT`, the zero-cloud-key default that lights up the
 whole edit family (generate / similar / edit / fill / expand / remove /
-style-match), metered and provenance-stamped like the cloud path. **Still open
-as 1.2:** the mask-brush / expand **studio UI** and deep card-editor integration
-in front of it. Text-to-video b-roll (↗ 1.6), layer extraction, and 3D
-(deferred-last) remain. See
+style-match), metered and provenance-stamped like the cloud path. **Build 3**
+(the studio UI — the last open piece of 1.2): a mask-brush **image studio**
+(`web/image_studio.py`, route `/media-library/<asset_id>/studio`) puts the whole
+edit family in front of volunteers — paint a mask and Fill/Erase, Expand to a new
+canvas, Upscale, Restyle, make Variations, Lift the subject, or Grab text. It is
+**capability-probed at runtime** (`/api/media-library/imagine/info`) so only ops
+the active provider supports ever appear (honest, never a dead button), shows the
+per-org quota live, and saves every result as a provenance-stamped *draft* for
+review. Reachable from each library asset row, the cut-out page, the
+generated-images history, and — the **card-editor integration** — a "✦ Edit
+photo" deep-link on the content-pack photo picker (`api_create_graphic` returns a
+`studio_url` for the chosen photo). **With Build 3, 1.2 is complete.** Out of
+1.2's scope and tracked elsewhere: text-to-video b-roll (↗ 1.6), provider-native
+layer extraction, and 3D (deferred-last). See
 [`adr/0023-p6-3-generative-imagery-seam.md`](adr/0023-p6-3-generative-imagery-seam.md)
 and [`adr/0024-local-diffusion-image-backend.md`](adr/0024-local-diffusion-image-backend.md).
 

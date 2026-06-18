@@ -3697,10 +3697,15 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var uploadBtn = '<button type="button" onclick=' + _attrEsc(upOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0">+ Add photo' + (firstName ? ' of ' + firstName : '') + '</button>';
   var venueOc = 'mhVenueSearchOpen(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var venueBtn = '<button type="button" onclick=' + _attrEsc(venueOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">Venue backdrop&hellip;</button>';
+  // Roadmap 1.2 — when a real library photo is on this graphic, deep-link it
+  // into the image studio (fill/erase/expand/upscale/restyle) in a new tab. The
+  // URL is server-built with url_for; absent when no photo (Auto/No photo) is set.
+  var studioUrl = data.studio_url || '';
+  var studioBtn = (chosen && studioUrl) ? '<a href="' + studioUrl + '" target="_blank" rel="noopener" title="Fill, erase, expand, upscale or restyle this photo with AI" style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0;text-decoration:none;display:inline-block">✦ Edit photo</a>' : '';
   var pickerHtml =
     '<div style="margin-bottom:8px">' +
       '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
-      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn + venueBtn +
+      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn + studioBtn + venueBtn +
       '<div class="mh-venue-results" data-card="' + cardId.replace(/"/g, '&quot;') + '" style="display:none;margin-top:6px"></div>' +
     '</div>';
   panel.innerHTML =
@@ -34623,6 +34628,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
             _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
+            _studio_url = url_for("image_studio_page", asset_id=ad.get("id", ""))
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -34666,6 +34672,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
+    <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
             style="font-size:11px;padding:3px 9px"
@@ -35375,6 +35382,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<p class="mh-gen-prompt">{_h(prompt[:180])}</p>'
                 f'<p class="dim mh-gen-meta">{_h(model)}{" · " if model and created else ""}{_h(created)}</p>'
                 '<div class="mh-gen-actions">'
+                f'<a class="btn secondary" href="{url_for("image_studio_page", asset_id=ad.get("id", ""))}">&#x2726; Edit</a>'
                 f'<a class="btn secondary" href="{file_url}" download>Download</a>'
                 f'<a class="btn secondary" href="{url_for("api_media_library_mockup", asset_id=ad.get("id", ""), template="poster_wall")}" target="_blank" rel="noopener">Poster mockup</a>'
                 "</div>"
@@ -35753,11 +35761,97 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             body = hero + note
 
         body += (
-            '<div style="margin-top:var(--sp-5)">'
+            '<div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">'
             f'<a class="btn ghost" href="{back_url}">&larr; Back to library</a>'
+            f'<a class="btn secondary" href="{url_for("image_studio_page", asset_id=a.id)}">'
+            "&#x2726; Open in image studio</a>"
             "</div>"
         )
         return _layout("Cut-out preview", body, active="media")
+
+    @app.route("/media-library/<asset_id>/studio")
+    def image_studio_page(asset_id: str):
+        """Roadmap 1.2 — the generative-imagery studio for one library asset.
+
+        The mask-brush / expand surface in front of the shipped ``imagine`` edit
+        family (edit/fill/remove/expand/upscale/style_match/similar) plus the
+        deterministic subject-lift and vision grab-text. All page logic lives in
+        the Flask-free ``image_studio`` helper so it unit-tests without a request;
+        this route only enforces tenancy, measures the asset, resolves the
+        ``url_for(...)`` endpoints, and wraps the body with ``_layout``. The
+        provider-backed ops still honest-error (and the panels stay hidden) when
+        no image backend is configured — capabilities are probed at runtime.
+        """
+        if not (_v8_ok and _imagine_ok):
+            return _recovery_page(
+                "Image studio unavailable",
+                "The generative-imagery engine isn't enabled on this deployment, so "
+                "the image studio can't open. Other parts of MediaHub still work.",
+                eyebrow="Image studio",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("Media library", url_for("media_library_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library &mdash; it may have been deleted, "
+                "or the link might be out of date.",
+                eyebrow="Image studio",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation, so it isn't "
+                "available from your current session.",
+                eyebrow="Image studio",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+
+        ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+        label = (
+            ", ".join(ad.get("linked_athlete_names") or [])
+            or ad.get("linked_venue")
+            or ad.get("linked_event")
+            or ad.get("filename")
+            or "this photo"
+        )
+        width = int(ad.get("width") or 0)
+        height = int(ad.get("height") or 0)
+        if not (width and height):
+            try:
+                from PIL import Image as _Image
+
+                with _Image.open(a.path) as _im:
+                    width, height = int(_im.width), int(_im.height)
+            except Exception:
+                width = height = 0
+
+        from mediahub.web import image_studio as _studio
+
+        body = _studio.render_studio_body(
+            asset_id=a.id,
+            asset_label=label,
+            asset_type=str(ad.get("type") or "photo"),
+            asset_url=url_for("api_media_library_file", asset_id=a.id),
+            info_url=url_for("api_imagine_info"),
+            op_url_base=url_for("api_imagine_asset_op", asset_id=a.id, op=_studio.OP_SENTINEL),
+            grab_text_url=url_for("api_imagine_grab_text", asset_id=a.id),
+            subject_lift_url=url_for("api_imagine_subject_lift", asset_id=a.id),
+            cutout_url=url_for("api_media_library_cutout", asset_id=a.id),
+            studio_url_base=url_for("image_studio_page", asset_id=_studio.ASSET_SENTINEL),
+            file_url_base=url_for("api_media_library_file", asset_id=_studio.ASSET_SENTINEL),
+            back_url=url_for("media_library_page"),
+            gen_history_url=url_for("media_library_generated_page"),
+            width=width,
+            height=height,
+        )
+        return _layout("Image studio", body, active="media")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):
@@ -36506,6 +36600,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "chosen_asset_id": chosen_asset_id,
                 "no_photo": force_no_photo,
                 "card_athlete": _card_athlete,
+                # Roadmap 1.2 — deep-link the chosen photo into the image studio
+                # so a volunteer can fix it up (fill/erase/expand/upscale) without
+                # leaving the card flow. Empty unless a real library photo is on
+                # the card; built with url_for so the path is never hardcoded.
+                "studio_url": (
+                    url_for("image_studio_page", asset_id=chosen_asset_id)
+                    if chosen_asset_id
+                    else ""
+                ),
                 # UI 1.18 inspector state: the brand-locked swatches it may pick
                 # from, plus the overrides actually in force for this render.
                 "brand_swatches": _brand_swatches(brand_kit),
