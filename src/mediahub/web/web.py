@@ -22905,7 +22905,7 @@ Relay team broke club record"></textarea>
                 f'<a href="{href}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h3 style="margin:0">{_h(title)}</h3>'
+                f'<h2 style="margin:0;font-size:inherit">{_h(title)}</h2>'
                 "</div>"
                 f"<p>{_h(desc)}</p>"
                 '<span class="mh-template-cta">Open</span>'

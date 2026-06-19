@@ -73,6 +73,28 @@ def test_settings_renders_card_grid_landing(app):
     assert "Settings" in body
 
 
+def test_settings_heading_order(app):
+    """axe heading-order: tile headings must be h2 (not h3) after the hero h1.
+
+    Heading levels must only increase by one — h1 → h3 is a WCAG violation.
+    """
+    import re
+
+    c = app.test_client()
+    body = c.get("/settings", follow_redirects=False).get_data(as_text=True)
+    # Hero supplies the sole h1.
+    assert body.count("<h1") == 1
+    # The first heading after the h1 must be h2, not h3 (no level skip).
+    h1_end = body.index("<h1") + len("<h1")
+    after_h1 = body[h1_end:]
+    next_h = re.search(r"<(h[1-6])\b", after_h1)
+    assert next_h is not None, "No heading found after h1 on settings page"
+    assert next_h.group(1) == "h2", (
+        f"First heading after h1 is <{next_h.group(1)}>, expected <h2> "
+        "(axe heading-order violation)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # /api/settings/llm-status — read-only status endpoint
 # ---------------------------------------------------------------------------
