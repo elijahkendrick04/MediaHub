@@ -10272,9 +10272,7 @@ def _layout(
         # with a transparency-capable format so the silhouette reads cleanly.
         _hero_src = _h(_pool[0])
         _hero_rot = round(_rng.uniform(-8.0, 8.0), 1)
-        _wash = (
-            '<div class="mh-bg-wash" style="--wx:100%;--wy:0%"></div>' if _brand else ""
-        )
+        _wash = '<div class="mh-bg-wash" style="--wx:100%;--wy:0%"></div>' if _brand else ""
         _hero = (
             '<div class="mh-bg-layer mh-bg-layer--hero">'
             '<span class="mh-bg-mark" style="left:101%;top:-6%;'
