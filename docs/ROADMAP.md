@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `445ad57bb` · Merge pull request #879 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `20abd77a5` · Merge pull request #881 from elijahkendrick04/claude/confident-brown-o6zxyg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1222,6 +1222,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `531bb7092` | Backdrop: adaptive blur (fixes busy logos), centre content, pick best logo |
 | 2026-06-19 | `019caf2b8` | Backdrop: make the logo still, and fix one logo rendering un-blurred |
 | 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
 | 2026-06-19 | `e2c0f911c` | Backdrop: soft-blur the logo so it stays identifiable, and make it dynamic |
@@ -1231,5 +1232,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `0c18ecce4` | Build 1.5: tokenised motion vocabulary (Remotion + FFmpeg + CSS) |
 | 2026-06-19 | `4f07e84fc` | Backdrop: knockout hybrid so it's future-proof for any club logo |
 | 2026-06-19 | `859e511ca` | Backdrop: centre the crest + auto-balance every logo's presence |
-| 2026-06-19 | `2c1615648` | fix(interpreter): narrow mirror-sidecar skip to _provenance.json only |
 <!-- /ROADMAP:ACTIVITY -->
