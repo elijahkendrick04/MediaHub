@@ -7136,11 +7136,13 @@ body::before {
   opacity: calc(var(--op, 0.5) * var(--opf, 0.6));
   transform: translate(-50%, -50%);
 }
-/* Colourful logo — its real artwork, softly blurred (fixed: never dropped). */
+/* Colourful logo — its real artwork, softly blurred. The blur amount is the
+   per-logo adaptive --mh-blur (busier crests blur more), with a fixed fallback so
+   it can never be dropped even if --mh-blur is unset/odd. */
 .mh-bg-mark--img {
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
-  filter: blur(16px) brightness(1.12);
+  filter: blur(var(--mh-blur, 22px)) brightness(1.12);
 }
 /* Monochrome / SVG logo — its shape in one light brand-tinted ink, softly blurred. */
 .mh-bg-mark--ko {
@@ -7148,7 +7150,7 @@ body::before {
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center;
   -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
-  filter: blur(16px);
+  filter: blur(var(--mh-blur, 22px));
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
@@ -8532,10 +8534,14 @@ main.wrap.mh-has-chapnav [id^="mh-ch-"] { scroll-margin-top: 84px; }
 
 @media (min-width: 1240px) {
   main.wrap.mh-has-chapnav {
-    max-width: 1440px;
+    max-width: 1560px;
     display: grid;
-    grid-template-columns: 196px minmax(0, 1fr);
-    column-gap: 44px;
+    /* TOC | centred content | empty mirror column. The empty right column makes
+       the content sit in the VIEWPORT centre (so it lines up with the centred
+       brand backdrop), while the "On this page" nav tucks into the far-left
+       margin. */
+    grid-template-columns: 180px minmax(0, 1fr) 180px;
+    column-gap: 36px;
     align-items: start;
   }
   .mh-chapter-nav {
@@ -10515,16 +10521,44 @@ def _layout(
                             _trans.append((_u, _lid))
                         else:
                             _opaque.append((_u, _lid))
-                    # First entry is the primary crest the backdrop paints; keep
-                    # a few candidates, cap the rest for sanity.
+                    # The backdrop paints ONE logo; cap candidates for sanity.
                     _ordered = (_trans or _opaque)[:8]
                     if _ordered:
-                        signed_in_bg_logos = [_u for (_u, _lid) in _ordered]
+                        # When a club uploaded several logos, pick the one that
+                        # reads best as a centred backdrop — a compact, badge-like
+                        # mark over a wide wordmark/lockup (which blurs to a smear).
+                        # Cheap heuristic: nearest-square raw aspect ratio wins.
+                        _pi = 0
+                        if len(_ordered) > 1:
+                            from mediahub.brand.logos import resolve_logo_path as _rlp
+
+                            def _bg_fit(_lid):
+                                try:
+                                    _p = _rlp(signed_in_pid, _lid)
+                                    if not _p or _p.suffix.lower() == ".svg":
+                                        return 0.6  # vectors: neutral, usually fine
+                                    from PIL import Image as _PImg
+
+                                    with _PImg.open(_p) as _im:
+                                        _w, _hh = _im.size
+                                    if _w <= 0 or _hh <= 0:
+                                        return 0.0
+                                    _ar = _w / _hh if _w >= _hh else _hh / _w
+                                    return 1.0 / _ar  # square→1.0, wide/tall→lower
+                                except Exception:
+                                    return 0.4
+
+                            _pi = max(
+                                range(len(_ordered)),
+                                key=lambda i: (_bg_fit(_ordered[i][1]), -i),
+                            )
+                        _primary = _ordered[_pi]
+                        signed_in_bg_logos = [_primary[0]]
                         # Per-logo adaptive treatment so the watermark sits at a
                         # consistent, tasteful presence whatever the logo's design.
                         from mediahub.brand.logos import logo_bg_treatment as _bg_treat
 
-                        signed_in_bg_treatment = _bg_treat(signed_in_pid, _ordered[0][1])
+                        signed_in_bg_treatment = _bg_treat(signed_in_pid, _primary[1])
                     else:
                         # No uploaded logo — fall back to the org's WEBSITE-CAPTURED
                         # logo (mirrored first-party) so the backdrop works no matter
@@ -10565,10 +10599,17 @@ def _layout(
         if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
             _op = 0.5
         _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
+        # Adaptive blur (px): busier crests blur more so they read as a clean glow.
+        # Sanitised to a plain int so --mh-blur is always a valid length.
+        try:
+            _blur = int(round(float(_t.get("blur", 22))))
+        except (TypeError, ValueError):
+            _blur = 22
+        _blur = min(60, max(8, _blur))
         _geo = (
             "left:50%;top:53%;"
             "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
-            f"--op:{_op};"
+            f"--op:{_op};--mh-blur:{_blur}px;"
         )
         if _t.get("mode") == "image":
             # Colourful logo → its real artwork (blurred by the fixed CSS rule).
