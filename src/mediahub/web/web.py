@@ -3006,6 +3006,15 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     approve_cls = "btn mh-wf-approve is-on" if is_approved else "btn secondary mh-wf-approve"
     approve_label = "Approved ✓" if is_approved else "Approve"
     approve_pressed = ' aria-pressed="true"' if is_approved else ""
+    _dl_link = ""
+    if is_approved:
+        _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id)
+        _dl_link = (
+            f'<a class="btn secondary" href="{_h(_dl_url)}"'
+            f' style="font-size:12px;padding:4px 10px"'
+            f' title="Download caption + visual as a .zip for manual posting">'
+            f"&#x2B07; Download</a>"
+        )
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
         f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
@@ -3018,6 +3027,7 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f"{_disabled_attrs('queue')}"
         f' title="Send back to the queue — undoes the approval.">Re-queue</button>'
+        f"{_dl_link}"
     )
 
 
@@ -13290,6 +13300,9 @@ def _hero_product_demo() -> str:
         '<span class="mh-demo-chip">Feed</span>'
         '<span class="mh-demo-chip">Reel</span>'
         '<span class="mh-demo-chip">Caption</span>'
+        "</div>"
+        '<div class="mh-demo-acts" style="margin-top:10px">'
+        '<span class="go">&#x2B07; Download&nbsp;.zip</span>'
         "</div>"
         '<div class="mh-demo-meter"><span class="lab">'
         "Nothing leaves the queue without your approval.</span></div>"
