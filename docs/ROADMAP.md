@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `0c597da2b` · Merge pull request #861 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `da6691dc3` · Merge pull request #857 from elijahkendrick04/claude/epic-dijkstra-iuuhnl
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.4** · Phase 1 (Product) — whisper.cpp / faster-whisper local ASR for reel captions / word-level burn-in (unblocks the video suite's captions, 1.6) · ❌ **NOT STARTED**
 - **1.5** · Phase 1 (Product) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
 - **1.6** · Phase 1 (Product) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
 - **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · ❌ **NOT STARTED**
@@ -1225,6 +1224,8 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
+| 2026-06-19 | `96965f821` | Regenerate ENV_INVENTORY.md for the new ASR env vars |
+| 2026-06-19 | `873315687` | Add local ASR engine for word-level captions (roadmap 1.4) |
 | 2026-06-19 | `03517475e` | Refine logo backdrop: visible, composed crest (fixes invisible + littered) |
 | 2026-06-19 | `66d12ddc1` | feat(spotlight): add Reformat + Copilot to the composite Content builder (full toolbar parity) |
 | 2026-06-19 | `8e808dbe0` | Apply ruff-format to the 1.3 photo-editor modules |
@@ -1234,5 +1235,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `90d2a54bd` | Apply ruff-format (collapse _wash ternary onto one line) |
 | 2026-06-19 | `638122eb6` | Recompose the signed-in logo backdrop into a branded crest backdrop |
 | 2026-06-19 | `6c31adcb2` | fix(graphic): keep v1 list layout for multi-fact recaps so spotlight composite renders |
-| 2026-06-19 | `c6da906f3` | Surface PB-lookup and store errors to the operator (don't silently fail) |
 <!-- /ROADMAP:ACTIVITY -->
