@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `1bb4e9f5d` · Backdrop: standardise the logo + support any uploaded logo, with brand-wash fallback (#892)
+**Last updated:** 2026-06-19 · `1ae636844` · Logo chip: unify the chrome avatar — keyed, contrast-aware, works for any logo (#904)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1220,6 +1220,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `666bf6cf5` | Logo chip: unify the chrome avatar — keyed, contrast-aware, any logo |
 | 2026-06-19 | `2e2e4c3e9` | Apply ruff-format (v0.8.4) to the _brand assignment |
 | 2026-06-19 | `6d1b7866e` | Backdrop: fall back to a soft brand-coloured wash when there's no paintable logo |
 | 2026-06-19 | `0d399f1af` | 1.7: bundle the local Piper voice into the deployed image (build 2/2) |
@@ -1230,5 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `dc4f9f6fd` | Fix duplicate result cards from reprinted HY-TEK event headers |
 | 2026-06-19 | `88894fc39` | chore(devtools): commit shared Claude Code MCP + Codex plugin config |
 | 2026-06-19 | `6f4e8aaa0` | Backdrop: standardise the logo — dead-centre, modest blur, dark-logo knockout |
-| 2026-06-19 | `5d1cc5795` | build(deps): bump actions/checkout from 6 to 7 |
 <!-- /ROADMAP:ACTIVITY -->
