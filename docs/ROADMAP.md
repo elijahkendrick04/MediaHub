@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `20abd77a5` · Merge pull request #881 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `3261e4cda` · Merge pull request #885: Build 1.6 — video suite (footage path, Clip-Maker, EDL timeline, captions, 
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.6** · Phase 1 (Product) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
 - **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · ❌ **NOT STARTED**
 - **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
 - **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
@@ -1222,6 +1221,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `8f1683563` | Disclose the 1.6 avatar provider keys in the subprocessor register |
+| 2026-06-19 | `d20e56ce2` | Apply ruff-format to the 1.6 video suite |
+| 2026-06-19 | `e3a8853e2` | Build 1.6: video suite — footage path, Clip-Maker, EDL timeline, captions, reframe |
 | 2026-06-19 | `531bb7092` | Backdrop: adaptive blur (fixes busy logos), centre content, pick best logo |
 | 2026-06-19 | `019caf2b8` | Backdrop: make the logo still, and fix one logo rendering un-blurred |
 | 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
@@ -1230,6 +1232,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `643d1cc61` | fix(spotlight): celebrate achievements on the graphic, not '5 approved' |
 | 2026-06-19 | `b230e1316` | Apply ruff-format to the 1.5 motion vocabulary |
 | 2026-06-19 | `0c18ecce4` | Build 1.5: tokenised motion vocabulary (Remotion + FFmpeg + CSS) |
-| 2026-06-19 | `4f07e84fc` | Backdrop: knockout hybrid so it's future-proof for any club logo |
-| 2026-06-19 | `859e511ca` | Backdrop: centre the crest + auto-balance every logo's presence |
 <!-- /ROADMAP:ACTIVITY -->
