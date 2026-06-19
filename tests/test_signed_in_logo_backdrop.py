@@ -151,12 +151,16 @@ def test_css_contract_is_future_proof(client):
     assert "left:50%" in style and "top:53%" in style  # centred
     assert "background-size: contain" in html  # any aspect ratio survives
     assert "--op:" in style  # adaptive opacity, inline
-    # Blur is a FIXED CSS rule, not an inline per-logo value — so a bad adaptive
-    # number can never void the filter and leave one logo sharp.
-    assert "filter: blur(16px)" in html
-    assert "blur" not in style  # never inline
+    # Blur is a CSS rule keyed off the per-logo adaptive --mh-blur (busier crests
+    # blur more), with a fixed fallback so it can never be voided and leave a logo
+    # sharp; the inline side only sets the variable, never a `filter`.
+    assert "blur(var(--mh-blur" in html
+    assert "--mh-blur:" in style
+    assert "filter:" not in style  # blur is never an inline filter
     # Still, not animated (no drift/breathe/orbit).
     assert "mh-bg-drift" not in html and "mh-bg-wash-orbit" not in html
+    # Content centred in the viewport, TOC in the far-left margin.
+    assert "180px minmax(0, 1fr) 180px" in html
     assert "pointer-events: none" in html
     # Both modes exist in the stylesheet, with a guaranteed-readable knockout ink.
     assert ".mh-bg-mark--img" in html and ".mh-bg-mark--ko" in html
@@ -266,4 +270,35 @@ def test_nan_opacity_is_sanitised_and_blur_survives(client, monkeypatch):
     assert "nan" not in style.lower()  # the NaN never reaches the markup
     m = re.search(r"--op:([0-9.]+)", style)
     assert m and 0.0 <= float(m.group(1)) <= 1.0  # sanitised to a finite opacity
-    assert "filter: blur(16px)" in html  # blur is a fixed CSS rule, unaffected
+    assert "blur(var(--mh-blur" in html  # blur is a CSS rule, unaffected
+
+
+def test_multi_logo_picks_the_most_badge_like(client):
+    """With several uploaded logos, the backdrop prefers a compact badge over a
+    wide wordmark (which would blur to a smear)."""
+    from mediahub.brand import logos as L
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    d = L.logos_dir("org-multi")
+    d.mkdir(parents=True, exist_ok=True)
+    wide = Image.new("RGBA", (300, 100), (0, 0, 0, 0))  # 3:1 wordmark
+    ImageDraw.Draw(wide).rectangle([10, 30, 290, 70], fill=(40, 120, 200, 255))
+    wide.save(d / "wide01.png")
+    badge = Image.new("RGBA", (200, 200), (0, 0, 0, 0))  # square badge
+    ImageDraw.Draw(badge).ellipse([10, 10, 190, 190], fill=(40, 120, 200, 255))
+    badge.save(d / "badge01.png")
+
+    prof = ClubProfile(
+        profile_id="org-multi",
+        display_name="Multi SC",
+        brand_primary="#1659c8",
+        brand_capture_status="ok",
+    )
+    prof.brand_logos = [  # wide listed first; the backdrop should still pick the badge
+        {"logo_id": "wide01", "mime": "image/png"},
+        {"logo_id": "badge01", "mime": "image/png"},
+    ]
+    save_profile(prof)
+
+    _classes, style = _mark(_home(client, "org-multi"))
+    assert "badge01" in style and "wide01" not in style

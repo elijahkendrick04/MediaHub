@@ -643,8 +643,13 @@ _BG_TREAT_TARGET_LUM, _BG_TREAT_BR_MAX = 0.40, 1.8
 _BG_TREAT_TARGET_SAT, _BG_TREAT_SAT_MIN = 0.42, 0.55
 _BG_TREAT_COLOURFUL = 0.12  # Hasler–Süsstrunk: above this the logo is "colourful"
 _BG_TREAT_KO_POP = 0.85  # a knockout ghost reads at a fixed light luminance
+# Adaptive blur (display px): a busier shape needs MORE blur to dissolve into a
+# clean soft glow rather than a sharp, fiddly crest; a simple mark (a filled disc)
+# stays identifiable at the low end. Keyed off the silhouette's alpha-edge density.
+_BG_TREAT_BLUR_MIN, _BG_TREAT_BLUR_MAX = 16, 46
+_BG_TREAT_BLUR_BASE, _BG_TREAT_BLUR_GAIN = 12.0, 850.0
 # Knockout / unmeasurable fallback: a light ghost at a moderate watermark weight.
-_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5}
+_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5, "blur": 22}
 
 
 def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
@@ -668,12 +673,17 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
     try:
         if cache.exists():
             cached = json.loads(cache.read_text())
-            # Only trust a well-formed cache: a finite opacity and a known mode.
-            # Older builds could persist a NaN opacity or a mode-less dict; ignore
-            # those and recompute rather than feed a bad value into the CSS.
+            # Only trust a well-formed cache: a finite opacity, a known mode, and a
+            # blur. Older builds could persist a NaN opacity, a mode-less dict, or a
+            # pre-adaptive-blur shape; ignore those and recompute rather than feed a
+            # bad value into the CSS.
             if isinstance(cached, dict) and cached.get("mode") in ("image", "knockout"):
                 _cop = cached.get("opacity")
-                if isinstance(_cop, (int, float)) and _cop == _cop:  # finite, not NaN
+                if (
+                    isinstance(_cop, (int, float))
+                    and _cop == _cop  # finite, not NaN
+                    and isinstance(cached.get("blur"), (int, float))
+                ):
                     return cached
     except Exception:
         pass
@@ -705,9 +715,21 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
         colourfulness = float(
             np.sqrt(rg.std() ** 2 + yb.std() ** 2) + 0.3 * np.sqrt(rg.mean() ** 2 + yb.mean() ** 2)
         )
+        # Shape busyness from the alpha-edge density → how much blur the crest needs
+        # to read as a clean soft glow (a detailed badge with text needs far more
+        # than a plain disc).
+        edges = float(np.abs(np.diff(alpha, axis=0)).mean() + np.abs(np.diff(alpha, axis=1)).mean())
+        blur = int(
+            round(
+                min(
+                    _BG_TREAT_BLUR_MAX,
+                    max(_BG_TREAT_BLUR_MIN, _BG_TREAT_BLUR_BASE + _BG_TREAT_BLUR_GAIN * edges),
+                )
+            )
+        )
         # Never let a non-finite metric reach the CSS (it would void the filter /
         # opacity); fall back to the neutral knockout instead of caching a NaN.
-        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness]).all()):
+        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness, edges]).all()):
             return dict(_BG_TREAT_NEUTRAL)
 
         if colourfulness >= _BG_TREAT_COLOURFUL:
@@ -727,6 +749,7 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                     min(1.0, max(_BG_TREAT_SAT_MIN, _BG_TREAT_TARGET_SAT / max(sat, 0.05))), 2
                 ),
                 "halo": round(min(0.30, max(0.10, 0.30 - 0.42 * lum)), 3),
+                "blur": blur,
             }
         else:
             # Monochrome — paint the shape as a light ghost (CSS knockout). Its
@@ -738,6 +761,7 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                 "opacity": round(
                     min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
                 ),
+                "blur": blur,
             }
         try:
             cache.write_text(json.dumps(treat))
