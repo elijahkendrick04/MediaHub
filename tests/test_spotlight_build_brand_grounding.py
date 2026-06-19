@@ -460,4 +460,8 @@ def test_spotlight_graphic_item_strips_entry_url_and_dedupes():
     # …and the duplicate moment collapses to one bullet.
     assert gt["bullets"] == ["50m Breaststroke (LC)"]
     assert gt["stats"].get("athlete") == "Amy Crowley"
-    assert gt["stats"].get("moments") == "2 approved"
+    # …and the count chip celebrates the swims, never the internal "N approved"
+    # workflow state (no medals/PBs in this data → a plain swim count).
+    assert gt["stats"].get("swims") == "2"
+    assert "moments" not in gt["stats"]
+    assert "approved" not in repr(gt["stats"]).lower()
