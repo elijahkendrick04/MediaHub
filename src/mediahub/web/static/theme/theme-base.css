@@ -153,6 +153,71 @@
   object-fit: contain;
 }
 
+/* ---------------------------------------------------------------------------
+   Elevated chrome chip — the unified org-logo avatar used across the signed-in
+   chrome (nav avatar, sign-in picker tiles, settings preview). A fixed-size,
+   contrast-aware framed chip so EVERY club's mark reads at the same size and
+   weight whatever its colour/shape/format. The logo is the KEYED silhouette
+   (opaque/white backgrounds removed — no white boxes); the backing tone is
+   chosen server-side so the mark reads (brand.logos.logo_chip_tone): a light
+   "paper" chip for dark/colour logos, a dark "ink" chip for light ones, each
+   optionally tinted with the org's brand. An initials fallback shows when there
+   is no logo or it fails to load. Built by _logo_chip_html(size=…) in web.py.
+   --------------------------------------------------------------------------- */
+.mh-logo-chip--sm,
+.mh-logo-chip--md,
+.mh-logo-chip--lg {
+  --chip-brand: transparent;
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0;            /* fixed square; the image carries its own clear-space */
+  overflow: hidden;
+  box-shadow: none;      /* flat + bordered reads cleaner at avatar sizes */
+}
+.mh-logo-chip--sm { width: 22px; height: 22px; border-radius: 6px; }
+.mh-logo-chip--md { width: 40px; height: 40px; border-radius: 9px; }
+.mh-logo-chip--lg { width: 64px; height: 64px; border-radius: 13px; }
+/* Backing tone — house paper / ink, with a subtle on-brand tint mixed in. The
+   color-mix degrades to the plain tone where --chip-brand is unset/transparent
+   (and on engines without color-mix, the first declaration is the fallback). */
+.mh-logo-chip--light {
+  background: var(--mh-prim-neutral-0, #f5f2e8);
+  background: color-mix(in oklab, var(--chip-brand) 8%, var(--mh-prim-neutral-0, #f5f2e8));
+}
+.mh-logo-chip--dark {
+  background: #0a0b11;
+  background: color-mix(in oklab, var(--chip-brand) 16%, #0a0b11);
+}
+.mh-logo-chip__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 16%;          /* clear-space so the keyed mark never kisses the frame */
+  box-sizing: border-box;
+}
+.mh-logo-chip__initials {
+  display: none;
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.mh-logo-chip--light .mh-logo-chip__initials { color: #0a0b11; }
+.mh-logo-chip--dark .mh-logo-chip__initials { color: #f5f2e8; }
+.mh-logo-chip--sm .mh-logo-chip__initials { font-size: 9px; }
+.mh-logo-chip--md .mh-logo-chip__initials { font-size: 15px; }
+.mh-logo-chip--lg .mh-logo-chip__initials { font-size: 24px; }
+/* No logo / load failure → hide the image, reveal the initials. */
+.mh-logo-chip.is-empty .mh-logo-chip__img { display: none; }
+.mh-logo-chip.is-empty .mh-logo-chip__initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
 /* =====================================================================
    @PROPERTY REGISTRATIONS
    ---------------------------------------------------------------------
