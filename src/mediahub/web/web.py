@@ -21780,6 +21780,15 @@ Relay team broke club record"></textarea>
             deps["tts_provider"] = tts_provider_status()
         except Exception as _tts_err:
             deps["tts_provider"] = {"error": str(_tts_err)[:200]}
+        # ASR provider slot (P0.4 / roadmap 1.4) — informational; server
+        # transcription is opt-in (the live copilot voice path is the browser's
+        # on-device speech capture).
+        try:
+            from mediahub.visual.transcribe import asr_provider_status
+
+            deps["asr_provider"] = asr_provider_status()
+        except Exception as _asr_err:
+            deps["asr_provider"] = {"error": str(_asr_err)[:200]}
         # Motion is healthy when the *active* reel engine can render:
         # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
         # makes both optional.

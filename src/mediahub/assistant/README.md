@@ -30,8 +30,10 @@ What's in here:
   8-and-unders"). You add to it explicitly ("remember this"), and you can see
   and delete everything in it. The copilot reads the relevant ones each turn.
 - `asr.py` — the voice seam. The browser transcribes speech on-device (free, no
-  provider); this server seam is for uploaded audio and honestly errors until a
-  speech provider is configured.
+  provider); this server seam handles uploaded audio by delegating to the local
+  ASR engine (`../visual/transcribe.py` — faster-whisper / whisper.cpp, roadmap
+  1.4) and returning just the text. With no provider configured it honestly
+  errors (the browser path stays the live default).
 
 Magic-Write-style caption tools (Summarise / Expand / Rewrite, on top of the
 existing Shorter / Punchier / Tidy) live on the caption engine

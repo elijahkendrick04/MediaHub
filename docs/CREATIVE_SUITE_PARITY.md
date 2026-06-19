@@ -260,7 +260,7 @@ speech + an honest server ASR seam (`assistant/asr.py`). Web: a per-card
 | C2 | Guided Presentations (conversational goal/story/structure flow) | ↗ 1.15, driven by this assistant |
 | C2 | Ask @Canva (tag the AI in a comment for feedback/generation) | ↗ 1.18 (assistant joins review threads) |
 | A2 | AI Assistant beta (conversational create/edit; generate images; change backgrounds/text; replace objects; position/align/stylise; edit individual layers; toggle on/off; smart prompt suggestions; Imaging Subagent) | 🆕 P6.2 — same copilot; image operations delegate to 1.2 providers; assistant is per-org toggleable; suggestions seeded from the planner |
-| A2 | Voice commands via microphone | ✅ P6.2 mic input via browser on-device speech; server ASR seam (`assistant/asr.py`) honest-errors until a provider lands (1.4) |
+| A2 | Voice commands via microphone | ✅ P6.2 mic input via browser on-device speech; server ASR seam (`assistant/asr.py`) now backed by the local ASR engine (1.4 — `visual/transcribe.py`, faster-whisper / whisper.cpp), honest-erroring only when no `MEDIAHUB_ASR_PROVIDER` is set |
 | A2 | Generate captions / Caption Writer for social posts | ✅ shipped — `web/ai_caption.py` (few-shot brand voice, generate-many-then-dedupe, per-platform variants, AI-tell ban-list, approval loop) |
 | A2 | Rewrite / text variations | 🆕 P6.2 text-tools (variations = the shipped generate-many-then-dedupe pattern applied to any text block) |
 | A2 | Text to Template (generate fully editable template from a prompt) | 🆕 P6.2 prompt → `FormatSpec` + design spec (editable, brand-locked); catalogue home ↗ P6.1 |
@@ -495,7 +495,7 @@ no-synthetic-people rule.
 | C4 | Transitions (fade/slide/wipe/chop/dissolve; duration/direction; apply between all pages) | 🔵 crossfades shipped in reels → 🆕 1.6 transition library + apply-all |
 | C4 | Animation effects / transitions library | ↗ 1.5 motion presets, applied on video overlays |
 | C4 | Beat Sync (auto-match audio beats to cuts) | 🆕 1.6 beat grid (librosa-class onset detection, deterministic) snapping cuts |
-| C4 | Captions / Subtitles (AI auto-generate; editable styled caption layer; manual timing) | 🆕 1.6 ASR captions (1.4 seam) + styled editable layer |
+| C4 | Captions / Subtitles (AI auto-generate; editable styled caption layer; manual timing) | 🆕 1.4 word-level ASR caption track shipped (`transcribe.caption_track_for_audio` → `subtitle_burn`); the styled editable caption layer on footage is 1.6 |
 | C4 | Video Background Remover (no green screen, <90s) | 🆕 1.6 video matting provider slot (flagged) |
 | C4 | Speed control (speed up / slow-mo) | 🆕 1.6 per-clip speed (race-finish slow-mo) |
 | C4 | Highlights (AI surfaces best clips) · Auto-trim | 🆕 1.6 `moments.py` scoring + suggested trims |
