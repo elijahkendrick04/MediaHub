@@ -9922,8 +9922,17 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
         # form_data exactly for this.
         swimmer = _display_clean(fd.get("swimmer_name") or "")
         hook = "SPOTLIGHT"
-        head_src = _short_hook(swimmer or "Spotlight")
-        line2_default = "SPOTLIGHT"
+        # The eyebrow already reads "ATHLETE SPOTLIGHT", so make the headline the
+        # athlete's NAME — first name over surname — instead of repeating
+        # "SPOTLIGHT" as a second line. That repeat was redundant with the
+        # eyebrow and collided with the name in the render.
+        _name_words = (swimmer or "Spotlight").split()
+        if len(_name_words) >= 2:
+            head_src = _name_words[0]
+            line2_default = " ".join(_name_words[1:]).upper()
+        else:
+            head_src = swimmer or "Spotlight"
+            line2_default = ""
         kicker = meet or "Athlete spotlight"
         # Strip any scraped crawl-URL suffix and drop exact-duplicate moments so
         # the card lists each result once, never the entry_url.
@@ -9941,9 +9950,19 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
         # actually have a real one — no URL placeholder, no empty tile.
         if meet:
             stats["meet"] = meet
-        _n_appr = fd.get("n_approved")
-        if _n_appr:
-            stats["moments"] = f"{_n_appr} approved"
+        # Celebrate what the swimmer DID, never the internal "N approved"
+        # workflow count. Lead the headline stat with podium medals, then
+        # personal bests, then the number of featured swims — all tallied from
+        # the real parsed results by spotlight_build.
+        _n_appr = int(fd.get("n_approved") or 0)
+        _n_pbs = int(fd.get("n_pbs") or 0)
+        _n_medals = int(fd.get("n_medals") or 0)
+        if _n_medals:
+            stats["medals"] = str(_n_medals)
+        elif _n_pbs:
+            stats["pbs"] = str(_n_pbs)
+        elif _n_appr:
+            stats["swims"] = str(_n_appr)
     else:  # free_text / other
         hook = "HIGHLIGHT"
         head_src = _short_hook(parts[0]) if parts else "Highlight"
@@ -24945,6 +24964,20 @@ function mhPlanGenerate(btn) {{
             if bits and bits not in result_lines:
                 result_lines.append(bits)
 
+        # Celebratory aggregates for the spotlight GRAPHIC's stat chips: tally
+        # the real, verified achievements behind the approved moments so the
+        # card can lead with medals / PBs / swims, never an internal "N
+        # approved" count. Counted over every approved moment, not just the
+        # four the graphic lists.
+        n_pbs = 0
+        n_medals = 0
+        for ra in approved:
+            a = ra.get("achievement", {})
+            if a.get("pb"):
+                n_pbs += 1
+            if a.get("place") in (1, 2, 3, "1", "2", "3"):
+                n_medals += 1
+
         tone_line = ""
         if tone:
             from mediahub.brand.tone import TONE_META, tone_from_str
@@ -25026,6 +25059,8 @@ function mhPlanGenerate(btn) {{
                 "swimmer_name": swimmer_name,
                 "meet_name": meet_name,
                 "n_approved": len(approved),
+                "n_pbs": n_pbs,
+                "n_medals": n_medals,
                 "results_lines": "\n".join(result_lines),
             },
             None,
@@ -25079,6 +25114,8 @@ function mhPlanGenerate(btn) {{
                 "run_id": run_id,
                 "swimmer_key": swimmer_key,
                 "n_approved": result["n_approved"],
+                "n_pbs": result["n_pbs"],
+                "n_medals": result["n_medals"],
                 "tone": tone,
                 "results_lines": result["results_lines"],
             },

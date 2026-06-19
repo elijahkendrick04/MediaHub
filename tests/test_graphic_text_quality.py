@@ -96,6 +96,50 @@ def test_preview_and_session_headlines_labelled_honestly():
 
 
 # ---------------------------------------------------------------------------
+# Athlete spotlight — celebrate achievements, never the internal "approved" count
+# ---------------------------------------------------------------------------
+
+
+def _spotlight_item(fd_extra):
+    fd = {"source": "athlete_spotlight", "swimmer_name": "Dylan Broom"}
+    fd.update(fd_extra)
+    card = {"caption": "A standout weekend for Dylan."}
+    return _stub_card_to_graphic_item("free_text", card, fd)
+
+
+def test_spotlight_stats_never_show_approved_workflow_count():
+    item = _spotlight_item(
+        {"n_approved": 5, "results_lines": "200m Freestyle (LC)\n100m Freestyle (LC)"}
+    )
+    stats = item["graphic_text"]["stats"]
+    # The internal workflow word must never reach the celebratory graphic.
+    assert "moments" not in stats
+    for v in stats.values():
+        assert "approved" not in str(v).lower()
+    # With no medals/PBs in the data, fall back to a celebratory swim count.
+    assert stats.get("swims") == "5"
+
+
+def test_spotlight_stats_lead_with_medals_then_pbs():
+    medals = _spotlight_item({"n_approved": 5, "n_pbs": 3, "n_medals": 2})["graphic_text"]["stats"]
+    assert medals.get("medals") == "2"
+    assert "swims" not in medals  # medals win the headline stat
+    pbs = _spotlight_item({"n_approved": 4, "n_pbs": 3, "n_medals": 0})["graphic_text"]["stats"]
+    assert pbs.get("pbs") == "3"
+    assert "swims" not in pbs
+
+
+def test_spotlight_headline_is_the_name_not_redundant_spotlight():
+    gt = _spotlight_item({"n_approved": 2})["graphic_text"]
+    # The eyebrow already says ATHLETE SPOTLIGHT; the headline is the athlete's
+    # name split first-over-surname, not a second "SPOTLIGHT" line colliding
+    # with it.
+    assert gt["headline_line1"] == "DYLAN"
+    assert gt["headline_line2"] == "BROOM"
+    assert "SPOTLIGHT" not in (gt["headline_line1"] + " " + gt["headline_line2"])
+
+
+# ---------------------------------------------------------------------------
 # generator.py — routing hook words must not land in achievement_label
 # ---------------------------------------------------------------------------
 
