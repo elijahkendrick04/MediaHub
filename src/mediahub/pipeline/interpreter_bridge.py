@@ -231,6 +231,33 @@ def _coerce_distance(d) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _canonical_result_identity(r: RaceResult) -> tuple:
+    """Stable identity for a parsed swim — used to drop exact reprints.
+
+    The key spans every field that distinguishes two genuinely different
+    swims, the round and the A/B-final label/rank among them, so a swimmer's
+    heat and final of the same event (which differ there) are never merged.
+    A row the source printed twice is identical across all of these and
+    collapses to one.
+    """
+    extra = r.extra or {}
+    return (
+        r.swimmer_key,
+        r.distance,
+        r.stroke,
+        r.course,
+        r.gender,
+        r.age_band,
+        r.finals_time_cs,
+        r.place,
+        r.round,
+        r.status,
+        r.swim_date,
+        extra.get("final_label", ""),
+        extra.get("final_rank", 0),
+    )
+
+
 def interpreted_to_canonical(
     interpreted: InterpretedMeet,
     *,
@@ -281,6 +308,14 @@ def interpreted_to_canonical(
 
     # Per-key swimmer cache to preserve identity across events.
     swimmer_lookup: dict[tuple[str, str, str], str] = {}
+    # Exact-reprint guard. HY-TEK MEET MANAGER printouts repeat an event's
+    # header and its result rows whenever the event spills onto a new page, so
+    # the same physical swim gets parsed twice. Left unchecked it surfaces as
+    # duplicate cards downstream — and breaks per-card approval, since every
+    # card keyed by that one swim_id flips together. Collapse the reprints here,
+    # at the single seam every parse path funnels through.
+    seen_result_keys: set[tuple] = set()
+    duplicate_rows_dropped = 0
 
     for event in interpreted.events or []:
         ev_distance = _coerce_distance(event.distance_m)
@@ -360,7 +395,21 @@ def interpreted_to_canonical(
                     "final_rank": ev_final_rank,
                 },
             )
+            ident = _canonical_result_identity(result)
+            if ident in seen_result_keys:
+                duplicate_rows_dropped += 1
+                continue
+            seen_result_keys.add(ident)
             meet.results.append(result)
+
+    if duplicate_rows_dropped:
+        meet.add_warning(
+            "duplicate_results_collapsed",
+            f"{duplicate_rows_dropped} duplicate result row(s) were collapsed "
+            "— the source repeated identical swims (e.g. an event header "
+            "reprinted across a page break).",
+            severity="info",
+        )
 
     return meet
 
