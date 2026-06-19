@@ -163,3 +163,15 @@ def test_transcribe_honest_error_503(app_env):
     with app.test_client() as c:
         r = c.post("/api/assistant/transcribe", data=b"audio", content_type="audio/webm")
     assert r.status_code == 503 and r.get_json()["error"] == "asr_unavailable"
+
+
+def test_transcribe_empty_audio_is_400_not_500(app_env, monkeypatch):
+    """A configured provider with an empty upload is a client condition (400),
+    not an unhandled 500. ``transcribe_audio`` raises ``ValueError('audio is
+    empty')`` once a provider is set; the route must turn that into an honest
+    400 rather than letting it fall through to the global 500 handler."""
+    app, wm, tmp_path = app_env
+    monkeypatch.setenv("MEDIAHUB_ASR_PROVIDER", "faster-whisper")
+    with app.test_client() as c:
+        r = c.post("/api/assistant/transcribe", data=b"", content_type="audio/webm")
+    assert r.status_code == 400 and r.get_json()["error"] == "empty"
