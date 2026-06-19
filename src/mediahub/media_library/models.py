@@ -21,6 +21,7 @@ ASSET_TYPES = (
     "brand_pattern",
     "exemplar_post",
     "ai_generated",  # P6.3: produced/edited by the generative-imagery seam
+    "footage",  # 1.6: an uploaded/recorded video clip for the video suite
     "other",
 )
 
@@ -71,6 +72,9 @@ class MediaAsset:
     safe_for_minors: bool = True
     cutout_path: Optional[str] = None  # set after rembg
     edit_recipe: dict = field(default_factory=dict)  # 1.3: non-destructive photo-edit recipe
+    media_meta: dict = field(
+        default_factory=dict
+    )  # 1.6: video probe (duration_ms, fps, has_audio…)
     source_url: Optional[str] = None  # web-sourced (e.g. Wikimedia)
     source_attribution: Optional[str] = None
     source_licence: Optional[str] = None
@@ -90,14 +94,14 @@ class MediaAsset:
         for k, v in d.items():
             if k not in known:
                 continue
-            if k in ("description_parsed", "edit_recipe") and isinstance(v, str):
+            if k in ("description_parsed", "edit_recipe", "media_meta") and isinstance(v, str):
                 try:
                     v = json.loads(v) if v else {}
                 except Exception:
                     v = {}
-            # A migrated-in NULL edit_recipe column → the empty-recipe default
+            # A migrated-in NULL dict column → the empty-dict default
             # (keeps the field honouring its declared dict type).
-            if k == "edit_recipe" and v is None:
+            if k in ("edit_recipe", "media_meta") and v is None:
                 v = {}
             if k in (
                 "linked_athlete_ids",

@@ -9462,6 +9462,249 @@ def _theme_seed_style_block() -> str:
 #
 # Defined in <head> (before any body consumer, incl. on-load mhAutoGraphic) and
 # kept as a module constant so tests can exercise the controller directly.
+_VIDEO_STUDIO_HTML = """
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
+  <span class="mh-hero-eyebrow">Video &middot; the footage path</span>
+  <h1>Turn race footage into<br><em class="editorial">a branded reel.</em></h1>
+  <p class="lede">Upload or record a clip; MediaHub finds the moment, crops it
+  upright, puts the spoken words on screen, and brands it. You approve before
+  anything is exported.</p>
+  __ENGINE_NOTE__
+</section>
+
+<div class="vstudio-grid">
+  <section class="vstudio-panel">
+    <h2 class="vstudio-h">1 &middot; Footage</h2>
+    <div id="vs-drop" class="vstudio-drop" tabindex="0" role="button"
+         aria-label="Upload footage">
+      <strong>Drop a clip here</strong>
+      <span class="muted">or click to choose &middot; MP4, MOV, WebM &middot; under 50&nbsp;MB</span>
+      <input id="vs-file" type="file" accept="video/*" hidden>
+    </div>
+    <div class="vstudio-rec">
+      <button class="btn ghost" id="vs-rec-cam" type="button">&#9679; Record webcam</button>
+      <button class="btn ghost" id="vs-rec-screen" type="button">&#9633; Record screen</button>
+      <button class="btn danger" id="vs-rec-stop" type="button" hidden>&#9632; Stop</button>
+      <span id="vs-rec-status" class="muted" aria-live="polite"></span>
+    </div>
+    <div id="vs-footage" class="vstudio-tiles" aria-live="polite"></div>
+  </section>
+
+  <section class="vstudio-panel">
+    <h2 class="vstudio-h">2 &middot; Clip Maker</h2>
+    <p id="vs-selected" class="muted">Select a clip on the left to begin.</p>
+    <div class="vstudio-controls" id="vs-controls" hidden>
+      <label>Title <input type="text" id="vs-title" maxlength="120" placeholder="e.g. New club record!"></label>
+      <label>Format
+        <select id="vs-format">
+          <option value="story">Story (9:16)</option>
+          <option value="portrait">Portrait (4:5)</option>
+          <option value="square">Square (1:1)</option>
+          <option value="landscape">Landscape (16:9)</option>
+        </select>
+      </label>
+      <label>Moments
+        <select id="vs-moments">
+          <option value="1">1 (single highlight)</option>
+          <option value="2">2</option>
+          <option value="3">3 (montage)</option>
+        </select>
+      </label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-captions" checked> Captions (spoken words on screen)</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-reframe" checked> Reframe to fit (keep the subject)</label>
+      <button class="btn primary" id="vs-make" type="button">Make clip &rarr;</button>
+      <span id="vs-make-status" class="muted" aria-live="polite"></span>
+    </div>
+  </section>
+</div>
+
+<section class="vstudio-panel" style="margin-top:var(--sp-5)">
+  <h2 class="vstudio-h">3 &middot; Your clips</h2>
+  <div id="vs-projects" class="vstudio-projects" aria-live="polite">
+    <p class="muted">No clips yet &mdash; make one above.</p>
+  </div>
+</section>
+
+<style>
+  .vstudio-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-5);margin-top:var(--sp-4)}
+  @media (max-width:860px){.vstudio-grid{grid-template-columns:1fr}}
+  .vstudio-panel{background:var(--panel,#0f0f12);border:1px solid var(--border,#26262c);border-radius:10px;padding:var(--sp-4)}
+  .vstudio-h{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-muted,#9a9aa3);margin:0 0 12px}
+  .vstudio-drop{border:1.5px dashed var(--border,#33333a);border-radius:8px;padding:26px 16px;text-align:center;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:border-color .15s,background .15s}
+  .vstudio-drop:hover,.vstudio-drop.drag{border-color:var(--accent,#22d3ee);background:rgba(34,211,238,.04)}
+  .vstudio-rec{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
+  .vstudio-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:6px}
+  .vstudio-tile{border:1px solid var(--border,#26262c);border-radius:8px;overflow:hidden;cursor:pointer;background:#000;position:relative}
+  .vstudio-tile.sel{outline:2px solid var(--accent,#22d3ee);outline-offset:-2px}
+  .vstudio-tile video{display:block;width:100%;height:90px;object-fit:cover;background:#000}
+  .vstudio-tile .cap{padding:5px 7px;font-size:11px;color:var(--ink-dim,#b8b8c0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vstudio-controls{display:flex;flex-direction:column;gap:12px}
+  .vstudio-controls label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-dim,#b8b8c0)}
+  .vstudio-controls input[type=text],.vstudio-controls select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:7px 9px;font-size:14px}
+  .vstudio-check{flex-direction:row !important;align-items:center;gap:8px !important}
+  .vstudio-projects{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .vstudio-proj{border:1px solid var(--border,#26262c);border-radius:8px;padding:12px;background:#0a0a0c}
+  .vstudio-proj video{width:100%;border-radius:6px;background:#000;margin-bottom:8px}
+  .vstudio-proj .name{font-weight:600;margin-bottom:4px}
+  .vstudio-proj .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .vstudio-badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--border,#33333a)}
+  .vstudio-badge.approved{color:#34d399;border-color:#34d39955}
+  .vstudio-badge.draft{color:#fbbf24;border-color:#fbbf2455}
+</style>
+
+<script>
+(function(){
+  var CSRF = "__CSRF__";
+  var FOOTAGE_URL = "__FOOTAGE_URL__";
+  var FOOTAGE_LIST_URL = "__FOOTAGE_LIST_URL__";
+  var CLIPMAKER_URL = "__CLIPMAKER_URL__";
+  var PROJECTS_URL = "__PROJECTS_URL__";
+  var RENDER_TMPL = "__PROJECT_RENDER_TMPL__";
+  var APPROVE_TMPL = "__PROJECT_APPROVE_TMPL__";
+  var FILE_TMPL = "__PROJECT_FILE_TMPL__";
+  var selectedId = null;
+  var mediaRecorder = null, recChunks = [];
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':String(s)); return d.innerHTML; }
+  function url(tmpl, id){ return tmpl.replace('__PID__', encodeURIComponent(id)); }
+  function fmtDur(ms){ if(!ms) return ''; var s=Math.round(ms/1000); return s+'s'; }
+
+  function jpost(u, body){
+    return fetch(u, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF,'Accept':'application/json'}, body:JSON.stringify(body||{})}).then(function(r){return r.json().then(function(j){j.__status=r.status;return j;});});
+  }
+
+  // ---- footage upload ----
+  function uploadFile(file){
+    if(!file) return;
+    var status = $('vs-rec-status'); status.textContent = 'Uploading '+file.name+'...';
+    if(file.size > 50*1024*1024){ status.textContent = 'That clip is over 50 MB. Trim it shorter and try again.'; return; }
+    var fd = new FormData(); fd.append('file', file, file.name);
+    fetch(FOOTAGE_URL, {method:'POST', headers:{'X-CSRF-Token':CSRF,'Accept':'application/json'}, body:fd})
+      .then(function(r){ if(r.status===413){ return {error:'too_large', message:'That clip is over 50 MB.'}; } return r.json(); })
+      .then(function(j){ status.textContent = j.ok ? 'Uploaded.' : ('Upload failed: '+(j.message||j.error||'error')); if(j.ok) loadFootage(); })
+      .catch(function(){ status.textContent = 'Upload failed.'; });
+  }
+
+  var drop = $('vs-drop'), fileInput = $('vs-file');
+  drop.addEventListener('click', function(){ fileInput.click(); });
+  drop.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); } });
+  fileInput.addEventListener('change', function(){ if(fileInput.files[0]) uploadFile(fileInput.files[0]); fileInput.value=''; });
+  ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('drag'); }); });
+  ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('drag'); }); });
+  drop.addEventListener('drop', function(e){ var f=e.dataTransfer.files[0]; if(f) uploadFile(f); });
+
+  // ---- recorder (webcam / screen) ----
+  function startRec(kind){
+    var status = $('vs-rec-status');
+    var getter = kind==='screen'
+      ? navigator.mediaDevices.getDisplayMedia({video:true, audio:true})
+      : navigator.mediaDevices.getUserMedia({video:true, audio:true});
+    getter.then(function(stream){
+      recChunks = [];
+      var mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+      mediaRecorder = new MediaRecorder(stream, {mimeType:mime});
+      mediaRecorder.ondataavailable = function(e){ if(e.data && e.data.size) recChunks.push(e.data); };
+      mediaRecorder.onstop = function(){
+        stream.getTracks().forEach(function(t){t.stop();});
+        var blob = new Blob(recChunks, {type:'video/webm'});
+        var name = (kind==='screen'?'screen':'webcam')+'-'+Date.now()+'.webm';
+        uploadFile(new File([blob], name, {type:'video/webm'}));
+        $('vs-rec-stop').hidden = true;
+      };
+      mediaRecorder.start();
+      $('vs-rec-stop').hidden = false;
+      status.textContent = 'Recording...';
+    }).catch(function(err){ status.textContent = 'Recorder unavailable: '+(err && err.message || err); });
+  }
+  $('vs-rec-cam').addEventListener('click', function(){ startRec('camera'); });
+  $('vs-rec-screen').addEventListener('click', function(){ startRec('screen'); });
+  $('vs-rec-stop').addEventListener('click', function(){ if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); });
+
+  // ---- footage list ----
+  function loadFootage(){
+    fetch(FOOTAGE_LIST_URL, {headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
+      var wrap = $('vs-footage'); var items = (j && j.footage) || [];
+      if(!items.length){ wrap.innerHTML = '<p class="muted">No footage yet. Upload or record a clip.</p>'; return; }
+      wrap.innerHTML = items.map(function(a){
+        return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
+          + '<video src="'+esc(a.file_url)+'#t=0.1" preload="metadata" muted playsinline></video>'
+          + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption></figure>';
+      }).join('');
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vstudio-tile'), function(el){
+        el.addEventListener('click', function(){ selectFootage(el.getAttribute('data-id'), items); });
+      });
+    });
+  }
+  function selectFootage(id, items){
+    selectedId = id;
+    Array.prototype.forEach.call(document.querySelectorAll('.vstudio-tile'), function(el){
+      el.classList.toggle('sel', el.getAttribute('data-id')===id);
+    });
+    var a = (items||[]).filter(function(x){return x.id===id;})[0];
+    $('vs-selected').innerHTML = 'Selected: <strong>'+esc(a?a.filename:id)+'</strong>'
+      + (a && !a.has_audio ? ' <span class="muted">(no audio &rarr; captions need sound)</span>' : '');
+    $('vs-controls').hidden = false;
+  }
+
+  // ---- make clip ----
+  $('vs-make').addEventListener('click', function(){
+    if(!selectedId){ return; }
+    var status = $('vs-make-status'); status.textContent = 'Analysing footage...';
+    jpost(CLIPMAKER_URL, {
+      asset_id: selectedId,
+      format: $('vs-format').value,
+      title: $('vs-title').value,
+      target_moments: parseInt($('vs-moments').value,10)||1,
+      with_captions: $('vs-captions').checked,
+      with_reframe: $('vs-reframe').checked
+    }).then(function(j){
+      if(j.ok){ status.textContent = 'Clip created. Render it below.'; loadProjects(); }
+      else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
+    });
+  });
+
+  // ---- projects ----
+  function loadProjects(){
+    fetch(PROJECTS_URL, {headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
+      var wrap = $('vs-projects'); var ps = (j && j.projects) || [];
+      if(!ps.length){ wrap.innerHTML = '<p class="muted">No clips yet &mdash; make one above.</p>'; return; }
+      wrap.innerHTML = ps.map(function(p){
+        var fileUrl = url(FILE_TMPL, p.id);
+        var preview = p.rendered ? '<video src="'+esc(fileUrl)+'" controls preload="metadata" playsinline></video>' : '';
+        var exportBtn = (p.rendered && p.status==='approved')
+          ? '<a class="btn ghost" href="'+esc(fileUrl)+'?download=1">Export</a>' : '';
+        var approveBtn = (p.rendered && p.status!=='approved')
+          ? '<button class="btn primary vs-approve" data-id="'+esc(p.id)+'">Approve</button>' : '';
+        var renderBtn = '<button class="btn ghost vs-render" data-id="'+esc(p.id)+'">'+(p.rendered?'Re-render':'Render')+'</button>';
+        return '<div class="vstudio-proj">'+preview
+          + '<div class="name">'+esc(p.name)+'</div>'
+          + '<span class="vstudio-badge '+esc(p.status)+'">'+esc(p.status)+'</span> '
+          + '<span class="muted" style="font-size:12px">'+esc(p.format)+' &middot; '+p.clips+' clip(s) &middot; '+fmtDur(p.duration_ms)+'</span>'
+          + '<div class="row">'+renderBtn+approveBtn+exportBtn+'</div></div>';
+      }).join('');
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-render'), function(b){ b.addEventListener('click', function(){ renderProject(b.getAttribute('data-id'), b); }); });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-approve'), function(b){ b.addEventListener('click', function(){ approveProject(b.getAttribute('data-id')); }); });
+    });
+  }
+  function renderProject(id, btn){
+    if(btn){ btn.disabled = true; btn.textContent = 'Rendering...'; }
+    jpost(url(RENDER_TMPL, id), {}).then(function(j){
+      if(!j.ok && j.message){ alert(j.message); }
+      loadProjects();
+    });
+  }
+  function approveProject(id){
+    jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+  }
+
+  loadFootage();
+  loadProjects();
+})();
+</script>
+"""
+
+
 _RENDER_PROGRESS_JS = """
 (function(){
   var MH = window.MH = window.MH || {};
@@ -10780,6 +11023,7 @@ def _layout(
        full Create tile (the live design editor). Keeping both off the top bar
        leaves the signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    {% if video_enabled %}<a href="{{ url_for('video_studio_page') }}" class="{{ 'active' if active=='video' else '' }}">Video</a>{% endif %}
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
@@ -12922,6 +13166,7 @@ def _layout(
         chapter_nav_html=chapter_nav_html,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
+        video_enabled=bool(_v8_ok),
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
@@ -22184,6 +22429,20 @@ Relay team broke club record"></textarea>
             deps["asr_provider"] = asr_provider_status()
         except Exception as _asr_err:
             deps["asr_provider"] = {"error": str(_asr_err)[:200]}
+        # Video suite (roadmap 1.6) — footage render engine + the flagged
+        # matting/avatar provider slots (both off by default, honest about it).
+        try:
+            from mediahub.video.render import available as _video_render_available
+
+            deps["video_engine"] = {"available": bool(_video_render_available())}
+            from mediahub.video.matting import matting_status
+
+            deps["video_matting"] = matting_status()
+            from mediahub.video.avatars import avatar_status
+
+            deps["video_avatars"] = avatar_status()
+        except Exception as _vid_err:
+            deps["video_engine"] = {"error": str(_vid_err)[:200]}
         # Motion is healthy when the *active* reel engine can render:
         # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
         # makes both optional.
@@ -41317,6 +41576,369 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": True, "comment": updated.to_dict()})
 
         return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
+
+    # =====================================================================
+    # Video suite (roadmap 1.6) — the footage path
+    # ---------------------------------------------------------------------
+    # Upload/record real clips → Clip-Maker-for-sport (moments → reframe →
+    # captions → branded cut) → EDL timeline projects → render, approve, export.
+    # Footage rides in the media library (so it inherits per-profile isolation
+    # and the consent/approval machinery); timelines persist in video_projects.
+    # =====================================================================
+
+    def _video_project_store():
+        from mediahub.video.projects import get_store as _vp_get_store
+
+        return _vp_get_store()
+
+    def _video_can_access_project(project) -> bool:
+        """Per-profile guard for a video project (ADR-0003 isolation)."""
+        if project is None:
+            return False
+        pid = getattr(project, "profile_id", None)
+        if pid and isinstance(pid, str) and pid.startswith("_run_"):
+            return True
+        return pid == _active_profile_id()
+
+    def _video_render_dir(project_id: str) -> Path:
+        return DATA_DIR / "video_projects" / project_id
+
+    def _video_brand_colours():
+        """Best-effort brand colours for caption styling (defaults are legible)."""
+        from mediahub.video.clip_maker import BrandColours
+
+        prof = _active_profile()
+        accent = ""
+        background = "#0A0A0A"
+        for attr in ("accent_colour", "accent", "primary_colour", "primary"):
+            val = getattr(prof, attr, "") if prof else ""
+            if isinstance(val, str) and val.startswith("#"):
+                accent = val
+                break
+        return BrandColours(ground="", onground="", accent=accent, background=background)
+
+    @app.route("/video")
+    def video_studio_page():
+        """Video Studio — upload/record footage, run Clip-Maker, review + export."""
+        if not _v8_ok:
+            return _recovery_page(
+                "Video studio unavailable",
+                "The video suite stores footage in the media library, which isn't "
+                "enabled on this deployment. Ask your operator to turn on the V8 "
+                "media engine.",
+                eyebrow="Video",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=503,
+            )
+        prof = _active_profile()
+        if not prof:
+            profs = list_profiles()
+            if not profs:
+                return _layout(
+                    "Video studio",
+                    '<section class="mh-hero"><span class="mh-hero-eyebrow">Video</span>'
+                    '<h1>No organisation,<br><em class="editorial">no studio.</em></h1>'
+                    '<p class="lede">The video studio is scoped per organisation. '
+                    "Set one up, then come back to turn race footage into reels.</p>"
+                    f'<div class="mh-hero-actions"><a class="mh-cta-primary" '
+                    f'href="{url_for("organisation_page")}">Set up organisation &rarr;</a></div>'
+                    "</section>",
+                    active="video",
+                )
+        from mediahub.video.render import available as _video_render_available
+
+        engine_ready = _video_render_available()
+        engine_note = (
+            ""
+            if engine_ready
+            else '<p class="muted" style="margin-top:6px">&#9888; The render engine '
+            "(FFmpeg) isn't available on this deployment yet, so clips can be "
+            "planned but not yet rendered. Captions also need server speech-to-text "
+            "(<code>MEDIAHUB_ASR_PROVIDER</code>).</p>"
+        )
+        body = (
+            _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
+            .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
+            .replace("__FOOTAGE_LIST_URL__", url_for("api_video_footage_list"))
+            .replace("__CLIPMAKER_URL__", url_for("api_video_clip_maker"))
+            .replace("__PROJECTS_URL__", url_for("api_video_projects_list"))
+            .replace(
+                "__PROJECT_RENDER_TMPL__", url_for("api_video_project_render", project_id="__PID__")
+            )
+            .replace(
+                "__PROJECT_APPROVE_TMPL__",
+                url_for("api_video_project_approve", project_id="__PID__"),
+            )
+            .replace(
+                "__PROJECT_FILE_TMPL__", url_for("api_video_project_file", project_id="__PID__")
+            )
+            .replace("__ENGINE_NOTE__", engine_note)
+        )
+        return _layout("Video studio", body, active="video")
+
+    @app.route("/api/video/footage", methods=["POST"])
+    def api_video_footage_upload():
+        """Ingest an uploaded/recorded clip as a `footage` media asset.
+
+        Footage is bounded by the app-wide 50 MB upload cap (a clip over that is
+        rejected by the global 413 handler before this runs) — enough for the
+        short clips Clip-Maker turns into highlights. Lifting the cap for video
+        means reworking the shared CSRF/body-limit middleware, so it's a
+        deliberate follow-up, not bundled here.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        f = request.files.get("file")
+        if not f:
+            return jsonify({"error": "no_file"}), 400
+        profile_id = _active_profile_id()
+        if not profile_id:
+            return jsonify({"error": "no_active_profile"}), 400
+        from mediahub.video.ingest import ingest_footage, is_video_filename
+
+        filename = f.filename or "clip.webm"
+        if not is_video_filename(filename):
+            return jsonify(
+                {"error": "not_video", "message": "Only video files can be uploaded as footage."}
+            ), 415
+        # The body is already ≤ the app's 50 MB cap here (the global 413 handler
+        # rejects anything larger before this route runs), so reading it is bounded.
+        data = f.read()
+        try:
+            asset = ingest_footage(
+                data, filename, profile_id=profile_id, uploaded_by=_active_profile_id()
+            )
+        except ValueError as e:
+            return jsonify({"error": "bad_footage", "message": str(e)}), 400
+        return jsonify({"ok": True, "asset": _video_footage_summary(asset)})
+
+    def _video_footage_summary(asset) -> dict:
+        ad = asset.to_dict() if hasattr(asset, "to_dict") else dict(asset)
+        meta = ad.get("media_meta") or {}
+        return {
+            "id": ad.get("id", ""),
+            "filename": ad.get("filename", ""),
+            "file_url": url_for("api_media_library_file", asset_id=ad.get("id", "")),
+            "duration_ms": meta.get("duration_ms", 0),
+            "has_audio": meta.get("has_audio", False),
+            "orientation": ad.get("orientation", "unknown"),
+            "permission_status": ad.get("permission_status", ""),
+            "uploaded_at": ad.get("uploaded_at", ""),
+        }
+
+    @app.route("/api/video/footage")
+    def api_video_footage_list():
+        """List the active profile's footage clips (JSON)."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"footage": []})
+        store = _v8_get_media_store()
+        try:
+            assets = store.list(profile_id=pid, asset_type="footage", limit=200)
+        except Exception as e:
+            log.warning("video footage list failed: %s", e)
+            return jsonify({"footage": [], "error": "list_failed"})
+        return jsonify({"footage": [_video_footage_summary(a) for a in assets]})
+
+    @app.route("/api/video/clip-maker", methods=["POST"])
+    def api_video_clip_maker():
+        """Run Clip-Maker on a footage asset and save the result as a project."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        payload = request.get_json(silent=True) or {}
+        asset_id = (payload.get("asset_id") or "").strip()
+        if not asset_id:
+            return jsonify({"error": "asset_id_required"}), 400
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if not asset or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        if not Path(asset.path).exists():
+            return jsonify({"error": "footage_missing_on_disk"}), 410
+
+        fmt = (payload.get("format") or "story").strip().lower()
+        from mediahub.visual.motion import MOTION_FORMATS
+
+        if fmt not in MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        try:
+            target_moments = max(1, min(5, int(payload.get("target_moments", 1))))
+        except (TypeError, ValueError):
+            target_moments = 1
+        title = (payload.get("title") or "").strip()[:120]
+        with_captions = bool(payload.get("with_captions", True))
+        with_reframe = bool(payload.get("with_reframe", True))
+
+        from mediahub.video.clip_maker import clip_maker
+        from mediahub.video.probe import ProbeUnavailable
+
+        try:
+            result = clip_maker(
+                asset.path,
+                format_name=fmt,
+                target_moments=target_moments,
+                title=title,
+                with_captions=with_captions,
+                with_reframe=with_reframe,
+                colours=_video_brand_colours(),
+            )
+        except ProbeUnavailable:
+            return jsonify(
+                {
+                    "error": "engine_unavailable",
+                    "message": "The video engine (FFmpeg) isn't available to analyse "
+                    "this clip on this deployment.",
+                }
+            ), 503
+        except Exception as e:  # honest surface; never a fabricated clip
+            log.warning("clip-maker failed for %s: %s", asset_id, e)
+            return jsonify({"error": "clip_maker_failed", "message": str(e)[:200]}), 500
+
+        from mediahub.video.projects import VideoProject
+
+        proj = VideoProject(
+            id="",
+            profile_id=asset.profile_id,
+            name=title or f"Clip from {asset.filename}"[:80],
+            edl=result.edl,
+            source_asset_id=asset_id,
+            format_name=fmt,
+        )
+        proj = _video_project_store().save(proj)
+        return jsonify({"ok": True, "project_id": proj.id, "manifest": result.manifest})
+
+    @app.route("/api/video/projects")
+    def api_video_projects_list():
+        """List the active profile's saved video projects (JSON)."""
+        pid = _active_profile_id()
+        projects = _video_project_store().list(profile_id=pid)
+        out = []
+        for p in projects:
+            rendered = (_video_render_dir(p.id) / f"{p.format_name}.mp4").exists()
+            out.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "status": p.status,
+                    "format": p.format_name,
+                    "clips": len(p.edl.clips),
+                    "duration_ms": p.edl.total_timeline_ms(),
+                    "rendered": rendered,
+                    "updated_at": p.updated_at,
+                    "file_url": url_for("api_video_project_file", project_id=p.id),
+                }
+            )
+        return jsonify({"projects": out})
+
+    @app.route("/api/video/projects/<project_id>", methods=["GET", "POST"])
+    def api_video_project(project_id: str):
+        """Fetch or update a single video project (name / EDL / status)."""
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        if request.method == "GET":
+            return jsonify({"ok": True, "project": proj.to_dict()})
+        payload = request.get_json(silent=True) or {}
+        if "name" in payload:
+            proj.name = str(payload["name"])[:120]
+        if "edl" in payload and isinstance(payload["edl"], dict):
+            from mediahub.video.edl import EDL, EDLError, validate
+
+            try:
+                new_edl = EDL.from_dict(payload["edl"])
+                validate(new_edl)
+            except EDLError as e:
+                return jsonify({"error": "invalid_edl", "message": str(e)}), 400
+            proj.edl = new_edl
+            proj.status = "draft"  # an edit reopens approval (rule 6)
+        store.save(proj)
+        return jsonify({"ok": True, "project": proj.to_dict()})
+
+    @app.route("/api/video/projects/<project_id>/render", methods=["POST"])
+    def api_video_project_render(project_id: str):
+        """Render a project's timeline to an MP4 (server-side; honest-error)."""
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.video.render import VideoEngineUnavailable
+        from mediahub.video.render import available as _render_available
+        from mediahub.video.render import render_edl
+
+        if not _render_available():
+            return jsonify(
+                {
+                    "error": "engine_unavailable",
+                    "message": "The video render engine (FFmpeg + renderer) isn't "
+                    "available on this deployment.",
+                }
+            ), 503
+        out_path = _video_render_dir(project_id) / f"{proj.format_name}.mp4"
+        try:
+            render_edl(proj.edl, out_path)
+        except VideoEngineUnavailable as e:
+            return jsonify({"error": "engine_unavailable", "message": str(e)}), 503
+        except Exception as e:
+            log.warning("video render failed for %s: %s", project_id, e)
+            return jsonify({"error": "render_failed", "message": str(e)[:200]}), 500
+        return jsonify(
+            {"ok": True, "file_url": url_for("api_video_project_file", project_id=project_id)}
+        )
+
+    @app.route("/api/video/projects/<project_id>/approve", methods=["POST"])
+    def api_video_project_approve(project_id: str):
+        """Approve (or reject) a project — the human gate before export (rule 6)."""
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        status = (payload.get("status") or "approved").strip()
+        try:
+            updated = store.set_status(project_id, status)
+        except ValueError as e:
+            return jsonify({"error": "bad_status", "message": str(e)}), 400
+        return jsonify({"ok": True, "status": updated.status})
+
+    @app.route("/api/video/projects/<project_id>/file")
+    def api_video_project_file(project_id: str):
+        """Serve a rendered project MP4 (inline) or poster; export needs approval."""
+        from flask import send_file
+
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        path = _video_render_dir(project_id) / f"{proj.format_name}.mp4"
+        if not path.exists():
+            return jsonify({"error": "not_rendered"}), 404
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            poster = path.with_suffix(".poster.png")
+            if not poster.exists():
+                return jsonify({"error": "poster_not_rendered"}), 404
+            return send_file(str(poster), mimetype="image/png")
+        download = (request.args.get("download") or "").strip().lower() in {"1", "true", "yes"}
+        # Approval-before-export gate (rule 6): inline preview is always allowed
+        # for review, but a download/export requires a human approval.
+        if download and proj.status != "approved":
+            return jsonify(
+                {
+                    "error": "not_approved",
+                    "message": "Approve this clip before exporting it.",
+                }
+            ), 403
+        return send_file(
+            str(path),
+            mimetype="video/mp4",
+            as_attachment=download,
+            download_name=f"{proj.name[:48] or 'clip'}.mp4",
+        )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
     def api_card_voiceover(run_id: str, card_id: str):
