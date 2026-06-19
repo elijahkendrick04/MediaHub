@@ -10537,13 +10537,25 @@ def _layout(
                     # First entry is the primary crest the backdrop paints; keep
                     # a few candidates, cap the rest for sanity.
                     _ordered = (_trans or _opaque)[:8]
-                    signed_in_bg_logos = [_u for (_u, _lid) in _ordered]
                     if _ordered:
+                        signed_in_bg_logos = [_u for (_u, _lid) in _ordered]
                         # Per-logo adaptive treatment so the watermark sits at a
                         # consistent, tasteful presence whatever the logo's design.
                         from mediahub.brand.logos import logo_bg_treatment as _bg_treat
 
                         signed_in_bg_treatment = _bg_treat(signed_in_pid, _ordered[0][1])
+                    else:
+                        # No uploaded logo — fall back to the org's WEBSITE-CAPTURED
+                        # logo (mirrored first-party) so the backdrop works no matter
+                        # which profile is selected, not only ones with an upload.
+                        _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
+                        if _cap.startswith("http://") or _cap.startswith("https://"):
+                            from mediahub.brand.logos import mirror_bg_treatment as _mir_treat
+
+                            signed_in_bg_logos = [
+                                url_for("organisation_logo_mirror", profile_id=signed_in_pid, bg=1)
+                            ]
+                            signed_in_bg_treatment = _mir_treat(signed_in_pid, _cap)
                 except Exception:
                     signed_in_bg_logos = []
                     signed_in_bg_treatment = {}
@@ -33944,8 +33956,23 @@ function mhSetupMode(mode) {{
         url = (getattr(prof, "brand_logo_url", "") or "").strip()
         if not url:
             return ("", 404)
-        from mediahub.brand.logos import mirror_external_logo, mirror_content_type
+        from mediahub.brand.logos import (
+            mirror_bg_silhouette_path,
+            mirror_content_type,
+            mirror_external_logo,
+        )
 
+        # ?bg=1 serves the clean-alpha silhouette of the mirrored logo for the
+        # signed-in backdrop — the same keyed artwork an uploaded logo gets, so
+        # the backdrop works for orgs whose logo was only captured from their site.
+        if request.args.get("bg"):
+            sil = mirror_bg_silhouette_path(profile_id, url)
+            if sil:
+                resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = mirror_content_type(sil)
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                return resp
+            return ("", 404)
         path = mirror_external_logo(profile_id, url)
         if not path:
             return ("", 404)
