@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-18 · `d4ab5a49f` · Merge pull request #833: mask-brush image studio UI (roadmap 1.2)
+**Last updated:** 2026-06-19 · `f2488050c` · Merge pull request #839 from elijahkendrick04/claude/cl-issues-deep-research-unh81e
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1225,6 +1225,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-18 | `05a437fd2` | Apply ruff formatting to spotlight builder |
+| 2026-06-18 | `8abf743c6` | Render athlete-spotlight builds on a dedicated Spotlight builder |
+| 2026-06-18 | `7e69f4b4b` | chore: gitignore ephemeral Claude Code agent worktrees |
+| 2026-06-18 | `0ca6ab847` | ci: key Playwright browser cache on the Playwright version, not the dep hash |
 | 2026-06-18 | `cc574272f` | Fold para-class clubs into parent; recover club from collapsed swimmer rows |
 | 2026-06-18 | `778000f38` | Apply ruff-format to the run-status page edits |
 | 2026-06-18 | `4b1715fe7` | Fix meet-recap permission errors; give customers a friendly progress screen |
@@ -1232,6 +1236,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `827ad9d7c` | Move Templates into Settings; drop Create-page brand strip & gallery link |
 | 2026-06-18 | `85a9170a1` | Fix sign-in cards showing broken club logos (serve them first-party) |
 | 2026-06-18 | `a00643abc` | Restore the standard centred content width |
-| 2026-06-18 | `eb83fb51c` | fix: a11y: Form elements must have labels (label) |
-| 2026-06-18 | `70bd5d6bc` | fix: font failed on /account/2fa |
 <!-- /ROADMAP:ACTIVITY -->
