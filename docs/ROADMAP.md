@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `c00c322bc` · Merge pull request #848 from elijahkendrick04/claude/awesome-ptolemy-0sn2q1
+**Last updated:** 2026-06-19 · `ad8f3a20c` · Merge pull request #851 from elijahkendrick04/claude/confident-brown-o6zxyg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1225,6 +1225,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `90d2a54bd` | Apply ruff-format (collapse _wash ternary onto one line) |
+| 2026-06-19 | `638122eb6` | Recompose the signed-in logo backdrop into a branded crest backdrop |
 | 2026-06-19 | `c6da906f3` | Surface PB-lookup and store errors to the operator (don't silently fail) |
 | 2026-06-19 | `26974da89` | fix: No export or download action visible after approval |
 | 2026-06-18 | `05a437fd2` | Apply ruff formatting to spotlight builder |
@@ -1233,6 +1235,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `7e69f4b4b` | chore: gitignore ephemeral Claude Code agent worktrees |
 | 2026-06-18 | `0ca6ab847` | ci: key Playwright browser cache on the Playwright version, not the dep hash |
 | 2026-06-18 | `cc574272f` | Fold para-class clubs into parent; recover club from collapsed swimmer rows |
-| 2026-06-18 | `778000f38` | Apply ruff-format to the run-status page edits |
-| 2026-06-18 | `4b1715fe7` | Fix meet-recap permission errors; give customers a friendly progress screen |
 <!-- /ROADMAP:ACTIVITY -->
