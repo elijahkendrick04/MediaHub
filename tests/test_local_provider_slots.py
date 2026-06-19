@@ -11,9 +11,11 @@ Pinned per surface:
   TTS       voiceover carries a provider seam (MEDIAHUB_TTS_PROVIDER) with a
             registered local slot ('piper'); selecting it never silently
             falls back to the cloud backend.
-  ASR       no ASR surface exists yet (it arrives with P5.3); this guard
-            fails the moment a cloud ASR import lands outside a provider
-            seam, so the slot rule can't be bypassed by accident.
+  ASR       the ASR surface (roadmap 1.4) lives behind MEDIAHUB_ASR_PROVIDER
+            in mediahub.visual.transcribe (faster-whisper / whisper.cpp, with
+            word-level timestamps); this guard still fails the moment a speech
+            dependency is imported anywhere *outside* that seam, so the slot
+            rule can't be bypassed by accident.
   graphics  rendering is on-server already (Playwright stills; ffmpeg reel
             engine ships with P0.1); cutout defaults to in-process rembg;
             the only cloud-only image call (Imagen backgrounds) is opt-in
@@ -100,18 +102,24 @@ def test_tts_interface_admits_a_local_provider(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# ASR — no unslotted cloud ASR may exist
+# ASR — the speech dependency may live ONLY inside the provider seam
 # ---------------------------------------------------------------------------
+
+# The single module allowed to import a speech-to-text backend: the
+# MEDIAHUB_ASR_PROVIDER seam (roadmap 1.4). Its whisper imports are lazy (inside
+# the per-backend functions) so importing the module never loads a heavy model,
+# but they are still the only ones the scan tolerates.
+_ASR_SEAM = {"visual/transcribe.py"}
 
 
 def test_no_cloud_asr_import_outside_a_provider_seam():
-    """There is no ASR call in MediaHub today (reel-caption ASR is P5.3).
-    When it arrives it must live behind a provider seam like the LLM/TTS
-    ones; this scan fails the moment a speech-to-text dependency is
-    imported anywhere else, forcing that conversation."""
+    """ASR lives behind one provider seam (mediahub.visual.transcribe, roadmap
+    1.4); a speech-to-text dependency imported anywhere else fails this scan,
+    forcing the conversation. The seam itself is allow-listed — that is the
+    conscious registration the guard was written to require."""
     asr_import = re.compile(
         r"^\s*(?:import|from)\s+"
-        r"(whisper|faster_whisper|whispercpp|openai\.audio|"
+        r"(whisper|faster_whisper|whispercpp|pywhispercpp|openai\.audio|"
         r"google\.cloud\.speech|boto3\.transcribe|azure\.cognitiveservices\.speech)\b",
         re.MULTILINE,
     )
@@ -119,12 +127,42 @@ def test_no_cloud_asr_import_outside_a_provider_seam():
     for py in SRC.rglob("*.py"):
         if "node_modules" in py.parts:
             continue
+        if py.relative_to(SRC).as_posix() in _ASR_SEAM:
+            continue  # the registered seam may import a speech backend
         if asr_import.search(py.read_text(encoding="utf-8", errors="ignore")):
             offenders.append(str(py.relative_to(SRC)))
     assert not offenders, (
-        "Cloud/loose ASR imports found outside a provider seam: "
-        f"{offenders}. Add a MEDIAHUB_ASR_PROVIDER seam first (P0.4 rule)."
+        "Cloud/loose ASR imports found outside the provider seam "
+        f"({sorted(_ASR_SEAM)}): {offenders}. Route ASR through "
+        "MEDIAHUB_ASR_PROVIDER in mediahub.visual.transcribe (P0.4 rule)."
     )
+
+
+def test_asr_seam_keeps_its_whisper_import_lazy():
+    """The seam's whisper backends import inside their functions, so importing
+    the module (e.g. for status probes) never pulls a heavy model at top level."""
+    seam = (SRC / "visual" / "transcribe.py").read_text(encoding="utf-8")
+    for line in seam.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("import faster_whisper", "from faster_whisper")) or (
+            stripped.startswith(("import pywhispercpp", "from pywhispercpp"))
+        ):
+            assert line != stripped, (
+                "whisper backend import must be lazy (indented inside a function), "
+                f"not top-level: {line!r}"
+            )
+
+
+def test_asr_interface_admits_a_local_provider(monkeypatch):
+    from mediahub.visual import transcribe
+
+    monkeypatch.setenv("MEDIAHUB_ASR_PROVIDER", "faster-whisper")
+    assert transcribe.select_asr_provider() == "faster-whisper"
+    status = transcribe.asr_provider_status()
+    assert "faster_whisper_available" in status
+    # An alias resolves to the same canonical backend.
+    monkeypatch.setenv("MEDIAHUB_ASR_PROVIDER", "whisper")
+    assert transcribe.select_asr_provider() == "faster-whisper"
 
 
 # ---------------------------------------------------------------------------

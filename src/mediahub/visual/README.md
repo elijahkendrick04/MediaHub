@@ -132,6 +132,33 @@ nothing changes — the renders are byte-identical. (The still+FFmpeg fallback
 burns captions on the **story** cut only; reel captions there are a known gap —
 the Remotion engine captions reels too.)
 
+## transcribe.py — listening to audio (the opposite of voiceover)
+
+`voiceover.py` *speaks* words we already have; `transcribe.py` *listens* to a
+sound (or video) clip and writes down the words that were said — **and when each
+one was said**, to the millisecond. Those word timings are exactly what you need
+to put captions on real footage where there is no script to read from (a coach's
+voice memo, a clip a club filmed). It's also the server side of the copilot's
+microphone button for uploaded audio.
+
+It's a **local, free, offline** tool, chosen with `MEDIAHUB_ASR_PROVIDER`:
+`faster-whisper` (the recommended one — a tidy rebuild of OpenAI's Whisper that
+runs on a normal CPU and gives real per-word times) or `whisper.cpp`. Like the
+voice engine, it's **off unless you turn it on**: with nothing set, the app uses
+the browser's own built-in speech recogniser for the copilot mic, and the server
+honestly says "speech-to-text isn't set up here" rather than inventing words —
+because made-up words put in a real person's mouth are the worst thing a content
+tool could do. Pick a backend but don't install its package, and you get the same
+honest error, never a fake.
+
+Every clip it transcribes is **remembered** (cached under
+`DATA_DIR/asr_cache`), so the same audio is never listened to twice. There is no
+AI *writing* here — it only reports what was actually spoken — and a tiny helper,
+`caption_track_for_audio`, turns those spoken words straight into a ready-to-burn,
+provably-legible caption track (handing off to `subtitle_burn.py`). If the
+listener isn't available, that helper just returns "no captions" so a video still
+renders — a caption is an extra, never something that can break a render.
+
 ## motion_regression.py — the frame-by-frame "did the video still look right?" check
 
 The MP4 path proves two different cards make two *different* videos, but it

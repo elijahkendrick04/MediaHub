@@ -6,57 +6,55 @@ Voice has two honest paths:
   Web Speech API to transcribe on the device and drop the text into the chat
   box. No server round-trip, no provider, no audio leaves the device.
 * **Server ASR (this seam):** for uploaded audio, :func:`transcribe` routes to a
-  configured ASR provider. None ships yet (it's the P5.3 provider seam), so it
-  raises :class:`ASRUnavailable` — an honest error, never a fabricated
-  transcript. When a provider lands it slots in behind this one function.
+  configured local ASR backend via ``MEDIAHUB_ASR_PROVIDER``. The real engine —
+  faster-whisper / whisper.cpp, with word-level timestamps for the video suite's
+  captions — lives in :mod:`mediahub.visual.transcribe` (roadmap 1.4); this module
+  is the thin copilot-facing seam over it, returning just the transcript text.
 
-The seam is deliberately tiny: a provider check + one entry point, mirroring the
-AI-core provider doctrine (env-keyed, honest failure).
+When no provider is configured (the default) :func:`transcribe` raises
+:class:`ASRUnavailable` — an honest error, never a fabricated transcript.
 """
 
 from __future__ import annotations
 
-import os
-
-
-class ASRUnavailable(RuntimeError):
-    """Raised when no speech-to-text provider is configured."""
+from mediahub.visual.transcribe import (
+    ASRUnavailable,
+    asr_provider_status,
+    is_available,
+    select_asr_provider,
+    transcribe_audio,
+)
 
 
 def asr_provider() -> str:
-    """The configured ASR provider name, or "" when none is set.
+    """The configured ASR provider name (canonical), or "" when none/invalid.
 
-    Reads ``MEDIAHUB_ASR_PROVIDER``; no provider is wired yet, so this returns
-    "" on every current deployment (the browser Web Speech API is the live
-    voice path). Kept as the single seam a future provider plugs into.
+    Reads ``MEDIAHUB_ASR_PROVIDER`` via the engine; an unset or unrecognised
+    value resolves to "" here (the browser Web Speech API is the live voice
+    path), so this stays a non-raising readiness probe.
     """
-    return os.environ.get("MEDIAHUB_ASR_PROVIDER", "").strip().lower()
-
-
-def is_available() -> bool:
-    return bool(asr_provider())
+    try:
+        return select_asr_provider()
+    except ASRUnavailable:
+        return ""
 
 
 def transcribe(audio_bytes: bytes, *, content_type: str = "") -> str:
-    """Transcribe uploaded audio to text via the configured ASR provider.
+    """Transcribe uploaded audio to text via the configured ASR backend.
 
-    Raises :class:`ASRUnavailable` when no provider is configured (the honest
-    state today). A future provider implementation slots in here, behind the
-    same env-keyed seam as the LLM and image providers.
+    Delegates to :func:`mediahub.visual.transcribe.transcribe_audio` and returns
+    just the transcript text (the copilot only needs the words; the word-level
+    stamps feed the caption surfaces). Raises :class:`ASRUnavailable` when no
+    provider is configured or the backend is unavailable — the honest state the
+    route turns into a 503.
     """
-    provider = asr_provider()
-    if not provider:
-        raise ASRUnavailable(
-            "Speech-to-text isn't configured on this deployment. Use the "
-            "microphone button (your browser transcribes on-device), or type "
-            "your request."
-        )
-    # No server-side provider ships yet (P5.3 seam). When one lands it is
-    # dispatched here by name; until then an "configured but unimplemented"
-    # provider is still an honest error rather than a fake transcript.
-    raise ASRUnavailable(  # pragma: no cover - no provider wired yet
-        f"ASR provider {provider!r} is named but not implemented on this build."
-    )
+    return transcribe_audio(audio_bytes, content_type=content_type).text
 
 
-__all__ = ["ASRUnavailable", "asr_provider", "is_available", "transcribe"]
+__all__ = [
+    "ASRUnavailable",
+    "asr_provider",
+    "asr_provider_status",
+    "is_available",
+    "transcribe",
+]

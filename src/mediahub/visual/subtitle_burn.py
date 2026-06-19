@@ -166,6 +166,56 @@ def cues_from_text(text: str, total_ms: int) -> list[Cue]:
     return cues
 
 
+def cues_from_stamps(stamps) -> list[Cue]:
+    """Group timed word (or segment) stamps into readable caption cues.
+
+    The ASR path (roadmap 1.4): each ``stamp`` carries real measured timing —
+    either a ``WordStamp``-like object (``.text``/``.start_ms``/``.end_ms``) or a
+    ``(text, start_ms, end_ms)`` tuple — so, unlike :func:`cues_from_text`, the
+    cue boundaries are *observed*, not spread. Stamps are grouped into the same
+    ``MAX_CUE_WORDS`` / ``MAX_CUE_MS`` windows the voiceover SRT uses, so an
+    ASR-driven caption reads at the same rhythm as a TTS-driven one. Pure and
+    deterministic; malformed/empty stamps drop out rather than raising.
+    """
+    items: list[tuple[int, int, str]] = []
+    for s in stamps or []:
+        if isinstance(s, (tuple, list)) and len(s) >= 3:
+            text, start, end = str(s[0]), s[1], s[2]
+        else:
+            text = str(getattr(s, "text", ""))
+            start, end = getattr(s, "start_ms", None), getattr(s, "end_ms", None)
+        text = text.strip()
+        if not text or start is None or end is None:
+            continue
+        try:
+            a, b = int(start), int(end)
+        except (TypeError, ValueError):
+            continue
+        items.append((a, max(a, b), text))
+
+    cues: list[Cue] = []
+    cur: list[tuple[int, int, str]] = []
+
+    def _flush() -> None:
+        if not cur:
+            return
+        start = cur[0][0]
+        end = max(w[1] for w in cur)
+        text = " ".join(w[2] for w in cur).strip()
+        if text and end > start:
+            cues.append(Cue(start, end, text))
+
+    for a, b, t in items:
+        if cur:
+            span = b - cur[0][0]
+            if len(cur) >= MAX_CUE_WORDS or span > MAX_CUE_MS:
+                _flush()
+                cur = []
+        cur.append((a, b, t))
+    _flush()
+    return cues
+
+
 # ---------------------------------------------------------------------------
 # APCA-gated caption colour (deterministic colour-science)
 # ---------------------------------------------------------------------------
@@ -432,6 +482,7 @@ __all__ = [
     "CAPTION_APCA_MIN",
     "parse_srt",
     "cues_from_text",
+    "cues_from_stamps",
     "caption_colours",
     "cues_to_frames",
     "build_track",

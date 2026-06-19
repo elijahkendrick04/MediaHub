@@ -51,6 +51,17 @@ edge-tts>=7.2.8
 #   pip install piper-tts
 # Absent → an honest VoiceoverError, never a fabricated voice.
 
+# Local, zero-cost ASR backend (roadmap 1.4), selected with
+# MEDIAHUB_ASR_PROVIDER=faster-whisper. MIT; a CTranslate2 reimplementation of
+# OpenAI Whisper that transcribes fully offline on CPU with word-level
+# timestamps — the primitive for the copilot's uploaded-audio voice input and
+# the video suite's word-level captions (1.6). Left OPTIONAL on purpose: server
+# ASR is off by default (the browser's on-device speech is the live voice path)
+# and the CTranslate2 weights are heavy. Install it only when you want server
+# transcription:
+#   pip install faster-whisper       # or: pip install pywhispercpp  (whisper.cpp)
+# Absent → an honest ASRUnavailable, never a fabricated transcript.
+
 # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
 # materialyoucolor is the maintained Python port of Google's
 # material-color-utilities; it ships HCT, the MD3 TonalSpot scheme
