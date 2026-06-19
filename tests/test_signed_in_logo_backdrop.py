@@ -236,9 +236,22 @@ def test_no_brand_colour_drops_the_wash_but_keeps_the_crest(client):
     assert 'class="mh-bg-wash"' not in html  # no colour → no ambient wash
 
 
-def test_no_logo_means_no_backdrop(client):
+def test_no_logo_but_brand_colour_shows_the_brand_wash(client):
+    """No paintable logo but a brand colour → the soft brand wash still renders as
+    a tasteful 'better than nothing', with no logo crest."""
     _make_org("org-d", brand="#24507f", with_logo=False)
     html = _home(client, "org-d")
+    assert 'class="mh-bg-canvas"' in html
+    assert 'class="mh-bg-wash"' in html
+    # No crest SPAN (the CSS rule names still live in the stylesheet) — just the wash.
+    assert '<span class="mh-bg-mark' not in html
+    assert "--mh-bg-brand:#24507f" in html
+
+
+def test_no_logo_and_no_brand_colour_shows_nothing(client):
+    """With neither a paintable logo nor a brand colour there's nothing to show."""
+    _make_org("org-empty", brand="", with_logo=False)
+    html = _home(client, "org-empty")
     assert 'class="mh-bg-canvas"' not in html
 
 

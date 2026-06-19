@@ -217,17 +217,18 @@ def test_unrenderable_logo_serves_transparent_pixel_not_404(client, ext, mime, d
     assert len(body) < 200
 
 
-def test_home_with_only_an_unrenderable_logo_never_paints_a_solid_block(client):
-    """A club whose ONLY logo is unrenderable still renders a clean page: either no
-    backdrop, or a backdrop whose asset is a 200 image (here a transparent pixel)."""
+def test_unrenderable_logo_falls_back_to_the_brand_wash(client):
+    """A club whose ONLY logo is unrenderable still gets a tasteful backdrop: the
+    soft brand-coloured wash (better than nothing), with NO crest mark — and never
+    a broken asset or a solid ink block."""
     meta = _store_bytes("org-onlybad", "l_bad", "pdf", b"%PDF-1.4 not an image", "application/pdf")
-    _make_org("org-onlybad", [meta])  # no website logo either
+    _make_org("org-onlybad", [meta], brand="#24507f")  # brand colour, no website logo
     html = _home(client, "org-onlybad")
-    classes, style = _mark(html)
-    if classes:  # if a mark was emitted at all, its asset must load as an image
-        asset = client.get(_bg_url(style))
-        assert asset.status_code == 200
-        assert asset.headers["Content-Type"].startswith("image/")
+    classes, _style = _mark(html)
+    assert classes is None  # the PDF can't be painted → no crest mark
+    assert 'class="mh-bg-canvas"' in html  # but the canvas + brand wash render
+    assert 'class="mh-bg-wash"' in html
+    assert "--mh-bg-brand:#24507f" in html
 
 
 def test_builder_picks_a_renderable_logo_over_an_unrenderable_sibling(client):

@@ -10707,8 +10707,17 @@ def _layout(
                         manual=getattr(_p, "brand_palette_manual", {}) or {},
                         extracted=getattr(_p, "brand_palette_extracted", {}) or {},
                     )
-                    signed_in_primary = (_eff_pal.get("primary") or "").strip()
-                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip()
+                    # Same resolution order as ClubProfile.get_brand_kit: the
+                    # AI/manual palette wins, then the legacy brand_primary/secondary
+                    # strings. The legacy fallback matters here so the brand accent
+                    # (and the backdrop wash below) still show for an org whose colour
+                    # only lives in those fields, not just freshly-captured ones.
+                    signed_in_primary = (_eff_pal.get("primary") or "").strip() or (
+                        getattr(_p, "brand_primary", "") or ""
+                    ).strip()
+                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip() or (
+                        getattr(_p, "brand_secondary", "") or ""
+                    ).strip()
                 except Exception:
                     pass
                 # Surface the org's logo in the signed-in chrome the same
@@ -10838,55 +10847,62 @@ def _layout(
     # captured): "image" paints a colourful logo's real artwork; "knockout" paints
     # a monochrome / SVG logo's shape in one light brand-tinted ink.
     bg_logos_html = ""
-    if signed_in_bg_logos:
-        _brand = (
-            signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
-        )
-        _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
-        _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
-        try:
-            _op = float(_t.get("opacity", 0.5))
-        except (TypeError, ValueError):
-            _op = 0.5
-        if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
-            _op = 0.5
-        _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
-        # Adaptive blur (px): a busier crest earns a little more, but kept MODEST
-        # so the logo stays identifiable. Sanitised to a plain int so --mh-blur is
-        # always a valid length, and clamped to the professional band as a guard
-        # against any stale/odd value sneaking through.
-        try:
-            _blur = int(round(float(_t.get("blur", 14))))
-        except (TypeError, ValueError):
-            _blur = 14
-        _blur = min(28, max(8, _blur))
-        _geo = (
-            "left:50%;top:50%;"
-            "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
-            f"--op:{_op};--mh-blur:{_blur}px;"
-        )
-        if _t.get("mode") == "image":
-            # Colourful logo → its real artwork (blurred by the fixed CSS rule).
-            _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
-                f"background-image:url('{_src}')"
-                '"></span>'
+    _brand = (
+        signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
+    )
+    # Render the backdrop whenever there's a paintable logo OR at least a brand
+    # colour. A soft brand-coloured wash is a tasteful "better than nothing" when a
+    # club's logo can't be rendered as a backdrop (an unrenderable format) or the
+    # org has a brand colour but no logo at all — far nicer than a blank page. The
+    # logo crest is layered on only when we actually have one to paint.
+    if signed_in_bg_logos or _brand:
+        _hero = ""
+        if signed_in_bg_logos:
+            _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
+            _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
+            try:
+                _op = float(_t.get("opacity", 0.5))
+            except (TypeError, ValueError):
+                _op = 0.5
+            if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
+                _op = 0.5
+            _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
+            # Adaptive blur (px): a busier crest earns a little more, but kept MODEST
+            # so the logo stays identifiable. Sanitised to a plain int so --mh-blur is
+            # always a valid length, and clamped to the professional band as a guard
+            # against any stale/odd value sneaking through.
+            try:
+                _blur = int(round(float(_t.get("blur", 14))))
+            except (TypeError, ValueError):
+                _blur = 14
+            _blur = min(28, max(8, _blur))
+            _geo = (
+                "left:50%;top:50%;"
+                "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
+                f"--op:{_op};--mh-blur:{_blur}px;"
             )
-        else:
-            # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
-            _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
-                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
-                '"></span>'
-            )
+            if _t.get("mode") == "image":
+                # Colourful logo → its real artwork (blurred by the fixed CSS rule).
+                _hero = (
+                    f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
+                    f"background-image:url('{_src}')"
+                    '"></span>'
+                )
+            else:
+                # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
+                _hero = (
+                    f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
+                    f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
+                    '"></span>'
+                )
         _wash = '<div class="mh-bg-wash"></div>' if _brand else ""
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
+        _marks = ('<div class="mh-bg-marks">' + _hero + "</div>") if _hero else ""
         bg_logos_html = (
             f'<div class="mh-bg-canvas" aria-hidden="true"{_brand_attr}>'
             + _wash
-            + '<div class="mh-bg-marks">'
-            + _hero
-            + "</div></div>"
+            + _marks
+            + "</div>"
         )
 
     # One-shot success/error toast queued by a prior POST (see _flash_toast).
