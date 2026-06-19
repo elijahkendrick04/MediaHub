@@ -5,6 +5,26 @@
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
     },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    },
+    "puppeteer": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "puppeteer-mcp-server@latest"]
+    },
+    "browserbase": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@browserbasehq/mcp@latest"],
+      "env": {
+        "BROWSERBASE_API_KEY": "${BROWSERBASE_API_KEY:-}",
+        "BROWSERBASE_PROJECT_ID": "${BROWSERBASE_PROJECT_ID:-}",
+        "GEMINI_API_KEY": "${GEMINI_API_KEY:-}"
+      }
+    },
     "context7": {
       "type": "stdio",
       "command": "npx",
