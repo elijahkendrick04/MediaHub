@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `ad8f3a20c` · Merge pull request #851 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `b2d86a033` · Merge pull request #852: Photo editor (roadmap 1.3)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.3** · Phase 1 (Product) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
 - **1.4** · Phase 1 (Product) — whisper.cpp / faster-whisper local ASR for reel captions / word-level burn-in (unblocks the video suite's captions, 1.6) · ❌ **NOT STARTED**
 - **1.5** · Phase 1 (Product) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
 - **1.6** · Phase 1 (Product) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
@@ -1225,6 +1224,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `8e808dbe0` | Apply ruff-format to the 1.3 photo-editor modules |
+| 2026-06-19 | `bb4c0a355` | Add deterministic non-destructive photo editor (roadmap 1.3) |
 | 2026-06-19 | `90d2a54bd` | Apply ruff-format (collapse _wash ternary onto one line) |
 | 2026-06-19 | `638122eb6` | Recompose the signed-in logo backdrop into a branded crest backdrop |
 | 2026-06-19 | `c6da906f3` | Surface PB-lookup and store errors to the operator (don't silently fail) |
@@ -1233,6 +1234,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `8abf743c6` | Render athlete-spotlight builds on a dedicated Spotlight builder |
 | 2026-06-18 | `93477d34d` | docs: fix two stale comments after moving Templates into Settings |
 | 2026-06-18 | `7e69f4b4b` | chore: gitignore ephemeral Claude Code agent worktrees |
-| 2026-06-18 | `0ca6ab847` | ci: key Playwright browser cache on the Playwright version, not the dep hash |
-| 2026-06-18 | `cc574272f` | Fold para-class clubs into parent; recover club from collapsed swimmer rows |
 <!-- /ROADMAP:ACTIVITY -->
