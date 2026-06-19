@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `e6f83ecf4` · Merge pull request #897 from elijahkendrick04/claude/clever-babbage-as72g9
+**Last updated:** 2026-06-19 · `57c34a35e` · Merge pull request #895: Fix duplicate result cards from reprinted HY-TEK event headers
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1222,7 +1222,9 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-19 | `3e1cd3200` | 1.7: make local Piper the default TTS, demote edge-tts to opt-in (build 1/2) |
+| 2026-06-19 | `0934649fc` | Rebaseline ground-truth oracle for reprint de-duplication |
 | 2026-06-19 | `7678a9de7` | chore(devtools): drop Codex plugin from MCP tooling config |
+| 2026-06-19 | `dc4f9f6fd` | Fix duplicate result cards from reprinted HY-TEK event headers |
 | 2026-06-19 | `88894fc39` | chore(devtools): commit shared Claude Code MCP + Codex plugin config |
 | 2026-06-19 | `5d1cc5795` | build(deps): bump actions/checkout from 6 to 7 |
 | 2026-06-19 | `15c81108b` | build(deps): bump actions/setup-node from 4 to 6 |
@@ -1230,5 +1232,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `d20e56ce2` | Apply ruff-format to the 1.6 video suite |
 | 2026-06-19 | `e3a8853e2` | Build 1.6: video suite — footage path, Clip-Maker, EDL timeline, captions, reframe |
 | 2026-06-19 | `531bb7092` | Backdrop: adaptive blur (fixes busy logos), centre content, pick best logo |
-| 2026-06-19 | `019caf2b8` | Backdrop: make the logo still, and fix one logo rendering un-blurred |
 <!-- /ROADMAP:ACTIVITY -->
