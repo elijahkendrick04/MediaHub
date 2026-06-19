@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `6dfae6105` · fix(pb): accurate, scalable PB finder — real-history baseline + free search (#901)
+**Last updated:** 2026-06-20 · `1f20aaeb3` · Merge pull request #908 from elijahkendrick04/claude/web-interaction-parity-pfutvv
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1220,6 +1220,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `a724e2fd2` | Add browser-automation MCP servers for full web interaction |
 | 2026-06-19 | `f8670eba4` | compliance(pb): disclose TinyFish as a DPA sub-processor |
 | 2026-06-19 | `666bf6cf5` | Logo chip: unify the chrome avatar — keyed, contrast-aware, any logo |
 | 2026-06-19 | `ca7d12262` | feat(pb): free TinyFish search backend for the cold-start PB bootstrap |
@@ -1230,6 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `d68f8e2e9` | style(pb): apply ruff-format to discover.py |
 | 2026-06-19 | `bd4e4bac8` | fix(pb): find PBs offline from the file's own entry times (was always 0) |
 | 2026-06-19 | `0d399f1af` | 1.7: bundle the local Piper voice into the deployed image (build 2/2) |
-| 2026-06-19 | `e49fae490` | Backdrop: support ANY uploaded logo — every format, or degrade cleanly |
-| 2026-06-19 | `3e1cd3200` | 1.7: make local Piper the default TTS, demote edge-tts to opt-in (build 1/2) |
 <!-- /ROADMAP:ACTIVITY -->
