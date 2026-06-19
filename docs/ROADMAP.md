@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `da6691dc3` · Merge pull request #857 from elijahkendrick04/claude/epic-dijkstra-iuuhnl
+**Last updated:** 2026-06-19 · `e655cf4b9` · Merge PR #860: Spotlight content — strip entry_url placeholder + dedupe moments
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1224,6 +1224,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
+| 2026-06-19 | `2af60c0b4` | fix(spotlight): strip entry_url placeholder + dedupe moments on the composite |
 | 2026-06-19 | `96965f821` | Regenerate ENV_INVENTORY.md for the new ASR env vars |
 | 2026-06-19 | `873315687` | Add local ASR engine for word-level captions (roadmap 1.4) |
 | 2026-06-19 | `03517475e` | Refine logo backdrop: visible, composed crest (fixes invisible + littered) |
@@ -1233,6 +1234,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `bb4c0a355` | Add deterministic non-destructive photo editor (roadmap 1.3) |
 | 2026-06-19 | `0cc651510` | feat(spotlight): open the mode-aware Content builder (composite post: graphic + reel + full toolbar) |
 | 2026-06-19 | `90d2a54bd` | Apply ruff-format (collapse _wash ternary onto one line) |
-| 2026-06-19 | `638122eb6` | Recompose the signed-in logo backdrop into a branded crest backdrop |
-| 2026-06-19 | `6c31adcb2` | fix(graphic): keep v1 list layout for multi-fact recaps so spotlight composite renders |
 <!-- /ROADMAP:ACTIVITY -->
