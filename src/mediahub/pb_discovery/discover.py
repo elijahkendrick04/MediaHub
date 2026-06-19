@@ -270,9 +270,7 @@ def _fetch_workers() -> int:
         return 3
 
 
-def _fetch_and_parse_url(
-    url: str, name: str, use_interpreter: bool
-) -> "tuple[PBSource, bool]":
+def _fetch_and_parse_url(url: str, name: str, use_interpreter: bool) -> "tuple[PBSource, bool]":
     """Fetch + deterministically parse ONE candidate URL and apply the identity
     gate. Pure: it mutates no shared state and never writes the trust ledger, so
     it is safe to run concurrently across candidates. Returns (source, eligible);
@@ -325,9 +323,7 @@ def _fetch_and_parse_many(
 
     out: "dict[str, tuple[PBSource, bool]]" = {}
     with ThreadPoolExecutor(max_workers=min(len(urls), _fetch_workers())) as pool:
-        futures = {
-            pool.submit(_fetch_and_parse_url, u, name, use_interpreter): u for u in urls
-        }
+        futures = {pool.submit(_fetch_and_parse_url, u, name, use_interpreter): u for u in urls}
         for fut, u in futures.items():
             try:
                 out[u] = fut.result()
