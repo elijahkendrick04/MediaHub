@@ -11,6 +11,7 @@ source of truth). The compilers are :mod:`~mediahub.motion.compile_remotion`,
 ``scripts/regen_motion_tokens.py`` regenerates the committed Remotion token
 bundle and the served CSS stylesheet from this package.
 """
+
 from __future__ import annotations
 
 from .easing import EASINGS, Easing, easing_names, get_easing

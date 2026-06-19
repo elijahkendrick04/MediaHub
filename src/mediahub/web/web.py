@@ -21863,22 +21863,22 @@ Relay team broke club record"></textarea>
                 cells.append(
                     f'<figure class="mv-cell"><div class="mv-stage">'
                     f'<div class="mv-chip {cls}"></div></div>'
-                    f'<figcaption><b>{_h(p.name)}</b>'
+                    f"<figcaption><b>{_h(p.name)}</b>"
                     f'<span class="mv-meta">{_h(p.energy)} · {_h(p.direction)}'
-                    f'{" · photo" if p.photo else ""}{" · loop" if p.loop else ""}</span>'
+                    f"{' · photo' if p.photo else ''}{' · loop' if p.loop else ''}</span>"
                     f'<span class="mv-desc">{_h(p.description)}</span></figcaption></figure>'
                 )
             sections.append(
-                f'<section><h2>{_h(family)} '
+                f"<section><h2>{_h(family)} "
                 f'<span class="mv-count">{len(presets)}</span></h2>'
                 f'<div class="mv-grid">{"".join(cells)}</div></section>'
             )
         body = "".join(sections)
         html = (
-            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
             "<title>Motion vocabulary — MediaHub</title>"
-            f"<link rel=\"stylesheet\" href=\"{css_url}\">"
+            f'<link rel="stylesheet" href="{css_url}">'
             "<style>"
             ":root{--bg:#0A0B11;--panel:#14161F;--ink:#EaEcF2;--muted:#8A90A2;--accent:#C9A227;}"
             "*{box-sizing:border-box}"
@@ -21904,7 +21904,7 @@ Relay team broke club record"></textarea>
             ".mv-desc{display:block;color:#aeb4c4;font-size:11px;margin-top:5px;line-height:1.4}"
             "</style></head><body>"
             "<header><h1>Motion vocabulary</h1>"
-            "<p class=\"lede\">Every brand motion preset (roadmap 1.5), rendered "
+            '<p class="lede">Every brand motion preset (roadmap 1.5), rendered '
             "from its compiled CSS. One source of truth in <code>motion/</code>; "
             "the reels compile the same tokens to Remotion and the ffmpeg engine "
             "to filter recipes. Click a tile to replay; turn on your device's "
@@ -27071,7 +27071,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     "generated_at": now_iso,
                     "error": "transient",
                     "message": (
-                        "The AI couldn't finish the caption — wait a few seconds " "and try again."
+                        "The AI couldn't finish the caption — wait a few seconds and try again."
                     ),
                 }
             ), 200

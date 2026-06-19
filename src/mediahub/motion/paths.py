@@ -12,6 +12,7 @@ browser does the work natively), Remotion translate/rotate keyframe tokens, and
 sampled FFmpeg overlay ``x``/``y`` expressions. Supports the common path subset
 (M, L, H, V, C, Q, Z; absolute and relative).
 """
+
 from __future__ import annotations
 
 import math
@@ -30,8 +31,7 @@ def _tokens(d: str) -> List[str]:
 
 def _line(p0: Point, p1: Point, n: int) -> List[Point]:
     return [
-        (p0[0] + (p1[0] - p0[0]) * i / n, p0[1] + (p1[1] - p0[1]) * i / n)
-        for i in range(1, n + 1)
+        (p0[0] + (p1[0] - p0[0]) * i / n, p0[1] + (p1[1] - p0[1]) * i / n) for i in range(1, n + 1)
     ]
 
 
@@ -99,13 +99,18 @@ class MotionPath:
             t = s / samples
             x, y = self.point_at(t)
             pts.append(
-                {"offset": round(t, 6), "x": round(x, 3), "y": round(y, 3),
-                 "angle": round(self.angle_at(t), 3)}
+                {
+                    "offset": round(t, 6),
+                    "x": round(x, 3),
+                    "y": round(y, 3),
+                    "angle": round(self.angle_at(t), 3),
+                }
             )
         return {"d": self.d, "samples": pts}
 
-    def to_css(self, *, class_name: str, duration_sec: float, orient: bool = True,
-               easing: str = "linear") -> str:
+    def to_css(
+        self, *, class_name: str, duration_sec: float, orient: bool = True, easing: str = "linear"
+    ) -> str:
         rotate = "auto" if orient else "0deg"
         return (
             f".{class_name}{{"

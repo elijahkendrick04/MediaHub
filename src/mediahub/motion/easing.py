@@ -20,6 +20,7 @@ representations of one curve:
 Everything here is a pure function of its inputs — deterministic, no clock, no
 RNG — so a preset renders byte-identically every time.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

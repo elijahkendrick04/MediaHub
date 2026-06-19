@@ -15,6 +15,7 @@ Crucially, the photo presets **delegate to the shipped, reel-proven recipe**
 rendering production reels instead of shipping a second, unvalidated zoompan
 implementation.
 """
+
 from __future__ import annotations
 
 from typing import Mapping
@@ -50,9 +51,7 @@ def compile_ffmpeg(
     if preset.photo:
         variant = nearest_ken_burns_variant(preset.name)
         if not variant:
-            raise MotionCapError(
-                f"photo preset {preset.name!r} has no FFmpeg Ken Burns variant"
-            )
+            raise MotionCapError(f"photo preset {preset.name!r} has no FFmpeg Ken Burns variant")
         # Delegate to the shipped recipe — single source of truth for zoompan.
         from mediahub.visual.reel_ffmpeg import _ken_burns_filter
 

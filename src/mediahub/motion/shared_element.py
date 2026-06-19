@@ -15,6 +15,7 @@ brand-colour tween). It compiles to:
 FFmpeg (whole-frame compositing) expresses this as the reel crossfade it already
 ships; the per-element morph is a Remotion/CSS capability.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -52,8 +53,13 @@ class SharedElementTransition:
         return out
 
     # -- compilers ----------------------------------------------------------
-    def to_css(self, *, class_name: Optional[str] = None,
-               duration_sec: Optional[float] = None, fps: int = 30) -> str:
+    def to_css(
+        self,
+        *,
+        class_name: Optional[str] = None,
+        duration_sec: Optional[float] = None,
+        fps: int = 30,
+    ) -> str:
         cls = class_name or f"mh-shared-{self.element_id}"
         secs = duration_sec if duration_sec is not None else self.duration_frames / float(fps)
         fx, fy, fw, fh = self.from_rect
@@ -97,8 +103,11 @@ class SharedElementTransition:
             if "color" in g:
                 stop["color"] = g["color"]
             stops.append(stop)
-        return {"elementId": self.element_id, "durationFrames": self.duration_frames,
-                "stops": stops}
+        return {
+            "elementId": self.element_id,
+            "durationFrames": self.duration_frames,
+            "stops": stops,
+        }
 
 
 def _lerp(a: float, b: float, t: float) -> float:

@@ -11,6 +11,7 @@ writes that file from :func:`export_ts`, and a guard test re-derives the bundle
 and asserts the committed file is in sync — the same regen-plus-guard discipline
 the self-hosted fonts use.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,9 +47,7 @@ def token_bundle(presets: Iterable[MotionPreset] | None = None) -> Dict[str, Any
     return {
         "version": MOTION_REV,
         "fps": FPS,
-        "easings": {
-            name: {"bezier": list(e.bezier)} for name, e in EASINGS.items()
-        },
+        "easings": {name: {"bezier": list(e.bezier)} for name, e in EASINGS.items()},
         "presets": {p.name: preset_tokens(p) for p in items},
         "reduced": {p.name: preset_tokens(p.reduced()) for p in items},
     }

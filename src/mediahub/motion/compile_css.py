@@ -14,6 +14,7 @@ Reduce-motion is emitted as a ``@media (prefers-reduced-motion: reduce)`` block
 that swaps in the still-respecting variant (:meth:`MotionPreset.reduced`), so
 every preset honours the accessibility setting wherever this CSS is served.
 """
+
 from __future__ import annotations
 
 from typing import Iterable, List
@@ -71,9 +72,7 @@ def _frame_decls(preset: MotionPreset, t: float) -> str:
 def keyframes_block(preset: MotionPreset, *, name: str | None = None) -> str:
     anim = name or _anim_name(preset)
     stops = _stops(preset)
-    body = "".join(
-        f"{_pct(t)}{{{_frame_decls(preset, t)}}}" for t in _dedupe(stops)
-    )
+    body = "".join(f"{_pct(t)}{{{_frame_decls(preset, t)}}}" for t in _dedupe(stops))
     return f"@keyframes {anim}{{{body}}}"
 
 
@@ -117,9 +116,7 @@ def compile_preset_css(preset: MotionPreset, *, fps: int = FPS) -> str:
     )
 
 
-def compile_all_css(
-    presets: Iterable[MotionPreset] | None = None, *, fps: int = FPS
-) -> str:
+def compile_all_css(presets: Iterable[MotionPreset] | None = None, *, fps: int = FPS) -> str:
     """The full motion-vocabulary stylesheet (served as a static asset)."""
     items = list(presets if presets is not None else PRESETS.values())
     blocks: List[str] = [

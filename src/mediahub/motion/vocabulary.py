@@ -25,6 +25,7 @@ variant of every preset) and the engineering :data:`MAX_ANIM_SECONDS` /
 Everything is deterministic — same preset, same frame, same value — so renders
 stay byte-identical.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -141,9 +142,7 @@ class MotionPreset:
         else:  # in
             channels = {"opacity": (kf(0.0, 0.0), kf(1.0, 1.0, "ease_out_quad"))}
             dur = min(self.duration_frames, 8)
-        return replace(
-            self, channels=channels, duration_frames=dur, is_reduced=True, loop=False
-        )
+        return replace(self, channels=channels, duration_frames=dur, is_reduced=True, loop=False)
 
     # -- caps ---------------------------------------------------------------
     def capped(self) -> "MotionPreset":
@@ -257,12 +256,20 @@ def _preset(
 _PRESET_LIST: Tuple[MotionPreset, ...] = (
     # -- Entrances (in) -----------------------------------------------------
     _preset(
-        "fade_in", "in", "standard", "none", 12,
+        "fade_in",
+        "in",
+        "standard",
+        "none",
+        12,
         {"opacity": [kf(0, 0), kf(1, 1, "ease_out_cubic")]},
         description="Pure opacity arrival; no movement.",
     ),
     _preset(
-        "rise", "in", "calm", "up", 16,
+        "rise",
+        "in",
+        "calm",
+        "up",
+        16,
         {
             "translateY": [kf(0, 40), kf(1, 0, "ease_out_cubic")],
             "opacity": [kf(0, 0), kf(0.7, 1, "ease_out_quad")],
@@ -270,7 +277,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Gentle lift from below with a fade (Canva Rise).",
     ),
     _preset(
-        "slide_up", "in", "standard", "up", 14,
+        "slide_up",
+        "in",
+        "standard",
+        "up",
+        14,
         {
             "translateY": [kf(0, 60), kf(1, 0, "ease_out_cubic")],
             "opacity": [kf(0, 0), kf(0.6, 1, "ease_out_quad")],
@@ -278,7 +289,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Slides in from below.",
     ),
     _preset(
-        "slide_left", "in", "standard", "left", 14,
+        "slide_left",
+        "in",
+        "standard",
+        "left",
+        14,
         {
             "translateX": [kf(0, 64), kf(1, 0, "ease_out_cubic")],
             "opacity": [kf(0, 0), kf(0.6, 1, "ease_out_quad")],
@@ -286,7 +301,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Enters from the right, travelling left.",
     ),
     _preset(
-        "slide_right", "in", "standard", "right", 14,
+        "slide_right",
+        "in",
+        "standard",
+        "right",
+        14,
         {
             "translateX": [kf(0, -64), kf(1, 0, "ease_out_cubic")],
             "opacity": [kf(0, 0), kf(0.6, 1, "ease_out_quad")],
@@ -294,7 +313,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Enters from the left, travelling right.",
     ),
     _preset(
-        "scale_in", "in", "standard", "in", 14,
+        "scale_in",
+        "in",
+        "standard",
+        "in",
+        14,
         {
             "scale": [kf(0, 0.82), kf(1, 1, "ease_out_cubic")],
             "opacity": [kf(0, 0), kf(0.6, 1, "ease_out_quad")],
@@ -302,7 +325,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Grows into place (Canva/Adobe Grow).",
     ),
     _preset(
-        "pop", "in", "electric", "in", 12,
+        "pop",
+        "in",
+        "electric",
+        "in",
+        12,
         {
             "scale": [kf(0, 0.6), kf(1, 1, "ease_out_back")],
             "opacity": [kf(0, 0), kf(0.4, 1, "ease_out_quad")],
@@ -310,7 +337,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Scale punch with overshoot (Adobe Pop).",
     ),
     _preset(
-        "drop_in", "in", "electric", "down", 16,
+        "drop_in",
+        "in",
+        "electric",
+        "down",
+        16,
         {
             "translateY": [kf(0, -64), kf(1, 0, "ease_out_back")],
             "opacity": [kf(0, 0), kf(0.3, 1, "ease_out_quad")],
@@ -318,7 +349,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Drops from above and bounces to rest.",
     ),
     _preset(
-        "tumble", "in", "standard", "up", 18,
+        "tumble",
+        "in",
+        "standard",
+        "up",
+        18,
         {
             "rotate": [kf(0, -12), kf(1, 0, "ease_out_cubic")],
             "translateY": [kf(0, 36), kf(1, 0, "ease_out_cubic")],
@@ -327,7 +362,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Rotates and lifts into place (Adobe Tumble).",
     ),
     _preset(
-        "blur_in", "in", "calm", "none", 14,
+        "blur_in",
+        "in",
+        "calm",
+        "none",
+        14,
         {
             "blur": [kf(0, 16), kf(1, 0, "ease_out_cubic")],
             "opacity": [kf(0, 0), kf(0.7, 1, "ease_out_quad")],
@@ -335,7 +374,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Resolves from a soft blur (register shift).",
     ),
     _preset(
-        "snap_in", "in", "electric", "up", 10,
+        "snap_in",
+        "in",
+        "electric",
+        "up",
+        10,
         {
             "translateY": [kf(0, 28), kf(1, 0, "ease_out_expo")],
             "opacity": [kf(0, 0), kf(0.35, 1, "ease_out_quad")],
@@ -344,69 +387,157 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
     ),
     # -- Loops (loop) -------------------------------------------------------
     _preset(
-        "drift", "loop", "calm", "none", 90,
+        "drift",
+        "loop",
+        "calm",
+        "none",
+        90,
         {"translateX": [kf(0, 0), kf(0.5, 6, "ease_in_out_sine"), kf(1, 0, "ease_in_out_sine")]},
-        loop=True, description="Slow ambient horizontal drift.",
+        loop=True,
+        description="Slow ambient horizontal drift.",
     ),
     _preset(
-        "breathe", "loop", "calm", "none", 96,
+        "breathe",
+        "loop",
+        "calm",
+        "none",
+        96,
         {"scale": [kf(0, 1), kf(0.5, 1.03, "ease_in_out_sine"), kf(1, 1, "ease_in_out_sine")]},
-        loop=True, description="Breathing scale on a glow or panel.",
+        loop=True,
+        description="Breathing scale on a glow or panel.",
     ),
     _preset(
-        "pulse", "loop", "standard", "none", 48,
+        "pulse",
+        "loop",
+        "standard",
+        "none",
+        48,
         {"scale": [kf(0, 1), kf(0.5, 1.06, "ease_in_out_sine"), kf(1, 1, "ease_in_out_sine")]},
-        loop=True, description="Emphasis pulse.",
+        loop=True,
+        description="Emphasis pulse.",
     ),
     _preset(
-        "float", "loop", "calm", "up", 84,
+        "float",
+        "loop",
+        "calm",
+        "up",
+        84,
         {"translateY": [kf(0, 0), kf(0.5, -8, "ease_in_out_sine"), kf(1, 0, "ease_in_out_sine")]},
-        loop=True, description="Gentle bob.",
+        loop=True,
+        description="Gentle bob.",
     ),
     _preset(
-        "wiggle", "loop", "electric", "none", 36,
-        {"rotate": [kf(0, 0), kf(0.25, 2, "ease_in_out_sine"), kf(0.75, -2, "ease_in_out_sine"), kf(1, 0, "ease_in_out_sine")]},
-        loop=True, description="Playful rotation wiggle.",
+        "wiggle",
+        "loop",
+        "electric",
+        "none",
+        36,
+        {
+            "rotate": [
+                kf(0, 0),
+                kf(0.25, 2, "ease_in_out_sine"),
+                kf(0.75, -2, "ease_in_out_sine"),
+                kf(1, 0, "ease_in_out_sine"),
+            ]
+        },
+        loop=True,
+        description="Playful rotation wiggle.",
     ),
     # -- Photo motion (loop, whole-frame; maps to Ken Burns / pan) ----------
     _preset(
-        "ken_burns_in", "loop", "calm", "in", 120,
+        "ken_burns_in",
+        "loop",
+        "calm",
+        "in",
+        120,
         {"scale": [kf(0, 1.0), kf(1, 1.06, "ease_in_out_sine")]},
-        loop=True, photo=True, description="Slow zoom toward the saliency focus.",
+        loop=True,
+        photo=True,
+        description="Slow zoom toward the saliency focus.",
     ),
     _preset(
-        "ken_burns_out", "loop", "calm", "out", 120,
+        "ken_burns_out",
+        "loop",
+        "calm",
+        "out",
+        120,
         {"scale": [kf(0, 1.06), kf(1, 1.0, "ease_in_out_sine")]},
-        loop=True, photo=True, description="Slow zoom pull-back.",
+        loop=True,
+        photo=True,
+        description="Slow zoom pull-back.",
     ),
     _preset(
-        "pan_left", "loop", "calm", "left", 120,
-        {"scale": [kf(0, 1.08), kf(1, 1.08)], "translateX": [kf(0, 0), kf(1, -48, "ease_in_out_sine")]},
-        loop=True, photo=True, description="Fixed zoom, crop slides left.",
+        "pan_left",
+        "loop",
+        "calm",
+        "left",
+        120,
+        {
+            "scale": [kf(0, 1.08), kf(1, 1.08)],
+            "translateX": [kf(0, 0), kf(1, -48, "ease_in_out_sine")],
+        },
+        loop=True,
+        photo=True,
+        description="Fixed zoom, crop slides left.",
     ),
     _preset(
-        "pan_right", "loop", "calm", "right", 120,
-        {"scale": [kf(0, 1.08), kf(1, 1.08)], "translateX": [kf(0, 0), kf(1, 48, "ease_in_out_sine")]},
-        loop=True, photo=True, description="Fixed zoom, crop slides right.",
+        "pan_right",
+        "loop",
+        "calm",
+        "right",
+        120,
+        {
+            "scale": [kf(0, 1.08), kf(1, 1.08)],
+            "translateX": [kf(0, 0), kf(1, 48, "ease_in_out_sine")],
+        },
+        loop=True,
+        photo=True,
+        description="Fixed zoom, crop slides right.",
     ),
     _preset(
-        "pan_up", "loop", "calm", "up", 120,
-        {"scale": [kf(0, 1.08), kf(1, 1.08)], "translateY": [kf(0, 0), kf(1, -48, "ease_in_out_sine")]},
-        loop=True, photo=True, description="Fixed zoom, crop slides up.",
+        "pan_up",
+        "loop",
+        "calm",
+        "up",
+        120,
+        {
+            "scale": [kf(0, 1.08), kf(1, 1.08)],
+            "translateY": [kf(0, 0), kf(1, -48, "ease_in_out_sine")],
+        },
+        loop=True,
+        photo=True,
+        description="Fixed zoom, crop slides up.",
     ),
     _preset(
-        "pan_down", "loop", "calm", "down", 120,
-        {"scale": [kf(0, 1.08), kf(1, 1.08)], "translateY": [kf(0, 0), kf(1, 48, "ease_in_out_sine")]},
-        loop=True, photo=True, description="Fixed zoom, crop slides down.",
+        "pan_down",
+        "loop",
+        "calm",
+        "down",
+        120,
+        {
+            "scale": [kf(0, 1.08), kf(1, 1.08)],
+            "translateY": [kf(0, 0), kf(1, 48, "ease_in_out_sine")],
+        },
+        loop=True,
+        photo=True,
+        description="Fixed zoom, crop slides down.",
     ),
     # -- Exits (out) --------------------------------------------------------
     _preset(
-        "fade_out", "out", "standard", "none", 8,
+        "fade_out",
+        "out",
+        "standard",
+        "none",
+        8,
         {"opacity": [kf(0, 1), kf(1, 0, "ease_in_cubic")]},
         description="Opacity exit.",
     ),
     _preset(
-        "sink", "out", "standard", "down", 10,
+        "sink",
+        "out",
+        "standard",
+        "down",
+        10,
         {
             "translateY": [kf(0, 0), kf(1, 24, "ease_in_cubic")],
             "opacity": [kf(0, 1), kf(1, 0, "ease_in_quad")],
@@ -414,7 +545,11 @@ _PRESET_LIST: Tuple[MotionPreset, ...] = (
         description="Settles down and away.",
     ),
     _preset(
-        "zoom_out", "out", "standard", "out", 10,
+        "zoom_out",
+        "out",
+        "standard",
+        "out",
+        10,
         {
             "scale": [kf(0, 1), kf(1, 0.9, "ease_in_cubic")],
             "opacity": [kf(0, 1), kf(1, 0, "ease_in_quad")],
