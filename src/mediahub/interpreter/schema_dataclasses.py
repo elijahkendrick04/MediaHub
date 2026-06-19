@@ -69,11 +69,18 @@ class InterpretedSwim:
     yob: Optional[int]
     club: Optional[str]
     place: Optional[int]
-    time: Optional[str]  # canonical "mm:ss.cc" or "ss.cc"
+    time: Optional[str]  # canonical "mm:ss.cc" or "ss.cc" — the achieved/finals time
     reaction: Optional[str]
     confidence: float  # 0..1 per swim
     raw_row: str
     field_confidence: dict[str, float] = field(default_factory=dict)
+    # The swimmer's entry / seed time for this event, canonical "mm:ss.cc" or
+    # "ss.cc" when the source carries it (HY-TEK E1, SDIF seed column, printed
+    # "Seed Time" column). It is the swimmer's prior best at entry, so a finals
+    # time faster than the seed is an offline, deterministic PB signal — the
+    # baseline that lets the engine find PBs without any web lookup. ``None``
+    # when the source has no seed/entry column.
+    seed_time: Optional[str] = None
 
 
 @dataclass

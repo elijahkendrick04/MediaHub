@@ -345,6 +345,10 @@ def parse_sdif(data: bytes) -> InterpretedMeet:
                 confidence=round(swim_conf, 3),
                 raw_row=raw[:120],
                 field_confidence=field_conf,
+                # SDIF individual-event (D0) records carry the seed time (the
+                # swimmer's entry/prior best); pass it through so the engine can
+                # confirm a PB offline.
+                seed_time=d0.get("seed_time"),
             )
             ev.swims.append(swim)
 

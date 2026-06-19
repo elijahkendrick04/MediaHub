@@ -42,7 +42,17 @@ def build_weekend_in_numbers(report: dict) -> dict:
         swimmer = a.get("swimmer_name", "")
         raw = a.get("raw_facts", {})
 
-        if "pb_confirmed" in atype or "pb_magnitude" in atype or "official_pb" in atype:
+        # A PB the engine surfaced — confirmed against a prior best, confirmed
+        # as an all-time official PB, the magnitude split of one, or a likely PB
+        # beaten against the swimmer's own entry/seed time (the offline,
+        # file-only signal). ``pb_likely`` is counted here too so this card
+        # agrees with the "weekend at a glance" digest, which already does.
+        if (
+            "pb_confirmed" in atype
+            or "pb_magnitude" in atype
+            or "official_pb" in atype
+            or "pb_likely" in atype
+        ):
             n_pbs += 1
             pb_by_swimmer[swimmer] = pb_by_swimmer.get(swimmer, 0) + 1
 
