@@ -7097,15 +7097,16 @@ body::before {
 }
 
 /* Signed-in brand backdrop — a composed "crest backdrop" built from the active
-   org's uploaded logos (the marks are generated in Python). One oversized HERO
-   silhouette bleeds off a corner as the anchor, sitting in a pool of the club's
-   brand-coloured ambient light (.mh-bg-wash); a sparse, edge-biased SCATTER of
-   smaller marks hugs the gutters around the reading column. Every mark paints
-   the logo's SILHOUETTE in one brand-derived tint via CSS mask, so the field
-   reads as a single cohesive, on-brand texture — not a clash of full-colour
-   marks, and not a repeating wallpaper grid. Two layers drift at different rates
-   for parallax depth (off under reduced-motion). z-index:0 — behind all content
-   (main.wrap is z-index:1). */
+   org's uploaded logos (the marks are generated in Python). One large HERO
+   silhouette anchors the bottom-right corner, sitting in a pool of the club's
+   brand-coloured ambient light (.mh-bg-wash); two larger ECHO marks balance it
+   from the left/bottom gutters. Every mark paints the logo's SILHOUETTE in one
+   brand-derived tint via CSS mask, so detailed club crests read as a single
+   cohesive, on-brand ghost — not a clash of full-colour marks, and not a
+   scattered field of stamps. The arrangement is fixed and deliberate (only a
+   per-org rotation is seeded), placed clear of the page title and the hero's
+   own lane-number watermark. The marks drift gently as one layer (off under
+   reduced-motion). z-index:0 — behind all content (main.wrap is z-index:1). */
 .mh-bg-canvas {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
   /* One tint for every mark: brand-derived when the org has a primary colour
@@ -7113,29 +7114,28 @@ body::before {
      light enough to ghost on the near-black surface; the plain --mh-bg-tint
      above is the fallback when color-mix is unsupported. */
   --mh-bg-tint: var(--ink);
-  --mh-bg-tint: color-mix(in oklab, var(--mh-bg-brand, var(--ink)) 44%, var(--ink));
+  --mh-bg-tint: color-mix(in oklab, var(--mh-bg-brand, var(--ink)) 50%, var(--ink));
 }
-/* Brand-coloured ambient wash pooling light around the hero crest's corner, so
-   the club's colour is unmistakably present even though each silhouette stays a
-   faint ghost. Inline --wx/--wy place the pool at the hero's corner; the builder
-   omits this element entirely when the org has no brand colour (clean neutral). */
+/* Brand-coloured ambient wash pooling light around the hero crest (bottom-right)
+   so the club's colour is unmistakably present and even a thin, low-ink crest
+   reads against the near-black surface. The builder omits this element entirely
+   when the org has no brand colour (clean neutral fallback). */
 .mh-bg-wash {
   position: absolute; inset: 0;
-  background: radial-gradient(58% 60% at var(--wx, 100%) var(--wy, 0%),
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 20%, transparent) 0%,
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 7%, transparent) 34%,
-    transparent 68%);
+  background: radial-gradient(70% 72% at 100% 100%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 26%, transparent) 0%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 10%, transparent) 30%,
+    transparent 64%);
 }
-.mh-bg-layer { position: absolute; inset: -8%; will-change: transform; }
-.mh-bg-layer--hero    { animation: mh-bg-drift-a 66s ease-in-out infinite alternate; }
-.mh-bg-layer--scatter {
-  animation: mh-bg-drift-b 46s ease-in-out infinite alternate;
-  /* Vignette only the scatter: keeps the central reading column calm while the
-     gutters carry the texture. The hero is exempt so its cornered mass survives. */
-  -webkit-mask-image: radial-gradient(128% 102% at 50% 44%,
-        transparent 1%, rgba(0,0,0,0.42) 42%, #000 76%);
-          mask-image: radial-gradient(128% 102% at 50% 44%,
-        transparent 1%, rgba(0,0,0,0.42) 42%, #000 76%);
+.mh-bg-marks {
+  position: absolute; inset: -8%; will-change: transform;
+  animation: mh-bg-drift 60s ease-in-out infinite alternate;
+  /* Gentle centre-protect: fades each mark's inner edge so it never crowds the
+     body text, while the cornered mass stays full strength. */
+  -webkit-mask-image: radial-gradient(135% 110% at 50% 46%,
+        transparent 6%, rgba(0,0,0,0.5) 40%, #000 74%);
+          mask-image: radial-gradient(135% 110% at 50% 46%,
+        transparent 6%, rgba(0,0,0,0.5) 40%, #000 74%);
 }
 .mh-bg-mark {
   position: absolute;
@@ -7145,20 +7145,16 @@ body::before {
   -webkit-mask-size: contain; mask-size: contain;
   transform: translate(-50%, -50%) rotate(var(--r, 0deg));
 }
-@keyframes mh-bg-drift-a {
-  from { transform: translate3d(-7px, 5px, 0) scale(1.02); }
-  to   { transform: translate3d(7px, -9px, 0) scale(1.02); }
-}
-@keyframes mh-bg-drift-b {
-  from { transform: translate3d(10px, -7px, 0) scale(1.03); }
-  to   { transform: translate3d(-10px, 9px, 0) scale(1.03); }
+@keyframes mh-bg-drift {
+  from { transform: translate3d(-6px, 5px, 0); }
+  to   { transform: translate3d(6px, -8px, 0); }
 }
 @media (max-width: 720px) {
-  /* Thin the scatter on small screens so it stays a whisper, not clutter. */
-  .mh-bg-layer--scatter .mh-bg-mark:nth-child(2n) { display: none; }
+  /* On phones keep only the bottom-right anchor; drop the gutter echoes. */
+  .mh-bg-mark[data-echo] { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mh-bg-layer { animation: none; }
+  .mh-bg-marks { animation: none; }
 }
 
 /* Card hover. Interactive cards (links / [data-interactive]) lift a touch and
@@ -10461,80 +10457,52 @@ def _layout(
             signed_in_name = ""
 
     # Composed "crest backdrop" behind every signed-in page, built from the org's
-    # uploaded logos. One oversized HERO silhouette bleeds off the top-right
-    # corner as the anchor, pooled in the club's brand-coloured ambient light; a
-    # sparse, edge-biased SCATTER of smaller marks hugs the gutters around the
-    # reading column. Each mark paints the logo's silhouette in one brand-derived
-    # tint (CSS mask + background-color, see .mh-bg-mark) so the field reads as a
-    # single cohesive, on-brand texture — not a repeating wallpaper grid. The
-    # layout is deterministic (seeded by the profile id), so it is STABLE across
-    # page loads (no jarring re-shuffle).
+    # uploaded logos. One large HERO silhouette anchors the bottom-right corner,
+    # pooled in the club's brand-coloured ambient light; two larger ECHO marks
+    # balance it from the left/bottom gutters. Each mark paints the logo's
+    # silhouette in one brand-derived tint (CSS mask + background-color, see
+    # .mh-bg-mark) so detailed club crests read as a single cohesive, on-brand
+    # ghost — not a scattered field of stamps. The arrangement is FIXED and
+    # deliberate (only a per-org rotation is seeded), kept clear of the page
+    # title and the hero's own lane-number watermark, and big + opaque enough
+    # that even a thin, low-ink crest reads against the near-black surface.
     bg_logos_html = ""
     if signed_in_bg_logos:
         _rng = random.Random("mh-bg:" + (signed_in_pid or "default"))
         _pool = signed_in_bg_logos
+        _n = len(_pool)
         _brand = (
             signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
         )
-        # Hero anchors the top-right — the empty counterweight to the page
-        # title/nav at top-left, and clear of the centred content column. It is
-        # the org's first (primary) mark, which signed_in_bg_logos front-loads
-        # with a transparency-capable format so the silhouette reads cleanly.
-        _hero_src = _h(_pool[0])
-        _hero_rot = round(_rng.uniform(-8.0, 8.0), 1)
-        _wash = '<div class="mh-bg-wash" style="--wx:100%;--wy:0%"></div>' if _brand else ""
-        _hero = (
-            '<div class="mh-bg-layer mh-bg-layer--hero">'
-            '<span class="mh-bg-mark" style="left:101%;top:-6%;'
-            "width:clamp(360px,52vw,760px);height:clamp(360px,52vw,760px);"
-            f"--r:{_hero_rot}deg;opacity:0.155;"
-            f"-webkit-mask-image:url('{_hero_src}');mask-image:url('{_hero_src}')"
-            '"></span></div>'
-        )
-        # Scatter — edge-biased blue-noise: fill the margin band around the
-        # reading column, keep the centre clear (the keep-out ellipse), and
-        # reject near-neighbours so nothing aligns into a visible lattice.
-        _slots: list[tuple[float, float]] = []
-        _cx, _cy, _rx, _ry = 0.5, 0.46, 0.31, 0.36
-        _tries = 0
-        while len(_slots) < 11 and _tries < 11 * 80:
-            _tries += 1
-            _px, _py = _rng.uniform(0.015, 0.985), _rng.uniform(0.03, 0.97)
-            if ((_px - _cx) / _rx) ** 2 + ((_py - _cy) / _ry) ** 2 < 1.0:
-                continue  # inside the reading column — skip
-            if any((_px - _qx) ** 2 + (_py - _qy) ** 2 < 0.018 for _qx, _qy in _slots):
-                continue  # too close to a placed mark — skip
-            _slots.append((_px, _py))
-        # Depth tiers: (min_px, vw, max_px, base_opacity, blur_px).
-        _tiers = (
-            (150, 12.0, 240, 0.105, 0.0),  # near — large, strongest
-            (104, 8.5, 168, 0.082, 0.0),  # mid
-            (70, 6.0, 120, 0.060, 1.1),  # far — small, faint, softened
+        # (left%, top%, size clamp, opacity, pool index, is_echo). The hero is the
+        # org's first (primary) mark; echoes cycle through the rest so a multi-logo
+        # org shows variety while a single-logo org still reads as one deliberate
+        # composition. Echoes carry data-echo so the phone breakpoint drops them.
+        _plan = (
+            (101, 103, "clamp(440px,42vw,860px)", 0.185, 0, False),  # hero — bottom-right anchor
+            (-2, 20, "clamp(300px,26vw,540px)", 0.120, 1, True),  # echo — left edge
+            (5, 103, "clamp(280px,23vw,470px)", 0.105, 2, True),  # echo — bottom-left
         )
         _marks: list[str] = []
-        for _px, _py in _slots:
-            _smin, _svw, _smax, _op, _blur = _rng.choices(_tiers, weights=(3, 4, 3))[0]
-            _op = round(_op * _rng.uniform(0.84, 1.12), 4)
-            _rot = round(_rng.uniform(-12.0, 12.0), 1)
-            _blur_css = f"filter:blur({_blur}px);" if _blur else ""
-            _src = _h(_rng.choice(_pool))
+        for _lx, _ty, _sz, _op, _idx, _echo in _plan:
+            _src = _h(_pool[_idx % _n])
+            _rot = round(_rng.uniform(-9.0, 9.0), 1)
+            _echo_attr = " data-echo" if _echo else ""
             _marks.append(
-                '<span class="mh-bg-mark" style="'
-                f"left:{_px * 100:.2f}%;top:{_py * 100:.2f}%;"
-                f"width:clamp({_smin}px,{_svw}vw,{_smax}px);"
-                f"height:clamp({_smin}px,{_svw}vw,{_smax}px);"
-                f"--r:{_rot}deg;opacity:{_op};{_blur_css}"
+                f'<span class="mh-bg-mark"{_echo_attr} style="'
+                f"left:{_lx}%;top:{_ty}%;width:{_sz};height:{_sz};"
+                f"--r:{_rot}deg;opacity:{_op};"
                 f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
                 '"></span>'
             )
-        _scatter = '<div class="mh-bg-layer mh-bg-layer--scatter">' + "".join(_marks) + "</div>"
+        _wash = '<div class="mh-bg-wash"></div>' if _brand else ""
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
         bg_logos_html = (
             f'<div class="mh-bg-canvas" aria-hidden="true"{_brand_attr}>'
             + _wash
-            + _hero
-            + _scatter
-            + "</div>"
+            + '<div class="mh-bg-marks">'
+            + "".join(_marks)
+            + "</div></div>"
         )
 
     # One-shot success/error toast queued by a prior POST (see _flash_toast).
