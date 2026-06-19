@@ -883,6 +883,94 @@ def mirror_bg_treatment(profile_id: str, url: str) -> dict:
     return _treatment_for_silhouette(mirror_bg_silhouette_path(profile_id, url, allow_fetch=False))
 
 
+# ---------------------------------------------------------------------------
+# Logo-chip backing tone (signed-in chrome: nav avatar, sign-in picker, settings)
+#
+# A logo displayed in the UI chrome sits on a small, consistent "chip" so every
+# club's mark reads at the same size and weight (standardised + professional). For
+# the logo to actually READ on that chip we pick the backing tone deterministically
+# from the logo's own ink: a LIGHT logo (white/pale wordmark) needs a DARK chip; a
+# dark or colourful logo sits on the LIGHT "paper" chip where the overwhelming
+# majority of logos are designed to live. We choose whichever of the two house
+# tones gives the logo the higher APCA contrast — reusing theming/contrast.py, the
+# same colour-science the rest of the app trusts. Pure deterministic maths, cached
+# beside the keyed silhouette as ``*.chip.json``. SVGs/unmeasurable default to the
+# light paper chip (safe for the vast majority of marks).
+# ---------------------------------------------------------------------------
+
+_CHIP_TONE_VERSION = 1
+_CHIP_PAPER = "#F5F2E8"  # house paper-cream — the light chip
+_CHIP_INK = "#0A0B11"  # house paper-black — the dark chip
+
+
+def _chip_tone_for_silhouette(sil: Optional[Path]) -> str:
+    """Return ``"light"`` or ``"dark"`` — the chip backing the logo reads best on.
+
+    Measured from the keyed silhouette's mean ink colour and decided by APCA
+    contrast against the two house tones. Cached beside the silhouette. Defaults to
+    ``"light"`` for SVGs (not rasterised here) or if analysis can't run."""
+    if not sil or sil.suffix.lower() == ".svg":
+        return "light"
+    cache = sil.with_suffix(".chip.json")
+    try:
+        if cache.exists():
+            cached = json.loads(cache.read_text())
+            if (
+                isinstance(cached, dict)
+                and cached.get("v") == _CHIP_TONE_VERSION
+                and cached.get("tone") in ("light", "dark")
+            ):
+                return cached["tone"]
+    except Exception:
+        pass
+    try:
+        import numpy as np
+        from PIL import Image
+
+        with Image.open(sil) as _im:
+            arr = np.asarray(_im.convert("RGBA")).astype(np.float32)
+        alpha = arr[..., 3] / 255.0
+        inked = alpha > 0.15
+        if int(inked.sum()) < 10:
+            return "light"
+        # Alpha-weighted mean ink colour → a single representative hex. Weighting by
+        # alpha keeps soft anti-aliased edges from dragging the colour toward black.
+        w = alpha[inked]
+        ink = arr[..., :3][inked]
+        mean_rgb = (ink * w[:, None]).sum(axis=0) / max(float(w.sum()), 1e-6)
+        if not bool(np.isfinite(mean_rgb).all()):
+            return "light"
+        hexcol = "#%02x%02x%02x" % tuple(int(round(min(255.0, max(0.0, c)))) for c in mean_rgb)
+
+        from mediahub.theming.contrast import apca
+
+        # Pick the house tone the logo reads BEST against (higher |APCA Lc|). Ties
+        # go to the light paper chip — the conventional home for a logo.
+        lc_paper = abs(apca(hexcol, _CHIP_PAPER))
+        lc_ink = abs(apca(hexcol, _CHIP_INK))
+        tone = "dark" if lc_ink > lc_paper else "light"
+        try:
+            cache.write_text(json.dumps({"tone": tone, "v": _CHIP_TONE_VERSION}))
+        except Exception:
+            pass
+        return tone
+    except Exception:
+        log.debug("chip tone unavailable for %s", sil, exc_info=True)
+        return "light"
+
+
+def logo_chip_tone(profile_id: str, logo_id: str) -> str:
+    """Backing tone (``"light"``/``"dark"``) for an UPLOADED logo's chrome chip."""
+    return _chip_tone_for_silhouette(logo_bg_silhouette_path(profile_id, logo_id))
+
+
+def mirror_chip_tone(profile_id: str, url: str) -> str:
+    """Backing tone for a WEBSITE-CAPTURED logo's chrome chip. Uses only an
+    already-cached mirror (no network in the render path), so it returns the light
+    default until the silhouette is produced by the ``?bg=1`` serve route."""
+    return _chip_tone_for_silhouette(mirror_bg_silhouette_path(profile_id, url, allow_fetch=False))
+
+
 # A 1×1 fully-transparent PNG, lazily decoded once. The backdrop serve routes
 # ship this (HTTP 200, image/png) whenever a logo can't be turned into a
 # silhouette — so a CSS ``mask-image``/``background-image`` always *loads* and the
@@ -920,6 +1008,8 @@ __all__ = [
     "logo_bg_treatment",
     "mirror_bg_silhouette_path",
     "mirror_bg_treatment",
+    "logo_chip_tone",
+    "mirror_chip_tone",
     "transparent_pixel_png",
     "describe_logo_with_ai",
 ]

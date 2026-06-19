@@ -117,17 +117,19 @@ class TestProfileCardSite:
         )
         # No need to pin a session — /sign-in shows ALL profiles.
         body = client.get("/sign-in").get_data(as_text=True)
-        # The logo should be wrapped in .mh-logo-chip (force_chip=True
-        # for grid consistency).
-        assert "mh-logo-chip" in body, (
-            "profile-card logo not wrapped in .mh-logo-chip"
+        # The logo renders as the unified elevated chip (fixed-size, framed) for
+        # grid consistency.
+        assert "mh-logo-chip mh-logo-chip--lg" in body, (
+            "profile-card logo not rendered as the elevated .mh-logo-chip"
         )
-        # A detected (external) logo is served FIRST-PARTY via the mirror
-        # route — never the raw cross-origin URL, which the CSP img-src 'self'
-        # would block (broken image). And the onerror→initials net is wired.
+        # A detected (external) logo is served FIRST-PARTY via the mirror route's
+        # KEYED silhouette — never the raw cross-origin URL, which the CSP
+        # img-src 'self' would block (broken image). The chip carries the keyed
+        # ?bg=1&chip=1 source and a built-in initials fallback.
         assert "/organisation/logo-test/brand-logo" in body
+        assert "bg=1" in body and "chip=1" in body
         assert "https://example.com/club.png" not in body
-        assert "mh-logo-fallback" in body
+        assert "mh-logo-chip__initials" in body
 
 
 class TestRenderHelper:

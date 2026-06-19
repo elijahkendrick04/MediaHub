@@ -8050,30 +8050,13 @@ body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
   border-color: var(--border-h);
   box-shadow: var(--shadow-h);
 }
+/* Holder for the unified logo chip, which self-frames (fixed size, contrast-
+   aware backing, keyed logo or org-initials fallback — see .mh-logo-chip--lg in
+   theme-base.css). The old 56px lane tile + onerror→initials plumbing is gone:
+   the chip owns that now, so every card reads identically. */
 .mh-profile-card .logo {
-  width: 56px; height: 56px;
-  border-radius: 0;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
   margin-bottom: var(--sp-4);
-  font-family: var(--font-display);
-  font-weight: 900; font-size: 22px;
-  letter-spacing: 0.04em;
-  color: var(--lane-ink);
-  background: var(--lane);
-  overflow: hidden;
-  text-transform: uppercase;
-}
-.mh-profile-card .logo img {
-  width: 100%; height: 100%; object-fit: cover;
-}
-/* onerror fallback: a logo that fails to load (dead detected URL, deleted
-   file) flips the tile to the org initials instead of a broken-image icon. */
-.mh-profile-card .logo .mh-logo-fallback { display: none; }
-.mh-profile-card .logo.mh-logo-failed .mh-logo-chip,
-.mh-profile-card .logo.mh-logo-failed img { display: none; }
-.mh-profile-card .logo.mh-logo-failed .mh-logo-fallback {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; height: 100%;
 }
 .mh-profile-card .display-name {
   font-family: var(--font-display);
@@ -8876,6 +8859,10 @@ def _logo_chip_html(
     force_chip: bool = False,
     force_bare: bool = False,
     extra_attrs: str = "",
+    size: str = "",
+    tone: str = "",
+    brand_hex: str = "",
+    initials: str = "",
 ) -> str:
     """Render an uploaded logo with the chip-vs-bare decision.
 
@@ -8913,9 +8900,53 @@ def _logo_chip_html(
     extra_attrs : str
         Already-escaped attribute fragment appended to the
         ``<img>`` element (e.g. additional inline style).
+    size : str
+        ``"sm"`` / ``"md"`` / ``"lg"``. When set, render the ELEVATED chrome
+        chip: a fixed-size, contrast-aware framed chip with a built-in initials
+        fallback (overrides ``height`` and the bare/chip auto-detect). Empty →
+        the legacy chip/bare behaviour above.
+    tone : str
+        ``"light"`` / ``"dark"`` — the backing the logo reads best on
+        (``brand.logos.logo_chip_tone``). Only used in elevated mode.
+    brand_hex : str
+        Org primary hex — a subtle on-brand tint of the backing. Elevated mode.
+    initials : str
+        Fallback text shown when the logo can't load (``onerror``) or ``src_url``
+        is empty. Elevated mode. Do NOT pass an ``onerror`` in ``extra_attrs``
+        in elevated mode — the chip wires its own.
     """
     safe_src = _h(src_url)
     safe_alt = _h(alt or "")
+
+    # Elevated chrome chip (opt-in via ``size``): a fixed-size, contrast-aware
+    # framed chip with a built-in initials fallback — used by the nav avatar, the
+    # sign-in picker tiles and the settings preview so EVERY club's mark reads at
+    # the same size and weight whatever its colour / shape / format. ``src_url``
+    # is the KEYED ``?bg=1&chip=1`` silhouette (opaque backgrounds removed, and an
+    # unrenderable logo 404s so ``onerror`` swaps in the initials). ``tone`` is the
+    # backing the logo reads best on (brand.logos.logo_chip_tone); ``brand_hex``
+    # tints the backing subtly. Always framed (never bare) for a standardised look.
+    if size:
+        _sz = size if size in ("sm", "md", "lg") else "md"
+        _tone = tone if tone in ("light", "dark") else "light"
+        classes = f"mh-logo-chip mh-logo-chip--{_sz} mh-logo-chip--{_tone}"
+        chip_style = ""
+        if brand_hex and re.match(r"^#[0-9A-Fa-f]{3,8}$", brand_hex):
+            chip_style = f' style="--chip-brand:{_h(brand_hex)}"'
+        has_img = bool(src_url)
+        if not has_img:
+            classes += " is-empty"  # no logo → show the initials straight away
+        out = [f'<span class="{classes}"{chip_style} aria-hidden="true">']
+        if has_img:
+            _lazy = "" if _sz == "sm" else ' loading="lazy" decoding="async"'
+            out.append(
+                f'<img class="mh-logo-chip__img" src="{safe_src}" alt="{safe_alt}"{_lazy}'
+                " onerror=\"this.closest('.mh-logo-chip').classList.add('is-empty')\""
+                f"{extra_attrs} />"
+            )
+        out.append(f'<span class="mh-logo-chip__initials">{_h(initials or "?")}</span>')
+        out.append("</span>")
+        return "".join(out)
 
     if force_chip and force_bare:
         force_chip = False  # bare wins on contradiction
@@ -10694,7 +10725,7 @@ def _layout(
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
-    signed_in_logo = ""
+    signed_in_logo_chip_html = ""
     signed_in_bg_logos: list[str] = []
     signed_in_bg_treatment: dict = {}
     if signed_in_pid:
@@ -10722,29 +10753,59 @@ def _layout(
                     ).strip()
                 except Exception:
                     pass
-                # Surface the org's logo in the signed-in chrome the same
-                # way the brand colours are. Prefer an uploaded logo (served
-                # per-profile, IDOR-guarded) and fall back to the website logo
-                # captured from the org's site — but route THAT through the
-                # first-party mirror, never the raw external URL: the CSP pins
-                # ``img-src 'self'`` so a cross-origin <img> renders broken.
+                # Surface the org's logo in the signed-in chrome as the unified
+                # logo chip — the KEYED silhouette (opaque/white backgrounds removed)
+                # on a contrast-aware, brand-tinted backing, with an org-initials
+                # fallback. Prefer an uploaded logo (IDOR-guarded) and fall back to
+                # the website-captured logo via the first-party mirror, never the raw
+                # external URL (the CSP pins ``img-src 'self'``). The same chip
+                # renders on the sign-in picker and the settings preview.
                 try:
+                    from mediahub.brand.logos import (
+                        logo_chip_tone as _lct,
+                        mirror_chip_tone as _mct,
+                    )
+
                     _uploaded = getattr(_p, "brand_logos", None) or []
-                    _first = _uploaded[0] if _uploaded else None
-                    _lid = (_first or {}).get("logo_id") if isinstance(_first, dict) else ""
+                    _lid = ""
+                    for _e in _uploaded:
+                        if (
+                            isinstance(_e, dict)
+                            and _e.get("logo_id")
+                            and str(_e.get("mime", "")).lower().startswith("image/")
+                        ):
+                            _lid = _e["logo_id"]
+                            break
+                    if not _lid and _uploaded and isinstance(_uploaded[0], dict):
+                        _lid = _uploaded[0].get("logo_id") or ""
+                    _chip_src = ""
+                    _chip_tone = "light"
                     if _lid:
-                        signed_in_logo = url_for(
-                            "organisation_setup_logo_serve",
-                            logo_id=_lid,
+                        _chip_src = url_for(
+                            "organisation_setup_logo_serve", logo_id=_lid, bg=1, chip=1
                         )
+                        _chip_tone = _lct(signed_in_pid, _lid)
                     else:
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
                         if _cap.startswith("http://") or _cap.startswith("https://"):
-                            signed_in_logo = url_for(
-                                "organisation_logo_mirror", profile_id=signed_in_pid
+                            _chip_src = url_for(
+                                "organisation_logo_mirror", profile_id=signed_in_pid, bg=1, chip=1
                             )
+                            _chip_tone = _mct(signed_in_pid, _cap)
+                    # Always render the chip when there's an org — logo when we have
+                    # one, org initials otherwise — so the nav always carries a
+                    # consistent, professional avatar.
+                    if signed_in_name:
+                        signed_in_logo_chip_html = _logo_chip_html(
+                            _chip_src,
+                            alt="",
+                            size="sm",
+                            tone=_chip_tone,
+                            brand_hex=signed_in_primary,
+                            initials=_avatar_initials(signed_in_name),
+                        )
                 except Exception:
-                    signed_in_logo = ""
+                    signed_in_logo_chip_html = ""
                 # The org's uploaded logos, surfaced as a brand backdrop behind
                 # every signed-in page (the "team's logo seamlessly in the
                 # background" ask — see the .mh-bg-canvas CSS and the
@@ -11132,16 +11193,7 @@ def _layout(
       <button id="active-org-chip" class="mh-orgmenu-btn" type="button"
               aria-haspopup="menu" aria-expanded="false" aria-controls="mh-orgmenu-panel"
               title="Account &amp; organisation">
-        {% if signed_in_logo %}
-        <span aria-hidden="true"
-              style="display:inline-flex;align-items:center;justify-content:center;
-                     width:20px;height:20px;border-radius:5px;overflow:hidden;
-                     background:#fff;border:1px solid rgba(245,242,232,0.20)">
-          <img src="{{ signed_in_logo }}" alt=""
-               onerror="this.closest('span').style.display='none'"
-               style="width:100%;height:100%;object-fit:contain" />
-        </span>
-        {% endif %}
+        {{ signed_in_logo_chip_html | safe }}
         {% if signed_in_primary %}
         <span aria-hidden="true"
               style="display:inline-block;width:10px;height:10px;border-radius:50%;
@@ -13200,7 +13252,7 @@ def _layout(
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
-        signed_in_logo=signed_in_logo,
+        signed_in_logo_chip_html=signed_in_logo_chip_html,
         bg_logos_html=bg_logos_html,
         flash_toast=flash_toast,
         theme_seed_style=_theme_seed_style_block(),
@@ -28790,20 +28842,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             logo_html = ""
             if profile.brand_logo_url:
-                # Phase 1.6 Stage F: wrap detected logo in a neutral
-                # chip by default; auto-drop if the dominant colour
-                # is visually distinct from the active surface.
-                #
-                # Serve it through the first-party mirror, never the raw
-                # external URL: the CSP pins ``img-src 'self'`` so a
-                # cross-origin <img> would render as a broken image.
+                # The unified logo chip — KEYED silhouette (mirrored first-party,
+                # never the raw cross-origin URL the CSP would block) on a
+                # contrast-aware, brand-tinted backing, with an initials fallback.
                 _extracted = profile.brand_palette_extracted or {}
-                _dominant = (_extracted.get("primary") or "").strip() or None
+                _dominant = (_extracted.get("primary") or "").strip() or (
+                    getattr(profile, "brand_primary", "") or ""
+                ).strip()
+                from mediahub.brand.logos import mirror_chip_tone as _mct
+
+                _cap = (getattr(profile, "brand_logo_url", "") or "").strip()
                 logo_html = _logo_chip_html(
-                    url_for("organisation_logo_mirror", profile_id=profile.profile_id),
+                    url_for(
+                        "organisation_logo_mirror", profile_id=profile.profile_id, bg=1, chip=1
+                    ),
                     alt="Detected logo",
-                    height=60,
-                    dominant_hex=_dominant,
+                    size="lg",
+                    tone=_mct(profile.profile_id, _cap),
+                    brand_hex=_dominant,
+                    initials=_avatar_initials(profile.display_name),
                 )
             captured_meta = ""
             if profile.brand_captured_at or profile.brand_source_url:
@@ -31570,6 +31627,8 @@ what you're doing, what they should do.</p>
                 return parts[0][:2].upper()
             return (parts[0][0] + parts[-1][0]).upper()
 
+        from mediahub.brand import logos as logos_mod
+
         cards_html = ""
         for p in profiles:
             is_current = p.profile_id == current_id
@@ -31583,8 +31642,13 @@ what you're doing, what they should do.</p>
             # didn't. So: uploaded logo → per-profile serve route; else the
             # detected logo → first-party mirror route (downloads + caches the
             # bytes on first request); else initials.
-            logo_src = ""
-            _dom_hex = None
+            # Unified logo chip — the KEYED silhouette (opaque/white backgrounds
+            # removed, so no white box) on a contrast-aware, brand-tinted backing,
+            # with a built-in org-initials fallback. Every org tile reads at the
+            # same size and weight whatever its logo's colour / shape / format; an
+            # org with no usable logo simply shows its initials in the same frame.
+            _chip_src = ""
+            _chip_tone = "light"
             _uploaded = getattr(p, "brand_logos", None) or []
             _first = next(
                 (
@@ -31597,47 +31661,33 @@ what you're doing, what they should do.</p>
                 None,
             )
             if _first:
-                logo_src = url_for(
+                _chip_src = url_for(
                     "organisation_logo_serve",
                     profile_id=p.profile_id,
                     logo_id=_first.get("logo_id"),
+                    bg=1,
+                    chip=1,
                 )
-                _dom = (_first.get("ai_dominant_colours") or [None])[0]
-                _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
+                _chip_tone = logos_mod.logo_chip_tone(p.profile_id, _first.get("logo_id"))
             else:
                 _cap = (getattr(p, "brand_logo_url", "") or "").strip()
                 if _cap.startswith("http://") or _cap.startswith("https://"):
-                    logo_src = url_for("organisation_logo_mirror", profile_id=p.profile_id)
-                    _ext_pal = getattr(p, "brand_palette_extracted", None) or {}
-                    _dom = (_ext_pal.get("primary") or "").strip() or None
-                    _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
-            if logo_src:
-                # Phase 1.6 Stage F: profile-card logos are tiny
-                # uniform tiles inside a fixed .logo container; force
-                # chip mode for visual consistency across the grid
-                # (sign-in page renders many orgs side-by-side and
-                # one bare logo amid chipped ones reads as a glitch).
-                #
-                # Robustness net: if the image still fails to load (a dead
-                # detected URL, a deleted file), ``onerror`` flags the tile so
-                # the CSS swaps in the initials — a broken-image icon never
-                # reaches the user. CSP allows inline handlers (script-src
-                # 'unsafe-inline').
-                _chip = _logo_chip_html(
-                    logo_src,
-                    alt="",
-                    height=48,
-                    dominant_hex=_dom_hex,
-                    force_chip=True,
-                    extra_attrs=" onerror=\"this.closest('.logo').classList.add('mh-logo-failed')\"",
-                )
-                logo_html = (
-                    f"{_chip}"
-                    f'<span class="mh-logo-fallback" aria-hidden="true">'
-                    f"{_h(_initials(p.display_name))}</span>"
-                )
-            else:
-                logo_html = _h(_initials(p.display_name))
+                    _chip_src = url_for(
+                        "organisation_logo_mirror", profile_id=p.profile_id, bg=1, chip=1
+                    )
+                    _chip_tone = logos_mod.mirror_chip_tone(p.profile_id, _cap)
+            _ext_pal = getattr(p, "brand_palette_extracted", None) or {}
+            _brand = (_ext_pal.get("primary") or "").strip() or (
+                getattr(p, "brand_primary", "") or ""
+            ).strip()
+            logo_html = _logo_chip_html(
+                _chip_src,
+                alt="",
+                size="lg",
+                tone=_chip_tone,
+                brand_hex=_brand,
+                initials=_initials(p.display_name),
+            )
 
             ready = p.is_ready()
             captured = p.brand_capture_status in ("ok", "ok_heuristic")
@@ -32598,25 +32648,24 @@ what you're doing, what they should do.</p>
                 label = logo.get("label") or logo.get("original_filename") or "logo"
                 desc = (logo.get("ai_description") or "").strip()
                 mime = logo.get("mime") or ""
-                # Server route exposes the actual file
-                serve_url = url_for(
-                    "organisation_setup_logo_serve", logo_id=logo.get("logo_id", "")
-                )
                 delete_url = url_for(
                     "organisation_setup_logo_delete", logo_id=logo.get("logo_id", "")
                 )
                 preview = ""
                 if mime.startswith("image/"):
-                    # Phase 1.6 Stage F: thumbnail grid — every uploaded
-                    # logo gets the .mh-logo-chip wrapper (visual
-                    # consistency matters more than per-logo lightness).
-                    _dom = (logo.get("ai_dominant_colours") or [None])[0]
+                    # Unified logo chip — the KEYED silhouette (opaque/white
+                    # backgrounds removed) on a contrast-aware backing, so the upload
+                    # grid reads consistently whatever each file's colour/format.
+                    from mediahub.brand.logos import logo_chip_tone as _lct
+
+                    _lid = logo.get("logo_id", "")
                     preview = _logo_chip_html(
-                        serve_url,
+                        url_for("organisation_setup_logo_serve", logo_id=_lid, bg=1, chip=1),
                         alt=label,
-                        height=96,
-                        dominant_hex=_dom,
-                        force_chip=True,
+                        size="lg",
+                        tone=_lct(prof.profile_id, _lid),
+                        brand_hex=(getattr(prof, "brand_primary", "") or ""),
+                        initials=_avatar_initials(prof.display_name),
                     )
                 else:
                     preview = (
@@ -34219,10 +34268,12 @@ function mhSetupMode(mode) {{
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
             # The logo can't be rasterised to a paintable silhouette (an exotic or
-            # corrupt format). Ship a transparent pixel — never a 404 — so the CSS
-            # mask/background loads and the backdrop element hides cleanly instead
-            # of failing into a solid ink block. Keeps the backdrop safe for ANY
-            # uploaded format.
+            # corrupt format). A chrome CHIP (?chip=1) wants a real 404 so its
+            # <img> onerror swaps in the org initials; the backdrop wants a
+            # transparent pixel (never a 404) so its CSS mask/background loads and
+            # the element hides cleanly instead of failing into a solid ink block.
+            if request.args.get("chip"):
+                return ("", 404)
             return Response(
                 transparent_pixel_png(),
                 mimetype="image/png",
@@ -34249,8 +34300,33 @@ function mhSetupMode(mode) {{
         """
         if not _session_can_use_profile(profile_id):
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path
+        from mediahub.brand.logos import (
+            resolve_logo_path,
+            logo_bg_silhouette_path,
+            transparent_pixel_png,
+        )
 
+        # ?bg=1 serves the clean-alpha KEYED silhouette (opaque/white backgrounds
+        # keyed out) — used by the sign-in picker's logo chip so a white-background
+        # upload doesn't show as a white box. ?chip=1 makes an unrenderable logo
+        # 404 (so the chip's <img> onerror swaps in the org initials); a bare ?bg=1
+        # ships a transparent pixel like the backdrop path. Cached hard.
+        if request.args.get("bg"):
+            sil = logo_bg_silhouette_path(profile_id, logo_id)
+            if sil:
+                resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = (
+                    "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
+                )
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                return resp
+            if request.args.get("chip"):
+                return ("", 404)
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = resolve_logo_path(profile_id, logo_id)
         if not path:
             return ("", 404)
@@ -34298,9 +34374,12 @@ function mhSetupMode(mode) {{
                 resp.headers["Content-Type"] = mirror_content_type(sil)
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            # Can't rasterise the mirrored logo — ship a transparent pixel (never a
-            # 404) so the CSS mask/background loads and hides cleanly rather than
-            # painting a solid ink block.
+            # Can't rasterise the mirrored logo. A chrome CHIP (?chip=1) wants a 404
+            # so its <img> onerror falls back to the org initials; the backdrop
+            # wants a transparent pixel (never a 404) so its mask/background loads
+            # and hides cleanly rather than painting a solid ink block.
+            if request.args.get("chip"):
+                return ("", 404)
             return Response(
                 transparent_pixel_png(),
                 mimetype="image/png",
