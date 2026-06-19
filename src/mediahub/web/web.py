@@ -7096,19 +7096,20 @@ body::before {
 }
 
 /* Signed-in brand backdrop — the active org's PRIMARY logo as a large, softly
-   blurred glow CENTRED behind the page content, in a faint pool of the club's
-   brand colour (.mh-bg-wash). A MODERATE blur keeps the crest IDENTIFIABLE while
-   softening its edges so it sits behind the headline without knifing through the
-   text, and the whole layer is gently DYNAMIC — the glow slowly drifts and
-   breathes, the wash orbits — for a living, on-brand atmosphere (all motion off
-   under reduced-motion). The deterministic logo_bg_treatment analysis still picks
-   the mode per logo, so it's future-proof for any team's upload:
-     • .mh-bg-mark--img — a COLOURFUL logo blurred from its real artwork → a soft
+   blurred crest CENTRED and STILL behind the page content, in a faint pool of the
+   club's brand colour (.mh-bg-wash). A MODERATE blur keeps the crest identifiable
+   while softening its edges so it sits behind the headline without knifing through
+   the text. Crucially the blur is a FIXED rule on the mode classes below — NOT an
+   inline per-logo value — so it can never be dropped if a logo's adaptive numbers
+   are odd (a bad inline filter value voids the whole filter, incl. the blur). The
+   deterministic logo_bg_treatment analysis still picks the mode per logo, so it's
+   future-proof for any team's upload:
+     • .mh-bg-mark--img — a COLOURFUL logo, blurred from its real artwork → a soft
        glow in the club's own colours;
      • .mh-bg-mark--ko  — a MONOCHROME logo (black/navy/grey/white/single-ink) or
        an SVG we can't measure, blurred from its shape painted in one light brand-
        tinted ink (--mh-bg-ink) → a soft light glow that always reads on dark.
-   --op + blur are set inline per logo. z-index:0 — behind all content. */
+   Only --op (adaptive opacity) is inline. z-index:0 — behind all content. */
 .mh-bg-canvas {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
   /* Light, brand-tinted ink for the monochrome knockout glow so even a near-black
@@ -7116,21 +7117,17 @@ body::before {
   --mh-bg-ink: #e9eef5;
   --mh-bg-ink: color-mix(in oklab, var(--mh-bg-brand, #cfe0ff) 40%, #eef3f9);
 }
-/* Brand-coloured ambient wash, pooled at centre behind the glow; it slowly orbits
-   so the brand light drifts independently of the crest (parallax depth). The
-   builder omits this element entirely when the org has no brand colour. */
+/* Brand-coloured ambient wash, pooled at centre behind the crest. The builder
+   omits this element entirely when the org has no brand colour. */
 .mh-bg-wash {
-  position: absolute; inset: 0; will-change: transform;
+  position: absolute; inset: 0;
   background: radial-gradient(50% 54% at 50% 50%,
     color-mix(in oklab, var(--mh-bg-brand, transparent) 18%, transparent) 0%,
     color-mix(in oklab, var(--mh-bg-brand, transparent) 7%, transparent) 42%,
     transparent 72%);
-  animation: mh-bg-wash-orbit 38s ease-in-out infinite;
 }
 .mh-bg-marks {
-  position: absolute; inset: 0; will-change: transform, opacity;
-  /* Slow drift + breathe → a living glow, not a static watermark. */
-  animation: mh-bg-drift 46s ease-in-out infinite, mh-bg-breathe 17s ease-in-out infinite;
+  position: absolute; inset: 0;
 }
 .mh-bg-mark {
   position: absolute;
@@ -7139,39 +7136,23 @@ body::before {
   opacity: calc(var(--op, 0.5) * var(--opf, 0.6));
   transform: translate(-50%, -50%);
 }
-/* Colourful logo — blurred from its real artwork (filter set inline). */
+/* Colourful logo — its real artwork, softly blurred (fixed: never dropped). */
 .mh-bg-mark--img {
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
+  filter: blur(16px) brightness(1.12);
 }
-/* Monochrome / SVG logo — its shape in one light brand-tinted ink, then blurred. */
+/* Monochrome / SVG logo — its shape in one light brand-tinted ink, softly blurred. */
 .mh-bg-mark--ko {
   background-color: var(--mh-bg-ink);
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center;
   -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
-}
-@keyframes mh-bg-drift {
-  0%   { transform: translate3d(-1.4%, 0.9%, 0); }
-  33%  { transform: translate3d(1.0%, -1.2%, 0); }
-  66%  { transform: translate3d(1.4%, 1.0%, 0); }
-  100% { transform: translate3d(-1.4%, 0.9%, 0); }
-}
-@keyframes mh-bg-breathe {
-  0%, 100% { opacity: 0.85; }
-  50%      { opacity: 1; }
-}
-@keyframes mh-bg-wash-orbit {
-  0%   { transform: translate3d(-2.2%, -1.4%, 0) scale(1.05); }
-  50%  { transform: translate3d(2.2%, 1.6%, 0) scale(1.09); }
-  100% { transform: translate3d(-2.2%, -1.4%, 0) scale(1.05); }
+  filter: blur(16px);
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
   .mh-bg-mark { --opf: 0.5; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mh-bg-marks, .mh-bg-wash { animation: none; }
 }
 
 /* Card hover. Interactive cards (links / [data-interactive]) lift a touch and
@@ -10562,17 +10543,14 @@ def _layout(
         except Exception:
             signed_in_name = ""
 
-    # Brand backdrop behind every signed-in page: the org's PRIMARY uploaded logo
-    # as a large, softly blurred glow CENTRED behind the content. A MODERATE blur
-    # keeps the crest identifiable while softening its edges so it doesn't knife
-    # through the headline; the .mh-bg CSS adds the slow drift/breathe/orbit motion.
-    # The per-logo adaptive treatment (logo_bg_treatment) still picks the mode so
-    # the glow is future-proof for whatever a club uploads:
-    #  - "image": a COLOURFUL logo blurred from its real artwork → a glow in the
-    #    club's own colours (toned/lifted so it neither dazzles nor disappears);
-    #  - "knockout": a MONOCHROME logo (black/navy/grey/white/single-ink) or an SVG
-    #    we can't measure → its shape in one light brand-tinted ink, then blurred
-    #    into a soft light glow that always reads on the near-black page.
+    # Brand backdrop behind every signed-in page: the org's PRIMARY logo as a
+    # large, softly blurred crest CENTRED and STILL behind the content. The blur
+    # is a FIXED CSS rule (.mh-bg-mark--img/--ko) so it can never be dropped; the
+    # only inline value is the adaptive --op opacity (sanitised to a finite number
+    # so a stray cached NaN can't void it). The per-logo treatment picks the mode
+    # so it's future-proof for whatever a club uploads (uploaded OR website-
+    # captured): "image" paints a colourful logo's real artwork; "knockout" paints
+    # a monochrome / SVG logo's shape in one light brand-tinted ink.
     bg_logos_html = ""
     if signed_in_bg_logos:
         _brand = (
@@ -10580,27 +10558,29 @@ def _layout(
         )
         _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
         _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
+        try:
+            _op = float(_t.get("opacity", 0.5))
+        except (TypeError, ValueError):
+            _op = 0.5
+        if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
+            _op = 0.5
+        _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
         _geo = (
             "left:50%;top:53%;"
             "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
-            f"--op:{_t.get('opacity', 0.5)};"
+            f"--op:{_op};"
         )
         if _t.get("mode") == "image":
-            # Colourful logo → soft-blur its real artwork into a brand-colour glow,
-            # kept identifiable. Lift a touch (blur dims) and keep the adaptive
-            # desaturation. Values are floats from image analysis — no user strings.
-            _bright = round(max(float(_t.get("brightness", 1.0)), 1.15), 2)
-            _flt = f"blur(16px) saturate({_t['saturate']}) brightness({_bright})"
+            # Colourful logo → its real artwork (blurred by the fixed CSS rule).
             _hero = (
                 f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
-                f"filter:{_flt};background-image:url('{_src}')"
+                f"background-image:url('{_src}')"
                 '"></span>'
             )
         else:
-            # Monochrome / SVG → light brand-tinted shape via CSS mask, then soft-
-            # blur it into a soft light glow.
+            # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
             _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}filter:blur(16px);'
+                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
                 f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
                 '"></span>'
             )

@@ -667,7 +667,14 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
     cache = sil.with_suffix(".treat.json")
     try:
         if cache.exists():
-            return json.loads(cache.read_text())
+            cached = json.loads(cache.read_text())
+            # Only trust a well-formed cache: a finite opacity and a known mode.
+            # Older builds could persist a NaN opacity or a mode-less dict; ignore
+            # those and recompute rather than feed a bad value into the CSS.
+            if isinstance(cached, dict) and cached.get("mode") in ("image", "knockout"):
+                _cop = cached.get("opacity")
+                if isinstance(_cop, (int, float)) and _cop == _cop:  # finite, not NaN
+                    return cached
     except Exception:
         pass
     try:
@@ -698,6 +705,10 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
         colourfulness = float(
             np.sqrt(rg.std() ** 2 + yb.std() ** 2) + 0.3 * np.sqrt(rg.mean() ** 2 + yb.mean() ** 2)
         )
+        # Never let a non-finite metric reach the CSS (it would void the filter /
+        # opacity); fall back to the neutral knockout instead of caching a NaN.
+        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness]).all()):
+            return dict(_BG_TREAT_NEUTRAL)
 
         if colourfulness >= _BG_TREAT_COLOURFUL:
             # Real artwork — its colour is its identity. Lift dark ones, calm

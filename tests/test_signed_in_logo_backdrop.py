@@ -151,17 +151,16 @@ def test_css_contract_is_future_proof(client):
     assert "left:50%" in style and "top:53%" in style  # centred
     assert "background-size: contain" in html  # any aspect ratio survives
     assert "--op:" in style  # adaptive opacity, inline
-    # Softly blurred but still identifiable (moderate radius, not a heavy wash).
-    assert "blur(16px)" in style
-    assert "filter:" in style and "brightness(" in style
+    # Blur is a FIXED CSS rule, not an inline per-logo value — so a bad adaptive
+    # number can never void the filter and leave one logo sharp.
+    assert "filter: blur(16px)" in html
+    assert "blur" not in style  # never inline
+    # Still, not animated (no drift/breathe/orbit).
+    assert "mh-bg-drift" not in html and "mh-bg-wash-orbit" not in html
     assert "pointer-events: none" in html
     # Both modes exist in the stylesheet, with a guaranteed-readable knockout ink.
     assert ".mh-bg-mark--img" in html and ".mh-bg-mark--ko" in html
     assert "--mh-bg-ink" in html
-    # Dynamic: the glow drifts + breathes and the wash orbits, all off under
-    # prefers-reduced-motion.
-    assert "mh-bg-drift" in html and "mh-bg-breathe" in html and "mh-bg-wash-orbit" in html
-    assert "prefers-reduced-motion" in html
     # REGRESSION GUARD — the old flat single-tint silhouette is gone for good.
     assert "--mh-bg-tint" not in html
 
@@ -176,7 +175,6 @@ def test_monochrome_logo_uses_a_readable_knockout(client):
     assert "background-image" not in style
     # Painted as the logo's shape via a CSS mask, tinted by the light ink.
     assert re.search(r"mask-image:url\('[^']*bg=1[^']*'\)", style)
-    assert "blur(" in style  # ...then blurred into a soft glow
     assert "--mh-bg-ink: #" in html or "--mh-bg-ink:#" in html
 
 
@@ -189,7 +187,6 @@ def test_unmeasurable_svg_takes_the_safe_knockout_path(client):
     assert "mh-bg-mark--ko" in classes
     assert "mask-image:url(" in style
     assert "background-image" not in style
-    assert "blur(" in style  # safe glow, not a sharp ghost
 
 
 def test_heavy_logo_is_toned_down_relative_to_a_faint_one(client):
@@ -251,4 +248,22 @@ def test_backdrop_falls_back_to_website_captured_logo(client):
     # No network in the render path: the treatment is the neutral knockout until
     # the silhouette has been produced by the serve route on first request.
     assert "mh-bg-mark--ko" in classes
-    assert "blur(" in style
+
+
+def test_nan_opacity_is_sanitised_and_blur_survives(client, monkeypatch):
+    """Regression for the "one logo wasn't blurred" bug: an older build could
+    cache a NaN opacity. It must not reach the CSS (an inline NaN would void the
+    calc()), and the blur — now a fixed CSS rule — must still apply regardless."""
+    import mediahub.brand.logos as L
+
+    monkeypatch.setattr(
+        L, "logo_bg_treatment", lambda *a, **k: {"mode": "image", "opacity": float("nan")}
+    )
+    _make_org("org-nan", brand="#24507f", with_logo=True)
+    html = _home(client, "org-nan")
+    _classes, style = _mark(html)
+
+    assert "nan" not in style.lower()  # the NaN never reaches the markup
+    m = re.search(r"--op:([0-9.]+)", style)
+    assert m and 0.0 <= float(m.group(1)) <= 1.0  # sanitised to a finite opacity
+    assert "filter: blur(16px)" in html  # blur is a fixed CSS rule, unaffected
