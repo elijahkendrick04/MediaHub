@@ -46,6 +46,19 @@ from urllib.parse import urljoin, urlparse
 
 log = logging.getLogger(__name__)
 
+# Register optional Pillow format plugins at import so the backdrop (and any
+# other rasteriser here) can open the widest possible range of uploads — Apple
+# HEIC/HEIF in particular, which a phone exports by default. Best-effort: if the
+# plugin isn't installed those formats simply take the clean no-silhouette path
+# (a transparent backdrop) rather than crashing. AVIF/TIFF/BMP/ICO/PSD/WEBP/GIF
+# are already covered by modern Pillow itself.
+try:  # pragma: no cover - depends on an optional dependency being present
+    import pillow_heif as _pillow_heif
+
+    _pillow_heif.register_heif_opener()
+except Exception:  # noqa: BLE001 - any failure just means HEIC degrades cleanly
+    pass
+
 # Accepted file extensions. The user asked for "whatever format the
 # club likes" so this list is intentionally broad — every common
 # raster, vector, design-tool, and print format. The server validates
@@ -538,36 +551,51 @@ def mirror_content_type(path: Path) -> str:
 _BG_SILHOUETTE_MAX_DIM = 512
 
 
+def _looks_like_svg(src: Path) -> bool:
+    """Cheap sanity check that an .svg upload is actually SVG markup, so a corrupt
+    or empty file isn't handed to the browser as a mask (a mask that fails to parse
+    is treated as "no mask" → a solid ink block)."""
+    try:
+        return b"<svg" in src.read_bytes()[:2048].lower()
+    except Exception:
+        return False
+
+
 def logo_bg_silhouette_path(profile_id: str, logo_id: str) -> Optional[Path]:
     """Clean-alpha PNG of a logo for the signed-in background wall.
 
-    Returns a cached transparent silhouette suitable for use as a CSS mask.
-    Falls back to the raw logo path (SVGs, or if processing fails) and returns
-    None only when the source logo can't be found. Safe to call per request —
-    computed once, then served from cache.
+    Returns a cached transparent silhouette (PNG) suitable for use as a CSS mask,
+    or the raw file for a valid SVG (already a clean vector). Returns None whenever
+    the source can't be found OR can't be turned into something a browser will
+    paint — i.e. if we couldn't rasterise it, we don't trust it. The caller then
+    serves a transparent pixel so the backdrop degrades cleanly for ANY upload
+    (any format, corrupt file included). Safe to call per request — computed once,
+    then served from cache.
     """
     src = resolve_logo_path(profile_id, logo_id)
     if not src:
         return None
     # SVGs are already clean transparent vectors; Pillow can't rasterise them
-    # without an extra dependency, and they need no keying.
+    # without an extra dependency, and they need no keying — pass a *valid* one
+    # straight through.
     if src.suffix.lower() == ".svg":
-        return src
+        return src if _looks_like_svg(src) else None
     try:
         safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
         dst = _data_dir() / "logo_variants" / safe / f"{logo_id}_bg.png"
         if dst.exists():
             return dst
         _render_bg_silhouette(src, dst)
-        return dst if dst.exists() else src
-    except Exception:
-        log.warning(
-            "bg silhouette failed for %s/%s — serving raw logo",
-            profile_id,
-            logo_id,
-            exc_info=True,
-        )
-        return src
+        if dst.exists():
+            return dst
+    except Exception as e:
+        # Expected for unrenderable/corrupt uploads (PDF, EPS-without-gs, a truncated
+        # file, …). The transparent-pixel fallback makes this non-actionable, and the
+        # path is re-attempted per render, so keep it at debug — never spam WARNING.
+        log.debug("bg silhouette unavailable for %s/%s: %s", profile_id, logo_id, e)
+    # Couldn't rasterise to a clean PNG silhouette — return None so the caller
+    # ships a transparent pixel rather than an un-paintable (or corrupt) file.
+    return None
 
 
 def _render_bg_silhouette(src: Path, dst: Path) -> None:
@@ -739,8 +767,16 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
         )
         # Shape busyness from the alpha-edge density → how much blur the crest needs
         # to read as a clean soft glow (a detailed badge with text needs far more
-        # than a plain disc).
-        edges = float(np.abs(np.diff(alpha, axis=0)).mean() + np.abs(np.diff(alpha, axis=1)).mean())
+        # than a plain disc). Guard each axis: np.diff over a 1-px-thin silhouette
+        # (an extreme line/wordmark crop) is empty and .mean() would be NaN.
+        e0 = float(np.abs(np.diff(alpha, axis=0)).mean()) if alpha.shape[0] > 1 else 0.0
+        e1 = float(np.abs(np.diff(alpha, axis=1)).mean()) if alpha.shape[1] > 1 else 0.0
+        edges = e0 + e1
+        # Never let a non-finite metric reach the CSS (it would void the filter /
+        # opacity); fall back to the neutral knockout instead of caching a NaN. Run
+        # this BEFORE int(round(blur)) so a NaN edge can never raise there either.
+        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness, edges]).all()):
+            return dict(_BG_TREAT_NEUTRAL)
         blur = int(
             round(
                 min(
@@ -749,10 +785,6 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                 )
             )
         )
-        # Never let a non-finite metric reach the CSS (it would void the filter /
-        # opacity); fall back to the neutral knockout instead of caching a NaN.
-        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness, edges]).all()):
-            return dict(_BG_TREAT_NEUTRAL)
 
         if colourfulness >= _BG_TREAT_COLOURFUL and lum >= _BG_TREAT_DARK_FLOOR:
             # Real artwork — colourful AND light enough to read on the dark page,
@@ -829,7 +861,7 @@ def mirror_bg_silhouette_path(
     if not src:
         return None
     if src.suffix.lower() == ".svg":
-        return src
+        return src if _looks_like_svg(src) else None
     try:
         safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
         key = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
@@ -837,10 +869,11 @@ def mirror_bg_silhouette_path(
         if dst.exists():
             return dst
         _render_bg_silhouette(src, dst)
-        return dst if dst.exists() else src
-    except Exception:
-        log.warning("mirror bg silhouette failed for %s — serving raw", profile_id, exc_info=True)
-        return src
+        if dst.exists():
+            return dst
+    except Exception as e:
+        log.debug("mirror bg silhouette unavailable for %s: %s", profile_id, e)
+    return None
 
 
 def mirror_bg_treatment(profile_id: str, url: str) -> dict:
@@ -848,6 +881,29 @@ def mirror_bg_treatment(profile_id: str, url: str) -> dict:
     mirror (no network in the render path), so it returns the neutral knockout
     until the silhouette has been produced by the ``?bg=1`` serve route."""
     return _treatment_for_silhouette(mirror_bg_silhouette_path(profile_id, url, allow_fetch=False))
+
+
+# A 1×1 fully-transparent PNG, lazily decoded once. The backdrop serve routes
+# ship this (HTTP 200, image/png) whenever a logo can't be turned into a
+# silhouette — so a CSS ``mask-image``/``background-image`` always *loads* and the
+# element hides cleanly, instead of a 404. A failed mask is the dangerous case:
+# CSS treats it as "no mask", which paints the knockout element's full ink
+# rectangle. This transparent pixel is the last-resort guarantee that the backdrop
+# is safe for ANY upload — any format, colour, shape, or size.
+_TRANSPARENT_PNG: Optional[bytes] = None
+
+
+def transparent_pixel_png() -> bytes:
+    """Bytes of a 1×1 fully-transparent PNG (decoded once, then cached)."""
+    global _TRANSPARENT_PNG
+    if _TRANSPARENT_PNG is None:
+        import base64
+
+        _TRANSPARENT_PNG = base64.b64decode(
+            b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4"
+            b"2mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+    return _TRANSPARENT_PNG
 
 
 __all__ = [
@@ -864,5 +920,6 @@ __all__ = [
     "logo_bg_treatment",
     "mirror_bg_silhouette_path",
     "mirror_bg_treatment",
+    "transparent_pixel_png",
     "describe_logo_with_ai",
 ]

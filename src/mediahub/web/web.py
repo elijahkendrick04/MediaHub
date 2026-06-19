@@ -10745,68 +10745,76 @@ def _layout(
                 # party — the signed-in pid IS the active profile, so the serve
                 # route resolves them.
                 try:
-                    _trans: list[tuple[str, str]] = []
-                    _opaque: list[tuple[str, str]] = []
+                    from mediahub.brand.logos import (
+                        logo_bg_silhouette_path as _bg_sil,
+                        logo_bg_treatment as _bg_treat,
+                        resolve_logo_path as _rlp,
+                    )
+
+                    # Consider EVERY uploaded logo, then PICK THE FIRST one that
+                    # actually yields a paintable silhouette. Ordering: a logo whose
+                    # format keeps transparency (clean keyed artwork) comes before an
+                    # opaque one, and within each tier the most badge-like (nearest-
+                    # square) wins over a wide wordmark that would blur to a smear.
+                    # We don't pre-exclude by MIME — _render_bg_silhouette rasterises
+                    # whatever Pillow can open (HEIC/TIFF/BMP/PSD/ICO/…), and an
+                    # upload it CAN'T (PDF/EPS/corrupt) simply returns no silhouette
+                    # and we move to the next candidate. So any club, any format, gets
+                    # the best backdrop available — and never a blank/broken one.
+                    _trans_ext = {"png", "svg", "webp", "gif", "avif"}
+                    _trans_mime = {
+                        "image/png",
+                        "image/svg+xml",
+                        "image/webp",
+                        "image/gif",
+                        "image/avif",
+                    }
+
+                    def _bg_fit(_lid):
+                        # Nearest-square raw aspect (square→~1.0, wide/tall→lower).
+                        try:
+                            _pp = _rlp(signed_in_pid, _lid)
+                            if not _pp or _pp.suffix.lower() == ".svg":
+                                return 0.6  # vectors: neutral, usually fine
+                            from PIL import Image as _PImg
+
+                            with _PImg.open(_pp) as _im:
+                                _w, _hh = _im.size
+                            if _w <= 0 or _hh <= 0:
+                                return 0.0
+                            _ar = _w / _hh if _w >= _hh else _hh / _w
+                            return 1.0 / _ar
+                        except Exception:
+                            return 0.4
+
+                    _cands: list[tuple[int, float, str, str]] = []  # (tier, -fit, url, lid)
                     for _e in getattr(_p, "brand_logos", None) or []:
                         if not (isinstance(_e, dict) and _e.get("logo_id")):
                             continue
-                        _mime = str(_e.get("mime", "")).lower()
-                        if not _mime.startswith("image/"):
-                            continue
                         _lid = _e["logo_id"]
+                        _mime = str(_e.get("mime", "")).lower()
+                        _fx = str(_e.get("original_filename", "")).rsplit(".", 1)[-1].lower()
+                        _is_trans = _mime in _trans_mime or _fx in _trans_ext
                         _u = url_for("organisation_setup_logo_serve", logo_id=_lid, bg=1)
-                        if _mime in (
-                            "image/png",
-                            "image/svg+xml",
-                            "image/webp",
-                            "image/gif",
-                            "image/avif",
-                        ):
-                            _trans.append((_u, _lid))
-                        else:
-                            _opaque.append((_u, _lid))
-                    # The backdrop paints ONE logo; cap candidates for sanity.
-                    _ordered = (_trans or _opaque)[:8]
-                    if _ordered:
-                        # When a club uploaded several logos, pick the one that
-                        # reads best as a centred backdrop — a compact, badge-like
-                        # mark over a wide wordmark/lockup (which blurs to a smear).
-                        # Cheap heuristic: nearest-square raw aspect ratio wins.
-                        _pi = 0
-                        if len(_ordered) > 1:
-                            from mediahub.brand.logos import resolve_logo_path as _rlp
+                        _cands.append((0 if _is_trans else 1, -_bg_fit(_lid), _u, _lid))
 
-                            def _bg_fit(_lid):
-                                try:
-                                    _p = _rlp(signed_in_pid, _lid)
-                                    if not _p or _p.suffix.lower() == ".svg":
-                                        return 0.6  # vectors: neutral, usually fine
-                                    from PIL import Image as _PImg
+                    # Best-backing first; cap the walk so a pathological 500-logo
+                    # profile can't fan out into hundreds of rasterisations.
+                    for _tier, _negfit, _u, _lid in sorted(_cands)[:12]:
+                        _sil = _bg_sil(signed_in_pid, _lid)
+                        if _sil and _sil.suffix.lower() in (".png", ".svg"):
+                            signed_in_bg_logos = [_u]
+                            # Per-logo adaptive treatment so the watermark sits at a
+                            # consistent, tasteful presence whatever the logo's design.
+                            signed_in_bg_treatment = _bg_treat(signed_in_pid, _lid)
+                            break
 
-                                    with _PImg.open(_p) as _im:
-                                        _w, _hh = _im.size
-                                    if _w <= 0 or _hh <= 0:
-                                        return 0.0
-                                    _ar = _w / _hh if _w >= _hh else _hh / _w
-                                    return 1.0 / _ar  # square→1.0, wide/tall→lower
-                                except Exception:
-                                    return 0.4
-
-                            _pi = max(
-                                range(len(_ordered)),
-                                key=lambda i: (_bg_fit(_ordered[i][1]), -i),
-                            )
-                        _primary = _ordered[_pi]
-                        signed_in_bg_logos = [_primary[0]]
-                        # Per-logo adaptive treatment so the watermark sits at a
-                        # consistent, tasteful presence whatever the logo's design.
-                        from mediahub.brand.logos import logo_bg_treatment as _bg_treat
-
-                        signed_in_bg_treatment = _bg_treat(signed_in_pid, _primary[1])
-                    else:
-                        # No uploaded logo — fall back to the org's WEBSITE-CAPTURED
-                        # logo (mirrored first-party) so the backdrop works no matter
-                        # which profile is selected, not only ones with an upload.
+                    if not signed_in_bg_logos:
+                        # No uploaded logo we can paint — fall back to the org's
+                        # WEBSITE-CAPTURED logo (mirrored first-party) so the backdrop
+                        # works no matter which profile is selected, not only ones with
+                        # a usable upload. The mirror ?bg=1 route ships a transparent
+                        # pixel if even that can't be rasterised, so it's never broken.
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
                         if _cap.startswith("http://") or _cap.startswith("https://"):
                             from mediahub.brand.logos import mirror_bg_treatment as _mir_treat
@@ -34174,18 +34182,36 @@ function mhSetupMode(mode) {{
         prof = _active_profile()
         if not prof:
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path, logo_bg_silhouette_path
+        from mediahub.brand.logos import (
+            resolve_logo_path,
+            logo_bg_silhouette_path,
+            transparent_pixel_png,
+        )
 
         # ?bg=1 serves the clean-alpha silhouette used by the signed-in logo
         # wall (transparent for any logo, opaque backgrounds keyed out). It's
-        # cached and immutable per logo_id, so it's safe to cache hard.
+        # cached and immutable per logo_id, so it's safe to cache hard. The
+        # Content-Type is set explicitly because the response carries nosniff —
+        # the silhouette is only ever a PNG (rasterised) or an SVG (passthrough).
         if request.args.get("bg"):
             sil = logo_bg_silhouette_path(prof.profile_id, logo_id)
             if sil:
                 resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = (
+                    "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
+                )
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            return ("", 404)
+            # The logo can't be rasterised to a paintable silhouette (an exotic or
+            # corrupt format). Ship a transparent pixel — never a 404 — so the CSS
+            # mask/background loads and the backdrop element hides cleanly instead
+            # of failing into a solid ink block. Keeps the backdrop safe for ANY
+            # uploaded format.
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = resolve_logo_path(prof.profile_id, logo_id)
         if not path:
             return ("", 404)
@@ -34243,6 +34269,7 @@ function mhSetupMode(mode) {{
             mirror_bg_silhouette_path,
             mirror_content_type,
             mirror_external_logo,
+            transparent_pixel_png,
         )
 
         # ?bg=1 serves the clean-alpha silhouette of the mirrored logo for the
@@ -34255,7 +34282,14 @@ function mhSetupMode(mode) {{
                 resp.headers["Content-Type"] = mirror_content_type(sil)
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            return ("", 404)
+            # Can't rasterise the mirrored logo — ship a transparent pixel (never a
+            # 404) so the CSS mask/background loads and hides cleanly rather than
+            # painting a solid ink block.
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = mirror_external_logo(profile_id, url)
         if not path:
             return ("", 404)
