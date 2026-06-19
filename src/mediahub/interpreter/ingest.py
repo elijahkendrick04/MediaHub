@@ -468,6 +468,25 @@ def _extract_html(
 # ---------------------------------------------------------------------------
 
 
+def _is_mirror_sidecar(name: str) -> bool:
+    """True for results-fetch mirror bookkeeping that must never be ingested as
+    document content: the crawl provenance JSON (``_provenance.json``), captured
+    screenshots (``_screenshots/``) and AI sidecars (``_ai/``, ``*.ai.json``).
+
+    These are written into the mirror ZIP by ``results_fetch/package.py`` for
+    audit/provenance, not as results. Ingesting ``_provenance.json`` leaks its
+    ``entry_url`` line into the combined text — and because provenance is the
+    first ZIP member, that URL leads the stream and gets picked as the meet
+    title (``_extract_meet_metadata`` takes the first non-trivial line). Skip
+    them so crawl bookkeeping never reaches the parser.
+    """
+    parts = [p for p in name.replace("\\", "/").split("/") if p]
+    base = parts[-1] if parts else name
+    if base == "_provenance.json" or base.endswith(".ai.json"):
+        return True
+    return any(seg in ("_screenshots", "_ai") for seg in parts)
+
+
 def _extract_zip(
     data: bytes,
     hint: Optional[str] = None,
@@ -482,6 +501,10 @@ def _extract_zip(
             all_streams: list[IngestStream] = []
             for name, member_data in safe_iter_members(zf):
                 if name.endswith("/"):
+                    continue
+                # Mirror bookkeeping (provenance / screenshots / AI sidecars) is
+                # not document content — never let it into the parsed stream.
+                if _is_mirror_sidecar(name):
                     continue
                 child_hint = name.rsplit(".", 1)[-1] if "." in name else hint
                 child_stream = ingest(

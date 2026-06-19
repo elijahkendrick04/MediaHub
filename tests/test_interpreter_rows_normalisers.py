@@ -77,6 +77,10 @@ class TestNormalisePlace:
             ("100", 100),
             ("=1", 1),
             ("=12", 12),
+            # Trailing-dot places ("1." / "2.") are how some results services
+            # render the place column — parse them rather than reject them.
+            ("1.", 1),
+            ("3.", 3),
         ],
     )
     def test_digits_and_equals_prefix(self, raw: str, expected: int) -> None:
@@ -84,7 +88,7 @@ class TestNormalisePlace:
         assert v == expected
         assert c == pytest.approx(0.90)
 
-    @pytest.mark.parametrize("raw", ["", "DQ", "first", "1.", "abc"])
+    @pytest.mark.parametrize("raw", ["", "DQ", "first", "abc", "1.5", "1a"])
     def test_non_digit_returns_none(self, raw: str) -> None:
         v, c = _normalise_place(raw)
         assert v is None

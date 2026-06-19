@@ -42,7 +42,10 @@ def _normalise_time(raw: str) -> tuple[str | None, float]:
 
 
 def _normalise_place(raw: str) -> tuple[int | None, float]:
-    s = raw.strip().lstrip("=")
+    # Some results services list finishing places with a trailing dot
+    # ("1." / "2.") — strip it, plus a leading "=" tie marker, before parsing
+    # the integer, so a real place column isn't rejected as non-numeric.
+    s = raw.strip().lstrip("=").rstrip(".")
     if s.isdigit():
         return int(s), 0.90
     return None, 0.0
@@ -177,12 +180,21 @@ def _extract_swim_from_cells(
         if normaliser:
             value, conf = normaliser(raw)
             if value is not None:
-                field_vals[schema.col_type] = value
-                field_conf[schema.col_type] = conf * schema.confidence
+                _eff = conf * schema.confidence
+                # When two columns claim the same type — a real time plus a
+                # lap-split column, or a place plus a separate points column —
+                # keep the HIGHEST-confidence one instead of letting the
+                # rightmost column overwrite (which clobbered the real time with
+                # the split, and the place with the points).
+                if _eff >= field_conf.get(schema.col_type, -1.0):
+                    field_vals[schema.col_type] = value
+                    field_conf[schema.col_type] = _eff
         else:
-            # Unknown column type — store raw
-            field_vals[schema.col_type] = raw
-            field_conf[schema.col_type] = schema.confidence * 0.5
+            # Unknown column type — store raw (highest-confidence wins too).
+            _eff = schema.confidence * 0.5
+            if _eff >= field_conf.get(schema.col_type, -1.0):
+                field_vals[schema.col_type] = raw
+                field_conf[schema.col_type] = _eff
 
     # A competition result must identify a competitor. A row with a time but no
     # name is a split/continuation line (cumulative lap times listed under a

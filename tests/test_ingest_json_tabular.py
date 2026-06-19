@@ -174,3 +174,64 @@ def test_existing_sniffing_unchanged():
     with zipfile.ZipFile(zbuf, "w") as zf:
         zf.writestr("meet.hy3", b"A1foo\nB2bar\n")
     assert _sniff_format(zbuf.getvalue()) == "zip"
+
+
+# ---------------------------------------------------------------------------
+# Mirror-sidecar skip + colliding-column resolution (results-from-a-link)
+# ---------------------------------------------------------------------------
+
+
+def test_mirror_sidecar_provenance_not_ingested_as_meet_name():
+    """A results-fetch mirror ZIP carries a ``_provenance.json`` sidecar whose
+    ``entry_url`` line otherwise leads the combined text stream and gets
+    mistaken for the meet title. The sidecar (and screenshots) must be skipped
+    so the real meet name from the result page wins."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        # Provenance written FIRST, mirroring results_fetch/package.py.
+        z.writestr(
+            "_provenance.json",
+            json.dumps({"entry_url": "https://results.example.org/swimming/results/2026/champs/"}),
+        )
+        z.writestr("_screenshots/entry.png", b"\x89PNG not-a-real-image")
+        z.writestr(
+            "RG11H205.HTM",
+            "<html><head><title>City Spring Meet 2026</title></head><body>"
+            "<table><tr><th>Place</th><th>Name</th><th>Club</th><th>Time</th></tr>"
+            "<tr><td>1.</td><td>Amy Crowley</td><td>City of Cardiff</td><td>33.45</td></tr>"
+            "</table></body></html>",
+        )
+    res = interpret_document(buf.getvalue(), hint="zip")
+    assert res.meet_name == "City Spring Meet 2026"
+    assert "entry_url" not in (res.meet_name or "")
+    assert "http" not in (res.meet_name or "")
+
+
+def test_colliding_columns_keep_highest_confidence_value():
+    """When two columns claim the same semantic type — a real time plus a lap
+    split, or a place plus a separate points column — the highest-confidence
+    column wins instead of the rightmost one overwriting the result."""
+    from mediahub.interpreter.rows import _extract_swim_from_cells
+    from mediahub.interpreter.schema_dataclasses import ColumnSchema
+
+    schemas = [
+        ColumnSchema(
+            name="place", col_type="place", confidence=0.55, col_index=0, header_text="Place"
+        ),
+        ColumnSchema(
+            name="name", col_type="name", confidence=0.90, col_index=1, header_text="Name"
+        ),
+        ColumnSchema(
+            name="time", col_type="time", confidence=0.55, col_index=2, header_text="Time"
+        ),
+        ColumnSchema(name="time", col_type="time", confidence=0.35, col_index=3, header_text="50"),
+        ColumnSchema(
+            name="place", col_type="place", confidence=0.35, col_index=4, header_text="Pts"
+        ),
+    ]
+    cells = ["1.", "Leila Kokas", "1:23.60", "37.91", "287"]
+    swim = _extract_swim_from_cells(cells, schemas)
+    assert swim is not None
+    assert swim.swimmer_name == "Leila Kokas"
+    assert swim.time == "1:23.60"  # the real time, not the 37.91 split
+    assert swim.place == 1  # the real place ("1."), not the 287 points
