@@ -476,6 +476,79 @@ def ass_filter(ass_path: str) -> str:
     return f"ass={escaped}"
 
 
+# Title position → (ASS alignment numpad, vertical margin as a fraction of H).
+# Burned via libass too (the deployment's FFmpeg has libass but not drawtext),
+# so a title and a bottom caption don't collide: "lower-third" sits well above
+# the caption band.
+_TITLE_ALIGN: dict[str, tuple[int, float]] = {
+    "top": (8, 0.10),
+    "center": (5, 0.0),
+    "bottom": (2, 0.16),
+    "lower-third": (2, 0.30),
+}
+
+
+def titles_ass_document(
+    overlays: list[dict],
+    *,
+    width: int,
+    height: int,
+    fps: int = FPS_DEFAULT,
+    color: str = "#FFFFFF",
+    scrim: str = "#0A0A0A",
+) -> str:
+    """Render positioned title overlays as a self-contained ASS document.
+
+    Each overlay is ``{"text", "start_ms", "duration_ms", "position"}`` (the
+    ``video.edl.TextOverlay`` shape). Titles are bolder than captions and sit at
+    their requested position via the libass alignment; the brand ``scrim`` backs
+    each line so it reads on any footage. Deterministic.
+    """
+    primary = _ass_colour(color, 1.0)
+    box = _ass_colour(scrim, 0.78)
+    fontsize = max(20, round(min(width, height) * 0.050))
+    side = round(width * 0.08)
+    head = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "WrapStyle: 0",
+        f"PlayResX: {int(width)}",
+        f"PlayResY: {int(height)}",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        (
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding"
+        ),
+    ]
+    events = ["", "[Events]",
+              "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    styles: list[str] = []
+    seen_aligns: set[int] = set()
+    for o in overlays:
+        align, mv_frac = _TITLE_ALIGN.get(str(o.get("position", "lower-third")), (2, 0.30))
+        margin_v = round(height * mv_frac)
+        style_name = f"Title{align}"
+        if align not in seen_aligns:
+            styles.append(
+                f"Style: {style_name},Inter,{fontsize},{primary},{primary},{box},{box},"
+                f"-1,0,0,0,100,100,0,0,4,0,0,{align},{side},{side},{margin_v},1"
+            )
+            seen_aligns.add(align)
+        start_ms = int(o.get("start_ms", 0))
+        end_ms = start_ms + int(o.get("duration_ms", 2000))
+        text = _ass_text(str(o.get("text", "")))
+        if not text:
+            continue
+        events.append(
+            f"Dialogue: 0,{_ass_ts(start_ms)},{_ass_ts(end_ms)},{style_name},,0,0,0,,{text}"
+        )
+    return "\n".join(head + styles + events) + "\n"
+
+
 __all__ = [
     "Cue",
     "FPS_DEFAULT",
@@ -490,5 +563,6 @@ __all__ = [
     "story_caption_track",
     "text_caption_track",
     "ass_document",
+    "titles_ass_document",
     "ass_filter",
 ]
