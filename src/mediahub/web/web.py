@@ -10101,7 +10101,7 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
         tone_tabs += (
             f'<button type="button" class="cb-tone" data-tone="{_k}" '
             f"onclick=\"cbTone(this, '{_k}')\" "
-            f"style=\"font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);"
+            f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
             f"cursor:pointer;background:{_bg};color:{_fg};font-family:inherit;margin:0 4px 4px 0;"
             f'font-weight:{_weight}">{_h(_label)}</button>'
         )
@@ -10165,7 +10165,7 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
         f"{_assist_btns}"
         '<input id="cb-assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" '
         'aria-label="Custom caption change instruction" style="flex:1;min-width:140px;font-size:12px;'
-        'padding:4px 8px;border:1px solid var(--border);border-radius:6px;'
+        "padding:4px 8px;border:1px solid var(--border);border-radius:6px;"
         'background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
         '<button type="button" class="btn" style="font-size:11px;padding:3px 10px;'
         'background:var(--lane);color:var(--lane-ink);border:none" '
@@ -26837,8 +26837,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     "generated_at": now_iso,
                     "error": "transient",
                     "message": (
-                        "The AI couldn't finish the caption — wait a few seconds "
-                        "and try again."
+                        "The AI couldn't finish the caption — wait a few seconds " "and try again."
                     ),
                 }
             ), 200
@@ -27038,9 +27037,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
         if fmt not in _motion.MOTION_FORMATS:
             return None, (
-                jsonify(
-                    {"error": "bad_format", "valid_formats": sorted(_motion.MOTION_FORMATS)}
-                ),
+                jsonify({"error": "bad_format", "valid_formats": sorted(_motion.MOTION_FORMATS)}),
                 400,
             )
 
