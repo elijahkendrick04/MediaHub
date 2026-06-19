@@ -1,9 +1,9 @@
-"""tests/test_home_hero_cta.py — Home hero primary CTA must be 'Set up' not 'Sign in'.
+"""tests/test_home_hero_cta.py — Home hero primary CTA must be 'Sign up' for new users.
 
-Regression for: primary hero CTA says 'Sign in' not 'Sign up' when organisations
-already exist on the deployment. A first-time visitor has no account — 'Sign in'
-as the primary action misleads them. 'Set up my organisation' must always be the
-primary CTA for any signed-out visitor, regardless of n_orgs.
+Regression for: primary hero CTA for a signed-out visitor must link to /signup
+with clear 'Sign up' language so first-time visitors have an obvious entry point.
+'Sign in' implies an existing account; 'Set up my organisation' is ambiguous and
+does not signal account creation. The fix surfaces /signup as the primary action.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def _primary_cta_href(html: str) -> str:
 
 def _primary_cta_text(html: str) -> str:
     """Return the text content of the first mh-cta-primary anchor."""
-    m = re.search(r'<a class="mh-cta-primary"[^>]*>([^<]+)</a>', html)
+    m = re.search(r'<a class="mh-cta-primary"[^>]*>([^<]+)', html)
     assert m, "No mh-cta-primary anchor text found in home page"
     return m.group(1)
 
@@ -79,27 +79,28 @@ def _primary_cta_text(html: str) -> str:
 # Tests
 # --------------------------------------------------------------------------- #
 class TestSignedOutPrimaryCTA:
-    """Primary CTA for a signed-out visitor must always point at onboarding."""
+    """Primary CTA for a signed-out visitor must always be a clear 'Sign up' link."""
 
-    def test_zero_orgs_primary_cta_is_setup(self, zero_org_client):
-        """No-org deployment: primary CTA should already be 'Set up my organisation'."""
+    def test_zero_orgs_primary_cta_is_signup(self, zero_org_client):
+        """No-org deployment: primary CTA must link to /signup."""
         body = _home(zero_org_client)
         href = _primary_cta_href(body)
-        assert "/organisation/setup" in href, (
-            f"Expected primary CTA to link to /organisation/setup, got {href!r}"
+        assert "/signup" in href, (
+            f"Expected primary CTA to link to /signup, got {href!r}"
         )
 
-    def test_orgs_present_primary_cta_is_setup_not_sign_in(self, orgs_present_client):
-        """With existing orgs but signed out, primary CTA must be setup, not sign in.
+    def test_orgs_present_primary_cta_is_signup_not_setup(self, orgs_present_client):
+        """With existing orgs but signed out, primary CTA must be /signup.
 
-        A first-time visitor landing on the home page has no account. Making
-        'Sign in' the primary action misleads them; 'Set up my organisation'
-        is the correct entry point for new users.
+        A first-time visitor landing on the home page has no account. 'Set up
+        my organisation' is ambiguous (sounds like configuring an existing org)
+        and 'Sign in' implies an account already exists. '/signup' is the clear
+        entry point for new users.
         """
         body = _home(orgs_present_client)
         href = _primary_cta_href(body)
-        assert "/organisation/setup" in href, (
-            f"Primary CTA must link to /organisation/setup (onboarding), got {href!r}. "
+        assert "/signup" in href, (
+            f"Primary CTA must link to /signup (new-user entry point), got {href!r}. "
             "Sign in must not be the primary action for a first-time visitor."
         )
 
@@ -109,13 +110,27 @@ class TestSignedOutPrimaryCTA:
         assert "/sign-in" in body, "Sign-in link must still appear on the home page"
         assert 'class="mh-cta-secondary"' in body, "Sign-in must be present as a secondary CTA"
 
-    def test_orgs_present_primary_cta_text_is_setup(self, orgs_present_client):
-        """Primary CTA text should say 'Set up' (not 'Sign in')."""
+    def test_orgs_present_primary_cta_text_is_signup(self, orgs_present_client):
+        """Primary CTA text should say 'Sign up' (not 'Sign in' or 'Set up')."""
         body = _home(orgs_present_client)
         text = _primary_cta_text(body)
         assert "Sign in" not in text, (
             f"Primary CTA text must not say 'Sign in', got {text!r}"
         )
-        assert "Set up" in text, (
-            f"Primary CTA text should say 'Set up my organisation', got {text!r}"
+        assert "Sign up" in text, (
+            f"Primary CTA text should say 'Sign up', got {text!r}"
+        )
+
+    def test_zero_orgs_signup_link_present(self, zero_org_client):
+        """Home page must contain a /signup link so new users have a clear entry point."""
+        body = _home(zero_org_client)
+        assert "/signup" in body, (
+            "Home page must link to /signup — new users have no obvious entry point otherwise"
+        )
+
+    def test_orgs_present_signup_link_present(self, orgs_present_client):
+        """Home page must contain a /signup link even when orgs already exist."""
+        body = _home(orgs_present_client)
+        assert "/signup" in body, (
+            "Home page must link to /signup — new users have no obvious entry point otherwise"
         )

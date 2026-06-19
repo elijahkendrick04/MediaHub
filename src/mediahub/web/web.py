@@ -14548,7 +14548,7 @@ def create_app() -> Flask:
     def home():
         """Rebuilt home page (Phase 1.5 polish).
 
-        Two-button hero — "Create organisation" + "Sign in to existing" —
+        Two-button hero — "Sign up" (primary) + "Sign in" (secondary) —
         plus the established four-step explainer. When an org is already
         pinned, the hero swaps in a "Continue as <name>" CTA pointing at
         Create, with the sign-in / create paths still accessible below
@@ -14618,28 +14618,16 @@ def create_app() -> Flask:
                 "motion videos in your voice. Set up once. Reuse forever. "
                 "Nothing posts without you."
             )
-            if n_orgs > 0:
-                # Signed-out session with existing organisations: a first-time
-                # visitor has no account, so onboarding is always the primary
-                # action. Sign in is secondary — visible for returning users
-                # switching tenants, but never the hero emphasis.
-                hero_actions = (
-                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    "Set up my organisation &rarr;</a>"
-                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    "Sign in</a>"
-                )
-            else:
-                # Fresh deployment with no organisations yet: lead with
-                # Set up my organisation, but still surface Sign in so the
-                # button is always present (the picker shows a friendly
-                # "no orgs yet" panel) and never looks broken.
-                hero_actions = (
-                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    "Set up my organisation &rarr;</a>"
-                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    "Sign in</a>"
-                )
+            # Sign up is the unambiguous entry point for a first-time visitor.
+            # 'Set up my organisation' reads as configuring an existing org;
+            # 'Sign in' implies an account already exists. Both mislead new
+            # users. Sign in stays visible as secondary for returning users.
+            hero_actions = (
+                f'<a class="mh-cta-primary" href="{url_for("signup_page")}">'
+                "Sign up &rarr;</a>"
+                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                "Sign in</a>"
+            )
             eyebrow = "The content engine for sports clubs"
             lane_no = "01"
 

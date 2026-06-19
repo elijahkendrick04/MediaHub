@@ -187,12 +187,12 @@ class TestHomeIsStripped:
         c, _ = gated_client
         # A fresh session is signed out: the home page must NOT resume
         # whichever org was used last. With organisations on disk but
-        # none pinned, the signed-out hero surfaces both the Sign in and
-        # the Set up my organisation paths.
+        # none pinned, the signed-out hero surfaces Sign up (primary)
+        # and Sign in (secondary) so new users have a clear entry point.
         resp = c.get("/")
         body = resp.get_data(as_text=True)
         assert "Sign in" in body
-        assert "Set up my organisation" in body
+        assert "Sign up" in body
         # The signed-in-only CTA must be absent — we are signed out.
         assert "Create new content" not in body
 
