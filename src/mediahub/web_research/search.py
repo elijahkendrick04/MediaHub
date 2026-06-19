@@ -96,6 +96,25 @@ def _ddg_start_cooldown() -> None:
         _ddg_cooldown_until = time.time() + _DDG_COOLDOWN_S
 
 
+def _tinyfish_key() -> Optional[str]:
+    """The operator's TinyFish API key, or None when the backend is off.
+
+    Read from the environment only (never hard-coded), like every other key.
+    TinyFish offers a free tier (no credit card), so this stays inside the
+    no-paid-API rule while giving the cold-start PB bootstrap a reliable backend.
+    """
+    k = (os.environ.get("TINYFISH_API_KEY") or "").strip()
+    return k or None
+
+
+def _tinyfish_timeout() -> int:
+    raw = (os.environ.get("MEDIAHUB_TINYFISH_TIMEOUT") or "").strip()
+    try:
+        return max(2, min(30, int(raw))) if raw else 12
+    except ValueError:
+        return 12
+
+
 def _cache_key(query: str) -> str:
     return hashlib.md5(query.lower().strip().encode(), usedforsecurity=False).hexdigest()[:16]
 
@@ -182,6 +201,17 @@ class WebResearcher:
 
         results: list[SearchResult] = []
 
+        # TinyFish web search is the PREFERRED backend when a key is configured:
+        # a free tier (no credit card), fast, and returns clean title/snippet/URL
+        # JSON that drops straight into the candidate-URL pipeline. Off by default
+        # (no TINYFISH_API_KEY => skipped, behaviour unchanged). Any failure falls
+        # through to SearXNG/DDG below, so search never just stops. No paid API.
+        if not results and _tinyfish_key():
+            try:
+                results = self._search_tinyfish(query, num)
+            except Exception:
+                pass
+
         # Cap 3: SearXNG metasearch is the PREFERRED backend when configured
         # (multi-engine, free, far sturdier than DDG HTML scraping). On any
         # failure we fall back to the existing pplx/DDG path (logged degraded)
@@ -266,6 +296,51 @@ class WebResearcher:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _search_tinyfish(self, query: str, num: int) -> list[SearchResult]:
+        """Query the TinyFish Search API (free tier) for web results.
+
+        Returns up to ``num`` SearchResult URLs. Tolerant of the JSON shape —
+        reads the common ``results``/``organic``/``data`` arrays and the usual
+        url/title/snippet fields. Raises on transport error so the caller falls
+        back to the next backend.
+        """
+        key = _tinyfish_key()
+        if not key:
+            return []
+        encoded = urllib.parse.quote_plus(query)
+        url = f"https://api.search.tinyfish.ai?query={encoded}&location=US&language=en"
+        req = urllib.request.Request(
+            url,
+            headers={"X-API-Key": key, "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=_tinyfish_timeout()) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        items = []
+        if isinstance(data, dict):
+            for field in ("results", "organic", "organic_results", "data", "items"):
+                if isinstance(data.get(field), list):
+                    items = data[field]
+                    break
+        elif isinstance(data, list):
+            items = data
+
+        out: list[SearchResult] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            link = (it.get("url") or it.get("link") or it.get("href") or "").strip()
+            if not link.startswith("http"):
+                continue
+            title = html.unescape(str(it.get("title") or it.get("name") or "").strip())
+            snippet = html.unescape(
+                str(it.get("snippet") or it.get("description") or it.get("content") or "").strip()
+            )
+            out.append(SearchResult(url=link, title=title, snippet=snippet, source="tinyfish"))
+            if len(out) >= num:
+                break
+        return out
 
     def _search_pplx(self, query: str, num: int) -> list[SearchResult]:
         """Use pplx CLI to search."""
