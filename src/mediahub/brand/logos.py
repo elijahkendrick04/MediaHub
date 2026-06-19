@@ -616,50 +616,67 @@ def _render_bg_silhouette(src: Path, dst: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Adaptive backdrop treatment
-# A logo painted as a page watermark must sit at a consistent, tasteful presence
-# whatever a club uploads. We measure the silhouette and pick one of two modes:
+# A logo painted as a page watermark must sit at the SAME tasteful, identifiable
+# presence whatever a club uploads — that consistency is what reads as
+# "standardised and professional". We measure the silhouette and pick one of two
+# modes:
 #
-#   * "image"    — the logo is COLOURFUL (and so its colour carries its identity),
-#                  so we paint its real artwork, with a per-logo opacity (heavy
-#                  logos down, faint up), a brightness lift for dark ones, a
-#                  desaturation for over-bright ones, and a halo. Keeps brand
-#                  colour while never dazzling.
+#   * "image"    — the logo is COLOURFUL *and* light enough to read on the near-
+#                  black page, so its colour carries its identity: we paint its
+#                  real artwork, with a per-logo opacity (dense logos down, faint
+#                  ones up) inside a TIGHT band so no club's mark dominates
+#                  another's. Keeps brand colour while staying a faint watermark.
 #   * "knockout" — the logo is MONOCHROME (black / navy / grey / white / a single
-#                  ink) — colour carries no information and a brightness lift
-#                  can't rescue a near-black fill (×factor of ~0 is still ~0). So
-#                  we paint its SHAPE in one light, faintly brand-tinted ink via a
-#                  CSS mask: guaranteed to read on the near-black page, and since
-#                  the logo was already one colour, nothing is lost. SVGs (which
-#                  we can't rasterise to measure here) also take this safe path.
+#                  ink), OR a DARK colourful logo whose real colour would paint as
+#                  an invisible smudge on the near-black page (only its few bright
+#                  accents showing, off to one side — unreadable as the logo). We
+#                  paint its whole SHAPE in one light, faintly brand-tinted ink via
+#                  a CSS mask: guaranteed to read on the near-black page and
+#                  identifiable as the club's mark. SVGs (which we can't rasterise
+#                  to measure here) also take this safe path.
 #
-# Pure deterministic pixel maths (no AI, no per-logo hand-tuning), computed once
-# and cached beside the silhouette — the colour-science discipline of
+# The blur is deliberately MODEST and tightly-banded so the mark always stays
+# identifiable as the club's logo — soft-focus, never dissolved into an anonymous
+# blob. Pure deterministic pixel maths (no AI, no per-logo hand-tuning), computed
+# once and cached beside the silhouette — the colour-science discipline of
 # theming/logo_chip.py. Colourfulness is the Hasler–Süsstrunk metric.
 # ---------------------------------------------------------------------------
 
+# Schema version for the cached treatment. BUMP this whenever the calibration
+# below changes, so an already-cached *.treat.json (e.g. on the live deployment)
+# recomputes with the new tuning instead of serving a stale, differently-tuned
+# value — older entries lack the key and are ignored. This is what makes a
+# recalibration actually reach every existing profile, not just fresh uploads.
+_BG_TREAT_VERSION = 2
+# Opacity auto-balance, held inside a TIGHT band so every club's mark sits at the
+# same watermark-faint presence; the perceived-weight target keeps a dense logo
+# from out-shouting a sparse one without letting the two drift far apart.
 _BG_TREAT_W0 = 0.085  # target perceived weight on the near-black page
-_BG_TREAT_OP_MIN, _BG_TREAT_OP_MAX = 0.20, 0.88
-_BG_TREAT_TARGET_LUM, _BG_TREAT_BR_MAX = 0.40, 1.8
-_BG_TREAT_TARGET_SAT, _BG_TREAT_SAT_MIN = 0.42, 0.55
+_BG_TREAT_OP_MIN, _BG_TREAT_OP_MAX = 0.30, 0.60
 _BG_TREAT_COLOURFUL = 0.12  # Hasler–Süsstrunk: above this the logo is "colourful"
+# …but only paint real artwork if the ink is light enough to actually read on the
+# near-black page. A darker colourful logo (e.g. a navy crest) takes the knockout
+# path so its whole shape shows as a light ghost, never an invisible dark smudge.
+_BG_TREAT_DARK_FLOOR = 0.26
 _BG_TREAT_KO_POP = 0.85  # a knockout ghost reads at a fixed light luminance
-# Adaptive blur (display px): a busier shape needs MORE blur to dissolve into a
-# clean soft glow rather than a sharp, fiddly crest; a simple mark (a filled disc)
-# stays identifiable at the low end. Keyed off the silhouette's alpha-edge density.
-_BG_TREAT_BLUR_MIN, _BG_TREAT_BLUR_MAX = 16, 46
-_BG_TREAT_BLUR_BASE, _BG_TREAT_BLUR_GAIN = 12.0, 850.0
+# Adaptive blur (display px): a MODEST, tight band so the mark always stays
+# identifiable. A busier crest earns a little more blur (so its fine detail
+# doesn't knife through the page) but stays readable; a simple mark sits at the
+# low end. Keyed off the silhouette's alpha-edge density.
+_BG_TREAT_BLUR_MIN, _BG_TREAT_BLUR_MAX = 10, 20
+_BG_TREAT_BLUR_BASE, _BG_TREAT_BLUR_GAIN = 7.0, 380.0
 # Knockout / unmeasurable fallback: a light ghost at a moderate watermark weight.
-_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5, "blur": 22}
+_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5, "blur": 14}
 
 
 def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
     """Per-logo backdrop treatment so ANY uploaded logo sits at the same tasteful
     watermark presence behind the page.
 
-    Returns a small dict for inline CSS. Always carries ``mode`` ("image" or
-    "knockout") and ``opacity``; "image" mode adds ``brightness``/``saturate``/
-    ``halo``. Deterministic and cached beside the silhouette; returns the neutral
-    knockout for SVGs (not rasterised here) or if analysis can't run.
+    Returns a small dict for inline CSS — ``mode`` ("image" or "knockout"),
+    ``opacity``, an adaptive ``blur``, and the schema ``v``. Deterministic and
+    cached beside the silhouette; returns the neutral knockout for SVGs (not
+    rasterised here) or if analysis can't run.
     """
     return _treatment_for_silhouette(logo_bg_silhouette_path(profile_id, logo_id))
 
@@ -673,11 +690,16 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
     try:
         if cache.exists():
             cached = json.loads(cache.read_text())
-            # Only trust a well-formed cache: a finite opacity, a known mode, and a
-            # blur. Older builds could persist a NaN opacity, a mode-less dict, or a
-            # pre-adaptive-blur shape; ignore those and recompute rather than feed a
-            # bad value into the CSS.
-            if isinstance(cached, dict) and cached.get("mode") in ("image", "knockout"):
+            # Only trust a well-formed cache at the CURRENT schema version: a
+            # finite opacity, a known mode, and a blur. Older builds could persist
+            # a NaN opacity, a mode-less dict, a pre-adaptive-blur shape, or an
+            # earlier calibration (no/old ``v``); ignore those and recompute rather
+            # than feed a stale or bad value into the CSS.
+            if (
+                isinstance(cached, dict)
+                and cached.get("v") == _BG_TREAT_VERSION
+                and cached.get("mode") in ("image", "knockout")
+            ):
                 _cop = cached.get("opacity")
                 if (
                     isinstance(_cop, (int, float))
@@ -732,9 +754,11 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
         if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness, edges]).all()):
             return dict(_BG_TREAT_NEUTRAL)
 
-        if colourfulness >= _BG_TREAT_COLOURFUL:
-            # Real artwork — its colour is its identity. Lift dark ones, calm
-            # over-bright ones, halo so it separates from the near-black page.
+        if colourfulness >= _BG_TREAT_COLOURFUL and lum >= _BG_TREAT_DARK_FLOOR:
+            # Real artwork — colourful AND light enough to read on the dark page,
+            # so its colour is its identity. Opacity keys off perceived weight
+            # inside the tight band: a dense fill is held back, a faint mark
+            # brought up, but the two never drift far apart.
             pop = max(lum, 0.55 * sat)
             weight = max(coverage * pop * amean, 1e-4)
             treat = {
@@ -742,19 +766,15 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                 "opacity": round(
                     min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
                 ),
-                "brightness": round(
-                    min(_BG_TREAT_BR_MAX, max(1.0, _BG_TREAT_TARGET_LUM / max(lum, 0.05))), 2
-                ),
-                "saturate": round(
-                    min(1.0, max(_BG_TREAT_SAT_MIN, _BG_TREAT_TARGET_SAT / max(sat, 0.05))), 2
-                ),
-                "halo": round(min(0.30, max(0.10, 0.30 - 0.42 * lum)), 3),
                 "blur": blur,
+                "v": _BG_TREAT_VERSION,
             }
         else:
-            # Monochrome — paint the shape as a light ghost (CSS knockout). Its
-            # on-screen luminance is fixed, so opacity keys off coverage alone:
-            # a dense fill is held back, a sparse line crest brought up.
+            # Monochrome, OR a dark colourful logo whose real colour wouldn't read
+            # on the near-black page — paint the whole shape as a light ghost (CSS
+            # knockout), so it's always visible and identifiable. Its on-screen
+            # luminance is fixed, so opacity keys off coverage alone: a dense fill
+            # is held back, a sparse line crest brought up.
             weight = max(coverage * _BG_TREAT_KO_POP * amean, 1e-4)
             treat = {
                 "mode": "knockout",
@@ -762,6 +782,7 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                     min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
                 ),
                 "blur": blur,
+                "v": _BG_TREAT_VERSION,
             }
         try:
             cache.write_text(json.dumps(treat))

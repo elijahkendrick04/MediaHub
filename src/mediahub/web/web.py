@@ -7097,13 +7097,14 @@ body::before {
 
 /* Signed-in brand backdrop — the active org's PRIMARY logo as a large, softly
    blurred crest CENTRED and STILL behind the page content, in a faint pool of the
-   club's brand colour (.mh-bg-wash). A MODERATE blur keeps the crest identifiable
-   while softening its edges so it sits behind the headline without knifing through
-   the text. Crucially the blur is a FIXED rule on the mode classes below — NOT an
-   inline per-logo value — so it can never be dropped if a logo's adaptive numbers
-   are odd (a bad inline filter value voids the whole filter, incl. the blur). The
-   deterministic logo_bg_treatment analysis still picks the mode per logo, so it's
-   future-proof for any team's upload:
+   club's brand colour (.mh-bg-wash). A MODEST, tightly-banded blur keeps the crest
+   IDENTIFIABLE as the club's logo (soft-focus, never dissolved into an anonymous
+   blob) while softening its edges so it sits behind the headline without knifing
+   through the text. Crucially the blur is a FIXED rule on the mode classes below —
+   NOT an inline per-logo value — so it can never be dropped if a logo's adaptive
+   numbers are odd (a bad inline filter value voids the whole filter, incl. the
+   blur). The deterministic logo_bg_treatment analysis still picks the mode per
+   logo, so it's future-proof for any team's upload:
      • .mh-bg-mark--img — a COLOURFUL logo, blurred from its real artwork → a soft
        glow in the club's own colours;
      • .mh-bg-mark--ko  — a MONOCHROME logo (black/navy/grey/white/single-ink) or
@@ -7142,7 +7143,7 @@ body::before {
 .mh-bg-mark--img {
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
-  filter: blur(var(--mh-blur, 22px)) brightness(1.12);
+  filter: blur(var(--mh-blur, 14px)) brightness(1.12);
 }
 /* Monochrome / SVG logo — its shape in one light brand-tinted ink, softly blurred. */
 .mh-bg-mark--ko {
@@ -7150,7 +7151,7 @@ body::before {
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center;
   -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
-  filter: blur(var(--mh-blur, 22px));
+  filter: blur(var(--mh-blur, 14px));
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
@@ -10842,15 +10843,17 @@ def _layout(
         if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
             _op = 0.5
         _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
-        # Adaptive blur (px): busier crests blur more so they read as a clean glow.
-        # Sanitised to a plain int so --mh-blur is always a valid length.
+        # Adaptive blur (px): a busier crest earns a little more, but kept MODEST
+        # so the logo stays identifiable. Sanitised to a plain int so --mh-blur is
+        # always a valid length, and clamped to the professional band as a guard
+        # against any stale/odd value sneaking through.
         try:
-            _blur = int(round(float(_t.get("blur", 22))))
+            _blur = int(round(float(_t.get("blur", 14))))
         except (TypeError, ValueError):
-            _blur = 22
-        _blur = min(60, max(8, _blur))
+            _blur = 14
+        _blur = min(28, max(8, _blur))
         _geo = (
-            "left:50%;top:53%;"
+            "left:50%;top:50%;"
             "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
             f"--op:{_op};--mh-blur:{_blur}px;"
         )
