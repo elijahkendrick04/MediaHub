@@ -33,7 +33,6 @@ import logging
 import mimetypes
 import os
 import queue
-import random
 import re
 import sqlite3
 import threading
@@ -7096,62 +7095,48 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* Signed-in brand backdrop — a composed "crest backdrop" built from the active
-   org's uploaded logos (the marks are generated in Python). One large HERO
-   silhouette anchors the bottom-right corner, sitting in a pool of the club's
-   brand-coloured ambient light (.mh-bg-wash); two larger ECHO marks balance it
-   from the left/bottom gutters. Every mark paints the logo's SILHOUETTE in one
-   brand-derived tint via CSS mask, so detailed club crests read as a single
-   cohesive, on-brand ghost — not a clash of full-colour marks, and not a
-   scattered field of stamps. The arrangement is fixed and deliberate (only a
-   per-org rotation is seeded), placed clear of the page title and the hero's
-   own lane-number watermark. The marks drift gently as one layer (off under
+/* Signed-in brand backdrop — the active org's PRIMARY logo shown as a large
+   watermark crest in the bottom-right, lit by a pool of the club's brand colour
+   (.mh-bg-wash). Crucially this paints the logo's REAL artwork, not a flat tint:
+   the ?bg=1 silhouette keys out the background but keeps full colour + internal
+   detail, so a detailed crest reads as *that club's* mark rather than an
+   unrecognisable blob. background-size:contain means ANY upload keeps its aspect
+   — square crest, tall shield or wide horizontal lockup — which is what makes it
+   future-proof for whatever a club uploads. A soft light halo lifts even a
+   near-black logo off the near-black page; the layer drifts gently (off under
    reduced-motion). z-index:0 — behind all content (main.wrap is z-index:1). */
 .mh-bg-canvas {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
-  /* One tint for every mark: brand-derived when the org has a primary colour
-     (--mh-bg-brand set inline), else a neutral ink wash. color-mix keeps it
-     light enough to ghost on the near-black surface; the plain --mh-bg-tint
-     above is the fallback when color-mix is unsupported. */
-  --mh-bg-tint: var(--ink);
-  --mh-bg-tint: color-mix(in oklab, var(--mh-bg-brand, var(--ink)) 50%, var(--ink));
 }
-/* Brand-coloured ambient wash pooling light around the hero crest (bottom-right)
-   so the club's colour is unmistakably present and even a thin, low-ink crest
-   reads against the near-black surface. The builder omits this element entirely
-   when the org has no brand colour (clean neutral fallback). */
+/* Brand-coloured ambient wash pooling light around the crest so the club's
+   colour is present and the logo sits in a glow. The builder omits this element
+   entirely when the org has no brand colour (clean neutral fallback). */
 .mh-bg-wash {
   position: absolute; inset: 0;
-  background: radial-gradient(70% 72% at 100% 100%,
+  background: radial-gradient(56% 60% at 90% 84%,
     color-mix(in oklab, var(--mh-bg-brand, transparent) 26%, transparent) 0%,
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 10%, transparent) 30%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 10%, transparent) 34%,
     transparent 64%);
 }
 .mh-bg-marks {
-  position: absolute; inset: -8%; will-change: transform;
+  position: absolute; inset: 0; will-change: transform;
   animation: mh-bg-drift 60s ease-in-out infinite alternate;
-  /* Gentle centre-protect: fades each mark's inner edge so it never crowds the
-     body text, while the cornered mass stays full strength. */
-  -webkit-mask-image: radial-gradient(135% 110% at 50% 46%,
-        transparent 6%, rgba(0,0,0,0.5) 40%, #000 74%);
-          mask-image: radial-gradient(135% 110% at 50% 46%,
-        transparent 6%, rgba(0,0,0,0.5) 40%, #000 74%);
 }
 .mh-bg-mark {
-  position: absolute;
-  background-color: var(--mh-bg-tint);
-  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-  -webkit-mask-position: center; mask-position: center;
-  -webkit-mask-size: contain; mask-size: contain;
-  transform: translate(-50%, -50%) rotate(var(--r, 0deg));
+  position: absolute; opacity: 0.6;
+  background-repeat: no-repeat; background-position: center;
+  background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
+  transform: translate(-50%, -50%);
+  /* Soft light halo so even a near-black logo lifts off the near-black page. */
+  filter: drop-shadow(0 0 16px rgba(255, 255, 255, 0.18));
 }
 @keyframes mh-bg-drift {
-  from { transform: translate3d(-6px, 5px, 0); }
-  to   { transform: translate3d(6px, -8px, 0); }
+  from { transform: translate3d(-5px, 4px, 0); }
+  to   { transform: translate3d(5px, -7px, 0); }
 }
 @media (max-width: 720px) {
-  /* On phones keep only the bottom-right anchor; drop the gutter echoes. */
-  .mh-bg-mark[data-echo] { display: none; }
+  /* Calmer behind dense mobile text. */
+  .mh-bg-mark { opacity: 0.46; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mh-bg-marks { animation: none; }
@@ -10420,15 +10405,16 @@ def _layout(
                             )
                 except Exception:
                     signed_in_logo = ""
-                # The org's uploaded logos, surfaced as a composed brand
-                # backdrop behind every signed-in page (the "team's logos
-                # seamlessly in the background" ask — see the .mh-bg-canvas CSS
-                # and the bg_logos_html builder below). Use them ALL, but prefer
-                # transparency-capable formats so the mask-tint reads as a clean
-                # silhouette; only fall back to opaque formats (e.g. JPEG, which
-                # mask to a solid block) if that's all the org uploaded. Served
-                # first-party — the signed-in pid IS the active profile, so the
-                # serve route resolves them.
+                # The org's uploaded logos, surfaced as a brand backdrop behind
+                # every signed-in page (the "team's logo seamlessly in the
+                # background" ask — see the .mh-bg-canvas CSS and the
+                # bg_logos_html builder below). The builder paints the PRIMARY
+                # one (first here) as its real artwork; prefer transparency-
+                # capable formats so the keyed-out crest reads cleanly, falling
+                # back to opaque formats (e.g. JPEG, whose flat background ?bg=1
+                # keys out) only if that's all the org uploaded. Served first-
+                # party — the signed-in pid IS the active profile, so the serve
+                # route resolves them.
                 try:
                     _trans: list[str] = []
                     _opaque: list[str] = []
@@ -10449,59 +10435,41 @@ def _layout(
                             _trans.append(_u)
                         else:
                             _opaque.append(_u)
-                    # Cap for sanity (the wall samples ~24); keep all that fit.
-                    signed_in_bg_logos = (_trans or _opaque)[:32]
+                    # First entry is the primary crest the backdrop paints; keep
+                    # a few candidates, cap the rest for sanity.
+                    signed_in_bg_logos = (_trans or _opaque)[:8]
                 except Exception:
                     signed_in_bg_logos = []
         except Exception:
             signed_in_name = ""
 
-    # Composed "crest backdrop" behind every signed-in page, built from the org's
-    # uploaded logos. One large HERO silhouette anchors the bottom-right corner,
-    # pooled in the club's brand-coloured ambient light; two larger ECHO marks
-    # balance it from the left/bottom gutters. Each mark paints the logo's
-    # silhouette in one brand-derived tint (CSS mask + background-color, see
-    # .mh-bg-mark) so detailed club crests read as a single cohesive, on-brand
-    # ghost — not a scattered field of stamps. The arrangement is FIXED and
-    # deliberate (only a per-org rotation is seeded), kept clear of the page
-    # title and the hero's own lane-number watermark, and big + opaque enough
-    # that even a thin, low-ink crest reads against the near-black surface.
+    # Brand backdrop behind every signed-in page: the org's PRIMARY uploaded
+    # logo, shown as its REAL artwork (the ?bg=1 silhouette keys out the
+    # background but keeps full colour + internal detail) as a large watermark
+    # crest in the bottom-right, lit by a pool of the club's brand colour. The
+    # .mh-bg-mark rule sizes it with background-size:contain, so ANY upload keeps
+    # its aspect ratio — square crest, tall shield or wide horizontal lockup —
+    # and stays recognisable as *that club's* mark, not a squashed or flat-tinted
+    # blob. That is what makes it future-proof for whatever a club uploads.
     bg_logos_html = ""
     if signed_in_bg_logos:
-        _rng = random.Random("mh-bg:" + (signed_in_pid or "default"))
-        _pool = signed_in_bg_logos
-        _n = len(_pool)
         _brand = (
             signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
         )
-        # (left%, top%, size clamp, opacity, pool index, is_echo). The hero is the
-        # org's first (primary) mark; echoes cycle through the rest so a multi-logo
-        # org shows variety while a single-logo org still reads as one deliberate
-        # composition. Echoes carry data-echo so the phone breakpoint drops them.
-        _plan = (
-            (101, 103, "clamp(440px,42vw,860px)", 0.185, 0, False),  # hero — bottom-right anchor
-            (-2, 20, "clamp(300px,26vw,540px)", 0.120, 1, True),  # echo — left edge
-            (5, 103, "clamp(280px,23vw,470px)", 0.105, 2, True),  # echo — bottom-left
+        _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 real artwork)
+        _hero = (
+            '<span class="mh-bg-mark" style="left:82%;top:74%;'
+            "width:clamp(240px,26vw,430px);height:clamp(240px,26vw,430px);"
+            f"background-image:url('{_src}')"
+            '"></span>'
         )
-        _marks: list[str] = []
-        for _lx, _ty, _sz, _op, _idx, _echo in _plan:
-            _src = _h(_pool[_idx % _n])
-            _rot = round(_rng.uniform(-9.0, 9.0), 1)
-            _echo_attr = " data-echo" if _echo else ""
-            _marks.append(
-                f'<span class="mh-bg-mark"{_echo_attr} style="'
-                f"left:{_lx}%;top:{_ty}%;width:{_sz};height:{_sz};"
-                f"--r:{_rot}deg;opacity:{_op};"
-                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
-                '"></span>'
-            )
         _wash = '<div class="mh-bg-wash"></div>' if _brand else ""
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
         bg_logos_html = (
             f'<div class="mh-bg-canvas" aria-hidden="true"{_brand_attr}>'
             + _wash
             + '<div class="mh-bg-marks">'
-            + "".join(_marks)
+            + _hero
             + "</div></div>"
         )
 
