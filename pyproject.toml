@@ -26,8 +26,8 @@ dependencies = [
   "flask>=3.1.3",
   "markupsafe>=3.0.3",
   "requests>=2.34.2",
-  "pdfplumber>=0.11.9",
-  "pypdf>=6.13.2",
+  "pdfplumber>=0.11.10",
+  "pypdf>=6.13.3",
   "beautifulsoup4>=4.15.0",
   "lxml>=6.1.1",
   # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx): read .xlsx
@@ -37,7 +37,7 @@ dependencies = [
   # 1.3 photo editor — decode iPhone HEIC/HEIF uploads to web-safe JPEG on
   # ingest (mediahub.media_library.heic). BSD-3 wrapper over bundled libheif
   # (manylinux wheels, no system libs). Decode-only; honest-errors if absent.
-  "pillow-heif>=0.16.0",
+  "pillow-heif>=1.4.0",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.
   "materialyoucolor>=3.0.2",
@@ -49,7 +49,7 @@ dependencies = [
   # G1.10 club custom-font upload pipeline (mediahub.typography.font_intake):
   # validate → subset → re-pack an uploaded brand typeface as a first-party
   # self-hosted WOFF2. The [woff] extra adds brotli/zopfli for WOFF2. MIT-licensed.
-  "fonttools[woff]>=4.56.0",
+  "fonttools[woff]>=4.63.0",
   # Capability 2 (semantic memory): sqlite-vec stores vectors in a vec0 virtual
   # table for exact brute-force KNN recall (mediahub.memory.store). Pure-C,
   # dependency-free SQLite extension; MIT/Apache-2.0 dual.
@@ -60,12 +60,12 @@ dependencies = [
   # means billing 503s and the rest of the app is unaffected.
   "bcrypt>=5.0.0",
   "argon2-cffi>=25.1.0",
-  "stripe>=15.2.0",
+  "stripe>=15.2.1",
 ]
 
 [project.optional-dependencies]
 ai = [
-  "anthropic>=0.109.1",
+  "anthropic>=0.111.0",
   "replicate>=1.0.7",
 ]
 # W.10 OCR fallback for scanned/photographed result sheets (interpreter/ocr.py).
@@ -76,7 +76,7 @@ ai = [
 # rapidocr-onnxruntime (heavier wheel; onnxruntime already ships for rembg).
 ocr = [
   "pytesseract>=0.3.13",
-  "pypdfium2>=5.9.0",
+  "pypdfium2>=5.10.1",
 ]
 # Voiceover backends (operator-gated by MEDIAHUB_VOICEOVER=1). Roadmap 1.7 made
 # local Piper the DEFAULT (zero-cost, fully offline; caption text never leaves
@@ -110,7 +110,7 @@ render = [
   "imageio-ffmpeg>=0.6.0",
 ]
 dev = [
-  "pytest>=9.0.3",
+  "pytest>=9.1.1",
   "pytest-xdist>=3.8.0",
   # pytest-split shards the full suite across CI matrix jobs (unit-suite.yml):
   # `--splits N --group G` deterministically partitions the collected tests into
@@ -120,16 +120,16 @@ dev = [
   # just fall back to an average-time estimate for balancing). Refresh the map with
   # `pytest tests/ --ignore-glob='tests/test_autotest_*.py' --store-durations` and
   # commit `.test_durations`. MIT-licensed.
-  "pytest-split>=0.10.0",
+  "pytest-split>=0.11.0",
   # reportlab is used by test_interpreter_corpus to synthesise PDF
   # fixtures so the corpus tests can run without external sample files.
-  "reportlab>=4.5.1",
+  "reportlab>=5.0.0",
   # B5: property-based API contract testing (Schemathesis). tests/test_api_contract.py
   # honest-skips when it's absent, so this only enables the deeper fuzz; the plain
   # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
   # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
   # API drift, so a future bump can't redden CI — only a real 5xx fails it.
-  "schemathesis>=4.21.5,<5",
+  "schemathesis>=4.21.9,<5",
   # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
   # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
   "pytest-rerunfailures>=16.3",

@@ -3,12 +3,12 @@ gunicorn>=26.0.0
 requests>=2.34.2
 beautifulsoup4>=4.15.0
 lxml>=6.1.1
-pypdf>=6.13.2
+pypdf>=6.13.3
 # Floor must stay <= the exact pdfminer.six that pdfplumber pins (0.11.9 pins
 # ==20251230); dependabot's >=20260107 bump made the pair unresolvable and
 # broke pip-audit (ResolutionImpossible).
-pdfminer.six>=20251230
-pdfplumber>=0.11.9
+pdfminer.six>=20260107
+pdfplumber>=0.11.10
 # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx). Leagues and meets
 # publish results as .xlsx; openpyxl reads them deterministically (read-only).
 openpyxl>=3.1.5
@@ -22,10 +22,10 @@ pillow>=12.2.0
 # (media_library.heic). BSD-3 wrapper over bundled libheif; manylinux wheels
 # need no system libs. Decode-only at upload time; the code honest-errors on a
 # HEIC upload if it's ever absent.
-pillow-heif>=0.16.0
+pillow-heif>=1.4.0
 rembg>=2.0.76
-onnxruntime>=1.26.0
-anthropic>=0.109.1
+onnxruntime>=1.27.0
+anthropic>=0.111.0
 replicate>=1.0.7
 
 # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): ships a static FFmpeg
@@ -94,7 +94,7 @@ PyYAML>=6.0.3
 # [woff] extra pulls in brotli (+ zopfli) for WOFF2 (de)compression. fontTools is
 # MIT-licensed. The module honest-errors (FontToolingUnavailable) if it's absent;
 # its pure-Python security validation still rejects unsafe uploads with no deps.
-fonttools[woff]>=4.56.0
+fonttools[woff]>=4.63.0
 
 # Scheduler (mediahub.scheduler / mediahub.workflow.schedule) uses croniter to
 # compute cron / daily / weekly / monthly fire-times. croniter is MIT-licensed,
@@ -111,7 +111,7 @@ bcrypt>=5.0.0
 # argon2-cffi (MIT): argon2id password hashing (ASVS L2 V2.4); bcrypt stays
 # for verifying legacy hashes, upgraded on next login.
 argon2-cffi>=25.1.0
-stripe>=15.2.0
+stripe>=15.2.1
 
 # W.10 OPTIONAL OCR fallback (interpreter/ocr.py) — deliberately NOT installed
 # here. Scanned/photographed result sheets need a real OCR engine; without one
