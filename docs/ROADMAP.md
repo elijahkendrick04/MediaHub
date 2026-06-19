@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `c4d3dff20` · Merge PR #866: ASR empty-audio honest 400, not 500 (roadmap 1.4 review)
+**Last updated:** 2026-06-19 · `682bdada1` · Merge PR #865: Interpreter — stop dropping result times/places + entry_url meet name on link runs
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1223,7 +1223,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `2c1615648` | fix(interpreter): narrow mirror-sidecar skip to _provenance.json only |
 | 2026-06-19 | `cad43d714` | fix(asr): empty audio upload is an honest 400, not a 500 (roadmap 1.4) |
+| 2026-06-19 | `23ab087d4` | fix(interpreter): stop dropping result times/places + entry_url meet name on link runs |
 | 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
 | 2026-06-19 | `2af60c0b4` | fix(spotlight): strip entry_url placeholder + dedupe moments on the composite |
 | 2026-06-19 | `96965f821` | Regenerate ENV_INVENTORY.md for the new ASR env vars |
@@ -1231,6 +1233,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `03517475e` | Refine logo backdrop: visible, composed crest (fixes invisible + littered) |
 | 2026-06-19 | `66d12ddc1` | feat(spotlight): add Reformat + Copilot to the composite Content builder (full toolbar parity) |
 | 2026-06-19 | `8e808dbe0` | Apply ruff-format to the 1.3 photo-editor modules |
-| 2026-06-19 | `a9e8d24d3` | style: ruff-format the composite content builder code |
-| 2026-06-19 | `bb4c0a355` | Add deterministic non-destructive photo editor (roadmap 1.3) |
 <!-- /ROADMAP:ACTIVITY -->
