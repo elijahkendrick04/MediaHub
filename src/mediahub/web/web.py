@@ -7096,47 +7096,53 @@ body::before {
 }
 
 /* Signed-in brand backdrop — the active org's PRIMARY logo shown as a large
-   watermark crest in the bottom-right, lit by a pool of the club's brand colour
-   (.mh-bg-wash). Crucially this paints the logo's REAL artwork, not a flat tint:
+   watermark crest CENTRED behind the page content, in a faint pool of the club's
+   brand colour (.mh-bg-wash). It paints the logo's REAL artwork, not a flat tint:
    the ?bg=1 silhouette keys out the background but keeps full colour + internal
    detail, so a detailed crest reads as *that club's* mark rather than an
-   unrecognisable blob. background-size:contain means ANY upload keeps its aspect
-   — square crest, tall shield or wide horizontal lockup — which is what makes it
-   future-proof for whatever a club uploads. A soft light halo lifts even a
-   near-black logo off the near-black page; the layer drifts gently (off under
-   reduced-motion). z-index:0 — behind all content (main.wrap is z-index:1). */
+   unrecognisable blob. background-size:contain keeps ANY upload's aspect ratio
+   (square crest, tall shield, wide lockup). The per-logo opacity/brightness/
+   saturation/halo come from the deterministic logo_bg_treatment analysis so a
+   bright logo never dazzles and a dark one never vanishes — set inline as --op
+   and filter. A centre-protect mask keeps headings crisp; the layer drifts
+   gently (off under reduced-motion). z-index:0 — behind all content. */
 .mh-bg-canvas {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
 }
-/* Brand-coloured ambient wash pooling light around the crest so the club's
-   colour is present and the logo sits in a glow. The builder omits this element
-   entirely when the org has no brand colour (clean neutral fallback). */
+/* Brand-coloured ambient wash, pooled at centre behind the crest. The builder
+   omits this element entirely when the org has no brand colour (neutral). */
 .mh-bg-wash {
   position: absolute; inset: 0;
-  background: radial-gradient(56% 60% at 90% 84%,
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 26%, transparent) 0%,
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 10%, transparent) 34%,
-    transparent 64%);
+  background: radial-gradient(46% 50% at 50% 50%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 16%, transparent) 0%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 7%, transparent) 40%,
+    transparent 70%);
 }
 .mh-bg-marks {
   position: absolute; inset: 0; will-change: transform;
-  animation: mh-bg-drift 60s ease-in-out infinite alternate;
+  animation: mh-bg-drift 64s ease-in-out infinite alternate;
+  /* Centre-protect: ease the crest under the densest text so headings stay crisp. */
+  -webkit-mask-image: radial-gradient(58% 58% at 50% 50%, rgba(0,0,0,0.64) 0%, #000 46%);
+          mask-image: radial-gradient(58% 58% at 50% 50%, rgba(0,0,0,0.64) 0%, #000 46%);
 }
 .mh-bg-mark {
-  position: absolute; opacity: 0.6;
+  position: absolute;
+  /* Per-logo --op (inline, from logo_bg_treatment) × a placement factor --opf
+     so the centred watermark stays subtle behind content; --opf lives only in
+     the stylesheet so the mobile query below can override it. */
+  opacity: calc(var(--op, 0.5) * var(--opf, 0.6));
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
   transform: translate(-50%, -50%);
-  /* Soft light halo so even a near-black logo lifts off the near-black page. */
-  filter: drop-shadow(0 0 16px rgba(255, 255, 255, 0.18));
+  /* filter (saturate/brightness/halo) is set inline per logo by the builder. */
 }
 @keyframes mh-bg-drift {
-  from { transform: translate3d(-5px, 4px, 0); }
-  to   { transform: translate3d(5px, -7px, 0); }
+  from { transform: translate3d(-4px, 3px, 0); }
+  to   { transform: translate3d(4px, -5px, 0); }
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
-  .mh-bg-mark { opacity: 0.46; }
+  .mh-bg-mark { --opf: 0.48; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mh-bg-marks { animation: none; }
@@ -10412,6 +10418,7 @@ def _layout(
     signed_in_secondary = ""
     signed_in_logo = ""
     signed_in_bg_logos: list[str] = []
+    signed_in_bg_treatment: dict = {}
     if signed_in_pid:
         try:
             _p = load_profile(signed_in_pid)
@@ -10462,15 +10469,16 @@ def _layout(
                 # party — the signed-in pid IS the active profile, so the serve
                 # route resolves them.
                 try:
-                    _trans: list[str] = []
-                    _opaque: list[str] = []
+                    _trans: list[tuple[str, str]] = []
+                    _opaque: list[tuple[str, str]] = []
                     for _e in getattr(_p, "brand_logos", None) or []:
                         if not (isinstance(_e, dict) and _e.get("logo_id")):
                             continue
                         _mime = str(_e.get("mime", "")).lower()
                         if not _mime.startswith("image/"):
                             continue
-                        _u = url_for("organisation_setup_logo_serve", logo_id=_e["logo_id"], bg=1)
+                        _lid = _e["logo_id"]
+                        _u = url_for("organisation_setup_logo_serve", logo_id=_lid, bg=1)
                         if _mime in (
                             "image/png",
                             "image/svg+xml",
@@ -10478,34 +10486,58 @@ def _layout(
                             "image/gif",
                             "image/avif",
                         ):
-                            _trans.append(_u)
+                            _trans.append((_u, _lid))
                         else:
-                            _opaque.append(_u)
+                            _opaque.append((_u, _lid))
                     # First entry is the primary crest the backdrop paints; keep
                     # a few candidates, cap the rest for sanity.
-                    signed_in_bg_logos = (_trans or _opaque)[:8]
+                    _ordered = (_trans or _opaque)[:8]
+                    signed_in_bg_logos = [_u for (_u, _lid) in _ordered]
+                    if _ordered:
+                        # Per-logo adaptive treatment so the watermark sits at a
+                        # consistent, tasteful presence whatever the logo's design.
+                        from mediahub.brand.logos import logo_bg_treatment as _bg_treat
+
+                        signed_in_bg_treatment = _bg_treat(signed_in_pid, _ordered[0][1])
                 except Exception:
                     signed_in_bg_logos = []
+                    signed_in_bg_treatment = {}
         except Exception:
             signed_in_name = ""
 
     # Brand backdrop behind every signed-in page: the org's PRIMARY uploaded
     # logo, shown as its REAL artwork (the ?bg=1 silhouette keys out the
     # background but keeps full colour + internal detail) as a large watermark
-    # crest in the bottom-right, lit by a pool of the club's brand colour. The
-    # .mh-bg-mark rule sizes it with background-size:contain, so ANY upload keeps
-    # its aspect ratio — square crest, tall shield or wide horizontal lockup —
-    # and stays recognisable as *that club's* mark, not a squashed or flat-tinted
-    # blob. That is what makes it future-proof for whatever a club uploads.
+    # crest CENTRED behind the content. background-size:contain keeps ANY upload's
+    # aspect ratio — square crest, tall shield or wide lockup — and the per-logo
+    # adaptive treatment (logo_bg_treatment) balances its presence: a bright,
+    # dense crest is toned down so it never dazzles or fights the page, while a
+    # dark, faint one is lifted and brightened so it still reads. That pairing —
+    # real artwork + auto-balanced presence — is what makes it look professional
+    # and stay future-proof for whatever a club uploads.
     bg_logos_html = ""
     if signed_in_bg_logos:
         _brand = (
             signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
         )
+        _t = signed_in_bg_treatment or {
+            "opacity": 0.5,
+            "brightness": 1.0,
+            "saturate": 0.9,
+            "halo": 0.18,
+        }
         _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 real artwork)
+        # Adaptive filter: desaturate over-bright logos, lift dark ones, and halo
+        # so a near-black crest separates from the near-black page. Values are
+        # floats from deterministic image analysis — no user strings, no XSS.
+        _flt = (
+            f"saturate({_t['saturate']}) brightness({_t['brightness']}) "
+            f"drop-shadow(0 0 22px rgba(255,255,255,{_t['halo']}))"
+        )
         _hero = (
-            '<span class="mh-bg-mark" style="left:82%;top:74%;'
-            "width:clamp(240px,26vw,430px);height:clamp(240px,26vw,430px);"
+            '<span class="mh-bg-mark" style="left:50%;top:50%;'
+            "width:clamp(420px,50vw,760px);height:clamp(420px,50vw,760px);"
+            f"--op:{_t['opacity']};filter:{_flt};"
             f"background-image:url('{_src}')"
             '"></span>'
         )

@@ -614,6 +614,88 @@ def _render_bg_silhouette(src: Path, dst: Path) -> None:
     out.save(dst, "PNG")
 
 
+# ---------------------------------------------------------------------------
+# Adaptive backdrop treatment
+# A logo painted as a page watermark must sit at a consistent, tasteful presence
+# whatever its design. A bright, dense, saturated crest (a filled badge) dazzles
+# and fights the content; a dark, sparse line crest all but vanishes on the
+# near-black page. So we measure the silhouette's own visual weight — how much of
+# its box it inks, and how bright / saturated that ink is — and derive a per-logo
+# opacity (heavy logos down, faint logos up), a brightness lift for dark logos, a
+# desaturation for over-saturated ones, and a halo strength. Pure deterministic
+# pixel maths (no AI, no per-logo hand-tuning), computed once and cached beside
+# the silhouette — the same colour-science discipline as theming/logo_chip.py.
+# ---------------------------------------------------------------------------
+
+_BG_TREAT_W0 = 0.085  # target perceived weight on the near-black page
+_BG_TREAT_OP_MIN, _BG_TREAT_OP_MAX = 0.20, 0.88
+_BG_TREAT_TARGET_LUM, _BG_TREAT_BR_MAX = 0.40, 2.2
+_BG_TREAT_TARGET_SAT, _BG_TREAT_SAT_MIN = 0.42, 0.55
+_BG_TREAT_NEUTRAL = {"opacity": 0.5, "brightness": 1.0, "saturate": 0.9, "halo": 0.18}
+
+
+def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
+    """Per-logo backdrop treatment so ANY uploaded logo sits at the same tasteful
+    watermark presence behind the page.
+
+    Returns plain floats for inline CSS — ``{opacity, brightness, saturate,
+    halo}``. Deterministic and cached beside the silhouette; returns a neutral
+    treatment for SVGs (not rasterised here) or if analysis can't run.
+    """
+    sil = logo_bg_silhouette_path(profile_id, logo_id)
+    if not sil or sil.suffix.lower() == ".svg":
+        return dict(_BG_TREAT_NEUTRAL)
+    cache = sil.with_suffix(".treat.json")
+    try:
+        if cache.exists():
+            return json.loads(cache.read_text())
+    except Exception:
+        pass
+    try:
+        import numpy as np
+        from PIL import Image
+
+        with Image.open(sil) as _im:
+            arr = np.asarray(_im.convert("RGBA")).astype(np.float32)
+        alpha = arr[..., 3] / 255.0
+        inked = alpha > 0.15
+        if int(inked.sum()) < 10:
+            return dict(_BG_TREAT_NEUTRAL)
+        rgb = arr[..., :3] / 255.0
+        lum_px = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+        mx = rgb.max(-1)
+        mn = rgb.min(-1)
+        sat_px = np.where(mx > 1e-3, (mx - mn) / np.maximum(mx, 1e-3), 0.0)
+        h, w = alpha.shape
+        box = float(max(h, w))  # background-size:contain → longer side fills the box
+        coverage = float(inked.sum()) / (box * box)  # on-screen ink fraction of the box
+        lum = float(lum_px[inked].mean())
+        sat = float(sat_px[inked].mean())
+        amean = float(alpha[inked].mean())
+        pop = max(lum, 0.55 * sat)  # bright OR saturated ink pops on a dark page
+        weight = max(coverage * pop * amean, 1e-4)
+        treat = {
+            "opacity": round(
+                min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
+            ),
+            "brightness": round(
+                min(_BG_TREAT_BR_MAX, max(1.0, _BG_TREAT_TARGET_LUM / max(lum, 0.05))), 2
+            ),
+            "saturate": round(
+                min(1.0, max(_BG_TREAT_SAT_MIN, _BG_TREAT_TARGET_SAT / max(sat, 0.05))), 2
+            ),
+            "halo": round(min(0.30, max(0.10, 0.30 - 0.42 * lum)), 3),
+        }
+        try:
+            cache.write_text(json.dumps(treat))
+        except Exception:
+            pass
+        return treat
+    except Exception:
+        log.warning("bg treatment failed for %s/%s — neutral", profile_id, logo_id, exc_info=True)
+        return dict(_BG_TREAT_NEUTRAL)
+
+
 __all__ = [
     "ALLOWED_EXTENSIONS",
     "MAX_LOGO_BYTES",
@@ -625,5 +707,6 @@ __all__ = [
     "mirror_external_logo",
     "mirror_content_type",
     "logo_bg_silhouette_path",
+    "logo_bg_treatment",
     "describe_logo_with_ai",
 ]
