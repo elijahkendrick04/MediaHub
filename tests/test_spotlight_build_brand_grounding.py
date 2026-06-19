@@ -284,3 +284,51 @@ def test_spotlight_build_renders_saved_pack(gated_app, tmp_path, monkeypatch):
         assert r2.status_code == 200
         html = r2.get_data(as_text=True)
         assert "Lara took the meet by the throat" in html
+
+
+def test_spotlight_build_renders_spotlight_builder_surface(
+    gated_app, tmp_path, monkeypatch
+):
+    """After build, the saved spotlight pack renders the dedicated
+    *Spotlight builder* surface (the Content-builder structure scoped to the
+    single composite), not the generic saved-draft card layout."""
+    def _stub_ask(system, user, **kw):
+        return "Lara took the meet by the throat."
+
+    import mediahub.ai_core as ai_core_pkg
+    monkeypatch.setattr(ai_core_pkg, "ask", _stub_ask)
+
+    run_id = "synth_run_3"
+    runs_dir = tmp_path / "runs_v4"
+    run = _synthetic_run_with_achievements(run_id, runs_dir)
+    swimmer_key = run["recognition_report"][
+        "ranked_achievements"
+    ][0]["achievement"]["swimmer_id"]
+
+    with gated_app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["active_profile_id"] = "acmeswim"
+        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build",
+                    follow_redirects=False)
+        assert r1.status_code == 302
+        loc = r1.headers["Location"]
+        r2 = c.get(loc)
+        assert r2.status_code == 200
+        html = r2.get_data(as_text=True)
+
+        # It IS the Spotlight builder (eyebrow + title), not the Content
+        # builder, and not the generic stub-draft layout.
+        assert "Spotlight builder" in html
+        assert "Content builder" not in html
+        assert "draft card generated" not in html  # render_cards_html marker
+
+        # Same base generators surfaced: the four caption registers (retone)
+        # and the shared create-graphic endpoint.
+        for register in ("Brand voice", "Warm club", "Hype", "Data-led"):
+            assert register in html
+        assert "Create graphic" in html
+        assert "/create-graphic" in html
+
+        # Composite caption + a route back to the spotlight to re-pick moments.
+        assert "Lara took the meet by the throat" in html
+        assert f"/spotlight/{run_id}/" in html
