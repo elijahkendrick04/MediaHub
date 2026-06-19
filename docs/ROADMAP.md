@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `decf5e9ba` · Merge pull request #893 from elijahkendrick04/claude/mcp-tools-integrations-fydfk3
+**Last updated:** 2026-06-19 · `e6f83ecf4` · Merge pull request #897 from elijahkendrick04/claude/clever-babbage-as72g9
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,7 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · ❌ **NOT STARTED**
+- **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · 🔵 **IN PROGRESS**
 - **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
 - **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
 - **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
@@ -1221,6 +1221,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `3e1cd3200` | 1.7: make local Piper the default TTS, demote edge-tts to opt-in (build 1/2) |
 | 2026-06-19 | `7678a9de7` | chore(devtools): drop Codex plugin from MCP tooling config |
 | 2026-06-19 | `88894fc39` | chore(devtools): commit shared Claude Code MCP + Codex plugin config |
 | 2026-06-19 | `5d1cc5795` | build(deps): bump actions/checkout from 6 to 7 |
@@ -1230,6 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `e3a8853e2` | Build 1.6: video suite — footage path, Clip-Maker, EDL timeline, captions, reframe |
 | 2026-06-19 | `531bb7092` | Backdrop: adaptive blur (fixes busy logos), centre content, pick best logo |
 | 2026-06-19 | `019caf2b8` | Backdrop: make the logo still, and fix one logo rendering un-blurred |
-| 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
-| 2026-06-19 | `e2c0f911c` | Backdrop: soft-blur the logo so it stays identifiable, and make it dynamic |
 <!-- /ROADMAP:ACTIVITY -->
