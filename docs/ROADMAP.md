@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `6216a6fc4` · Merge pull request #856 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `0c597da2b` · Merge pull request #861 from elijahkendrick04/claude/confident-brown-o6zxyg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1224,6 +1224,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
 | 2026-06-19 | `03517475e` | Refine logo backdrop: visible, composed crest (fixes invisible + littered) |
 | 2026-06-19 | `66d12ddc1` | feat(spotlight): add Reformat + Copilot to the composite Content builder (full toolbar parity) |
 | 2026-06-19 | `8e808dbe0` | Apply ruff-format to the 1.3 photo-editor modules |
@@ -1234,5 +1235,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `638122eb6` | Recompose the signed-in logo backdrop into a branded crest backdrop |
 | 2026-06-19 | `6c31adcb2` | fix(graphic): keep v1 list layout for multi-fact recaps so spotlight composite renders |
 | 2026-06-19 | `c6da906f3` | Surface PB-lookup and store errors to the operator (don't silently fail) |
-| 2026-06-19 | `26974da89` | fix: No export or download action visible after approval |
 <!-- /ROADMAP:ACTIVITY -->
