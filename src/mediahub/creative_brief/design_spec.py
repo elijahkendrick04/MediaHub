@@ -129,6 +129,13 @@ MOTION_INTENTS: tuple[str, ...] = (
     "swirl",
     "reveal_from_sides",
     "cascade",
+    # 1.5 motion-vocabulary pack — same sprint-intents seam, but each programme
+    # is *compiled* from the tokenised vocabulary (mediahub.motion.vocabulary)
+    # via remotion/src/motion/compile.ts, so the movement is identical on the
+    # CSS surface and in the reel. Widens the director's vocabulary (1.5).
+    "rise",
+    "pop",
+    "drop_in",
 )
 
 # Safe defaults — each MUST be a member of its vocabulary above. These are the

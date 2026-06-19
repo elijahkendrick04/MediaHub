@@ -129,9 +129,11 @@ def test_registry_file_is_deterministic(intent):
 
 
 def test_intents_dir_has_no_orphan_registrations():
-    """Every registered intent module in the folder (besides the README) is one
-    of the pack — catches a stray/dupe file that would register a phantom
-    intent the vocabulary doesn't know about."""
+    """Every registered intent module in the folder is a real vocabulary member
+    whose filename matches its token — catches a stray/dupe file that would
+    register a phantom intent the vocabulary doesn't know about. The folder grows
+    over time (1.5 added the motion-vocabulary pack on the same seam), so the
+    guarantee is a *superset*: all R1.1 intents present, and nothing phantom."""
     registered = {}
     for path in _INTENTS_DIR.glob("*.ts"):
         m = re.search(r'name:\s*"([^"]+)"', path.read_text())
@@ -141,7 +143,7 @@ def test_intents_dir_has_no_orphan_registrations():
     for stem, name in registered.items():
         assert stem == name, f"{stem}.ts registers mismatched name {name!r}"
         assert name in ds.MOTION_INTENTS, f"{name!r} not in MOTION_INTENTS"
-    assert set(registered.values()) == set(R1_1_INTENTS)
+    assert set(registered.values()) >= set(R1_1_INTENTS)
 
 
 # ---------------------------------------------------------------------------
