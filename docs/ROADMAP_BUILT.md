@@ -171,6 +171,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **P6.2** · Phase 2 (Creative suite) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam *(completed 2026-06-18)*
 - ✅ **1.1** · Phase 1 (Product) — Local generative-image backend behind the `media_ai` seam (a licence-clean self-hosted diffusion model, e.g. FLUX.1-schnell, Apache-2.0): the **default in-house backend** for the imagery suite (1.2) so generate / edit / fill / expand run with no cloud key; cloud generators stay optional on the same seam *(completed 2026-06-18)*
 - ✅ **1.2** · Phase 1 (Product) — Generative imagery **edit-family** on the `imagine` seam: edit / fill / expand / remove / upscale / style-match + mask-brush studio UI; default backend the in-house local model (1.1), cloud optional. (Seam + generate / subject-lift / grab-text / mockups / provenance / per-org quotas already shipped — see [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md)) *(completed 2026-06-18)*
+- ✅ **1.3** · Phase 1 (Product) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets *(completed 2026-06-19)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
