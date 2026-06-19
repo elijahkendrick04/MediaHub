@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `1ae636844` · Logo chip: unify the chrome avatar — keyed, contrast-aware, works for any logo (#904)
+**Last updated:** 2026-06-19 · `6dfae6105` · fix(pb): accurate, scalable PB finder — real-history baseline + free search (#901)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1220,15 +1220,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `f8670eba4` | compliance(pb): disclose TinyFish as a DPA sub-processor |
 | 2026-06-19 | `666bf6cf5` | Logo chip: unify the chrome avatar — keyed, contrast-aware, any logo |
+| 2026-06-19 | `ca7d12262` | feat(pb): free TinyFish search backend for the cold-start PB bootstrap |
+| 2026-06-19 | `981f81ac3` | feat(pb): accumulating per-club PB history as the scalable PB baseline |
+| 2026-06-19 | `835f57b38` | fix(pb): never infer PBs from entry/seed times — keep PBs to verified baselines |
 | 2026-06-19 | `2e2e4c3e9` | Apply ruff-format (v0.8.4) to the _brand assignment |
 | 2026-06-19 | `6d1b7866e` | Backdrop: fall back to a soft brand-coloured wash when there's no paintable logo |
+| 2026-06-19 | `d68f8e2e9` | style(pb): apply ruff-format to discover.py |
+| 2026-06-19 | `bd4e4bac8` | fix(pb): find PBs offline from the file's own entry times (was always 0) |
 | 2026-06-19 | `0d399f1af` | 1.7: bundle the local Piper voice into the deployed image (build 2/2) |
 | 2026-06-19 | `e49fae490` | Backdrop: support ANY uploaded logo — every format, or degrade cleanly |
 | 2026-06-19 | `3e1cd3200` | 1.7: make local Piper the default TTS, demote edge-tts to opt-in (build 1/2) |
-| 2026-06-19 | `0934649fc` | Rebaseline ground-truth oracle for reprint de-duplication |
-| 2026-06-19 | `7678a9de7` | chore(devtools): drop Codex plugin from MCP tooling config |
-| 2026-06-19 | `dc4f9f6fd` | Fix duplicate result cards from reprinted HY-TEK event headers |
-| 2026-06-19 | `88894fc39` | chore(devtools): commit shared Claude Code MCP + Codex plugin config |
-| 2026-06-19 | `6f4e8aaa0` | Backdrop: standardise the logo — dead-centre, modest blur, dark-logo knockout |
 <!-- /ROADMAP:ACTIVITY -->
