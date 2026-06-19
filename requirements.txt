@@ -40,16 +40,23 @@ imageio-ffmpeg>=0.6.0
 # known-good 0.1.x (the project is pre-1.0).
 sqlite-vec>=0.1.9,<0.2
 
-# Voiceover (optional, operator-gated via MEDIAHUB_VOICEOVER=1): pure-Python,
-# CPU-only text-to-speech of the already-approved caption. When absent the
-# voiceover route honest-errors (503) rather than degrading to a fake voice.
-edge-tts>=7.2.8
-# Local, zero-cost TTS backend (R1.21), selected with MEDIAHUB_TTS_PROVIDER=piper
-# + a Piper '.onnx' voice (MEDIAHUB_PIPER_MODEL). Left OPTIONAL on purpose: the
-# default is edge, and onnxruntime/ffmpeg (its only heavy deps) already ship
-# above. Install it only when you want fully-offline narration:
-#   pip install piper-tts
+# Voiceover (optional, operator-gated via MEDIAHUB_VOICEOVER=1): deterministic
+# text-to-speech of the already-approved caption. When absent the voiceover
+# route honest-errors (503) rather than degrading to a fake voice.
+#
+# DEFAULT backend (roadmap 1.7): local Piper (piper-tts, GPL-3.0-or-later) —
+# zero-cost, fully offline; the caption text never leaves the box. It is not
+# pinned here on purpose: the package + a licence-clean CC BY 4.0 voice model
+# are installed in the DEPLOYED image (see Dockerfile + scripts/fetch_piper_voice.py),
+# the same shape as the W.10 OCR engine. onnxruntime/ffmpeg (its only heavy deps)
+# already ship above. For a non-Docker dev box that wants offline narration:
+#   pip install piper-tts            # then drop a '.onnx' in $DATA_DIR/piper_voices
 # Absent → an honest VoiceoverError, never a fabricated voice.
+#
+# OPTIONAL online alternative: edge-tts (Microsoft endpoint — caption text
+# leaves the box), selected with MEDIAHUB_TTS_PROVIDER=edge. No longer the
+# default (1.7) and no longer a hard dependency; install only if you want it:
+#   pip install edge-tts
 
 # Local, zero-cost ASR backend (roadmap 1.4), selected with
 # MEDIAHUB_ASR_PROVIDER=faster-whisper. MIT; a CTranslate2 reimplementation of

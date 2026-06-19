@@ -78,6 +78,22 @@ ocr = [
   "pytesseract>=0.3.13",
   "pypdfium2>=5.9.0",
 ]
+# Voiceover backends (operator-gated by MEDIAHUB_VOICEOVER=1). Roadmap 1.7 made
+# local Piper the DEFAULT (zero-cost, fully offline; caption text never leaves
+# the box). piper-tts is GPL-3.0-or-later, used only server-side in the
+# hosted-only deployment (never conveyed to customers — no source-offer
+# obligation, the same basis the repo relies on for AGPL SearXNG). onnxruntime
+# already ships for rembg; a licence-clean CC BY 4.0 voice model is fetched into
+# the image (scripts/fetch_piper_voice.py). With no voice present the route
+# honest-errors (503) — never a fabricated voice.
+voiceover = [
+  "piper-tts>=1.4.2",
+]
+# The opt-in ONLINE alternative (MEDIAHUB_TTS_PROVIDER=edge): streams from a
+# Microsoft endpoint, so caption text leaves the box. No longer the default (1.7).
+voiceover-edge = [
+  "edge-tts>=7.2.8",
+]
 render = [
   # Playwright pin: the bundled Chromium revision must match what the
   # Dockerfile downloads at build time. Phase 1.5 audit pinned this to
