@@ -1,4 +1,13 @@
 {
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "allow": [
+      "mcp__playwright",
+      "mcp__chrome-devtools",
+      "mcp__puppeteer",
+      "mcp__browserbase"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
