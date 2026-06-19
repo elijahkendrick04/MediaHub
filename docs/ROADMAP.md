@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `78d9a8ff0` · Merge pull request #873 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `e93263f7b` · Merge pull request #877 from elijahkendrick04/claude/confident-brown-o6zxyg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1222,6 +1222,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
+| 2026-06-19 | `e2c0f911c` | Backdrop: soft-blur the logo so it stays identifiable, and make it dynamic |
 | 2026-06-19 | `d09a52402` | Backdrop: heavily blur the centred logo into a soft brand glow |
 | 2026-06-19 | `643d1cc61` | fix(spotlight): celebrate achievements on the graphic, not '5 approved' |
 | 2026-06-19 | `b230e1316` | Apply ruff-format to the 1.5 motion vocabulary |
