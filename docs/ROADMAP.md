@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `0dc043a30` · Merge pull request #845 from elijahkendrick04/autotest/fix-deeefa4ee496
+**Last updated:** 2026-06-19 · `c00c322bc` · Merge pull request #848 from elijahkendrick04/claude/awesome-ptolemy-0sn2q1
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1225,6 +1225,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `c6da906f3` | Surface PB-lookup and store errors to the operator (don't silently fail) |
 | 2026-06-19 | `26974da89` | fix: No export or download action visible after approval |
 | 2026-06-18 | `05a437fd2` | Apply ruff formatting to spotlight builder |
 | 2026-06-18 | `8abf743c6` | Render athlete-spotlight builds on a dedicated Spotlight builder |
@@ -1234,5 +1235,4 @@ list and the auto table below, not here.
 | 2026-06-18 | `cc574272f` | Fold para-class clubs into parent; recover club from collapsed swimmer rows |
 | 2026-06-18 | `778000f38` | Apply ruff-format to the run-status page edits |
 | 2026-06-18 | `4b1715fe7` | Fix meet-recap permission errors; give customers a friendly progress screen |
-| 2026-06-18 | `8753ee981` | feat(1.2): mask-brush image studio UI for the generative-imagery edit family |
 <!-- /ROADMAP:ACTIVITY -->
