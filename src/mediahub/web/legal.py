@@ -238,6 +238,24 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "own infrastructure — no third party, so not an Art. 28 sub-processor; "
         "the token is redacted from logs and error text."
     ),
+    "DID_API_KEY": (
+        "the opt-in, disclosed AI-avatar seam (roadmap 1.6, video/avatars.py). "
+        "The D-ID network integration is NOT wired in this build — "
+        "synthesize_avatar() honest-errors and the key is read only to report "
+        "availability — so no Club Data is transmitted to D-ID and it is not yet "
+        "an active Art. 28 sub-processor. When the integration is built and an "
+        "org enables it, D-ID MUST move to legal.SUBPROCESSORS (and the club DPA) "
+        "before any data flows."
+    ),
+    "HEYGEN_API_KEY": (
+        "the opt-in, disclosed AI-avatar seam (roadmap 1.6, video/avatars.py). "
+        "The HeyGen network integration is NOT wired in this build — "
+        "synthesize_avatar() honest-errors and the key is read only to report "
+        "availability — so no Club Data is transmitted to HeyGen and it is not "
+        "yet an active Art. 28 sub-processor. When the integration is built and "
+        "an org enables it, HeyGen MUST move to legal.SUBPROCESSORS (and the club "
+        "DPA) before any data flows."
+    ),
 }
 
 
