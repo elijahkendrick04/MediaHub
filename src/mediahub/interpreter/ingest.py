@@ -469,22 +469,22 @@ def _extract_html(
 
 
 def _is_mirror_sidecar(name: str) -> bool:
-    """True for results-fetch mirror bookkeeping that must never be ingested as
-    document content: the crawl provenance JSON (``_provenance.json``), captured
-    screenshots (``_screenshots/``) and AI sidecars (``_ai/``, ``*.ai.json``).
+    """True only for the crawl provenance sidecar (``_provenance.json``), which
+    must never be ingested as document content.
 
-    These are written into the mirror ZIP by ``results_fetch/package.py`` for
-    audit/provenance, not as results. Ingesting ``_provenance.json`` leaks its
-    ``entry_url`` line into the combined text — and because provenance is the
-    first ZIP member, that URL leads the stream and gets picked as the meet
-    title (``_extract_meet_metadata`` takes the first non-trivial line). Skip
-    them so crawl bookkeeping never reaches the parser.
+    ``results_fetch/package.py`` writes ``_provenance.json`` into the mirror ZIP
+    first; it carries the crawl's ``entry_url``. Ingesting it leaks that URL into
+    the combined text, and because it leads the stream it gets picked as the
+    meet title (``_extract_meet_metadata`` takes the first non-trivial line).
+
+    Crucially this is scoped to JUST that file: the AI-read sidecars
+    (``*.ai.json``) and the extracted CSVs that carry image-result data, plus
+    page screenshots, ARE content and must still flow through to the parser —
+    skipping them dropped real results for image-based runs.
     """
     parts = [p for p in name.replace("\\", "/").split("/") if p]
     base = parts[-1] if parts else name
-    if base == "_provenance.json" or base.endswith(".ai.json"):
-        return True
-    return any(seg in ("_screenshots", "_ai") for seg in parts)
+    return base == "_provenance.json"
 
 
 def _extract_zip(
