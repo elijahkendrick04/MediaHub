@@ -333,6 +333,11 @@ def test_spotlight_build_renders_content_builder_surface(
         assert "/create-graphic" in html
         assert "Generate reel" in html
         assert "/reel-job" in html
+        # Full toolbar parity with the meet-recap Content builder: Reformat + Copilot.
+        assert "Reformat" in html
+        assert "/reformat" in html
+        assert "Copilot" in html
+        assert "/assistant" in html
 
         # Composite caption + a route back to the spotlight to re-pick moments.
         assert "Lara took the meet by the throat" in html
@@ -400,3 +405,16 @@ def test_composite_builder_toolbar_endpoints(gated_app, tmp_path, monkeypatch):
         assert r_reel.status_code == 202
         rj = r_reel.get_json()
         assert rj["job_id"] and rj["poll_url"]
+
+        # Reformat + Copilot need the composite design first → honest 409 before
+        # a graphic exists (never a fabricated/blank render), and the copilot
+        # suggestion chips are always available.
+        r_rf = c.post(f"/api/drafts/{pack_id}/card/0/reformat?format=ig_square")
+        assert r_rf.status_code == 409
+        r_cp = c.post(
+            f"/api/drafts/{pack_id}/card/0/assistant", json={"message": "make it navy"}
+        )
+        assert r_cp.status_code == 409
+        r_sg = c.get(f"/api/drafts/{pack_id}/card/0/assistant/suggestions")
+        assert r_sg.status_code == 200
+        assert "suggestions" in r_sg.get_json()

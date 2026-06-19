@@ -10005,6 +10005,64 @@ _COMPOSITE_BUILDER_JS = """
       })
       .catch(function(){ fail('Network error'); });
   };
+  window.cbReformat = function(btn){
+    var box = document.getElementById('cb-reformat-panel'); if(!box) return;
+    if(box.style.display && box.style.display !== 'none'){ box.style.display = 'none'; return; }
+    box.style.display = '';
+    if(box.getAttribute('data-init')) return;
+    box.setAttribute('data-init', '1');
+    var url = btn.getAttribute('data-reformat-url');
+    var fmts = [['ig_square','Square'], ['ig_post','Portrait'], ['ig_story','Story'], ['poster','Poster']];
+    var chips = fmts.map(function(f){
+      return '<button type="button" class="btn secondary" style="font-size:11px;padding:3px 9px;margin:0 4px 4px 0" onclick="cbReformatRun(this, \\'' + f[0] + '\\')">' + f[1] + '</button>';
+    }).join('');
+    box.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Reformat the graphic</div>'
+      + '<div data-reformat-url="' + url + '">' + chips + '</div>'
+      + '<div class="cb-reformat-out" style="margin-top:8px"></div>';
+  };
+  window.cbReformatRun = function(btn, fmt){
+    var box = document.getElementById('cb-reformat-panel');
+    var url = box.querySelector('[data-reformat-url]').getAttribute('data-reformat-url');
+    var out = box.querySelector('.cb-reformat-out');
+    out.innerHTML = '<div style="font-size:12px;color:var(--ink-dim)">Reformatting\\u2026</div>';
+    fetch(url + '?format=' + encodeURIComponent(fmt), {method:'POST', credentials:'same-origin'})
+      .then(function(r){ if(!r.ok){ return r.json().then(function(j){ throw (j.user_message || j.error || 'failed'); }); } return r.blob(); })
+      .then(function(b){ var u = URL.createObjectURL(b);
+        out.innerHTML = '<img src="' + u + '" style="max-width:240px;border-radius:8px;display:block"/>'
+          + '<div style="margin-top:6px"><a class="btn secondary" style="font-size:11px;padding:4px 10px" href="' + u + '" download="reformat_' + fmt + '.png">Download PNG</a></div>';
+      })
+      .catch(function(e){ out.innerHTML = '<div style="font-size:12px;color:var(--bad)">' + e + '</div>'; });
+  };
+  window.cbCopilot = function(btn){
+    var box = document.getElementById('cb-copilot-panel'); if(!box) return;
+    if(box.style.display && box.style.display !== 'none'){ box.style.display = 'none'; return; }
+    box.style.display = '';
+    if(box.getAttribute('data-init')) return;
+    box.setAttribute('data-init', '1');
+    box.setAttribute('data-assistant-url', btn.getAttribute('data-assistant-url'));
+    box.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Design copilot \\u2014 ask in plain words</div>'
+      + '<div class="cb-copilot-log" style="font-size:12px;color:var(--ink);max-height:160px;overflow:auto;margin-bottom:6px"></div>'
+      + '<div style="display:flex;gap:6px"><input class="cb-copilot-msg" type="text" placeholder="e.g. make the headline bigger, more navy" style="flex:1;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>'
+      + '<button type="button" class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="cbCopilotSend(this)">Send</button></div>';
+  };
+  window.cbCopilotSend = function(btn){
+    var box = document.getElementById('cb-copilot-panel');
+    var url = box.getAttribute('data-assistant-url');
+    var inp = box.querySelector('.cb-copilot-msg'); var log = box.querySelector('.cb-copilot-log');
+    var msg = (inp.value || '').trim(); if(!msg) return;
+    log.innerHTML += '<div style="margin:4px 0"><strong>You:</strong> ' + msg.replace(/[&<>]/g, function(ch){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]; }) + '</div>';
+    inp.value = ''; btn.disabled = true;
+    fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: msg, session_id: (box.getAttribute('data-session') || '')})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){ btn.disabled = false;
+        if(j.session_id) box.setAttribute('data-session', j.session_id);
+        var reply = j.reply || j.user_message || (j.changed ? 'Updated the design.' : 'No change made.');
+        var note = j.changed ? ' <em>(graphic updated — open Reformat to render it)</em>' : '';
+        log.innerHTML += '<div style="margin:4px 0;color:var(--ink-dim)"><strong>Copilot:</strong> ' + String(reply).replace(/[&<>]/g, function(ch){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]; }) + note + '</div>';
+        log.scrollTop = log.scrollHeight;
+      })
+      .catch(function(){ btn.disabled = false; log.innerHTML += '<div style="color:var(--bad)">Network error</div>'; });
+  };
   // Approve pill — queue -> approved -> queue; right-click resets to queue.
   var NEXT = {queue:'approved', approved:'queue', rejected:'queue'};
   var STYLE = {queue:['rgba(255,174,59,0.18)','#ffae3b'], approved:['rgba(74,222,128,0.18)','#4ade80'], rejected:['rgba(244,63,94,0.18)','#f43f5e']};
@@ -10082,6 +10140,8 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
     _assist_url = url_for("api_stub_pack_caption_assist", pack_id=pack_id, card_idx=0)
     _reel_job_url = url_for("api_stub_pack_reel_job", pack_id=pack_id, card_idx=0)
     _graphic_url = url_for("api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0)
+    _reformat_url = url_for("api_stub_pack_reformat", pack_id=pack_id, card_idx=0)
+    _assistant_url = url_for("api_stub_pack_assistant", pack_id=pack_id, card_idx=0)
     _status_url = url_for("api_stub_pack_card_status", pack_id=pack_id, card_idx=0)
 
     # Same honest AI-unavailable banner the Content builder shows.
@@ -10246,6 +10306,12 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
         onclick="mhCreateGraphic(this, {repr(_graphic_url)}, '{_h(g_card_id)}')">&#x2726; Create graphic</button>
       <button type="button" class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none"
         data-reel-url="{_h(_reel_job_url)}" onclick="cbReel(this)">&#x25B6; Generate reel</button>
+      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px"
+        data-reformat-url="{_h(_reformat_url)}" onclick="cbReformat(this)"
+        title="Re-target this graphic to another size or format">&#x21C4; Reformat&hellip;</button>
+      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px"
+        data-assistant-url="{_h(_assistant_url)}" onclick="cbCopilot(this)"
+        title="Ask the copilot to edit this design in plain words; you approve">&#10024; Copilot&hellip;</button>
       <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_export_url)}"
         title="Download the caption as .txt for manual posting">&#x2B07; Export caption</a>
       {_schedule_button_html(f"_stub_{pack_id}", f"stub:{pack_id}:0", g_card_id)}
@@ -10253,6 +10319,8 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
     {assist_row}
     <div class="visual-panel" data-card="{_h(g_card_id)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>
     <div id="cb-reel-panel" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
+    <div id="cb-reformat-panel" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>
+    <div id="cb-copilot-panel" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>
   </div>
   {moments_html}
   {notes_html}
@@ -27230,6 +27298,261 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             as_attachment=False,
             download_name=f"spotlight_reel_{slug}.mp4",
         )
+
+    def _latest_brief_in_run(run_id: str):
+        """Most-recent CreativeBrief JSON in a run's briefs dir, ignoring
+        ``content_item_id``. A synthetic ``_stub_<pack_id>`` run holds exactly
+        one card's briefs (the composite), so this resolves the composite
+        design without coupling to the stub item id."""
+        try:
+            bdir = RUNS_DIR / run_id / "briefs"
+            if not bdir.exists():
+                return None
+            cands: list[tuple[float, Path]] = []
+            for p in bdir.glob("cb_*.json"):
+                try:
+                    mtime = p.stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+                cands.append((mtime, p))
+            if not cands:
+                return None
+            cands.sort(key=lambda kv: kv[0], reverse=True)
+            return json.loads(cands[0][1].read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/reformat", methods=["GET", "POST"])
+    def api_stub_pack_reformat(pack_id, card_idx):
+        """Re-target the composite graphic to another format/size — the
+        meet-recap Reformat, scoped to the spotlight composite's stored design.
+        Mirrors ``api_card_reformat`` but resolves the brief from the synthetic
+        ``_stub_<pack_id>`` run and authorises via the pack."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import send_file
+
+        from mediahub.club_platform.stub_pack_store import load_pack
+        from mediahub.club_platform import format_catalog as _fc
+        from mediahub.creative_brief.generator import CreativeBrief
+        from mediahub.turn_into import blank_brief_for_format, transform_design
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        run_id = f"_stub_{pack_id}"
+
+        fmt_slug = (request.args.get("format") or "").strip()
+        w_raw = request.args.get("w")
+        h_raw = request.args.get("h")
+        spec = None
+        try:
+            if w_raw and h_raw:
+                spec = _fc.custom_format(
+                    float(w_raw),
+                    float(h_raw),
+                    unit=(request.args.get("unit") or "px"),
+                    slug=(fmt_slug or "custom"),
+                )
+            elif fmt_slug:
+                spec = _fc.format_for(fmt_slug)
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": "bad_format", "user_message": str(e)}), 400
+        if spec is None:
+            return jsonify(
+                {"error": "unknown_format", "user_message": "Pick a format from the catalogue."}
+            ), 400
+
+        prof = _active_profile()
+        try:
+            brand_kit = (
+                prof.get_brand_kit()
+                if prof is not None
+                else (_v8_brand_kit_for(run_id) if _v8_ok else None)
+            )
+        except Exception:
+            brand_kit = _v8_brand_kit_for(run_id) if _v8_ok else None
+
+        use_ai = (request.args.get("ai") or "").lower() in ("1", "true", "yes")
+        blank = (request.args.get("blank") or "").lower() in ("1", "true", "yes")
+        card_key = f"{pack_id}-{card_idx}"
+        if blank:
+            new_brief = blank_brief_for_format(
+                spec,
+                brand_kit,
+                content_item_id=card_key,
+                profile_id=(rec.get("profile_id") or run_id),
+            )
+        else:
+            bdict = _latest_brief_in_run(run_id)
+            if not bdict:
+                return jsonify(
+                    {
+                        "error": "no_design",
+                        "user_message": (
+                            "Create the graphic first, then reformat it — or start blank."
+                        ),
+                    }
+                ), 409
+            src = CreativeBrief.from_dict(bdict)
+            if src is None:
+                return jsonify({"error": "brief_unreadable"}), 500
+            try:
+                tr = transform_design(
+                    source_brief=src,
+                    target_format=spec,
+                    brand_kit=brand_kit,
+                    use_ai_director=use_ai,
+                )
+            except ValueError as e:
+                return jsonify({"error": "transform_failed", "user_message": str(e)}), 400
+            new_brief = tr.brief
+
+        import hashlib as _hl
+
+        key = _hl.sha256(
+            f"{card_key}|{spec.slug}|{spec.width}x{spec.height}|"
+            f"{new_brief.layout_template}|{'blank' if blank else 'tx'}".encode("utf-8")
+        ).hexdigest()[:20]
+        out_dir = RUNS_DIR / run_id / "reformat" / key
+        cache_png = out_dir / f"{spec.render_name}.png"
+        if cache_png.exists() and not use_ai:
+            return send_file(str(cache_png), mimetype="image/png")
+
+        logo_path = None
+        bk_logo = getattr(brand_kit, "logo_path", None)
+        if bk_logo:
+            try:
+                if Path(bk_logo).exists():
+                    logo_path = str(bk_logo)
+            except Exception:
+                logo_path = None
+        try:
+            from mediahub.graphic_renderer.render import render_brief
+
+            out_dir.mkdir(parents=True, exist_ok=True)
+            # The composite is text-led (no athlete cutout), so no hero photo.
+            with _render_slot("graphic", card_key, timeout=_RENDER_TRY_TIMEOUT):
+                res = render_brief(
+                    new_brief,
+                    output_dir=out_dir,
+                    size=spec.size,
+                    format_name=spec.render_name,
+                    athlete_path=None,
+                    logo_path=logo_path,
+                    brand_kit=brand_kit,
+                    image_format="png",
+                )
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception as e:
+            return jsonify(_reformat_error_payload(e)), 500
+        return send_file(str(res.visual.file_path), mimetype="image/png")
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/assistant", methods=["POST"])
+    def api_stub_pack_assistant(pack_id, card_idx):
+        """One copilot turn editing the composite graphic's design in plain
+        words (proposes validated edits; never paints pixels, never publishes).
+        Mirrors ``api_card_assistant`` for the spotlight composite — the edited
+        brief persists so a subsequent Reformat reflects it."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from mediahub.club_platform.stub_pack_store import load_pack
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        body = request.get_json(silent=True) or {}
+        message = (body.get("message") or "").strip()
+        if not message:
+            return jsonify(
+                {"error": "empty_message", "user_message": "Type what you'd like to change."}
+            ), 400
+        session_id = (body.get("session_id") or "").strip()
+        run_id = f"_stub_{pack_id}"
+        fd = (rec or {}).get("form_data") or {}
+        profile_id = rec.get("profile_id") or _active_profile_id() or run_id
+
+        prof = _active_profile()
+        try:
+            brand_kit = (
+                prof.get_brand_kit()
+                if prof is not None
+                else (_v8_brand_kit_for(run_id) if _v8_ok else None)
+            )
+        except Exception:
+            brand_kit = _v8_brand_kit_for(run_id) if _v8_ok else None
+
+        bdict = _latest_brief_in_run(run_id)
+        if not bdict:
+            return jsonify(
+                {
+                    "error": "no_design",
+                    "user_message": (
+                        "Create the graphic first, then ask the copilot to refine it."
+                    ),
+                }
+            ), 409
+        src = CreativeBrief.from_dict(bdict)
+        if src is None:
+            return jsonify({"error": "brief_unreadable"}), 500
+
+        from mediahub.assistant import copilot as _acop
+        from mediahub.assistant import session as _asess
+
+        card_key = f"{pack_id}-{card_idx}"
+        facts = {
+            "swimmer_name": fd.get("swimmer_name") or "",
+            "meet": fd.get("meet_name") or "",
+            "moments": str(fd.get("results_lines") or "").replace("\n", "; "),
+        }
+        sess = _asess.get_or_create(run_id, card_key, session_id, profile_id=profile_id)
+        turn = _acop.run_turn(
+            session=sess,
+            user_message=message,
+            brief=src,
+            brand_kit=brand_kit,
+            facts=facts,
+            profile_id=profile_id,
+        )
+        if turn.changed:
+            try:
+                from mediahub.content_pack_visual.integration import briefs_dir_for_run
+
+                bdir = briefs_dir_for_run(run_id)
+                (bdir / f"{turn.brief.id}.json").write_text(
+                    json.dumps(turn.brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                )
+            except Exception:
+                pass
+        resp = turn.to_dict()
+        resp.update(
+            {
+                "session_id": sess.session_id,
+                "brief_id": turn.brief.id,
+                "format": (turn.brief.format_priority or ["story"])[0],
+                "reformat_url": url_for(
+                    "api_stub_pack_reformat", pack_id=pack_id, card_idx=card_idx
+                ),
+            }
+        )
+        return jsonify(resp)
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/assistant/suggestions")
+    def api_stub_pack_assistant_suggestions(pack_id, card_idx):
+        """Prompt chips for the composite copilot."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        profile_id = rec.get("profile_id") or _active_profile_id() or f"_stub_{pack_id}"
+        from mediahub.assistant.copilot import suggested_prompts
+
+        return jsonify({"suggestions": suggested_prompts(profile_id, "")})
 
     @app.route("/api/drafts/<pack_id>/regenerate", methods=["POST"])
     def api_stub_pack_regenerate(pack_id):
