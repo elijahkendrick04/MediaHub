@@ -616,13 +616,30 @@ def generate(
         ai_directed=ai_directed,
         hero_stat_options=hero_stat_options,
     )
+    # A caller that pins the multi-fact recap family (``allowed_families=
+    # ["text_led_recap"]``) is asking for the v1 LIST layout: the card carries a
+    # bullet list of several moments (an athlete-spotlight composite, a
+    # caption-only Free Text / Event Preview / Sponsor stub) and no single hero
+    # result. None of the v2 single-subject archetypes can render that list —
+    # ``_fill_v2_archetype`` only fills one ``RESULT_VALUE``/``HERO_STAT`` — so
+    # overriding to one drops every bullet and ships a blank card. Honour the
+    # constraint and keep the v1 ``text_led_recap`` layout, which renders the
+    # headline + bullet list + stat strip the caller actually supplied. Scoped
+    # to that explicit constraint, so every normal card render is byte-identical.
+    _layers_now = brief.text_layers or {}
+    _pin_text_led_list = (
+        "text_led_recap" in (allowed_families or [])
+        and brief.layout_template == "text_led_recap"
+        and bool(_layers_now.get("bullets"))
+        and not str(_layers_now.get("result_value") or "").strip()
+    )
     # Gen Engine v2: choose the v2 archetype for this card. Tier B (§5.4): when AI
     # direction is requested and a provider is configured, the design-spec director
     # picks the archetype + emphasis + hook FOR THIS MOMENT; otherwise (no provider
     # / failure) the deterministic seed-picker (Tier A) is the honest floor. v2 is
     # the default engine; MEDIAHUB_GEN_V2=0 keeps the legacy family byte-for-byte.
     try:
-        if _v2_on and _v2_archetypes is not None:
+        if _v2_on and _v2_archetypes is not None and not _pin_text_led_list:
             _names = _v2_archetypes.list_archetypes()
             _spec = None
             if _names and use_ai_director:

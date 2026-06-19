@@ -286,12 +286,13 @@ def test_spotlight_build_renders_saved_pack(gated_app, tmp_path, monkeypatch):
         assert "Lara took the meet by the throat" in html
 
 
-def test_spotlight_build_renders_spotlight_builder_surface(
+def test_spotlight_build_renders_content_builder_surface(
     gated_app, tmp_path, monkeypatch
 ):
-    """After build, the saved spotlight pack renders the dedicated
-    *Spotlight builder* surface (the Content-builder structure scoped to the
-    single composite), not the generic saved-draft card layout."""
+    """After build, the saved spotlight pack opens the mode-aware *Content
+    builder* (the single composite post — one caption + one graphic + one reel
+    from the approved moments) with the full live toolbar, not the standalone
+    spotlight builder and not the generic saved-draft card layout."""
     def _stub_ask(system, user, **kw):
         return "Lara took the meet by the throat."
 
@@ -316,19 +317,104 @@ def test_spotlight_build_renders_spotlight_builder_surface(
         assert r2.status_code == 200
         html = r2.get_data(as_text=True)
 
-        # It IS the Spotlight builder (eyebrow + title), not the Content
-        # builder, and not the generic stub-draft layout.
-        assert "Spotlight builder" in html
-        assert "Content builder" not in html
+        # It IS the Content builder (eyebrow + title), retiring the standalone
+        # "Spotlight builder", and not the generic stub-draft layout.
+        assert "Content builder" in html
+        assert "Spotlight builder" not in html
         assert "draft card generated" not in html  # render_cards_html marker
 
-        # Same base generators surfaced: the four caption registers (retone)
-        # and the shared create-graphic endpoint.
-        for register in ("Brand voice", "Warm club", "Hype", "Data-led"):
-            assert register in html
+        # Full live toolbar: the four caption tone tabs (wired to the pack-scoped
+        # caption endpoint), Regenerate, Assist, Create graphic, and the reel.
+        for tone_key in ("ai", "warm-club", "hype", "data-led"):
+            assert f'data-tone="{tone_key}"' in html
+        assert "Regenerate caption" in html
+        assert "Assist" in html
         assert "Create graphic" in html
         assert "/create-graphic" in html
+        assert "Generate reel" in html
+        assert "/reel-job" in html
+        # Full toolbar parity with the meet-recap Content builder: Reformat + Copilot.
+        assert "Reformat" in html
+        assert "/reformat" in html
+        assert "Copilot" in html
+        assert "/assistant" in html
 
         # Composite caption + a route back to the spotlight to re-pick moments.
         assert "Lara took the meet by the throat" in html
         assert f"/spotlight/{run_id}/" in html
+
+
+def test_composite_builder_toolbar_endpoints(gated_app, tmp_path, monkeypatch):
+    """The composite Content builder's toolbar endpoints — live caption (tone),
+    inline assist, and the reel job — are pack-scoped and reuse the spotlight
+    compose / caption-assist / reel engine. AI is honest-errored when no
+    provider is configured (never a fabricated caption)."""
+    import mediahub.ai_core as ai_core_pkg
+    monkeypatch.setattr(
+        ai_core_pkg, "ask", lambda system, user, **kw: "Lara owned the pool today."
+    )
+
+    run_id = "synth_run_ep"
+    runs_dir = tmp_path / "runs_v4"
+    run = _synthetic_run_with_achievements(run_id, runs_dir)
+    swimmer_key = run["recognition_report"][
+        "ranked_achievements"
+    ][0]["achievement"]["swimmer_id"]
+
+    with gated_app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["active_profile_id"] = "acmeswim"
+        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build", follow_redirects=False)
+        assert r1.status_code == 302
+        pack_id = r1.headers["Location"].rstrip("/").split("/")[-1]
+
+        # No provider configured → honest non-fabricated error, not a stub caption.
+        r_nokey = c.post(f"/api/drafts/{pack_id}/card/0/caption?tone=hype")
+        assert r_nokey.status_code == 200
+        assert r_nokey.get_json()["live"] is False
+
+        # With AI available, a tone tab recomposes the SAME approved moments live.
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
+        r_cap = c.post(f"/api/drafts/{pack_id}/card/0/caption?tone=hype")
+        assert r_cap.status_code == 200
+        body = r_cap.get_json()
+        assert body["live"] is True
+        assert body["caption"] == "Lara owned the pool today."
+        assert body["tone"] == "hype"
+
+        # Inline assist revises the current caption (engine stubbed).
+        monkeypatch.setattr(
+            "mediahub.web.caption_assist.assist_caption", lambda *a, **k: "Lara owned it."
+        )
+        r_as = c.post(
+            f"/api/drafts/{pack_id}/card/0/caption/assist",
+            json={
+                "current_caption": "Lara owned the pool today.",
+                "transform": "shorter",
+                "tone": "hype",
+            },
+        )
+        assert r_as.status_code == 200
+        assert r_as.get_json()["caption"] == "Lara owned it."
+
+        # The reel job kicks off from the approved moments (render stubbed) and
+        # returns a pollable job — the composite reel, not a per-card story.
+        import mediahub.visual.motion as _motion
+        monkeypatch.setattr(_motion, "render_meet_reel", lambda *a, **k: str(a[2]))
+        r_reel = c.post(f"/api/drafts/{pack_id}/card/0/reel-job")
+        assert r_reel.status_code == 202
+        rj = r_reel.get_json()
+        assert rj["job_id"] and rj["poll_url"]
+
+        # Reformat + Copilot need the composite design first → honest 409 before
+        # a graphic exists (never a fabricated/blank render), and the copilot
+        # suggestion chips are always available.
+        r_rf = c.post(f"/api/drafts/{pack_id}/card/0/reformat?format=ig_square")
+        assert r_rf.status_code == 409
+        r_cp = c.post(
+            f"/api/drafts/{pack_id}/card/0/assistant", json={"message": "make it navy"}
+        )
+        assert r_cp.status_code == 409
+        r_sg = c.get(f"/api/drafts/{pack_id}/card/0/assistant/suggestions")
+        assert r_sg.status_code == 200
+        assert "suggestions" in r_sg.get_json()

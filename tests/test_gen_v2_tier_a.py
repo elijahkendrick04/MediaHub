@@ -193,6 +193,57 @@ def test_generator_swaps_to_v2_when_flag_on(monkeypatch):
     assert len(chosen) >= 6
 
 
+def test_multifact_recap_keeps_v1_list_layout_when_family_pinned(monkeypatch):
+    """A caption-only / athlete-spotlight-composite graphic pins
+    ``allowed_families=["text_led_recap"]`` and supplies a BULLET LIST of
+    several moments with no single hero result. No v2 single-subject archetype
+    can render that list (``_fill_v2_archetype`` fills only one
+    ``RESULT_VALUE``/``HERO_STAT``), so the v2 override must be skipped and the
+    v1 ``text_led_recap`` layout — headline + bullets + stat strip — kept;
+    otherwise the card renders blank. Regression guard for the empty
+    athlete-spotlight graphic (the bullets the caller supplied disappeared when
+    the director overrode the layout to e.g. ``index_card``)."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")  # v2 on (the default engine)
+    from mediahub.creative_brief.generator import VariationProfile
+
+    item = {
+        "id": "athlete_spotlight",
+        "post_angle": "recap_mention",
+        "achievement": {"post_angle": "recap_mention", "confidence": 0.85},
+        "graphic_text": {
+            "headline_line1": "EIRA",
+            "headline_line2": "SPOTLIGHT",
+            "bullets": ["50m Breaststroke — 27.98 · PB", "100m Butterfly — 51.81 · 🥉"],
+            "primary_hook": "SPOTLIGHT",
+            "stats": {"athlete": "Eira Hughes", "moments": "5 approved"},
+        },
+    }
+    vp = VariationProfile(
+        layout_family="text_led_recap",
+        photo_treatment="no-photo",
+        background_style="clean",
+        accent_style="minimal",
+        composition="center",
+    )
+    brief = gen_brief(
+        item,
+        _eval(layout="text_led_recap"),
+        _brand(),
+        profile_id="test",
+        meet_name="Manchester Open",
+        variation_seed=0,
+        variation_profile=vp,
+        use_ai_director=True,
+        allowed_families=["text_led_recap"],
+    )
+    # The v1 list layout is kept (NOT swapped to a v2 single-subject archetype)…
+    assert brief.layout_template == "text_led_recap"
+    assert brief.layout_template not in archetypes.list_archetypes()
+    # …and the bullet list it needs survived onto the brief.
+    assert brief.text_layers.get("bullets")
+    assert not str(brief.text_layers.get("result_value") or "").strip()
+
+
 def _brief_for_item(item, *, seed=None, recent=None):
     # seed=None mirrors the bulk-pack / fresh-regenerate call shape (no
     # explicit seed → the floor derives one from the card id); pass an int
