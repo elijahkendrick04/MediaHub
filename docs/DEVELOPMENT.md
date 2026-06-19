@@ -80,7 +80,7 @@ Without a configured provider, AI-dependent routes surface
 `ClaudeUnavailableError` so it's immediately obvious that the provider is
 unset rather than silently producing low-quality heuristic output.
 
-## Claude Code dev-loop tooling (MCP servers + Codex plugin)
+## Claude Code dev-loop tooling (MCP servers)
 
 The repo ships a shared Claude Code tooling config so contributors don't have to
 re-add it by hand (and so it survives the ephemeral cloud sessions, where
@@ -99,24 +99,11 @@ session, check with `/mcp`):
 | `sequential-thinking` | `@modelcontextprotocol/server-sequential-thinking` | Structured step-by-step planning |
 | `memory` | `@modelcontextprotocol/server-memory` | Persistent cross-session memory; store at `./.claude/memory.json` (gitignored, never committed) |
 
-**Codex plugin** (OpenAI Codex as an in-session second-opinion reviewer). The
-marketplace + enable flag are committed in `.claude/settings.json`; finish setup
-per-contributor:
+All four launch via `npx`, so they need Node 18+ available on the machine.
 
-```bash
-npm install -g @openai/codex     # the Codex CLI (Node 18.18+)
-# in Claude Code:
-/codex:setup                     # verify install + OpenAI/ChatGPT auth
-```
-
-Then `/codex:review`, `/codex:adversarial-review`, and `/codex:rescue` are
-available. (The marketplace name is `openai-codex`, so the manual install — if
-ever needed — is `/plugin install codex@openai-codex`.)
-
-**Data-egress caveat.** Context7 sends query/library context to Upstash and the
-Codex plugin sends code/diffs to OpenAI under *your* credentials. Don't point
-them at secrets or proprietary client data. Provider keys live in `.env` only —
-never in `.mcp.json` or committed settings.
+**Data-egress caveat.** Context7 sends query/library context to Upstash. Don't
+point these servers at secrets or proprietary client data. Provider keys live in
+`.env` only — never in `.mcp.json` or committed settings.
 
 ## Deployment
 
