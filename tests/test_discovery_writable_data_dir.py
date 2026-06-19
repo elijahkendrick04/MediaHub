@@ -44,19 +44,23 @@ def test_record_clubs_writes_under_data_dir(monkeypatch, tmp_path):
     assert "City of Test Aquatics" in names
 
 
-def test_record_clubs_failsoft_on_readonly(monkeypatch, tmp_path):
-    """A read-only store must not raise — it returns [] so the recap completes."""
+def test_record_clubs_raises_on_readonly_so_caller_can_surface(monkeypatch, tmp_path):
+    """A storage failure must PROPAGATE, not be swallowed: pipeline_v4 wraps the
+    call in a try/except that surfaces it as a (developer-visible) "Club
+    discovery store warning" progress line. Swallowing it here would hide a
+    genuine infrastructure fault — exactly the silent-fail the operator does
+    not want."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
     def _boom(*a, **k):
         raise PermissionError(13, "Permission denied")
 
     monkeypatch.setattr("pathlib.Path.mkdir", _boom)
-    # Must not raise (the bug was an unhandled PermissionError).
-    assert club_discovery.record_clubs(["Anything SC"], run_id="run-2") == []
+    with pytest.raises(OSError):
+        club_discovery.record_clubs(["Anything SC"], run_id="run-2")
 
 
-def test_list_discovered_clubs_failsoft_when_root_missing(monkeypatch, tmp_path):
+def test_list_discovered_clubs_empty_when_root_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "does-not-exist"))
     # No store yet → empty list, never an error.
     assert club_discovery.list_discovered_clubs() == []

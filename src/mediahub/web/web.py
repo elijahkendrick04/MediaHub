@@ -18428,6 +18428,42 @@ function copyWhyCard(btn, taId) {{
 {_render_inspector_panel(_review_swatches)}
 {_inspector_js()}
 """
+        # Operator-only processing log. A developer reviewing a finished run can
+        # see exactly what happened — PB-lookup errors, club-discovery store
+        # warnings, and every other step — persisted from the run, so genuine
+        # failures never silently vanish once the live progress screen redirects
+        # here. Gated behind the developer session: customers never see the raw
+        # engineer-facing steps or internal error text.
+        if _auth.is_dev_operator():
+            _plog = data.get("progress_log") or []
+            if _plog:
+                _problem_lines = [
+                    ln
+                    for ln in _plog
+                    if any(k in ln.lower() for k in ("error", "warning", "failed"))
+                ]
+                _problems_html = ""
+                if _problem_lines:
+                    _problems_html = (
+                        '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-2)">'
+                        f"{len(_problem_lines)} issue(s) flagged during processing</div>"
+                        + "".join(
+                            '<div style="font-family:var(--font-mono);font-size:12px;'
+                            'color:var(--bad);white-space:pre-wrap;word-break:break-word">'
+                            f"{_h(ln)}</div>"
+                            for ln in _problem_lines
+                        )
+                    )
+                body += f"""
+<div class="card" style="margin-top:var(--sp-6);border-left:2px solid var(--accent)">
+  <div class="strap" style="margin-bottom:var(--sp-3)">Processing log &middot; operator only</div>
+  {_problems_html}
+  <details style="margin-top:var(--sp-3)">
+    <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Full processing log ({len(_plog)} steps)</summary>
+    <div class="progress-log" style="margin-top:var(--sp-3)">{_h(chr(10).join(_plog))}</div>
+  </details>
+</div>
+"""
         # U.13: floating mobile action dock for the review/approve flow — only
         # when there's actually a pack to review (cards present or workflow
         # state on file). Its "Approve" pill advances through the queue; when
