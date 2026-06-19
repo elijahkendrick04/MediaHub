@@ -74,6 +74,7 @@ import time
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 # A neutral British English voice by default — sport clubs in the current wedge
 # are UK-centric. Operators can override per deployment; this is a presentation
@@ -454,12 +455,19 @@ def _piper_available() -> bool:
     return bool(_ffmpeg_exe())
 
 
-def _piper_wav_bytes(text: str, model_path: Path, config_path: Path | None) -> bytes:
+def _piper_wav_bytes(
+    text: str, model_path: Path, config_path: Path | None, length_scale: float | None = None
+) -> bytes:
     """Synthesise ``text`` with Piper and return a complete WAV as bytes.
 
     This is the single Piper-touching seam (tests monkeypatch it, exactly as the
     edge path's network call is patched). Importing ``piper`` or loading the
     model failing becomes a `VoiceoverError` — never a fallback.
+
+    ``length_scale`` (1.8 voice layer) tunes Piper's speaking rate when set
+    (faster → smaller). It is passed best-effort via the modern
+    ``SynthesisConfig``; a Piper build that doesn't accept it falls back to the
+    default rate rather than failing. ``None`` reproduces the pre-1.8 call.
     """
     try:
         from piper import PiperVoice
@@ -483,12 +491,27 @@ def _piper_wav_bytes(text: str, model_path: Path, config_path: Path | None) -> b
             f"Failed to load the Piper voice model at {model_path}: {exc}"
         ) from exc
 
+    syn_config = None
+    if length_scale is not None:
+        try:
+            from piper import SynthesisConfig
+
+            syn_config = SynthesisConfig(length_scale=float(length_scale))
+        except Exception:
+            syn_config = None  # older Piper without SynthesisConfig → default rate
+
     buf = io.BytesIO()
     try:
         with wave.open(buf, "wb") as wav_out:
             synth_wav = getattr(voice, "synthesize_wav", None)
             if callable(synth_wav):
-                synth_wav(text, wav_out)  # modern piper-tts (>=1.0)
+                if syn_config is not None:
+                    try:
+                        synth_wav(text, wav_out, syn_config=syn_config)  # piper-tts >=1.0
+                    except TypeError:
+                        synth_wav(text, wav_out)
+                else:
+                    synth_wav(text, wav_out)  # modern piper-tts (>=1.0)
             else:
                 voice.synthesize(text, wav_out)  # older API wrote the WAV directly
     except Exception as exc:
@@ -585,14 +608,26 @@ def _estimate_word_boundaries(text: str, total_ms: int) -> list[WordBoundary]:
     return boundaries
 
 
-def _synthesize_piper(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
+def _synthesize_piper(
+    text: str, voice: str, params: Any = None
+) -> tuple[bytes, list[WordBoundary]]:
     """The Piper branch of `_synthesize_raw`: resolve the model, synthesise a
     WAV, transcode to MP3, and estimate word boundaries for the SRT. The edge
     ``voice`` name is not a Piper concept (the model fixes the voice), so it is
     accepted and ignored — the cache is namespaced by the Piper model instead
-    (see `_cache_voice`)."""
+    (see `_cache_voice`).
+
+    Non-default ``params`` contribute a Piper ``length_scale`` (rate); the
+    default path calls ``_piper_wav_bytes`` with the original three-arg signature
+    so the seam monkeypatch stays intact."""
     model_path, config_path = _require_piper_model()
-    wav_bytes = _piper_wav_bytes(text, model_path, config_path)
+    length_scale = None
+    if params is not None and not params.is_default():
+        length_scale = params.to_piper().get("length_scale")
+    if length_scale is None:
+        wav_bytes = _piper_wav_bytes(text, model_path, config_path)
+    else:
+        wav_bytes = _piper_wav_bytes(text, model_path, config_path, length_scale=length_scale)
     total_ms = _wav_duration_ms(wav_bytes)
     mp3_bytes = _wav_to_mp3(wav_bytes)
     boundaries = _estimate_word_boundaries(text, total_ms)
@@ -604,30 +639,51 @@ def _synthesize_piper(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]
 # ---------------------------------------------------------------------------
 
 
-def _synthesize_raw(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
+def _synthesize_raw(text: str, voice: str, params: Any = None) -> tuple[bytes, list[WordBoundary]]:
     """Call the selected TTS backend and return (mp3_bytes, word_boundaries).
 
     Isolated so the entire network/codec surface sits behind one seam that tests
     monkeypatch. Dispatches on `select_tts_provider`; any failure (missing
     dependency, unreachable endpoint, missing model, empty audio) becomes a
     `VoiceoverError` — there is no fallback path.
+
+    ``params`` is an optional ``VoiceParams``-like object (1.8 voice layer) —
+    rate/pitch/volume for edge, ``length_scale`` for Piper. It is only ever
+    passed by callers who set non-default prosody, so the default-path call
+    signature stays ``(text, voice)`` and existing seam monkeypatches are intact.
     """
     provider = select_tts_provider()
+    use_params = params is not None and not params.is_default()
     if provider == "piper":
-        return _synthesize_piper(text, voice)
-    return _synthesize_edge(text, voice)
+        return (
+            _synthesize_piper(text, voice, params) if use_params else _synthesize_piper(text, voice)
+        )
+    return _synthesize_edge(text, voice, params) if use_params else _synthesize_edge(text, voice)
 
 
-def _synthesize_edge(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
+def _synthesize_edge(text: str, voice: str, params: Any = None) -> tuple[bytes, list[WordBoundary]]:
     """The default `edge-tts` backend: streams MP3 + native word boundaries from
-    the Microsoft endpoint (online; the reason voiceover is opt-in)."""
+    the Microsoft endpoint (online; the reason voiceover is opt-in).
+
+    When ``params`` carries non-default prosody, its ``to_edge()`` rate/pitch/
+    volume are passed to ``Communicate``; otherwise the call is byte-identical to
+    the pre-1.8 path (no kwargs), so existing cached MP3s are never orphaned.
+    """
     try:
         import edge_tts
     except Exception as exc:  # pragma: no cover - exercised via is_available()
         raise VoiceoverError("Text-to-speech backend (edge-tts) is not installed.") from exc
 
+    prosody: dict[str, str] = {}
+    if params is not None and not params.is_default():
+        prosody = params.to_edge()
+
     async def _run() -> tuple[bytes, list[WordBoundary]]:
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = (
+            edge_tts.Communicate(text, voice, **prosody)
+            if prosody
+            else edge_tts.Communicate(text, voice)
+        )
         audio = bytearray()
         boundaries: list[WordBoundary] = []
         async for chunk in communicate.stream():
@@ -663,12 +719,23 @@ def synthesize(
     voice: str = DEFAULT_VOICE,
     run_id: str | None = None,
     apply_pronunciation: bool = True,
+    params: Any = None,
+    profile_id: str | None = None,
 ) -> VoiceoverResult:
     """Synthesise a voiceover for the (already-approved) caption `text`, verbatim.
 
     The text is spoken as given, after an optional deterministic pronunciation
     pre-pass for swimmer names (no AI). Output is cached by content hash; a second
     call with the same text+voice returns the cached artefacts without re-synthesis.
+
+    1.8 voice layer (both optional and backward-compatible):
+
+    * ``params`` — a ``VoiceParams``-like object (rate/pitch/volume). Non-default
+      prosody is applied to synthesis *and* folded into the cache key, so a
+      re-voiced clip never serves a stale render; default/``None`` keeps the
+      pre-1.8 cache key byte-identical.
+    * ``profile_id`` — the organisation whose pronunciation lexicon should join
+      the override chain (global → org → per-run).
 
     Raises:
         ValueError: if `text` is empty after stripping.
@@ -682,9 +749,13 @@ def synthesize(
     if apply_pronunciation:
         from . import pronunciation
 
-        spoken = pronunciation.pronounce(spoken, run_id)
+        spoken = pronunciation.pronounce(spoken, run_id, profile_id)
 
-    key = cache_key(spoken, _cache_voice(voice))
+    has_params = params is not None and not params.is_default()
+    voice_token = _cache_voice(voice)
+    if has_params:
+        voice_token = f"{voice_token}|{params.cache_token()}"
+    key = cache_key(spoken, voice_token)
     cdir = cache_dir()
     mp3_path = cdir / f"{key}.mp3"
     srt_path = cdir / f"{key}.srt"
@@ -710,7 +781,10 @@ def synthesize(
             # Corrupt sidecar → fall through and re-synthesise.
             pass
 
-    audio_bytes, boundaries = _synthesize_raw(spoken, voice)
+    if has_params:
+        audio_bytes, boundaries = _synthesize_raw(spoken, voice, params)
+    else:
+        audio_bytes, boundaries = _synthesize_raw(spoken, voice)
     duration_ms = boundaries[-1].offset_ms + boundaries[-1].duration_ms if boundaries else 0
     srt = build_srt(boundaries)
 

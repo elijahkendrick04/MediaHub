@@ -279,11 +279,8 @@ def _track_from_file(path: Path, *, source: str) -> AudioTrack:
     )
 
 
-def _read_dir(env_var: str, *, source: str) -> list[AudioTrack]:
-    raw = os.environ.get(env_var, "").strip()
-    if not raw:
-        return []
-    d = Path(raw)
+def _read_dir(directory: Path, *, source: str) -> list[AudioTrack]:
+    d = Path(directory)
     if not d.is_dir():
         return []
     out: list[AudioTrack] = []
@@ -291,6 +288,24 @@ def _read_dir(env_var: str, *, source: str) -> list[AudioTrack]:
         if p.is_file() and p.suffix.lower() in _AUDIO_SUFFIXES:
             out.append(_track_from_file(p, source=source))
     return out
+
+
+def _operator_dirs() -> list[tuple[Path, str]]:
+    """The operator-supplied source directories, in precedence order.
+
+    ``MEDIAHUB_AUDIO_LIBRARY_DIR`` is the 1.8 managed library; the legacy
+    ``MEDIAHUB_REEL_MUSIC_DIR`` (pre-1.8 bed directory) is folded in unchanged.
+    The env vars are read here as literals so they are discoverable by the env
+    inventory + secrets scanners.
+    """
+    pairs: list[tuple[Path, str]] = []
+    op = os.environ.get("MEDIAHUB_AUDIO_LIBRARY_DIR", "").strip()
+    if op:
+        pairs.append((Path(op), "operator"))
+    legacy = os.environ.get("MEDIAHUB_REEL_MUSIC_DIR", "").strip()
+    if legacy:
+        pairs.append((Path(legacy), "legacy-music-dir"))
+    return pairs
 
 
 class AudioLibrary:
@@ -315,10 +330,9 @@ class AudioLibrary:
         for track in _read_bundled():
             merged[track.id] = track
         if include_operator:
-            for track in _read_dir("MEDIAHUB_AUDIO_LIBRARY_DIR", source="operator"):
-                merged[track.id] = track
-            for track in _read_dir("MEDIAHUB_REEL_MUSIC_DIR", source="legacy-music-dir"):
-                merged[track.id] = track
+            for directory, source in _operator_dirs():
+                for track in _read_dir(directory, source=source):
+                    merged[track.id] = track
         return cls(sorted(merged.values(), key=lambda t: (t.kind, t.id)))
 
     def all(self) -> list[AudioTrack]:
