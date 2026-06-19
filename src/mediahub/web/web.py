@@ -7099,13 +7099,14 @@ body::before {
 
 /* Signed-in brand backdrop — the active org's PRIMARY logo as a large, softly
    blurred crest CENTRED and STILL behind the page content, in a faint pool of the
-   club's brand colour (.mh-bg-wash). A MODERATE blur keeps the crest identifiable
-   while softening its edges so it sits behind the headline without knifing through
-   the text. Crucially the blur is a FIXED rule on the mode classes below — NOT an
-   inline per-logo value — so it can never be dropped if a logo's adaptive numbers
-   are odd (a bad inline filter value voids the whole filter, incl. the blur). The
-   deterministic logo_bg_treatment analysis still picks the mode per logo, so it's
-   future-proof for any team's upload:
+   club's brand colour (.mh-bg-wash). A MODEST, tightly-banded blur keeps the crest
+   IDENTIFIABLE as the club's logo (soft-focus, never dissolved into an anonymous
+   blob) while softening its edges so it sits behind the headline without knifing
+   through the text. Crucially the blur is a FIXED rule on the mode classes below —
+   NOT an inline per-logo value — so it can never be dropped if a logo's adaptive
+   numbers are odd (a bad inline filter value voids the whole filter, incl. the
+   blur). The deterministic logo_bg_treatment analysis still picks the mode per
+   logo, so it's future-proof for any team's upload:
      • .mh-bg-mark--img — a COLOURFUL logo, blurred from its real artwork → a soft
        glow in the club's own colours;
      • .mh-bg-mark--ko  — a MONOCHROME logo (black/navy/grey/white/single-ink) or
@@ -7144,7 +7145,7 @@ body::before {
 .mh-bg-mark--img {
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
-  filter: blur(var(--mh-blur, 22px)) brightness(1.12);
+  filter: blur(var(--mh-blur, 14px)) brightness(1.12);
 }
 /* Monochrome / SVG logo — its shape in one light brand-tinted ink, softly blurred. */
 .mh-bg-mark--ko {
@@ -7152,7 +7153,7 @@ body::before {
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center;
   -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
-  filter: blur(var(--mh-blur, 22px));
+  filter: blur(var(--mh-blur, 14px));
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
@@ -10708,8 +10709,17 @@ def _layout(
                         manual=getattr(_p, "brand_palette_manual", {}) or {},
                         extracted=getattr(_p, "brand_palette_extracted", {}) or {},
                     )
-                    signed_in_primary = (_eff_pal.get("primary") or "").strip()
-                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip()
+                    # Same resolution order as ClubProfile.get_brand_kit: the
+                    # AI/manual palette wins, then the legacy brand_primary/secondary
+                    # strings. The legacy fallback matters here so the brand accent
+                    # (and the backdrop wash below) still show for an org whose colour
+                    # only lives in those fields, not just freshly-captured ones.
+                    signed_in_primary = (_eff_pal.get("primary") or "").strip() or (
+                        getattr(_p, "brand_primary", "") or ""
+                    ).strip()
+                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip() or (
+                        getattr(_p, "brand_secondary", "") or ""
+                    ).strip()
                 except Exception:
                     pass
                 # Surface the org's logo in the signed-in chrome the same
@@ -10746,68 +10756,76 @@ def _layout(
                 # party — the signed-in pid IS the active profile, so the serve
                 # route resolves them.
                 try:
-                    _trans: list[tuple[str, str]] = []
-                    _opaque: list[tuple[str, str]] = []
+                    from mediahub.brand.logos import (
+                        logo_bg_silhouette_path as _bg_sil,
+                        logo_bg_treatment as _bg_treat,
+                        resolve_logo_path as _rlp,
+                    )
+
+                    # Consider EVERY uploaded logo, then PICK THE FIRST one that
+                    # actually yields a paintable silhouette. Ordering: a logo whose
+                    # format keeps transparency (clean keyed artwork) comes before an
+                    # opaque one, and within each tier the most badge-like (nearest-
+                    # square) wins over a wide wordmark that would blur to a smear.
+                    # We don't pre-exclude by MIME — _render_bg_silhouette rasterises
+                    # whatever Pillow can open (HEIC/TIFF/BMP/PSD/ICO/…), and an
+                    # upload it CAN'T (PDF/EPS/corrupt) simply returns no silhouette
+                    # and we move to the next candidate. So any club, any format, gets
+                    # the best backdrop available — and never a blank/broken one.
+                    _trans_ext = {"png", "svg", "webp", "gif", "avif"}
+                    _trans_mime = {
+                        "image/png",
+                        "image/svg+xml",
+                        "image/webp",
+                        "image/gif",
+                        "image/avif",
+                    }
+
+                    def _bg_fit(_lid):
+                        # Nearest-square raw aspect (square→~1.0, wide/tall→lower).
+                        try:
+                            _pp = _rlp(signed_in_pid, _lid)
+                            if not _pp or _pp.suffix.lower() == ".svg":
+                                return 0.6  # vectors: neutral, usually fine
+                            from PIL import Image as _PImg
+
+                            with _PImg.open(_pp) as _im:
+                                _w, _hh = _im.size
+                            if _w <= 0 or _hh <= 0:
+                                return 0.0
+                            _ar = _w / _hh if _w >= _hh else _hh / _w
+                            return 1.0 / _ar
+                        except Exception:
+                            return 0.4
+
+                    _cands: list[tuple[int, float, str, str]] = []  # (tier, -fit, url, lid)
                     for _e in getattr(_p, "brand_logos", None) or []:
                         if not (isinstance(_e, dict) and _e.get("logo_id")):
                             continue
-                        _mime = str(_e.get("mime", "")).lower()
-                        if not _mime.startswith("image/"):
-                            continue
                         _lid = _e["logo_id"]
+                        _mime = str(_e.get("mime", "")).lower()
+                        _fx = str(_e.get("original_filename", "")).rsplit(".", 1)[-1].lower()
+                        _is_trans = _mime in _trans_mime or _fx in _trans_ext
                         _u = url_for("organisation_setup_logo_serve", logo_id=_lid, bg=1)
-                        if _mime in (
-                            "image/png",
-                            "image/svg+xml",
-                            "image/webp",
-                            "image/gif",
-                            "image/avif",
-                        ):
-                            _trans.append((_u, _lid))
-                        else:
-                            _opaque.append((_u, _lid))
-                    # The backdrop paints ONE logo; cap candidates for sanity.
-                    _ordered = (_trans or _opaque)[:8]
-                    if _ordered:
-                        # When a club uploaded several logos, pick the one that
-                        # reads best as a centred backdrop — a compact, badge-like
-                        # mark over a wide wordmark/lockup (which blurs to a smear).
-                        # Cheap heuristic: nearest-square raw aspect ratio wins.
-                        _pi = 0
-                        if len(_ordered) > 1:
-                            from mediahub.brand.logos import resolve_logo_path as _rlp
+                        _cands.append((0 if _is_trans else 1, -_bg_fit(_lid), _u, _lid))
 
-                            def _bg_fit(_lid):
-                                try:
-                                    _p = _rlp(signed_in_pid, _lid)
-                                    if not _p or _p.suffix.lower() == ".svg":
-                                        return 0.6  # vectors: neutral, usually fine
-                                    from PIL import Image as _PImg
+                    # Best-backing first; cap the walk so a pathological 500-logo
+                    # profile can't fan out into hundreds of rasterisations.
+                    for _tier, _negfit, _u, _lid in sorted(_cands)[:12]:
+                        _sil = _bg_sil(signed_in_pid, _lid)
+                        if _sil and _sil.suffix.lower() in (".png", ".svg"):
+                            signed_in_bg_logos = [_u]
+                            # Per-logo adaptive treatment so the watermark sits at a
+                            # consistent, tasteful presence whatever the logo's design.
+                            signed_in_bg_treatment = _bg_treat(signed_in_pid, _lid)
+                            break
 
-                                    with _PImg.open(_p) as _im:
-                                        _w, _hh = _im.size
-                                    if _w <= 0 or _hh <= 0:
-                                        return 0.0
-                                    _ar = _w / _hh if _w >= _hh else _hh / _w
-                                    return 1.0 / _ar  # square→1.0, wide/tall→lower
-                                except Exception:
-                                    return 0.4
-
-                            _pi = max(
-                                range(len(_ordered)),
-                                key=lambda i: (_bg_fit(_ordered[i][1]), -i),
-                            )
-                        _primary = _ordered[_pi]
-                        signed_in_bg_logos = [_primary[0]]
-                        # Per-logo adaptive treatment so the watermark sits at a
-                        # consistent, tasteful presence whatever the logo's design.
-                        from mediahub.brand.logos import logo_bg_treatment as _bg_treat
-
-                        signed_in_bg_treatment = _bg_treat(signed_in_pid, _primary[1])
-                    else:
-                        # No uploaded logo — fall back to the org's WEBSITE-CAPTURED
-                        # logo (mirrored first-party) so the backdrop works no matter
-                        # which profile is selected, not only ones with an upload.
+                    if not signed_in_bg_logos:
+                        # No uploaded logo we can paint — fall back to the org's
+                        # WEBSITE-CAPTURED logo (mirrored first-party) so the backdrop
+                        # works no matter which profile is selected, not only ones with
+                        # a usable upload. The mirror ?bg=1 route ships a transparent
+                        # pixel if even that can't be rasterised, so it's never broken.
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
                         if _cap.startswith("http://") or _cap.startswith("https://"):
                             from mediahub.brand.logos import mirror_bg_treatment as _mir_treat
@@ -10831,53 +10849,60 @@ def _layout(
     # captured): "image" paints a colourful logo's real artwork; "knockout" paints
     # a monochrome / SVG logo's shape in one light brand-tinted ink.
     bg_logos_html = ""
-    if signed_in_bg_logos:
-        _brand = (
-            signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
-        )
-        _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
-        _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
-        try:
-            _op = float(_t.get("opacity", 0.5))
-        except (TypeError, ValueError):
-            _op = 0.5
-        if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
-            _op = 0.5
-        _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
-        # Adaptive blur (px): busier crests blur more so they read as a clean glow.
-        # Sanitised to a plain int so --mh-blur is always a valid length.
-        try:
-            _blur = int(round(float(_t.get("blur", 22))))
-        except (TypeError, ValueError):
-            _blur = 22
-        _blur = min(60, max(8, _blur))
-        _geo = (
-            "left:50%;top:53%;"
-            "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
-            f"--op:{_op};--mh-blur:{_blur}px;"
-        )
-        if _t.get("mode") == "image":
-            # Colourful logo → its real artwork (blurred by the fixed CSS rule).
-            _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
-                f"background-image:url('{_src}')"
-                '"></span>'
+    _brand = signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
+    # Render the backdrop whenever there's a paintable logo OR at least a brand
+    # colour. A soft brand-coloured wash is a tasteful "better than nothing" when a
+    # club's logo can't be rendered as a backdrop (an unrenderable format) or the
+    # org has a brand colour but no logo at all — far nicer than a blank page. The
+    # logo crest is layered on only when we actually have one to paint.
+    if signed_in_bg_logos or _brand:
+        _hero = ""
+        if signed_in_bg_logos:
+            _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
+            _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
+            try:
+                _op = float(_t.get("opacity", 0.5))
+            except (TypeError, ValueError):
+                _op = 0.5
+            if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
+                _op = 0.5
+            _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
+            # Adaptive blur (px): a busier crest earns a little more, but kept MODEST
+            # so the logo stays identifiable. Sanitised to a plain int so --mh-blur is
+            # always a valid length, and clamped to the professional band as a guard
+            # against any stale/odd value sneaking through.
+            try:
+                _blur = int(round(float(_t.get("blur", 14))))
+            except (TypeError, ValueError):
+                _blur = 14
+            _blur = min(28, max(8, _blur))
+            _geo = (
+                "left:50%;top:50%;"
+                "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
+                f"--op:{_op};--mh-blur:{_blur}px;"
             )
-        else:
-            # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
-            _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
-                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
-                '"></span>'
-            )
+            if _t.get("mode") == "image":
+                # Colourful logo → its real artwork (blurred by the fixed CSS rule).
+                _hero = (
+                    f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
+                    f"background-image:url('{_src}')"
+                    '"></span>'
+                )
+            else:
+                # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
+                _hero = (
+                    f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
+                    f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
+                    '"></span>'
+                )
         _wash = '<div class="mh-bg-wash"></div>' if _brand else ""
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
+        _marks = ('<div class="mh-bg-marks">' + _hero + "</div>") if _hero else ""
         bg_logos_html = (
             f'<div class="mh-bg-canvas" aria-hidden="true"{_brand_attr}>'
             + _wash
-            + '<div class="mh-bg-marks">'
-            + _hero
-            + "</div></div>"
+            + _marks
+            + "</div>"
         )
 
     # One-shot success/error toast queued by a prior POST (see _flash_toast).
@@ -34173,18 +34198,36 @@ function mhSetupMode(mode) {{
         prof = _active_profile()
         if not prof:
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path, logo_bg_silhouette_path
+        from mediahub.brand.logos import (
+            resolve_logo_path,
+            logo_bg_silhouette_path,
+            transparent_pixel_png,
+        )
 
         # ?bg=1 serves the clean-alpha silhouette used by the signed-in logo
         # wall (transparent for any logo, opaque backgrounds keyed out). It's
-        # cached and immutable per logo_id, so it's safe to cache hard.
+        # cached and immutable per logo_id, so it's safe to cache hard. The
+        # Content-Type is set explicitly because the response carries nosniff —
+        # the silhouette is only ever a PNG (rasterised) or an SVG (passthrough).
         if request.args.get("bg"):
             sil = logo_bg_silhouette_path(prof.profile_id, logo_id)
             if sil:
                 resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = (
+                    "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
+                )
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            return ("", 404)
+            # The logo can't be rasterised to a paintable silhouette (an exotic or
+            # corrupt format). Ship a transparent pixel — never a 404 — so the CSS
+            # mask/background loads and the backdrop element hides cleanly instead
+            # of failing into a solid ink block. Keeps the backdrop safe for ANY
+            # uploaded format.
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = resolve_logo_path(prof.profile_id, logo_id)
         if not path:
             return ("", 404)
@@ -34242,6 +34285,7 @@ function mhSetupMode(mode) {{
             mirror_bg_silhouette_path,
             mirror_content_type,
             mirror_external_logo,
+            transparent_pixel_png,
         )
 
         # ?bg=1 serves the clean-alpha silhouette of the mirrored logo for the
@@ -34254,7 +34298,14 @@ function mhSetupMode(mode) {{
                 resp.headers["Content-Type"] = mirror_content_type(sil)
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            return ("", 404)
+            # Can't rasterise the mirrored logo — ship a transparent pixel (never a
+            # 404) so the CSS mask/background loads and hides cleanly rather than
+            # painting a solid ink block.
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = mirror_external_logo(profile_id, url)
         if not path:
             return ("", 404)

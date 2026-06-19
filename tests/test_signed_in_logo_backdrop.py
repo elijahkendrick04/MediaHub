@@ -121,6 +121,19 @@ def _opacity(style: str) -> float:
     return float(m.group(1))
 
 
+def _blur_px(style: str) -> int:
+    m = re.search(r"--mh-blur:(\d+)px", style)
+    assert m, f"inline --mh-blur not found in {style!r}"
+    return int(m.group(1))
+
+
+def _dark_colourful_paint(d: ImageDraw.ImageDraw, w: int, h: int) -> None:
+    """Two distinct hues (colourful) but both DARK → real colour wouldn't read on
+    the near-black page, so the treatment must fall to the readable knockout."""
+    d.rectangle([20, 15, w - 20, h - 15], fill=(24, 38, 96, 255))  # navy
+    d.polygon([(w // 2, 24), (w - 30, h - 24), (30, h - 24)], fill=(120, 24, 40, 255))  # crimson
+
+
 def test_colourful_logo_is_painted_as_real_artwork(client):
     """A colourful logo → image mode: its real artwork off ?bg=1, never masked."""
     _make_org("org-a", brand="#24507f", with_logo=True)  # default = colourful
@@ -148,12 +161,12 @@ def test_css_contract_is_future_proof(client):
     html = _home(client, "org-b")
     _classes, style = _mark(html)
 
-    assert "left:50%" in style and "top:53%" in style  # centred
+    assert "left:50%" in style and "top:50%" in style  # dead-centred
     assert "background-size: contain" in html  # any aspect ratio survives
     assert "--op:" in style  # adaptive opacity, inline
     # Blur is a CSS rule keyed off the per-logo adaptive --mh-blur (busier crests
-    # blur more), with a fixed fallback so it can never be voided and leave a logo
-    # sharp; the inline side only sets the variable, never a `filter`.
+    # blur a little more), with a fixed fallback so it can never be voided and
+    # leave a logo sharp; the inline side only sets the variable, never a `filter`.
     assert "blur(var(--mh-blur" in html
     assert "--mh-blur:" in style
     assert "filter:" not in style  # blur is never an inline filter
@@ -223,9 +236,22 @@ def test_no_brand_colour_drops_the_wash_but_keeps_the_crest(client):
     assert 'class="mh-bg-wash"' not in html  # no colour → no ambient wash
 
 
-def test_no_logo_means_no_backdrop(client):
+def test_no_logo_but_brand_colour_shows_the_brand_wash(client):
+    """No paintable logo but a brand colour → the soft brand wash still renders as
+    a tasteful 'better than nothing', with no logo crest."""
     _make_org("org-d", brand="#24507f", with_logo=False)
     html = _home(client, "org-d")
+    assert 'class="mh-bg-canvas"' in html
+    assert 'class="mh-bg-wash"' in html
+    # No crest SPAN (the CSS rule names still live in the stylesheet) — just the wash.
+    assert '<span class="mh-bg-mark' not in html
+    assert "--mh-bg-brand:#24507f" in html
+
+
+def test_no_logo_and_no_brand_colour_shows_nothing(client):
+    """With neither a paintable logo nor a brand colour there's nothing to show."""
+    _make_org("org-empty", brand="", with_logo=False)
+    html = _home(client, "org-empty")
     assert 'class="mh-bg-canvas"' not in html
 
 
@@ -271,6 +297,68 @@ def test_nan_opacity_is_sanitised_and_blur_survives(client, monkeypatch):
     m = re.search(r"--op:([0-9.]+)", style)
     assert m and 0.0 <= float(m.group(1)) <= 1.0  # sanitised to a finite opacity
     assert "blur(var(--mh-blur" in html  # blur is a CSS rule, unaffected
+
+
+def test_blur_stays_modest_so_the_logo_is_identifiable(client):
+    """The whole point of the backdrop is that you can SEE it's the club's logo.
+    The adaptive blur must stay in a modest band — even a busy crest is soft-focus,
+    never dissolved into an anonymous blob (the old build blurred busy crests ~46px
+    so they smeared away)."""
+
+    def busy(d, w, h):  # detailed crest with fine internal structure
+        d.ellipse([8, 8, w - 8, h - 8], outline=(20, 60, 150, 255), width=8)
+        d.ellipse([28, 28, w - 28, h - 28], fill=(40, 120, 200, 255))
+        d.polygon([(w // 2, 30), (w - 24, h - 24), (24, h - 24)], fill=(232, 130, 40, 255))
+        for i in range(8):
+            d.line([40 + i * 22, h // 2, 40 + i * 22, h // 2 + 30], fill=(255, 255, 255, 255), width=3)
+
+    _make_org("org-busy", brand="#1659c8", logo_paint=busy)
+    _make_org("org-disc", brand="#1659c8")  # a simple filled mark
+
+    busy_blur = _blur_px(_mark(_home(client, "org-busy"))[1])
+    disc_blur = _blur_px(_mark(_home(client, "org-disc"))[1])
+
+    # Modest, identifiable band — far below the old smear (and below the inline
+    # clamp guard of 28). A busier crest may sit a touch higher, never lower.
+    assert 8 <= disc_blur <= 22, f"simple mark blur {disc_blur} outside the modest band"
+    assert 8 <= busy_blur <= 22, f"busy crest blur {busy_blur} dissolves the logo"
+    assert busy_blur >= disc_blur
+
+
+def test_dark_colourful_logo_uses_a_readable_knockout(client):
+    """A colourful but DARK logo (e.g. a navy crest) would paint as an invisible
+    dark smudge in image mode — only its few bright accents showing, off to one
+    side. It must take the knockout path so the whole shape reads as a light ghost,
+    identifiable as the club's mark."""
+    _make_org("org-darkcol", brand="#16306a", with_logo=True, logo_paint=_dark_colourful_paint)
+    classes, style = _mark(_home(client, "org-darkcol"))
+
+    assert "mh-bg-mark--ko" in classes  # knockout, not an invisible image-mode smudge
+    assert "background-image" not in style
+    assert re.search(r"mask-image:url\('[^']*bg=1[^']*'\)", style)
+
+
+def test_treatment_cache_is_versioned_so_recalibration_reaches_old_profiles(client):
+    """A *.treat.json from an older calibration (no/stale schema version) must be
+    ignored and recomputed — otherwise a live profile keeps serving a stale,
+    differently-tuned blur/opacity forever. This is what makes a recalibration
+    actually reach the existing clubs, not only fresh uploads."""
+    from mediahub.brand import logos as L
+
+    _make_org("org-stale", brand="#24507f", with_logo=True)
+    # First call materialises the silhouette and writes a current-version cache.
+    first = L.logo_bg_treatment("org-stale", "logo01")
+    assert first.get("v") == L._BG_TREAT_VERSION
+
+    sil = L.logo_bg_silhouette_path("org-stale", "logo01")
+    cache = sil.with_suffix(".treat.json")
+    # Simulate a cache written by an older build: a wildly different blur, no `v`.
+    cache.write_text('{"mode": "image", "opacity": 0.5, "blur": 99}')
+
+    again = L.logo_bg_treatment("org-stale", "logo01")
+    assert again.get("v") == L._BG_TREAT_VERSION  # recomputed at the current version
+    assert again.get("blur") != 99  # the stale value did NOT leak through
+    assert 8 <= int(again["blur"]) <= 22  # and the recompute lands in the modest band
 
 
 def test_multi_logo_picks_the_most_badge_like(client):
