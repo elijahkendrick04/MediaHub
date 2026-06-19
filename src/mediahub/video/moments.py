@@ -180,7 +180,9 @@ def rank_moments(
         has_cut = any(s <= c <= en for c in cut_set)
         score = e + (0.25 if has_cut else 0.0)
         kind = "energy+scene" if has_cut else "energy"
-        reason = f"audio energy {e:.2f} at {start_ms // 1000}s" + (" with a scene cut" if has_cut else "")
+        reason = f"audio energy {e:.2f} at {start_ms // 1000}s" + (
+            " with a scene cut" if has_cut else ""
+        )
         candidates.append(Moment(s, en, score, kind, reason))
 
     # Scene-cut candidates with no nearby energy window (silent visual change).
@@ -189,9 +191,7 @@ def rank_moments(
         if any(abs(c - s) <= half for s in energy_starts):
             continue
         s, en = _window_for(c)
-        candidates.append(
-            Moment(s, en, 0.4, "scene", f"scene cut at {c // 1000}s")
-        )
+        candidates.append(Moment(s, en, 0.4, "scene", f"scene cut at {c // 1000}s"))
 
     if not candidates:
         # No signal at all (a flat, silent clip): keep the opening as the moment.
@@ -234,23 +234,29 @@ def energy_args(path: Path | str, *, window_ms: int = 1000) -> list[str]:
     """FFmpeg args that print per-window RMS loudness (pure builder)."""
     samples = max(1, round(44100 * window_ms / 1000))
     return [
-        "-i", str(path),
+        "-i",
+        str(path),
         "-vn",
         "-af",
         f"aresample=44100,asetnsamples=n={samples}:p=0,"
         "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level",
-        "-f", "null", "-",
+        "-f",
+        "null",
+        "-",
     ]
 
 
 def scene_args(path: Path | str, *, threshold: float = 0.3) -> list[str]:
     """FFmpeg args that print scene-change timestamps (pure builder)."""
     return [
-        "-i", str(path),
+        "-i",
+        str(path),
         "-an",
         "-vf",
         f"select='gt(scene,{threshold:g})',metadata=print",
-        "-f", "null", "-",
+        "-f",
+        "null",
+        "-",
     ]
 
 

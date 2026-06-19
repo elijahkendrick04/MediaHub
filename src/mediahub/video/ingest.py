@@ -60,8 +60,7 @@ def ingest_footage(
         raise ValueError("footage is empty")
     if not is_video_filename(filename):
         raise ValueError(
-            f"{filename!r} is not a recognised video file (accepted: "
-            f"{sorted(VIDEO_EXTS)})"
+            f"{filename!r} is not a recognised video file (accepted: {sorted(VIDEO_EXTS)})"
         )
 
     if store is None:

@@ -90,11 +90,16 @@ def needs_reframe(src_w: int, src_h: int, dst_w: int, dst_h: int, *, tol: float 
 def frame_extract_args(path: Path | str, ms: int, out_png: Path | str) -> list[str]:
     """FFmpeg args to grab a single frame at ``ms`` as a PNG (pure builder)."""
     return [
-        "-ss", f"{max(0, ms) / 1000:.3f}",
-        "-i", str(path),
-        "-frames:v", "1",
-        "-q:v", "2",
-        "-y", str(out_png),
+        "-ss",
+        f"{max(0, ms) / 1000:.3f}",
+        "-i",
+        str(path),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        "-y",
+        str(out_png),
     ]
 
 

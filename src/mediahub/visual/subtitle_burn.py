@@ -524,8 +524,11 @@ def titles_ass_document(
             "Alignment, MarginL, MarginR, MarginV, Encoding"
         ),
     ]
-    events = ["", "[Events]",
-              "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    events = [
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
     styles: list[str] = []
     seen_aligns: set[int] = set()
     for o in overlays:

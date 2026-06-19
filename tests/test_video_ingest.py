@@ -37,8 +37,14 @@ def test_is_video_filename():
 def test_ingest_creates_footage_asset_with_meta(tmp_path):
     store = _FakeStore(tmp_path)
     probe = lambda path: ClipProbe(  # noqa: E731
-        duration_ms=12000, width=1920, height=1080, fps=30.0, has_video=True, has_audio=True,
-        video_codec="h264", audio_codec="aac",
+        duration_ms=12000,
+        width=1920,
+        height=1080,
+        fps=30.0,
+        has_video=True,
+        has_audio=True,
+        video_codec="h264",
+        audio_codec="aac",
     )
     asset = ingest_footage(
         b"\x00\x00\x00\x18ftypmp42rest",

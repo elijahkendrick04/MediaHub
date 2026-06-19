@@ -186,9 +186,7 @@ def clip_maker(
         labelled: list[Moment] = []
         for m in chosen:
             name = _moments.label_moment(m.reason, context=title)
-            labelled.append(
-                Moment(m.start_ms, m.end_ms, m.score, m.kind, m.reason, label=name)
-            )
+            labelled.append(Moment(m.start_ms, m.end_ms, m.score, m.kind, m.reason, label=name))
         chosen = labelled
 
     # Reframe (saliency) — only when the source shape differs from the canvas.

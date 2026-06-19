@@ -72,7 +72,9 @@ class MediaAsset:
     safe_for_minors: bool = True
     cutout_path: Optional[str] = None  # set after rembg
     edit_recipe: dict = field(default_factory=dict)  # 1.3: non-destructive photo-edit recipe
-    media_meta: dict = field(default_factory=dict)  # 1.6: video probe (duration_ms, fps, has_audio…)
+    media_meta: dict = field(
+        default_factory=dict
+    )  # 1.6: video probe (duration_ms, fps, has_audio…)
     source_url: Optional[str] = None  # web-sourced (e.g. Wikimedia)
     source_attribution: Optional[str] = None
     source_licence: Optional[str] = None

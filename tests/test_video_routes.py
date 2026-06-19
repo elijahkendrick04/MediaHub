@@ -78,10 +78,29 @@ def _upload_real_clip(client, tmp_path, *, size="640x480", dur=2):
     exe = _ffmpeg_exe()
     src = tmp_path / "raw.mp4"
     subprocess.run(
-        [exe, "-y", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=30:duration={dur}",
-         "-f", "lavfi", "-i", f"sine=frequency=440:duration={dur}",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src)],
-        check=True, capture_output=True, timeout=120,
+        [
+            exe,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=size={size}:rate=30:duration={dur}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={dur}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(src),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
     )
     data = src.read_bytes()
     return client.post(
@@ -177,7 +196,12 @@ def test_export_gate_blocks_unapproved(app):
         # ...but export is blocked until approval.
         assert c.get(f"/api/video/projects/{proj.id}/file?download=1").status_code == 403
         # Approve, then export is allowed.
-        assert c.post(f"/api/video/projects/{proj.id}/approve", json={"status": "approved"}).status_code == 200
+        assert (
+            c.post(
+                f"/api/video/projects/{proj.id}/approve", json={"status": "approved"}
+            ).status_code
+            == 200
+        )
         assert c.get(f"/api/video/projects/{proj.id}/file?download=1").status_code == 200
 
 
@@ -189,7 +213,9 @@ def test_edit_reopens_approval(app):
     store = get_store()
     proj = store.save(
         VideoProject(
-            id="", profile_id="alpha", status="approved",
+            id="",
+            profile_id="alpha",
+            status="approved",
             edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]),
         )
     )
@@ -207,7 +233,9 @@ def test_update_rejects_invalid_edl(app):
     from mediahub.video.projects import VideoProject, get_store
 
     store = get_store()
-    proj = store.save(VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)])))
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
     with application.test_client() as c:
         _pin(c, "alpha")
         r = c.post(f"/api/video/projects/{proj.id}", json={"edl": {"clips": []}})

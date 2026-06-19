@@ -127,11 +127,16 @@ def build_ffmpeg_args(
         args += ["-map", f"[{compiled.aout}]"]
 
     args += [
-        "-r", str(fps),
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
-        "-pix_fmt", "yuv420p",
+        "-r",
+        str(fps),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
     ]
     if compiled.aout:
         args += ["-c:a", "aac", "-b:a", "160k"]
@@ -229,9 +234,22 @@ def _write_poster(cached: Path) -> None:
     poster = cached.with_suffix(".poster.png")
     try:
         subprocess.run(
-            [exe, "-hide_banner", "-loglevel", "error", "-y", "-i", str(cached),
-             "-frames:v", "1", "-q:v", "3", str(poster)],
-            capture_output=True, timeout=60,
+            [
+                exe,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(cached),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "3",
+                str(poster),
+            ],
+            capture_output=True,
+            timeout=60,
         )
     except (subprocess.SubprocessError, OSError):
         pass
@@ -302,7 +320,10 @@ def render_edl(edl: EDL, out_path: Path | str, *, timeout: int = 600) -> Path:
             title_file = Path(td) / "titles.ass"
             title_file.write_text(
                 titles_ass_document(
-                    overlay_lines, width=edl.width, height=edl.height, fps=edl.fps,
+                    overlay_lines,
+                    width=edl.width,
+                    height=edl.height,
+                    fps=edl.fps,
                     scrim=edl.background,
                 ),
                 encoding="utf-8",

@@ -18,8 +18,14 @@ from mediahub.video.probe import ClipProbe
 
 def _probe(w=1920, h=1080, dur=12000, audio=True):
     return ClipProbe(
-        duration_ms=dur, width=w, height=h, fps=30.0, has_video=True, has_audio=audio,
-        video_codec="h264", audio_codec="aac" if audio else "",
+        duration_ms=dur,
+        width=w,
+        height=h,
+        fps=30.0,
+        has_video=True,
+        has_audio=audio,
+        video_codec="h264",
+        audio_codec="aac" if audio else "",
     )
 
 
@@ -46,9 +52,7 @@ def test_build_clip_edl_one_moment():
 
 def test_build_clip_edl_multi_moment_transitions():
     moments = [_moment(0, 3000), _moment(5000, 8000), _moment(9000, 11000)]
-    edl = build_clip_edl(
-        "a.mp4", _probe(), moments, transition_kind="fade", transition_ms=400
-    )
+    edl = build_clip_edl("a.mp4", _probe(), moments, transition_kind="fade", transition_ms=400)
     assert len(edl.clips) == 3
     assert edl.clips[0].transition_in.is_cut  # first is always a cut
     assert edl.clips[1].transition_in.kind == "fade"
@@ -66,7 +70,10 @@ def test_build_clip_edl_applies_crops_and_title():
 def test_build_clip_edl_restyles_captions_to_brand():
     track = {"color": "#FFFFFF", "scrim": "#000000", "cues": [{"from": 0, "dur": 30, "text": "Go"}]}
     edl = build_clip_edl(
-        "a.mp4", _probe(), [_moment()], caption_track=track,
+        "a.mp4",
+        _probe(),
+        [_moment()],
+        caption_track=track,
         colours=BrandColours(ground="#FFFFFF", accent="#FF0000"),
     )
     # Restyled for a white ground → ink no longer white.

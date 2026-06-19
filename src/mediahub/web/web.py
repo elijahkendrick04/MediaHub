@@ -41638,7 +41638,7 @@ voice, and queues them for one-click approval.</p>
                 return _layout(
                     "Video studio",
                     '<section class="mh-hero"><span class="mh-hero-eyebrow">Video</span>'
-                    "<h1>No organisation,<br><em class=\"editorial\">no studio.</em></h1>"
+                    '<h1>No organisation,<br><em class="editorial">no studio.</em></h1>'
                     '<p class="lede">The video studio is scoped per organisation. '
                     "Set one up, then come back to turn race footage into reels.</p>"
                     f'<div class="mh-hero-actions"><a class="mh-cta-primary" '
@@ -41663,9 +41663,16 @@ voice, and queues them for one-click approval.</p>
             .replace("__FOOTAGE_LIST_URL__", url_for("api_video_footage_list"))
             .replace("__CLIPMAKER_URL__", url_for("api_video_clip_maker"))
             .replace("__PROJECTS_URL__", url_for("api_video_projects_list"))
-            .replace("__PROJECT_RENDER_TMPL__", url_for("api_video_project_render", project_id="__PID__"))
-            .replace("__PROJECT_APPROVE_TMPL__", url_for("api_video_project_approve", project_id="__PID__"))
-            .replace("__PROJECT_FILE_TMPL__", url_for("api_video_project_file", project_id="__PID__"))
+            .replace(
+                "__PROJECT_RENDER_TMPL__", url_for("api_video_project_render", project_id="__PID__")
+            )
+            .replace(
+                "__PROJECT_APPROVE_TMPL__",
+                url_for("api_video_project_approve", project_id="__PID__"),
+            )
+            .replace(
+                "__PROJECT_FILE_TMPL__", url_for("api_video_project_file", project_id="__PID__")
+            )
             .replace("__ENGINE_NOTE__", engine_note)
         )
         return _layout("Video studio", body, active="video")
@@ -41803,9 +41810,7 @@ voice, and queues them for one-click approval.</p>
             format_name=fmt,
         )
         proj = _video_project_store().save(proj)
-        return jsonify(
-            {"ok": True, "project_id": proj.id, "manifest": result.manifest}
-        )
+        return jsonify({"ok": True, "project_id": proj.id, "manifest": result.manifest})
 
     @app.route("/api/video/projects")
     def api_video_projects_list():

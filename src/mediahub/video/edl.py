@@ -274,9 +274,7 @@ def validate(edl: EDL) -> None:
         if c.out_ms and c.out_ms <= c.in_ms:
             raise EDLError(f"clip {i}: out_ms ({c.out_ms}) must exceed in_ms ({c.in_ms})")
         if not (MIN_SPEED <= c.speed <= MAX_SPEED):
-            raise EDLError(
-                f"clip {i}: speed {c.speed} outside [{MIN_SPEED}, {MAX_SPEED}]"
-            )
+            raise EDLError(f"clip {i}: speed {c.speed} outside [{MIN_SPEED}, {MAX_SPEED}]")
         if c.crop is not None:
             if len(c.crop) != 4 or any(v < 0 for v in c.crop) or c.crop[2] <= 0 or c.crop[3] <= 0:
                 raise EDLError(f"clip {i}: crop must be (x,y,w,h) with w,h>0, got {c.crop}")
@@ -345,9 +343,7 @@ def video_clip_chain(
         x, y, w, h = clip.crop
         parts.append(f"crop={w}:{h}:{x}:{y}")
     parts.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
-    parts.append(
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={_pad_colour(background)}"
-    )
+    parts.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={_pad_colour(background)}")
     parts.append("setsar=1")
     parts.append(f"fps={fps}")
     parts.append("format=yuv420p")
@@ -457,9 +453,7 @@ def compile_filtergraph(
         )
         # Accurate audio-stream presence from the probe; unknown ⇒ assume present.
         has_audio = audio.get(c.source, True)
-        lines.append(
-            audio_clip_chain(i, c, keep_audio=edl.keep_audio, has_audio=has_audio)
-        )
+        lines.append(audio_clip_chain(i, c, keep_audio=edl.keep_audio, has_audio=has_audio))
 
     # 2) Join clips onto one running composite (cut → concat, else xfade).
     if len(resolved) == 1:

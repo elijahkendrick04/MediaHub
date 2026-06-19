@@ -103,10 +103,29 @@ def _make_clip(exe, path, *, size, freq, dur=2):
     import subprocess
 
     subprocess.run(
-        [exe, "-y", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=30:duration={dur}",
-         "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={dur}",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path)],
-        check=True, capture_output=True, timeout=120,
+        [
+            exe,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=size={size}:rate=30:duration={dur}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency={freq}:duration={dur}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
     )
 
 
@@ -127,9 +146,15 @@ def test_live_render_reframe_transition_and_captions(tmp_path, monkeypatch):
     c2 = Clip(source=str(b), in_ms=0, out_ms=1500, crop=(280, 0, 720, 720))
     c2.transition_in = Transition("fade", 400)
     edl = EDL(
-        width=1080, height=1920, fps=30,
+        width=1080,
+        height=1920,
+        fps=30,
         clips=[Clip(source=str(a), in_ms=0, out_ms=1500), c2],
-        captions={"color": "#FFF", "scrim": "#0A2540", "cues": [{"from": 0, "dur": 30, "text": "PB"}]},
+        captions={
+            "color": "#FFF",
+            "scrim": "#0A2540",
+            "cues": [{"from": 0, "dur": 30, "text": "PB"}],
+        },
     )
     out = render_edl(edl, tmp_path / "out.mp4")
     assert out.exists() and out.stat().st_size > 4096
