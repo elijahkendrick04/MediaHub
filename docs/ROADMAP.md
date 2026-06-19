@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `4d10c3715` · Merge PR #872: Spotlight graphic celebrates achievements (medals/PBs/swims), not "5 approved"
+**Last updated:** 2026-06-19 · `78d9a8ff0` · Merge pull request #873 from elijahkendrick04/claude/confident-brown-o6zxyg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1222,6 +1222,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `d09a52402` | Backdrop: heavily blur the centred logo into a soft brand glow |
 | 2026-06-19 | `643d1cc61` | fix(spotlight): celebrate achievements on the graphic, not '5 approved' |
 | 2026-06-19 | `b230e1316` | Apply ruff-format to the 1.5 motion vocabulary |
 | 2026-06-19 | `0c18ecce4` | Build 1.5: tokenised motion vocabulary (Remotion + FFmpeg + CSS) |
@@ -1230,6 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `2c1615648` | fix(interpreter): narrow mirror-sidecar skip to _provenance.json only |
 | 2026-06-19 | `cad43d714` | fix(asr): empty audio upload is an honest 400, not a 500 (roadmap 1.4) |
 | 2026-06-19 | `23ab087d4` | fix(interpreter): stop dropping result times/places + entry_url meet name on link runs |
-| 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
-| 2026-06-19 | `2af60c0b4` | fix(spotlight): strip entry_url placeholder + dedupe moments on the composite |
 <!-- /ROADMAP:ACTIVITY -->
