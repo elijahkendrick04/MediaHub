@@ -656,7 +656,12 @@ def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
     ``halo``. Deterministic and cached beside the silhouette; returns the neutral
     knockout for SVGs (not rasterised here) or if analysis can't run.
     """
-    sil = logo_bg_silhouette_path(profile_id, logo_id)
+    return _treatment_for_silhouette(logo_bg_silhouette_path(profile_id, logo_id))
+
+
+def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
+    """Core of logo_bg_treatment: derive the treatment from a prepared silhouette
+    path (uploaded or mirrored). Cached beside the silhouette as ``*.treat.json``."""
     if not sil or sil.suffix.lower() == ".svg":
         return dict(_BG_TREAT_NEUTRAL)
     cache = sil.with_suffix(".treat.json")
@@ -729,8 +734,64 @@ def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
             pass
         return treat
     except Exception:
-        log.warning("bg treatment failed for %s/%s — neutral", profile_id, logo_id, exc_info=True)
+        log.warning("bg treatment failed for %s — neutral", sil, exc_info=True)
         return dict(_BG_TREAT_NEUTRAL)
+
+
+def _mirror_cached_path(profile_id: str, url: str) -> Optional[Path]:
+    """The already-downloaded mirror file for ``url`` (no network), or None."""
+    if not profile_id or not url:
+        return None
+    try:
+        cache_dir = _logo_cache_dir(profile_id)
+    except Exception:
+        return None
+    key = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
+    for ext in _MIRROR_EXTS:
+        p = cache_dir / f"{key}.{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+def mirror_bg_silhouette_path(
+    profile_id: str, url: str, *, allow_fetch: bool = True
+) -> Optional[Path]:
+    """Clean-alpha silhouette of an org's WEBSITE-CAPTURED (mirrored) logo, for the
+    signed-in backdrop — so it works for orgs that never uploaded a file, only had
+    a logo detected from their site.
+
+    Mirrors the same keying as ``logo_bg_silhouette_path``. ``allow_fetch=False``
+    uses only an already-cached mirror (safe to call in the page-render path; it
+    never makes a network request).
+    """
+    src = (
+        mirror_external_logo(profile_id, url)
+        if allow_fetch
+        else _mirror_cached_path(profile_id, url)
+    )
+    if not src:
+        return None
+    if src.suffix.lower() == ".svg":
+        return src
+    try:
+        safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
+        key = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
+        dst = _data_dir() / "logo_variants" / safe / f"mirror_{key}_bg.png"
+        if dst.exists():
+            return dst
+        _render_bg_silhouette(src, dst)
+        return dst if dst.exists() else src
+    except Exception:
+        log.warning("mirror bg silhouette failed for %s — serving raw", profile_id, exc_info=True)
+        return src
+
+
+def mirror_bg_treatment(profile_id: str, url: str) -> dict:
+    """Backdrop treatment for a mirrored website logo. Uses only an already-cached
+    mirror (no network in the render path), so it returns the neutral knockout
+    until the silhouette has been produced by the ``?bg=1`` serve route."""
+    return _treatment_for_silhouette(mirror_bg_silhouette_path(profile_id, url, allow_fetch=False))
 
 
 __all__ = [
@@ -745,5 +806,7 @@ __all__ = [
     "mirror_content_type",
     "logo_bg_silhouette_path",
     "logo_bg_treatment",
+    "mirror_bg_silhouette_path",
+    "mirror_bg_treatment",
     "describe_logo_with_ai",
 ]

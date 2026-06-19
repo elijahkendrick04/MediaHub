@@ -148,14 +148,20 @@ def test_css_contract_is_future_proof(client):
     html = _home(client, "org-b")
     _classes, style = _mark(html)
 
-    assert "left:50%" in style and "top:50%" in style  # centred
+    assert "left:50%" in style and "top:53%" in style  # centred
     assert "background-size: contain" in html  # any aspect ratio survives
     assert "--op:" in style  # adaptive opacity, inline
-    assert "filter:" in style and "blur(" in style and "brightness(" in style
+    # Softly blurred but still identifiable (moderate radius, not a heavy wash).
+    assert "blur(16px)" in style
+    assert "filter:" in style and "brightness(" in style
     assert "pointer-events: none" in html
     # Both modes exist in the stylesheet, with a guaranteed-readable knockout ink.
     assert ".mh-bg-mark--img" in html and ".mh-bg-mark--ko" in html
     assert "--mh-bg-ink" in html
+    # Dynamic: the glow drifts + breathes and the wash orbits, all off under
+    # prefers-reduced-motion.
+    assert "mh-bg-drift" in html and "mh-bg-breathe" in html and "mh-bg-wash-orbit" in html
+    assert "prefers-reduced-motion" in html
     # REGRESSION GUARD — the old flat single-tint silhouette is gone for good.
     assert "--mh-bg-tint" not in html
 
@@ -220,3 +226,29 @@ def test_no_logo_means_no_backdrop(client):
     _make_org("org-d", brand="#24507f", with_logo=False)
     html = _home(client, "org-d")
     assert 'class="mh-bg-canvas"' not in html
+
+
+def test_backdrop_falls_back_to_website_captured_logo(client):
+    """No uploaded logo but a captured website logo → the backdrop still shows,
+    painted from the first-party MIRROR of that logo. This is what makes it work
+    no matter which profile is selected, not only ones that uploaded a file."""
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    prof = ClubProfile(
+        profile_id="org-cap",
+        display_name="Captured SC",
+        brand_primary="#1e63c8",
+        brand_capture_status="ok",
+    )
+    prof.brand_logo_url = "https://example.com/logo.png"  # captured, not uploaded
+    save_profile(prof)
+
+    html = _home(client, "org-cap")
+    classes, style = _mark(html)
+    assert 'class="mh-bg-canvas"' in html
+    # Painted from the mirror serve route's ?bg=1 silhouette of the captured logo.
+    assert "brand-logo?bg=1" in style
+    # No network in the render path: the treatment is the neutral knockout until
+    # the silhouette has been produced by the serve route on first request.
+    assert "mh-bg-mark--ko" in classes
+    assert "blur(" in style

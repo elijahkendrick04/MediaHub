@@ -7095,45 +7095,48 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* Signed-in brand backdrop — the active org's PRIMARY logo as a large, HEAVILY
-   BLURRED glow CENTRED behind the page content (in a faint pool of the club's
-   brand colour, .mh-bg-wash). The blur dissolves the crest's hard edges into a
-   soft on-brand atmosphere, so it sits behind the headline without fighting it.
-   The deterministic logo_bg_treatment analysis still picks the mode per logo, so
-   the glow is future-proof for any upload (set inline as --op + class + blur):
-     • .mh-bg-mark--img — a COLOURFUL logo blurred from its real artwork → a glow
-       in the club's own colours;
+/* Signed-in brand backdrop — the active org's PRIMARY logo as a large, softly
+   blurred glow CENTRED behind the page content, in a faint pool of the club's
+   brand colour (.mh-bg-wash). A MODERATE blur keeps the crest IDENTIFIABLE while
+   softening its edges so it sits behind the headline without knifing through the
+   text, and the whole layer is gently DYNAMIC — the glow slowly drifts and
+   breathes, the wash orbits — for a living, on-brand atmosphere (all motion off
+   under reduced-motion). The deterministic logo_bg_treatment analysis still picks
+   the mode per logo, so it's future-proof for any team's upload:
+     • .mh-bg-mark--img — a COLOURFUL logo blurred from its real artwork → a soft
+       glow in the club's own colours;
      • .mh-bg-mark--ko  — a MONOCHROME logo (black/navy/grey/white/single-ink) or
        an SVG we can't measure, blurred from its shape painted in one light brand-
        tinted ink (--mh-bg-ink) → a soft light glow that always reads on dark.
-   The blur radius + filter are set inline per logo. z-index:0 — behind all
-   content; the layer drifts gently (off under reduced-motion). */
+   --op + blur are set inline per logo. z-index:0 — behind all content. */
 .mh-bg-canvas {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
   /* Light, brand-tinted ink for the monochrome knockout glow so even a near-black
      logo reads as a soft glow (first value is the no-color-mix fallback). */
   --mh-bg-ink: #e9eef5;
-  --mh-bg-ink: color-mix(in oklab, var(--mh-bg-brand, #cfe0ff) 38%, #eef3f9);
+  --mh-bg-ink: color-mix(in oklab, var(--mh-bg-brand, #cfe0ff) 40%, #eef3f9);
 }
-/* Brand-coloured ambient wash, pooled at centre behind the glow. The builder
-   omits this element entirely when the org has no brand colour (neutral). */
+/* Brand-coloured ambient wash, pooled at centre behind the glow; it slowly orbits
+   so the brand light drifts independently of the crest (parallax depth). The
+   builder omits this element entirely when the org has no brand colour. */
 .mh-bg-wash {
-  position: absolute; inset: 0;
-  background: radial-gradient(50% 54% at 50% 49%,
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 16%, transparent) 0%,
-    color-mix(in oklab, var(--mh-bg-brand, transparent) 6%, transparent) 42%,
+  position: absolute; inset: 0; will-change: transform;
+  background: radial-gradient(50% 54% at 50% 50%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 18%, transparent) 0%,
+    color-mix(in oklab, var(--mh-bg-brand, transparent) 7%, transparent) 42%,
     transparent 72%);
+  animation: mh-bg-wash-orbit 38s ease-in-out infinite;
 }
 .mh-bg-marks {
-  position: absolute; inset: 0; will-change: transform;
-  animation: mh-bg-drift 64s ease-in-out infinite alternate;
+  position: absolute; inset: 0; will-change: transform, opacity;
+  /* Slow drift + breathe → a living glow, not a static watermark. */
+  animation: mh-bg-drift 46s ease-in-out infinite, mh-bg-breathe 17s ease-in-out infinite;
 }
 .mh-bg-mark {
   position: absolute;
   /* Per-logo --op (inline, from logo_bg_treatment) × a placement factor --opf;
-     the blur softens the glow so it can sit a touch stronger than a sharp mark.
      --opf lives only in the stylesheet so the mobile query below can override it. */
-  opacity: calc(var(--op, 0.5) * var(--opf, 0.88));
+  opacity: calc(var(--op, 0.5) * var(--opf, 0.6));
   transform: translate(-50%, -50%);
 }
 /* Colourful logo — blurred from its real artwork (filter set inline). */
@@ -7149,15 +7152,26 @@ body::before {
   -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
 }
 @keyframes mh-bg-drift {
-  from { transform: translate3d(-4px, 3px, 0); }
-  to   { transform: translate3d(4px, -5px, 0); }
+  0%   { transform: translate3d(-1.4%, 0.9%, 0); }
+  33%  { transform: translate3d(1.0%, -1.2%, 0); }
+  66%  { transform: translate3d(1.4%, 1.0%, 0); }
+  100% { transform: translate3d(-1.4%, 0.9%, 0); }
+}
+@keyframes mh-bg-breathe {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
+}
+@keyframes mh-bg-wash-orbit {
+  0%   { transform: translate3d(-2.2%, -1.4%, 0) scale(1.05); }
+  50%  { transform: translate3d(2.2%, 1.6%, 0) scale(1.09); }
+  100% { transform: translate3d(-2.2%, -1.4%, 0) scale(1.05); }
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
-  .mh-bg-mark { --opf: 0.72; }
+  .mh-bg-mark { --opf: 0.5; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mh-bg-marks { animation: none; }
+  .mh-bg-marks, .mh-bg-wash { animation: none; }
 }
 
 /* Card hover. Interactive cards (links / [data-interactive]) lift a touch and
@@ -10523,13 +10537,25 @@ def _layout(
                     # First entry is the primary crest the backdrop paints; keep
                     # a few candidates, cap the rest for sanity.
                     _ordered = (_trans or _opaque)[:8]
-                    signed_in_bg_logos = [_u for (_u, _lid) in _ordered]
                     if _ordered:
+                        signed_in_bg_logos = [_u for (_u, _lid) in _ordered]
                         # Per-logo adaptive treatment so the watermark sits at a
                         # consistent, tasteful presence whatever the logo's design.
                         from mediahub.brand.logos import logo_bg_treatment as _bg_treat
 
                         signed_in_bg_treatment = _bg_treat(signed_in_pid, _ordered[0][1])
+                    else:
+                        # No uploaded logo — fall back to the org's WEBSITE-CAPTURED
+                        # logo (mirrored first-party) so the backdrop works no matter
+                        # which profile is selected, not only ones with an upload.
+                        _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
+                        if _cap.startswith("http://") or _cap.startswith("https://"):
+                            from mediahub.brand.logos import mirror_bg_treatment as _mir_treat
+
+                            signed_in_bg_logos = [
+                                url_for("organisation_logo_mirror", profile_id=signed_in_pid, bg=1)
+                            ]
+                            signed_in_bg_treatment = _mir_treat(signed_in_pid, _cap)
                 except Exception:
                     signed_in_bg_logos = []
                     signed_in_bg_treatment = {}
@@ -10537,8 +10563,9 @@ def _layout(
             signed_in_name = ""
 
     # Brand backdrop behind every signed-in page: the org's PRIMARY uploaded logo
-    # as a large, HEAVILY BLURRED glow CENTRED behind the content — the blur turns
-    # the crest into a soft on-brand atmosphere that doesn't fight the headline.
+    # as a large, softly blurred glow CENTRED behind the content. A MODERATE blur
+    # keeps the crest identifiable while softening its edges so it doesn't knife
+    # through the headline; the .mh-bg CSS adds the slow drift/breathe/orbit motion.
     # The per-logo adaptive treatment (logo_bg_treatment) still picks the mode so
     # the glow is future-proof for whatever a club uploads:
     #  - "image": a COLOURFUL logo blurred from its real artwork → a glow in the
@@ -10554,26 +10581,26 @@ def _layout(
         _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
         _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
         _geo = (
-            "left:50%;top:50%;"
-            "width:clamp(480px,56vw,860px);height:clamp(480px,56vw,860px);"
+            "left:50%;top:53%;"
+            "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
             f"--op:{_t.get('opacity', 0.5)};"
         )
         if _t.get("mode") == "image":
-            # Colourful logo → blur its real artwork into a brand-colour glow.
-            # Lift a touch (blur dims) and keep the adaptive desaturation. Values
-            # are floats from image analysis — no user strings.
+            # Colourful logo → soft-blur its real artwork into a brand-colour glow,
+            # kept identifiable. Lift a touch (blur dims) and keep the adaptive
+            # desaturation. Values are floats from image analysis — no user strings.
             _bright = round(max(float(_t.get("brightness", 1.0)), 1.15), 2)
-            _flt = f"blur(74px) saturate({_t['saturate']}) brightness({_bright})"
+            _flt = f"blur(16px) saturate({_t['saturate']}) brightness({_bright})"
             _hero = (
                 f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
                 f"filter:{_flt};background-image:url('{_src}')"
                 '"></span>'
             )
         else:
-            # Monochrome / SVG → light brand-tinted shape via CSS mask, then blur
-            # it into a soft light glow.
+            # Monochrome / SVG → light brand-tinted shape via CSS mask, then soft-
+            # blur it into a soft light glow.
             _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}filter:blur(74px);'
+                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}filter:blur(16px);'
                 f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
                 '"></span>'
             )
@@ -33929,8 +33956,23 @@ function mhSetupMode(mode) {{
         url = (getattr(prof, "brand_logo_url", "") or "").strip()
         if not url:
             return ("", 404)
-        from mediahub.brand.logos import mirror_external_logo, mirror_content_type
+        from mediahub.brand.logos import (
+            mirror_bg_silhouette_path,
+            mirror_content_type,
+            mirror_external_logo,
+        )
 
+        # ?bg=1 serves the clean-alpha silhouette of the mirrored logo for the
+        # signed-in backdrop — the same keyed artwork an uploaded logo gets, so
+        # the backdrop works for orgs whose logo was only captured from their site.
+        if request.args.get("bg"):
+            sil = mirror_bg_silhouette_path(profile_id, url)
+            if sil:
+                resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = mirror_content_type(sil)
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                return resp
+            return ("", 404)
         path = mirror_external_logo(profile_id, url)
         if not path:
             return ("", 404)
