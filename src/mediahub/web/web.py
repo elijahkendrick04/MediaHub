@@ -40428,6 +40428,10 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": True, "text": text})
         except ASRUnavailable as e:
             return jsonify({"error": "asr_unavailable", "user_message": str(e)}), 503
+        except ValueError:
+            # A provider is configured but the upload carried no audio — a client
+            # condition, not a server fault. Honest 400, not a 500 stack trace.
+            return jsonify({"error": "empty", "user_message": "No audio to transcribe."}), 400
 
     def _assemble_reel_inputs(run_id: str):
         """Shared validation + payload assembly for the reel routes.
