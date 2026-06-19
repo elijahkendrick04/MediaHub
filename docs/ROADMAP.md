@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `9d441fc52` · Merge PR #871: Build 1.5 — tokenised motion vocabulary (Remotion + FFmpeg + CSS)
+**Last updated:** 2026-06-19 · `4d10c3715` · Merge PR #872: Spotlight graphic celebrates achievements (medals/PBs/swims), not "5 approved"
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1222,6 +1222,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `643d1cc61` | fix(spotlight): celebrate achievements on the graphic, not '5 approved' |
 | 2026-06-19 | `b230e1316` | Apply ruff-format to the 1.5 motion vocabulary |
 | 2026-06-19 | `0c18ecce4` | Build 1.5: tokenised motion vocabulary (Remotion + FFmpeg + CSS) |
 | 2026-06-19 | `4f07e84fc` | Backdrop: knockout hybrid so it's future-proof for any club logo |
@@ -1231,5 +1232,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `23ab087d4` | fix(interpreter): stop dropping result times/places + entry_url meet name on link runs |
 | 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
 | 2026-06-19 | `2af60c0b4` | fix(spotlight): strip entry_url placeholder + dedupe moments on the composite |
-| 2026-06-19 | `96965f821` | Regenerate ENV_INVENTORY.md for the new ASR env vars |
 <!-- /ROADMAP:ACTIVITY -->
