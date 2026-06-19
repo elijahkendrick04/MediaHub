@@ -21832,6 +21832,93 @@ Relay team broke club record"></textarea>
     def static_fonts_css():
         return app.send_static_file("theme/fonts.css")
 
+    @app.route("/static/theme/motion-vocabulary.css")
+    def static_motion_vocabulary_css():
+        # The compiled brand motion vocabulary (roadmap 1.5): a @keyframes block
+        # per preset, generated from src/mediahub/motion/ by
+        # scripts/regen_motion_tokens.py. Reduce-motion variants are folded in via
+        # @media (prefers-reduced-motion: reduce).
+        return app.send_static_file("theme/motion-vocabulary.css")
+
+    @app.route("/motion/vocabulary")
+    def motion_vocabulary_gallery():
+        """A reference gallery of the brand motion vocabulary (roadmap 1.5).
+
+        An operator/dev surface that renders every preset through its *compiled
+        CSS* — the same tokenised vocabulary the reels compile to Remotion and
+        the ffmpeg engine compiles to filter recipes — grouped by family. The
+        reduce-motion variants are honoured by the stylesheet, so toggling the
+        OS "reduce motion" setting visibly calms the whole page.
+        """
+        from mediahub.motion import compile_css as _mcss
+        from mediahub.motion import vocabulary as _mv
+
+        css_url = url_for("static", filename="theme/motion-vocabulary.css")
+        sections = []
+        for family in _mv.FAMILIES:
+            presets = _mv.by_family(family)
+            cells = []
+            for p in presets:
+                cls = _mcss.class_name(p)
+                cells.append(
+                    f'<figure class="mv-cell"><div class="mv-stage">'
+                    f'<div class="mv-chip {cls}"></div></div>'
+                    f'<figcaption><b>{_h(p.name)}</b>'
+                    f'<span class="mv-meta">{_h(p.energy)} · {_h(p.direction)}'
+                    f'{" · photo" if p.photo else ""}{" · loop" if p.loop else ""}</span>'
+                    f'<span class="mv-desc">{_h(p.description)}</span></figcaption></figure>'
+                )
+            sections.append(
+                f'<section><h2>{_h(family)} '
+                f'<span class="mv-count">{len(presets)}</span></h2>'
+                f'<div class="mv-grid">{"".join(cells)}</div></section>'
+            )
+        body = "".join(sections)
+        html = (
+            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>Motion vocabulary — MediaHub</title>"
+            f"<link rel=\"stylesheet\" href=\"{css_url}\">"
+            "<style>"
+            ":root{--bg:#0A0B11;--panel:#14161F;--ink:#EaEcF2;--muted:#8A90A2;--accent:#C9A227;}"
+            "*{box-sizing:border-box}"
+            "body{margin:0;background:var(--bg);color:var(--ink);"
+            "font-family:'Inter',system-ui,sans-serif;padding:28px 22px 60px}"
+            "header{max-width:1100px;margin:0 auto 8px}"
+            "h1{font-size:22px;margin:0 0 4px}"
+            ".lede{color:var(--muted);max-width:640px;margin:0 0 4px;font-size:14px;line-height:1.5}"
+            "section{max-width:1100px;margin:26px auto 0}"
+            "h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;"
+            "color:var(--accent);border-bottom:1px solid #222533;padding-bottom:6px}"
+            ".mv-count{color:var(--muted);font-weight:400;margin-left:6px}"
+            ".mv-grid{display:grid;gap:14px;"
+            "grid-template-columns:repeat(auto-fill,minmax(150px,1fr));margin-top:14px}"
+            ".mv-cell{margin:0;background:var(--panel);border:1px solid #222533;"
+            "border-radius:10px;padding:12px;cursor:pointer}"
+            ".mv-stage{height:64px;display:flex;align-items:center;justify-content:center;"
+            "overflow:hidden;margin-bottom:10px}"
+            ".mv-chip{width:46px;height:46px;border-radius:9px;"
+            "background:linear-gradient(135deg,var(--accent),#7a6418)}"
+            "figcaption b{font-size:13px}"
+            ".mv-meta{display:block;color:var(--muted);font-size:11px;margin-top:2px}"
+            ".mv-desc{display:block;color:#aeb4c4;font-size:11px;margin-top:5px;line-height:1.4}"
+            "</style></head><body>"
+            "<header><h1>Motion vocabulary</h1>"
+            "<p class=\"lede\">Every brand motion preset (roadmap 1.5), rendered "
+            "from its compiled CSS. One source of truth in <code>motion/</code>; "
+            "the reels compile the same tokens to Remotion and the ffmpeg engine "
+            "to filter recipes. Click a tile to replay; turn on your device's "
+            "<em>reduce motion</em> setting to see the calmer variants.</p></header>"
+            f"{body}"
+            "<script>document.addEventListener('click',function(e){"
+            "var c=e.target.closest('.mv-cell');if(!c)return;"
+            "var chip=c.querySelector('.mv-chip');if(!chip)return;"
+            "var cls=chip.className;chip.className='mv-chip';"
+            "void chip.offsetWidth;chip.className=cls;});</script>"
+            "</body></html>"
+        )
+        return app.response_class(html, mimetype="text/html")
+
     @app.route("/healthz")
     def healthz():
         # Cheap liveness probe (no disk/db work). We still record a

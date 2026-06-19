@@ -1,0 +1,113 @@
+// Sample the motion vocabulary inside Remotion — frame-pure.
+//
+// This is the Remotion "compiler target": it turns a preset's keyframe tokens
+// (the single source of truth in src/mediahub/motion/, mirrored into
+// tokens.generated.ts) into interpolated values via Remotion's `interpolate`
+// and the matching `Easing.bezier`. CSS @keyframes do NOT render in Remotion —
+// only this frame-pure path does.
+//
+// `entranceChannels` maps a preset's generic transform channels onto the
+// StoryCard AnimChannels, staggering hero → result → chrome by importance (the
+// motion-craft choreography rule), so a sprint intent file becomes a one-liner.
+
+import { interpolate } from "remotion";
+import type { AnimChannels } from "../compositions/StoryCard";
+import { easingFor } from "./easing";
+import { MOTION_TOKENS, MotionPresetTokens } from "./tokens.generated";
+
+const REST: Record<string, number> = {
+  opacity: 1,
+  translateX: 0,
+  translateY: 0,
+  scale: 1,
+  rotate: 0,
+  blur: 0,
+};
+
+export function presetFor(
+  name: string,
+  reduced = false,
+): MotionPresetTokens | undefined {
+  const table = reduced ? MOTION_TOKENS.reduced : MOTION_TOKENS.presets;
+  return table[name];
+}
+
+/** Value of one preset channel at `frame` (loops wrap; entrances clamp). */
+export function sampleChannel(
+  preset: MotionPresetTokens,
+  channel: string,
+  frame: number,
+  _fps: number,
+  opts?: { delayFrames?: number; speed?: number },
+): number {
+  const kfs = preset.channels[channel];
+  if (!kfs || kfs.length === 0) {
+    return REST[channel] ?? 0;
+  }
+  const delay = opts?.delayFrames ?? 0;
+  const speed = opts?.speed ?? 1;
+  const dur = Math.max(1, preset.durationFrames / speed);
+  let local = frame - delay;
+  if (preset.loop) {
+    local = ((local % dur) + dur) % dur; // wrap (handles negatives)
+  }
+  const t = local / dur;
+  if (t <= kfs[0].offset) {
+    return kfs[0].value;
+  }
+  const last = kfs[kfs.length - 1];
+  if (t >= last.offset) {
+    return last.value;
+  }
+  for (let i = 1; i < kfs.length; i++) {
+    const a = kfs[i - 1];
+    const b = kfs[i];
+    if (t <= b.offset) {
+      const span = b.offset - a.offset || 1;
+      const localSeg = (t - a.offset) / span;
+      return interpolate(localSeg, [0, 1], [a.value, b.value], {
+        easing: easingFor(b.easing),
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
+    }
+  }
+  return last.value;
+}
+
+const HERO_DELAY = 3;
+const SECONDARY_DELAY = 6;
+const RESULT_DELAY = 9;
+const CHIP_DELAY = 14;
+
+/**
+ * Drive the StoryCard AnimChannels from an entrance preset, staggering the
+ * layers by importance. Channels the preset doesn't animate fall back to rest
+ * (so a scale-only preset leaves heroY at 0, an opacity-only preset leaves
+ * scale at 1), and everything else inherits from `base`.
+ */
+export function entranceChannels(
+  presetName: string,
+  frame: number,
+  fps: number,
+  base: AnimChannels,
+): AnimChannels {
+  const p = presetFor(presetName);
+  if (!p) {
+    return base;
+  }
+  return {
+    ...base,
+    heroY: sampleChannel(p, "translateY", frame, fps, { delayFrames: HERO_DELAY }),
+    heroOpacity: sampleChannel(p, "opacity", frame, fps, { delayFrames: HERO_DELAY }),
+    heroScale: sampleChannel(p, "scale", frame, fps, { delayFrames: HERO_DELAY }),
+    secondaryOpacity: sampleChannel(p, "opacity", frame, fps, {
+      delayFrames: SECONDARY_DELAY,
+    }),
+    resultOpacity: sampleChannel(p, "opacity", frame, fps, {
+      delayFrames: RESULT_DELAY,
+    }),
+    resultScale: sampleChannel(p, "scale", frame, fps, { delayFrames: RESULT_DELAY }),
+    chipOpacity: sampleChannel(p, "opacity", frame, fps, { delayFrames: CHIP_DELAY }),
+  };
+}
