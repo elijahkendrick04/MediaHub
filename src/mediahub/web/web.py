@@ -9913,28 +9913,139 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     }
 
 
-def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
-    """Spotlight builder — the post-build surface for an athlete-spotlight
-    composite post.
+# Self-contained JS for the composite Content builder. URLs ride in via data-*
+# attributes so this stays a static string (no f-string brace-escaping), and it
+# never depends on the per-card `_card_creative_js()` globals. Caption tone tabs
+# + Regenerate + Assist hit the pack-scoped caption endpoints; Generate reel
+# kicks the background reel job and polls it; the approve pill cycles status.
+_COMPOSITE_BUILDER_JS = """
+<script>
+(function(){
+  function tools(){ return document.getElementById('cb-tools'); }
+  function capEl(){ return document.getElementById('cb-caption'); }
+  window.cbTone = function(btn, tone){
+    var wrap = tools(); if(!wrap) return;
+    var url = wrap.getAttribute('data-caption-url'); if(!url) return;
+    var tabs = wrap.querySelectorAll('.cb-tone');
+    for(var i=0;i<tabs.length;i++){
+      var on = tabs[i].getAttribute('data-tone') === tone;
+      tabs[i].style.background = on ? 'color-mix(in oklab, var(--lane) 15%, transparent)' : 'transparent';
+      tabs[i].style.color = on ? 'var(--lane)' : 'var(--ink-dim)';
+      tabs[i].style.fontWeight = on ? '600' : '400';
+    }
+    wrap.setAttribute('data-tone', tone);
+    var cap = capEl(); var prev = cap.textContent;
+    cap.textContent = 'Composing\\u2026'; if(btn) btn.disabled = true;
+    fetch(url + '?tone=' + encodeURIComponent(tone), {method:'POST', credentials:'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(btn) btn.disabled = false;
+        if(j && j.caption){ cap.textContent = j.caption; window.MH && MH.toast('Caption updated', 'success'); }
+        else { cap.textContent = prev; window.MH && MH.toast((j && j.message) || 'Could not compose caption', 'error'); }
+      })
+      .catch(function(){ if(btn) btn.disabled = false; cap.textContent = prev; window.MH && MH.toast('Network error', 'error'); });
+  };
+  window.cbRegen = function(btn){ var wrap = tools(); cbTone(btn, (wrap && wrap.getAttribute('data-tone')) || 'ai'); };
+  window.cbCopy = function(){
+    var c = (capEl().textContent || '').trim();
+    if(navigator.clipboard){ navigator.clipboard.writeText(c).then(function(){ window.MH && MH.toast('Caption copied', 'success'); }); }
+    else { window.MH && MH.toast('Clipboard not available', 'error'); }
+  };
+  window.cbAssistToggle = function(btn){
+    var row = document.getElementById('cb-assist-row'); if(!row) return;
+    row.style.display = (row.style.display === 'none' || !row.style.display) ? '' : 'none';
+  };
+  window.cbAssistRun = function(btn, transform){
+    var wrap = tools(); var url = wrap.getAttribute('data-assist-url');
+    var cap = capEl(); var cur = (cap.textContent || '').trim();
+    if(!cur){ window.MH && MH.toast('Compose a caption first', 'error'); return; }
+    var custom = '';
+    if(transform === 'custom'){
+      var inp = document.getElementById('cb-assist-custom'); custom = inp ? inp.value.trim() : '';
+      if(!custom){ window.MH && MH.toast('Type a change first', 'error'); return; }
+    }
+    var st = document.getElementById('cb-assist-status'); if(st) st.textContent = 'Revising\\u2026';
+    if(btn) btn.disabled = true;
+    fetch(url, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({current_caption: cur, transform: transform, custom: custom, tone: (wrap.getAttribute('data-tone') || 'ai')})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(btn) btn.disabled = false; if(st) st.textContent = '';
+        if(j && j.caption){ cap.textContent = j.caption; window.MH && MH.toast('Caption revised', 'success'); }
+        else { window.MH && MH.toast((j && j.message) || 'Could not revise', 'error'); }
+      })
+      .catch(function(){ if(btn) btn.disabled = false; if(st) st.textContent = ''; window.MH && MH.toast('Network error', 'error'); });
+  };
+  window.cbReel = function(btn){
+    var box = document.getElementById('cb-reel-panel'); if(!box) return;
+    var jobUrl = btn.getAttribute('data-reel-url'); if(!jobUrl) return;
+    box.style.display = '';
+    box.innerHTML = '<div style="padding:14px;font-size:13px;color:var(--ink-dim)">Producing your reel from the approved moments \\u2014 up to ~90s the first time\\u2026</div>';
+    var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Rendering reel\\u2026';
+    var done = function(){ btn.disabled = false; btn.textContent = orig; };
+    var fail = function(m){ done(); box.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel error: ' + m + '</div>'; };
+    fetch(jobUrl, {method:'POST', credentials:'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {s:r.status, b:j}; }); })
+      .then(function(res){
+        if(res.s !== 202 || !res.b || !res.b.poll_url){ fail((res.b && (res.b.user_message || res.b.error)) || 'could not start the render'); return; }
+        var tries = 0;
+        var poll = function(){
+          tries++; if(tries > 80){ fail('timed out waiting for the render \\u2014 try again'); return; }
+          fetch(res.b.poll_url).then(function(r){ return r.json(); }).then(function(j){
+            if(j.status === 'done' && j.video_url){ done();
+              box.innerHTML = '<video controls playsinline style="width:100%;max-width:320px;border-radius:10px;display:block" src="' + j.video_url + '"></video>'
+                + '<div style="margin-top:6px"><a class="btn secondary" style="font-size:11px;padding:4px 10px" href="' + j.video_url + '" download>Download reel</a></div>';
+              return;
+            }
+            if(j.status === 'error' || (j.error && j.status !== 'running')){ fail(j.user_message || j.error || 'render failed'); return; }
+            setTimeout(poll, 3000);
+          }).catch(function(){ setTimeout(poll, 3000); });
+        };
+        setTimeout(poll, 3000);
+      })
+      .catch(function(){ fail('Network error'); });
+  };
+  // Approve pill — queue -> approved -> queue; right-click resets to queue.
+  var NEXT = {queue:'approved', approved:'queue', rejected:'queue'};
+  var STYLE = {queue:['rgba(255,174,59,0.18)','#ffae3b'], approved:['rgba(74,222,128,0.18)','#4ade80'], rejected:['rgba(244,63,94,0.18)','#f43f5e']};
+  function apply(btn, status){ var s = STYLE[status] || STYLE.queue; btn.style.background = s[0]; btn.style.color = s[1]; btn.dataset.status = status; btn.textContent = status; }
+  function send(btn, status){ var prev = btn.dataset.status; apply(btn, status); var fd = new FormData(); fd.append('status', status);
+    fetch(btn.dataset.url, {method:'POST', body: fd, credentials:'same-origin'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(j){ if(j && j.status) apply(btn, j.status); }).catch(function(){ apply(btn, prev); window.MH && MH.toast('Could not save status', 'error'); }); }
+  document.addEventListener('click', function(e){ var btn = e.target.closest('.sp-wf-pill'); if(!btn) return; e.preventDefault(); send(btn, NEXT[btn.dataset.status] || 'approved'); });
+  document.addEventListener('contextmenu', function(e){ var btn = e.target.closest('.sp-wf-pill'); if(!btn) return; e.preventDefault(); send(btn, 'queue'); });
+})();
+</script>
+"""
 
-    Mirrors the Content builder's structure (hero + creative card + download
-    footer) but is scoped to the single composite the spotlight produced, and
-    titled *Spotlight builder*. It runs off the same base generators the rest
-    of the app uses: the caption registers come from the spotlight retone
-    (``_compose_spotlight_caption`` → the cloud LLM) and the graphic from
-    ``create_visual_for_item`` via ``api_stub_pack_create_graphic`` — the same
-    renderer the meet-recap and Content-builder cards use. Replaces the generic
-    saved-draft card layout for spotlight packs.
+
+def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") -> str:
+    """The Content builder — the post-build surface where one post is finished.
+
+    Mode-aware: ``spotlight`` finishes a single COMPOSITE post built from the
+    swimmer's N approved moments (one caption + one graphic + one reel). It
+    carries the same live toolbar the meet-recap Content builder gives each
+    card — caption tone tabs (AI / Warm / Hype / Precise) + Regenerate, inline
+    Assist, Create graphic, and Generate reel — wired to the pack-scoped
+    composite endpoints. Other create-tile modes (meet recap, event preview …)
+    can be added later by extending ``_MODE``; only ``spotlight`` is wired now.
     """
-    import html as _html
-
-    from mediahub.brand.tone import TONE_META as _TM
-
     fd = rec.get("form_data") or {}
     cards = rec.get("cards") or []
     card = cards[0] if cards else {}
 
-    swimmer = str(fd.get("swimmer_name") or rec.get("title") or "Spotlight").strip()
+    # Per-mode chrome. Spotlight is the only wired mode today; an unknown mode
+    # falls back to the spotlight surface rather than erroring.
+    _MODE = {
+        "spotlight": {
+            "eyebrow": "Content builder",
+            "subject_fallback": "Spotlight",
+            "sub_fallback": "Athlete spotlight",
+        },
+    }
+    cfg = _MODE.get(mode) or _MODE["spotlight"]
+
+    swimmer = str(fd.get("swimmer_name") or rec.get("title") or cfg["subject_fallback"]).strip()
     meet = str(fd.get("meet_name") or "").strip()
     run_id = str(fd.get("run_id") or "")
     swimmer_key = str(fd.get("swimmer_key") or "")
@@ -9943,6 +10054,13 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     except (TypeError, ValueError):
         n_approved = 0
     cur_tone = str(fd.get("tone") or "")
+    # Saved compose tone → active toolbar tab (brand voice == the AI tab).
+    _active_tone = {
+        "": "ai",
+        "warm-club": "warm-club",
+        "hype": "hype",
+        "data-led": "data-led",
+    }.get(cur_tone, "ai")
 
     caption = str(card.get("caption") or "").strip()
     hashtags = card.get("hashtags") or []
@@ -9960,32 +10078,32 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     )
     _drafts_url = url_for("stub_packs_list")
     _export_url = url_for("stub_pack_export", pack_id=pack_id)
-    _retone_url = url_for("spotlight_pack_retone", pack_id=pack_id)
+    _caption_url = url_for("api_stub_pack_caption", pack_id=pack_id, card_idx=0)
+    _assist_url = url_for("api_stub_pack_caption_assist", pack_id=pack_id, card_idx=0)
+    _reel_job_url = url_for("api_stub_pack_reel_job", pack_id=pack_id, card_idx=0)
     _graphic_url = url_for("api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0)
     _status_url = url_for("api_stub_pack_card_status", pack_id=pack_id, card_idx=0)
 
     # Same honest AI-unavailable banner the Content builder shows.
     _ai_banner_html = _ai_unavailable_banner(_AI_UNAVAILABLE_DETAIL_PACK)
 
-    # Caption-tone tabs: Brand voice + the three registers, styled like the
-    # Content builder's tone row but wired to the spotlight retone (each is a
-    # form POST that recomposes the same approved moments in a new register).
+    # Caption-tone tabs — the SAME registers the meet-recap Content builder
+    # offers (AI / Warm / Hype / Precise), wired LIVE to the pack-scoped caption
+    # endpoint (recomposes the same approved moments in the new register, no
+    # full-page reload). AI == the org's brand voice.
+    _TONE_TABS = [("ai", "✦ AI"), ("warm-club", "Warm"), ("hype", "Hype"), ("data-led", "Precise")]
     tone_tabs = ""
-    for _t, _label in [(None, "Brand voice")] + [(t, m["label"]) for t, m in _TM.items()]:
-        _val = _t.value if _t is not None else ""
-        _on = _val == cur_tone
+    for _k, _label in _TONE_TABS:
+        _on = _k == _active_tone
         _bg = "color-mix(in oklab, var(--lane) 15%, transparent)" if _on else "transparent"
         _fg = "var(--lane)" if _on else "var(--ink-dim)"
         _weight = "600" if _on else "400"
         tone_tabs += (
-            f'<form method="post" action="{_h(_retone_url)}" style="display:inline" '
-            f'data-loader-text="Rewriting in {_h(_label)}">'
-            f'<input type="hidden" name="tone" value="{_h(_val)}"/>'
-            f'<button type="submit" '
-            f'style="font-size:11px;padding:3px 10px;border-radius:999px;'
-            f"border:1px solid var(--border);cursor:pointer;background:{_bg};"
-            f'color:{_fg};font-family:inherit;margin:0 4px 4px 0;font-weight:{_weight}"'
-            f"{' disabled' if _on else ''}>{_h(_label)}</button></form>"
+            f'<button type="button" class="cb-tone" data-tone="{_k}" '
+            f"onclick=\"cbTone(this, '{_k}')\" "
+            f"style=\"font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);"
+            f"cursor:pointer;background:{_bg};color:{_fg};font-family:inherit;margin:0 4px 4px 0;"
+            f'font-weight:{_weight}">{_h(_label)}</button>'
         )
 
     # Real, grounded moments going into the post (event + time per approved
@@ -10020,7 +10138,42 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     )
 
     g_card_id = f"{pack_id}-0"
-    caption_for_copy = _html.escape(json.dumps(caption), quote=True)
+
+    # Inline Assist row — the meet-recap revise buttons (shorter / punchier /
+    # add the time / tidy / summarise / expand / rewrite + a custom box), hidden
+    # until "Assist…" is clicked. AI suggests; the user keeps or copies.
+    _assist_btns = "".join(
+        f'<button type="button" class="btn secondary" style="font-size:11px;padding:3px 9px" '
+        f"onclick=\"cbAssistRun(this, '{_t}')\">{_lbl}</button>"
+        for _t, _lbl in [
+            ("shorter", "Shorter"),
+            ("punchier", "Punchier"),
+            ("add_time", "Add time"),
+            ("tidy", "Tidy up"),
+            ("summarise", "Summarise"),
+            ("expand", "Expand"),
+            ("rewrite", "Rewrite"),
+        ]
+    )
+    assist_row = (
+        '<div id="cb-assist-row" style="display:none;margin-top:8px;padding:8px 10px;'
+        'background:rgba(255,255,255,0.02);border:1px dashed var(--border);border-radius:6px">'
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);'
+        'margin-bottom:6px;letter-spacing:0.5px">Assist &mdash; revise the caption '
+        "(AI suggests; you approve)</div>"
+        '<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">'
+        f"{_assist_btns}"
+        '<input id="cb-assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" '
+        'aria-label="Custom caption change instruction" style="flex:1;min-width:140px;font-size:12px;'
+        'padding:4px 8px;border:1px solid var(--border);border-radius:6px;'
+        'background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
+        '<button type="button" class="btn" style="font-size:11px;padding:3px 10px;'
+        'background:var(--lane);color:var(--lane-ink);border:none" '
+        "onclick=\"cbAssistRun(this, 'custom')\">Apply</button>"
+        "</div>"
+        '<div id="cb-assist-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>'
+        "</div>"
+    )
 
     # Approve pill — same endpoint + approve-only cycle as the saved-draft list.
     _pill_style = {
@@ -10042,7 +10195,7 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
         _sub_bits.append(
             f"Composed from {n_approved} approved moment{'s' if n_approved != 1 else ''}"
         )
-    sub_line = " &middot; ".join(_sub_bits) if _sub_bits else "Athlete spotlight"
+    sub_line = " &middot; ".join(_sub_bits) if _sub_bits else cfg["sub_fallback"]
 
     _strap_bits = []
     if meet:
@@ -10066,7 +10219,7 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     return f"""
 {_ai_banner_html}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Spotlight builder</span>
+  <span class="mh-hero-eyebrow">{_h(cfg["eyebrow"])}</span>
   <h1>{_h(swimmer)}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">{strap_html}</div>
 </section>
@@ -10080,25 +10233,26 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
     {approve_pill}
   </div>
 
-  <div class="tone-picker" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">
+  <div class="tone-picker" id="cb-tools" data-caption-url="{_h(_caption_url)}" data-assist-url="{_h(_assist_url)}" data-tone="{_active_tone}" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">
     <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>
     <div style="margin-bottom:10px;display:flex;flex-wrap:wrap;align-items:center">{tone_tabs}</div>
-    <div class="caption-text" style="font-size:13px;color:var(--ink);white-space:pre-wrap;line-height:1.5">{_caption_block}</div>
+    <div id="cb-caption" class="caption-text" style="font-size:13px;color:var(--ink);white-space:pre-wrap;line-height:1.5">{_caption_block}</div>
     {tags_html}
     <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px"
-        onclick='(function(b){{
-          var c = {caption_for_copy};
-          if (navigator.clipboard) {{ navigator.clipboard.writeText(c).then(function(){{ window.MH && MH.toast("Caption copied", "success"); }}); }}
-          else {{ window.MH && MH.toast("Clipboard not available", "error"); }}
-        }})(this)'>Copy caption</button>
+      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="cbCopy()">Copy caption</button>
+      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="cbRegen(this)">&#x21BA; Regenerate caption</button>
+      <button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="cbAssistToggle(this)">&#10024; Assist&hellip;</button>
       <button type="button" class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none"
         onclick="mhCreateGraphic(this, {repr(_graphic_url)}, '{_h(g_card_id)}')">&#x2726; Create graphic</button>
+      <button type="button" class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none"
+        data-reel-url="{_h(_reel_job_url)}" onclick="cbReel(this)">&#x25B6; Generate reel</button>
       <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_export_url)}"
         title="Download the caption as .txt for manual posting">&#x2B07; Export caption</a>
       {_schedule_button_html(f"_stub_{pack_id}", f"stub:{pack_id}:0", g_card_id)}
     </div>
+    {assist_row}
     <div class="visual-panel" data-card="{_h(g_card_id)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>
+    <div id="cb-reel-panel" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
   </div>
   {moments_html}
   {notes_html}
@@ -10111,19 +10265,7 @@ def _render_spotlight_builder(pack_id: str, rec: dict) -> str:
 </div>
 
 {_VISUAL_PANEL_JS}
-<script>
-(function(){{
-  // Approve-only flow, same cycle as the saved-draft card pill.
-  var NEXT = {{queue:'approved', approved:'queue', rejected:'queue'}};
-  var STYLE = {{queue:['rgba(255,174,59,0.18)','#ffae3b'],approved:['rgba(74,222,128,0.18)','#4ade80'],rejected:['rgba(244,63,94,0.18)','#f43f5e']}};
-  function apply(btn,status){{var s=STYLE[status]||STYLE.queue;btn.style.background=s[0];btn.style.color=s[1];btn.dataset.status=status;btn.textContent=status;}}
-  function send(btn,status){{var prev=btn.dataset.status;apply(btn,status);var fd=new FormData();fd.append('status',status);
-    fetch(btn.dataset.url,{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(r){{if(!r.ok)throw 0;return r.json();}})
-    .then(function(j){{if(j&&j.status)apply(btn,j.status);}}).catch(function(){{apply(btn,prev);window.MH&&MH.toast('Could not save status','error');}});}}
-  document.addEventListener('click',function(e){{var btn=e.target.closest('.sp-wf-pill');if(!btn)return;e.preventDefault();send(btn,NEXT[btn.dataset.status]||'approved');}});
-  document.addEventListener('contextmenu',function(e){{var btn=e.target.closest('.sp-wf-pill');if(!btn)return;e.preventDefault();send(btn,'queue');}});
-}})();
-</script>
+{_COMPOSITE_BUILDER_JS}
 """
 
 
@@ -24658,49 +24800,6 @@ function mhPlanGenerate(btn) {{
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
-    @app.route("/drafts/<pack_id>/spotlight-tone", methods=["POST"])
-    def spotlight_pack_retone(pack_id):
-        """Rewrite a saved spotlight post in a different tone.
-
-        Mirrors the meet-recap caption tone tabs: same approved moments,
-        same brand grounding, different register. Updates the pack's
-        caption in place (no new draft id).
-        """
-        from mediahub.club_platform.stub_pack_store import load_pack, update_pack
-
-        rec = load_pack(pack_id)
-        if not _can_access_pack(rec, _active_profile_id()):
-            rec = None
-        if not rec:
-            return redirect(url_for("stub_packs_list"))
-        fd = rec.get("form_data") or {}
-        if fd.get("source") != "athlete_spotlight":
-            return redirect(url_for("stub_pack_view", pack_id=pack_id))
-        run_id = str(fd.get("run_id") or "")
-        swimmer_key = str(fd.get("swimmer_key") or "")
-        tone = (request.form.get("tone") or "").strip()
-        if tone not in ("", "warm-club", "hype", "data-led"):
-            tone = ""
-        result, err = _compose_spotlight_caption(run_id, swimmer_key, tone=tone)
-        if err is not None:
-            return err
-        cards = list(rec.get("cards") or [])
-        if cards:
-            cards[0] = {**cards[0], "caption": result["caption"]}
-        else:
-            cards = [
-                {
-                    "platform": "Instagram",
-                    "caption": result["caption"],
-                    "hashtags": ["#spotlight", "#swimming"],
-                    "confidence": 0.9,
-                    "notes": f"Composed for {result['swimmer_name']}.",
-                    "status": "queue",
-                }
-            ]
-        update_pack(pack_id, cards=cards, form_data_updates={"tone": tone})
-        return redirect(url_for("stub_pack_view", pack_id=pack_id))
-
     # ---- /spotlight &mdash; Athlete Spotlight landing ------------------------
     @app.route("/spotlight")
     def spotlight_landing():
@@ -26299,15 +26398,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 secondary_cta=("Start a new draft", url_for("make_page")),
             )
 
-        # Athlete-spotlight packs get the dedicated Spotlight builder — the
-        # Content-builder structure, scoped to the single composite post, run
-        # off the same base generators (retone caption + create_visual_for_item
-        # graphic) — instead of the generic saved-draft card layout.
+        # Athlete-spotlight packs open the mode-aware Content builder, scoped to
+        # the single composite post (one caption + one graphic + one reel from
+        # the approved moments) with the full live toolbar — instead of the
+        # generic saved-draft card layout. Other create-tile types will become
+        # additional builder modes; today only spotlight is wired.
         if (rec.get("form_data") or {}).get("source") == "athlete_spotlight":
             _sp_name = (rec.get("form_data") or {}).get("swimmer_name") or "Spotlight"
             return _layout(
-                f"Spotlight builder — {_sp_name}",
-                _render_spotlight_builder(pack_id, rec),
+                f"Content builder — {_sp_name}",
+                _render_content_builder(pack_id, rec, mode="spotlight"),
                 active="create",
             )
 
@@ -26666,6 +26766,472 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "no_photo": force_no_photo,
                 **res,
             }
+        )
+
+    # ---- Composite content builder (athlete-spotlight mode) -----------------
+    # The spotlight composite is one post built from N approved moments. These
+    # pack-scoped endpoints give that single composite the SAME live toolbar the
+    # meet-recap Content builder gives each card — caption tones + Regenerate,
+    # inline Assist, and a multi-moment reel — reusing the existing engine
+    # (`_compose_spotlight_caption`, `caption_assist`, `render_meet_reel`).
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/caption", methods=["POST"])
+    def api_stub_pack_caption(pack_id, card_idx):
+        """Live composite caption for the Content builder's spotlight mode.
+
+        Recomposes the SAME approved moments in the requested tone and returns
+        JSON ``{caption, tone, live, generated_at}`` — the shape the toolbar's
+        tone tabs / Regenerate button consume — then persists it onto the pack
+        so Copy / Export stay in sync. Spotlight packs only.
+        """
+        from datetime import datetime, timezone as _tz
+
+        from mediahub.club_platform.stub_pack_store import load_pack, update_pack
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        fd = (rec or {}).get("form_data") or {}
+        if fd.get("source") != "athlete_spotlight":
+            return jsonify({"error": "unsupported_type"}), 400
+        cards = (rec or {}).get("cards") or []
+        if not (0 <= card_idx < len(cards)):
+            return jsonify({"error": "card_not_found"}), 404
+
+        # Toolbar tone keys → the spotlight compose vocabulary (ai / brand voice
+        # = ""). Anything unknown falls back to brand voice.
+        _tone_in = (request.args.get("tone") or "ai").strip()
+        tone = {"ai": "", "warm-club": "warm-club", "hype": "hype", "data-led": "data-led"}.get(
+            _tone_in, ""
+        )
+        now_iso = datetime.now(_tz.utc).isoformat()
+
+        from mediahub.media_ai.llm import is_available as _llm_available
+
+        if not _llm_available():
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": _tone_in,
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": (
+                        "AI captions are unavailable on this deployment. "
+                        "Contact your administrator to enable them."
+                    ),
+                }
+            ), 200
+
+        run_id = str(fd.get("run_id") or "")
+        swimmer_key = str(fd.get("swimmer_key") or "")
+        result, err = _compose_spotlight_caption(run_id, swimmer_key, tone=tone)
+        if err is not None or not result:
+            # _compose_spotlight_caption returns a rendered HTML error page on
+            # provider failure; a fetch caller wants JSON, so translate it.
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": _tone_in,
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": (
+                        "The AI couldn't finish the caption — wait a few seconds "
+                        "and try again."
+                    ),
+                }
+            ), 200
+        caption = str(result.get("caption") or "").strip()
+        new_cards = list(cards)
+        new_cards[card_idx] = {**new_cards[card_idx], "caption": caption}
+        try:
+            update_pack(pack_id, cards=new_cards, form_data_updates={"tone": tone})
+        except Exception:
+            pass
+        return jsonify(
+            {"caption": caption, "tone": _tone_in, "live": True, "generated_at": now_iso}
+        )
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/caption/assist", methods=["POST"])
+    def api_stub_pack_caption_assist(pack_id, card_idx):
+        """Inline assist for the composite caption (shorter / punchier / add the
+        time / tidy / custom …). Mirrors ``api_caption_assist`` but grounds the
+        revision in the spotlight's stored facts (swimmer, meet, the parsed
+        result lines) rather than a single swim_id."""
+        from datetime import datetime, timezone as _tz
+
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        fd = (rec or {}).get("form_data") or {}
+        if fd.get("source") != "athlete_spotlight":
+            return jsonify({"error": "unsupported_type"}), 400
+
+        payload = request.get_json(silent=True) or {}
+        current_caption = (payload.get("current_caption") or "").strip()
+        transform = (payload.get("transform") or "").strip()
+        custom = (payload.get("custom") or "").strip()
+        tone = (payload.get("tone") or "warm-club").strip()
+        if tone not in ("ai", "warm-club", "hype", "data-led"):
+            tone = "warm-club"
+        if not current_caption:
+            return jsonify(
+                {"error": "empty_caption", "message": "Generate a caption first, then assist it."}
+            ), 400
+
+        from mediahub.web.caption_assist import assist_caption, resolve_instruction
+
+        if not resolve_instruction(transform, custom):
+            return jsonify(
+                {"error": "invalid_transform", "message": "Pick a change or type an instruction."}
+            ), 400
+
+        swimmer = str(fd.get("swimmer_name") or "")
+        meet = str(fd.get("meet_name") or "")
+        results_lines = str(fd.get("results_lines") or "")
+        # A composite spans several events, so leave event/time blank and hand
+        # the joined result lines as the headline context for `add_time`.
+        ach_dict = {
+            "swimmer_name": swimmer,
+            "event": "",
+            "time": "",
+            "pb": False,
+            "club": "",
+            "meet": meet,
+            "place": "",
+            "type": "athlete_spotlight",
+            "headline": results_lines.replace("\n", "; "),
+        }
+        club_brand = {"club_name": "", "meet_name": meet}
+        club_profile_obj = None
+        voice_profile = None
+        try:
+            prof = _active_profile()
+            if prof is not None:
+                club_profile_obj = prof
+                club_brand["club_name"] = getattr(prof, "display_name", "") or ""
+                if getattr(prof, "voice_profile", None):
+                    voice_profile = prof.voice_profile
+        except Exception:
+            club_profile_obj = None
+
+        now_iso = datetime.now(_tz.utc).isoformat()
+        from mediahub.media_ai.llm import is_available as _llm_available
+        from mediahub.web.ai_caption import ClaudeUnavailableError as _ClaudeUE
+
+        if not _llm_available():
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": "AI captions are unavailable on this deployment.",
+                }
+            ), 200
+        try:
+            revised = assist_caption(
+                ach_dict,
+                current_caption,
+                transform,
+                custom=custom,
+                club_brand=club_brand,
+                club_profile=club_profile_obj,
+                tone=tone,
+                voice_profile=voice_profile,
+            )
+        except _ClaudeUE:
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": "AI captions are unavailable on this deployment.",
+                }
+            ), 200
+        except Exception:
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": "The AI is briefly busy — wait a few seconds and try again.",
+                }
+            ), 200
+        revised = (revised or "").strip()
+        if not revised:
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": "The AI returned nothing — try again.",
+                }
+            ), 200
+        return jsonify(
+            {
+                "caption": revised,
+                "original": current_caption,
+                "tone": tone,
+                "transform": transform or "custom",
+                "live": True,
+                "generated_at": now_iso,
+            }
+        )
+
+    def _assemble_spotlight_reel_inputs(pack_id: str, rec: dict):
+        """Reel inputs for an athlete-spotlight composite: the swimmer's
+        APPROVED moments (a subset of the real run), shaped exactly like
+        ``_assemble_reel_inputs`` so ``render_meet_reel`` consumes them
+        unchanged. Returns ``(inputs, None)`` or ``(None, (resp, status))``.
+        Runs off the REAL run (the approved moments are real cards in it), so
+        there is no synthetic-run access trap.
+        """
+        from mediahub.visual import motion as _motion
+        from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
+
+        fd = (rec or {}).get("form_data") or {}
+        run_id = str(fd.get("run_id") or "")
+        swimmer_key = str(fd.get("swimmer_key") or "")
+        if not run_id or not swimmer_key:
+            return None, (jsonify({"error": "spotlight_context_missing"}), 400)
+        run_data = _load_run(run_id)
+        if run_data is None:
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        try:
+            pack = build_spotlight_pack(run_data, swimmer_key)
+        except Exception as e:
+            return None, (jsonify({"error": f"spotlight_pack_failed: {e}"}), 500)
+        if not pack:
+            return None, (jsonify({"error": "swimmer_not_found"}), 404)
+
+        # Approved/posted moments only — the SAME selection the composite
+        # caption uses (see `_compose_spotlight_caption`): the reviewer hand-
+        # picks which moments go in the post by approving them.
+        wf_states = {}
+        try:
+            ws = _get_wf_store()
+            if ws:
+                wf_states = ws.load(run_id)
+        except Exception:
+            wf_states = {}
+        approved = []
+        for ra in pack.get("ranked_achievements") or []:
+            a = ra.get("achievement", {})
+            cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
+            st = wf_states.get(cid)
+            if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
+                approved.append(ra)
+        if not approved:
+            return None, (jsonify({"error": "no_approved_moments"}), 404)
+
+        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+        if fmt not in _motion.MOTION_FORMATS:
+            return None, (
+                jsonify(
+                    {"error": "bad_format", "valid_formats": sorted(_motion.MOTION_FORMATS)}
+                ),
+                400,
+            )
+
+        meet_name = pack.get("meet_name") or ""
+        cards: list[dict] = []
+        for ra in approved[:5]:
+            ach = ra.get("achievement") or {}
+            cards.append(
+                {
+                    "id": ach.get("swim_id") or ra.get("id") or "",
+                    "swim_id": ach.get("swim_id") or "",
+                    "achievement": ach,
+                    "meet_name": meet_name,
+                }
+            )
+        n = len(cards)
+        rhythm = _motion.normalise_reel_rhythm({}, n)
+
+        prof = _active_profile()
+        try:
+            brand_kit = (
+                prof.get_brand_kit()
+                if prof is not None
+                else (_v8_brand_kit_for(f"_stub_{pack_id}") if _v8_ok else None)
+            )
+        except Exception:
+            brand_kit = _v8_brand_kit_for(f"_stub_{pack_id}") if _v8_ok else None
+
+        sponsor_name = ""
+        try:
+            if prof is not None:
+                from mediahub.club_platform.sponsors import active_sponsors
+
+                actives = active_sponsors(prof)
+                if actives:
+                    sponsor_name = str(actives[0].get("name") or "").strip()
+                if not sponsor_name:
+                    sponsor_name = str(getattr(prof, "sponsor_name", "") or "").strip()
+        except Exception:
+            sponsor_name = ""
+
+        slug = re.sub(r"[^a-z0-9]+", "-", swimmer_key.lower()).strip("-") or "spotlight"
+        out_dir = RUNS_DIR / run_id / "motion"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / (
+            f"spotlight_{slug}_{n}.mp4" if fmt == "story" else f"spotlight_{slug}_{n}_{fmt}.mp4"
+        )
+
+        return (
+            {
+                "n": n,
+                "format": fmt,
+                "cards": cards,
+                "brand_kit": brand_kit,
+                "out_path": out_path,
+                "meet_name": meet_name,
+                "briefs": [None] * len(cards),
+                "rhythm": rhythm,
+                "sponsor": sponsor_name,
+                "run_id": run_id,
+                "slug": slug,
+            },
+            None,
+        )
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/reel-job", methods=["POST"])
+    def api_stub_pack_reel_job(pack_id, card_idx):
+        """Kick off a background composite reel from the spotlight's approved
+        moments; returns ``{job_id, poll_url}``. Mirrors ``api_run_reel_job``
+        and reuses ``api_reel_job_status`` for polling + ``-file`` for serving.
+        """
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        inputs, err = _assemble_spotlight_reel_inputs(pack_id, rec)
+        if err is not None:
+            return err
+
+        file_url = url_for(
+            "api_stub_pack_reel_file",
+            pack_id=pack_id,
+            card_idx=card_idx,
+            n=inputs["n"],
+            format=inputs["format"],
+        )
+        run_id = inputs["run_id"]
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "reel",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _render_slot("reel", f"_stub_{pack_id}", timeout=_RENDER_TRY_TIMEOUT):
+                    mp4 = _motion.render_meet_reel(
+                        inputs["cards"],
+                        inputs["brand_kit"],
+                        inputs["out_path"],
+                        meet_name=inputs["meet_name"],
+                        briefs=inputs["briefs"],
+                        format_name=inputs["format"],
+                        rhythm=inputs["rhythm"],
+                        sponsor=inputs.get("sponsor", ""),
+                    )
+                if not Path(mp4).exists():
+                    raise RuntimeError("mp4 missing after render")
+                job["status"] = "done"
+                job["video_url"] = file_url
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="spotlight reel"
+                    )
+                except Exception:
+                    pass
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"spreel-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/reel-file", methods=["GET"])
+    def api_stub_pack_reel_file(pack_id, card_idx):
+        """Serve an already-rendered composite reel MP4 — never renders."""
+        from flask import send_file
+
+        from mediahub.visual import motion as _motion
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        fd = (rec or {}).get("form_data") or {}
+        run_id = str(fd.get("run_id") or "")
+        swimmer_key = str(fd.get("swimmer_key") or "")
+        if not run_id or not swimmer_key:
+            return jsonify({"error": "spotlight_context_missing"}), 400
+        try:
+            n = int(request.args.get("n", "3"))
+        except (TypeError, ValueError):
+            n = 3
+        n = max(1, min(5, n))
+        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+        if fmt not in _motion.MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        slug = re.sub(r"[^a-z0-9]+", "-", swimmer_key.lower()).strip("-") or "spotlight"
+        name = f"spotlight_{slug}_{n}.mp4" if fmt == "story" else f"spotlight_{slug}_{n}_{fmt}.mp4"
+        path = RUNS_DIR / run_id / "motion" / name
+        if not path.exists():
+            return jsonify({"error": "reel_not_rendered"}), 404
+        return send_file(
+            str(path),
+            mimetype="video/mp4",
+            as_attachment=False,
+            download_name=f"spotlight_reel_{slug}.mp4",
         )
 
     @app.route("/api/drafts/<pack_id>/regenerate", methods=["POST"])
