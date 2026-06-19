@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `57c34a35e` · Merge pull request #895: Fix duplicate result cards from reprinted HY-TEK event headers
+**Last updated:** 2026-06-19 · `e830818be` · Merge pull request #899 from elijahkendrick04/claude/clever-babbage-as72g9
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · 🔵 **IN PROGRESS**
 - **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
 - **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
 - **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
@@ -1221,6 +1220,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `0d399f1af` | 1.7: bundle the local Piper voice into the deployed image (build 2/2) |
 | 2026-06-19 | `3e1cd3200` | 1.7: make local Piper the default TTS, demote edge-tts to opt-in (build 1/2) |
 | 2026-06-19 | `0934649fc` | Rebaseline ground-truth oracle for reprint de-duplication |
 | 2026-06-19 | `7678a9de7` | chore(devtools): drop Codex plugin from MCP tooling config |
@@ -1231,5 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `8f1683563` | Disclose the 1.6 avatar provider keys in the subprocessor register |
 | 2026-06-19 | `d20e56ce2` | Apply ruff-format to the 1.6 video suite |
 | 2026-06-19 | `e3a8853e2` | Build 1.6: video suite — footage path, Clip-Maker, EDL timeline, captions, reframe |
-| 2026-06-19 | `531bb7092` | Backdrop: adaptive blur (fixes busy logos), centre content, pick best logo |
 <!-- /ROADMAP:ACTIVITY -->
