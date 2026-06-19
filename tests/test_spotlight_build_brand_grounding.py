@@ -418,3 +418,46 @@ def test_composite_builder_toolbar_endpoints(gated_app, tmp_path, monkeypatch):
         r_sg = c.get(f"/api/drafts/{pack_id}/card/0/assistant/suggestions")
         assert r_sg.status_code == 200
         assert "suggestions" in r_sg.get_json()
+
+
+def test_spotlight_graphic_item_strips_entry_url_and_dedupes():
+    """The results-from-a-link flow leaves an ``entry_url: https://…`` meet
+    placeholder, and the recognition headline bakes it into achievement text.
+    The spotlight graphic must never print that URL, must drop the empty meet
+    tile rather than label a URL 'EVENT', and must collapse duplicate moments."""
+    from mediahub.web.web import (
+        _clean_meet_label,
+        _strip_source_suffix,
+        _stub_card_to_graphic_item,
+    )
+
+    url = "entry_url: https://results.swimming.org/swimming/results/2026/agbchamps/"
+    # Unit: the two display sanitizers.
+    assert _clean_meet_label(url) == ""
+    assert _clean_meet_label("AGB Champs 2026") == "AGB Champs 2026"
+    assert (
+        _strip_source_suffix(f"Amy Crowley wins gold in 50m Breaststroke (LC) at {url}!")
+        == "Amy Crowley wins gold in 50m Breaststroke (LC)"
+    )
+
+    item = _stub_card_to_graphic_item(
+        "free_text",
+        {"caption": "Great swim."},
+        {
+            "source": "athlete_spotlight",
+            "swimmer_name": "Amy Crowley",
+            "meet_name": url,
+            "n_approved": 2,
+            "results_lines": "50m Breaststroke (LC)\n50m Breaststroke (LC)",
+        },
+    )
+    gt = item["graphic_text"]
+    blob = repr(gt) + repr(item.get("meet_name"))
+    # No crawl URL anywhere on the card…
+    assert "entry_url" not in blob and "http" not in blob
+    # …no meet/event tile labelled with the URL (we have no real meet)…
+    assert "meet" not in gt["stats"] and "event" not in gt["stats"]
+    # …and the duplicate moment collapses to one bullet.
+    assert gt["bullets"] == ["50m Breaststroke (LC)"]
+    assert gt["stats"].get("athlete") == "Amy Crowley"
+    assert gt["stats"].get("moments") == "2 approved"

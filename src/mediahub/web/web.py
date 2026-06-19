@@ -9797,6 +9797,42 @@ def _has_real_text(text: str) -> bool:
     return any(ch.isalnum() for ch in text or "")
 
 
+def _looks_like_url_label(text: str) -> bool:
+    """True when a meet/venue label is really a crawl URL or the
+    results-from-a-link ``entry_url`` placeholder, not a human meet title."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    return "://" in t or t.startswith(("entry_url", "http", "www."))
+
+
+def _clean_meet_label(text: str) -> str:
+    """A meet name safe to DISPLAY. The results-from-a-link flow leaves an
+    ``entry_url: https://…`` placeholder when it can't parse a real meet title,
+    and the recognition headline template bakes that into achievement text — so
+    drop it (and the ``(unknown)`` sentinel) rather than print a URL on a card."""
+    t = (text or "").strip()
+    if not t or _looks_like_url_label(t) or t.lower() in ("(unknown)", "unknown"):
+        return ""
+    return t
+
+
+def _strip_source_suffix(text: str) -> str:
+    """Strip the trailing source reference the recognition headline template
+    appends (``… at entry_url: https://…`` / ``… at https://…``) plus any stray
+    URL / ``entry_url`` token, so a moment reads as the achievement — not the
+    crawl URL it was scraped from."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    # Cut everything from a trailing " at <url/entry_url>" reference.
+    t = re.split(r"\s+at\s+(?:entry_url\b|https?://|www\.)", t, maxsplit=1, flags=re.I)[0]
+    # Remove any leftover bare URL / entry_url token anywhere in the string.
+    t = re.sub(r"\b(?:entry_url\s*:?\s*)?https?://\S+", "", t, flags=re.I)
+    t = re.sub(r"\bentry_url\b\s*:?\s*", "", t, flags=re.I)
+    return t.strip().rstrip(" -—·:;").strip()
+
+
 def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> dict:
     """Map a caption-only stub card into a text-led graphic ``content_item``.
 
@@ -9819,7 +9855,9 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     stub_type = canonical_slug(stub_type)
     caption = _display_clean(card.get("caption") or "")
     fd = form_data or {}
-    meet = _display_clean(fd.get("meet_name") or "")
+    # A crawl URL / entry_url placeholder is never a meet title — drop it so it
+    # can't land in the kicker, a stat tile or the brand corner.
+    meet = _clean_meet_label(_display_clean(fd.get("meet_name") or ""))
     sponsor = _display_clean(fd.get("sponsor_name") or "")
     # Sentence-ish split (also break on newlines).
     parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+|\n+", caption) if p.strip()]
@@ -9863,14 +9901,22 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
         head_src = _short_hook(swimmer or "Spotlight")
         line2_default = "SPOTLIGHT"
         kicker = meet or "Athlete spotlight"
-        result_lines = [
-            l.strip() for l in str(fd.get("results_lines") or "").splitlines() if l.strip()
-        ]
+        # Strip any scraped crawl-URL suffix and drop exact-duplicate moments so
+        # the card lists each result once, never the entry_url.
+        _seen: set[str] = set()
+        result_lines = []
+        for _l in str(fd.get("results_lines") or "").splitlines():
+            _c = _strip_source_suffix(_l.strip())
+            if _c and _c not in _seen:
+                _seen.add(_c)
+                result_lines.append(_c)
         bullets = (result_lines or parts)[:4]
         if swimmer:
             stats["athlete"] = swimmer
+        # The meet name reads as a "MEET" tile (not "EVENT"), and only when we
+        # actually have a real one — no URL placeholder, no empty tile.
         if meet:
-            stats["event"] = meet
+            stats["meet"] = meet
         _n_appr = fd.get("n_approved")
         if _n_appr:
             stats["moments"] = f"{_n_appr} approved"
@@ -24691,14 +24737,18 @@ function mhPlanGenerate(btn) {{
             return None, (_layout("Build spotlight post", body, active="create"), 400)
 
         swimmer_name = pack["swimmer_name"]
-        meet_name = pack["meet_name"]
+        # The link-flow leaves an entry_url placeholder when it can't parse a
+        # real meet title; never weave a URL into the caption.
+        meet_name = _clean_meet_label(pack["meet_name"])
         # English brief — no JSON envelope. Each approved moment is a
-        # natural-language line the model can weave into prose.
+        # natural-language line the model can weave into prose. Strip the
+        # scraped crawl-URL suffix the headline template appends and drop
+        # exact duplicates so the model isn't fed the same moment twice.
         moment_lines: list[str] = []
         for ra in approved[:8]:
             a = ra.get("achievement", {})
-            hl = (a.get("headline") or "").strip()
-            ev = (a.get("event") or "").strip()
+            hl = _strip_source_suffix(a.get("headline") or "")
+            ev = _strip_source_suffix(a.get("event") or "")
             tm = (a.get("time") or "").strip()
             pl = a.get("place")
             pb = "PB" if a.get("pb") else ""
@@ -24706,7 +24756,7 @@ function mhPlanGenerate(btn) {{
             line = "; ".join(bits)
             if hl:
                 line = f"{hl} ({line})" if line else hl
-            if line:
+            if line and line not in moment_lines:
                 moment_lines.append(line)
 
         # Compact result lines for the spotlight GRAPHIC (event + time + PB
@@ -24715,7 +24765,7 @@ function mhPlanGenerate(btn) {{
         result_lines: list[str] = []
         for ra in approved[:4]:
             a = ra.get("achievement", {})
-            ev = (a.get("event") or "").strip()
+            ev = _strip_source_suffix(a.get("event") or "")
             tm = (a.get("time") or "").strip()
             pl = a.get("place")
             if not (ev or tm):
@@ -24725,7 +24775,8 @@ function mhPlanGenerate(btn) {{
                 bits += f" · {['🥇', '🥈', '🥉'][int(pl) - 1]}"
             if a.get("pb"):
                 bits += " · PB"
-            result_lines.append(bits)
+            if bits and bits not in result_lines:
+                result_lines.append(bits)
 
         tone_line = ""
         if tone:
@@ -24737,8 +24788,9 @@ function mhPlanGenerate(btn) {{
                     f"\n\nTone: {meta.get('label', tone)} — {meta.get('description', '')} "
                     f"Example of the register: {meta.get('example', '')}"
                 )
+        _where = f" at {meet_name}" if meet_name else ""
         brief = (
-            f"{swimmer_name} just had their day at {meet_name}. The reviewer "
+            f"{swimmer_name} just had a strong outing{_where}. The reviewer "
             f"has hand-approved these moments for the spotlight post:\n"
             + "\n".join(f"- {l}" for l in moment_lines)
             + "\n\nWrite ONE single Instagram-ready caption: a hooky "
