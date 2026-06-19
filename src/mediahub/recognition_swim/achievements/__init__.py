@@ -10,7 +10,6 @@ from swim_content_v5.achievements import (
 )
 from swim_content_v5.achievements.pb import (
     PBConfirmedDetector,
-    PBLikelyDetector,
     PBImprovementMagnitudeDetector,
 )
 from swim_content_v5.achievements.barrier import FirstSubBarrierDetector
@@ -42,7 +41,6 @@ __all__ = [
     "DETECTORS",
     "get_all_detectors",
     "PBConfirmedDetector",
-    "PBLikelyDetector",
     "PBImprovementMagnitudeDetector",
     "FirstSubBarrierDetector",
     "MedalDetector",

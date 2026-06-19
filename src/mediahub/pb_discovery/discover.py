@@ -257,19 +257,29 @@ def _research_candidate_urls(
         return []
 
 
-def _evaluate_url(
-    url: str, name: str, use_interpreter: bool, sources_tried: "list[PBSource]"
-) -> "tuple[Optional[PBSource], bool]":
-    """Fetch + deterministically parse one candidate URL, apply the identity
-    gate, append the attempt to sources_tried, and record the trust-ledger
-    outcome. Returns (source, eligible); eligible means it parsed >=1 PB AND the
-    page is about the target athlete."""
+# How many candidate pages to fetch concurrently per swimmer. The fetches are
+# independent network round-trips, so fanning them out turns the dominant
+# per-swimmer cost from N sequential fetches into ~one. Page fetches are not the
+# rate-limited DuckDuckGo search, so a small fan-out is polite; a constant keeps
+# this off the operator's env surface (no new knob to document/tune).
+_FETCH_WORKERS = 3
+
+
+def _fetch_and_parse_url(url: str, name: str, use_interpreter: bool) -> "tuple[PBSource, bool]":
+    """Fetch + deterministically parse ONE candidate URL and apply the identity
+    gate. Pure: it mutates no shared state and never writes the trust ledger, so
+    it is safe to run concurrently across candidates. Returns (source, eligible);
+    eligible means it parsed >=1 PB AND the page is about the target athlete.
+
+    A page that fetched but isn't about this athlete carries zeroed
+    confidence/PBs (so it can never be chosen as a baseline) — a wrong PB is
+    worse than a missing one, the same-name guard."""
     domain = _domain_from_url(url)
     fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     page = fetch_profile_page(url)
     if not page.fetch_success:
-        sources_tried.append(
+        return (
             PBSource(
                 url=url,
                 domain=domain,
@@ -277,18 +287,13 @@ def _evaluate_url(
                 parse_confidence=0.0,
                 pbs=[],
                 fetch_success=False,
-            )
+            ),
+            False,
         )
-        record_attempt(domain, success=False, purpose="swimmer_pbs")
-        return None, False
 
     pb_rows, confidence = parse_pbs_from_page(page, use_interpreter=use_interpreter)
     identity_ok = _page_is_about_swimmer(page.text, name)
     eligible = bool(pb_rows) and identity_ok
-
-    # A page that parses but isn't about this athlete must never supply a
-    # baseline: record it (auditable) with zeroed confidence/PBs so it can't be
-    # chosen, and count it as a failed attempt for the trust ledger.
     source = PBSource(
         url=url,
         domain=domain,
@@ -296,9 +301,40 @@ def _evaluate_url(
         parse_confidence=confidence if identity_ok else 0.0,
         pbs=pb_rows if identity_ok else [],
     )
-    sources_tried.append(source)
-    record_attempt(domain, success=eligible, purpose="swimmer_pbs")
     return source, eligible
+
+
+def _fetch_and_parse_many(
+    urls: "list[str]", name: str, use_interpreter: bool
+) -> "dict[str, tuple[PBSource, bool]]":
+    """Fetch + parse several candidate URLs concurrently. Returns a url → (source,
+    eligible) map; the caller folds the results in a deterministic (ranked) order,
+    so the audit trail and trust-ledger writes stay reproducible despite the
+    parallel I/O. A single URL skips the pool (no thread overhead)."""
+    if len(urls) <= 1:
+        return {u: _fetch_and_parse_url(u, name, use_interpreter) for u in urls}
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    out: "dict[str, tuple[PBSource, bool]]" = {}
+    with ThreadPoolExecutor(max_workers=min(len(urls), _FETCH_WORKERS)) as pool:
+        futures = {pool.submit(_fetch_and_parse_url, u, name, use_interpreter): u for u in urls}
+        for fut, u in futures.items():
+            try:
+                out[u] = fut.result()
+            except Exception:
+                out[u] = (
+                    PBSource(
+                        url=u,
+                        domain=_domain_from_url(u),
+                        fetched_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        parse_confidence=0.0,
+                        pbs=[],
+                        fetch_success=False,
+                    ),
+                    False,
+                )
+    return out
 
 
 def discover_swimmer_pbs(
@@ -377,19 +413,30 @@ def discover_swimmer_pbs(
     for query in queries:
         _add_candidates([hit.url for hit in client.search(query, num=5)])
 
-    # 4-6. Rank by trust, fetch top N, deterministically parse, identity-gate,
-    # and select. Selection prefers an authoritative source, then parse
-    # confidence — but the TIME is always the deterministic parser's; selection
-    # only decides WHICH verified page to trust.
+    # 4-6. Rank by trust, fetch the top N candidates CONCURRENTLY, deterministically
+    # parse, identity-gate, and select. The selection is byte-for-byte the same as
+    # the old serial path — rank every candidate, take the top ``max_sources`` —
+    # so results never change; only the fetch wall-clock does (N independent page
+    # fetches collapse from sequential to ~one). Selection prefers an authoritative
+    # source, then parse confidence — but the TIME is always the deterministic
+    # parser's; selection only decides WHICH verified page to trust.
     sources_tried: list[PBSource] = []
     best_source: Optional[PBSource] = None
     best_key: Optional[tuple[int, float]] = None
 
     def _consider(urls: list[str]) -> None:
         nonlocal best_source, best_key
-        for url in rank_candidates(urls)[:max_sources]:
-            source, eligible = _evaluate_url(url, name, use_interpreter, sources_tried)
-            if not eligible or source is None:
+        ranked = rank_candidates(urls)[:max_sources]
+        if not ranked:
+            return
+        # Fold in ranked order so sources_tried + the trust-ledger writes stay
+        # deterministic despite the parallel I/O.
+        results = _fetch_and_parse_many(ranked, name, use_interpreter)
+        for url in ranked:
+            source, eligible = results[url]
+            sources_tried.append(source)
+            record_attempt(source.domain, success=eligible, purpose="swimmer_pbs")
+            if not eligible:
                 continue
             key = (1 if _is_authority(url) else 0, source.parse_confidence)
             if best_key is None or key > best_key:

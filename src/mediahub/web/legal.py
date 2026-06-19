@@ -159,6 +159,23 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
         engaged_when="Only if the operator configures an endpoint",
     ),
     Subprocessor(
+        name="TinyFish AI, Inc. (Search API)",
+        processing=(
+            "Web search for PB-discovery bootstrap: the query carries a swimmer's "
+            "name and club (personal data) to find their public results/profile "
+            "page. Only first-seen swimmers (no club history yet) are looked up; "
+            "returning swimmers are served from the club's own stored history"
+        ),
+        location="United States",
+        env_keys=("TINYFISH_API_KEY", "MEDIAHUB_TINYFISH_TIMEOUT"),
+        transfer_mechanism=(
+            "Free-tier API — the operator must confirm processor terms (SCCs/IDTA "
+            "for the US transfer) before enabling; OFF by default and opt-in for "
+            "exactly this reason"
+        ),
+        engaged_when="Only if a TinyFish API key is configured",
+    ),
+    Subprocessor(
         name="Photoroom SAS",
         processing="Photo background removal",
         location="France (sub-processors may be outside the EEA)",

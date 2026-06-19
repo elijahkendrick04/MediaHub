@@ -13,8 +13,13 @@ from __future__ import annotations
 
 from .base import AchievementDetector, Achievement
 
-# Import all detectors
-from .pb import PBConfirmedDetector, PBLikelyDetector, PBImprovementMagnitudeDetector
+# Import all detectors.
+# NB: a PB inferred from the swimmer's own entry/seed time is deliberately NOT
+# registered. Entry/seed times are unreliable (soft / converted / "NT" entries),
+# so inferring a PB from them risks false PBs — and a wrong PB is worse than a
+# missing one. PBs come only from a real prior-best baseline: the verified web
+# PB lookup (pb_confirmed / official_pb_confirmed).
+from .pb import PBConfirmedDetector, PBImprovementMagnitudeDetector
 from .barrier import FirstSubBarrierDetector
 from .medal_final import MedalDetector, FinalAppearanceDetector, HeatToFinalDropDetector
 from .qualifier import QualifyingTimeDetector
@@ -26,7 +31,6 @@ from .relay import RelayMedalDetector, RelayStrongPerformanceDetector
 # Ordered registry — priority given to higher-confidence detectors first
 DETECTORS: list[AchievementDetector] = [
     PBConfirmedDetector(),
-    PBLikelyDetector(),
     PBImprovementMagnitudeDetector(),
     FirstSubBarrierDetector(),
     MedalDetector(),
