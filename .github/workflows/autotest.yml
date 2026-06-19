@@ -50,18 +50,31 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      # The Chromium download is ~275 MB per run, 4× a day — cache it. The key
-      # tracks pyproject.toml so a Playwright version bump refreshes the build.
+      - name: Install MediaHub (Python deps)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,render]"
+
+      - name: Resolve Playwright version (stable browser-cache key)
+        id: pw
+        # Key the Chromium cache on the Playwright version, not a pyproject hash:
+        # the bundled Chromium revision is tied to the Playwright version alone,
+        # so unrelated pyproject churn must not bust the cache and force a slow
+        # cold re-download.
+        run: echo "version=$(python -m playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      # The Chromium download is ~275 MB per run, 4× a day — cache it. Keyed on
+      # the Playwright version (a bump refreshes the build) with a prefix
+      # restore-key so a bump still reuses the prior browser instead of cold.
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: playwright-chromium-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          restore-keys: playwright-chromium-${{ runner.os }}-
 
-      - name: Install MediaHub + Chromium + Claude CLI (judges + fixer run on it)
+      - name: Install Chromium + Claude CLI (judges + fixer run on it)
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,render]"
           python -m playwright install --with-deps chromium
           npm install -g @anthropic-ai/claude-code
           # B2: axe-core for the deterministic accessibility pass. autotest/a11y.py

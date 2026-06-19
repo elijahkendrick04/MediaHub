@@ -107,3 +107,6 @@ src/mediahub/compliance/*.jsonl
 src/mediahub/compliance/consent/
 src/mediahub/security_log/
 src/mediahub/users.jsonl
+
+# Ephemeral Claude Code agent worktrees (harness-managed; auto-cleaned).
+.claude/worktrees/

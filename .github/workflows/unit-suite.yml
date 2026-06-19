@@ -30,11 +30,12 @@
 # regression oracle must redden a PR rather than only the 6-hourly schedule — see
 # that job's comment for the why.
 #
-# Chromium IS installed (cached across runs) and the renderer/browser tests run
-# against it on the shards; only the handful pinned to a specific local Chromium
-# build self-skip when that exact revision is absent. Deps mirror the runtime
-# image (requirements.txt) + the test tooling (.[dev]) so optional modules import
-# rather than erroring.
+# Chromium IS installed (cached across runs, keyed on the Playwright version so
+# unrelated dep churn doesn't force a cold re-download) and the renderer/browser
+# tests run against it on the shards; only the handful pinned to a specific local
+# Chromium build self-skip when that exact revision is absent. Deps mirror the
+# runtime image (requirements.txt) + the test tooling (.[dev]) so optional
+# modules import rather than erroring.
 #
 # REFRESH SHARD BALANCE after a big batch of new/removed tests — regenerate the
 # duration map and commit it:
@@ -62,11 +63,12 @@ jobs:
     name: Suite shard ${{ matrix.group }}
     runs-on: ubuntu-latest
     # ~7 min on a warm Playwright cache (≈4 min tests + setup). The headroom is
-    # for a COLD cache: each shard does its own `playwright install`, and a
-    # cold-cache run can hit a slow apt/CDN fetch (observed ~10 min once) — the
-    # timeout must clear that worst case so transient install slowness can never
-    # falsely fail a shard. The browser binary is cached across runs, so the
-    # steady state stays fast.
+    # for the rare COLD cache: each shard does its own `playwright install`, and
+    # a true cold-cache run can hit a slow apt/CDN fetch (observed ~12 min once).
+    # The browser cache now keys on the Playwright VERSION (not the churny dep
+    # hash) with a prefix restore-key, so cold misses are rare — but the timeout
+    # still clears that worst case so transient install slowness can never
+    # falsely fail a shard.
     timeout-minutes: 20
     strategy:
       # One shard failing must NOT cancel the others — we want every failure in
@@ -86,17 +88,6 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Cache Playwright browsers
-        # The Chromium download is ~115 MB; cache it so only the first run on a
-        # fresh key pays for it. The key tracks the dep files that pin Playwright;
-        # the prefix restore-key reuses an existing browser on unrelated dep churn
-        # (`playwright install` then just verifies and skips the download).
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
-          restore-keys: playwright-${{ runner.os }}-
-
       - name: Install MediaHub (runtime + dev extras)
         run: |
           python -m pip install --upgrade pip
@@ -105,6 +96,27 @@ jobs:
           # the dev extra adds pytest + xdist + pytest-split + reportlab + schemathesis.
           pip install -r requirements.txt
           pip install -e ".[dev]"
+
+      - name: Resolve Playwright version (stable browser-cache key)
+        id: pw
+        # Chromium's bundled revision is determined by the Playwright version
+        # ALONE, so the browser cache must key on that — not on a hash of the
+        # whole requirements.txt/pyproject.toml. Hashing the dep files meant any
+        # unrelated dependency bump (frequent) minted a new key and forced a
+        # ~12-min cold Chromium re-download (the "cold-cache Chromium" slowness).
+        run: echo "version=$(python -m playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        # The Chromium download is ~115 MB; cache it so only the first run on a
+        # new Playwright version pays for it. The prefix restore-key reuses an
+        # existing browser across version bumps too (`playwright install` then
+        # just verifies and skips the download), so the cache effectively never
+        # goes fully cold once any run has populated it.
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          restore-keys: playwright-${{ runner.os }}-
 
       - name: Install Chromium for the renderer/browser tests
         run: python -m playwright install --with-deps chromium

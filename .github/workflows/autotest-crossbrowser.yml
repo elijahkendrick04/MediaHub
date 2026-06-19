@@ -37,15 +37,24 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Install MediaHub (Python deps)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,render]"
+      - name: Resolve Playwright version (stable browser-cache key)
+        id: pw
+        # Key on the Playwright version, not a pyproject hash — the bundled
+        # browser revision is tied to the Playwright version alone, so unrelated
+        # pyproject churn must not force a slow cold re-download.
+        run: echo "version=$(python -m playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-      - name: Install MediaHub + the matrix browser
+          key: playwright-${{ matrix.browser }}-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          restore-keys: playwright-${{ matrix.browser }}-${{ runner.os }}-
+      - name: Install the matrix browser
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,render]"
           python -m playwright install --with-deps ${{ matrix.browser }}
           npm install axe-core || echo "::warning::axe-core not installed — a11y pass will skip"
       - name: Restore bot memory from the state branch (read-only)
