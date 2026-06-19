@@ -74,9 +74,9 @@ _MAX_DIM = 8000
 
 _BOUNDS: Dict[str, Tuple[float, float]] = {
     "factor": (0.0, 3.0),
-    "unit": (-100.0, 100.0),       # symmetric slider amounts (warmth/tint/…)
-    "amount01": (0.0, 1.0),        # 0..1 strength
-    "amount100": (0.0, 100.0),     # 0..100 strength
+    "unit": (-100.0, 100.0),  # symmetric slider amounts (warmth/tint/…)
+    "amount01": (0.0, 1.0),  # 0..1 strength
+    "amount100": (0.0, 100.0),  # 0..100 strength
     "degrees": (-360.0, 360.0),
     "perspective": (-1.0, 1.0),
     "frac": (0.0, 1.0),
@@ -366,7 +366,9 @@ def opacity(img: Image.Image, alpha: float = 1.0) -> Image.Image:
 # --------------------------------------------------------------------------- #
 
 
-def crop(img: Image.Image, x: float = 0.0, y: float = 0.0, w: float = 1.0, h: float = 1.0) -> Image.Image:
+def crop(
+    img: Image.Image, x: float = 0.0, y: float = 0.0, w: float = 1.0, h: float = 1.0
+) -> Image.Image:
     """Crop to a rectangle in **fractions of the current image** (0..1).
 
     Resolution-independent: ``(x, y)`` is the top-left, ``(w, h)`` the size, all
@@ -469,7 +471,7 @@ def perspective(img: Image.Image, h: float = 0.0, v: float = 0.0) -> Image.Image
     if hh == 0.0 and vv == 0.0:
         return img
     w, ht = img.size
-    kx = abs(hh) * 0.25 * w   # horizontal keystone inset (px)
+    kx = abs(hh) * 0.25 * w  # horizontal keystone inset (px)
     ky = abs(vv) * 0.25 * ht  # vertical keystone inset (px)
     # Destination quad corners, clockwise from top-left.
     tl = [0.0, 0.0]
@@ -521,7 +523,9 @@ def _shape_mask(shape: str, size: Tuple[int, int]) -> Image.Image:
         d.rounded_rectangle((0, 0, w - 1, h - 1), radius=int(min(w, h) * 0.12), fill=255)
     elif shape == "square":
         s = min(w, h)
-        d.rectangle(((w - s) // 2, (h - s) // 2, (w - s) // 2 + s - 1, (h - s) // 2 + s - 1), fill=255)
+        d.rectangle(
+            ((w - s) // 2, (h - s) // 2, (w - s) // 2 + s - 1, (h - s) // 2 + s - 1), fill=255
+        )
     elif shape == "triangle":
         d.polygon([(w / 2, 0), (w, h), (0, h)], fill=255)
     elif shape == "star":
@@ -584,7 +588,9 @@ def shape_crop(img: Image.Image, shape: str = "circle", feather: float = 0.0) ->
     return rgba
 
 
-def frame(img: Image.Image, style: str = "solid", colour: str = "#ffffff", width: float = 0.04) -> Image.Image:
+def frame(
+    img: Image.Image, style: str = "solid", colour: str = "#ffffff", width: float = 0.04
+) -> Image.Image:
     """Draw a border *inside* the image edges. ``width`` is a fraction of the short side."""
     rgba = img.convert("RGBA")
     w, h = rgba.size
@@ -625,7 +631,9 @@ def _stamp_regions(params: Dict[str, Any]) -> List[Tuple[float, float, float, fl
     return out
 
 
-def _stamp_mask(size: Tuple[int, int], stamps: Sequence[Tuple[float, float, float, float]]) -> Image.Image:
+def _stamp_mask(
+    size: Tuple[int, int], stamps: Sequence[Tuple[float, float, float, float]]
+) -> Image.Image:
     """An 'L' mask painted from circular stamps (max strength wins on overlap)."""
     w, h = size
     mask = Image.new("L", size, 0)
@@ -642,7 +650,9 @@ def _stamp_mask(size: Tuple[int, int], stamps: Sequence[Tuple[float, float, floa
     return mask
 
 
-def blur_brush(img: Image.Image, stamps: Optional[list] = None, radius: float = 12.0, feather: float = 0.4) -> Image.Image:
+def blur_brush(
+    img: Image.Image, stamps: Optional[list] = None, radius: float = 12.0, feather: float = 0.4
+) -> Image.Image:
     """Locally blur the painted regions — the safeguarding tool (blur a face).
 
     ``stamps`` is a list of ``{cx, cy, r, strength}`` discs in image fractions;
@@ -691,16 +701,36 @@ def eraser(img: Image.Image, stamps: Optional[list] = None, feather: float = 0.3
 # so the same filter at 0.0 is the identity and at 1.0 the full look.
 FILTERS: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {
     "mono": [("grayscale", {"amount": 1.0}), ("contrast", {"factor": 1.06})],
-    "noir": [("grayscale", {"amount": 1.0}), ("contrast", {"factor": 1.28}), ("vignette", {"amount": 30})],
+    "noir": [
+        ("grayscale", {"amount": 1.0}),
+        ("contrast", {"factor": 1.28}),
+        ("vignette", {"amount": 30}),
+    ],
     "sepia": [("sepia", {"amount": 1.0})],
     "natural": [("auto_contrast", {"cutoff": 0.5}), ("sharpen", {"amount": 0.5})],
     "crisp": [("sharpen", {"amount": 0.9}), ("contrast", {"factor": 1.05})],
-    "punchy": [("contrast", {"factor": 1.12}), ("saturation", {"factor": 1.15}), ("sharpen", {"amount": 0.8})],
+    "punchy": [
+        ("contrast", {"factor": 1.12}),
+        ("saturation", {"factor": 1.15}),
+        ("sharpen", {"amount": 0.8}),
+    ],
     "vivid": [("saturation", {"factor": 1.28}), ("contrast", {"factor": 1.08})],
-    "editorial": [("contrast", {"factor": 1.06}), ("saturation", {"factor": 0.92}), ("levels", {"black": 6, "white": 250, "gamma": 0.98})],
-    "soft": [("contrast", {"factor": 0.94}), ("brightness", {"factor": 1.04}), ("saturation", {"factor": 0.96})],
+    "editorial": [
+        ("contrast", {"factor": 1.06}),
+        ("saturation", {"factor": 0.92}),
+        ("levels", {"black": 6, "white": 250, "gamma": 0.98}),
+    ],
+    "soft": [
+        ("contrast", {"factor": 0.94}),
+        ("brightness", {"factor": 1.04}),
+        ("saturation", {"factor": 0.96}),
+    ],
     "golden": [("golden_hour", {"amount": 1.0})],
-    "poolside": [("white_balance", {"amount": 0.8}), ("auto_contrast", {"cutoff": 0.5}), ("saturation", {"factor": 1.08})],
+    "poolside": [
+        ("white_balance", {"amount": 0.8}),
+        ("auto_contrast", {"cutoff": 0.5}),
+        ("saturation", {"factor": 1.08}),
+    ],
 }
 
 FILTER_NAMES: Tuple[str, ...] = tuple(FILTERS.keys())
@@ -793,15 +823,37 @@ _OPS: Dict[str, Callable[..., Image.Image]] = {
 
 # Canonical pipeline order: geometry → tone → filter → effects → local → mask.
 _OP_RANK: Dict[str, int] = {
-    "crop": 10, "perspective": 20, "rotate": 30, "flip": 40, "resize": 50,
-    "white_balance": 90, "auto_contrast": 95, "levels": 100, "brightness": 110,
-    "contrast": 120, "highlights": 130, "shadows": 140, "warmth": 150, "tint": 160,
-    "saturation": 170, "clarity": 180, "sharpen": 190,
+    "crop": 10,
+    "perspective": 20,
+    "rotate": 30,
+    "flip": 40,
+    "resize": 50,
+    "white_balance": 90,
+    "auto_contrast": 95,
+    "levels": 100,
+    "brightness": 110,
+    "contrast": 120,
+    "highlights": 130,
+    "shadows": 140,
+    "warmth": 150,
+    "tint": 160,
+    "saturation": 170,
+    "clarity": 180,
+    "sharpen": 190,
     "filter": 300,
-    "grayscale": 400, "sepia": 410, "duotone": 420, "golden_hour": 430, "colour_punch": 440,
-    "vignette": 500, "blur": 510, "pixelate": 520, "glitch": 530,
-    "blur_brush": 600, "eraser": 610,
-    "shape_crop": 700, "frame": 710,
+    "grayscale": 400,
+    "sepia": 410,
+    "duotone": 420,
+    "golden_hour": 430,
+    "colour_punch": 440,
+    "vignette": 500,
+    "blur": 510,
+    "pixelate": 520,
+    "glitch": 530,
+    "blur_brush": 600,
+    "eraser": 610,
+    "shape_crop": 700,
+    "frame": 710,
     "opacity": 800,
 }
 
@@ -860,7 +912,10 @@ def _coerce_params(op: str, params: Dict[str, Any]) -> Dict[str, Any]:
     if op == "flip":
         return {"axis": "v" if str(p.get("axis", "h")).lower().startswith("v") else "h"}
     if op == "rotate":
-        return {"degrees": round(_clamp(p.get("degrees", 0.0), *_BOUNDS["degrees"]), 3), "expand": bool(p.get("expand", True))}
+        return {
+            "degrees": round(_clamp(p.get("degrees", 0.0), *_BOUNDS["degrees"]), 3),
+            "expand": bool(p.get("expand", True)),
+        }
     if op == "resize":
         return {
             "width": int(max(0, min(_MAX_DIM, int(p.get("width", 0) or 0)))),
@@ -973,7 +1028,9 @@ class EditRecipe:
     # --- construction --------------------------------------------------- #
 
     @classmethod
-    def build(cls, spec: Sequence[Union[Tuple[str, Dict[str, Any]], Tuple[str], str]]) -> "EditRecipe":
+    def build(
+        cls, spec: Sequence[Union[Tuple[str, Dict[str, Any]], Tuple[str], str]]
+    ) -> "EditRecipe":
         steps: List[EditOp] = []
         for item in spec:
             if isinstance(item, str):
@@ -1087,7 +1144,11 @@ def _describe_step(step: EditOp) -> str:
     if op == "flip":
         return f"flip {p['axis']}"
     if op == "resize":
-        return f"resize {p['width']}×{p['height']}" if p.get("width") else f"resize ×{p.get('scale', 0):g}"
+        return (
+            f"resize {p['width']}×{p['height']}"
+            if p.get("width")
+            else f"resize ×{p.get('scale', 0):g}"
+        )
     if op == "perspective":
         return f"perspective h{p['h']:+g} v{p['v']:+g}"
     if op == "shape_crop":
@@ -1107,7 +1168,12 @@ def _describe_step(step: EditOp) -> str:
 # Encoding
 # --------------------------------------------------------------------------- #
 
-_MIME_BY_FORMAT = {"JPEG": "image/jpeg", "JPG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+_MIME_BY_FORMAT = {
+    "JPEG": "image/jpeg",
+    "JPG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+}
 
 
 def encode_image(img: Image.Image, src_format: str = "") -> Tuple[bytes, str]:
@@ -1243,7 +1309,9 @@ def compose_grid(
         tile = ImageOps.fit(tile, (bw, bh), method=Image.LANCZOS, centering=(0.5, 0.5))
         if corner > 0:
             mask = Image.new("L", (bw, bh), 0)
-            ImageDraw.Draw(mask).rounded_rectangle((0, 0, bw - 1, bh - 1), radius=int(corner), fill=255)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                (0, 0, bw - 1, bh - 1), radius=int(corner), fill=255
+            )
             canvas.paste(tile, (x0, y0), mask)
         else:
             canvas.paste(tile, (x0, y0))
@@ -1257,7 +1325,12 @@ def compose_grid(
 PROFILE_PRESETS: Dict[str, Dict[str, Any]] = {
     "avatar_circle": {"shape": "circle", "size": 512, "title": "Circle avatar"},
     "avatar_square": {"shape": "rounded", "size": 512, "title": "Rounded square avatar"},
-    "avatar_ring": {"shape": "circle", "size": 512, "ring": True, "title": "Avatar with brand ring"},
+    "avatar_ring": {
+        "shape": "circle",
+        "size": 512,
+        "ring": True,
+        "title": "Avatar with brand ring",
+    },
 }
 
 
@@ -1289,9 +1362,30 @@ __all__ = [
     "encode_image",
     "load_image",
     # primitives (exported for direct use / tests)
-    "warmth", "tint", "highlights", "shadows", "white_balance", "clarity",
-    "grayscale", "sepia", "duotone", "golden_hour", "colour_punch",
-    "blur", "pixelate", "glitch", "vignette", "opacity",
-    "crop", "flip", "rotate", "resize", "perspective",
-    "shape_crop", "frame", "blur_brush", "eraser", "apply_filter",
+    "warmth",
+    "tint",
+    "highlights",
+    "shadows",
+    "white_balance",
+    "clarity",
+    "grayscale",
+    "sepia",
+    "duotone",
+    "golden_hour",
+    "colour_punch",
+    "blur",
+    "pixelate",
+    "glitch",
+    "vignette",
+    "opacity",
+    "crop",
+    "flip",
+    "rotate",
+    "resize",
+    "perspective",
+    "shape_crop",
+    "frame",
+    "blur_brush",
+    "eraser",
+    "apply_filter",
 ]

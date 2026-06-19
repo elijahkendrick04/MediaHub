@@ -60,7 +60,9 @@ def has_edit(asset: MediaAsset) -> bool:
 def save_recipe(asset: MediaAsset, recipe: EditRecipe, store: Any) -> Optional[MediaAsset]:
     """Persist ``recipe`` on the asset (canonicalised). Clears stale edit caches."""
     canon = recipe.canonical()
-    _purge_edit_cache(asset, store, keep_signature=canon.signature() if not canon.is_noop() else None)
+    _purge_edit_cache(
+        asset, store, keep_signature=canon.signature() if not canon.is_noop() else None
+    )
     updated = store.update_fields(asset.id, {"edit_recipe": canon.to_dict()})
     return updated
 
@@ -281,7 +283,13 @@ def create_collage(
     if len(paths) < 2:
         return None
     collage = compose_grid(
-        paths, layout=layout, width=width, height=height, gap=gap, background=background, corner=corner
+        paths,
+        layout=layout,
+        width=width,
+        height=height,
+        gap=gap,
+        background=background,
+        corner=corner,
     )
     data, _mime = encode_image(collage, "JPEG")
     path = _new_blob_path(store, profile_id, "collage", ".jpg")
@@ -295,7 +303,9 @@ def create_collage(
         profile_id=profile_id,
         width=collage.width,
         height=collage.height,
-        orientation="square" if collage.width == collage.height else ("portrait" if collage.height > collage.width else "landscape"),
+        orientation="square"
+        if collage.width == collage.height
+        else ("portrait" if collage.height > collage.width else "landscape"),
         permission_status="internal_only",
         approval_status="draft",
         safe_for_minors=safe,

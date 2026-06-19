@@ -58,9 +58,25 @@ EFFECT_CONTROLS = (
     ("opacity", "alpha", "Opacity", 0, 100, 1, 100, "pct01"),
 )
 
-FILTERS = ("natural", "crisp", "punchy", "vivid", "editorial", "soft", "mono", "noir", "sepia", "golden", "poolside")
+FILTERS = (
+    "natural",
+    "crisp",
+    "punchy",
+    "vivid",
+    "editorial",
+    "soft",
+    "mono",
+    "noir",
+    "sepia",
+    "golden",
+    "poolside",
+)
 SHAPES = ("circle", "oval", "square", "rounded", "triangle", "star", "heart")
-PROFILE_PRESETS = (("avatar_circle", "Circle"), ("avatar_square", "Rounded"), ("avatar_ring", "Brand ring"))
+PROFILE_PRESETS = (
+    ("avatar_circle", "Circle"),
+    ("avatar_square", "Rounded"),
+    ("avatar_ring", "Brand ring"),
+)
 
 
 def _slider(op: str, param: str, label: str, lo, hi, step, default, mp) -> str:
