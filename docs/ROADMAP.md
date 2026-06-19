@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `3261e4cda` · Merge pull request #885: Build 1.6 — video suite (footage path, Clip-Maker, EDL timeline, captions, 
+**Last updated:** 2026-06-19 · `f9b4ec76b` · Merge pull request #888 from elijahkendrick04/dependabot/github_actions/actions/checkout-7
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1221,6 +1221,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `5d1cc5795` | build(deps): bump actions/checkout from 6 to 7 |
+| 2026-06-19 | `15c81108b` | build(deps): bump actions/setup-node from 4 to 6 |
 | 2026-06-19 | `8f1683563` | Disclose the 1.6 avatar provider keys in the subprocessor register |
 | 2026-06-19 | `d20e56ce2` | Apply ruff-format to the 1.6 video suite |
 | 2026-06-19 | `e3a8853e2` | Build 1.6: video suite — footage path, Clip-Maker, EDL timeline, captions, reframe |
@@ -1229,7 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
 | 2026-06-19 | `e2c0f911c` | Backdrop: soft-blur the logo so it stays identifiable, and make it dynamic |
 | 2026-06-19 | `d09a52402` | Backdrop: heavily blur the centred logo into a soft brand glow |
-| 2026-06-19 | `643d1cc61` | fix(spotlight): celebrate achievements on the graphic, not '5 approved' |
-| 2026-06-19 | `b230e1316` | Apply ruff-format to the 1.5 motion vocabulary |
-| 2026-06-19 | `0c18ecce4` | Build 1.5: tokenised motion vocabulary (Remotion + FFmpeg + CSS) |
 <!-- /ROADMAP:ACTIVITY -->
