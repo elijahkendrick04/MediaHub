@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `b2d86a033` · Merge pull request #852: Photo editor (roadmap 1.3)
+**Last updated:** 2026-06-19 · `8d6f9db12` · Merge PR #850: Spotlight → mode-aware Content builder (composite post: graphic + reel + full toolbar
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1224,14 +1224,15 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `66d12ddc1` | feat(spotlight): add Reformat + Copilot to the composite Content builder (full toolbar parity) |
 | 2026-06-19 | `8e808dbe0` | Apply ruff-format to the 1.3 photo-editor modules |
+| 2026-06-19 | `a9e8d24d3` | style: ruff-format the composite content builder code |
 | 2026-06-19 | `bb4c0a355` | Add deterministic non-destructive photo editor (roadmap 1.3) |
+| 2026-06-19 | `0cc651510` | feat(spotlight): open the mode-aware Content builder (composite post: graphic + reel + full toolbar) |
 | 2026-06-19 | `90d2a54bd` | Apply ruff-format (collapse _wash ternary onto one line) |
 | 2026-06-19 | `638122eb6` | Recompose the signed-in logo backdrop into a branded crest backdrop |
+| 2026-06-19 | `6c31adcb2` | fix(graphic): keep v1 list layout for multi-fact recaps so spotlight composite renders |
 | 2026-06-19 | `c6da906f3` | Surface PB-lookup and store errors to the operator (don't silently fail) |
 | 2026-06-19 | `26974da89` | fix: No export or download action visible after approval |
 | 2026-06-18 | `05a437fd2` | Apply ruff formatting to spotlight builder |
-| 2026-06-18 | `8abf743c6` | Render athlete-spotlight builds on a dedicated Spotlight builder |
-| 2026-06-18 | `93477d34d` | docs: fix two stale comments after moving Templates into Settings |
-| 2026-06-18 | `7e69f4b4b` | chore: gitignore ephemeral Claude Code agent worktrees |
 <!-- /ROADMAP:ACTIVITY -->
