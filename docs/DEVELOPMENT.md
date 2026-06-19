@@ -80,6 +80,44 @@ Without a configured provider, AI-dependent routes surface
 `ClaudeUnavailableError` so it's immediately obvious that the provider is
 unset rather than silently producing low-quality heuristic output.
 
+## Claude Code dev-loop tooling (MCP servers + Codex plugin)
+
+The repo ships a shared Claude Code tooling config so contributors don't have to
+re-add it by hand (and so it survives the ephemeral cloud sessions, where
+`claude mcp add` would not). This is **developer tooling only** — none of it is a
+product feature, none of it ships to Render, and none of it touches MediaHub's
+customer AI path (which stays Gemini → Anthropic via `ai_core/llm.py` /
+`media_ai/llm.py`). Rationale and scope: [`adr/0025-dev-loop-mcp-tooling.md`](adr/0025-dev-loop-mcp-tooling.md).
+
+**MCP servers** (declared in `.mcp.json` at the repo root; approve them on first
+session, check with `/mcp`):
+
+| Server | Package | What it's for |
+| --- | --- | --- |
+| `playwright` | `@playwright/mcp` | Drive a real browser — exercise MediaHub's own UI, scrape API-less pages |
+| `context7` | `@upstash/context7-mcp` | Pull live, version-specific library docs into the session |
+| `sequential-thinking` | `@modelcontextprotocol/server-sequential-thinking` | Structured step-by-step planning |
+| `memory` | `@modelcontextprotocol/server-memory` | Persistent cross-session memory; store at `./.claude/memory.json` (gitignored, never committed) |
+
+**Codex plugin** (OpenAI Codex as an in-session second-opinion reviewer). The
+marketplace + enable flag are committed in `.claude/settings.json`; finish setup
+per-contributor:
+
+```bash
+npm install -g @openai/codex     # the Codex CLI (Node 18.18+)
+# in Claude Code:
+/codex:setup                     # verify install + OpenAI/ChatGPT auth
+```
+
+Then `/codex:review`, `/codex:adversarial-review`, and `/codex:rescue` are
+available. (The marketplace name is `openai-codex`, so the manual install — if
+ever needed — is `/plugin install codex@openai-codex`.)
+
+**Data-egress caveat.** Context7 sends query/library context to Upstash and the
+Codex plugin sends code/diffs to OpenAI under *your* credentials. Don't point
+them at secrets or proprietary client data. Provider keys live in `.env` only —
+never in `.mcp.json` or committed settings.
+
 ## Deployment
 
 Production runs on Render via `render.yaml`; see [`DEPLOYMENT.md`](DEPLOYMENT.md)

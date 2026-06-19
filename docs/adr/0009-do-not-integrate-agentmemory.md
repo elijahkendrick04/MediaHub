@@ -7,6 +7,12 @@
   dependency). If a contributor wants agent memory while coding, it is a
   personal, local dev-environment choice that lives outside this repo and off
   the deploy path — like their editor.
+  **Superseded in part by [ADR-0025](0025-dev-loop-mcp-tooling.md)
+  (2026-06-19):** the maintainer has since decided to commit the *lightweight
+  official* `@modelcontextprotocol/server-memory` MCP server as shared dev-loop
+  tooling (stdio, single JSON file, no native binary, no ports, store
+  gitignored). The rejection of the *heavyweight* `agentmemory` package itself —
+  with its `iii-engine` native binary and three ports + WebSocket — stands.
 - **Date:** 2026-05-31
 - **Deciders:** MediaHub maintainer
 - **Method:** Decision adjudicated by the LLM Council
