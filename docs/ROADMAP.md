@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `682bdada1` · Merge PR #865: Interpreter — stop dropping result times/places + entry_url meet name on link runs
+**Last updated:** 2026-06-19 · `6c1629cf5` · Merge pull request #867 from elijahkendrick04/claude/confident-brown-o6zxyg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1223,6 +1223,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `4f07e84fc` | Backdrop: knockout hybrid so it's future-proof for any club logo |
+| 2026-06-19 | `859e511ca` | Backdrop: centre the crest + auto-balance every logo's presence |
 | 2026-06-19 | `2c1615648` | fix(interpreter): narrow mirror-sidecar skip to _provenance.json only |
 | 2026-06-19 | `cad43d714` | fix(asr): empty audio upload is an honest 400, not a 500 (roadmap 1.4) |
 | 2026-06-19 | `23ab087d4` | fix(interpreter): stop dropping result times/places + entry_url meet name on link runs |
@@ -1231,6 +1233,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `96965f821` | Regenerate ENV_INVENTORY.md for the new ASR env vars |
 | 2026-06-19 | `873315687` | Add local ASR engine for word-level captions (roadmap 1.4) |
 | 2026-06-19 | `03517475e` | Refine logo backdrop: visible, composed crest (fixes invisible + littered) |
-| 2026-06-19 | `66d12ddc1` | feat(spotlight): add Reformat + Copilot to the composite Content builder (full toolbar parity) |
-| 2026-06-19 | `8e808dbe0` | Apply ruff-format to the 1.3 photo-editor modules |
 <!-- /ROADMAP:ACTIVITY -->
