@@ -180,10 +180,11 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
         location="United States",
         env_keys=("MEDIAHUB_VOICEOVER",),
         transfer_mechanism=(
-            "Public synthesis endpoint, no contractual terms — voiceover is "
-            "OFF by default and opt-in for exactly this reason"
+            "Public synthesis endpoint, no contractual terms — voiceover is OFF "
+            "by default, and even when enabled the default backend is local "
+            "Piper (no transfer); this online backend is a deliberate opt-in"
         ),
-        engaged_when="Only if voiceover is enabled",
+        engaged_when="Only if voiceover is enabled AND the edge backend is selected (MEDIAHUB_TTS_PROVIDER=edge)",
     ),
     Subprocessor(
         name="Resend, Inc.",
@@ -685,7 +686,8 @@ def privacy_html(
             configured</td></tr>
     <tr><td>Reel narration voiceover</td>
         <td>The narration text (athlete name, event, time)</td>
-        <td>Microsoft (edge-tts) &mdash; only if voiceover is enabled</td></tr>
+        <td>Local on our own server by default (Piper); Microsoft (edge-tts)
+            only if voiceover is enabled and the edge backend is selected</td></tr>
     <tr><td>Personal-best verification</td>
         <td>Search queries containing athlete name, club and birth year; fetches of
             public results pages</td>

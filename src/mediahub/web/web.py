@@ -122,8 +122,10 @@ except ImportError:
     _workflow_ok = False
 
 # Voiceover: deterministic TTS of the already-approved caption (verbatim).
-# Off by default — it is an online dependency that sends caption text to a
-# Microsoft endpoint, so the operator opts in with MEDIAHUB_VOICEOVER=1.
+# Off by default (operator opts in with MEDIAHUB_VOICEOVER=1). The default
+# backend is local Piper (roadmap 1.7 — zero-cost, fully offline; caption text
+# never leaves the box); MEDIAHUB_TTS_PROVIDER=edge selects the online
+# Microsoft-endpoint alternative instead.
 try:
     from mediahub.visual import voiceover as _voiceover
 

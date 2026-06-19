@@ -19,21 +19,28 @@ caption text; we (optionally) apply deterministic pronunciation overrides for sw
 names, then synthesise.
 
 Synthesis is provider-selected via ``MEDIAHUB_TTS_PROVIDER`` (roadmap P0.4 — every
-AI surface carries a local-capable provider slot):
+AI surface carries a local-capable provider slot). Roadmap **1.7** made the local
+backend the default — *Piper replaces edge-tts* — so the zero-cost, fully-offline
+path is what a deployment uses unless an operator deliberately opts into the
+online one:
 
-    edge   (default) `edge-tts` — pure-Python, CPU-only, no GPU. It is an
-           **online** dependency: it streams audio from a Microsoft endpoint,
-           which means the caption text leaves the box. That is why the feature
-           is operator-gated and off by default.
-    piper  the local-TTS backend (Piper, MIT) — **zero-cost and fully offline**:
-           the caption text never leaves the box. The operator points
-           ``MEDIAHUB_PIPER_MODEL`` at a Piper ``.onnx`` voice model (or sets
-           ``MEDIAHUB_PIPER_VOICE`` + ``MEDIAHUB_PIPER_VOICE_DIR``); we load it
-           with the ``piper-tts`` package, synthesise a WAV, and transcode it to
-           the same MP3 the rest of the pipeline already consumes. If the
+    piper  (default) the local-TTS backend (Piper, GPL-3.0-or-later) —
+           **zero-cost and fully offline**: the caption text never leaves the
+           box. The deployed image ships a licence-clean voice (CC BY 4.0
+           ``en_GB-alba-medium``) so this works out of the box; an operator can
+           also point ``MEDIAHUB_PIPER_MODEL`` at a Piper ``.onnx`` voice model,
+           set ``MEDIAHUB_PIPER_VOICE`` + ``MEDIAHUB_PIPER_VOICE_DIR``, or simply
+           drop a single ``.onnx`` into the voice dir (auto-discovered). We load
+           it with the ``piper-tts`` package, synthesise a WAV, and transcode it
+           to the same MP3 the rest of the pipeline already consumes. If the
            package or the model file is absent we raise `VoiceoverError`
-           honestly — never a silent fall back to the cloud backend or a
+           honestly — never a silent fall back to the online backend or a
            fabricated clip.
+    edge   the opt-in online alternative, `edge-tts` — pure-Python, CPU-only, no
+           GPU, but an **online** dependency: it streams audio from a Microsoft
+           endpoint, which means the caption text leaves the box. It is no longer
+           the default (1.7); select it explicitly with
+           ``MEDIAHUB_TTS_PROVIDER=edge`` when a deployment genuinely wants it.
 
            Piper does not emit word-level timestamps, so the Piper SRT cue
            *timings* are a deterministic estimate (the measured clip duration
@@ -94,16 +101,18 @@ class VoiceoverError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 _VALID_TTS_PROVIDERS: frozenset[str] = frozenset({"edge", "piper"})
-_DEFAULT_TTS_PROVIDER = "edge"
+# Roadmap 1.7 — Piper (local, zero-cost, fully offline) replaced edge-tts as the
+# default. The online 'edge' backend stays selectable for operators who want it.
+_DEFAULT_TTS_PROVIDER = "piper"
 
 
 def select_tts_provider() -> str:
     """Return the active TTS provider name.
 
-    Reads ``MEDIAHUB_TTS_PROVIDER``; unset/blank means the historical
-    default ``'edge'`` so existing deployments are byte-identical. An
-    unrecognised value raises `VoiceoverError` — an honest configuration
-    error beats silently synthesising with the wrong backend.
+    Reads ``MEDIAHUB_TTS_PROVIDER``; unset/blank means the default ``'piper'``
+    (roadmap 1.7 — the zero-cost, fully-offline local backend). An unrecognised
+    value raises `VoiceoverError` — an honest configuration error beats silently
+    synthesising with the wrong backend.
     """
     raw = os.environ.get("MEDIAHUB_TTS_PROVIDER", "").strip().lower()
     if not raw:
@@ -111,9 +120,9 @@ def select_tts_provider() -> str:
     if raw not in _VALID_TTS_PROVIDERS:
         raise VoiceoverError(
             f"MEDIAHUB_TTS_PROVIDER={raw!r} is not a recognised TTS provider. "
-            f"Valid choices: {sorted(_VALID_TTS_PROVIDERS)}. 'edge' is the "
-            "default; 'piper' is the zero-cost local backend (needs a Piper "
-            ".onnx voice model via MEDIAHUB_PIPER_MODEL)."
+            f"Valid choices: {sorted(_VALID_TTS_PROVIDERS)}. 'piper' is the "
+            "default zero-cost local backend (ships a voice model; also reads "
+            "MEDIAHUB_PIPER_MODEL); 'edge' is the opt-in online alternative."
         )
     return raw
 
@@ -298,9 +307,13 @@ def build_srt(boundaries: list[WordBoundary]) -> str:
 # Piper — the zero-cost, fully-offline local backend (roadmap R1.21)
 # ---------------------------------------------------------------------------
 #
-# Piper (https://github.com/OHF-Voice/piper1-gpl, MIT) runs a small neural TTS
-# model entirely on CPU with no network and no API key — the operator just
-# supplies a ``.onnx`` voice file. The implementation stays behind the same
+# Piper (https://github.com/OHF-Voice/piper1-gpl, GPL-3.0-or-later) runs a small
+# neural TTS model entirely on CPU with no network and no API key — a ``.onnx``
+# voice file is supplied (the deployed image ships a CC BY 4.0 default; an
+# operator can swap it). Used server-side in MediaHub's hosted-only deployment,
+# never conveyed to customers, so the GPL imposes no source-offer obligation
+# (the same hosted-only basis the repo already relies on for AGPL SearXNG).
+# The implementation stays behind the same
 # `_synthesize_raw` seam as edge so the rest of the pipeline (cache, SRT, route,
 # audio mux) is untouched: it returns the same ``(mp3_bytes, word_boundaries)``
 # tuple. Every failure mode (package absent, model absent, ffmpeg absent, empty
@@ -319,6 +332,27 @@ def _piper_voice_dir() -> Path:
     return _data_dir() / "piper_voices"
 
 
+def _autodiscover_piper_model() -> Path | None:
+    """The bundled/dropped-in default voice: a single ``.onnx`` in the voice dir.
+
+    Roadmap 1.7 ships a licence-clean default voice and makes Piper the default
+    provider, so a deployment must narrate locally with **no env configuration**.
+    When neither ``MEDIAHUB_PIPER_MODEL`` nor ``MEDIAHUB_PIPER_VOICE`` is set we
+    scan `_piper_voice_dir` for ``*.onnx`` and use it. Deterministic: with one
+    voice present it is used; with several we pick the lexicographically-first so
+    the choice is stable, never random. An absent/empty dir → ``None``, which
+    preserves the honest "no model configured" error path exactly as before.
+    """
+    vdir = _piper_voice_dir()
+    if not vdir.is_dir():
+        return None
+    try:
+        onnx = sorted(p for p in vdir.glob("*.onnx") if p.is_file())
+    except OSError:
+        return None
+    return onnx[0] if onnx else None
+
+
 def _resolve_piper_model() -> tuple[Path, Path | None] | None:
     """Locate the configured Piper model + its config, without raising.
 
@@ -326,6 +360,8 @@ def _resolve_piper_model() -> tuple[Path, Path | None] | None:
       1. ``MEDIAHUB_PIPER_MODEL`` — an explicit path to a ``.onnx`` voice model.
       2. ``MEDIAHUB_PIPER_VOICE`` — a voice name looked up in `_piper_voice_dir`
          (``<voice>.onnx``).
+      3. **Auto-discovery** (1.7) — a single ``.onnx`` dropped into / bundled in
+         `_piper_voice_dir`, so the shipped default voice works with no env set.
 
     The config sidecar is ``MEDIAHUB_PIPER_CONFIG`` when set, else the Piper
     convention ``<model>.onnx.json`` beside the model when it exists (Piper can
@@ -338,11 +374,14 @@ def _resolve_piper_model() -> tuple[Path, Path | None] | None:
         model = Path(explicit)
     else:
         name = os.environ.get("MEDIAHUB_PIPER_VOICE", "").strip()
-        if not name:
-            return None
-        if not name.endswith(".onnx"):
-            name += ".onnx"
-        model = _piper_voice_dir() / name
+        if name:
+            if not name.endswith(".onnx"):
+                name += ".onnx"
+            model = _piper_voice_dir() / name
+        else:
+            model = _autodiscover_piper_model()
+            if model is None:
+                return None
     if not model.is_file():
         return None
 
@@ -378,9 +417,9 @@ def _require_piper_model() -> tuple[Path, Path | None]:
         )
     raise VoiceoverError(
         "The Piper TTS backend is selected but no voice model is configured. "
-        "Set MEDIAHUB_PIPER_MODEL to a Piper '.onnx' file (or "
-        "MEDIAHUB_PIPER_VOICE + MEDIAHUB_PIPER_VOICE_DIR), or set "
-        "MEDIAHUB_TTS_PROVIDER=edge."
+        f"Drop a Piper '.onnx' voice into {_piper_voice_dir()} (auto-discovered), "
+        "set MEDIAHUB_PIPER_MODEL to a '.onnx' file (or MEDIAHUB_PIPER_VOICE + "
+        "MEDIAHUB_PIPER_VOICE_DIR), or set MEDIAHUB_TTS_PROVIDER=edge."
     )
 
 
