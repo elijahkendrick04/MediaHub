@@ -17,6 +17,8 @@ ENV PYTHONUNBUFFERED=1 \
 #  - tesseract-ocr: W.10 OCR fallback engine for scanned/photographed
 #    result sheets (interpreter/ocr.py, driven via pytesseract below)
 #  - libgl1: image/video preprocessing
+#  - espeak-ng: phonemizer + voice data for local Piper TTS — the DEFAULT
+#    voiceover backend (roadmap 1.7); piper-tts needs it at synthesis time
 #  - git: required to pip-install SearXNG from its git repo (below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -25,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates gnupg \
     poppler-utils \
     tesseract-ocr \
+    espeak-ng \
     libgl1 \
     libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libffi-dev \
     libnss3 libxss1 libgbm1 libasound2 libatk-bridge2.0-0 libatk1.0-0 \
@@ -89,8 +92,27 @@ COPY scripts/ /app/scripts/
 COPY pyproject.toml /app/pyproject.toml
 COPY deploy/ /app/deploy/
 
-# Install MediaHub itself in editable mode so the console script is wired.
-RUN pip install -e /app
+# Install MediaHub itself in editable mode so the console script is wired. The
+# [voiceover] extra pulls in piper-tts (GPL-3.0-or-later) — the DEFAULT local
+# TTS backend (roadmap 1.7). It is server-side only in this hosted-only image,
+# never conveyed to customers, so no GPL source-offer obligation triggers (the
+# same basis used for AGPL SearXNG below). onnxruntime already ships (rembg).
+RUN pip install -e "/app[voiceover]"
+
+# Bundle the licence-clean default Piper voice (roadmap 1.7) INTO the image so a
+# deployment narrates locally out of the box. en_GB-alba-medium is CC BY 4.0
+# (commercial use with attribution — recorded in docs/DEPENDENCY_LICENSING.md).
+# The voice lives at /opt/piper_voices (image-only, off the small persistent
+# disk); MEDIAHUB_PIPER_VOICE_DIR points the runtime auto-discovery at it.
+# We then run a REAL end-to-end synth (piper + espeak-ng + ffmpeg, via the app's
+# own code path) so a broken local-voice setup fails the build LOUDLY instead of
+# degrading silently at runtime — the same loud-build discipline as the rembg /
+# sqlite-vec preloads above. Voiceover itself stays opt-in (MEDIAHUB_VOICEOVER=1).
+ENV MEDIAHUB_PIPER_VOICE_DIR=/opt/piper_voices
+RUN python /app/scripts/fetch_piper_voice.py /opt/piper_voices \
+ && DATA_DIR=/tmp/piperverify MEDIAHUB_TTS_PROVIDER=piper python -c "from mediahub.visual import voiceover as v; assert v._piper_available(), 'piper backend not available in image (package/model/ffmpeg missing)'; r = v.synthesize('MediaHub local voice check, one two three.', apply_pronunciation=False); assert r.audio_path.exists() and r.audio_path.stat().st_size > 0 and r.duration_ms > 0, 'piper produced empty audio'; print('piper TTS OK:', r.duration_ms, 'ms ->', r.audio_path)" \
+ && rm -rf /tmp/piperverify \
+ && test -f /opt/piper_voices/en_GB-alba-medium.onnx
 
 # Install Remotion node modules so /api/.../motion + /reel render MP4s.
 RUN cd /app/src/mediahub/remotion && npm install --no-audit --no-fund
