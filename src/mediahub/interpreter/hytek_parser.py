@@ -111,25 +111,6 @@ def _hy3_distance(token: str) -> Optional[int]:
     return None
 
 
-# The E1 entry carries the swimmer's seed (entry) time. Its fixed column varies
-# across HY-TEK versions, but it is reliably the first clock time immediately
-# tagged with a course code (S/L/Y) — "  73.44S", "299.18S", " 1:13.44L". That
-# course suffix is what distinguishes the seed from the entry fee ("9.50", no
-# suffix) and the "0.00" placeholders, so we locate it by shape rather than a
-# brittle offset. The first such token is the entered seed; a "0.00" / NT seed
-# yields no match (``_parse_hy3_time`` rejects zeros) → no seed, which is honest.
-_HY3_SEED_RE = re.compile(r"(\d{1,3}(?::\d{2})?\.\d{2})[SLYsly]")
-
-
-def _e1_seed_time(line: str) -> Optional[str]:
-    """Best-effort canonical seed time from an E1 record, or None."""
-    for m in _HY3_SEED_RE.finditer(line):
-        canonical = _parse_hy3_time(m.group(1))
-        if canonical:
-            return canonical
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Athlete cache built from D1 records
 # ---------------------------------------------------------------------------
@@ -218,7 +199,7 @@ def _parse_e1(line: str) -> dict:
         "stroke_code": _safe_str(line, 21, 1),
         "course_code": _safe_str(line, 33, 1) if len(line) > 33 else "",
         "event_no": _safe_str(line, 34, 4) if len(line) > 34 else "",
-        "seed_time": _e1_seed_time(line),
+        "seed_time_raw": _safe_str(line, 41, 8) if len(line) > 41 else "",
     }
 
 
@@ -438,10 +419,6 @@ def parse_hy3(data: bytes) -> InterpretedMeet:
                 confidence=round(swim_conf, 3),
                 raw_row=raw[:120],
                 field_confidence=field_conf,
-                # E1 carries the entry/seed time. It is the swimmer's prior best
-                # at entry, so the recognition engine can confirm a PB straight
-                # from the file — no web lookup needed.
-                seed_time=pending_e1.get("seed_time"),
             )
             ev.swims.append(swim)
             pending_e1 = None  # consumed

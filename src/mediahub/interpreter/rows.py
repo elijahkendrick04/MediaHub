@@ -149,11 +149,6 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
 
 _NORMALISERS = {
     "time": _normalise_time,
-    # A seed/entry-time column has the same value shape as a finals time, so it
-    # normalises the same way; it is distinguished from the finals column purely
-    # by its header ("Seed Time" / "Entry Time" → col_type "seed" in the
-    # ontology). Captured so the recognition engine can confirm a PB offline.
-    "seed": _normalise_time,
     "place": _normalise_place,
     "yob": _normalise_yob,
     "reaction": _normalise_reaction,
@@ -221,7 +216,6 @@ def _extract_swim_from_cells(
         confidence=round(min(row_conf, 1.0), 4),
         raw_row="\t".join(cells),
         field_confidence=field_conf,
-        seed_time=field_vals.get("seed"),  # type: ignore[arg-type]
     )
 
 
@@ -264,39 +258,6 @@ def _is_time_like(tok: str) -> bool:
     return bool(_TIME_TOKEN.match(tok) or _DSQ_TOKEN.match(tok))
 
 
-def _is_real_time_token(tok: str) -> bool:
-    """A time token that is an actual clock time (not a DQ/NS marker)."""
-    return bool(_TIME_TOKEN.match(tok)) and not _DSQ_TOKEN.match(tok)
-
-
-def _time_token_seconds(tok: str) -> float | None:
-    """Parse a (possibly J/X/R-prefixed) time token to seconds, or None.
-
-    Used only to sanity-check a "seed  finals" pair: two adjacent time tokens
-    are accepted as entry+result when their ratio is plausible, which keeps a
-    trailing points / split column from being misread as a seed time.
-    """
-    canonical, conf = _normalise_time(re.sub(r"^[JXRjxr]", "", tok.strip()))
-    if not canonical or conf <= 0:
-        return None
-    m = _TIME_COLON.match(canonical)
-    if m:
-        return int(m.group(1)) * 60 + int(m.group(2)) + int(m.group(3)) / 100.0
-    m = _TIME_PLAIN.match(canonical)
-    if m:
-        return int(m.group(1)) + int(m.group(2)) / 100.0
-    return None
-
-
-# A printed "Seed Time  Finals Time" pair sits as two adjacent time tokens at
-# the end of a record. We treat the earlier as the entry/seed and the later as
-# the achieved result only when their ratio is plausible for the same swimmer's
-# entry-vs-swim — wide enough for a big age-group improvement, tight enough to
-# reject a place-points or split column that happens to be decimal-shaped.
-_SEED_FINALS_RATIO_LO = 0.80
-_SEED_FINALS_RATIO_HI = 1.25
-
-
 def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
     """Split text into (token, big_gap_before) pairs.
 
@@ -316,27 +277,12 @@ def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
 def _split_into_records(
     tokens: list[tuple[str, bool]],
 ) -> list[list[tuple[str, bool]]]:
-    """Break a tokenised line into records, each ending at a time token.
-
-    Two *adjacent* time tokens (a "Seed Time  Finals Time" pair) belong to the
-    same competitor, so we do not split between them — the record closes after
-    the trailing time. A new record only ever starts with a place or a name, so
-    a time immediately followed by another time is always the same swimmer's
-    entry+result, never the start of the next record.
-    """
+    """Break a tokenised line into records, each ending at a time token."""
     records: list[list[tuple[str, bool]]] = []
     cur: list[tuple[str, bool]] = []
-    n = len(tokens)
-    for i, (tok, big) in enumerate(tokens):
+    for tok, big in tokens:
         cur.append((tok, big))
         if _is_time_like(tok):
-            nxt = tokens[i + 1][0] if i + 1 < n else None
-            # Keep a "Seed  Finals" pair (two adjacent *real* clock times) in one
-            # record. A DQ/NS marker is never grouped, so a DQ swim splits exactly
-            # as before; whether the pair is genuinely seed+finals (vs a time and
-            # a trailing points column) is decided in _record_to_swim.
-            if nxt is not None and _is_real_time_token(tok) and _is_real_time_token(nxt):
-                continue
             records.append(cur)
             cur = []
     return records
@@ -361,34 +307,8 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     """Classify one time-terminated record's tokens into an InterpretedSwim."""
     if not rec:
         return None
-    # Peel the trailing run of time tokens and decide which is the result and
-    # which (if any) is the entry/seed. A "Seed  Finals" pair prints Seed first
-    # and Finals last, so the result is the LAST — but only when the two times
-    # are plausibly the same swimmer's entry-vs-swim (ratio gate). Otherwise the
-    # second token is a trailing points/other column, so the result stays the
-    # FIRST time (the long-standing behaviour) and no seed is recorded.
-    k = len(rec)
-    while k > 0 and _is_time_like(rec[k - 1][0]):
-        k -= 1
-    trailing_times = [t for t, _ in rec[k:]]
-    if not trailing_times:
-        return None
-    body = rec[:k]
-    seed_tok: str | None = None
-    if (
-        len(trailing_times) == 2
-        and _is_real_time_token(trailing_times[0])
-        and _is_real_time_token(trailing_times[1])
-    ):
-        s0 = _time_token_seconds(trailing_times[0])
-        s1 = _time_token_seconds(trailing_times[1])
-        if s0 and s1 and _SEED_FINALS_RATIO_LO <= s1 / s0 <= _SEED_FINALS_RATIO_HI:
-            seed_tok, time_tok = trailing_times[0], trailing_times[1]
-        else:
-            time_tok = trailing_times[0]  # trailing column is not a finals time
-    else:
-        # One time, or 3+ adjacent times (ambiguous): the first is the result.
-        time_tok = trailing_times[0]
+    time_tok = rec[-1][0]
+    body = rec[:-1]
 
     # Place (optional leading rank).
     place_val: int | None = None
@@ -429,14 +349,6 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     if time_val is None:
         return None
 
-    # Canonicalise the entry/seed time chosen above (the ratio gate already ran).
-    # The PB detector decides whether result < seed is a PB.
-    seed_val: str | None = None
-    if seed_tok is not None:
-        cand, sconf = _normalise_time(re.sub(r"^[JXRjxr]", "", seed_tok))
-        if cand and sconf > 0:
-            seed_val = cand
-
     # Drop leading lane / heat numbers sitting before the name (the place was
     # already consumed, and a competitor name never begins with a bare number).
     while name_toks and name_toks[0].strip("()").isdigit():
@@ -463,8 +375,6 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         if club_val is not None:
             field_conf["club"] = cconf
 
-    if seed_val is not None:
-        field_conf["seed"] = 0.80
     row_conf = sum(field_conf.values()) / len(field_conf)
     return InterpretedSwim(
         swimmer_name=name,
@@ -474,7 +384,6 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         time=time_val,
         reaction=None,
         confidence=round(min(row_conf, 1.0), 4),
-        seed_time=seed_val,
         raw_row=" ".join(t for t, _ in rec),
         field_confidence=field_conf,
     )

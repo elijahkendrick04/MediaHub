@@ -341,11 +341,7 @@ def interpreted_to_canonical(
                 gender=ev_gender,
                 age_band=ev_age_band,
                 finals_time_cs=time_cs,
-                # The entry/seed time the source carried (HY-TEK E1, SDIF seed
-                # column, printed "Seed Time" column). Threaded through so the
-                # recognition engine can confirm a PB straight from the file —
-                # no web lookup. ``None`` when the source had no seed column.
-                seed_time_cs=_time_to_cs(getattr(swim, "seed_time", None)),
+                seed_time_cs=None,
                 place=place_int,
                 round="timed_final",
                 dq=time_cs is None,

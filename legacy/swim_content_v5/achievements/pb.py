@@ -1,8 +1,12 @@
 """
 PB detectors:
   - PBConfirmedDetector: prior PB exists and current time is faster
-  - PBLikelyDetector: entry time > final time but no prior PB data
   - PBImprovementMagnitudeDetector: how big is the improvement?
+
+A PB is only ever asserted against a real prior-best baseline (the verified web
+PB lookup). PBs are deliberately NOT inferred from a swimmer's entry/seed time:
+seed times are unreliable (soft / converted / "NT" entries) and a wrong PB is
+worse than a missing one.
 """
 from __future__ import annotations
 
@@ -127,84 +131,6 @@ class PBConfirmedDetector(AchievementDetector):
         time_sec = _cs_to_sec(swim.finals_time_cs)
         if time_sec >= prior:
             return f"time {_sec_to_str(time_sec)} not faster than prior PB {_sec_to_str(prior)}"
-        return "did not fire"
-
-
-class PBLikelyDetector(AchievementDetector):
-    """
-    Fires when entry time > final time but no prior PB data.
-    Confidence: medium. Adds uncertainty note.
-    """
-    name = "pb_likely"
-
-    def detect(self, swim, ctx, history, all_results=None, extra=None) -> list[Achievement]:
-        if getattr(swim, "dq", False) or getattr(swim, "finals_time_cs", None) is None:
-            return []
-
-        # Skip if we have confirmed PB data (PBConfirmedDetector handles it)
-        if history.has_data and history.best_time_in_event(swim.distance, swim.stroke, swim.course) is not None:
-            return []
-
-        seed_cs = getattr(swim, "seed_time_cs", None)
-        if not seed_cs or seed_cs <= 0:
-            return []
-
-        final_cs = swim.finals_time_cs
-        if final_cs >= seed_cs:
-            return []
-
-        # Sanity check: improvement must be plausible (< 20%)
-        drop_pct = 100.0 * (seed_cs - final_cs) / seed_cs
-        if drop_pct > 20.0:
-            return []
-
-        time_str = _cs_to_str(final_cs)
-        seed_str = _cs_to_str(seed_cs)
-        drop_sec = (seed_cs - final_cs) / 100.0
-        evt = _event_label(swim)
-        swimmer_name = (extra or {}).get("swimmer_name", history.swimmer_name)
-
-        return [Achievement(
-            type="pb_likely",
-            swim_id=_swim_id(swim, ":pb_likely"),
-            swimmer_id=swim.swimmer_key,
-            swimmer_name=swimmer_name,
-            event=evt,
-            headline=f"{swimmer_name} likely PB: {time_str} in {evt} (entry was {seed_str})",
-            angle_hint=f"Likely personal best of {time_str}, beating entry time of {seed_str} by {drop_sec:.2f}s.",
-            confidence=0.6,
-            confidence_label="medium",
-            evidence=[
-                AchievementEvidence(
-                    source_type="results_file",
-                    source_name="Meet results",
-                    statement=f"Final time {time_str} faster than entry time {seed_str}",
-                    confidence="medium",
-                ),
-            ],
-            raw_facts={
-                "time_sec": final_cs / 100.0,
-                "time_str": time_str,
-                "seed_sec": seed_cs / 100.0,
-                "seed_str": seed_str,
-                "drop_seconds": round(drop_sec, 3),
-                "drop_pct": round(drop_pct, 2),
-            },
-            uncertainty_notes=["no prior PB data available — comparison is against entry time only"],
-            detector_name=self.name,
-        )]
-
-    def _no_fire_reason(self, swim, ctx, history, all_results=None, extra=None) -> str:
-        if history.has_data and history.best_time_in_event(swim.distance, swim.stroke, swim.course) is not None:
-            return "prior PB data exists — handled by pb_confirmed detector"
-        seed_cs = getattr(swim, "seed_time_cs", None)
-        if not seed_cs or seed_cs <= 0:
-            return "no entry/seed time to compare against"
-        final_cs = getattr(swim, "finals_time_cs", None)
-        if final_cs is None:
-            return "no final time (DQ/NS)"
-        if final_cs >= seed_cs:
-            return "did not beat entry time"
         return "did not fire"
 
 

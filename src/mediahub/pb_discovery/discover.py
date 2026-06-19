@@ -257,17 +257,12 @@ def _research_candidate_urls(
         return []
 
 
-def _fetch_workers() -> int:
-    """How many candidate pages to fetch concurrently per swimmer. The fetches
-    are independent network round-trips, so fanning them out turns the dominant
-    per-swimmer cost from N sequential fetches into ~one. Bounded and tunable;
-    page fetches are not the rate-limited DuckDuckGo search, so a small fan-out
-    is polite."""
-    raw = os.environ.get("MEDIAHUB_PB_FETCH_WORKERS", "").strip()
-    try:
-        return max(1, min(8, int(raw))) if raw else 3
-    except ValueError:
-        return 3
+# How many candidate pages to fetch concurrently per swimmer. The fetches are
+# independent network round-trips, so fanning them out turns the dominant
+# per-swimmer cost from N sequential fetches into ~one. Page fetches are not the
+# rate-limited DuckDuckGo search, so a small fan-out is polite; a constant keeps
+# this off the operator's env surface (no new knob to document/tune).
+_FETCH_WORKERS = 3
 
 
 def _fetch_and_parse_url(url: str, name: str, use_interpreter: bool) -> "tuple[PBSource, bool]":
@@ -322,7 +317,7 @@ def _fetch_and_parse_many(
     from concurrent.futures import ThreadPoolExecutor
 
     out: "dict[str, tuple[PBSource, bool]]" = {}
-    with ThreadPoolExecutor(max_workers=min(len(urls), _fetch_workers())) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(urls), _FETCH_WORKERS)) as pool:
         futures = {pool.submit(_fetch_and_parse_url, u, name, use_interpreter): u for u in urls}
         for fut, u in futures.items():
             try:
