@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `f9b4ec76b` · Merge pull request #888 from elijahkendrick04/dependabot/github_actions/actions/checkout-7
+**Last updated:** 2026-06-19 · `d62db6711` · Merge pull request #887 from elijahkendrick04/dependabot/github_actions/actions/setup-node-6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1230,5 +1230,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `019caf2b8` | Backdrop: make the logo still, and fix one logo rendering un-blurred |
 | 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
 | 2026-06-19 | `e2c0f911c` | Backdrop: soft-blur the logo so it stays identifiable, and make it dynamic |
-| 2026-06-19 | `d09a52402` | Backdrop: heavily blur the centred logo into a soft brand glow |
 <!-- /ROADMAP:ACTIVITY -->
