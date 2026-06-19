@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `6c1629cf5` · Merge pull request #867 from elijahkendrick04/claude/confident-brown-o6zxyg
+**Last updated:** 2026-06-19 · `9d441fc52` · Merge PR #871: Build 1.5 — tokenised motion vocabulary (Remotion + FFmpeg + CSS)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.5** · Phase 1 (Product) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
 - **1.6** · Phase 1 (Product) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
 - **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · ❌ **NOT STARTED**
 - **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
@@ -1223,6 +1222,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `b230e1316` | Apply ruff-format to the 1.5 motion vocabulary |
+| 2026-06-19 | `0c18ecce4` | Build 1.5: tokenised motion vocabulary (Remotion + FFmpeg + CSS) |
 | 2026-06-19 | `4f07e84fc` | Backdrop: knockout hybrid so it's future-proof for any club logo |
 | 2026-06-19 | `859e511ca` | Backdrop: centre the crest + auto-balance every logo's presence |
 | 2026-06-19 | `2c1615648` | fix(interpreter): narrow mirror-sidecar skip to _provenance.json only |
@@ -1231,6 +1232,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `761c48dc7` | Backdrop: paint the logo's REAL artwork, future-proof for any upload |
 | 2026-06-19 | `2af60c0b4` | fix(spotlight): strip entry_url placeholder + dedupe moments on the composite |
 | 2026-06-19 | `96965f821` | Regenerate ENV_INVENTORY.md for the new ASR env vars |
-| 2026-06-19 | `873315687` | Add local ASR engine for word-level captions (roadmap 1.4) |
-| 2026-06-19 | `03517475e` | Refine logo backdrop: visible, composed crest (fixes invisible + littered) |
 <!-- /ROADMAP:ACTIVITY -->
