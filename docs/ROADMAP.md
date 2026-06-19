@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `d62db6711` · Merge pull request #887 from elijahkendrick04/dependabot/github_actions/actions/setup-node-6
+**Last updated:** 2026-06-19 · `decf5e9ba` · Merge pull request #893 from elijahkendrick04/claude/mcp-tools-integrations-fydfk3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1221,6 +1221,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-19 | `7678a9de7` | chore(devtools): drop Codex plugin from MCP tooling config |
+| 2026-06-19 | `88894fc39` | chore(devtools): commit shared Claude Code MCP + Codex plugin config |
 | 2026-06-19 | `5d1cc5795` | build(deps): bump actions/checkout from 6 to 7 |
 | 2026-06-19 | `15c81108b` | build(deps): bump actions/setup-node from 4 to 6 |
 | 2026-06-19 | `8f1683563` | Disclose the 1.6 avatar provider keys in the subprocessor register |
