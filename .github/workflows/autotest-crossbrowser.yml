@@ -32,7 +32,7 @@ jobs:
           - { browser: webkit,  device: "",          label: "webkit-desktop" }
           - { browser: chromium, device: "Pixel 7",  label: "chromium-pixel7" }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
