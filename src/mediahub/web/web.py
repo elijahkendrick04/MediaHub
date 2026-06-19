@@ -13779,6 +13779,14 @@ def create_app() -> Flask:
             "organisation_setup_reread",
             "organisation_setup_logo_serve",
             "organisation_setup_logo_delete",
+            # The sign-in picker renders org logos BEFORE the user has picked
+            # an active org. Without these exemptions the gate intercepts logo
+            # requests and 302-redirects to /sign-in (HTML), which Chrome
+            # can't decode as an image — producing net::ERR_ABORTED.
+            # Both routes carry their own IDOR guard (_session_can_use_profile)
+            # so exempting them from the org-ready gate does not weaken security.
+            "organisation_logo_serve",
+            "organisation_logo_mirror",
             "organisation_set_active",
             # Phase 1.5 — the profile-picker page must be reachable without
             # an active org (it's how the user PICKS one). Same for the POST
