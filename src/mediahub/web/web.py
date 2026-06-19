@@ -10847,9 +10847,7 @@ def _layout(
     # captured): "image" paints a colourful logo's real artwork; "knockout" paints
     # a monochrome / SVG logo's shape in one light brand-tinted ink.
     bg_logos_html = ""
-    _brand = (
-        signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
-    )
+    _brand = signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
     # Render the backdrop whenever there's a paintable logo OR at least a brand
     # colour. A soft brand-coloured wash is a tasteful "better than nothing" when a
     # club's logo can't be rendered as a backdrop (an unrenderable format) or the
