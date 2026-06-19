@@ -144,6 +144,8 @@ CATEGORIES: tuple[str, ...] = (
     "document",
     "calendar",
     "wallpaper",
+    "collage",
+    "profile",
     "custom",
 )
 
@@ -538,6 +540,44 @@ _CATALOG: tuple[FormatSpec, ...] = (
         render_format="landscape",
         archetypes=("horizon_band", "full_bleed_photo_lower_third", "minimal_type_poster"),
         description="16:9 desktop wallpaper from brand tokens.",
+        caption_style="none",
+    ),
+    # --- Photo collages (1.3 photo-grid composer; universal) --------------
+    FormatSpec(
+        "collage_square",
+        "Square collage",
+        "collage",
+        1080,
+        1080,
+        description="1:1 multi-photo grid for the feed (2-up, 3-up, 2×2, 3×3).",
+        caption_style="feed",
+    ),
+    FormatSpec(
+        "collage_portrait",
+        "Portrait collage",
+        "collage",
+        1080,
+        1350,
+        description="4:5 multi-photo grid — the highest-reach feed collage.",
+        caption_style="feed",
+    ),
+    FormatSpec(
+        "collage_story",
+        "Story collage",
+        "collage",
+        1080,
+        1920,
+        description="9:16 multi-photo grid for stories.",
+        caption_style="story",
+    ),
+    # --- Profile pictures (1.3 avatar export presets; universal) ----------
+    FormatSpec(
+        "profile_avatar",
+        "Profile picture",
+        "profile",
+        512,
+        512,
+        description="Square/circle club or athlete avatar with an optional brand ring.",
         caption_style="none",
     ),
 )

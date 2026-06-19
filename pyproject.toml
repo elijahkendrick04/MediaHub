@@ -34,6 +34,10 @@ dependencies = [
   # results deterministically, read-only. MIT-licensed.
   "openpyxl>=3.1.5",
   "Pillow>=12.2.0",
+  # 1.3 photo editor — decode iPhone HEIC/HEIF uploads to web-safe JPEG on
+  # ingest (mediahub.media_library.heic). BSD-3 wrapper over bundled libheif
+  # (manylinux wheels, no system libs). Decode-only; honest-errors if absent.
+  "pillow-heif>=0.16.0",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.
   "materialyoucolor>=3.0.2",

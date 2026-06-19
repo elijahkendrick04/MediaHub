@@ -112,6 +112,11 @@ Notes:
 - The cutout substitution is **already done** — `rembg` is the shipped default.
 - The remaining `requirements.txt` deps (Flask, Pillow, pdfplumber, lxml,
   materialyoucolor, coloraide, numpy, PyYAML, …) are permissive and free.
+- **`pillow-heif`** (1.3 photo-editor HEIC ingest) is BSD-3; its manylinux
+  wheels bundle **libheif** (LGPL-2.1+, dynamically linked) for decode. We use
+  it **decode-only at upload time** to convert iPhone HEIC/HEIF to JPEG, never
+  to encode/distribute HEVC, and the code (`media_library.heic`) honest-errors
+  if the package is ever absent — so it stays an optional, free ingest helper.
 
 ## 3. AGPL handling rule (restated)
 

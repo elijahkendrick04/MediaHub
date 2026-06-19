@@ -34963,6 +34963,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
             _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
             _studio_url = url_for("image_studio_page", asset_id=ad.get("id", ""))
+            _edit_url = url_for("photo_editor_page", asset_id=ad.get("id", ""))
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -35006,6 +35007,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
+    <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
     <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
@@ -35209,6 +35211,31 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
         dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
         f.save(str(dest))
+
+        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
+        # show — normalise it to a web-safe JPEG on the way in. Honest-error
+        # (don't keep an unreadable asset) when the optional decoder is absent.
+        from mediahub.media_library import heic as _heic
+
+        if _heic.is_heic(dest.name):
+            try:
+                dest, _converted = _heic.normalize_upload(dest)
+            except _heic.HeicUnsupported:
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return (
+                    jsonify(
+                        {
+                            "error": "heic_unsupported",
+                            "message": "HEIC/HEIF photos need conversion support that "
+                            "isn't installed on this deployment. Re-save the photo as "
+                            "JPEG or PNG and upload again.",
+                        }
+                    ),
+                    415,
+                )
 
         # Parse metadata
         meta = _v8_parse_description(description) if description else {}
@@ -36186,6 +36213,294 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             height=height,
         )
         return _layout("Image studio", body, active="media")
+
+    # -- 1.3 photo editor --------------------------------------------------
+    # The deterministic, non-destructive photo editor on a library asset:
+    # filters / adjustments / crop / perspective / shapes / frames / blur
+    # brush / one-click enhance, all stored as a serialisable EditRecipe and
+    # applied to a *copy* at render time. Engine: media_library.photo_ops;
+    # asset integration: media_library.photo_edit. Run-independent — this IS
+    # the "standalone Photo Editor" surface (reachable without starting a run).
+
+    _PHOTO_PREVIEW_MAX = 1400  # downscale the working copy so preview stays snappy
+
+    def _photo_recipe_from_request(req):
+        """Parse a posted EditRecipe (canonicalised); never raises."""
+        from mediahub.media_library.photo_ops import EditRecipe
+
+        try:
+            data = req.get_json(silent=True) or {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return EditRecipe.from_dict(data).canonical()
+
+    def _photo_editor_asset(asset_id: str):
+        """Resolve + tenancy-check an asset for the editor. Returns (asset, store, error_response)."""
+        if not _v8_ok:
+            return None, None, (jsonify({"error": "v8_unavailable"}), 503)
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return None, None, (jsonify({"error": "not_found"}), 404)
+        if not _session_can_access_profile(a.profile_id):
+            return None, None, (jsonify({"error": "forbidden"}), 403)
+        return a, store, None
+
+    @app.route("/media-library/<asset_id>/edit")
+    def photo_editor_page(asset_id: str):
+        """The standalone photo-editor page for one library asset."""
+        if not _v8_ok:
+            return _recovery_page(
+                "Photo editor unavailable",
+                "The media library isn't enabled on this deployment, so the photo "
+                "editor can't open.",
+                eyebrow="Photo editor",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library &mdash; it may have been deleted.",
+                eyebrow="Photo editor",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation.",
+                eyebrow="Photo editor",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+
+        ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+        label = (
+            ", ".join(ad.get("linked_athlete_names") or [])
+            or ad.get("linked_venue")
+            or ad.get("linked_event")
+            or ad.get("filename")
+            or "this photo"
+        )
+        width = int(ad.get("width") or 0)
+        height = int(ad.get("height") or 0)
+        if not (width and height):
+            try:
+                from PIL import Image as _Image
+
+                with _Image.open(a.path) as _im:
+                    width, height = int(_im.width), int(_im.height)
+            except Exception:
+                width = height = 0
+
+        from mediahub.media_library import photo_edit as _pe
+        from mediahub.web import photo_editor as _editor
+
+        bk = _v8_brand_kit_for(a.profile_id) if a.profile_id else None
+        brand_shadow = (getattr(bk, "primary_colour", None) or "#0b1020") if bk else "#0b1020"
+
+        body = _editor.render_editor_body(
+            asset_id=a.id,
+            asset_label=label,
+            asset_type=str(ad.get("type") or "photo"),
+            asset_url=url_for("api_media_library_file", asset_id=a.id),
+            edited_url=url_for("api_media_library_edited", asset_id=a.id),
+            apply_url=url_for("api_photo_edit_apply", asset_id=a.id),
+            preview_url=url_for("api_photo_edit_preview", asset_id=a.id),
+            enhance_url=url_for("api_photo_edit_enhance", asset_id=a.id),
+            reset_url=url_for("api_photo_edit_reset", asset_id=a.id),
+            profile_pic_url=url_for("api_photo_profile_picture", asset_id=a.id),
+            back_url=url_for("media_library_page"),
+            studio_url=url_for("image_studio_page", asset_id=a.id) if _imagine_ok else "",
+            cutout_url=url_for("media_library_cutout_page", asset_id=a.id),
+            width=width,
+            height=height,
+            brand_shadow=brand_shadow,
+            brand_highlight="#f5f7ff",
+            has_edit=_pe.has_edit(a),
+            recipe=_pe.recipe_for_asset(a).to_dict(),
+        )
+        return _layout("Photo editor", body, active="media")
+
+    @app.route("/api/media-library/<asset_id>/edit/preview", methods=["POST"])
+    def api_photo_edit_preview(asset_id: str):
+        """Render a recipe on a downscaled working copy — no persist. Returns PNG."""
+        from flask import request as _req, Response
+
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        recipe = _photo_recipe_from_request(_req)
+        try:
+            from mediahub.media_library.photo_ops import load_image, encode_image
+
+            img = load_image(a.path)
+            long_edge = max(img.size)
+            if long_edge > _PHOTO_PREVIEW_MAX:
+                scale = _PHOTO_PREVIEW_MAX / float(long_edge)
+                img = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))))
+            out = recipe.apply(img)
+            data, mime = encode_image(out, "PNG")
+        except Exception:
+            return jsonify({"error": "preview_failed"}), 500
+        resp = Response(data, mimetype=mime)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @app.route("/api/media-library/<asset_id>/edit/apply", methods=["POST"])
+    def api_photo_edit_apply(asset_id: str):
+        """Persist the posted recipe on the asset and materialise the edit."""
+        from flask import request as _req
+
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        recipe = _photo_recipe_from_request(_req)
+        from mediahub.media_library import photo_edit as _pe
+
+        _pe.save_recipe(a, recipe, store)
+        a = store.get(asset_id)  # reload with the saved recipe
+        _pe.materialize_edit(a, store)
+        return jsonify(
+            {
+                "ok": True,
+                "signature": recipe.signature(),
+                "steps": len(recipe.steps),
+                "describe": recipe.describe(),
+                "edited_url": url_for("api_media_library_edited", asset_id=a.id),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/edit/enhance", methods=["POST"])
+    def api_photo_edit_enhance(asset_id: str):
+        """Return the deterministic one-click Enhance recipe (club-tuned). No persist."""
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        from mediahub.media_library import photo_edit as _pe
+
+        try:
+            recipe = _pe.suggest_enhance(a, store)
+        except Exception:
+            return jsonify({"error": "enhance_failed"}), 500
+        return jsonify({"ok": True, "recipe": recipe.to_dict(), "describe": recipe.describe()})
+
+    @app.route("/api/media-library/<asset_id>/edit/reset", methods=["POST"])
+    def api_photo_edit_reset(asset_id: str):
+        """Clear the asset's edit recipe and its materialised caches."""
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        from mediahub.media_library import photo_edit as _pe
+
+        _pe.clear_recipe(a, store)
+        return jsonify({"ok": True})
+
+    @app.route("/api/media-library/<asset_id>/edited")
+    def api_media_library_edited(asset_id: str):
+        """Serve the *effective* (edited) image bytes — original if no recipe.
+
+        This is what cards and exports read so they always show the edited
+        photo without knowing whether it was edited.
+        """
+        if not _v8_ok:
+            return "", 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return "", 404
+        if not _session_can_access_profile(a.profile_id):
+            return "", 403
+        from flask import send_file
+        from mediahub.media_library import photo_edit as _pe
+
+        try:
+            path = _pe.effective_image_path(a, store)
+            return send_file(path)
+        except Exception:
+            try:
+                return send_file(a.path)
+            except Exception:
+                return "", 404
+
+    @app.route("/api/media-library/<asset_id>/profile-picture", methods=["POST"])
+    def api_photo_profile_picture(asset_id: str):
+        """Export a profile-picture crop of the asset as a new draft asset."""
+        from flask import request as _req
+
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        try:
+            payload = _req.get_json(silent=True) or {}
+        except Exception:
+            payload = {}
+        preset = str(payload.get("preset") or "avatar_circle")
+        from mediahub.media_library import photo_edit as _pe
+
+        try:
+            new = _pe.export_profile_picture(a, store, preset=preset)
+        except Exception:
+            return jsonify({"error": "export_failed"}), 500
+        return jsonify(
+            {
+                "ok": True,
+                "asset": new.to_dict() if hasattr(new, "to_dict") else None,
+                "edit_url": url_for("photo_editor_page", asset_id=new.id),
+            }
+        )
+
+    @app.route("/api/media-library/collage", methods=["POST"])
+    def api_media_library_collage():
+        """Compose selected library photos into a collage saved as a new draft."""
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import request as _req
+
+        try:
+            payload = _req.get_json(silent=True) or {}
+        except Exception:
+            payload = {}
+        asset_ids = [str(x) for x in (payload.get("asset_ids") or []) if x]
+        layout = str(payload.get("layout") or "grid_2x2")
+        fmt_slug = str(payload.get("format") or "collage_square")
+        active_pid = _active_profile_id() or ""
+        if not active_pid:
+            return jsonify({"error": "no_active_profile"}), 403
+        if not asset_ids:
+            return jsonify({"error": "no_assets"}), 400
+
+        # Dimensions from the format catalogue (falls back to a square canvas).
+        width = height = 1080
+        try:
+            from mediahub.club_platform.format_catalog import format_for
+
+            spec = format_for(fmt_slug)
+            if spec:
+                width, height = spec.width, spec.height
+        except Exception:
+            pass
+
+        store = _v8_get_media_store()
+        from mediahub.media_library import photo_edit as _pe
+
+        new = _pe.create_collage(
+            asset_ids, store, profile_id=active_pid, layout=layout, width=width, height=height
+        )
+        if new is None:
+            return jsonify({"error": "need_two_photos"}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "asset": new.to_dict() if hasattr(new, "to_dict") else None,
+                "edit_url": url_for("photo_editor_page", asset_id=new.id),
+            }
+        )
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
     def api_card_photo_upload(run_id: str, card_id: str):

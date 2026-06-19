@@ -70,6 +70,7 @@ class MediaAsset:
     has_face: Optional[bool] = None
     safe_for_minors: bool = True
     cutout_path: Optional[str] = None  # set after rembg
+    edit_recipe: dict = field(default_factory=dict)  # 1.3: non-destructive photo-edit recipe
     source_url: Optional[str] = None  # web-sourced (e.g. Wikimedia)
     source_attribution: Optional[str] = None
     source_licence: Optional[str] = None
@@ -89,11 +90,15 @@ class MediaAsset:
         for k, v in d.items():
             if k not in known:
                 continue
-            if k == "description_parsed" and isinstance(v, str):
+            if k in ("description_parsed", "edit_recipe") and isinstance(v, str):
                 try:
                     v = json.loads(v) if v else {}
                 except Exception:
                     v = {}
+            # A migrated-in NULL edit_recipe column → the empty-recipe default
+            # (keeps the field honouring its declared dict type).
+            if k == "edit_recipe" and v is None:
+                v = {}
             if k in (
                 "linked_athlete_ids",
                 "linked_athlete_names",

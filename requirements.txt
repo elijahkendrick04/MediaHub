@@ -18,6 +18,11 @@ openpyxl>=3.1.5
 # Render at build time. See pyproject.toml comment for the full reason.
 playwright>=1.60.0,<1.61
 pillow>=12.2.0
+# 1.3 photo editor: decode iPhone HEIC/HEIF uploads to web-safe JPEG on ingest
+# (media_library.heic). BSD-3 wrapper over bundled libheif; manylinux wheels
+# need no system libs. Decode-only at upload time; the code honest-errors on a
+# HEIC upload if it's ever absent.
+pillow-heif>=0.16.0
 rembg>=2.0.76
 onnxruntime>=1.26.0
 anthropic>=0.109.1

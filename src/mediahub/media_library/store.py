@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS media_assets (
     has_face INTEGER,
     safe_for_minors INTEGER,
     cutout_path TEXT,
+    edit_recipe TEXT,
     source_url TEXT,
     source_attribution TEXT,
     source_licence TEXT,
@@ -80,7 +81,11 @@ _LIST_FIELDS = {
     "used_in",
     "tags",
 }
-_DICT_FIELDS = {"description_parsed"}
+_DICT_FIELDS = {"description_parsed", "edit_recipe"}
+
+# Columns added after the original schema shipped — applied lazily to existing
+# DBs so an older data.db keeps loading (additive, never destructive).
+_ADDED_COLUMNS = (("edit_recipe", "TEXT"),)
 
 
 class MediaLibraryStore:
@@ -95,6 +100,12 @@ class MediaLibraryStore:
     def _init_schema(self) -> None:
         with _lock, _connect(self.db_path) as conn:
             conn.executescript(SCHEMA)
+            # Lazy migration: add any column introduced after the table first
+            # shipped, so an older data.db upgrades in place on open.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(media_assets)")}
+            for col, decl in _ADDED_COLUMNS:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE media_assets ADD COLUMN {col} {decl}")
             conn.commit()
 
     # ------------------------------------------------------------------
