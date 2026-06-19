@@ -175,6 +175,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **1.4** · Phase 1 (Product) — whisper.cpp / faster-whisper local ASR for reel captions / word-level burn-in (unblocks the video suite's captions, 1.6) *(completed 2026-06-19)*
 - ✅ **1.5** · Phase 1 (Product) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants *(completed 2026-06-19)*
 - ✅ **1.6** · Phase 1 (Product) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars *(completed 2026-06-19)*
+- ✅ **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) *(completed 2026-06-19)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
