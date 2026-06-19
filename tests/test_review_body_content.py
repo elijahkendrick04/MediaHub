@@ -520,3 +520,61 @@ class TestBulkApproveButtonVisibility:
         # Button element must be present when nothing has been reviewed yet.
         assert 'id="mh-bulk-approve"' in body, "Approve all button must appear at 0% reviewed"
         assert 'Approve all in queue' in body
+
+
+class TestApprovedCardHasDownloadLink:
+    """Regression guard: an approved card in /review must show a download/export link.
+
+    Bug: after approving a card the volunteer saw 'Approved ✓' and 'Re-queue'
+    but no way to download or export — the flow dead-ended at approval.
+    The approved state must render a download link so the user can act
+    immediately without navigating away to the content builder.
+    """
+
+    def test_approved_card_shows_download_link(self, review_env):
+        """An approved card row must contain a link to the card download endpoint."""
+        wm = review_env["wm"]
+        client = review_env["client"]
+        tmp_path = review_env["tmp_path"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "swim-dl", "swimmer_name": "Tom Davies",
+             "event": "100m Free", "headline": "PB set"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        from mediahub.workflow.status import CardStatus
+        ws = wm._get_wf_store()
+        ws.set_status(run_id, "swim-dl", CardStatus.APPROVED)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        # The download endpoint URL must appear in the approved card's actions.
+        assert f"/card/swim-dl/download" in body, (
+            "An approved card must include a download link in its action strip so "
+            "the volunteer can export after approving without navigating elsewhere. "
+            f"Expected '/card/swim-dl/download' in /review/{run_id} body."
+        )
+
+    def test_unapproved_card_has_no_download_link(self, review_env):
+        """A queued card must not show a download link — download is post-approval only."""
+        wm = review_env["wm"]
+        client = review_env["client"]
+        tmp_path = review_env["tmp_path"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "swim-nodl", "swimmer_name": "Sam Lee",
+             "event": "50m Free", "headline": "Season best"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+        # No workflow state — card is implicitly in queue.
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        assert f"/card/swim-nodl/download" not in body, (
+            "A queued card must not show a download link — download is only for approved cards."
+        )
