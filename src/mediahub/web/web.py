@@ -7095,19 +7095,25 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* Signed-in brand backdrop — the active org's PRIMARY logo shown as a large
-   watermark crest CENTRED behind the page content, in a faint pool of the club's
-   brand colour (.mh-bg-wash). It paints the logo's REAL artwork, not a flat tint:
-   the ?bg=1 silhouette keys out the background but keeps full colour + internal
-   detail, so a detailed crest reads as *that club's* mark rather than an
-   unrecognisable blob. background-size:contain keeps ANY upload's aspect ratio
-   (square crest, tall shield, wide lockup). The per-logo opacity/brightness/
-   saturation/halo come from the deterministic logo_bg_treatment analysis so a
-   bright logo never dazzles and a dark one never vanishes — set inline as --op
-   and filter. A centre-protect mask keeps headings crisp; the layer drifts
-   gently (off under reduced-motion). z-index:0 — behind all content. */
+/* Signed-in brand backdrop — the active org's PRIMARY logo as a large watermark
+   crest CENTRED behind the page content, in a faint pool of the club's brand
+   colour (.mh-bg-wash). The deterministic logo_bg_treatment analysis picks a mode
+   per logo so it's future-proof for any upload (set inline as --op + class):
+     • .mh-bg-mark--img — a COLOURFUL logo painted as real artwork (background-
+       image), with an inline filter that tones it down / lifts it / halos it so
+       it never dazzles and never vanishes, keeping the club's colour;
+     • .mh-bg-mark--ko  — a MONOCHROME logo (black/navy/grey/white/single-ink) or
+       an SVG we can't measure, painted as its SHAPE in one light brand-tinted
+       ink (--mh-bg-ink) via a CSS mask, so it always reads on the near-black page.
+   background-size/mask-size:contain preserves ANY aspect ratio. A centre-protect
+   mask keeps headings crisp; the layer drifts gently (off under reduced-motion).
+   z-index:0 — behind all content. */
 .mh-bg-canvas {
   position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+  /* Light, faintly brand-tinted ink for monochrome knockout logos so they always
+     read on the near-black page (first value is the no-color-mix fallback). */
+  --mh-bg-ink: #e9eef5;
+  --mh-bg-ink: color-mix(in oklab, var(--mh-bg-brand, #e9eef5) 24%, #eef3f9);
 }
 /* Brand-coloured ambient wash, pooled at centre behind the crest. The builder
    omits this element entirely when the org has no brand colour (neutral). */
@@ -7131,10 +7137,19 @@ body::before {
      so the centred watermark stays subtle behind content; --opf lives only in
      the stylesheet so the mobile query below can override it. */
   opacity: calc(var(--op, 0.5) * var(--opf, 0.6));
+  transform: translate(-50%, -50%);
+}
+/* Colourful logo — real artwork; filter (saturate/brightness/halo) set inline. */
+.mh-bg-mark--img {
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
-  transform: translate(-50%, -50%);
-  /* filter (saturate/brightness/halo) is set inline per logo by the builder. */
+}
+/* Monochrome / SVG logo — paint its shape in one light brand-tinted ink. */
+.mh-bg-mark--ko {
+  background-color: var(--mh-bg-ink);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
 }
 @keyframes mh-bg-drift {
   from { transform: translate3d(-4px, 3px, 0); }
@@ -10505,42 +10520,48 @@ def _layout(
         except Exception:
             signed_in_name = ""
 
-    # Brand backdrop behind every signed-in page: the org's PRIMARY uploaded
-    # logo, shown as its REAL artwork (the ?bg=1 silhouette keys out the
-    # background but keeps full colour + internal detail) as a large watermark
-    # crest CENTRED behind the content. background-size:contain keeps ANY upload's
-    # aspect ratio — square crest, tall shield or wide lockup — and the per-logo
-    # adaptive treatment (logo_bg_treatment) balances its presence: a bright,
-    # dense crest is toned down so it never dazzles or fights the page, while a
-    # dark, faint one is lifted and brightened so it still reads. That pairing —
-    # real artwork + auto-balanced presence — is what makes it look professional
-    # and stay future-proof for whatever a club uploads.
+    # Brand backdrop behind every signed-in page: the org's PRIMARY uploaded logo
+    # as a large watermark crest CENTRED behind the content. background-size:
+    # contain keeps ANY upload's aspect ratio (square crest, tall shield, wide
+    # lockup). The per-logo adaptive treatment (logo_bg_treatment) picks the mode
+    # and balances presence so it's future-proof for whatever a club uploads:
+    #  - "image": a COLOURFUL logo is painted as real artwork, toned down if it
+    #    would dazzle and lifted if it's dark — keeping its brand colour;
+    #  - "knockout": a MONOCHROME logo (black/navy/grey/white/single-ink) or an
+    #    SVG we can't measure is painted as its SHAPE in one light, brand-tinted
+    #    ink via a CSS mask — guaranteed to read on the near-black page, with
+    #    nothing lost since the logo was already one colour.
     bg_logos_html = ""
     if signed_in_bg_logos:
         _brand = (
             signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
         )
-        _t = signed_in_bg_treatment or {
-            "opacity": 0.5,
-            "brightness": 1.0,
-            "saturate": 0.9,
-            "halo": 0.18,
-        }
-        _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 real artwork)
-        # Adaptive filter: desaturate over-bright logos, lift dark ones, and halo
-        # so a near-black crest separates from the near-black page. Values are
-        # floats from deterministic image analysis — no user strings, no XSS.
-        _flt = (
-            f"saturate({_t['saturate']}) brightness({_t['brightness']}) "
-            f"drop-shadow(0 0 22px rgba(255,255,255,{_t['halo']}))"
-        )
-        _hero = (
-            '<span class="mh-bg-mark" style="left:50%;top:50%;'
+        _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
+        _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
+        _geo = (
+            "left:50%;top:50%;"
             "width:clamp(420px,50vw,760px);height:clamp(420px,50vw,760px);"
-            f"--op:{_t['opacity']};filter:{_flt};"
-            f"background-image:url('{_src}')"
-            '"></span>'
+            f"--op:{_t.get('opacity', 0.5)};"
         )
+        if _t.get("mode") == "image":
+            # Real artwork: adaptive filter (desaturate over-bright, lift dark,
+            # halo). Values are floats from image analysis — no user strings.
+            _flt = (
+                f"saturate({_t['saturate']}) brightness({_t['brightness']}) "
+                f"drop-shadow(0 0 22px rgba(255,255,255,{_t['halo']}))"
+            )
+            _hero = (
+                f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
+                f"filter:{_flt};background-image:url('{_src}')"
+                '"></span>'
+            )
+        else:
+            # Monochrome / SVG: light brand-tinted knockout ghost via CSS mask.
+            _hero = (
+                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
+                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
+                '"></span>'
+            )
         _wash = '<div class="mh-bg-wash"></div>' if _brand else ""
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
         bg_logos_html = (

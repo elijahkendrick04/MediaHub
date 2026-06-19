@@ -617,30 +617,44 @@ def _render_bg_silhouette(src: Path, dst: Path) -> None:
 # ---------------------------------------------------------------------------
 # Adaptive backdrop treatment
 # A logo painted as a page watermark must sit at a consistent, tasteful presence
-# whatever its design. A bright, dense, saturated crest (a filled badge) dazzles
-# and fights the content; a dark, sparse line crest all but vanishes on the
-# near-black page. So we measure the silhouette's own visual weight — how much of
-# its box it inks, and how bright / saturated that ink is — and derive a per-logo
-# opacity (heavy logos down, faint logos up), a brightness lift for dark logos, a
-# desaturation for over-saturated ones, and a halo strength. Pure deterministic
-# pixel maths (no AI, no per-logo hand-tuning), computed once and cached beside
-# the silhouette — the same colour-science discipline as theming/logo_chip.py.
+# whatever a club uploads. We measure the silhouette and pick one of two modes:
+#
+#   * "image"    — the logo is COLOURFUL (and so its colour carries its identity),
+#                  so we paint its real artwork, with a per-logo opacity (heavy
+#                  logos down, faint up), a brightness lift for dark ones, a
+#                  desaturation for over-bright ones, and a halo. Keeps brand
+#                  colour while never dazzling.
+#   * "knockout" — the logo is MONOCHROME (black / navy / grey / white / a single
+#                  ink) — colour carries no information and a brightness lift
+#                  can't rescue a near-black fill (×factor of ~0 is still ~0). So
+#                  we paint its SHAPE in one light, faintly brand-tinted ink via a
+#                  CSS mask: guaranteed to read on the near-black page, and since
+#                  the logo was already one colour, nothing is lost. SVGs (which
+#                  we can't rasterise to measure here) also take this safe path.
+#
+# Pure deterministic pixel maths (no AI, no per-logo hand-tuning), computed once
+# and cached beside the silhouette — the colour-science discipline of
+# theming/logo_chip.py. Colourfulness is the Hasler–Süsstrunk metric.
 # ---------------------------------------------------------------------------
 
 _BG_TREAT_W0 = 0.085  # target perceived weight on the near-black page
 _BG_TREAT_OP_MIN, _BG_TREAT_OP_MAX = 0.20, 0.88
-_BG_TREAT_TARGET_LUM, _BG_TREAT_BR_MAX = 0.40, 2.2
+_BG_TREAT_TARGET_LUM, _BG_TREAT_BR_MAX = 0.40, 1.8
 _BG_TREAT_TARGET_SAT, _BG_TREAT_SAT_MIN = 0.42, 0.55
-_BG_TREAT_NEUTRAL = {"opacity": 0.5, "brightness": 1.0, "saturate": 0.9, "halo": 0.18}
+_BG_TREAT_COLOURFUL = 0.12  # Hasler–Süsstrunk: above this the logo is "colourful"
+_BG_TREAT_KO_POP = 0.85  # a knockout ghost reads at a fixed light luminance
+# Knockout / unmeasurable fallback: a light ghost at a moderate watermark weight.
+_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5}
 
 
 def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
     """Per-logo backdrop treatment so ANY uploaded logo sits at the same tasteful
     watermark presence behind the page.
 
-    Returns plain floats for inline CSS — ``{opacity, brightness, saturate,
-    halo}``. Deterministic and cached beside the silhouette; returns a neutral
-    treatment for SVGs (not rasterised here) or if analysis can't run.
+    Returns a small dict for inline CSS. Always carries ``mode`` ("image" or
+    "knockout") and ``opacity``; "image" mode adds ``brightness``/``saturate``/
+    ``halo``. Deterministic and cached beside the silhouette; returns the neutral
+    knockout for SVGs (not rasterised here) or if analysis can't run.
     """
     sil = logo_bg_silhouette_path(profile_id, logo_id)
     if not sil or sil.suffix.lower() == ".svg":
@@ -662,30 +676,53 @@ def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
         if int(inked.sum()) < 10:
             return dict(_BG_TREAT_NEUTRAL)
         rgb = arr[..., :3] / 255.0
-        lum_px = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
-        mx = rgb.max(-1)
-        mn = rgb.min(-1)
+        ink_rgb = rgb[inked]
+        lum_px = 0.2126 * ink_rgb[:, 0] + 0.7152 * ink_rgb[:, 1] + 0.0722 * ink_rgb[:, 2]
+        mx = ink_rgb.max(-1)
+        mn = ink_rgb.min(-1)
         sat_px = np.where(mx > 1e-3, (mx - mn) / np.maximum(mx, 1e-3), 0.0)
         h, w = alpha.shape
         box = float(max(h, w))  # background-size:contain → longer side fills the box
         coverage = float(inked.sum()) / (box * box)  # on-screen ink fraction of the box
-        lum = float(lum_px[inked].mean())
-        sat = float(sat_px[inked].mean())
+        lum = float(lum_px.mean())
+        sat = float(sat_px.mean())
         amean = float(alpha[inked].mean())
-        pop = max(lum, 0.55 * sat)  # bright OR saturated ink pops on a dark page
-        weight = max(coverage * pop * amean, 1e-4)
-        treat = {
-            "opacity": round(
-                min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
-            ),
-            "brightness": round(
-                min(_BG_TREAT_BR_MAX, max(1.0, _BG_TREAT_TARGET_LUM / max(lum, 0.05))), 2
-            ),
-            "saturate": round(
-                min(1.0, max(_BG_TREAT_SAT_MIN, _BG_TREAT_TARGET_SAT / max(sat, 0.05))), 2
-            ),
-            "halo": round(min(0.30, max(0.10, 0.30 - 0.42 * lum)), 3),
-        }
+        # Hasler–Süsstrunk colourfulness over the inked pixels.
+        rg = ink_rgb[:, 0] - ink_rgb[:, 1]
+        yb = 0.5 * (ink_rgb[:, 0] + ink_rgb[:, 1]) - ink_rgb[:, 2]
+        colourfulness = float(
+            np.sqrt(rg.std() ** 2 + yb.std() ** 2) + 0.3 * np.sqrt(rg.mean() ** 2 + yb.mean() ** 2)
+        )
+
+        if colourfulness >= _BG_TREAT_COLOURFUL:
+            # Real artwork — its colour is its identity. Lift dark ones, calm
+            # over-bright ones, halo so it separates from the near-black page.
+            pop = max(lum, 0.55 * sat)
+            weight = max(coverage * pop * amean, 1e-4)
+            treat = {
+                "mode": "image",
+                "opacity": round(
+                    min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
+                ),
+                "brightness": round(
+                    min(_BG_TREAT_BR_MAX, max(1.0, _BG_TREAT_TARGET_LUM / max(lum, 0.05))), 2
+                ),
+                "saturate": round(
+                    min(1.0, max(_BG_TREAT_SAT_MIN, _BG_TREAT_TARGET_SAT / max(sat, 0.05))), 2
+                ),
+                "halo": round(min(0.30, max(0.10, 0.30 - 0.42 * lum)), 3),
+            }
+        else:
+            # Monochrome — paint the shape as a light ghost (CSS knockout). Its
+            # on-screen luminance is fixed, so opacity keys off coverage alone:
+            # a dense fill is held back, a sparse line crest brought up.
+            weight = max(coverage * _BG_TREAT_KO_POP * amean, 1e-4)
+            treat = {
+                "mode": "knockout",
+                "opacity": round(
+                    min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
+                ),
+            }
         try:
             cache.write_text(json.dumps(treat))
         except Exception:
