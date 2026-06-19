@@ -75,11 +75,34 @@ _PIPER_DEFAULT = Voice(
 
 _EDGE_VOICES: tuple[Voice, ...] = (
     Voice("edge-en-gb-ryan", "edge", "en-GB-RyanNeural", "en-GB", "male", "British English, warm."),
-    Voice("edge-en-gb-sonia", "edge", "en-GB-SoniaNeural", "en-GB", "female", "British English, clear."),
-    Voice("edge-en-gb-libby", "edge", "en-GB-LibbyNeural", "en-GB", "female", "British English, bright."),
-    Voice("edge-en-us-aria", "edge", "en-US-AriaNeural", "en-US", "female", "US English, friendly."),
+    Voice(
+        "edge-en-gb-sonia",
+        "edge",
+        "en-GB-SoniaNeural",
+        "en-GB",
+        "female",
+        "British English, clear.",
+    ),
+    Voice(
+        "edge-en-gb-libby",
+        "edge",
+        "en-GB-LibbyNeural",
+        "en-GB",
+        "female",
+        "British English, bright.",
+    ),
+    Voice(
+        "edge-en-us-aria", "edge", "en-US-AriaNeural", "en-US", "female", "US English, friendly."
+    ),
     Voice("edge-en-us-guy", "edge", "en-US-GuyNeural", "en-US", "male", "US English, confident."),
-    Voice("edge-en-au-natasha", "edge", "en-AU-NatashaNeural", "en-AU", "female", "Australian English."),
+    Voice(
+        "edge-en-au-natasha",
+        "edge",
+        "en-AU-NatashaNeural",
+        "en-AU",
+        "female",
+        "Australian English.",
+    ),
     Voice("edge-cy-gb-nia", "edge", "cy-GB-NiaNeural", "cy-GB", "female", "Welsh (Cymraeg)."),
     Voice("edge-cy-gb-aled", "edge", "cy-GB-AledNeural", "cy-GB", "male", "Welsh (Cymraeg)."),
 )
@@ -146,7 +169,9 @@ class VoiceParams:
     volume_pct: int = 0
 
     @classmethod
-    def make(cls, *, rate_pct: object = 0, pitch_hz: object = 0, volume_pct: object = 0) -> "VoiceParams":
+    def make(
+        cls, *, rate_pct: object = 0, pitch_hz: object = 0, volume_pct: object = 0
+    ) -> "VoiceParams":
         return cls(
             rate_pct=_clamp(rate_pct, _RATE_MIN, _RATE_MAX),
             pitch_hz=_clamp(pitch_hz, _PITCH_MIN, _PITCH_MAX),

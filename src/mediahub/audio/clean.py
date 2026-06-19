@@ -88,9 +88,7 @@ def denoise(src: Path, out: Path, *, strength: float = 12.0) -> Path:
     model = rnnoise_model_path()
     if model:
         if not Path(model).is_file():
-            raise AudioOpError(
-                f"MEDIAHUB_RNNOISE_MODEL={model!r} is set but not a readable file"
-            )
+            raise AudioOpError(f"MEDIAHUB_RNNOISE_MODEL={model!r} is set but not a readable file")
         chain = f"arnndn=m={model}"
     else:
         chain = denoise_filter(strength=strength)

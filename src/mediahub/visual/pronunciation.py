@@ -82,9 +82,7 @@ def _read_map(path: Path) -> dict[str, str]:
     return out
 
 
-def load_overrides(
-    run_id: str | None = None, profile_id: str | None = None
-) -> dict[str, str]:
+def load_overrides(run_id: str | None = None, profile_id: str | None = None) -> dict[str, str]:
     """Merge global, per-org (1.8), and per-run pronunciation maps.
 
     Precedence is increasing specificity — global, then the organisation's
@@ -123,8 +121,6 @@ def apply_overrides(text: str, overrides: dict[str, str]) -> str:
     return pattern.sub(lambda m: lookup.get(m.group(0).lower(), m.group(0)), text)
 
 
-def pronounce(
-    text: str, run_id: str | None = None, profile_id: str | None = None
-) -> str:
+def pronounce(text: str, run_id: str | None = None, profile_id: str | None = None) -> str:
     """Convenience: load the configured overrides for a run/org and apply them."""
     return apply_overrides(text, load_overrides(run_id, profile_id))

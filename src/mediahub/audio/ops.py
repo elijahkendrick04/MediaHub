@@ -91,7 +91,9 @@ def speed_filter(factor: float) -> str:
     return ",".join(f"atempo={s:.6f}" for s in stages)
 
 
-def trim_args(src: Path, out: Path, *, start: float = 0.0, end: Optional[float] = None) -> list[str]:
+def trim_args(
+    src: Path, out: Path, *, start: float = 0.0, end: Optional[float] = None
+) -> list[str]:
     """FFmpeg args (after the binary) to cut ``[start, end)`` from ``src``."""
     s = max(0.0, float(start))
     args = ["-ss", f"{s:.3f}", "-i", str(src)]
@@ -102,7 +104,9 @@ def trim_args(src: Path, out: Path, *, start: float = 0.0, end: Optional[float] 
     return args
 
 
-def filter_args(src: Path, out: Path, *, chain: str, codec: Optional[list[str]] = None) -> list[str]:
+def filter_args(
+    src: Path, out: Path, *, chain: str, codec: Optional[list[str]] = None
+) -> list[str]:
     """FFmpeg args to apply a single-input audio filter ``chain`` to ``src``."""
     args = ["-i", str(src)]
     if chain:
