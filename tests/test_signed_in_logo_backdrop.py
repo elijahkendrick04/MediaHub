@@ -151,7 +151,7 @@ def test_css_contract_is_future_proof(client):
     assert "left:50%" in style and "top:50%" in style  # centred
     assert "background-size: contain" in html  # any aspect ratio survives
     assert "--op:" in style  # adaptive opacity, inline
-    assert "filter:" in style and "brightness(" in style and "drop-shadow(" in style
+    assert "filter:" in style and "blur(" in style and "brightness(" in style
     assert "pointer-events: none" in html
     # Both modes exist in the stylesheet, with a guaranteed-readable knockout ink.
     assert ".mh-bg-mark--img" in html and ".mh-bg-mark--ko" in html
@@ -170,6 +170,7 @@ def test_monochrome_logo_uses_a_readable_knockout(client):
     assert "background-image" not in style
     # Painted as the logo's shape via a CSS mask, tinted by the light ink.
     assert re.search(r"mask-image:url\('[^']*bg=1[^']*'\)", style)
+    assert "blur(" in style  # ...then blurred into a soft glow
     assert "--mh-bg-ink: #" in html or "--mh-bg-ink:#" in html
 
 
@@ -182,6 +183,7 @@ def test_unmeasurable_svg_takes_the_safe_knockout_path(client):
     assert "mh-bg-mark--ko" in classes
     assert "mask-image:url(" in style
     assert "background-image" not in style
+    assert "blur(" in style  # safe glow, not a sharp ghost
 
 
 def test_heavy_logo_is_toned_down_relative_to_a_faint_one(client):
