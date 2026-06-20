@@ -39080,7 +39080,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if placement is None:
                 return jsonify({"error": "bad_placement"}), 400
             if len(current) >= 12:
-                return jsonify({"error": "too_many", "user_message": "Up to 12 elements per card."}), 409
+                return jsonify(
+                    {"error": "too_many", "user_message": "Up to 12 elements per card."}
+                ), 409
             current.append(placement.to_dict())
 
         bdict["elements"] = current
@@ -39108,10 +39110,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         profile_id = _active_profile_id()
         role_vars = _elements_role_vars(profile_id)
-        seed = [
-            _element_to_payload(el, role_vars)
-            for el in _el_catalog.load_catalog(profile_id)
-        ]
+        seed = [_element_to_payload(el, role_vars) for el in _el_catalog.load_catalog(profile_id)]
         grad = [
             {"name": p.name, "css": _el_grad.gradient_css(p, role_vars)}
             for p in _el_grad.list_presets()
@@ -39126,9 +39125,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if run_data and _can_access_run(run_id, run_data, profile_id):
                 add_url = url_for("api_card_elements", run_id=run_id, card_id=card_id)
                 list_url = add_url
-                suggest_url = url_for(
-                    "api_element_suggestions", run_id=run_id, card_id=card_id
-                )
+                suggest_url = url_for("api_element_suggestions", run_id=run_id, card_id=card_id)
                 card_label = card_id
 
         body = _eb.render_browser_body(
