@@ -243,6 +243,24 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "disclosed in Privacy Notice §3–4. A public search engine is not an "
         "Art. 28 sub-processor; queries are transient and uncontracted."
     ),
+    "PEXELS_API_KEY": (
+        "the optional, flag-gated paid stock-photo source for the licence-clean "
+        "stock pool (roadmap 1.10, elements/stock.py). Off by default — the pool "
+        "harvests free open collections (Openverse, Wikimedia) unless an operator "
+        "sets this key. Only an operator-typed stock-image search term is sent "
+        "(e.g. 'swimming pool'); no Club/athlete personal data, uploads or results "
+        "leave MediaHub, and Pexels returns public stock imagery. Transient and "
+        "uncontracted — a stock-photo search API is not an Art. 28 sub-processor."
+    ),
+    "PIXABAY_API_KEY": (
+        "the optional, flag-gated paid stock-photo source for the licence-clean "
+        "stock pool (roadmap 1.10, elements/stock.py). Off by default — the pool "
+        "harvests free open collections (Openverse, Wikimedia) unless an operator "
+        "sets this key. Only an operator-typed stock-image search term is sent; no "
+        "Club/athlete personal data, uploads or results leave MediaHub, and Pixabay "
+        "returns public stock imagery. Transient and uncontracted — a stock-photo "
+        "search API is not an Art. 28 sub-processor."
+    ),
     "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT": (
         "the operator's own self-hosted local diffusion image backend (the "
         "imagine seam's in-house default, roadmap 1.1). Inference runs on the "
