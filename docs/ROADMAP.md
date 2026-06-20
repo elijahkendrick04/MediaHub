@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `7f7dbbc8c` · Merge pull request #911 from elijahkendrick04/claude/ecc-repo-integration-b3qo81
+**Last updated:** 2026-06-20 · `6b5cb24e7` · feat(pb): online-first PB baseline from swimmingresults.org (#916)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1219,15 +1219,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `22428e9ab` | feat(pb): read PBs from the all-time rankings (covers lapsed swimmers; fewer fetches) |
+| 2026-06-20 | `7cc6bca80` | fix(pb): fall back to name+time when a file's member id isn't a valid tiref |
+| 2026-06-20 | `42841f6ac` | feat(pb): time-based matching (no nickname dictionary) + politeness throttle |
+| 2026-06-20 | `4974668c2` | docs(pb): register MEDIAHUB_SR_AGE_MIN/MAX in env inventory + .env.example |
+| 2026-06-20 | `fb81879ea` | fix(pb): prefer exact name match over fuzzy — Sussex 92→98% |
+| 2026-06-20 | `20db08d83` | feat(pb): extract member id (tiref) + age from HY3/CL2 — Swansea Uni 47→92% |
+| 2026-06-20 | `2a40ed93d` | fix(pb): comprehensive club roster + gender-fallback resolution (Sussex 0→92%) |
+| 2026-06-20 | `5c96572d9` | style(pb): ruff-format the swimmingresults adapter |
+| 2026-06-20 | `cbd95950d` | feat(pb): online-first PB baseline from swimmingresults.org (remove history store) |
+| 2026-06-20 | `122132e93` | Add swimmingresults.org reachability probe script |
 | 2026-06-20 | `42ee27361` | obs(pb): log every search/lookup outcome; gate PB sources on name AND club |
 | 2026-06-20 | `0576e4d7d` | harden(pb): multi-worker SQLite safety + verified TinyFish search shape |
-| 2026-06-20 | `586a0fc05` | chore: gitignore runtime logs/ directory |
-| 2026-06-20 | `9c7359019` | chore(claude): add guard-edits PreToolUse hook (adapted from ECC) |
-| 2026-06-20 | `d3e70d051` | 1.8: /api/audio/suggest never 5xxes — deterministic fallback (fix API contract) |
-| 2026-06-20 | `da230663b` | 1.8: web surface, reel bed, generation slots + consent — audio engine done (build 2/2) |
-| 2026-06-19 | `a724e2fd2` | Add browser-automation MCP servers for full web interaction |
-| 2026-06-19 | `0c07e41f3` | 1.8: wire the voice layer into synthesis + refresh env inventory (build 2, wip) |
-| 2026-06-19 | `ef74524c1` | 1.8: apply ruff-format to the audio package (hygiene hook) |
-| 2026-06-19 | `1b678c0dd` | 1.8: audio engine core — library, rights, ops, clean, voice, AI selection (build 1/2) |
-| 2026-06-19 | `f8670eba4` | compliance(pb): disclose TinyFish as a DPA sub-processor |
 <!-- /ROADMAP:ACTIVITY -->
