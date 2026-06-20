@@ -485,6 +485,7 @@ def lookup_official_pbs(
 
     # 2. Roster resolution (no-id swimmers + those whose id was rejected).
     n_by_roster = 0
+    roster_by_tiref: dict[str, dict] = {}
     club_code = resolve_club_code(club_name, force_refresh=force_refresh) if need_roster else None
     if need_roster and not club_code:
         emit(
@@ -521,4 +522,58 @@ def lookup_official_pbs(
     # the resolution rate never reaches the platform logs (Render), where the
     # operator checks coverage after a run.
     log.info("%s", summary)
+
+    # Name the swimmers we could NOT match, each with a data-grounded reason, so
+    # the exact gaps are visible in the platform logs instead of only a count.
+    # The operator can then tell a genuine "no ranked time" miss (nothing to fix)
+    # apart from a name/age quirk worth recovering — without guessing.
+    unmatched = _unmatched_report(our, snapshots, swimmers_by_key, roster_by_tiref)
+    if unmatched:
+        detail = "; ".join(f"{name} [{reason}]" for name, reason in unmatched)
+        line = f"PB baseline: {len(unmatched)} unmatched — {detail}"
+        emit(line)
+        log.info("%s", line)
     return snapshots
+
+
+def _unmatched_report(
+    our: set,
+    snapshots: dict,
+    swimmers_by_key: dict,
+    roster_by_tiref: dict,
+) -> "list[tuple[str, str]]":
+    """``[(swimmer_name, reason), …]`` for every requested swimmer with no PB
+    snapshot, sorted by name. The reason is derived from the roster we already
+    swept: whether any ranked swimmer shares the surname (so a true "not ranked
+    for this club" miss is distinguishable from a same-surname disambiguation
+    that fell through). Never raises — diagnostics must not fail a run."""
+    matched = {k for k, s in snapshots.items() if getattr(s, "pb_times", None)}
+    roster_surnames = [
+        split_full_name(e.get("name", ""))[1] for e in roster_by_tiref.values()
+    ]
+    out: list[tuple[str, str]] = []
+    for key in our:
+        if key in matched:
+            continue
+        sw = swimmers_by_key.get(key)
+        if sw is None:
+            continue
+        first = (getattr(sw, "first_name", "") or "").strip()
+        last = (getattr(sw, "last_name", "") or "").strip()
+        name = (f"{first} {last}").strip() or str(key)
+        if not roster_by_tiref:
+            reason = "no club roster available"
+        elif not last:
+            reason = "no surname parsed from the file"
+        else:
+            n_same = sum(1 for rs in roster_surnames if rs and surname_match(last, rs))
+            if n_same == 0:
+                reason = "no ranked swimmer with that surname in the club's all-time rankings"
+            else:
+                reason = (
+                    f"{n_same} same-surname candidate(s), none uniquely resolved "
+                    "(first-name/age/time)"
+                )
+        out.append((name, reason))
+    out.sort(key=lambda t: t[0].lower())
+    return out
