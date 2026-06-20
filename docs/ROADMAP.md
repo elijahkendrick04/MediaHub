@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `6b5cb24e7` · feat(pb): online-first PB baseline from swimmingresults.org (#916)
+**Last updated:** 2026-06-20 · `49ca9a62b` · Merge pull request #918 from elijahkendrick04/claude/create-tiles-hero-polish
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1219,6 +1219,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `c99d6fd0c` | fix(a11y): honour prefers-reduced-motion on the pipeline/intro diagram |
 | 2026-06-20 | `22428e9ab` | feat(pb): read PBs from the all-time rankings (covers lapsed swimmers; fewer fetches) |
 | 2026-06-20 | `7cc6bca80` | fix(pb): fall back to name+time when a file's member id isn't a valid tiref |
 | 2026-06-20 | `42841f6ac` | feat(pb): time-based matching (no nickname dictionary) + politeness throttle |
@@ -1226,9 +1227,8 @@ list and the auto table below, not here.
 | 2026-06-20 | `fb81879ea` | fix(pb): prefer exact name match over fuzzy — Sussex 92→98% |
 | 2026-06-20 | `20db08d83` | feat(pb): extract member id (tiref) + age from HY3/CL2 — Swansea Uni 47→92% |
 | 2026-06-20 | `2a40ed93d` | fix(pb): comprehensive club roster + gender-fallback resolution (Sussex 0→92%) |
+| 2026-06-20 | `c3aa6f498` | polish(create): give each Create stub tile its own hero headline |
 | 2026-06-20 | `5c96572d9` | style(pb): ruff-format the swimmingresults adapter |
 | 2026-06-20 | `cbd95950d` | feat(pb): online-first PB baseline from swimmingresults.org (remove history store) |
 | 2026-06-20 | `122132e93` | Add swimmingresults.org reachability probe script |
-| 2026-06-20 | `42ee27361` | obs(pb): log every search/lookup outcome; gate PB sources on name AND club |
-| 2026-06-20 | `0576e4d7d` | harden(pb): multi-worker SQLite safety + verified TinyFish search shape |
 <!-- /ROADMAP:ACTIVITY -->
