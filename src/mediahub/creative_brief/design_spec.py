@@ -138,6 +138,31 @@ MOTION_INTENTS: tuple[str, ...] = (
     "drop_in",
 )
 
+# 1.9 — text-effect tokens. The slots a per-text effect can be requested on
+# (mapped to the renderer's substituted text values), and the closed effect
+# vocabulary. The renderer (``graphic_renderer.text_effects``) is the authority
+# that executes each effect and polices it with the APCA gate; this list is kept
+# identical to ``text_effects.TEXT_EFFECTS`` by ``tests/test_text_effects.py`` so
+# the director can never request an effect the renderer cannot run.
+TEXT_EFFECT_SLOTS: tuple[str, ...] = ("headline", "result", "kicker", "event", "meta")
+TEXT_EFFECTS: tuple[str, ...] = (
+    "none",
+    "shadow",
+    "lift",
+    "hollow",
+    "outline",
+    "splice",
+    "echo",
+    "glitch",
+    "neon",
+    "background",
+    "gradient",
+    "extrude",
+    "warp",
+    "curve",
+)
+DEFAULT_TEXT_EFFECT = "none"
+
 # Safe defaults — each MUST be a member of its vocabulary above. These are the
 # values an out-of-vocabulary (hallucinated) field falls back to: every one is
 # renderable without depending on an optional asset.
@@ -200,6 +225,16 @@ class DesignSpec:
     mood: str
     motion_intent: str
     rationale: str
+    # 1.9 — per-slot text effects as a hashable, sorted (slot, effect) tuple.
+    # Only non-"none" effects on known slots survive ``normalise``; an empty
+    # tuple (the default) means the card carries no effects and renders
+    # byte-identically. Stored as a tuple (not a dict) so DesignSpec stays
+    # frozen-hashable like its other fields.
+    text_effects: tuple[tuple[str, str], ...] = ()
+
+    def text_effects_map(self) -> dict[str, str]:
+        """The text effects as a ``slot -> effect`` dict (renderer-facing shape)."""
+        return {slot: effect for slot, effect in self.text_effects}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -215,6 +250,7 @@ class DesignSpec:
             "mood": self.mood,
             "motion_intent": self.motion_intent,
             "rationale": self.rationale,
+            "text_effects": self.text_effects_map(),
         }
 
 
@@ -278,6 +314,25 @@ def _coerce_stat_list(value: Any, *, exclude: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _coerce_text_effects(value: Any) -> tuple[tuple[str, str], ...]:
+    """Coerce a raw ``{slot: effect}`` map into validated, sorted pairs.
+
+    Unknown slots and unknown/"none" effects are dropped, so a hallucinated or
+    partial map can only ever produce effects the renderer can run. Sorted by
+    slot for a deterministic, hashable result.
+    """
+    if not isinstance(value, dict):
+        return ()
+    out: dict[str, str] = {}
+    for slot, effect in value.items():
+        s = _match_enum(slot, TEXT_EFFECT_SLOTS)
+        e = _match_enum(effect, TEXT_EFFECTS)
+        if s is None or e is None or e == "none":
+            continue
+        out[s] = e
+    return tuple(sorted(out.items()))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -337,6 +392,7 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
             data.get("motion_intent"), MOTION_INTENTS, DEFAULT_MOTION_INTENT
         ),
         rationale=_clean_text(data.get("rationale"), max_len=MAX_RATIONALE_LEN, oneline=False),
+        text_effects=_coerce_text_effects(data.get("text_effects")),
     )
 
 
@@ -386,6 +442,14 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "mood": {"type": "string", "enum": list(MOODS)},
             "motion_intent": {"type": "string", "enum": list(MOTION_INTENTS)},
             "rationale": {"type": "string", "maxLength": MAX_RATIONALE_LEN},
+            "text_effects": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    slot: {"type": "string", "enum": list(TEXT_EFFECTS)}
+                    for slot in TEXT_EFFECT_SLOTS
+                },
+            },
         },
         "required": [
             "archetype",
@@ -400,6 +464,7 @@ def design_spec_json_schema(*, archetypes: list[str], token_roles: list[str]) ->
             "mood",
             "motion_intent",
             "rationale",
+            "text_effects",
         ],
     }
 
@@ -417,6 +482,9 @@ __all__ = [
     "LOGO_LOCKUPS",
     "MOODS",
     "MOTION_INTENTS",
+    "TEXT_EFFECT_SLOTS",
+    "TEXT_EFFECTS",
+    "DEFAULT_TEXT_EFFECT",
     "DEFAULT_FOCAL_ELEMENT",
     "DEFAULT_CROP_INTENT",
     "DEFAULT_HERO_STAT",

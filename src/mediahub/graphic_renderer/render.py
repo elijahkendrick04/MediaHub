@@ -1648,6 +1648,21 @@ def _common_replacements(
         )
     base_css = shared_css + "\n" + base_css + "\n" + text_led_css
 
+    # 1.9 — inline this org's UPLOADED custom fonts (typography.font_intake) as
+    # self-hosted file:// @font-face, so a club's own brand typeface renders on
+    # its cards. Byte-identical when the org has no uploads (empty CSS), and never
+    # the Google Fonts CDN. Best-effort: a lookup failure can't break a render.
+    try:
+        _pid = getattr(brief, "profile_id", "") or ""
+        if _pid:
+            from mediahub.typography import font_intake as _fi
+
+            _custom = _fi.font_face_css(_fi.list_fonts(_pid), file_uri=True)
+            if _custom:
+                base_css = base_css + "\n/* --- org custom fonts (1.9) --- */\n" + _custom
+    except Exception:
+        pass
+
     layers = brief.text_layers or {}
     full_name = layers.get("athlete_full_name") or ""
     first = layers.get("athlete_first_name") or ""
@@ -3420,6 +3435,75 @@ def _v2_style_pack_overlay(brief, width: int, height: int) -> str:
         return ""
 
 
+# 1.9 — per-slot text effects ride the substituted text VALUE (archetype-
+# agnostic), so no v2 template is edited and an empty effect map leaves every
+# card byte-identical. This maps a design-spec text-effect slot to the repl key
+# whose value it decorates.
+_TEXT_EFFECT_SLOT_KEYS: dict[str, str] = {
+    "headline": "ATHLETE_SURNAME_DISPLAY",
+    "result": "RESULT_VALUE",
+    "kicker": "ACHIEVEMENT_LABEL",
+    "event": "EVENT_NAME",
+    "meta": "MEET_NAME",
+}
+
+
+def _unescape_basic(s: str) -> str:
+    """Reverse ``html_escape`` + drop ``<br>`` — for feeding curve's SVG raw text."""
+    return (
+        s.replace("<br>", " ")
+        .replace("<br/>", " ")
+        .replace("<br />", " ")
+        .replace("&quot;", '"')
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+    )
+
+
+def _apply_text_effects_to_repl(repl: dict, effects: dict, root_vars: dict) -> None:
+    """Wrap effect-bearing slot values in APCA-policed effect spans / curve SVG.
+
+    Mutates ``repl`` in place. Reads the card's resolved role colours from
+    ``root_vars`` so each effect tracks the actual ground/ink/accent (medal tints
+    included), and the renderer-side APCA gate downgrades an illegible effect to a
+    safe outline. Unknown slots/effects are ignored and an empty slot value is
+    skipped — so this can only decorate, never break, a card.
+    """
+    try:
+        from mediahub.graphic_renderer import text_effects as _fx
+    except Exception:
+        return
+    ground = root_vars.get("--mh-primary") or "#101010"
+    ink = root_vars.get("--mh-on-primary") or "#FFFFFF"
+    accent = root_vars.get("--mh-accent") or ink
+    try:
+        on_accent = _on_color(accent)
+    except Exception:
+        on_accent = "#FFFFFF"
+    for slot, effect in effects.items():
+        key = _TEXT_EFFECT_SLOT_KEYS.get(str(slot).strip().lower())
+        if not key:
+            continue
+        value = repl.get(key) or ""
+        if not value:
+            continue
+        try:
+            res = _fx.effect_css(
+                str(effect), ground=ground, ink=ink, accent=accent, on_accent=on_accent
+            )
+        except Exception:
+            continue
+        if res.is_noop:
+            continue
+        if res.svg:
+            repl[key] = _fx.curve_text_svg(
+                _unescape_basic(value), fill="currentColor", font_family="inherit"
+            )
+        else:
+            repl[key] = _fx.apply_to_value(value, res)
+
+
 def _fill_v2_archetype(
     brief,
     width,
@@ -3600,6 +3684,13 @@ def _fill_v2_archetype(
     root_vars["--mh-photo-pos"] = _sanitise_photo_pos(photo_pos_override) or _v2_photo_position(
         athlete_path
     )
+
+    # 1.9 — apply per-slot text effects to the finalised slot values (AFTER the
+    # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
+    # Empty (the default) is a no-op, so a card with no effects is byte-identical.
+    effects = getattr(brief, "text_effects", None) or {}
+    if effects:
+        _apply_text_effects_to_repl(repl, effects, root_vars)
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
     repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block

@@ -143,6 +143,11 @@ class CreativeBrief:
     # e.g. "kinetic_type"). Consumed by the Remotion compositions; "" lets the
     # motion render fall back to its mood/seed-driven default programme.
     motion_intent: str = ""
+    # 1.9 — per-slot text effects (slot -> effect, e.g. {"headline": "neon"}).
+    # design_spec.TEXT_EFFECT_SLOTS × TEXT_EFFECTS; consumed by the still renderer
+    # (graphic_renderer.text_effects), APCA-policed at apply time. Empty (the
+    # default) means no effects, so every legacy card renders byte-identically.
+    text_effects: dict[str, str] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 2
 
@@ -771,6 +776,12 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.colour_role_assignment = dict(spec.colour_roles.to_dict())
     except Exception:
         brief.colour_role_assignment = {}
+    # 1.9 — carry the director's per-slot text effects onto the brief. Empty when
+    # the director requested none, so an undirected card stays byte-identical.
+    try:
+        brief.text_effects = dict(spec.text_effects_map())
+    except Exception:
+        brief.text_effects = {}
     # Mood-keyed style pack (G1.28): re-key the decorative pack to the mood's
     # curated preset bundle so the decoration matches the feeling the director
     # chose. This is the same selection ``generate()``'s v2 pack block makes for

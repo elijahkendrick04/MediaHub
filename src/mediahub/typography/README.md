@@ -1,12 +1,30 @@
-# typography — club custom-font upload pipeline
+# typography — MediaHub's first-party type system
 
-This folder lets a club bring **its own brand typeface** into MediaHub safely.
-A committee member uploads a font file; MediaHub checks it's a real, safe font,
-shrinks it, and hosts it itself — so the club's cards and reels can use the
-club's actual font instead of one of the built-in ones.
+This folder is MediaHub's **typography system** (roadmap **1.9**). It has two
+halves:
 
-The whole thing lives in one file: [`font_intake.py`](font_intake.py).
-It is roadmap item **G1.10**.
+* **The curated font catalogue** ([`catalog.py`](catalog.py) +
+  [`catalog.json`](catalog.json)) — the single source of truth for the
+  first-party typefaces MediaHub ships across its three surfaces (the web UI, the
+  still-graphic renderer, the reel). Each face is tagged with a class
+  (display / sans / serif / mono), mood words, its variable axes, the writing
+  scripts it covers, its OFL provenance, and which other faces it pairs well
+  with. You can browse it by mood / class / surface, and an org's *uploaded*
+  fonts (below) are merged into its own view via `org_catalog(profile_id)`.
+* **The club custom-font upload pipeline** ([`font_intake.py`](font_intake.py),
+  roadmap **G1.10**) — lets a club bring **its own brand typeface** in safely:
+  MediaHub checks it's a real, safe font, shrinks it, and hosts it itself, so the
+  club's cards and reels can use the club's actual font.
+
+It also carries the **deterministic rich-text formatting model**
+([`formatting.py`](formatting.py)) — the character/paragraph controls (colour,
+alignment, weight, lists, links, decimal sizes, line height, gradient fills) and
+editor utilities (uppercase, find & replace, copy-style, auto-link, an honest
+spellcheck seam) as pure, XSS-safe functions. The browsable surface for all of
+this is **Settings → Typography & fonts** in the web app.
+
+Every face — built-in or uploaded — is self-hosted `.woff2`. **Never the Google
+Fonts CDN** (a reliability + EU/UK GDPR rule the whole product follows).
 
 ## What happens when a font is uploaded (in plain words)
 
@@ -54,19 +72,39 @@ a result — the same "a clear error beats a fake" rule the rest of MediaHub
 follows. The *safety* checks need no third-party library at all, so a dangerous
 upload is rejected even in a stripped-down environment.
 
+## Using the catalogue
+
+```python
+from mediahub.typography import catalog as cat
+
+cat.load_catalog()                      # all built-in faces (validated, cached)
+cat.search(klass="display", mood="loud")  # filter by class / mood / surface / role
+cat.get("anton")                        # one face by slug
+cat.org_catalog("city-of-manchester")   # built-ins + this club's uploaded fonts
+cat.verify_assets()                     # [] when catalogue ⇄ disk are in lock-step
+```
+
+The catalogue is plain data: no network, no AI. Adding a face is a `catalog.json`
+edit plus a run of the matching fetch script
+(`scripts/fetch_fonts.py` / `fetch_renderer_fonts.py`) — `tests/test_font_catalog.py`
+then proves the new row has its `.woff2` and `@font-face` on every surface it claims.
+
 ## Where it plugs in
 
-This module is a self-contained **seam** (roadmap tag 🟢 ISOLATED). It does not
-edit the web app or the renderer on its own — a later task adds the upload screen
-and tells the renderer to use a stored font's `role` (display / body / numeric …)
-in place of a built-in family. Everything that task needs is already here:
-the stored `FontRecord` and `font_face_css()`.
+The catalogue feeds **AI font pairing** (`mediahub.brand.type_pairing`, which can
+only propose a face that is in the catalogue) and the **typography web surface**
+(browse + upload + preview). The renderer uses a stored upload's `role`
+(display / body / numeric …) and `font_face_css(..., file_uri=True)` in place of a
+built-in family for that org.
 
 ## Tests
 
-`tests/test_font_intake.py` covers the safety rejections (bad magic, truncated
-headers, oversize, declared decompression bombs, restricted-embedding fonts),
-the subsetting (glyph reduction, size shrink, deterministic output), storage
-round-trips, and the CSS emission (including that an arbitrary human family name
-can never inject into the stylesheet). The subset/`.woff2` tests skip cleanly
-where `fonttools` isn't installed.
+* `tests/test_font_catalog.py` — catalogue integrity (controlled vocabularies,
+  unique slugs, a valid pairing-affinity graph), the disk lock-step on every
+  surface, the query API, and the per-org upload merge with tenant isolation.
+* `tests/test_font_intake.py` — the upload safety rejections (bad magic, truncated
+  headers, oversize, declared decompression bombs, restricted-embedding fonts),
+  the subsetting (glyph reduction, size shrink, deterministic output), storage
+  round-trips, and the CSS emission (including that an arbitrary human family name
+  can never inject into the stylesheet). The subset/`.woff2` tests skip cleanly
+  where `fonttools` isn't installed.

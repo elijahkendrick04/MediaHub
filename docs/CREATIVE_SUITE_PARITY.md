@@ -655,32 +655,45 @@ deterministic); (5) "generate text effect" (AI texture inside letterforms) =
 fields in specs (already how cards work — exposed as a first-class editor
 concept).
 
+**Shipped (1.9, 2026-06-20).** Live in four parts: `typography/catalog.{json,py}`
+(curated self-hosted catalogue + per-org upload merge, lock-step asset guard),
+`graphic_renderer/text_effects.py` (13 deterministic, APCA-policed effects as a
+DesignSpec `text_effects` token, wired into the renderer — empty ⇒ byte-identical),
+`brand/type_pairing.py` (catalogue-bound AI pairing, honest-error), and
+`typography/formatting.py` plus the **Settings → Typography & fonts** web surface
+(browse, AI pairing, licence-attested upload now wired to the renderer's
+`@font-face`). **One sub-item is deferred to its dependency:** the
+*AI-texture-in-glyph* half of Magic Morph / Generate Text Effect needs the **1.2**
+generative-imagery backend — the deterministic clip-to-glyph substrate ships now
+(gradient fills via `background-clip:text`), and an AI texture flows through the
+same mask once 1.2 lands.
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
-| C6 | Font library (hundreds of free + premium fonts) | 🆕 1.9 curated self-hosted OFL catalogue (never CDN) |
-| C6 | Font upload (custom/purchased, with permissions) | 🆕 1.9 per-org upload + licence attestation → self-hosted pipeline |
-| C6 | Font pairing suggestions | 🆕 1.9 `brand/type_pairing.py` via `media_ai` |
-| C6 | Text effects (style): Shadow, Lift, Hollow, Splice, Echo, Glitch, Neon, Background | 🆕 1.9 deterministic effect tokens (APCA-policed) |
-| C6 | Text effects (shape): Curve | 🆕 1.9 curve-on-path |
-| C6 | TypeExtrude (3D extruded text: length, angle, outline) | 🆕 1.9 extrude primitive (layered offsets) |
-| C6 | TypeCraft (bend/warp/twist/reshape letters) | 🆕 1.9 warp primitive (SVG deformation) |
+| C6 | Font library (hundreds of free + premium fonts) | ✅ 1.9 curated self-hosted OFL catalogue (never CDN) |
+| C6 | Font upload (custom/purchased, with permissions) | ✅ 1.9 per-org upload + licence attestation → self-hosted pipeline |
+| C6 | Font pairing suggestions | ✅ 1.9 `brand/type_pairing.py` via `media_ai` |
+| C6 | Text effects (style): Shadow, Lift, Hollow, Splice, Echo, Glitch, Neon, Background | ✅ 1.9 deterministic effect tokens (APCA-policed) |
+| C6 | Text effects (shape): Curve | ✅ 1.9 curve-on-path |
+| C6 | TypeExtrude (3D extruded text: length, angle, outline) | ✅ 1.9 extrude primitive (layered offsets) |
+| C6 | TypeCraft (bend/warp/twist/reshape letters) | ✅ 1.9 warp primitive (SVG deformation) |
 | C6 | Text Studio Maker (3,000+ effect templates) | 🚫 adapted — a tokenised effect vocabulary the director composes, not a template pile |
-| C6 | Text formatting (colour, alignment, underline, strikethrough, links, lists/markers/levels, line height, size/weight/style) | 🆕 1.9 editor formatting depth |
-| C6 | Gradients on text | 🆕 1.9 gradient fills from brand palette |
+| C6 | Text formatting (colour, alignment, underline, strikethrough, links, lists/markers/levels, line height, size/weight/style) | ✅ 1.9 editor formatting depth |
+| C6 | Gradients on text | ✅ 1.9 gradient fills from brand palette |
 | C6 | Multilingual support (100+ languages; interface languages) | ↗ 1.24 (fonts here must carry the needed scripts) |
-| C6 | Dynamic text / captions | 🆕 1.9 data-bound text fields (cards already do this; surfaced in the editor) |
+| C6 | Dynamic text / captions | ✅ 1.9 data-bound text fields (cards already do this; surfaced in the editor) |
 | C6 | Text animations | ↗ 1.5 kinetic-type presets |
-| C2 | Magic Morph (transform text/shapes with AI textures via prompt) | 🆕 1.9 AI texture-in-glyph (1.2 imagery clipped to masks) |
-| A2 | Generate Text Effect (AI textures/styles on letters) | 🆕 1.9 same texture-in-glyph service |
-| A6 | Add/edit text; titles/headings/body defaults; text hierarchy | 🔵 hierarchy exists in specs → 🆕 1.9 editor exposure |
-| A6 | Tens of thousands of Adobe Fonts; custom upload; pairing/recommendations; search by style/mood | 🆕 1.9 catalogue + upload + AI pairing + mood search (catalogue tags) |
-| A6 | Character/paragraph styling (colour, alignment, underline, strikethrough, size incl. decimals, weight, italic, line height, lists with nesting/markers, links) | 🆕 1.9 formatting depth |
-| A6 | Copy text style (paintbrush); uppercase transform; find & replace; spellcheck (primary language) | 🆕 1.9 editor tools (deterministic) |
-| A6 | Curved text; shadow effects on text | 🆕 1.9 effect tokens |
+| C2 | Magic Morph (transform text/shapes with AI textures via prompt) | 🔵 1.9 clip-to-glyph substrate shipped (gradient via background-clip:text); AI texture-in-glyph ↗ 1.2 imagery |
+| A2 | Generate Text Effect (AI textures/styles on letters) | 🔵 1.9 same texture-in-glyph substrate (gradient now); AI texture ↗ 1.2 |
+| A6 | Add/edit text; titles/headings/body defaults; text hierarchy | 🔵 hierarchy exists in specs → ✅ 1.9 editor exposure |
+| A6 | Tens of thousands of Adobe Fonts; custom upload; pairing/recommendations; search by style/mood | ✅ 1.9 catalogue + upload + AI pairing + mood search (catalogue tags) |
+| A6 | Character/paragraph styling (colour, alignment, underline, strikethrough, size incl. decimals, weight, italic, line height, lists with nesting/markers, links) | ✅ 1.9 formatting depth |
+| A6 | Copy text style (paintbrush); uppercase transform; find & replace; spellcheck (primary language) | ✅ 1.9 editor tools (deterministic) |
+| A6 | Curved text; shadow effects on text | ✅ 1.9 effect tokens |
 | A6 | Text animations | ↗ 1.5 |
-| A6 | Auto-create hyperlinks | 🆕 1.9 (links live in PDF/doc/web outputs; plain images ignore them) |
+| A6 | Auto-create hyperlinks | ✅ 1.9 (links live in PDF/doc/web outputs; plain images ignore them) |
 
 ---
 
