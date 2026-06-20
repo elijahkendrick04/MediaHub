@@ -1,6 +1,13 @@
 # 25. Accumulating PB-history baseline (the scalable "is this a PB?" source)
 
-- **Status:** Accepted (maintainer directive, 2026-06-19).
+- **Status:** **SUPERSEDED by [ADR-0026](0026-online-first-pb-baseline-swimmingresults.md)**
+  (maintainer directive, 2026-06-20). The accumulating per-club history store was
+  removed: a baseline built only from MediaHub-uploaded meets is **incomplete**,
+  so a PB set at a meet the club never uploads is invisible, and a later slower
+  swim is then mis-flagged as a PB. A baseline from partial data manufactures
+  *false* PBs. The PB baseline is now the swimmer's **complete** official record
+  on swimmingresults.org, looked up every run. The original record is kept below.
+- **Status (original):** Accepted (maintainer directive, 2026-06-19).
 - **Date:** 2026-06-19
 - **Deciders:** MediaHub maintainer. Explicit directives, in order: *"improve the
   speed and efficiency of the PB finder by ten fold … the results also have to
