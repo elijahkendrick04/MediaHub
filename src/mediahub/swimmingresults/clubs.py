@@ -34,8 +34,20 @@ _OPTION_RE = re.compile(r'<option[^>]*value=["\']([^"\']+)["\'][^>]*>(.*?)</opti
 # only requires the QUERY's tokens to be covered by the candidate, so a shorter
 # meet-file name still matches a longer official name without stripping them.
 _CLUB_GENERIC = {
-    "sc", "asc", "club", "swimming", "swim", "swimmers", "aquatics", "aquatic",
-    "amateur", "the", "of", "and", "team", "squad",
+    "sc",
+    "asc",
+    "club",
+    "swimming",
+    "swim",
+    "swimmers",
+    "aquatics",
+    "aquatic",
+    "amateur",
+    "the",
+    "of",
+    "and",
+    "team",
+    "squad",
 }
 
 # Process-lifetime cache of {code: name}; the register changes rarely, so one

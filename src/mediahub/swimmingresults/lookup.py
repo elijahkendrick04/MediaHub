@@ -42,9 +42,16 @@ _PB_URL = SR_BASE + "/individualbest/personal_best.php?mode=A&tiref={tiref}"
 # so they're enough to find a swimmer in their club's roster without sweeping all
 # 19 events. Ordered roughly by participation.
 _ANCHOR_EVENTS: list[tuple[int, str]] = [
-    (50, "FR"), (100, "FR"), (200, "FR"),
-    (100, "BK"), (100, "BR"), (100, "FL"), (200, "IM"),
-    (50, "BK"), (50, "BR"), (50, "FL"),
+    (50, "FR"),
+    (100, "FR"),
+    (200, "FR"),
+    (100, "BK"),
+    (100, "BR"),
+    (100, "FL"),
+    (200, "IM"),
+    (50, "BK"),
+    (50, "BR"),
+    (50, "FL"),
 ]
 _COURSES = ("LC", "SC")
 _FETCH_WORKERS = 6
@@ -146,7 +153,12 @@ def _resolve_tirefs(
                 slices = list(
                     pool.map(
                         lambda j: roster_slice(
-                            club_code, sex, age, j[0], stroke, j[2],
+                            club_code,
+                            sex,
+                            age,
+                            j[0],
+                            stroke,
+                            j[2],
                             force_refresh=force_refresh,
                         ),
                         jobs,
@@ -182,7 +194,9 @@ def _best_name_match(first: str, last: str, index: dict[str, str]) -> Optional[s
     return None
 
 
-def _fetch_snapshot(swimmer_key: str, tiref: str, *, force_refresh: bool) -> Optional[BridgedSnapshot]:
+def _fetch_snapshot(
+    swimmer_key: str, tiref: str, *, force_refresh: bool
+) -> Optional[BridgedSnapshot]:
     url = _PB_URL.format(tiref=tiref)
     try:
         html = fetch(url)
@@ -255,11 +269,16 @@ def lookup_official_pbs(
     n_by_roster = 0
     club_code = resolve_club_code(club_name, force_refresh=force_refresh) if need_roster else None
     if need_roster and not club_code:
-        emit(f"PB lookup: '{club_name}' isn't on swimmingresults.org — skipping online PBs for unmatched swimmers.")
+        emit(
+            f"PB lookup: '{club_name}' isn't on swimmingresults.org — skipping online PBs for unmatched swimmers."
+        )
     elif need_roster:
         roster_tirefs = _resolve_tirefs(
-            club_code, need_roster, meet_year=_meet_year(meet),
-            force_refresh=force_refresh, budget=_budget(),
+            club_code,
+            need_roster,
+            meet_year=_meet_year(meet),
+            force_refresh=force_refresh,
+            budget=_budget(),
         )
         n_by_roster = len(roster_tirefs)
         tirefs.update(roster_tirefs)

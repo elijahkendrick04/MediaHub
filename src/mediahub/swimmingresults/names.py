@@ -152,9 +152,7 @@ def name_match(first_a: str, last_a: str, first_b: str, last_b: str) -> bool:
     # overlap). A surname mismatch is a hard no.
     la_toks, lb_toks = set(la.split()), set(lb.split())
     surname_ok = (
-        la == lb
-        or bool(la_toks & lb_toks)
-        or _close(la.replace(" ", ""), lb.replace(" ", ""))
+        la == lb or bool(la_toks & lb_toks) or _close(la.replace(" ", ""), lb.replace(" ", ""))
     )
     if not surname_ok:
         return False

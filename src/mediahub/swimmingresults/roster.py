@@ -33,10 +33,15 @@ _OPTION = re.compile(r'<option[^>]*value=["\']([^"\']+)["\'][^>]*>(.*?)</option>
 # A ranked swimmer: a tiref link whose anchor text is the swimmer's name.
 _TIREF_PAIR = re.compile(r"tiref=(\d+)[^>]*>\s*([^<]+?)\s*<", re.I)
 
-_STROKE_LABEL = re.compile(r"(\d+)\s*m?\s*(freestyle|backstroke|breaststroke|butterfly|.*medley)", re.I)
+_STROKE_LABEL = re.compile(
+    r"(\d+)\s*m?\s*(freestyle|backstroke|breaststroke|butterfly|.*medley)", re.I
+)
 _LABEL_CODE = {
-    "freestyle": "FR", "backstroke": "BK", "breaststroke": "BR",
-    "butterfly": "FL", "medley": "IM",
+    "freestyle": "FR",
+    "backstroke": "BK",
+    "breaststroke": "BR",
+    "butterfly": "FL",
+    "medley": "IM",
 }
 
 _POOL = {"LC": "L", "SC": "S"}
