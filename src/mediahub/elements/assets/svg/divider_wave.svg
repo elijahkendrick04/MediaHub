@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 24" role="img" aria-label="Wave divider">
+  <path d="M2 12 Q14 2 26 12 T50 12 T74 12 T98 12 T122 12 T146 12 T170 12 T194 12"
+        fill="none" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="2" cy="12" r="3.5" fill="__ACCENT__"/>
+  <circle cx="198" cy="12" r="3.5" fill="__ACCENT__"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Chevron texture">
+  <defs>
+    <pattern id="chev__UID__" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(0)">
+      <path d="M0 18 L12 6 L24 18" fill="none" stroke="__ACCENT__" stroke-width="3" opacity="0.5"/>
+      <path d="M0 30 L12 18 L24 30" fill="none" stroke="__ACCENT__" stroke-width="3" opacity="0.5"/>
+    </pattern>
+  </defs>
+  <rect x="0" y="0" width="120" height="120" fill="url(#chev__UID__)"/>
+</svg>

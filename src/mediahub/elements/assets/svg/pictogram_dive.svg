@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Racing dive off the blocks">
+  <!-- starting block -->
+  <path d="M10 70 h26 v6 h-26 z" fill="__SECONDARY__"/>
+  <path d="M14 76 v14 M32 76 v14" stroke="__SECONDARY__" stroke-width="5" stroke-linecap="round"/>
+  <!-- water line -->
+  <path d="M40 82 Q56 76 72 82 T96 82" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <!-- diving body, streamlined toward the water -->
+  <path d="M28 60 C40 52 56 56 70 70 C74 74 80 78 86 78"
+        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- head leading -->
+  <circle cx="80" cy="76" r="7.5" fill="__ACCENT__"/>
+  <!-- trailing arms streamlined -->
+  <path d="M30 60 C22 50 22 44 30 40" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+  <!-- entry splash -->
+  <path d="M86 72 l7 -4 M88 80 l8 2" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+</svg>

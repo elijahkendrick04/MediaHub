@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" role="img" aria-label="Personal best chip">
+  <rect x="2" y="6" width="116" height="36" rx="18" fill="__ACCENT__"/>
+  <circle cx="24" cy="24" r="11" fill="__GROUND__"/>
+  <path d="M19 24 l4 4 7 -8" fill="none" stroke="__ACCENT__" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="44" y="31" font-family="Arial, sans-serif" font-weight="800" font-size="20" letter-spacing="2" fill="__GROUND__">PB</text>
+  <text x="74" y="30" font-family="Arial, sans-serif" font-weight="600" font-size="12" letter-spacing="1.5" fill="__GROUND__" opacity="0.85">BEST</text>
+</svg>

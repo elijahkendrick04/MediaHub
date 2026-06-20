@@ -16,6 +16,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `admin_compliance` | `GET` | `/admin/compliance` |
 | `admin_compliance_ack` | `POST` | `/admin/compliance/complaints/<complaint_id>/ack` |
 | `admin_compliance_incident` | `POST` | `/admin/compliance/incidents` |
+| `annotate_page` | `GET` | `/annotate/<asset_id>` |
 | `api_assistant_memory` | `GET,POST` | `/api/assistant/memory` |
 | `api_assistant_memory_delete` | `POST` | `/api/assistant/memory/<item_id>/delete` |
 | `api_assistant_transcribe` | `POST` | `/api/assistant/transcribe` |
@@ -38,9 +39,14 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_stub_pack_reformat` | `GET,POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/reformat` |
 | `api_stub_pack_card_status` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/status` |
 | `api_stub_pack_regenerate` | `POST` | `/api/drafts/<pack_id>/regenerate` |
+| `api_elements` | `GET` | `/api/elements` |
+| `api_elements_generate` | `GET,POST` | `/api/elements/generate` |
+| `api_elements_gradients` | `GET` | `/api/elements/gradients` |
 | `api_event_preview_parse_entries` | `POST` | `/api/event-preview/parse-entries` |
 | `api_formats` | `GET` | `/api/formats` |
 | `api_media_library_upload` | `POST` | `/api/media-library` |
+| `api_annotate_asset` | `POST` | `/api/media-library/<asset_id>/annotate` |
+| `api_asset_annotated` | `GET` | `/api/media-library/<asset_id>/annotated` |
 | `api_media_library_delete` | `POST` | `/api/media-library/<asset_id>/delete` |
 | `api_photo_edit_apply` | `POST` | `/api/media-library/<asset_id>/edit/apply` |
 | `api_photo_edit_enhance` | `POST` | `/api/media-library/<asset_id>/edit/enhance` |
@@ -50,6 +56,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_imagine_asset_op` | `POST` | `/api/media-library/<asset_id>/imagine/<op>` |
 | `api_imagine_grab_text` | `POST` | `/api/media-library/<asset_id>/imagine/grab-text` |
 | `api_imagine_subject_lift` | `POST` | `/api/media-library/<asset_id>/imagine/subject-lift` |
+| `api_make_sticker` | `POST` | `/api/media-library/<asset_id>/make-sticker` |
 | `api_media_library_mockup` | `GET,POST` | `/api/media-library/<asset_id>/mockup/<template>` |
 | `api_photo_profile_picture` | `POST` | `/api/media-library/<asset_id>/profile-picture` |
 | `api_media_library_bulk_approve` | `POST` | `/api/media-library/bulk-approve` |
@@ -60,6 +67,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_media_library_file` | `GET` | `/api/media-library/file/<asset_id>` |
 | `api_imagine_generate` | `POST` | `/api/media-library/imagine/generate` |
 | `api_imagine_info` | `GET` | `/api/media-library/imagine/info` |
+| `api_import_stock` | `POST` | `/api/media-library/import-stock` |
 | `api_media_library_list_json` | `GET` | `/api/media-library/list.json` |
 | `api_mockup_templates` | `GET` | `/api/media-library/mockup-templates` |
 | `api_notifications` | `GET` | `/api/notifications` |
@@ -74,6 +82,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_reel_job_status` | `GET` | `/api/reel-jobs/<job_id>` |
 | `api_card_assistant` | `POST` | `/api/runs/<run_id>/card/<card_id>/assistant` |
 | `api_assistant_suggestions` | `GET` | `/api/runs/<run_id>/card/<card_id>/assistant/suggestions` |
+| `api_element_suggestions` | `GET` | `/api/runs/<run_id>/card/<card_id>/element-suggestions` |
+| `api_card_elements` | `GET,POST` | `/api/runs/<run_id>/card/<card_id>/elements` |
 | `api_card_motion` | `GET,POST` | `/api/runs/<run_id>/card/<card_id>/motion` |
 | `api_card_motion_manifest` | `GET` | `/api/runs/<run_id>/card/<card_id>/motion/manifest` |
 | `api_card_reaction_toggle` | `POST` | `/api/runs/<run_id>/card/<card_id>/reactions` |
@@ -112,6 +122,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_why_card` | `GET` | `/api/runs/<run_id>/why/<int:ach_index>` |
 | `api_llm_status` | `GET` | `/api/settings/llm-status` |
 | `api_status_json` | `GET` | `/api/status` |
+| `api_stock_search` | `GET` | `/api/stock/search` |
 | `api_studio_render` | `POST` | `/api/studio/render` |
 | `upload_from_url_status` | `GET` | `/api/upload/from-url/<job_id>/status` |
 | `api_variant_job_status` | `GET` | `/api/variant-jobs/<job_id>` |
@@ -152,6 +163,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `stub_pack_view` | `GET` | `/drafts/<pack_id>` |
 | `stub_pack_delete` | `POST` | `/drafts/<pack_id>/delete` |
 | `stub_pack_export` | `GET` | `/drafts/<pack_id>/export.txt` |
+| `elements_page` | `GET` | `/elements` |
 | `favicon` | `GET` | `/favicon.ico` |
 | `favicon` | `GET` | `/favicon.svg` |
 | `free_text_chat_page` | `GET` | `/free-text` |
@@ -258,6 +270,9 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `stub_session_update` | `GET,POST` | `/session-update` |
 | `settings_page` | `GET` | `/settings` |
 | `settings_section` | `GET` | `/settings/<section>` |
+| `typography_remove_font` | `POST` | `/settings/typography/font/<slug>/remove` |
+| `typography_upload_font` | `POST` | `/settings/typography/font/upload` |
+| `typography_pair` | `POST` | `/settings/typography/pair` |
 | `sign_in_page` | `GET` | `/sign-in` |
 | `sign_in_post` | `POST` | `/sign-in` |
 | `sign_in_delete` | `POST` | `/sign-in/delete` |
@@ -276,6 +291,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `static_fonts_css` | `GET` | `/static/theme/fonts.css` |
 | `static_motion_vocabulary_css` | `GET` | `/static/theme/motion-vocabulary.css` |
 | `status_page` | `GET` | `/status` |
+| `stock_page` | `GET` | `/stock` |
 | `design_studio` | `GET` | `/studio` |
 | `service_worker` | `GET` | `/sw.js` |
 | `template_gallery` | `GET` | `/templates` |

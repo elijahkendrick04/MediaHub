@@ -162,6 +162,13 @@ include = ["mediahub*"]
 # first-party CC0 SFX/idents/beds ship in the wheel so the reel engine has sound
 # with no operator setup. Regenerate with scripts/make_audio_assets.py.
 "mediahub.audio" = ["assets/manifest.json", "assets/**/*"]
+# Roadmap 1.10 — the bundled, brand-token-recolourable element library. The
+# curated sport-editorial SVG packs (assets/svg/*.svg) ship in the wheel so the
+# elements tab has content with no operator setup. The SVGs carry __SLOT__ token
+# placeholders recoloured to the card's brand roles at render time
+# (mediahub.elements.recolour). catalog.json is already covered by the **/*.json
+# rule above; this adds the non-JSON SVG assets.
+"mediahub.elements" = ["catalog.json", "assets/**/*"]
 # Phase 1.6 Stage C — Adaptive Theming Engine static CSS files. The
 # loader in mediahub.web.theme_tokens reads these at import time.
 "mediahub.web" = ["static/theme/*.css"]

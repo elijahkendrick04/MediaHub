@@ -148,6 +148,12 @@ class CreativeBrief:
     # (graphic_renderer.text_effects), APCA-policed at apply time. Empty (the
     # default) means no effects, so every legacy card renders byte-identically.
     text_effects: dict[str, str] = field(default_factory=dict)
+    # 1.10 — brand-token-recolourable library elements painted on this card. Each
+    # entry is an ``elements.models.ElementPlacement`` dict (element_id + position
+    # + scale + rotation + opacity); the ``sprint_hooks/elements`` hook resolves
+    # and recolours them to the card's own --mh-* roles. Empty (the default) →
+    # the card renders byte-identically (the additive, opt-in sprint-hook contract).
+    elements: list[dict] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 2
 

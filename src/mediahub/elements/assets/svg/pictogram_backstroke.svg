@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Backstroke swimmer">
+  <path d="M4 62 Q18 56 32 62 T60 62 T88 62 T96 62" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <!-- body face-up -->
+  <path d="M16 50 C30 56 46 58 64 56 C74 55 82 57 88 60"
+        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- head -->
+  <circle cx="70" cy="54" r="8" fill="__ACCENT__"/>
+  <!-- straight recovery arm reaching back over the head -->
+  <path d="M64 54 C68 36 60 26 46 26" fill="none" stroke="__ACCENT__" stroke-width="7" stroke-linecap="round"/>
+  <!-- kick splash -->
+  <path d="M16 50 l-9 -5 M18 44 l-10 -2" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 120" role="img" aria-label="Award ribbon">
+  <!-- tails -->
+  <path d="M26 70 L20 112 L40 98 L60 112 L54 70 Z" fill="__SECONDARY__"/>
+  <path d="M30 72 L26 104 L40 94 L54 104 L50 72 Z" fill="__ACCENT__" opacity="0.9"/>
+  <!-- medallion -->
+  <circle cx="40" cy="40" r="30" fill="__ACCENT__"/>
+  <circle cx="40" cy="40" r="30" fill="none" stroke="__GROUND__" stroke-width="2" opacity="0.4"/>
+  <circle cx="40" cy="40" r="21" fill="__GROUND__"/>
+  <!-- star -->
+  <path d="M40 26 l4.2 9.6 10.4 .9 -7.9 6.8 2.4 10.2 -9.1 -5.5 -9.1 5.5 2.4 -10.2 -7.9 -6.8 10.4 -.9 Z" fill="__ACCENT__"/>
+</svg>

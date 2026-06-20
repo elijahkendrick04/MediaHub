@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Stopwatch">
+  <!-- crown / start button -->
+  <rect x="44" y="6" width="12" height="9" rx="2" fill="__ACCENT__"/>
+  <rect x="46" y="13" width="8" height="6" fill="__SECONDARY__"/>
+  <!-- side button -->
+  <rect x="76" y="22" width="10" height="7" rx="2" transform="rotate(45 81 25)" fill="__SECONDARY__"/>
+  <!-- dial -->
+  <circle cx="50" cy="58" r="34" fill="__SURFACE__" stroke="__ACCENT__" stroke-width="4"/>
+  <!-- tick marks -->
+  <g stroke="__ON_SURFACE__" stroke-width="2.4" stroke-linecap="round" opacity="0.85">
+    <line x1="50" y1="28" x2="50" y2="34"/>
+    <line x1="50" y1="82" x2="50" y2="88"/>
+    <line x1="20" y1="58" x2="26" y2="58"/>
+    <line x1="74" y1="58" x2="80" y2="58"/>
+  </g>
+  <!-- hand -->
+  <line x1="50" y1="58" x2="68" y2="40" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="50" cy="58" r="4" fill="__ACCENT__"/>
+</svg>

@@ -732,33 +732,52 @@ shape-snap (deterministic), stored as a spec layer; (5) shape generator =
 emoji/sticker = club mascot pack (cutout + 1.5 animated sticker export);
 (7) GIF/sticker search only via licence-clean sources.
 
+**Status — shipped v1 (2026-06-20).** The library is live end-to-end:
+`mediahub.elements` ships a 25-element brand-token-recolourable sport-editorial
+pack (`models`/`catalog`/`catalog.json` + `recolour` + `render`), painted onto
+cards by the auto-discovered `graphic_renderer/sprint_hooks/elements.py`
+(opt-in, APCA-gated, byte-identical when off); embedding search reusing the
+caption-memory embedder with an honest keyword fallback (`elements/search.py`)
+plus contextual suggestions; brand-palette gradient presets (`elements/gradients`);
+a licence-clean stock pool (`elements/stock.py` — Openverse/Wikimedia harvest,
+shared `Licence`/rights ledger with 1.8, flag-gated paid sources, photo + video)
+with org-scoped import; and a deterministic telestration draw layer
+(`elements/draw.py` — RDP smoothing, Shape Assist auto-snap, symmetry, SVG +
+Pillow render, stored as a spec layer on the asset) wired into the photo editor.
+Club mascot stickers (`elements/stickers.py`) promote a cutout into an org-custom
+element. Web surface: `/elements`, `/stock`, `/annotate/<asset_id>` + the
+`/api/elements*`, `/api/stock/*`, `/api/media-library/<id>/annotate|make-sticker`
+routes. **Deferred to 1.2 (generative imagery):** the AI *shape generator*, the
+"generate an element" entry and 3D-render elements are an honest seam
+(`elements/generate.py` raises `GenerativeElementsUnavailable`) until 1.2 lands.
+
 **Coverage.**
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
 | C7 | Graphics library (1M+ elements) | 🚫 adapted — curated sport-editorial packs, brand-token recolourable |
-| C7 | Stickers | 🆕 1.10 sticker packs (+ club mascot stickers; animated ↗ 1.5) |
-| C7 | Icons | 🆕 1.10 icon set (sport pictograms first) |
-| C7 | Shapes + Shape Generator (AI unique shapes) | 🆕 1.10 shape library; AI generator via 1.2 → traced SVG |
-| C7 | Lines | 🆕 1.10 line/divider set |
-| C7 | Photos library (stock) | 🆕 1.10 our own licence-clean photo pool (open-collection seeded; paid sources flag-gated); venue shots ✅ shipped (`venue_search`) |
-| C7 | Stock videos | 🆕 1.10 our own licence-clean stock-video pool (feeds 1.6) |
-| C7 | Gradients | 🆕 1.10 gradient presets from brand palette (linear/radial) |
+| C7 | Stickers | ✅ 1.10 sticker packs (+ club mascot stickers; animated ↗ 1.5) |
+| C7 | Icons | ✅ 1.10 icon set (sport pictograms first) |
+| C7 | Shapes + Shape Generator (AI unique shapes) | ✅ 1.10 shape library; AI generator via 1.2 (honest seam until 1.2) |
+| C7 | Lines | ✅ 1.10 line/divider set |
+| C7 | Photos library (stock) | ✅ 1.10 our own licence-clean photo pool (open-collection seeded; paid sources flag-gated); venue shots ✅ shipped (`venue_search`) |
+| C7 | Stock videos | ✅ 1.10 our own licence-clean stock-video pool (feeds 1.6) |
+| C7 | Gradients | ✅ 1.10 gradient presets from brand palette (linear/radial) |
 | C7 | Tables · Charts/Graphs (20+ types) · Interactive charts (Flourish embeds) | ↗ 1.11 |
-| C7 | Draw / Drawing tools (freehand, Shape Assist) | 🆕 1.10 annotate layer (telestration) |
+| C7 | Draw / Drawing tools (freehand, Shape Assist) | ✅ 1.10 annotate layer (telestration) |
 | C7 | 3D elements (3D Content Generator) | 🆕 1.10 3D-render element pack (crest/trophy renders via 1.2, cached as images) |
 | C7 | AI-Powered Elements (generate photos/videos/code/icons/shapes/3D from the Elements tab) | 🆕 1.10 "generate an element" entry → 1.2 services (code widgets ↗ 1.16) |
-| C7 | Frames, grids | 🆕 1.10 frame/grid elements (shared masks with 1.3) |
-| C7 | Custom emojis | 🆕 1.10 club emoji/mascot pack |
-| C7 | Backgrounds | 🆕 1.10 background packs + `venue_search` ✅ + 1.2 generation |
-| C4 | Stock footage library (Artlist etc.) / Video Marketplace | 🆕 1.10 our own stock-video pool (licence-clean default; paid sources flag-gated) |
-| A10 | Draw with brushes (markers, pencils, paints, colours) | 🆕 1.10 annotate brushes (stylised strokes) |
-| A10 | Draw with symmetry; snap to shape; coloring mode (stay in lines) | 🆕 1.10 symmetry mirror + shape-snap; colouring mode pairs with `kids_activity_sheet` (P6.1) |
+| C7 | Frames, grids | ✅ 1.10 frame/grid elements (shared masks with 1.3) |
+| C7 | Custom emojis | ✅ 1.10 club emoji/mascot pack |
+| C7 | Backgrounds | ✅ 1.10 background packs + `venue_search` ✅ + 1.2 generation |
+| C4 | Stock footage library (Artlist etc.) / Video Marketplace | ✅ 1.10 our own stock-video pool (licence-clean default; paid sources flag-gated) |
+| A10 | Draw with brushes (markers, pencils, paints, colours) | ✅ 1.10 annotate brushes (stylised strokes) |
+| A10 | Draw with symmetry; snap to shape; coloring mode (stay in lines) | ✅ 1.10 symmetry mirror + shape-snap; colouring mode pairs with `kids_activity_sheet` (P6.1) |
 | A11 | Adobe Stock integration (200M+ assets) | 🚫 adapted — our own curated pool (open-collection seeded) instead of a vendor stock integration; paid sources optional behind flags |
-| A11 | Icons, shapes, backgrounds, overlays, frames, graphics, stickers, GIFs | 🆕 1.10 element packs (GIF/sticker sources licence-clean) |
-| A11 | Grids | 🆕 1.10 |
-| A11 | Gradients (linear/radial, prompt-driven) | 🆕 1.10 presets; prompt-driven gradient = brand-palette interpolation via `media_ai` suggestion |
-| A11 | Design elements search & browse; contextual recommendations | 🆕 1.10 embedding search + `context_engine`-aware suggestions |
+| A11 | Icons, shapes, backgrounds, overlays, frames, graphics, stickers, GIFs | ✅ 1.10 element packs (GIF/sticker sources licence-clean) |
+| A11 | Grids | ✅ 1.10 |
+| A11 | Gradients (linear/radial, prompt-driven) | ✅ 1.10 presets; prompt-driven gradient = brand-palette interpolation via `media_ai` suggestion |
+| A11 | Design elements search & browse; contextual recommendations | ✅ 1.10 embedding search + `context_engine`-aware suggestions |
 | A11 | Color themes; apply color themes; custom gradients; import from Adobe Color | ↗ 1.12 palette layer (Adobe-Color import = palette-file import) |
 | A11 | QR code generator (custom colour/style/logo; PNG/JPEG/PDF/SVG) | ↗ 1.16 |
 | A11 | Charts; tables (add/customize) | ↗ 1.11 |

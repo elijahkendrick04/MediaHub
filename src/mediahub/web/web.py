@@ -11142,6 +11142,7 @@ def _layout(
        full Create tile (the live design editor). Keeping both off the top bar
        leaves the signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('elements_page') }}" class="{{ 'active' if active=='elements' else '' }}">Elements</a>
     {% if video_enabled %}<a href="{{ url_for('video_studio_page') }}" class="{{ 'active' if active=='video' else '' }}">Video</a>{% endif %}
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
@@ -38560,6 +38561,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             back_url=url_for("media_library_page"),
             studio_url=url_for("image_studio_page", asset_id=a.id) if _imagine_ok else "",
             cutout_url=url_for("media_library_cutout_page", asset_id=a.id),
+            annotate_url=url_for("annotate_page", asset_id=a.id),
             width=width,
             height=height,
             brand_shadow=brand_shadow,
@@ -38928,6 +38930,499 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 },
             }
         )
+
+    # ---------------------------------------------------------------- #
+    # Roadmap 1.10 — Element library: browse, search, suggest, add-to-card.
+    # ---------------------------------------------------------------- #
+    def _elements_role_vars(profile_id: Optional[str]):
+        """Resolved --mh-* role vars for an org's brand (browse recolouring)."""
+        from mediahub.elements import recolour as _el_recolour
+
+        brand_kit = None
+        if profile_id:
+            try:
+                brand_kit = _v8_brand_kit_for(profile_id)
+            except Exception:
+                brand_kit = None
+        return _el_recolour.role_vars_from_palette(None, brand_kit)
+
+    def _element_to_payload(el, role_vars) -> dict:
+        from mediahub.elements import render as _el_render
+
+        svg = _el_render.render_element_markup(el, role_vars, uid=el.id.replace(".", "_"))
+        return {
+            "id": el.id,
+            "name": el.name,
+            "kind": el.kind,
+            "sport": el.sport,
+            "tags": list(el.tags),
+            "aspect": el.aspect,
+            "svg": svg or "",
+        }
+
+    @app.route("/api/elements")
+    def api_elements():
+        """Browse / search the element library, recoloured to the org brand."""
+        from flask import request as _req
+        from mediahub.elements import catalog as _el_catalog
+        from mediahub.elements import search as _el_search
+
+        profile_id = _active_profile_id()
+        q = (_req.args.get("q") or "").strip()
+        kind = (_req.args.get("kind") or "").strip() or None
+        sport = (_req.args.get("sport") or "").strip() or None
+        role_vars = _elements_role_vars(profile_id)
+
+        hits = _el_search.search(q, profile_id=profile_id, kind=kind, sport=sport, limit=60)
+        payload = [_element_to_payload(h.element, role_vars) for h in hits]
+        return jsonify(
+            {
+                "elements": payload,
+                "semantic": _el_search.is_semantic_available(),
+                "kinds": _el_catalog.list_kinds(profile_id),
+            }
+        )
+
+    @app.route("/api/elements/gradients")
+    def api_elements_gradients():
+        """Brand-palette gradient presets as ready-to-use CSS for the org."""
+        from mediahub.elements import gradients as _el_grad
+
+        role_vars = _elements_role_vars(_active_profile_id())
+        out = [
+            {"id": p.id, "name": p.name, "kind": p.kind, "css": _el_grad.gradient_css(p, role_vars)}
+            for p in _el_grad.list_presets()
+        ]
+        return jsonify({"gradients": out})
+
+    def _card_context_facts(run_data, card_id: str) -> dict:
+        """Achievement facts for contextual element suggestions on a card."""
+        facts: dict = {}
+        rr = (run_data or {}).get("recognition_report") or {}
+        for ra in rr.get("ranked_achievements") or []:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                facts["event_name"] = ach.get("event") or ach.get("event_name") or ""
+                facts["stroke"] = ach.get("stroke") or ""
+                facts["achievement_label"] = ach.get("achievement_label") or ""
+                facts["is_pb"] = bool(ach.get("is_pb") or ach.get("pb"))
+                place = str(ach.get("place") or "").strip()
+                if place in {"1", "1st"}:
+                    facts["medal_tier"] = "gold"
+                elif place in {"2", "2nd"}:
+                    facts["medal_tier"] = "silver"
+                elif place in {"3", "3rd"}:
+                    facts["medal_tier"] = "bronze"
+                if "relay" in str(facts.get("event_name", "")).lower():
+                    facts["post_angle"] = "relay"
+                break
+        return facts
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/element-suggestions")
+    def api_element_suggestions(run_id: str, card_id: str):
+        """Suggest elements that fit this card's moment (deterministic + AI blend)."""
+        from mediahub.elements import search as _el_search
+
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        profile_id = (run_data or {}).get("profile_id") or _active_profile_id()
+        facts = _card_context_facts(run_data, card_id)
+        role_vars = _elements_role_vars(profile_id)
+        suggested = _el_search.suggest_for_context(facts, profile_id=profile_id, limit=12)
+        return jsonify(
+            {"elements": [_element_to_payload(el, role_vars) for el in suggested], "context": facts}
+        )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/elements", methods=["GET", "POST"])
+    def api_card_elements(run_id: str, card_id: str):
+        """List, add, remove or clear the library elements painted on a card.
+
+        Placements live on the card's persisted CreativeBrief (`elements` field);
+        the next render picks them up via the elements sprint hook.
+        """
+        from flask import request as _req
+        from mediahub.elements.catalog import get_element as _get_element
+        from mediahub.elements.models import ElementPlacement
+
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        bdict = _latest_brief_for_card(run_id, card_id)
+        if not bdict:
+            return jsonify(
+                {"error": "no_design", "user_message": "Create a graphic for this card first."}
+            ), 409
+
+        current = list(bdict.get("elements") or [])
+
+        if _req.method == "GET":
+            return jsonify({"elements": current})
+
+        body = _req.get_json(silent=True) or {}
+        if body.get("clear"):
+            current = []
+        elif "remove_index" in body:
+            try:
+                idx = int(body["remove_index"])
+                if 0 <= idx < len(current):
+                    current.pop(idx)
+            except (TypeError, ValueError):
+                return jsonify({"error": "bad_index"}), 400
+        else:
+            element_id = str(body.get("element_id") or "").strip()
+            if not element_id:
+                return jsonify({"error": "no_element_id"}), 400
+            profile_id = (run_data or {}).get("profile_id") or _active_profile_id()
+            if _get_element(element_id, profile_id) is None:
+                return jsonify({"error": "unknown_element"}), 404
+            placement = ElementPlacement.from_dict({**body, "element_id": element_id})
+            if placement is None:
+                return jsonify({"error": "bad_placement"}), 400
+            if len(current) >= 12:
+                return jsonify(
+                    {"error": "too_many", "user_message": "Up to 12 elements per card."}
+                ), 409
+            current.append(placement.to_dict())
+
+        bdict["elements"] = current
+        brief_id = str(bdict.get("id") or "").strip()
+        if not brief_id:
+            return jsonify({"error": "brief_unreadable"}), 500
+        try:
+            bdir = RUNS_DIR / run_id / "briefs"
+            bdir.mkdir(parents=True, exist_ok=True)
+            (bdir / f"{brief_id}.json").write_text(
+                json.dumps(bdict, indent=2, default=str), encoding="utf-8"
+            )
+        except OSError as e:
+            return jsonify({"error": f"save_failed: {e}"}), 500
+        return jsonify({"ok": True, "elements": current})
+
+    @app.route("/elements")
+    def elements_page():
+        """Standalone Elements browser. ?run_id=&card_id= enables add-to-card."""
+        from flask import request as _req
+        from mediahub.elements import catalog as _el_catalog
+        from mediahub.elements import gradients as _el_grad
+        from mediahub.elements import search as _el_search
+        from mediahub.web import elements_browser as _eb
+
+        profile_id = _active_profile_id()
+        role_vars = _elements_role_vars(profile_id)
+        seed = [_element_to_payload(el, role_vars) for el in _el_catalog.load_catalog(profile_id)]
+        grad = [
+            {"name": p.name, "css": _el_grad.gradient_css(p, role_vars)}
+            for p in _el_grad.list_presets()
+        ]
+
+        run_id = (_req.args.get("run_id") or "").strip()
+        card_id = (_req.args.get("card_id") or "").strip()
+        add_url = list_url = suggest_url = ""
+        card_label = ""
+        if run_id and card_id:
+            run_data = _load_run(run_id)
+            if run_data and _can_access_run(run_id, run_data, profile_id):
+                add_url = url_for("api_card_elements", run_id=run_id, card_id=card_id)
+                list_url = add_url
+                suggest_url = url_for("api_element_suggestions", run_id=run_id, card_id=card_id)
+                card_label = card_id
+
+        body = _eb.render_browser_body(
+            elements=seed,
+            kinds=_el_catalog.list_kinds(profile_id),
+            gradients=grad,
+            semantic=_el_search.is_semantic_available(),
+            search_url=url_for("api_elements"),
+            add_url=add_url,
+            list_url=list_url,
+            suggest_url=suggest_url,
+            card_label=card_label,
+            stock_url=url_for("stock_page"),
+        )
+        return _layout("Elements", body, active="elements")
+
+    # ---------------------------------------------------------------- #
+    # Roadmap 1.10 build 3 — licence-clean stock pool (search + import).
+    # ---------------------------------------------------------------- #
+    @app.route("/api/stock/search")
+    def api_stock_search():
+        """Search the licence-clean stock pool (Openverse/Wikimedia; paid gated)."""
+        from flask import request as _req
+        from mediahub.elements import stock as _stock
+
+        q = (_req.args.get("q") or "").strip()
+        kind = (_req.args.get("kind") or "photo").strip()
+        if kind not in ("photo", "video"):
+            kind = "photo"
+        results = _stock.search(q, kind=kind, limit=24) if q else []
+        return jsonify(
+            {
+                "results": [r.to_dict() for r in results],
+                "sources": _stock.available_sources(),
+                "kind": kind,
+            }
+        )
+
+    @app.route("/api/media-library/import-stock", methods=["POST"])
+    def api_import_stock():
+        """Import a chosen stock result into the org library, recording its rights.
+
+        Mirrors the venue import, but org-scoped (to the active profile's library)
+        and persists a StockRightsRecord so the licence + attribution + commercial
+        gate stay auditable per asset.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import request as _req
+        from mediahub.elements import stock as _stock
+
+        profile_id = _active_profile_id()
+        if not profile_id or not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+
+        body = _req.get_json(silent=True) or {}
+        direct_url = str(body.get("direct_url") or "").strip()
+        if not direct_url.startswith(("http://", "https://")):
+            return jsonify({"error": "bad_media_url"}), 400
+        kind = "video" if str(body.get("kind") or "photo") == "video" else "photo"
+        title = str(body.get("title") or "").strip()
+        source_url = str(body.get("source_url") or "").strip()
+        source_site = str(body.get("source_site") or "").strip()
+        licence = _stock.parse_licence(
+            str(body.get("licence") or ""),
+            url=str(body.get("licence_url") or ""),
+            attribution=str(body.get("attribution") or ""),
+            source=source_site,
+        )
+        # Only licence-clean (commercially usable) assets enter the library.
+        if not licence.commercial_ok:
+            return jsonify(
+                {
+                    "error": "licence_not_clear",
+                    "user_message": "That asset's licence isn't cleared for club use.",
+                }
+            ), 409
+
+        import requests as _requests
+
+        want_prefix = "video/" if kind == "video" else "image/"
+        max_bytes = (60 if kind == "video" else 15) * 1024 * 1024
+        try:
+            resp = _requests.get(direct_url, timeout=20, stream=True)
+            resp.raise_for_status()
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            if not ctype.startswith(want_prefix):
+                return jsonify({"error": "wrong_media_type"}), 400
+            data = resp.raw.read(max_bytes + 1, decode_content=True)
+        except Exception as e:
+            return jsonify({"error": f"download_failed: {e}"}), 502
+        if len(data) > max_bytes:
+            return jsonify({"error": "media_too_large", "max_mb": max_bytes // (1024 * 1024)}), 400
+
+        ext_map = (
+            {"video/webm": ".webm", "video/ogg": ".ogv", "video/mp4": ".mp4"}
+            if kind == "video"
+            else {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+        )
+        ext = ext_map.get(ctype.split(";")[0].strip(), ".mp4" if kind == "video" else ".jpg")
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest = upload_dir / f"stock_{uuid.uuid4().hex[:12]}{ext}"
+        dest.write_bytes(data)
+
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        asset = MediaAsset(
+            id="",
+            filename=dest.name,
+            path=str(dest),
+            type="footage" if kind == "video" else "other",
+            description_raw=title or "stock asset",
+            profile_id=profile_id,
+            source_url=source_url or direct_url,
+            source_attribution=licence.attribution or None,
+            source_licence=licence.name or None,
+            permission_status=str(body.get("permission_status") or "approved_public"),
+            approval_status="approved",
+            tags=["stock", source_site] if source_site else ["stock"],
+        )
+        asset = store.save(asset)
+
+        try:
+            _stock.get_ledger().record(
+                _stock.StockRightsRecord(
+                    asset_id=asset.id,
+                    profile_id=profile_id,
+                    source=source_site or "stock",
+                    source_url=source_url or direct_url,
+                    kind=kind,
+                    licence=licence,
+                )
+            )
+        except Exception as e:  # rights record is best-effort; asset already saved
+            log.warning("stock rights record failed for %s: %s", asset.id, e)
+
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": asset.id,
+                    "url": url_for("api_media_library_file", asset_id=asset.id),
+                    "label": title or "stock asset",
+                    "licence": licence.to_dict(),
+                },
+            }
+        )
+
+    @app.route("/stock")
+    def stock_page():
+        """Standalone licence-clean stock browser (search → add to library)."""
+        from mediahub.elements import stock as _stock
+        from mediahub.web import elements_browser as _eb
+
+        body = _eb.render_stock_body(
+            search_url=url_for("api_stock_search"),
+            import_url=url_for("api_import_stock"),
+            sources=_stock.available_sources(),
+        )
+        return _layout("Stock", body, active="media")
+
+    # ---------------------------------------------------------------- #
+    # Roadmap 1.10 build 4 — telestration draw layer + mascot stickers
+    #                        + flagged AI-generation seam.
+    # ---------------------------------------------------------------- #
+    @app.route("/api/media-library/<asset_id>/annotate", methods=["POST"])
+    def api_annotate_asset(asset_id: str):
+        """Store a telestration annotation layer on an asset (non-destructive)."""
+        from flask import request as _req
+        from mediahub.elements.draw import AnnotationLayer
+
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        body = _req.get_json(silent=True) or {}
+        layer = AnnotationLayer.from_dict(body)
+        store.update_fields(a.id, {"annotation": layer.to_dict()})
+        return jsonify(
+            {
+                "ok": True,
+                "strokes": len(layer.strokes),
+                "annotated_url": url_for("api_asset_annotated", asset_id=a.id),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/annotated")
+    def api_asset_annotated(asset_id: str):
+        """Serve the asset composited with its annotation overlay (PNG)."""
+        from flask import Response
+
+        from mediahub.elements import draw as _draw
+        from mediahub.media_library import photo_edit as _pe
+
+        a, _store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        layer = _draw.AnnotationLayer.from_dict(getattr(a, "annotation", None) or {})
+        try:
+            from PIL import Image
+
+            base_path = _pe.effective_image_path(a)
+            with Image.open(base_path) as im:
+                im.load()
+                if layer.is_empty():
+                    out = im.convert("RGBA")
+                else:
+                    role_vars = _elements_role_vars(a.profile_id)
+                    out = _draw.render_onto_image(layer, im, role_vars)
+                import io as _io
+
+                buf = _io.BytesIO()
+                out.convert("RGBA").save(buf, format="PNG")
+                return Response(buf.getvalue(), mimetype="image/png")
+        except Exception as e:
+            return jsonify({"error": f"render_failed: {e}"}), 500
+
+    @app.route("/annotate/<asset_id>")
+    def annotate_page(asset_id: str):
+        """Standalone telestration canvas for one asset."""
+        if not _v8_ok:
+            return _recovery_page(
+                "Annotate unavailable",
+                "The media library isn't enabled on this deployment.",
+                eyebrow="Annotate",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library.",
+                eyebrow="Annotate",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation.",
+                eyebrow="Annotate",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+        from mediahub.web import elements_browser as _eb
+
+        body = _eb.render_annotate_body(
+            asset_url=url_for("api_media_library_file", asset_id=a.id),
+            save_url=url_for("api_annotate_asset", asset_id=a.id),
+            back_url=url_for("media_library_page"),
+            existing=getattr(a, "annotation", None) or {},
+        )
+        return _layout("Annotate", body, active="media")
+
+    @app.route("/api/media-library/<asset_id>/make-sticker", methods=["POST"])
+    def api_make_sticker(asset_id: str):
+        """Promote a cutout (or any library image) into an org-custom sticker."""
+        from flask import request as _req
+        from mediahub.elements import stickers as _stickers
+        from mediahub.media_library import photo_edit as _pe
+
+        a, _store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        if not a.profile_id:
+            return jsonify({"error": "no_profile"}), 400
+        body = _req.get_json(silent=True) or {}
+        name = str(body.get("name") or a.description_raw or "Club sticker").strip()
+        # Prefer the cut-out (transparent) image for a clean sticker; else edited/original.
+        from pathlib import Path as _Path
+
+        src = a.cutout_path if a.cutout_path and _Path(a.cutout_path).is_file() else None
+        src = src or str(_pe.effective_image_path(a))
+        element = _stickers.promote_image_to_sticker(
+            profile_id=a.profile_id, image_path=_Path(src), name=name
+        )
+        if element is None:
+            return jsonify({"error": "sticker_failed"}), 500
+        return jsonify({"ok": True, "element": {"id": element.id, "name": element.name}})
+
+    @app.route("/api/elements/generate", methods=["GET", "POST"])
+    def api_elements_generate():
+        """AI element generation — honest seam: unavailable until 1.2 ships."""
+        from flask import request as _req
+        from mediahub.elements import generate as _gen
+
+        if _req.method == "GET":
+            return jsonify(_gen.status().to_dict())
+        try:
+            _gen.generate_element(str((_req.get_json(silent=True) or {}).get("prompt") or ""))
+        except _gen.GenerativeElementsUnavailable as e:
+            return jsonify({"error": "generation_unavailable", "user_message": str(e)}), 501
+        return jsonify({"error": "unexpected"}), 500
 
     @app.route("/api/media-library/list.json")
     def api_media_library_list_json():

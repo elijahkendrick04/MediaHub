@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Corner tick frame">
+  <g fill="none" stroke="__ACCENT__" stroke-width="3" stroke-linecap="round">
+    <path d="M6 22 V6 H22"/>
+    <path d="M78 6 H94 V22"/>
+    <path d="M94 78 V94 H78"/>
+    <path d="M22 94 H6 V78"/>
+  </g>
+</svg>

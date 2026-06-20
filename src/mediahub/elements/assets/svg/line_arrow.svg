@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 24" role="img" aria-label="Arrow accent">
+  <line x1="4" y1="12" x2="138" y2="12" stroke="__ACCENT__" stroke-width="5" stroke-linecap="round"/>
+  <path d="M132 4 L150 12 L132 20" fill="none" stroke="__ACCENT__" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
