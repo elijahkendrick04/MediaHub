@@ -16,6 +16,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `admin_compliance` | `GET` | `/admin/compliance` |
 | `admin_compliance_ack` | `POST` | `/admin/compliance/complaints/<complaint_id>/ack` |
 | `admin_compliance_incident` | `POST` | `/admin/compliance/incidents` |
+| `annotate_page` | `GET` | `/annotate/<asset_id>` |
 | `api_assistant_memory` | `GET,POST` | `/api/assistant/memory` |
 | `api_assistant_memory_delete` | `POST` | `/api/assistant/memory/<item_id>/delete` |
 | `api_assistant_transcribe` | `POST` | `/api/assistant/transcribe` |
@@ -39,10 +40,13 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_stub_pack_card_status` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/status` |
 | `api_stub_pack_regenerate` | `POST` | `/api/drafts/<pack_id>/regenerate` |
 | `api_elements` | `GET` | `/api/elements` |
+| `api_elements_generate` | `GET,POST` | `/api/elements/generate` |
 | `api_elements_gradients` | `GET` | `/api/elements/gradients` |
 | `api_event_preview_parse_entries` | `POST` | `/api/event-preview/parse-entries` |
 | `api_formats` | `GET` | `/api/formats` |
 | `api_media_library_upload` | `POST` | `/api/media-library` |
+| `api_annotate_asset` | `POST` | `/api/media-library/<asset_id>/annotate` |
+| `api_asset_annotated` | `GET` | `/api/media-library/<asset_id>/annotated` |
 | `api_media_library_delete` | `POST` | `/api/media-library/<asset_id>/delete` |
 | `api_photo_edit_apply` | `POST` | `/api/media-library/<asset_id>/edit/apply` |
 | `api_photo_edit_enhance` | `POST` | `/api/media-library/<asset_id>/edit/enhance` |
@@ -52,6 +56,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_imagine_asset_op` | `POST` | `/api/media-library/<asset_id>/imagine/<op>` |
 | `api_imagine_grab_text` | `POST` | `/api/media-library/<asset_id>/imagine/grab-text` |
 | `api_imagine_subject_lift` | `POST` | `/api/media-library/<asset_id>/imagine/subject-lift` |
+| `api_make_sticker` | `POST` | `/api/media-library/<asset_id>/make-sticker` |
 | `api_media_library_mockup` | `GET,POST` | `/api/media-library/<asset_id>/mockup/<template>` |
 | `api_photo_profile_picture` | `POST` | `/api/media-library/<asset_id>/profile-picture` |
 | `api_media_library_bulk_approve` | `POST` | `/api/media-library/bulk-approve` |

@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS media_assets (
     cutout_path TEXT,
     edit_recipe TEXT,
     media_meta TEXT,
+    annotation TEXT,
     source_url TEXT,
     source_attribution TEXT,
     source_licence TEXT,
@@ -82,11 +83,11 @@ _LIST_FIELDS = {
     "used_in",
     "tags",
 }
-_DICT_FIELDS = {"description_parsed", "edit_recipe", "media_meta"}
+_DICT_FIELDS = {"description_parsed", "edit_recipe", "media_meta", "annotation"}
 
 # Columns added after the original schema shipped — applied lazily to existing
 # DBs so an older data.db keeps loading (additive, never destructive).
-_ADDED_COLUMNS = (("edit_recipe", "TEXT"), ("media_meta", "TEXT"))
+_ADDED_COLUMNS = (("edit_recipe", "TEXT"), ("media_meta", "TEXT"), ("annotation", "TEXT"))
 
 
 class MediaLibraryStore:

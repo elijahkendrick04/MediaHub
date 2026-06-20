@@ -93,17 +93,6 @@ def get_element(element_id: str, profile_id: Optional[str] = None) -> Optional[E
     return None
 
 
-def svg_path_for(element: Element) -> Optional[Path]:
-    """Absolute path to an element's SVG file (bundled or org-custom)."""
-    if element.source == "org_custom":
-        # org svgs live next to their catalog; we cannot know profile_id from the
-        # element alone, so callers pass the resolved path. Fall back to scanning
-        # known org dirs is intentionally avoided — see load_svg().
-        return None
-    p = _BUNDLED_SVG_DIR / element.svg_file
-    return p if p.is_file() else None
-
-
 def load_svg(element: Element, profile_id: Optional[str] = None) -> Optional[str]:
     """Read an element's raw SVG text (before recolour). ``None`` if missing."""
     candidates: list[Path] = []
@@ -194,7 +183,6 @@ __all__ = [
     "load_catalog",
     "get_element",
     "load_svg",
-    "svg_path_for",
     "filter_elements",
     "list_kinds",
     "list_tags",

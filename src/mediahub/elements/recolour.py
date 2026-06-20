@@ -93,30 +93,6 @@ def recolour_svg(svg_text: str, role_vars: dict[str, str], *, uid: str = "el") -
     return out
 
 
-def best_text_role(bg_role: str, role_vars: dict[str, str]) -> str:
-    """Pick the legible ink role for text painted on ``bg_role``.
-
-    Honours the deterministic-engine boundary by reusing the APCA gate
-    (``quality.compliance.is_legible``): tries on-ground then on-surface then
-    a black/white fallback, returning the role var key of the winner. This lets
-    a text-carrying element stay legible even on an off-default background.
-    """
-    bg_hex = role_vars.get(bg_role) or _ROLE_FALLBACK.get(bg_role, "#0A2540")
-    candidates = ("--mh-on-primary", "--mh-on-surface")
-    try:
-        from mediahub.quality.compliance import is_legible
-
-        for cand in candidates:
-            ink = role_vars.get(cand) or _ROLE_FALLBACK[cand]
-            if is_legible(ink, bg_hex):
-                return cand
-        # neither role ink clears — fall back to the higher-contrast of B/W
-        white_ok = is_legible("#FFFFFF", bg_hex)
-        return "--mh-on-primary" if white_ok else "--mh-on-surface"
-    except Exception:
-        return "--mh-on-primary"
-
-
 def element_is_legible(element: Element, role_vars: dict[str, str]) -> bool:
     """For a text-carrying element, is its ink legible on its ground?
 
@@ -152,6 +128,5 @@ __all__ = [
     "recolour_svg",
     "role_vars_for_brief",
     "role_vars_from_palette",
-    "best_text_role",
     "element_is_legible",
 ]

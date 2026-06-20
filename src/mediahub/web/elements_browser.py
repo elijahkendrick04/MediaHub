@@ -348,4 +348,152 @@ def render_stock_body(*, search_url: str, import_url: str, sources: dict) -> str
 """
 
 
-__all__ = ["render_browser_body", "render_stock_body"]
+def render_annotate_body(*, asset_url: str, save_url: str, back_url: str, existing: dict) -> str:
+    """The telestration canvas page body (pointer-capture draw → save spec layer)."""
+    boot = {"assetUrl": asset_url, "saveUrl": save_url, "existing": existing or {}}
+    return f"""
+<div class="an-wrap">
+  <style>
+    .an-wrap {{ max-width:1000px; margin:0 auto; padding:8px 0 64px; }}
+    .an-wrap h1 {{ font-size:21px; margin:0 0 2px; }}
+    .an-sub {{ color:var(--ink-muted,#9aa3b2); font-size:13px; margin:0 0 14px; }}
+    .an-bar {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }}
+    .an-tool, .an-col {{ width:36px; height:36px; border-radius:9px; cursor:pointer; border:1px solid var(--line,#2a3140);
+      background:var(--panel,#141821); color:var(--ink,#e8ecf3); display:flex; align-items:center; justify-content:center; font-size:13px; }}
+    .an-tool.active {{ background:var(--accent,#FFB81C); color:#10131a; border-color:var(--accent,#FFB81C); font-weight:700; }}
+    .an-col {{ padding:0; }}
+    .an-col.active {{ outline:2px solid var(--ink,#e8ecf3); outline-offset:1px; }}
+    .an-sep {{ width:1px; height:26px; background:var(--line,#2a3140); margin:0 4px; }}
+    .an-stage {{ position:relative; display:inline-block; max-width:100%; border:1px solid var(--line,#2a3140); border-radius:12px; overflow:hidden; }}
+    .an-stage img {{ display:block; max-width:100%; height:auto; }}
+    .an-stage canvas {{ position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair; }}
+    .an-btn {{ padding:8px 16px; border-radius:9px; border:none; cursor:pointer; font-weight:700; font-size:13px; }}
+    .an-btn.primary {{ background:var(--accent,#FFB81C); color:#10131a; }}
+    .an-btn.ghost {{ background:transparent; color:var(--ink-dim,#9aa3b2); border:1px solid var(--line,#2a3140); }}
+    .an-range {{ width:90px; }}
+    .an-toast {{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--accent,#FFB81C);
+      color:#10131a; padding:10px 18px; border-radius:10px; font-weight:700; font-size:13px; opacity:0; transition:opacity .2s; z-index:50; }}
+    .an-toast.show {{ opacity:1; }}
+  </style>
+  <h1>Annotate</h1>
+  <p class="an-sub">Telestration for coaching — draw over the photo. Pick a tool, draw, save.
+    The original photo is never changed (the marks are a separate layer).
+    <a href="{_h(back_url)}">&larr; Library</a></p>
+
+  <div class="an-bar" id="an-bar">
+    <button type="button" class="an-tool active" data-kind="free" title="Pen">&#9998;</button>
+    <button type="button" class="an-tool" data-kind="line" title="Line">&#9135;</button>
+    <button type="button" class="an-tool" data-kind="arrow" title="Arrow">&#8594;</button>
+    <button type="button" class="an-tool" data-kind="rect" title="Rectangle">&#9633;</button>
+    <button type="button" class="an-tool" data-kind="ellipse" title="Ellipse">&#9711;</button>
+    <button type="button" class="an-tool" data-kind="auto" title="Shape assist (auto-snap)">&#10022;</button>
+    <span class="an-sep"></span>
+    <button type="button" class="an-col active" data-colour="--mh-accent" style="background:var(--accent,#FFB81C)" title="Brand accent"></button>
+    <button type="button" class="an-col" data-colour="#FF3B30" style="background:#FF3B30" title="Red"></button>
+    <button type="button" class="an-col" data-colour="#FFD60A" style="background:#FFD60A" title="Yellow"></button>
+    <button type="button" class="an-col" data-colour="#FFFFFF" style="background:#FFFFFF" title="White"></button>
+    <button type="button" class="an-col" data-colour="#0A0A0A" style="background:#0A0A0A" title="Black"></button>
+    <span class="an-sep"></span>
+    <input type="range" class="an-range" id="an-width" min="2" max="18" value="6" title="Line width">
+    <select class="an-tool" id="an-sym" style="width:auto;padding:0 8px" title="Symmetry">
+      <option value="none">No mirror</option>
+      <option value="vertical">Mirror ↔</option>
+      <option value="horizontal">Mirror ↕</option>
+      <option value="quad">Mirror ✛</option>
+    </select>
+  </div>
+
+  <div class="an-stage" id="an-stage">
+    <img id="an-img" src="{_h(asset_url)}" alt="" crossorigin="anonymous">
+    <canvas id="an-canvas"></canvas>
+  </div>
+  <div style="margin-top:14px;display:flex;gap:10px">
+    <button type="button" class="an-btn primary" id="an-save">Save annotation</button>
+    <button type="button" class="an-btn ghost" id="an-undo">Undo</button>
+    <button type="button" class="an-btn ghost" id="an-clear">Clear</button>
+  </div>
+  <div class="an-toast" id="an-toast"></div>
+</div>
+
+<script>
+(function() {{
+  var BOOT = {_script_json(boot)};
+  var img = document.getElementById('an-img');
+  var canvas = document.getElementById('an-canvas');
+  var ctx = canvas.getContext('2d');
+  var toastEl = document.getElementById('an-toast');
+  var kind = 'free', colour = '--mh-accent', width = 6, drawing = false;
+  var strokes = (BOOT.existing.strokes || []).slice();
+  var sym = BOOT.existing.symmetry || 'none';
+  var cur = null;
+
+  function toast(m){{ toastEl.textContent=m; toastEl.classList.add('show'); setTimeout(function(){{toastEl.classList.remove('show');}},1700); }}
+  function brandAccent(){{ return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#FFB81C'; }}
+  function rgb(c){{ return c === '--mh-accent' ? brandAccent() : c; }}
+
+  function fit(){{
+    canvas.width = img.clientWidth; canvas.height = img.clientHeight; redraw();
+  }}
+  function pt(ev){{
+    var r = canvas.getBoundingClientRect();
+    return [Math.min(1,Math.max(0,(ev.clientX-r.left)/r.width)), Math.min(1,Math.max(0,(ev.clientY-r.top)/r.height))];
+  }}
+
+  function drawStroke(s){{
+    var W=canvas.width, H=canvas.height, p=s.points.map(function(q){{return [q[0]*W,q[1]*H];}});
+    var lw = (s.width||6); if (lw < 1) lw = lw * Math.min(W,H);  // stored widths are short-edge fractions
+    ctx.strokeStyle = rgb(s.colour); ctx.fillStyle = rgb(s.colour);
+    ctx.lineWidth = lw; ctx.lineCap='round'; ctx.lineJoin='round';
+    if (!p.length) return;
+    if (s.kind==='rect' && p.length>=2) {{ ctx.strokeRect(Math.min(p[0][0],p[p.length-1][0]),Math.min(p[0][1],p[p.length-1][1]),Math.abs(p[p.length-1][0]-p[0][0]),Math.abs(p[p.length-1][1]-p[0][1])); return; }}
+    if (s.kind==='ellipse' && p.length>=2) {{ var a=p[0],b=p[p.length-1]; ctx.beginPath(); ctx.ellipse((a[0]+b[0])/2,(a[1]+b[1])/2,Math.abs(b[0]-a[0])/2,Math.abs(b[1]-a[1])/2,0,0,7); ctx.stroke(); return; }}
+    var pts = (s.kind==='line'||s.kind==='arrow') && p.length>=2 ? [p[0],p[p.length-1]] : p;
+    ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]); for(var i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]); ctx.stroke();
+    if (s.kind==='arrow' && pts.length>=2) {{
+      var a=pts[pts.length-2], b=pts[pts.length-1], ang=Math.atan2(b[1]-a[1],b[0]-a[0]), sz=Math.max(8,lw*2.5);
+      ctx.beginPath(); ctx.moveTo(b[0],b[1]); ctx.lineTo(b[0]+sz*Math.cos(ang+2.6),b[1]+sz*Math.sin(ang+2.6));
+      ctx.lineTo(b[0]+sz*Math.cos(ang-2.6),b[1]+sz*Math.sin(ang-2.6)); ctx.closePath(); ctx.fill();
+    }}
+  }}
+  function mirror(s){{
+    var out=[];
+    function mk(fn){{ return {{points:s.points.map(fn),kind:s.kind,colour:s.colour,width:s.width}}; }}
+    if(sym==='vertical'||sym==='quad') out.push(mk(function(q){{return [1-q[0],q[1]];}}));
+    if(sym==='horizontal'||sym==='quad') out.push(mk(function(q){{return [q[0],1-q[1]];}}));
+    if(sym==='quad') out.push(mk(function(q){{return [1-q[0],1-q[1]];}}));
+    return out;
+  }}
+  function redraw(){{
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    var all = strokes.concat(cur?[cur]:[]);
+    all.forEach(function(s){{ drawStroke(s); mirror(s).forEach(drawStroke); }});
+  }}
+
+  canvas.addEventListener('pointerdown', function(ev){{ canvas.setPointerCapture(ev.pointerId); drawing=true; cur={{points:[pt(ev)],kind:kind,colour:colour,width:width}}; redraw(); }});
+  canvas.addEventListener('pointermove', function(ev){{ if(!drawing) return; cur.points.push(pt(ev)); redraw(); }});
+  function end(){{ if(!drawing) return; drawing=false; if(cur && cur.points.length){{ strokes.push(cur); }} cur=null; redraw(); }}
+  canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+
+  document.getElementById('an-bar').addEventListener('click', function(ev){{
+    var t=ev.target.closest('.an-tool'); if(t && t.dataset.kind){{ kind=t.dataset.kind; document.querySelectorAll('.an-tool[data-kind]').forEach(function(x){{x.classList.remove('active');}}); t.classList.add('active'); return; }}
+    var c=ev.target.closest('.an-col'); if(c){{ colour=c.dataset.colour; document.querySelectorAll('.an-col').forEach(function(x){{x.classList.remove('active');}}); c.classList.add('active'); }}
+  }});
+  document.getElementById('an-width').addEventListener('input', function(e){{ width=parseInt(e.target.value,10)||6; }});
+  document.getElementById('an-sym').addEventListener('change', function(e){{ sym=e.target.value; redraw(); }});
+  document.getElementById('an-undo').addEventListener('click', function(){{ strokes.pop(); redraw(); }});
+  document.getElementById('an-clear').addEventListener('click', function(){{ strokes=[]; redraw(); }});
+  document.getElementById('an-save').addEventListener('click', function(){{
+    var shortEdge = Math.min(canvas.width,canvas.height) || 1;
+    var payload = {{symmetry:sym, strokes:strokes.map(function(s){{ var w=(s.width||6); return {{points:s.points,kind:s.kind,colour:s.colour,width:(w<1?w:w/shortEdge)}}; }})}};
+    fetch(BOOT.saveUrl, {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}})
+      .then(function(r){{return r.json();}}).then(function(j){{ toast(j.ok?'Saved':'Save failed'); }}).catch(function(){{ toast('Save failed'); }});
+  }});
+
+  if (img.complete) fit(); else img.addEventListener('load', fit);
+  window.addEventListener('resize', fit);
+}})();
+</script>
+"""
+
+
+__all__ = ["render_browser_body", "render_stock_body", "render_annotate_body"]

@@ -101,14 +101,6 @@ def test_role_vars_from_palette_honours_palette():
     assert rv["--mh-accent"].lower() == "#aabbcc"
 
 
-def test_best_text_role_picks_legible_ink():
-    # white ink on a dark ground is legible → on-primary
-    role = recolour.best_text_role("--mh-primary", _ROLE_VARS)
-    assert role in ("--mh-on-primary", "--mh-on-surface")
-    # the returned role's colour must be defined
-    assert _ROLE_VARS.get(role)
-
-
 def test_element_is_legible_passes_for_nontext():
     el = catalog.get_element("pictogram.freestyle")
     assert el.carries_text is False

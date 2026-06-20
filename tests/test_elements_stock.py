@@ -251,6 +251,13 @@ def app_env(tmp_path, monkeypatch):
 
     importlib.reload(cp)
     importlib.reload(wm)
+    # Point the media-library store singleton at tmp so the import lands there
+    # (its default DB is package-local) — keeps the repo's data.db untouched.
+    import mediahub.media_library.store as mls
+
+    mls._default_store = mls.MediaLibraryStore(
+        db_path=tmp_path / "data.db", uploads_dir=tmp_path / "uploads_v4" / "media_library"
+    )
     app = wm.create_app()
     app.config["TESTING"] = True
     return app, wm, tmp_path

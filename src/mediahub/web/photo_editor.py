@@ -105,6 +105,7 @@ def render_editor_body(
     back_url: str,
     studio_url: str = "",
     cutout_url: str = "",
+    annotate_url: str = "",
     width: int = 0,
     height: int = 0,
     brand_shadow: str = "#0b1020",
@@ -138,6 +139,8 @@ def render_editor_body(
         extra_links += f'<span class="sep">·</span><a href="{escape(studio_url)}">AI studio</a>'
     if cutout_url:
         extra_links += f'<span class="sep">·</span><a href="{escape(cutout_url)}">Cut-out</a>'
+    if annotate_url:
+        extra_links += f'<span class="sep">·</span><a href="{escape(annotate_url)}">Annotate</a>'
 
     hero = (
         '<section class="mh-hero" data-lane="" '

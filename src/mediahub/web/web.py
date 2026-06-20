@@ -38561,6 +38561,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             back_url=url_for("media_library_page"),
             studio_url=url_for("image_studio_page", asset_id=a.id) if _imagine_ok else "",
             cutout_url=url_for("media_library_cutout_page", asset_id=a.id),
+            annotate_url=url_for("annotate_page", asset_id=a.id),
             width=width,
             height=height,
             brand_shadow=brand_shadow,
@@ -39288,6 +39289,140 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             sources=_stock.available_sources(),
         )
         return _layout("Stock", body, active="media")
+
+    # ---------------------------------------------------------------- #
+    # Roadmap 1.10 build 4 — telestration draw layer + mascot stickers
+    #                        + flagged AI-generation seam.
+    # ---------------------------------------------------------------- #
+    @app.route("/api/media-library/<asset_id>/annotate", methods=["POST"])
+    def api_annotate_asset(asset_id: str):
+        """Store a telestration annotation layer on an asset (non-destructive)."""
+        from flask import request as _req
+        from mediahub.elements.draw import AnnotationLayer
+
+        a, store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        body = _req.get_json(silent=True) or {}
+        layer = AnnotationLayer.from_dict(body)
+        store.update_fields(a.id, {"annotation": layer.to_dict()})
+        return jsonify(
+            {
+                "ok": True,
+                "strokes": len(layer.strokes),
+                "annotated_url": url_for("api_asset_annotated", asset_id=a.id),
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/annotated")
+    def api_asset_annotated(asset_id: str):
+        """Serve the asset composited with its annotation overlay (PNG)."""
+        from flask import Response
+
+        from mediahub.elements import draw as _draw
+        from mediahub.media_library import photo_edit as _pe
+
+        a, _store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        layer = _draw.AnnotationLayer.from_dict(getattr(a, "annotation", None) or {})
+        try:
+            from PIL import Image
+
+            base_path = _pe.effective_image_path(a)
+            with Image.open(base_path) as im:
+                im.load()
+                if layer.is_empty():
+                    out = im.convert("RGBA")
+                else:
+                    role_vars = _elements_role_vars(a.profile_id)
+                    out = _draw.render_onto_image(layer, im, role_vars)
+                import io as _io
+
+                buf = _io.BytesIO()
+                out.convert("RGBA").save(buf, format="PNG")
+                return Response(buf.getvalue(), mimetype="image/png")
+        except Exception as e:
+            return jsonify({"error": f"render_failed: {e}"}), 500
+
+    @app.route("/annotate/<asset_id>")
+    def annotate_page(asset_id: str):
+        """Standalone telestration canvas for one asset."""
+        if not _v8_ok:
+            return _recovery_page(
+                "Annotate unavailable",
+                "The media library isn't enabled on this deployment.",
+                eyebrow="Annotate",
+                primary_cta=("Back to Create", url_for("make_page")),
+                code=503,
+            )
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return _recovery_page(
+                "Photo not found",
+                "That photo isn't in your library.",
+                eyebrow="Annotate",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=404,
+            )
+        if not _session_can_access_profile(a.profile_id):
+            return _recovery_page(
+                "Not your photo",
+                "This photo belongs to a different organisation.",
+                eyebrow="Annotate",
+                primary_cta=("Back to library", url_for("media_library_page")),
+                code=403,
+            )
+        from mediahub.web import elements_browser as _eb
+
+        body = _eb.render_annotate_body(
+            asset_url=url_for("api_media_library_file", asset_id=a.id),
+            save_url=url_for("api_annotate_asset", asset_id=a.id),
+            back_url=url_for("media_library_page"),
+            existing=getattr(a, "annotation", None) or {},
+        )
+        return _layout("Annotate", body, active="media")
+
+    @app.route("/api/media-library/<asset_id>/make-sticker", methods=["POST"])
+    def api_make_sticker(asset_id: str):
+        """Promote a cutout (or any library image) into an org-custom sticker."""
+        from flask import request as _req
+        from mediahub.elements import stickers as _stickers
+        from mediahub.media_library import photo_edit as _pe
+
+        a, _store, err = _photo_editor_asset(asset_id)
+        if err:
+            return err
+        if not a.profile_id:
+            return jsonify({"error": "no_profile"}), 400
+        body = _req.get_json(silent=True) or {}
+        name = str(body.get("name") or a.description_raw or "Club sticker").strip()
+        # Prefer the cut-out (transparent) image for a clean sticker; else edited/original.
+        from pathlib import Path as _Path
+
+        src = a.cutout_path if a.cutout_path and _Path(a.cutout_path).is_file() else None
+        src = src or str(_pe.effective_image_path(a))
+        element = _stickers.promote_image_to_sticker(
+            profile_id=a.profile_id, image_path=_Path(src), name=name
+        )
+        if element is None:
+            return jsonify({"error": "sticker_failed"}), 500
+        return jsonify({"ok": True, "element": {"id": element.id, "name": element.name}})
+
+    @app.route("/api/elements/generate", methods=["GET", "POST"])
+    def api_elements_generate():
+        """AI element generation — honest seam: unavailable until 1.2 ships."""
+        from flask import request as _req
+        from mediahub.elements import generate as _gen
+
+        if _req.method == "GET":
+            return jsonify(_gen.status().to_dict())
+        try:
+            _gen.generate_element(str((_req.get_json(silent=True) or {}).get("prompt") or ""))
+        except _gen.GenerativeElementsUnavailable as e:
+            return jsonify({"error": "generation_unavailable", "user_message": str(e)}), 501
+        return jsonify({"error": "unexpected"}), 500
 
     @app.route("/api/media-library/list.json")
     def api_media_library_list_json():

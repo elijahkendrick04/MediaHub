@@ -75,6 +75,9 @@ class MediaAsset:
     media_meta: dict = field(
         default_factory=dict
     )  # 1.6: video probe (duration_ms, fps, has_audio…)
+    annotation: dict = field(
+        default_factory=dict
+    )  # 1.10: telestration/annotate spec layer (elements.draw.AnnotationLayer)
     source_url: Optional[str] = None  # web-sourced (e.g. Wikimedia)
     source_attribution: Optional[str] = None
     source_licence: Optional[str] = None
@@ -94,14 +97,19 @@ class MediaAsset:
         for k, v in d.items():
             if k not in known:
                 continue
-            if k in ("description_parsed", "edit_recipe", "media_meta") and isinstance(v, str):
+            if k in (
+                "description_parsed",
+                "edit_recipe",
+                "media_meta",
+                "annotation",
+            ) and isinstance(v, str):
                 try:
                     v = json.loads(v) if v else {}
                 except Exception:
                     v = {}
             # A migrated-in NULL dict column → the empty-dict default
             # (keeps the field honouring its declared dict type).
-            if k in ("edit_recipe", "media_meta") and v is None:
+            if k in ("edit_recipe", "media_meta", "annotation") and v is None:
                 v = {}
             if k in (
                 "linked_athlete_ids",
