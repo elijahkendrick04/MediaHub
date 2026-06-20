@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 56" role="img" aria-label="Stat chip">
+  <rect x="2" y="4" width="116" height="48" rx="8" fill="__SURFACE__" stroke="__OUTLINE__" stroke-width="1.5"/>
+  <rect x="2" y="4" width="6" height="48" rx="3" fill="__ACCENT__"/>
+  <text x="18" y="26" font-family="Arial, sans-serif" font-weight="800" font-size="22" fill="__ON_SURFACE__">00.00</text>
+  <text x="18" y="44" font-family="Arial, sans-serif" font-weight="600" font-size="11" letter-spacing="2" fill="__ACCENT__">SEASON BEST</text>
+</svg>

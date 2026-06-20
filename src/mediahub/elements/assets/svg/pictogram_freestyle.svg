@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Freestyle swimmer">
+  <!-- water line -->
+  <path d="M4 64 Q18 58 32 64 T60 64 T88 64 T96 64" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <path d="M4 74 Q18 68 32 74 T60 74 T88 74 T96 74" fill="none" stroke="__OUTLINE__" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- body sweeping forward -->
+  <path d="M18 58 C30 50 46 48 64 50 C74 51 82 49 88 44"
+        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- head -->
+  <circle cx="70" cy="46" r="8" fill="__ACCENT__"/>
+  <!-- recovery arm arc -->
+  <path d="M44 52 C40 34 50 24 64 26" fill="none" stroke="__ACCENT__" stroke-width="7" stroke-linecap="round"/>
+  <!-- kick splash -->
+  <path d="M16 56 l-9 6 M18 62 l-10 3" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+</svg>

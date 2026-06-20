@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" role="img" aria-label="Water waves">
+  <path d="M2 16 Q17 6 32 16 T62 16 T92 16 T118 16" fill="none" stroke="__ACCENT__" stroke-width="5" stroke-linecap="round"/>
+  <path d="M2 32 Q17 22 32 32 T62 32 T92 32 T118 32" fill="none" stroke="__ON_GROUND__" stroke-width="4" stroke-linecap="round" opacity="0.75"/>
+  <path d="M2 48 Q17 38 32 48 T62 48 T92 48 T118 48" fill="none" stroke="__SECONDARY__" stroke-width="4" stroke-linecap="round" opacity="0.65"/>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 70" role="img" aria-label="Swim goggles">
+  <!-- strap -->
+  <path d="M22 35 C8 30 8 40 18 44" fill="none" stroke="__OUTLINE__" stroke-width="5" stroke-linecap="round"/>
+  <path d="M98 35 C112 30 112 40 102 44" fill="none" stroke="__OUTLINE__" stroke-width="5" stroke-linecap="round"/>
+  <!-- left lens -->
+  <ellipse cx="40" cy="38" rx="22" ry="18" fill="__SURFACE__" stroke="__ACCENT__" stroke-width="5"/>
+  <ellipse cx="34" cy="32" rx="7" ry="5" fill="__ON_SURFACE__" opacity="0.35"/>
+  <!-- right lens -->
+  <ellipse cx="80" cy="38" rx="22" ry="18" fill="__SURFACE__" stroke="__ACCENT__" stroke-width="5"/>
+  <ellipse cx="74" cy="32" rx="7" ry="5" fill="__ON_SURFACE__" opacity="0.35"/>
+  <!-- nose bridge -->
+  <path d="M60 44 q0 -8 -3 -10 M60 44 q0 -8 3 -10" fill="none" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+</svg>

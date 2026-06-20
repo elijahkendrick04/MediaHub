@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" role="img" aria-label="Pool lane rope">
+  <!-- central cord -->
+  <line x1="4" y1="20" x2="116" y2="20" stroke="__OUTLINE__" stroke-width="2"/>
+  <!-- alternating discs threaded on the rope -->
+  <g>
+    <circle cx="14" cy="20" r="9" fill="__ACCENT__"/>
+    <circle cx="32" cy="20" r="9" fill="__ON_GROUND__"/>
+    <circle cx="50" cy="20" r="9" fill="__ACCENT__"/>
+    <circle cx="68" cy="20" r="9" fill="__ON_GROUND__"/>
+    <circle cx="86" cy="20" r="9" fill="__ACCENT__"/>
+    <circle cx="104" cy="20" r="9" fill="__ON_GROUND__"/>
+  </g>
+  <!-- fluted discs: a thin ring suggests the floats -->
+  <g fill="none" stroke="__GROUND__" stroke-width="1.4" opacity="0.5">
+    <circle cx="14" cy="20" r="5"/><circle cx="32" cy="20" r="5"/>
+    <circle cx="50" cy="20" r="5"/><circle cx="68" cy="20" r="5"/>
+    <circle cx="86" cy="20" r="5"/><circle cx="104" cy="20" r="5"/>
+  </g>
+</svg>

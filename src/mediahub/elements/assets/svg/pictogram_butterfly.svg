@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Butterfly swimmer">
+  <path d="M4 66 Q18 60 32 66 T60 66 T88 66 T96 66" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <!-- arched body diving down then forward -->
+  <path d="M20 70 C30 54 44 50 56 56 C66 61 74 58 82 48"
+        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- head down -->
+  <circle cx="58" cy="58" r="7.5" fill="__ACCENT__"/>
+  <!-- both arms swept wide overhead (the butterfly recovery) -->
+  <path d="M44 60 C30 40 30 30 44 26" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M44 60 C56 42 60 34 74 32" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M18 72 l-8 5 M22 76 l-9 3" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Breaststroke swimmer">
+  <path d="M4 64 Q18 58 32 64 T60 64 T88 64 T96 64" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <!-- body gliding forward, head up -->
+  <path d="M20 60 C34 54 50 54 66 56 C74 57 82 55 88 50"
+        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- head up out of the water -->
+  <circle cx="72" cy="50" r="8" fill="__ACCENT__"/>
+  <!-- arms sweeping out in the breaststroke pull -->
+  <path d="M52 58 C44 50 40 50 34 54" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M52 58 C48 66 44 68 38 68" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+</svg>
