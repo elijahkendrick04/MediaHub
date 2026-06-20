@@ -360,6 +360,30 @@ def _fetch_snapshot(
     return snap
 
 
+def _fetch_snapshots(
+    tirefs: dict[str, str], *, force_refresh: bool
+) -> dict[str, Optional[BridgedSnapshot]]:
+    """Fetch each ``{swimmer_key: tiref}`` PB page in parallel. Value is the
+    snapshot, or None when the page couldn't be fetched (e.g. HTTP 400 — the
+    tiref isn't valid)."""
+    out: dict[str, Optional[BridgedSnapshot]] = {}
+    if not tirefs:
+        return out
+    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
+        futures = {
+            pool.submit(_fetch_snapshot, key, tiref, force_refresh=force_refresh): key
+            for key, tiref in tirefs.items()
+        }
+        for fut in futures:
+            key = futures[fut]
+            try:
+                out[key] = fut.result()
+            except Exception as exc:  # never let one swimmer fail the run
+                log.info("swimmingresults: snapshot error for %s: %s", key, exc)
+                out[key] = None
+    return out
+
+
 def lookup_official_pbs(
     meet,
     our_swimmer_keys,
@@ -383,8 +407,10 @@ def lookup_official_pbs(
         if k in our:
             results_by_key.setdefault(k, []).append(r)
 
-    # 1. tiref fast path: swimmers whose file carries an ASA member id.
-    tirefs: dict[str, str] = {}
+    snapshots: dict[str, BridgedSnapshot] = {}
+
+    # 1. Fast path: swimmers whose file carries a member id → fetch directly.
+    asa_tirefs: dict[str, str] = {}
     need_roster: list[tuple[str, object, list]] = []
     for key in our:
         sw = swimmers_by_key.get(key)
@@ -392,12 +418,24 @@ def lookup_official_pbs(
             continue
         asa = (getattr(sw, "asa_id", "") or "").strip()
         if asa.isdigit():
-            tirefs[key] = asa
+            asa_tirefs[key] = asa
         else:
             need_roster.append((key, sw, results_by_key.get(key, [])))
 
-    # 2. roster resolution for the rest (needs the club code).
-    n_by_id = len(tirefs)
+    n_by_id = 0
+    for key, snap in _fetch_snapshots(asa_tirefs, force_refresh=force_refresh).items():
+        if snap is not None:
+            snapshots[key] = snap
+            n_by_id += 1
+        else:
+            # The file's number isn't this swimmer's swimmingresults.org tiref
+            # (HTTP 400 — common for Welsh/older/international registrations).
+            # Fall back to resolving them by name + time off the club roster.
+            sw = swimmers_by_key.get(key)
+            if sw is not None:
+                need_roster.append((key, sw, results_by_key.get(key, [])))
+
+    # 2. Roster resolution (no-id swimmers + those whose id was rejected).
     n_by_roster = 0
     club_code = resolve_club_code(club_name, force_refresh=force_refresh) if need_roster else None
     if need_roster and not club_code:
@@ -412,33 +450,15 @@ def lookup_official_pbs(
             force_refresh=force_refresh,
             budget=_budget(),
         )
-        n_by_roster = len(roster_tirefs)
-        tirefs.update(roster_tirefs)
-
-    if not tirefs:
-        return {}
-
-    # 3. fetch + parse each swimmer's official PB page, in parallel.
-    snapshots: dict[str, BridgedSnapshot] = {}
-    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
-        futures = {
-            pool.submit(_fetch_snapshot, key, tiref, force_refresh=force_refresh): key
-            for key, tiref in tirefs.items()
-        }
-        for fut in futures:
-            key = futures[fut]
-            try:
-                snap = fut.result()
-            except Exception as exc:  # never let one swimmer fail the run
-                log.info("swimmingresults: snapshot error for %s: %s", key, exc)
-                snap = None
+        for key, snap in _fetch_snapshots(roster_tirefs, force_refresh=force_refresh).items():
             if snap is not None:
                 snapshots[key] = snap
+                n_by_roster += 1
 
     with_pbs = sum(1 for s in snapshots.values() if s.pb_times)
     emit(
-        f"PB baseline: looked up {len(tirefs)} swimmer(s) on swimmingresults.org "
-        f"— {with_pbs} with official PBs "
-        f"({n_by_roster} matched by name+club+age, {n_by_id} by member id)."
+        f"PB baseline: {with_pbs} of {len(our)} swimmer(s) matched on "
+        f"swimmingresults.org with official PBs "
+        f"({n_by_id} by member id, {n_by_roster} by name+club+age)."
     )
     return snapshots
