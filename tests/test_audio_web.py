@@ -82,12 +82,17 @@ def test_voices_route(app_env):
     assert any(v["local"] for v in body["voices"])
 
 
-def test_suggest_honest_errors_without_ai(app_env):
+def test_suggest_falls_back_to_deterministic_without_ai(app_env):
+    # No AI provider configured → the advisory endpoint must still succeed (no
+    # 5xx on a bare GET — the API contract), returning the deterministic pick.
     app, _wm, _ = app_env
     with app.test_client() as c:
         resp = c.get("/api/audio/suggest?mood=triumphant")
-    assert resp.status_code == 503
-    assert resp.get_json()["error"] == "ai_unavailable"
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["method"] == "deterministic"
+    assert body["track"] is not None
 
 
 def test_settings_audio_section_renders(app_env):

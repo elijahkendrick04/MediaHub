@@ -23487,26 +23487,35 @@ Relay team broke club record"></textarea>
 
     @app.route("/api/audio/suggest")
     def api_audio_suggest():
-        """AI track suggestion for a mood/kind — the explainable AI surface (1.8).
+        """Suggest a track for a mood/kind — AI when available, else deterministic.
 
-        Honest-errors (503) when no AI provider is configured; the deterministic
-        library bed remains the default for renders.
+        Always 200 (never 5xx — a bare GET to this advisory endpoint must not
+        pollute uptime): returns the AI mood-matched pick when a provider is
+        configured, otherwise the deterministic library pick. ``method`` says
+        which path produced the suggestion ("ai" / "deterministic" / "none").
         """
         from flask import request as _req
 
         try:
             from mediahub.audio import load_library
-            from mediahub.audio.select import AudioSelectionUnavailable, select_track
+            from mediahub.audio.select import select_or_default
         except Exception as e:
-            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+            return jsonify({"ok": False, "available": False, "detail": str(e)})
         lib = load_library()
         mood = (_req.args.get("mood") or "").strip()
         kind = (_req.args.get("kind") or "music").strip()
-        try:
-            track = select_track(lib, arc=mood or "a club highlights reel", kind=kind)
-        except AudioSelectionUnavailable as e:
-            return jsonify({"error": "ai_unavailable", "message": str(e)}), 503
-        return jsonify({"ok": True, "track": track.to_dict()})
+        sel = select_or_default(
+            lib, content_key=(mood or "suggest"), kind=kind, mood_hint=(mood or None)
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "available": sel.track is not None,
+                "method": sel.method,
+                "arc": sel.arc,
+                "track": sel.track.to_dict() if sel.track else None,
+            }
+        )
 
     def _render_settings_audio_section(prof: Optional[ClubProfile]) -> str:
         """Audio engine settings — library, voices, lexicon, uploads, consent."""
