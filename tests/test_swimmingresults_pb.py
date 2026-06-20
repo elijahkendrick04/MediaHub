@@ -306,6 +306,47 @@ def test_plain_text_row_swimmer_gets_snapshot():
     assert snaps["s1"].pb_times["100FRLC"][0]["time_sec"] == pytest.approx(69.50)
 
 
+def test_unmatched_report_distinguishes_missing_surname_from_ambiguous():
+    """The unmatched report must give each gap a data-grounded reason from the
+    swept roster: a surname absent from the club's rankings (a genuine "not
+    ranked" miss) reads differently from a same-surname set that didn't resolve
+    (a disambiguation that fell through) — so the operator never has to guess."""
+    from mediahub.swimmingresults.lookup import _unmatched_report
+
+    roster = {
+        "1": {"name": "Holly Greenslade", "events": {}},
+        "2a": {"name": "Raffaelle Tincombe", "events": {}},
+        "2b": {"name": "Matilda Tincombe", "events": {}},
+    }
+    swimmers = {
+        "a": types.SimpleNamespace(first_name="Nobody", last_name="Nemo"),
+        "b": types.SimpleNamespace(first_name="Zzz", last_name="Tincombe"),
+    }
+    rep = dict(_unmatched_report({"a", "b"}, {}, swimmers, roster))
+    assert "no ranked swimmer with that surname" in rep["Nobody Nemo"]
+    assert "same-surname candidate" in rep["Zzz Tincombe"]  # two Tincombes on roster
+
+
+def test_lookup_logs_unmatched_swimmers_by_name():
+    """End-to-end: the resolution summary names the swimmers it could not match
+    (here the off-roster "Nobody Nemo"), so the exact gaps surface in the logs."""
+    from mediahub.swimmingresults import lookup_official_pbs
+
+    swimmers = {
+        "s1": _sw("s1", "Holly", "Greenslade", asa="1153374"),  # matches by id
+        "s3": _sw("s3", "Nobody", "Nemo", age=13),  # not on the roster
+    }
+    meet = types.SimpleNamespace(
+        swimmers=swimmers,
+        results=[_rr("s1"), _rr("s3")],
+        start_date="2023-03-01",
+        end_date=None,
+    )
+    lines: list[str] = []
+    lookup_official_pbs(meet, set(swimmers), "Torfaen Dolphins", step=lines.append)
+    assert any("unmatched" in ln.lower() and "Nobody Nemo" in ln for ln in lines)
+
+
 def test_lookup_skips_when_club_not_found():
     from mediahub.swimmingresults import lookup_official_pbs
 

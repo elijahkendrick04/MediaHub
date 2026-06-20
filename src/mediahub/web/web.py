@@ -1792,6 +1792,22 @@ _RUN_LOG_LIMIT = 200
 # the page spin forever. Generous on purpose — a single slow PB lookup
 # can chain a 45s + 60s LLM failover, so this must clear that worst case.
 _RUN_STALE_SECS = 180
+# The heartbeat is advanced two ways: on every progress line (below) AND by a
+# background ticker that runs for the lifetime of the worker thread (see
+# _heartbeat_ticker in the run worker). The ticker is what makes the heartbeat a
+# true *liveness* signal rather than a *progress-cadence* one: a single long,
+# progress-silent step — notably the heavy LLM interpretation of a large fresh
+# (uncached) PDF, which can run well past _RUN_STALE_SECS without emitting a line —
+# no longer trips the staleness check and falsely kills a run that is still
+# working. A genuinely dead run is still caught: if the worker is recycled or the
+# process dies, the ticker thread dies with it and the heartbeat goes stale as
+# before.
+_RUN_HEARTBEAT_TICK_SECS = 30.0
+# Safety cap on ticker-driven liveness: after this long the ticker stops
+# advancing the heartbeat, so a truly wedged thread (an infinite hang with no
+# per-call timeout) still goes stale ~_RUN_STALE_SECS later instead of spinning
+# forever. Comfortably above any legitimate big-meet run.
+_RUN_MAX_LIVENESS_SECS = 1800.0
 # Throttle for streaming the progress log to the DB from the worker's
 # progress callback. The in-memory entry updates on every line; the DB
 # (read by polls that land on the *other* gunicorn worker) only needs to
@@ -2524,6 +2540,39 @@ def _persist_run_progress(
         conn.close()
     except Exception:
         pass
+
+
+def _advance_run_heartbeat(run_id: str) -> bool:
+    """Advance a running run's liveness heartbeat (in-memory + DB) without
+    touching its progress log.
+
+    Called on a timer by the run worker's heartbeat ticker so a long,
+    progress-silent step — e.g. the heavy LLM interpretation of a large fresh
+    PDF, which can run past ``_RUN_STALE_SECS`` without emitting a progress
+    line — keeps the heartbeat fresh instead of being mistaken for a dead
+    worker. A no-op for a run that is missing or already terminal, so a
+    finished/evicted run is never resurrected and a genuinely dead worker
+    (whose ticker has stopped with it) still goes stale. Returns True if a
+    heartbeat was advanced.
+    """
+    with _active_lock:
+        entry = _active_runs.get(run_id)
+        if entry is None or entry.get("status") not in ("queued", "running"):
+            return False
+        entry["heartbeat"] = time.time()
+    # Mirror to the DB so polls that land on the *other* gunicorn worker (which
+    # read heartbeat_at, not the in-memory entry) also see the run is alive.
+    try:
+        conn = _db()
+        conn.execute(
+            "UPDATE runs SET heartbeat_at=? WHERE id=? AND status IN ('queued','running')",
+            (datetime.now(timezone.utc).isoformat(), run_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    return True
 
 
 def _init_db():
@@ -5475,6 +5524,29 @@ def _start_run(
                 if error is not None:
                     entry["error"] = error
 
+        # Liveness ticker: keep the heartbeat fresh for as long as THIS worker
+        # thread is alive, independent of how often the pipeline emits a progress
+        # line. Without it a long, progress-silent step — the heavy LLM
+        # interpretation of a large fresh PDF, which can run past
+        # _RUN_STALE_SECS without a single line — lets the heartbeat go stale and
+        # the run is falsely declared dead mid-interpretation. If the worker is
+        # recycled/killed this daemon thread dies with it, so a genuinely dead
+        # run still goes stale exactly as before.
+        _hb_stop = threading.Event()
+
+        def _heartbeat_ticker():
+            started = time.time()
+            while not _hb_stop.wait(_RUN_HEARTBEAT_TICK_SECS):
+                if time.time() - started > _RUN_MAX_LIVENESS_SECS:
+                    return  # safety cap: let a truly wedged run finally go stale
+                if not _advance_run_heartbeat(run_id):
+                    return  # run finished or was evicted — stop ticking
+
+        _hb_thread = threading.Thread(
+            target=_heartbeat_ticker, name=f"hb-{run_id[:8]}", daemon=True
+        )
+        _hb_thread.start()
+
         try:
             run = run_pipeline_v4(
                 file_bytes=file_bytes,
@@ -5544,6 +5616,11 @@ def _start_run(
                 )
             except Exception:
                 pass
+        finally:
+            # Stop the liveness ticker the moment the pipeline returns (success
+            # or error) so a finished run's heartbeat freezes and the entry can
+            # settle into its terminal status.
+            _hb_stop.set()
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
