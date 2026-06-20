@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `1f20aaeb3` · Merge pull request #908 from elijahkendrick04/claude/web-interaction-parity-pfutvv
+**Last updated:** 2026-06-20 · `5d7cabc1f` · 1.8 — Audio engine (music/SFX pools, rights ledger, voice layer, denoise/levelling) (#905)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
 - **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
 - **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
 - **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
@@ -1220,15 +1219,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `d3e70d051` | 1.8: /api/audio/suggest never 5xxes — deterministic fallback (fix API contract) |
+| 2026-06-20 | `da230663b` | 1.8: web surface, reel bed, generation slots + consent — audio engine done (build 2/2) |
 | 2026-06-19 | `a724e2fd2` | Add browser-automation MCP servers for full web interaction |
+| 2026-06-19 | `0c07e41f3` | 1.8: wire the voice layer into synthesis + refresh env inventory (build 2, wip) |
+| 2026-06-19 | `ef74524c1` | 1.8: apply ruff-format to the audio package (hygiene hook) |
+| 2026-06-19 | `1b678c0dd` | 1.8: audio engine core — library, rights, ops, clean, voice, AI selection (build 1/2) |
 | 2026-06-19 | `f8670eba4` | compliance(pb): disclose TinyFish as a DPA sub-processor |
 | 2026-06-19 | `666bf6cf5` | Logo chip: unify the chrome avatar — keyed, contrast-aware, any logo |
 | 2026-06-19 | `ca7d12262` | feat(pb): free TinyFish search backend for the cold-start PB bootstrap |
 | 2026-06-19 | `981f81ac3` | feat(pb): accumulating per-club PB history as the scalable PB baseline |
 | 2026-06-19 | `835f57b38` | fix(pb): never infer PBs from entry/seed times — keep PBs to verified baselines |
 | 2026-06-19 | `2e2e4c3e9` | Apply ruff-format (v0.8.4) to the _brand assignment |
-| 2026-06-19 | `6d1b7866e` | Backdrop: fall back to a soft brand-coloured wash when there's no paintable logo |
-| 2026-06-19 | `d68f8e2e9` | style(pb): apply ruff-format to discover.py |
-| 2026-06-19 | `bd4e4bac8` | fix(pb): find PBs offline from the file's own entry times (was always 0) |
-| 2026-06-19 | `0d399f1af` | 1.7: bundle the local Piper voice into the deployed image (build 2/2) |
 <!-- /ROADMAP:ACTIVITY -->
