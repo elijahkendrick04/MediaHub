@@ -16,6 +16,13 @@ halves:
   MediaHub checks it's a real, safe font, shrinks it, and hosts it itself, so the
   club's cards and reels can use the club's actual font.
 
+It also carries the **deterministic rich-text formatting model**
+([`formatting.py`](formatting.py)) — the character/paragraph controls (colour,
+alignment, weight, lists, links, decimal sizes, line height, gradient fills) and
+editor utilities (uppercase, find & replace, copy-style, auto-link, an honest
+spellcheck seam) as pure, XSS-safe functions. The browsable surface for all of
+this is **Settings → Typography & fonts** in the web app.
+
 Every face — built-in or uploaded — is self-hosted `.woff2`. **Never the Google
 Fonts CDN** (a reliability + EU/UK GDPR rule the whole product follows).
 

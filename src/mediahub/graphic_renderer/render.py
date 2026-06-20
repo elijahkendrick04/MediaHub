@@ -1648,6 +1648,21 @@ def _common_replacements(
         )
     base_css = shared_css + "\n" + base_css + "\n" + text_led_css
 
+    # 1.9 — inline this org's UPLOADED custom fonts (typography.font_intake) as
+    # self-hosted file:// @font-face, so a club's own brand typeface renders on
+    # its cards. Byte-identical when the org has no uploads (empty CSS), and never
+    # the Google Fonts CDN. Best-effort: a lookup failure can't break a render.
+    try:
+        _pid = getattr(brief, "profile_id", "") or ""
+        if _pid:
+            from mediahub.typography import font_intake as _fi
+
+            _custom = _fi.font_face_css(_fi.list_fonts(_pid), file_uri=True)
+            if _custom:
+                base_css = base_css + "\n/* --- org custom fonts (1.9) --- */\n" + _custom
+    except Exception:
+        pass
+
     layers = brief.text_layers or {}
     full_name = layers.get("athlete_full_name") or ""
     first = layers.get("athlete_first_name") or ""

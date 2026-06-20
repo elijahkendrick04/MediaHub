@@ -23123,6 +23123,7 @@ Relay team broke club record"></textarea>
         "account": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
         "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         "dev": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        "typography": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
     }
 
     def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
@@ -23146,6 +23147,13 @@ Relay team broke club record"></textarea>
                 "picks the right one per moment.",
                 "templates",
                 url_for("template_gallery"),
+            ),
+            (
+                "Typography & fonts",
+                "Browse the font catalogue, get an AI pairing, and upload your "
+                "club's own brand typeface.",
+                "typography",
+                url_for("settings_section", section="typography"),
             ),
             (
                 "Audio & voiceover",
@@ -23281,6 +23289,7 @@ Relay team broke club record"></textarea>
             ),
             "autonomy": ("Autonomy", lambda prof: _render_settings_autonomy_section(prof)),
             "clubdata": ("Club data", lambda prof: _render_settings_clubdata_section()),
+            "typography": ("Typography & fonts", lambda prof: _render_settings_typography_section(prof)),
             "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
             "account": ("Account", lambda prof: _render_settings_account_section()),
             "status": ("System status", lambda prof: _render_settings_status_public_section()),
@@ -23306,6 +23315,222 @@ Relay team broke club record"></textarea>
             "</section>" + back + render(prof)
         )
         return _layout(f"{title} · Settings", body, active="settings")
+
+    # ------------------------------------------------------------------
+    # Typography & fonts (roadmap 1.9) — catalogue browse, AI pairing, and the
+    # club custom-font upload (wired to typography.font_intake). Org-scoped to
+    # the ACTIVE profile (no caller-supplied profile_id ⇒ no IDOR).
+    # ------------------------------------------------------------------
+    _TYPOGRAPHY_STATUS = {
+        "font-added": (True, "Custom font added — it's now available on this club's cards."),
+        "font-removed": (True, "Custom font removed."),
+        "no-file": (False, "No font file was selected."),
+        "no-attest": (False, "Tick the licence box to confirm you're allowed to embed this font."),
+        "bad-font": (False, "That file isn't a usable font, or its licence forbids embedding."),
+        "no-tooling": (False, "Font processing isn't available on this deployment right now."),
+    }
+
+    def _typography_banner(status: str) -> str:
+        spec = _TYPOGRAPHY_STATUS.get(status or "")
+        if not spec:
+            return ""
+        ok, text = spec
+        colour = "#2ecc71" if ok else "#e74c3c"
+        return (
+            f'<div class="card" style="border-left:3px solid {colour};margin-bottom:14px">'
+            f'<p style="margin:0">{_h(text)}</p></div>'
+        )
+
+    def _render_settings_typography_section(prof: Optional[ClubProfile]) -> str:
+        if prof is None:
+            return (
+                '<div class="card"><p>Select or create a club first to manage its '
+                "typography.</p></div>"
+            )
+        from mediahub.typography import catalog as _cat
+        from mediahub.typography import font_intake as _fi
+        from mediahub.graphic_renderer import text_effects as _fx
+
+        pid = prof.profile_id
+        banner = _typography_banner(request.args.get("status", ""))
+
+        # --- Font catalogue (self-hosted, browsable) ---
+        cards = ""
+        for f in _cat.load_catalog():
+            moods = ", ".join(f.mood_tags[:4])
+            cards += (
+                '<div class="card" style="padding:12px 14px">'
+                f'<div style="font-family:\'{_h(f.family)}\',sans-serif;font-size:21px;'
+                f'font-weight:700;line-height:1.1">{_h(f.family)}</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">'
+                f"{_h(f.klass)} · {_h(moods)}</div>"
+                f'<div style="font-size:11px;color:var(--ink-muted);margin-top:2px">'
+                f'{_h(f.licence)} · {_h(", ".join(f.surfaces))}</div>'
+                "</div>"
+            )
+        catalogue = (
+            '<div class="card"><h2 style="margin-top:0">Font catalogue</h2>'
+            '<p style="color:var(--ink-dim)">The self-hosted typefaces available across your '
+            "cards, reels and the app — never loaded from a third-party CDN.</p>"
+            '<div class="mh-template-grid" '
+            'style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">'
+            f"{cards}</div></div>"
+        )
+
+        # --- AI pairing ---
+        pairing = (
+            '<div class="card"><h2 style="margin-top:0">AI font pairing</h2>'
+            '<p style="color:var(--ink-dim)">Ask the engine to pick a headline / body / numeral '
+            "trio from the catalogue that fits your club.</p>"
+            f'<form method="post" action="{url_for("typography_pair")}" '
+            'style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+            '<input name="mood" placeholder="desired feel — bold, editorial, technical…" '
+            'style="flex:1;min-width:220px;padding:8px 10px" maxlength="60">'
+            '<button class="btn" type="submit">Suggest a pairing</button></form>'
+            '<p style="font-size:12px;color:var(--ink-muted);margin-bottom:0">Uses your '
+            "configured AI provider; shows an honest message if none is set.</p></div>"
+        )
+
+        # --- Club's own uploaded fonts ---
+        try:
+            records = _fi.list_fonts(pid)
+        except Exception:
+            records = []
+        if records:
+            rows = ""
+            for r in records:
+                rows += (
+                    '<div class="card" style="display:flex;justify-content:space-between;'
+                    'align-items:center;gap:12px;padding:10px 14px">'
+                    f"<div><strong>{_h(r.family)}</strong> "
+                    f'<span style="font-size:12px;color:var(--ink-dim)">{_h(r.role)} · '
+                    f"{r.weight} · {r.woff2_size // 1024} KB</span></div>"
+                    f'<form method="post" action="'
+                    f'{url_for("typography_remove_font", slug=r.slug)}" '
+                    "onsubmit=\"return confirm('Remove this font?')\">"
+                    '<button class="btn ghost" type="submit">Remove</button></form></div>'
+                )
+            owned = rows
+        else:
+            owned = (
+                '<p style="color:var(--ink-dim)">No custom fonts yet — upload your club\'s '
+                "brand typeface below.</p>"
+            )
+        role_opts = "".join(f'<option value="{_h(r)}">{_h(r)}</option>' for r in _fi.ALLOWED_ROLES)
+        upload = (
+            '<div class="card"><h2 style="margin-top:0">Your club fonts</h2>' + owned
+            + '<hr style="margin:14px 0;border:none;border-top:1px solid var(--line,#2a2a2a)">'
+            f'<form method="post" action="{url_for("typography_upload_font")}" '
+            'enctype="multipart/form-data">'
+            '<input type="file" name="font_file" accept=".ttf,.otf,.woff,.woff2" required '
+            'style="display:block;margin-bottom:10px">'
+            '<label style="display:inline-block;margin-bottom:10px;font-size:13px">Role '
+            f'<select name="role" style="margin-left:6px">{role_opts}</select></label>'
+            '<label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;'
+            'font-size:13px;max-width:560px"><input type="checkbox" name="attest" value="1" '
+            "required><span>I confirm this club is licensed to embed this font — it owns the "
+            "licence, or the font is open-licensed (e.g. OFL). MediaHub self-hosts it for this "
+            "club only.</span></label>"
+            '<button class="btn" type="submit">Upload font</button></form></div>'
+        )
+
+        # --- Text-effect vocabulary (informational) ---
+        chips = "".join(
+            '<span style="display:inline-block;padding:4px 10px;margin:3px;border-radius:999px;'
+            'background:var(--panel,#1c1c1c);font-size:12px">'
+            f"{_h(_fx.EFFECT_LABELS.get(n, n))}</span>"
+            for n in _fx.TEXT_EFFECTS
+            if n != "none"
+        )
+        effects = (
+            '<div class="card"><h2 style="margin-top:0">Text effects</h2>'
+            '<p style="color:var(--ink-dim)">Per-text effects the engine can apply to headlines, '
+            "results and labels — each one legibility-checked automatically, and downgraded to a "
+            f"readable outline if it would hurt contrast.</p><div>{chips}</div></div>"
+        )
+
+        return banner + catalogue + pairing + upload + effects
+
+    @app.route("/settings/typography/font/upload", methods=["POST"])
+    def typography_upload_font():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("settings_page"))
+        from mediahub.typography import font_intake as _fi
+
+        f = request.files.get("font_file")
+        if not f or not f.filename:
+            return redirect(url_for("settings_section", section="typography", status="no-file"))
+        if not request.form.get("attest"):
+            return redirect(url_for("settings_section", section="typography", status="no-attest"))
+        role = (request.form.get("role") or "display").strip()
+        if role not in _fi.ALLOWED_ROLES:
+            role = "display"
+        try:
+            data = f.read() or b""
+        except Exception:
+            data = b""
+        if not data:
+            return redirect(url_for("settings_section", section="typography", status="no-file"))
+        try:
+            _fi.intake_font(data, profile_id=prof.profile_id, role=role)
+        except _fi.FontToolingUnavailable:
+            return redirect(url_for("settings_section", section="typography", status="no-tooling"))
+        except Exception as e:  # validation / embedding / parse — honest, not fatal
+            log.info("typography font upload rejected: %s", str(e)[:200])
+            return redirect(url_for("settings_section", section="typography", status="bad-font"))
+        return redirect(url_for("settings_section", section="typography", status="font-added"))
+
+    @app.route("/settings/typography/font/<slug>/remove", methods=["POST"])
+    def typography_remove_font(slug):
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("settings_page"))
+        from mediahub.typography import font_intake as _fi
+
+        try:
+            _fi.remove_font(prof.profile_id, slug)
+        except Exception:
+            pass
+        return redirect(url_for("settings_section", section="typography", status="font-removed"))
+
+    @app.route("/settings/typography/pair", methods=["POST"])
+    def typography_pair():
+        prof = _active_profile()
+        name = prof.display_name if prof else ""
+        mood = (request.form.get("mood") or "").strip()[:60]
+        back = url_for("settings_section", section="typography")
+        from mediahub.brand import design_tokens as _dt
+        from mediahub.brand.type_pairing import PairingContext
+
+        try:
+            result = _dt.ai_type_pairing(PairingContext(club_name=name, mood=mood))
+        except Exception as e:
+            body = (
+                '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
+                '<h1 style="margin-bottom:0">AI pairing</h1></section>'
+                '<div class="card"><p style="color:#e74c3c">AI pairing is unavailable: '
+                f"{_h(str(e)[:200])}</p>"
+                f'<a class="btn" href="{back}">Back to typography</a></div>'
+            )
+            return _layout("Typography · pairing", body, active="settings")
+        corrected = (
+            '<p style="font-size:12px;color:var(--ink-muted)">(adjusted to the nearest '
+            "catalogue faces)</p>"
+            if result.get("corrected")
+            else ""
+        )
+        body = (
+            '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
+            '<h1 style="margin-bottom:0">Suggested pairing</h1></section>'
+            '<div class="card"><p style="font-size:15px">'
+            f'<strong>Headline:</strong> {_h(result["headline_family"])}<br>'
+            f'<strong>Body:</strong> {_h(result["body_family"])}<br>'
+            f'<strong>Numerals:</strong> {_h(result["numeral_family"])}</p>'
+            f'<p style="color:var(--ink-dim)">{_h(result["reason"])}</p>{corrected}'
+            f'<a class="btn" href="{back}">Back to typography</a></div>'
+        )
+        return _layout("Typography · pairing", body, active="settings")
 
     # ------------------------------------------------------------------
     # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
