@@ -115,3 +115,6 @@ src/mediahub/users.jsonl
 
 # Ephemeral Claude Code agent worktrees (harness-managed; auto-cleaned).
 .claude/worktrees/
+
+# Runtime logs (MCP server logs, per-run audit JSON) — never source-tracked.
+logs/
