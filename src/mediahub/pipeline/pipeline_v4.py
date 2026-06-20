@@ -339,41 +339,23 @@ def run_pipeline_v4(
         elif s.club_code and effective_filter and s.club_code == _slug_for_filter(effective_filter):
             our_v3_swims.append(s)
 
-    # 8. PB baseline.
+    # 8. PB baseline — authoritative online lookup, every run.
     #
-    # PRIMARY (free, deterministic, scalable): the club's OWN accumulating
-    # results history. "Is this a PB?" is a local lookup against the swimmer's
-    # real earlier swims — instant, network-free, and more accurate every
-    # upload, so returning swimmers never touch the web. This is the baseline
-    # that makes the PB finder work for a public, "anyone-anytime" product.
-    #
-    # SECONDARY (cold start only): live web discovery for swimmers we have NO
-    # local history for yet (e.g. a club's first upload), via the free search
-    # backends — never overrides the real-history baseline.
+    # "Is this a PB?" is answered against the swimmer's COMPLETE official record
+    # on swimmingresults.org, looked up fresh each run. It is deterministic
+    # (resolve member id → fetch personal-best page → parse → compare; no LLM),
+    # so unlike the secondary discovery below it needs no provider and runs
+    # whenever PB enrichment is permitted. A swimmer it can't resolve gets NO
+    # baseline (an honest miss) — never a guessed one, which is what a partial
+    # MediaHub-only record would have produced. The generic web discovery
+    # remains a SECONDARY gap-filler for swimmers swimmingresults.org (British
+    # Swimming) doesn't list (e.g. non-GB / unranked).
     pb_snapshots: dict = {}
-    _pb_tenant = ""
-    if profile is not None and getattr(profile, "profile_id", None):
-        _pb_tenant = str(profile.profile_id)
-    elif effective_filter:
-        _pb_tenant = _slug_for_filter(effective_filter)
 
-    if our_results and _pb_tenant:
-        try:
-            from mediahub.pb_history import load_history_snapshots
-
-            _hist_snaps = load_history_snapshots(meet, our_keys, tenant_id=_pb_tenant)
-            if _hist_snaps:
-                pb_snapshots.update(_hist_snaps)
-                step(
-                    f"PB baseline: matched {len(_hist_snaps)} swimmer(s) against your "
-                    f"club's own results history (no lookup needed)."
-                )
-        except Exception as e:
-            step(f"PB history baseline unavailable: {e}")
-
-    # If no LLM provider is configured, skip live web discovery (it would spend
-    # 30–60 seconds on external HTTP the heuristic path can't use). The local
-    # history baseline above is unaffected — it needs no provider.
+    # If no LLM provider is configured, skip the SECONDARY web discovery (it
+    # would spend 30–60 seconds on external HTTP the heuristic path can't use).
+    # The swimmingresults.org baseline (8a below) is unaffected — it needs no
+    # provider.
     try:
         from mediahub.media_ai.llm import active_provider as _active_provider
 
@@ -393,9 +375,29 @@ def run_pipeline_v4(
         )
         fetch_pbs = False
 
+    # 8a. PRIMARY baseline: official PBs from swimmingresults.org, every run.
+    # Deterministic and provider-free, so it runs regardless of LLM config.
+    if fetch_pbs and our_results and effective_filter:
+        try:
+            from mediahub.swimmingresults import lookup_official_pbs
+
+            _sr_snaps = lookup_official_pbs(
+                meet,
+                our_keys,
+                club_name=effective_filter,
+                force_refresh=not use_pb_cache,
+                step=step,
+            )
+            pb_snapshots.update(_sr_snaps)
+        except Exception as e:
+            step(f"swimmingresults.org PB lookup failed: {e}")
+            meet.add_warning("pb_enrichment_failed", str(e), severity="warn")
+
     if fetch_pbs and our_results and effective_filter and _skip_pb_discovery:
         step(
-            "Skipping PB web lookup: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable)."
+            "Skipping the secondary PB web lookup (gap-filler for swimmers not on "
+            "swimmingresults.org): no LLM provider configured (set GEMINI_API_KEY "
+            "or ANTHROPIC_API_KEY to enable)."
         )
     _pb_fetch_started_iso = ""
     _pb_fetch_start_wall = 0.0
@@ -404,9 +406,9 @@ def run_pipeline_v4(
     if fetch_pbs and our_results and effective_filter and not _skip_pb_discovery:
         import time as _time
 
-        # Cold start only: research the swimmers the history baseline did not
-        # already cover. At scale this set shrinks toward zero as the club's
-        # history fills in, so the slow web phase stops being the bottleneck.
+        # Gap-filler only: research the swimmers swimmingresults.org could not
+        # resolve (e.g. non-GB clubs, unranked swimmers). It never overrides the
+        # authoritative swimmingresults.org baseline already in pb_snapshots.
         _unknown_keys = {k for k in our_keys if k not in pb_snapshots}
         if _unknown_keys:
             _pb_fetch_started_iso = datetime.now(timezone.utc).isoformat()
@@ -423,13 +425,17 @@ def run_pipeline_v4(
                     # run + warm caches instead of silently replaying them.
                     force_refresh=not use_pb_cache,
                 )
-                # Web fills gaps only — never override the real-history baseline.
+                # Web fills gaps only — never override the swimmingresults.org baseline.
                 for _k, _v in _web_snaps.items():
                     pb_snapshots.setdefault(_k, _v)
             except Exception as e:
                 step(f"PB web lookup failed: {e}")
                 meet.add_warning("pb_enrichment_failed", str(e), severity="warn")
             _pb_fetch_end_wall = _time.time()
+
+    # Baseline coverage from whatever filled it (swimmingresults.org and/or the
+    # secondary discovery), so the metric is correct even with no LLM provider.
+    if fetch_pbs and our_results and effective_filter:
         run.pb_fetch_ok = sum(1 for s in pb_snapshots.values() if getattr(s, "fetch_ok", False))
         run.pb_fetch_failed = max(0, len(our_keys) - run.pb_fetch_ok)
 
@@ -527,20 +533,6 @@ def run_pipeline_v4(
         run.recognition_report = None
         run.recognition_error = f"{type(exc).__name__}: {exc}"
         step(f"v5 recognition failed: {exc}")
-
-    # 11b. Fold THIS meet's real results into the club's accumulating PB history
-    # so the next upload has a richer baseline. Runs AFTER detection; the
-    # baseline loaded in step 8 already excluded the current meet, so recording
-    # now never affects this run's PBs. Free, deterministic, tenant-scoped.
-    if our_results and _pb_tenant:
-        try:
-            from mediahub.pb_history import record_meet_results
-
-            _n_recorded = record_meet_results(meet, our_keys, tenant_id=_pb_tenant)
-            if _n_recorded:
-                step(f"Saved {_n_recorded} result(s) to your club's PB history for next time.")
-        except Exception as e:
-            step(f"PB history save skipped: {e}")
 
     # 12a. Per-swimmer PB audit, assembled AFTER recognition so it can map
     # the engine's real PB decisions. The V5 achievements are keyed by the

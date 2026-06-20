@@ -193,7 +193,6 @@ class AthleteErasureReport:
     pb_cache_files: int = 0
     research_cache_files: int = 0
     memory_rows: int = 0
-    pb_history_rows: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -206,7 +205,6 @@ class AthleteErasureReport:
             "pb_cache_files": self.pb_cache_files,
             "research_cache_files": self.research_cache_files,
             "memory_rows": self.memory_rows,
-            "pb_history_rows": self.pb_history_rows,
         }
 
 
@@ -361,13 +359,6 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
         report.memory_rows = memory_store.delete_matching(tenant_id=profile_id, needle=name)
     except Exception as exc:
         log.warning("erasure: memory sweep failed for %r: %s", name, exc)
-    # Accumulating PB history (the swimmer's own stored prior best times).
-    try:
-        from mediahub.pb_history import erase_subject
-
-        report.pb_history_rows = erase_subject(profile_id, name)
-    except Exception as exc:
-        log.warning("erasure: pb_history sweep failed for %r: %s", name, exc)
     return report
 
 

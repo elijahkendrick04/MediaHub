@@ -241,8 +241,19 @@ def _parse_d0(line: str) -> dict:
 
     age = _safe_int(line, 64, 2) or _safe_int(line, 56, 2)
 
+    # Governing-body member id (Swim England/Wales "tiref" / USS id) sits just
+    # after the 28-char name field (nominally col 40-51). Read it by the first
+    # 5-9 digit run after the name rather than a fixed column, so a ±1 Hy-Tek
+    # version shift can't drop it. This is the swimmer's direct PB-lookup key.
+    member_id = ""
+    if len(line) > 40:
+        mm = re.search(r"\d{5,9}", line[38:54])
+        if mm:
+            member_id = mm.group(0)
+
     return {
         "swimmer_name": swimmer_name,
+        "member_id": member_id,
         "sex": sex,
         "age": age,
         "distance": distance,
@@ -345,6 +356,8 @@ def parse_sdif(data: bytes) -> InterpretedMeet:
                 confidence=round(swim_conf, 3),
                 raw_row=raw[:120],
                 field_confidence=field_conf,
+                asa_id=d0.get("member_id") or None,
+                age=d0.get("age"),
             )
             ev.swims.append(swim)
 

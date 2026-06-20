@@ -18,7 +18,7 @@ generated captions naming athletes, club-user account emails.
 | E1 | Results upload (HY3/SDIF/PDF/HTML/ZIP) | `POST /upload` → `web.py` (`upload_post`, ~line 9023); parsing in `interpreter/` | Names, age (AaD), sex category, club, events, times, splits, placements — for **every athlete in the file, including other clubs' athletes** |
 | E2 | Results from a link | `results_fetch/` 3-tier crawl → same pipeline | Same as E1 |
 | E3 | Media upload | media library routes → `media_library/store.py` | Photos of athletes (children), `linked_athlete_names`, uploader identity |
-| E4 | PB enrichment (collection from a third party, **not** the data subject) | `pb_discovery.fetch_profile` → swimmingresults.org | Athlete name + club sent as search query; PB history (event, course, time, date) received |
+| E4 | PB enrichment (collection from a third party, **not** the data subject) | PRIMARY: `swimmingresults/lookup.py` → swimmingresults.org (name+club+age → member id → personal-best page); SECONDARY gap-filler: `pb_discovery.fetch_profile` (generic web search) | Athlete name + club + age sent as rankings query; PB history (event, course, time, date) received |
 | E5 | Club profile setup | `/organisation*` routes → `web/club_profile.py` | Roster ASA IDs, "important swimmers" list, club branding |
 | E6 | Account signup/login | `/signup`, `/login` → `web/auth.py` | Club-user email + password (bcrypt-hashed) |
 

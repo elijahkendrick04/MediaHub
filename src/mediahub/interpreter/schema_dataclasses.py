@@ -74,6 +74,11 @@ class InterpretedSwim:
     confidence: float  # 0..1 per swim
     raw_row: str
     field_confidence: dict[str, float] = field(default_factory=dict)
+    # Governing-body member id (Swim England/Wales "tiref", USS id) when the
+    # source format carries it (HY3/CL2/LENEX). None for formats that don't
+    # (PDF/HTML/free text). Used to look a swimmer's official PBs up directly.
+    asa_id: Optional[str] = None
+    age: Optional[int] = None  # swimmer age at the meet, when stated in the file
 
 
 @dataclass
