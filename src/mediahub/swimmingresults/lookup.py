@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 from mediahub.pipeline.pb_bridge import BridgedSnapshot
 
-from .names import name_match, split_full_name
+from .names import fold, name_match, split_full_name
 from .parse import parse_personal_best
 from .roster import _load_event_numbers, roster_slice
 from .transport import SR_BASE, SRFetchError, fetch
@@ -223,16 +223,34 @@ def _resolve_tirefs(
 
 
 def _best_name_match(first: str, last: str, index: dict[str, str]) -> Optional[str]:
-    """Return the tiref whose roster name matches (first,last), if unambiguous."""
-    hits = []
+    """Return the tiref whose roster name matches (first,last), if unambiguous.
+
+    An EXACT (accent-folded) surname + leading-first-name match wins outright:
+    otherwise a real swimmer's exact entry could be refused just because a
+    *different* swimmer fuzzy-matched (e.g. "Sebastian Baker" vs "Sebastian
+    Walker"). Only when there's no exact match do we consider the fuzzy
+    (nickname/spelling-tolerant) candidates, and then only if unique.
+    """
+    ff = fold(first)
+    fl = fold(last)
+    f_lead = ff.split()[0] if ff else ""
+    exact: list[str] = []
+    fuzzy: list[str] = []
     for tiref, full in index.items():
         rf, rl = split_full_name(full)
-        if name_match(first, last, rf, rl):
-            hits.append(tiref)
-    # Unique match only — within one club+age pool a name should resolve to one
-    # person; if two roster entries match, refuse rather than risk the wrong id.
-    if len(set(hits)) == 1:
-        return hits[0]
+        rff = fold(rf)
+        r_lead = rff.split()[0] if rff else ""
+        if fl and f_lead and fold(rl) == fl and r_lead == f_lead:
+            exact.append(tiref)
+        elif name_match(first, last, rf, rl):
+            fuzzy.append(tiref)
+    if len(set(exact)) == 1:
+        return exact[0]
+    # Unique fuzzy match only when no exact candidate exists — within one
+    # club+age pool a name should resolve to one person; otherwise refuse
+    # rather than risk the wrong id.
+    if not exact and len(set(fuzzy)) == 1:
+        return fuzzy[0]
     return None
 
 
