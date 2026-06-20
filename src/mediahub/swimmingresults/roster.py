@@ -36,6 +36,24 @@ _TIREF_PAIR = re.compile(r"tiref=(\d+)[^>]*>\s*([^<]+?)\s*<", re.I)
 _ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
 # The swim time sits in the row's "splits" link (e.g. ...swimid=123>  58.16</a>).
 _SPLIT_TIME = re.compile(r"swimid=\d+[^>]*>\s*([0-9:]+\.[0-9]{2})", re.I)
+_ROW_DATE = re.compile(r"\b(\d{2}/\d{2}/\d{2,4})\b")
+# The meet where the time was set — an external results link in the row.
+_MEET_LINK = re.compile(r'class=["\']external["\'][^>]*>\s*([^<]+?)\s*<', re.I)
+
+
+def _row_date_iso(s: str) -> str:
+    m = re.fullmatch(r"(\d{2})/(\d{2})/(\d{2,4})", (s or "").strip())
+    if not m:
+        return ""
+    d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    y = 2000 + y if y < 100 else y
+    try:
+        from datetime import date as _date
+
+        return _date(y, mo, d).isoformat()
+    except ValueError:
+        return ""
+
 
 _STROKE_LABEL = re.compile(
     r"(\d+)\s*m?\s*(freestyle|backstroke|breaststroke|butterfly|.*medley)", re.I
@@ -111,13 +129,16 @@ def roster_slice(
     course: str,
     *,
     force_refresh: bool = False,
-) -> dict[str, tuple[str, Optional[int]]]:
-    """``{tiref: (full_name, time_cs)}`` for one club/sex/age/event/course.
+) -> dict[str, tuple[str, Optional[int], str, str]]:
+    """``{tiref: (full_name, time_cs, date_iso, meet)}`` for one
+    club/sex/age/event/course.
 
-    ``time_cs`` is the swimmer's ranked time for THIS event (centiseconds, or
-    None) — used to disambiguate same-surname siblings by performance instead of
-    a hand-maintained first-name nickname list. Cached per slice. A fetch failure
-    returns ``{}`` (a miss — the caller asserts no PB rather than guess).
+    The all-time ranking row carries the swimmer's best time for this event, the
+    date, and the meet — i.e. a personal best with provenance. This is the ONLY
+    place a swimmer who has since left the sport (lapsed membership → no
+    ``personal_best.php`` page) still appears, so reading PBs from here covers
+    them too. Also used to tell same-surname siblings apart by performance.
+    Cached per slice. A fetch failure returns ``{}`` (a miss, not a guess).
     """
     sex = _sex_param(gender)
     pool = _POOL.get((course or "").upper())
@@ -142,7 +163,7 @@ def roster_slice(
         log.info("swimmingresults: roster slice failed (%s age %s): %s", club_code, age, exc)
         return {}
 
-    out: dict[str, tuple[str, Optional[int]]] = {}
+    out: dict[str, tuple[str, Optional[int], str, str]] = {}
     for row in _ROW.findall(body):
         nm = _TIREF_PAIR.search(row)
         if not nm:
@@ -152,7 +173,17 @@ def roster_slice(
         if not name or name.isdigit() or len(name) < 3:
             continue
         tm = _SPLIT_TIME.search(row)
-        out.setdefault(tiref, (name, time_to_cs(tm.group(1)) if tm else None))
+        dm = _ROW_DATE.search(row)
+        mm = _MEET_LINK.search(row)
+        out.setdefault(
+            tiref,
+            (
+                name,
+                time_to_cs(tm.group(1)) if tm else None,
+                _row_date_iso(dm.group(1)) if dm else "",
+                mm.group(1).strip() if mm else "",
+            ),
+        )
     with _LOCK:
         _SLICE_CACHE[key] = dict(out)
     return out

@@ -179,9 +179,10 @@ def test_roster_slice_reads_name_and_time():
 
     assert event_number(100, "FR") == "2"
     sl = roster_slice("TDOYEWAY", "F", 13, 100, "FR", "LC")
-    name, time_cs = sl["1153374"]
+    name, time_cs, date_iso, meet = sl["1153374"]
     assert name == "Holly Greenslade"
     assert time_cs == 6613  # 1:06.13 parsed from the splits link
+    assert date_iso == "2024-01-01"  # 01/01/24 parsed from the row
     assert "1339695" in sl
 
 

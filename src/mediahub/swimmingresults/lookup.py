@@ -159,14 +159,23 @@ def _build_club_roster(
     if jobs:
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
             for event_key, sl in pool.map(_one, jobs):
-                for tiref, (name, time_cs) in sl.items():
-                    info = roster.setdefault(tiref, {"name": name, "times": {}})
+                for tiref, (name, time_cs, date_iso, meet) in sl.items():
+                    info = roster.setdefault(tiref, {"name": name, "events": {}})
                     if time_cs is not None:
-                        prev = info["times"].get(event_key)
-                        if prev is None or time_cs < prev:
-                            info["times"][event_key] = time_cs
+                        prev = info["events"].get(event_key)
+                        if prev is None or time_cs < prev["time_cs"]:
+                            info["events"][event_key] = {
+                                "time_cs": time_cs,
+                                "date_iso": date_iso,
+                                "meet": meet,
+                            }
     _ROSTER_CACHE[cache_key] = roster
     return roster, len(jobs)
+
+
+def _times_of(info: dict) -> dict[str, int]:
+    """``{event_key: time_cs}`` view of a roster entry's events."""
+    return {ek: e["time_cs"] for ek, e in info.get("events", {}).items() if e.get("time_cs")}
 
 
 def _resolve_tirefs(
@@ -176,13 +185,14 @@ def _resolve_tirefs(
     meet_year: Optional[int],
     force_refresh: bool,
     budget: int,
-) -> dict[str, str]:
-    """Resolve ``{swimmer_key: tiref}`` for swimmers without an ASA id.
+) -> "tuple[dict[str, str], dict[str, dict]]":
+    """Resolve swimmers to tirefs off the club's online roster.
 
-    Builds the club's COMPLETE online roster per sex (all events across the age
-    range), then name-matches each swimmer within it. The comprehensive sweep is
-    what finds the ~90%+ of swimmers who are on the rankings; a narrow event/age
-    probe missed too many.
+    Returns ``({swimmer_key: tiref}, {tiref: roster_entry})`` — the second map
+    lets the caller build a PB snapshot straight from the all-time rankings (the
+    only place a swimmer with a lapsed membership still has times). Builds the
+    club's COMPLETE roster per sex (all events across the age range), then
+    name+time-matches each swimmer within it.
     """
     # Per-swimmer candidate sexes. The rankings query needs F or M; when the file
     # doesn't give a usable gender ("X"/blank — common when a PDF's event headers
@@ -220,6 +230,10 @@ def _resolve_tirefs(
         )
         fetches += used
 
+    merged: dict[str, dict] = {}
+    for s in ("F", "M"):
+        merged.update(rosters.get(s, {}))
+
     resolved: dict[str, str] = {}
     for key, first, last, sexes, meet_times in members:
         pool: dict[str, dict] = {}
@@ -228,7 +242,7 @@ def _resolve_tirefs(
         hit = _match_one(first, last, meet_times, pool)
         if hit:
             resolved[key] = hit
-    return resolved
+    return resolved, merged
 
 
 def _meet_times(results) -> dict[str, int]:
@@ -264,7 +278,7 @@ def _closest_by_time(
     any first-name nickname rule."""
     scored: list[tuple[float, str]] = []
     for t in cands:
-        ct = roster[t]["times"]
+        ct = _times_of(roster[t])
         gaps = [abs(mt - ct[ek]) / ct[ek] for ek, mt in meet_times.items() if ct.get(ek) and mt]
         if gaps:
             scored.append((min(gaps), t))
@@ -308,7 +322,7 @@ def _match_one(
     surname_cands = [
         t for t, info in roster.items() if surname_match(last, split_full_name(info["name"])[1])
     ]
-    plausible = [t for t in surname_cands if _time_plausible(meet_times, roster[t]["times"])]
+    plausible = [t for t in surname_cands if _time_plausible(meet_times, _times_of(roster[t]))]
     pool = plausible or surname_cands
     if len(set(pool)) == 1:
         return pool[0]
@@ -355,6 +369,40 @@ def _fetch_snapshot(
                 "source_url": url,
                 "retrieved_at": now,
                 "meet": e.meet,
+            }
+        )
+    return snap
+
+
+def _snapshot_from_roster(swimmer_key: str, tiref: str, entry: dict) -> BridgedSnapshot:
+    """Build a PB snapshot from the all-time rankings rows we already swept.
+
+    This is the path that covers swimmers who have left the sport: their
+    membership lapses and ``personal_best.php`` 404/400s, but their times remain
+    in the event rankings. Less complete than the personal-best page (limited to
+    the swept age range), but real and provenance-tagged."""
+    now = datetime.now(timezone.utc).isoformat()
+    url = _PB_URL.format(tiref=tiref)
+    events = entry.get("events", {})
+    snap = BridgedSnapshot(
+        tiref=swimmer_key,
+        fetch_ok=True,
+        no_history=not events,
+        from_cache=False,
+        source_url=url,
+        retrieved_at=now,
+        source_domain=SOURCE_DOMAIN,
+    )
+    for ek, e in events.items():
+        if not e.get("time_cs"):
+            continue
+        snap.pb_times.setdefault(ek, []).append(
+            {
+                "time_sec": e["time_cs"] / 100.0,
+                "date_iso": e.get("date_iso", ""),
+                "source_url": url,
+                "retrieved_at": now,
+                "meet": e.get("meet", ""),
             }
         )
     return snap
@@ -443,15 +491,22 @@ def lookup_official_pbs(
             f"PB lookup: '{club_name}' isn't on swimmingresults.org — skipping online PBs for unmatched swimmers."
         )
     elif need_roster:
-        roster_tirefs = _resolve_tirefs(
+        roster_tirefs, roster_by_tiref = _resolve_tirefs(
             club_code,
             need_roster,
             meet_year=_meet_year(meet),
             force_refresh=force_refresh,
             budget=_budget(),
         )
-        for key, snap in _fetch_snapshots(roster_tirefs, force_refresh=force_refresh).items():
-            if snap is not None:
+        # Build PBs straight from the all-time rankings we already swept — no
+        # per-swimmer personal_best.php fetch (fewer requests) and it covers
+        # swimmers whose membership has lapsed (no personal-best page).
+        for key, tiref in roster_tirefs.items():
+            entry = roster_by_tiref.get(tiref)
+            if not entry:
+                continue
+            snap = _snapshot_from_roster(key, tiref, entry)
+            if snap.pb_times:
                 snapshots[key] = snap
                 n_by_roster += 1
 
