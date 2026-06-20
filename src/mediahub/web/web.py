@@ -26441,24 +26441,33 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # Per-content-type hero copy. Centralised once so every stub form
     # (and its returned cards page) shares the same masthead voice. Each
     # entry is (eyebrow, italic-emphasised tail of the headline).
+    # Each stub owns a DISTINCT lead line (not a shared "Describe it.") so the
+    # Create destinations don't read as the same page — Free Text legitimately
+    # keeps "Describe it." since describing-any-post is its whole function, and
+    # every other tile gets its own editorial opener. Shape: (eyebrow, lead,
+    # italic_tail, lede); the lead carries its own terminal punctuation.
     _STUB_HEROES = {
         "Event Preview": (
             "Event preview",
+            "Set the scene.",
             "preview it",
             "Give us the event name — add its website or meet pack and the AI works out what the event is. It can even read the entries and pick your ones to watch.",
         ),
         "Sponsor Post": (
             "Sponsor post",
+            "Name the partner.",
             "activate it",
             "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption.",
         ),
         "Session Update": (
             "Session update",
+            "Mid-session.",
             "live from poolside",
             "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing.",
         ),
         "Free Text (quick)": (
             "Free text — quick",
+            "Paste the moment.",
             "in your own words",
             "Paste a description of any moment. We identify the strongest social angles and draft platform-ready cards.",
         ),
@@ -26468,11 +26477,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         meta = _STUB_HEROES.get(title)
         if not meta:
             return f"<h1>{_h(title)}</h1>"
-        eyebrow, italic_tail, lede = meta
+        eyebrow, lead, italic_tail, lede = meta
         return (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
-            f'<h1>Describe it.<br><em class="editorial">{_h(italic_tail)}.</em></h1>'
+            f'<h1>{_h(lead)}<br><em class="editorial">{_h(italic_tail)}.</em></h1>'
             f'<p class="lede">{_h(lede)}</p>'
             "</section>"
         )
