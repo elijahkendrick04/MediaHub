@@ -530,6 +530,23 @@ no-synthetic-people rule.
 
 ## 1.8 — Audio engine (music, SFX, voiceover, cleanup, rights)
 
+**Status — shipped (2026-06-19).** The `audio/` package landed: `library.py`
+(bundled CC0 SFX/idents/beds + operator/legacy dirs, mood/energy/platform
+metadata), `select.py` (AI mood-match via `media_ai`, honest-error, over a
+deterministic floor), `ops.py` (trim/fade/gain/speed/extract/concat/mix/convert,
+deterministic FFmpeg), `clean.py` (denoise + EBU R128 levelling), `voice.py`
+(voice catalogue incl. Welsh + SSML-ish params + per-org pronunciation lexicon,
+wired into `visual/voiceover.synthesize` with cache-folding), `rights.py` (licence
+ledger + tiered fingerprint + duplicate check), plus `generate.py` (flagged
+music/SFX provider slots, honest-error) and `consent.py` (voice cloning/changer
+gate + audit, off by default). The reel engine gains an **opt-in** bundled bed
+(`MEDIAHUB_REEL_MUSIC_LIBRARY`, byte-parity off) and a Settings → **Audio &
+voiceover** surface (library preview, voices, lexicon, own-audio upload + rights,
+browser recorder, consent). Honest gaps remaining: chart-music rights and a
+connected generation backend stay flagged provider slots (the library is the
+default); voice cloning/changer ship the consent gate + audit, not a clone
+backend.
+
 **What Canva/Adobe have.** Stock + licensed music libraries (incl. popular
 chart tracks with regional/usage caveats; TikTok Commercial Music Library),
 SFX libraries, voiceover recording with noise cancellation, AI voiceover/TTS

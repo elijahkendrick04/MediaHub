@@ -179,6 +179,20 @@ def music_dir() -> Optional[Path]:
     return p if p.is_dir() else None
 
 
+def library_bed_enabled() -> bool:
+    """True when reels may use MediaHub's bundled licence-clean audio library
+    as the default music bed (roadmap 1.8, opt-in via
+    ``MEDIAHUB_REEL_MUSIC_LIBRARY``).
+
+    Off by default so an existing deployment's renders — and every cached MP4 —
+    stay byte-identical. When on, a reel with no operator-supplied music bed
+    (``MEDIAHUB_REEL_MUSIC_DIR``) gets a deterministically-picked bed from the
+    bundled CC0 pool, so reels have sound out of the box. The operator's own
+    licensed directory always takes precedence over the bundled pool.
+    """
+    return os.environ.get("MEDIAHUB_REEL_MUSIC_LIBRARY", "").strip().lower() in _TRUTHY
+
+
 def music_candidates() -> list[Path]:
     d = music_dir()
     if d is None:
@@ -238,10 +252,12 @@ def music_pool_summary() -> dict:
 
 def audio_active() -> bool:
     """True when any audio source could apply to a render right now."""
-    return voice_active() or bool(music_candidates())
+    return voice_active() or bool(music_candidates()) or library_bed_enabled()
 
 
-def build_audio_plan(*, script: str, content_key: str, mix_profile: Any = None) -> Optional[dict]:
+def build_audio_plan(
+    *, script: str, content_key: str, mix_profile: Any = None, library_track: Any = None
+) -> Optional[dict]:
     """The cache-identity description of a render's audio, or None for silent.
 
     Only identity fields live here (voice name, the exact script, the music
@@ -256,6 +272,13 @@ def build_audio_plan(*, script: str, content_key: str, mix_profile: Any = None) 
     ``balanced``. The profile is recorded here — and so in the cache key —
     *only* when it is not the default, so a balanced render keeps the
     pre-profile cache key byte-for-byte (no cache is orphaned).
+
+    ``library_track`` (roadmap 1.8) is an optional bundled-library bed
+    (an ``AudioTrack``-like object with ``id`` + ``path``) used **only** when the
+    operator supplies no ``MEDIAHUB_REEL_MUSIC_DIR`` track — their own licensed
+    music always wins. It records the track's absolute path so the mux can read
+    it from the package assets. ``None`` (the default) keeps the historic plan
+    byte-for-byte.
     """
     plan: dict[str, Any] = {}
     if voice_active() and (script or "").strip():
@@ -268,6 +291,16 @@ def build_audio_plan(*, script: str, content_key: str, mix_profile: Any = None) 
             plan["music_bytes"] = track.stat().st_size
         except OSError:
             pass
+    elif library_track is not None:
+        try:
+            plan["music"] = library_track.id
+            plan["music_path"] = str(library_track.path)
+            plan["music_bytes"] = Path(library_track.path).stat().st_size
+            if getattr(library_track, "source", ""):
+                plan["music_source"] = library_track.source
+        except OSError:
+            plan.pop("music", None)
+            plan.pop("music_path", None)
     if not plan:
         return None
     profile = _coalesce_profile(mix_profile)
@@ -277,6 +310,11 @@ def build_audio_plan(*, script: str, content_key: str, mix_profile: Any = None) 
 
 
 def _resolve_music_path(plan: dict) -> Optional[Path]:
+    # 1.8 — a bundled-library bed records its absolute path in the plan.
+    abs_path = str((plan or {}).get("music_path") or "")
+    if abs_path:
+        p = Path(abs_path)
+        return p if p.is_file() else None
     name = str((plan or {}).get("music") or "")
     if not name:
         return None
@@ -643,6 +681,7 @@ __all__ = [
     "voice_active",
     "voice_name",
     "music_dir",
+    "library_bed_enabled",
     "music_candidates",
     "pick_music",
     "track_bpm",

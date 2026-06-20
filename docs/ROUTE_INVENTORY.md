@@ -19,6 +19,13 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_assistant_memory` | `GET,POST` | `/api/assistant/memory` |
 | `api_assistant_memory_delete` | `POST` | `/api/assistant/memory/<item_id>/delete` |
 | `api_assistant_transcribe` | `POST` | `/api/assistant/transcribe` |
+| `api_audio_lexicon` | `GET,POST` | `/api/audio/lexicon` |
+| `api_audio_library` | `GET` | `/api/audio/library` |
+| `api_audio_suggest` | `GET` | `/api/audio/suggest` |
+| `api_audio_track` | `GET` | `/api/audio/track/<track_id>` |
+| `api_audio_upload` | `POST` | `/api/audio/upload` |
+| `api_audio_voice_consent` | `GET,POST` | `/api/audio/voice-consent` |
+| `api_audio_voices` | `GET` | `/api/audio/voices` |
 | `api_club_qa_submit` | `POST` | `/api/club-qa` |
 | `api_club_qa_status` | `GET` | `/api/club-qa/<job_id>` |
 | `api_stub_pack_assistant` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/assistant` |

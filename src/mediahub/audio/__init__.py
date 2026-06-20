@@ -14,6 +14,10 @@ voice layer:
 * :mod:`~mediahub.audio.voice` — voice catalogue + SSML-ish params + the per-org
   pronunciation lexicon, layered over the shipped ``visual/voiceover`` seam.
 * :mod:`~mediahub.audio.rights` — the licence ledger + upload fingerprinting.
+* :mod:`~mediahub.audio.generate` — optional music/SFX generation provider slots
+  (flagged, honest-error; the library is the default).
+* :mod:`~mediahub.audio.consent` — the consent gate + audit for voice cloning /
+  voice changer (off by default, per-org).
 
 Standing rules honoured here: deterministic maths stay deterministic (ops/clean/
 the content-hash pick); the one judgement surface (which track suits the reel)
@@ -46,6 +50,17 @@ from mediahub.audio.voice import (
     get_voice,
     list_voices,
 )
+from mediahub.audio.generate import (
+    GenerationUnavailable,
+    generate_music,
+    generate_sfx,
+    generation_status,
+)
+from mediahub.audio.consent import (
+    ConsentRequired,
+    ConsentStore,
+    require_consent,
+)
 
 __all__ = [
     # library
@@ -70,4 +85,13 @@ __all__ = [
     "list_voices",
     "get_voice",
     "default_voice",
+    # generate
+    "GenerationUnavailable",
+    "generate_music",
+    "generate_sfx",
+    "generation_status",
+    # consent
+    "ConsentRequired",
+    "ConsentStore",
+    "require_consent",
 ]
