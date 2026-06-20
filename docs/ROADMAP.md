@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `ffe706263` · harden(pb): multi-worker SQLite safety + verified TinyFish search shape (#912)
+**Last updated:** 2026-06-20 · `24d74a065` · obs(pb): log search/lookup outcomes + gate PB sources on name AND club (#914)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1219,6 +1219,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `42ee27361` | obs(pb): log every search/lookup outcome; gate PB sources on name AND club |
 | 2026-06-20 | `0576e4d7d` | harden(pb): multi-worker SQLite safety + verified TinyFish search shape |
 | 2026-06-20 | `d3e70d051` | 1.8: /api/audio/suggest never 5xxes — deterministic fallback (fix API contract) |
 | 2026-06-20 | `da230663b` | 1.8: web surface, reel bed, generation slots + consent — audio engine done (build 2/2) |
@@ -1230,5 +1231,4 @@ list and the auto table below, not here.
 | 2026-06-19 | `666bf6cf5` | Logo chip: unify the chrome avatar — keyed, contrast-aware, any logo |
 | 2026-06-19 | `ca7d12262` | feat(pb): free TinyFish search backend for the cold-start PB bootstrap |
 | 2026-06-19 | `981f81ac3` | feat(pb): accumulating per-club PB history as the scalable PB baseline |
-| 2026-06-19 | `835f57b38` | fix(pb): never infer PBs from entry/seed times — keep PBs to verified baselines |
 <!-- /ROADMAP:ACTIVITY -->
