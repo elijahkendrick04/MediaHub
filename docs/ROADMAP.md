@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `5a510af9a` · Merge pull request #922 — PB plain-text time capture + diagnosable logs
+**Last updated:** 2026-06-20 · `85ca3d840` · feat: Element & stock libraries (roadmap 1.10) (#925)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
 - **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
 - **1.12** · Phase 1 (Product) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
 - **1.13** · Phase 1 (Product) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
@@ -1218,16 +1217,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `532d1d431` | fix(1.10): declare Pexels/Pixabay stock keys as non-subprocessors (DPA guard) |
+| 2026-06-20 | `75ae6f495` | feat(1.10): telestration draw layer + mascot stickers; ship 1.10 (build 4/4) |
+| 2026-06-20 | `f237c8fc9` | feat(1.10): licence-clean stock pool + shared rights ledger (build 3/4) |
+| 2026-06-20 | `5d97fbbd3` | style(1.10): ruff-format the build-2 element routes in web.py |
+| 2026-06-20 | `6232a0244` | feat(1.10): element embedding search + Elements browse tab (build 2/4) |
+| 2026-06-20 | `69700a46a` | feat(1.10): brand-token element library + renderer injection (build 1/4) |
 | 2026-06-20 | `5cbdb2c08` | docs(env): register MEDIAHUB_LOG_LEVEL in env inventory + .env.example |
 | 2026-06-20 | `96602bca7` | feat(obs): send app INFO logs to stdout so PB matching is diagnosable on Render |
 | 2026-06-20 | `d20392c5c` | fix(pb): read plain-text ranking times, not just splits-link rows |
 | 2026-06-20 | `ad2d4561e` | fix(1.9): satisfy CI hygiene — ruff format + bandit B324 |
 | 2026-06-20 | `5a83c33c1` | chore(1.9): dead-code sweep — drop unused effect/format constants |
 | 2026-06-20 | `46bdb6c79` | feat(1.9): director can request text effects; mark typography system shipped |
-| 2026-06-20 | `cc80e09a4` | feat(typography): web surface + formatting depth, wire uploads to render (1.9, build 4/4) |
-| 2026-06-20 | `dd03c5505` | feat(brand): AI font pairing, catalogue-bound + honest-error (1.9, build 3/4) |
-| 2026-06-20 | `2b88c396e` | feat(render): deterministic, APCA-policed text-effects engine (1.9, build 2/4) |
-| 2026-06-20 | `e6ac2b13a` | feat(typography): curated self-hosted font catalogue (1.9, build 1/4) |
-| 2026-06-20 | `c99d6fd0c` | fix(a11y): honour prefers-reduced-motion on the pipeline/intro diagram |
-| 2026-06-20 | `22428e9ab` | feat(pb): read PBs from the all-time rankings (covers lapsed swimmers; fewer fetches) |
 <!-- /ROADMAP:ACTIVITY -->
