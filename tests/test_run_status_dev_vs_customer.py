@@ -137,3 +137,75 @@ def test_review_processing_log_visible_to_developer(app_client, tmp_path, monkey
     assert "Processing log" in html
     assert "PB lookup error for Cadi Evans" in html
     assert "Club discovery store warning" in html
+
+
+# --- Issue A: a long, progress-silent step (the heavy LLM interpretation of a
+#     large fresh/uncached PDF) ran past _RUN_STALE_SECS without emitting a
+#     progress line, so the heartbeat — which used to advance ONLY on a progress
+#     line — went stale and the status poller falsely declared the still-working
+#     run dead ("Processing stopped responding…"). The worker now runs a liveness
+#     ticker that advances the heartbeat for as long as the thread is alive,
+#     independent of progress emissions; a genuinely dead worker still goes stale
+#     because its ticker dies with it.
+
+
+def _seed_running_stale(web, run_id):
+    """A running run whose heartbeat is older than the staleness window — what a
+    long progress-silent interpretation step looks like to the status poller."""
+    web._active_runs[run_id] = {
+        "status": "running",
+        "error": None,
+        "log": list(_PB_LOG),
+        "started_at": "2026-01-01T00:00:00Z",
+        "heartbeat": time.time() - (web._RUN_STALE_SECS + 30),
+    }
+    return run_id
+
+
+def test_stale_heartbeat_reports_dead_then_liveness_tick_rescues(app_client):
+    web, client = app_client
+    run_id = _seed_running_stale(web, "run-stale")
+    # Before a tick: a stale heartbeat is surfaced as a terminal error — the
+    # exact false-death the large-PDF run hit mid-interpretation.
+    j = client.get(f"/api/runs/{run_id}/status").get_json()
+    assert j["status"] == "error"
+    assert "stopped responding" in (j.get("error") or "")
+    # One liveness tick (what the worker's background ticker does on a timer)
+    # advances the heartbeat even though NO new progress line was emitted…
+    assert web._advance_run_heartbeat(run_id) is True
+    # …so the still-working run is no longer mistaken for dead.
+    j2 = client.get(f"/api/runs/{run_id}/status").get_json()
+    assert j2["status"] == "running"
+    assert "stopped responding" not in (j2.get("error") or "")
+
+
+def test_advance_heartbeat_refreshes_running_run(app_client):
+    web, _client = app_client
+    old = time.time() - 500
+    web._active_runs["run-live"] = {
+        "status": "running",
+        "error": None,
+        "log": [],
+        "started_at": "2026-01-01T00:00:00Z",
+        "heartbeat": old,
+    }
+    assert web._advance_run_heartbeat("run-live") is True
+    assert web._active_runs["run-live"]["heartbeat"] > old
+
+
+def test_advance_heartbeat_noop_for_terminal_and_missing(app_client):
+    web, _client = app_client
+    # A missing run is a no-op (a tick can't resurrect an evicted run).
+    assert web._advance_run_heartbeat("does-not-exist") is False
+    # A terminal run is a no-op — the ticker must never flip a finished/errored
+    # run back to looking alive.
+    old = time.time() - 999
+    web._active_runs["run-terminal"] = {
+        "status": "done",
+        "error": None,
+        "log": [],
+        "started_at": "2026-01-01T00:00:00Z",
+        "heartbeat": old,
+    }
+    assert web._advance_run_heartbeat("run-terminal") is False
+    assert web._active_runs["run-terminal"]["heartbeat"] == old
