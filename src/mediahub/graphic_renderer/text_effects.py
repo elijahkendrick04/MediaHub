@@ -81,9 +81,9 @@ EFFECT_LABELS: dict[str, str] = {
     "curve": "Curve",
 }
 
-# Effects that change the colour the reader perceives → policed + maybe downgraded.
-_FILL_ALTERING: frozenset[str] = frozenset({"hollow", "splice", "gradient"})
 # The APCA headline floor (|Lc| ≥ 45) — the same gate the role system uses.
+# Effects that change the colour the reader perceives (hollow/splice/gradient)
+# are policed against it in effect_css() and downgraded to a legible outline.
 _LC_FLOOR = 45.0
 
 

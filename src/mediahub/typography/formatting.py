@@ -26,7 +26,6 @@ from typing import Optional
 ALIGNMENTS: tuple[str, ...] = ("left", "center", "right", "justify")
 ORDERED_MARKERS: tuple[str, ...] = ("decimal", "lower-alpha", "upper-alpha", "lower-roman")
 UNORDERED_MARKERS: tuple[str, ...] = ("disc", "circle", "square", "dash")
-STYLES: tuple[str, ...] = ("normal", "italic")
 
 # Role colour names → the card's CSS custom properties (never an invented hex).
 ROLE_COLOURS: dict[str, str] = {
