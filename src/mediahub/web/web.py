@@ -25812,10 +25812,14 @@ function mhPlanGenerate(btn) {{
 
         # Session Update and Sponsor Post are no longer their own tiles —
         # Free Text now interprets any such prompt (and adds photos) into a
-        # graphic, so a single "describe it" path covers them. The content
-        # types + their routes stay for deep links/back-compat; they're just
-        # not surfaced as separate Create cards.
-        _hidden_cts = {"session_update", "sponsor_activation"}
+        # graphic, so a single "describe it" path covers them.
+        #
+        # Athlete Spotlight is no longer a standalone tile either: it lives
+        # inside the meet-recap flow, reached from the Review ⇄ Athlete spotlight
+        # view switch on a processed meet (it always needed a processed meet
+        # anyway). The content type + its routes stay for the toggle, deep links
+        # and back-compat; it's just not surfaced as a separate Create card.
+        _hidden_cts = {"session_update", "sponsor_activation", "athlete_spotlight"}
 
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so

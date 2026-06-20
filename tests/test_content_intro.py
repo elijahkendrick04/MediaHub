@@ -316,8 +316,11 @@ def test_create_tiles_link_to_the_first_slide(client):
     """Clicking a live Create tile lands on its intro, not straight on the
     flow — for the visible (non-hidden) headings."""
     body = client.get("/make").get_data(as_text=True)
-    for slug in ("meet_recap", "athlete_spotlight", "event_preview", "free_text"):
+    for slug in ("meet_recap", "event_preview", "free_text"):
         assert f"/make/{slug}" in body, f"Create tile for {slug} should link to its intro"
+    # Athlete Spotlight is no longer a standalone Create tile — it lives inside
+    # the meet-recap flow (Review ⇄ Athlete spotlight view switch).
+    assert "/make/athlete_spotlight" not in body
 
 
 def test_intro_css_is_served_on_the_slide(client):
@@ -335,9 +338,10 @@ def test_unknown_slug_redirects_to_create(client):
 
 
 def test_hidden_type_is_still_reachable_by_deep_link(client):
-    # Session Update / Sponsor Post aren't surfaced as tiles, but their intro
-    # (and route) stay live for deep links / back-compat.
-    for slug in ("session_update", "sponsor_activation"):
+    # Session Update / Sponsor Post / Athlete Spotlight aren't surfaced as
+    # tiles, but their intro (and route) stay live for deep links / back-compat.
+    # Athlete Spotlight's primary surface is now the meet-recap view switch.
+    for slug in ("session_update", "sponsor_activation", "athlete_spotlight"):
         r = client.get(f"/make/{slug}")
         assert r.status_code == 200, (slug, r.status_code)
         assert "How it works" in r.get_data(as_text=True)
