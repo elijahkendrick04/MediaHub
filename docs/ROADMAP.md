@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `85ca3d840` · feat: Element & stock libraries (roadmap 1.10) (#925)
+**Last updated:** 2026-06-20 · `a2d4b6231` · Merge pull request #927 — large-PDF run false-timeout fix + name unmatched PB swimmers
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1217,6 +1217,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `a3ba1c8cf` | style(pb): ruff-format lookup.py (collapse comprehension to one line) |
+| 2026-06-20 | `500f3e15a` | feat(pb): name the unmatched swimmers (with a reason) in the resolution summary |
+| 2026-06-20 | `d2093f2cd` | fix(runs): keep heartbeat alive during long progress-silent steps (large fresh PDF) |
 | 2026-06-20 | `532d1d431` | fix(1.10): declare Pexels/Pixabay stock keys as non-subprocessors (DPA guard) |
 | 2026-06-20 | `75ae6f495` | feat(1.10): telestration draw layer + mascot stickers; ship 1.10 (build 4/4) |
 | 2026-06-20 | `f237c8fc9` | feat(1.10): licence-clean stock pool + shared rights ledger (build 3/4) |
@@ -1226,7 +1229,4 @@ list and the auto table below, not here.
 | 2026-06-20 | `5cbdb2c08` | docs(env): register MEDIAHUB_LOG_LEVEL in env inventory + .env.example |
 | 2026-06-20 | `96602bca7` | feat(obs): send app INFO logs to stdout so PB matching is diagnosable on Render |
 | 2026-06-20 | `d20392c5c` | fix(pb): read plain-text ranking times, not just splits-link rows |
-| 2026-06-20 | `ad2d4561e` | fix(1.9): satisfy CI hygiene — ruff format + bandit B324 |
-| 2026-06-20 | `5a83c33c1` | chore(1.9): dead-code sweep — drop unused effect/format constants |
-| 2026-06-20 | `46bdb6c79` | feat(1.9): director can request text effects; mark typography system shipped |
 <!-- /ROADMAP:ACTIVITY -->
