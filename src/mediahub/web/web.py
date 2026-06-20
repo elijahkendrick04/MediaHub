@@ -11142,6 +11142,7 @@ def _layout(
        full Create tile (the live design editor). Keeping both off the top bar
        leaves the signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('elements_page') }}" class="{{ 'active' if active=='elements' else '' }}">Elements</a>
     {% if video_enabled %}<a href="{{ url_for('video_studio_page') }}" class="{{ 'active' if active=='video' else '' }}">Video</a>{% endif %}
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
@@ -38928,6 +38929,220 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 },
             }
         )
+
+    # ---------------------------------------------------------------- #
+    # Roadmap 1.10 — Element library: browse, search, suggest, add-to-card.
+    # ---------------------------------------------------------------- #
+    def _elements_role_vars(profile_id: Optional[str]):
+        """Resolved --mh-* role vars for an org's brand (browse recolouring)."""
+        from mediahub.elements import recolour as _el_recolour
+
+        brand_kit = None
+        if profile_id:
+            try:
+                brand_kit = _v8_brand_kit_for(profile_id)
+            except Exception:
+                brand_kit = None
+        return _el_recolour.role_vars_from_palette(None, brand_kit)
+
+    def _element_to_payload(el, role_vars) -> dict:
+        from mediahub.elements import render as _el_render
+
+        svg = _el_render.render_element_markup(el, role_vars, uid=el.id.replace(".", "_"))
+        return {
+            "id": el.id,
+            "name": el.name,
+            "kind": el.kind,
+            "sport": el.sport,
+            "tags": list(el.tags),
+            "aspect": el.aspect,
+            "svg": svg or "",
+        }
+
+    @app.route("/api/elements")
+    def api_elements():
+        """Browse / search the element library, recoloured to the org brand."""
+        from flask import request as _req
+        from mediahub.elements import catalog as _el_catalog
+        from mediahub.elements import search as _el_search
+
+        profile_id = _active_profile_id()
+        q = (_req.args.get("q") or "").strip()
+        kind = (_req.args.get("kind") or "").strip() or None
+        sport = (_req.args.get("sport") or "").strip() or None
+        role_vars = _elements_role_vars(profile_id)
+
+        hits = _el_search.search(q, profile_id=profile_id, kind=kind, sport=sport, limit=60)
+        payload = [_element_to_payload(h.element, role_vars) for h in hits]
+        return jsonify(
+            {
+                "elements": payload,
+                "semantic": _el_search.is_semantic_available(),
+                "kinds": _el_catalog.list_kinds(profile_id),
+            }
+        )
+
+    @app.route("/api/elements/gradients")
+    def api_elements_gradients():
+        """Brand-palette gradient presets as ready-to-use CSS for the org."""
+        from mediahub.elements import gradients as _el_grad
+
+        role_vars = _elements_role_vars(_active_profile_id())
+        out = [
+            {"id": p.id, "name": p.name, "kind": p.kind, "css": _el_grad.gradient_css(p, role_vars)}
+            for p in _el_grad.list_presets()
+        ]
+        return jsonify({"gradients": out})
+
+    def _card_context_facts(run_data, card_id: str) -> dict:
+        """Achievement facts for contextual element suggestions on a card."""
+        facts: dict = {}
+        rr = (run_data or {}).get("recognition_report") or {}
+        for ra in rr.get("ranked_achievements") or []:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                facts["event_name"] = ach.get("event") or ach.get("event_name") or ""
+                facts["stroke"] = ach.get("stroke") or ""
+                facts["achievement_label"] = ach.get("achievement_label") or ""
+                facts["is_pb"] = bool(ach.get("is_pb") or ach.get("pb"))
+                place = str(ach.get("place") or "").strip()
+                if place in {"1", "1st"}:
+                    facts["medal_tier"] = "gold"
+                elif place in {"2", "2nd"}:
+                    facts["medal_tier"] = "silver"
+                elif place in {"3", "3rd"}:
+                    facts["medal_tier"] = "bronze"
+                if "relay" in str(facts.get("event_name", "")).lower():
+                    facts["post_angle"] = "relay"
+                break
+        return facts
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/element-suggestions")
+    def api_element_suggestions(run_id: str, card_id: str):
+        """Suggest elements that fit this card's moment (deterministic + AI blend)."""
+        from mediahub.elements import search as _el_search
+
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        profile_id = (run_data or {}).get("profile_id") or _active_profile_id()
+        facts = _card_context_facts(run_data, card_id)
+        role_vars = _elements_role_vars(profile_id)
+        suggested = _el_search.suggest_for_context(facts, profile_id=profile_id, limit=12)
+        return jsonify(
+            {"elements": [_element_to_payload(el, role_vars) for el in suggested], "context": facts}
+        )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/elements", methods=["GET", "POST"])
+    def api_card_elements(run_id: str, card_id: str):
+        """List, add, remove or clear the library elements painted on a card.
+
+        Placements live on the card's persisted CreativeBrief (`elements` field);
+        the next render picks them up via the elements sprint hook.
+        """
+        from flask import request as _req
+        from mediahub.elements.catalog import get_element as _get_element
+        from mediahub.elements.models import ElementPlacement
+
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        bdict = _latest_brief_for_card(run_id, card_id)
+        if not bdict:
+            return jsonify(
+                {"error": "no_design", "user_message": "Create a graphic for this card first."}
+            ), 409
+
+        current = list(bdict.get("elements") or [])
+
+        if _req.method == "GET":
+            return jsonify({"elements": current})
+
+        body = _req.get_json(silent=True) or {}
+        if body.get("clear"):
+            current = []
+        elif "remove_index" in body:
+            try:
+                idx = int(body["remove_index"])
+                if 0 <= idx < len(current):
+                    current.pop(idx)
+            except (TypeError, ValueError):
+                return jsonify({"error": "bad_index"}), 400
+        else:
+            element_id = str(body.get("element_id") or "").strip()
+            if not element_id:
+                return jsonify({"error": "no_element_id"}), 400
+            profile_id = (run_data or {}).get("profile_id") or _active_profile_id()
+            if _get_element(element_id, profile_id) is None:
+                return jsonify({"error": "unknown_element"}), 404
+            placement = ElementPlacement.from_dict({**body, "element_id": element_id})
+            if placement is None:
+                return jsonify({"error": "bad_placement"}), 400
+            if len(current) >= 12:
+                return jsonify({"error": "too_many", "user_message": "Up to 12 elements per card."}), 409
+            current.append(placement.to_dict())
+
+        bdict["elements"] = current
+        brief_id = str(bdict.get("id") or "").strip()
+        if not brief_id:
+            return jsonify({"error": "brief_unreadable"}), 500
+        try:
+            bdir = RUNS_DIR / run_id / "briefs"
+            bdir.mkdir(parents=True, exist_ok=True)
+            (bdir / f"{brief_id}.json").write_text(
+                json.dumps(bdict, indent=2, default=str), encoding="utf-8"
+            )
+        except OSError as e:
+            return jsonify({"error": f"save_failed: {e}"}), 500
+        return jsonify({"ok": True, "elements": current})
+
+    @app.route("/elements")
+    def elements_page():
+        """Standalone Elements browser. ?run_id=&card_id= enables add-to-card."""
+        from flask import request as _req
+        from mediahub.elements import catalog as _el_catalog
+        from mediahub.elements import gradients as _el_grad
+        from mediahub.elements import search as _el_search
+        from mediahub.web import elements_browser as _eb
+
+        profile_id = _active_profile_id()
+        role_vars = _elements_role_vars(profile_id)
+        seed = [
+            _element_to_payload(el, role_vars)
+            for el in _el_catalog.load_catalog(profile_id)
+        ]
+        grad = [
+            {"name": p.name, "css": _el_grad.gradient_css(p, role_vars)}
+            for p in _el_grad.list_presets()
+        ]
+
+        run_id = (_req.args.get("run_id") or "").strip()
+        card_id = (_req.args.get("card_id") or "").strip()
+        add_url = list_url = suggest_url = ""
+        card_label = ""
+        if run_id and card_id:
+            run_data = _load_run(run_id)
+            if run_data and _can_access_run(run_id, run_data, profile_id):
+                add_url = url_for("api_card_elements", run_id=run_id, card_id=card_id)
+                list_url = add_url
+                suggest_url = url_for(
+                    "api_element_suggestions", run_id=run_id, card_id=card_id
+                )
+                card_label = card_id
+
+        body = _eb.render_browser_body(
+            elements=seed,
+            kinds=_el_catalog.list_kinds(profile_id),
+            gradients=grad,
+            semantic=_el_search.is_semantic_available(),
+            search_url=url_for("api_elements"),
+            add_url=add_url,
+            list_url=list_url,
+            suggest_url=suggest_url,
+            card_label=card_label,
+        )
+        return _layout("Elements", body, active="elements")
 
     @app.route("/api/media-library/list.json")
     def api_media_library_list_json():
