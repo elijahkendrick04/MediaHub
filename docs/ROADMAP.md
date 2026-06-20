@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `a2d4b6231` · Merge pull request #927 — large-PDF run false-timeout fix + name unmatched PB swimmers
+**Last updated:** 2026-06-20 · `98b7c15ad` · Merge pull request #929 — recover resolved-but-no-roster-time PB swimmers + reveal unmatched cause
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1217,6 +1217,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `816e57b9f` | feat(pb): recover resolved-but-no-roster-time swimmers + reveal the real gap |
 | 2026-06-20 | `a3ba1c8cf` | style(pb): ruff-format lookup.py (collapse comprehension to one line) |
 | 2026-06-20 | `500f3e15a` | feat(pb): name the unmatched swimmers (with a reason) in the resolution summary |
 | 2026-06-20 | `d2093f2cd` | fix(runs): keep heartbeat alive during long progress-silent steps (large fresh PDF) |
@@ -1228,5 +1229,4 @@ list and the auto table below, not here.
 | 2026-06-20 | `69700a46a` | feat(1.10): brand-token element library + renderer injection (build 1/4) |
 | 2026-06-20 | `5cbdb2c08` | docs(env): register MEDIAHUB_LOG_LEVEL in env inventory + .env.example |
 | 2026-06-20 | `96602bca7` | feat(obs): send app INFO logs to stdout so PB matching is diagnosable on Render |
-| 2026-06-20 | `d20392c5c` | fix(pb): read plain-text ranking times, not just splits-link rows |
 <!-- /ROADMAP:ACTIVITY -->
