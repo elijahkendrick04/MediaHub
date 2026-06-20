@@ -30,7 +30,7 @@ from mediahub.pipeline.pb_bridge import BridgedSnapshot
 
 from .names import name_match, split_full_name
 from .parse import parse_personal_best
-from .roster import roster_slice
+from .roster import _load_event_numbers, roster_slice
 from .transport import SR_BASE, SRFetchError, fetch
 
 log = logging.getLogger(__name__)
@@ -38,27 +38,24 @@ log = logging.getLogger(__name__)
 SOURCE_DOMAIN = "swimmingresults.org"
 _PB_URL = SR_BASE + "/individualbest/personal_best.php?mode=A&tiref={tiref}"
 
-# High-participation events: almost every ranked swimmer appears in at least one,
-# so they're enough to find a swimmer in their club's roster without sweeping all
-# 19 events. Ordered roughly by participation.
-_ANCHOR_EVENTS: list[tuple[int, str]] = [
-    (50, "FR"),
-    (100, "FR"),
-    (200, "FR"),
-    (100, "BK"),
-    (100, "BR"),
-    (100, "FL"),
-    (200, "IM"),
-    (50, "BK"),
-    (50, "BR"),
-    (50, "FL"),
-]
 _COURSES = ("LC", "SC")
-_FETCH_WORKERS = 6
+_FETCH_WORKERS = 8
 
-# Hard ceiling on roster-resolution fetches per run so a huge meet with no age
-# data can't run away. The slice cache makes re-runs cheap. Tunable.
-_DEFAULT_BUDGET = 600
+# Default age sweep when the meet file carries no per-swimmer age (the rankings
+# query needs a specific age). 9–19 covers age-group swimming; an all-time
+# ranking lists older swimmers under the age they swam too, so most seniors are
+# still found via their junior ranks. Widen via env for masters/university meets.
+_AGE_MIN_DEFAULT = 9
+_AGE_MAX_DEFAULT = 19
+
+# Ceiling on roster-resolution fetches per run. A full club sweep (all events ×
+# age range × both courses × both sexes) is a few hundred slices; the in-process
+# roster cache makes repeat runs within a worker free.
+_DEFAULT_BUDGET = 1500
+
+# In-process club-roster cache: (club_code, sex, ages, events) -> {tiref: name}.
+# A club's roster changes slowly, so within a worker's lifetime we build it once.
+_ROSTER_CACHE: dict[tuple, dict[str, str]] = {}
 
 
 def _budget() -> int:
@@ -66,6 +63,16 @@ def _budget() -> int:
     if raw.isdigit():
         return max(1, int(raw))
     return _DEFAULT_BUDGET
+
+
+def _age_range() -> tuple[int, int]:
+    def _env(name: str, default: int) -> int:
+        raw = os.environ.get(name, "").strip()
+        return int(raw) if raw.isdigit() else default
+
+    lo = _env("MEDIAHUB_SR_AGE_MIN", _AGE_MIN_DEFAULT)
+    hi = _env("MEDIAHUB_SR_AGE_MAX", _AGE_MAX_DEFAULT)
+    return (min(lo, hi), max(lo, hi))
 
 
 def _meet_year(meet) -> Optional[int]:
@@ -89,11 +96,11 @@ def _ages_from_band(band: str) -> set[int]:
     return set()
 
 
-def _age_candidates(swimmer, results, meet_year: Optional[int]) -> list[int]:
+def _age_candidates(swimmer, results, meet_year: Optional[int]) -> set[int]:
     """Ages to try in the roster. A swim ranks under the age the swimmer WAS on
     the day, so we include the current age and the one below (they may have only
     ranked younger). Uses age_at_meet, else dob + meet year, else event bands,
-    else a bounded default sweep."""
+    else the default sweep range."""
     ages: set[int] = set()
     a = getattr(swimmer, "age_at_meet", None)
     if isinstance(a, int) and a > 0:
@@ -107,8 +114,49 @@ def _age_candidates(swimmer, results, meet_year: Optional[int]) -> list[int]:
         ages |= _ages_from_band(getattr(r, "age_band", "") or "")
     ages = {x for x in ages if 5 <= x <= 25}
     if not ages:
-        ages = set(range(9, 19))  # no age info anywhere: a bounded sweep
-    return sorted(ages)
+        lo, hi = _age_range()  # no age info anywhere: a bounded sweep
+        ages = set(range(lo, hi + 1))
+    return ages
+
+
+def _build_club_roster(
+    club_code: str,
+    sex: str,
+    ages: "list[int]",
+    events: "list[tuple[int, str]]",
+    *,
+    force_refresh: bool,
+    budget: int,
+) -> "tuple[dict[str, str], int]":
+    """The club's full ``{tiref: name}`` roster for one sex — the union across
+    every (age, event, course). Cached in-process. Returns (roster, fetches).
+
+    Sweeping the whole roster (not just a few events) is what actually finds the
+    swimmers: every ranked swimmer of the club appears here, so a name match is
+    reliable. Bounded by ``budget``."""
+    cache_key = (club_code, sex, tuple(ages), tuple(events))
+    if not force_refresh and cache_key in _ROSTER_CACHE:
+        return _ROSTER_CACHE[cache_key], 0
+
+    jobs = [
+        (age, dist, stroke, course)
+        for age in ages
+        for (dist, stroke) in events
+        for course in _COURSES
+    ][: max(0, budget)]
+
+    roster: dict[str, str] = {}
+    if jobs:
+        with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
+            for sl in pool.map(
+                lambda j: roster_slice(
+                    club_code, sex, j[0], j[1], j[2], j[3], force_refresh=force_refresh
+                ),
+                jobs,
+            ):
+                roster.update(sl)
+    _ROSTER_CACHE[cache_key] = roster
+    return roster, len(jobs)
 
 
 def _resolve_tirefs(
@@ -121,62 +169,56 @@ def _resolve_tirefs(
 ) -> dict[str, str]:
     """Resolve ``{swimmer_key: tiref}`` for swimmers without an ASA id.
 
-    Buckets swimmers by (sex, candidate age), fetches the club's anchor-event
-    roster slices for each bucket (in parallel, within budget), and name-matches
-    each swimmer inside its own club+age pool.
+    Builds the club's COMPLETE online roster per sex (all events across the age
+    range), then name-matches each swimmer within it. The comprehensive sweep is
+    what finds the ~90%+ of swimmers who are on the rankings; a narrow event/age
+    probe missed too many.
     """
-    # bucket[(sex, age)] = list of (swimmer_key, first, last)
-    buckets: dict[tuple[str, int], list[tuple[str, str, str]]] = {}
+    # Per-swimmer candidate sexes. The rankings query needs F or M; when the file
+    # doesn't give a usable gender ("X"/blank — common when a PDF's event headers
+    # don't parse a sex) we search BOTH rosters. The unique-match requirement
+    # still guards against a wrong hit, so this recovers those swimmers safely.
+    members: list[tuple[str, str, str, tuple[str, ...]]] = []
+    sex_ages: dict[str, set[int]] = {"F": set(), "M": set()}
     for key, sw, results in swimmers:
-        sex = (getattr(sw, "gender", "") or "").upper()
-        if sex not in ("F", "M"):
-            continue  # need a sex for the rankings query
         first = getattr(sw, "first_name", "") or ""
         last = getattr(sw, "last_name", "") or ""
         if not (first or last):
             continue
-        for age in _age_candidates(sw, results, meet_year):
-            buckets.setdefault((sex, age), []).append((key, first, last))
+        g = (getattr(sw, "gender", "") or "").upper()
+        sexes = (g,) if g in ("F", "M") else ("F", "M")
+        ages = _age_candidates(sw, results, meet_year)
+        for s in sexes:
+            sex_ages[s] |= ages
+        members.append((key, first, last, sexes))
+
+    events = sorted(_load_event_numbers().keys())
+    if not events or not members:
+        return {}
+
+    rosters: dict[str, dict[str, str]] = {}
+    fetches = 0
+    for s in ("F", "M"):
+        if not sex_ages[s] or fetches >= budget:
+            continue
+        rosters[s], used = _build_club_roster(
+            club_code,
+            s,
+            sorted(sex_ages[s]),
+            events,
+            force_refresh=force_refresh,
+            budget=budget - fetches,
+        )
+        fetches += used
 
     resolved: dict[str, str] = {}
-    fetches = 0
-    for (sex, age), members in buckets.items():
-        pending = [m for m in members if m[0] not in resolved]
-        if not pending:
-            continue
-        index: dict[str, str] = {}  # tiref -> full name
-        for dist, stroke in _ANCHOR_EVENTS:
-            if not pending or fetches >= budget:
-                break
-            jobs = [(dist, stroke, course) for course in _COURSES]
-            with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
-                slices = list(
-                    pool.map(
-                        lambda j: roster_slice(
-                            club_code,
-                            sex,
-                            age,
-                            j[0],
-                            stroke,
-                            j[2],
-                            force_refresh=force_refresh,
-                        ),
-                        jobs,
-                    )
-                )
-            fetches += len(jobs)
-            for sl in slices:
-                index.update(sl)
-            if not index:
-                continue
-            still: list[tuple[str, str, str]] = []
-            for key, first, last in pending:
-                hit = _best_name_match(first, last, index)
-                if hit:
-                    resolved[key] = hit
-                else:
-                    still.append((key, first, last))
-            pending = still
+    for key, first, last, sexes in members:
+        pool: dict[str, str] = {}
+        for s in sexes:
+            pool.update(rosters.get(s, {}))
+        hit = _best_name_match(first, last, pool)
+        if hit:
+            resolved[key] = hit
     return resolved
 
 
