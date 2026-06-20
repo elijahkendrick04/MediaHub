@@ -306,6 +306,13 @@ def interpreted_to_canonical(
             key_tuple = (first.lower(), last.lower(), club_code)
             if key_tuple in swimmer_lookup:
                 swimmer_key = swimmer_lookup[key_tuple]
+                # A later swim may carry the member id / age the first one lacked.
+                _sw = meet.swimmers.get(swimmer_key)
+                if _sw is not None:
+                    if not getattr(_sw, "asa_id", None) and getattr(swim, "asa_id", None):
+                        _sw.asa_id = swim.asa_id
+                    if getattr(_sw, "age_at_meet", None) is None and getattr(swim, "age", None):
+                        _sw.age_at_meet = swim.age
             else:
                 base = f"{club_code}:{last},{first}".replace(" ", "_")
                 if not base.strip(":,"):
@@ -319,7 +326,8 @@ def interpreted_to_canonical(
                     first_name=first,
                     last_name=last,
                     gender=ev_gender,
-                    age_at_meet=None,
+                    age_at_meet=getattr(swim, "age", None),
+                    asa_id=(getattr(swim, "asa_id", None) or None),
                     club_code=club_code,
                     club_name=club_name or club_code,
                     identity_confidence="medium",

@@ -130,12 +130,23 @@ def _parse_d1(line: str) -> dict:
         col 80-87 : DOB ddmmyyyy or mmddyyyy depending on locale (8 digits)
         col 88-89 : age
     """
+    # Governing-body member id (Swim England/Wales "tiref" / USS id), nominally
+    # col 68-79. Read the first 5-9 digit run AFTER the two 20-char name fields
+    # (i.e. from col 48 on) rather than a fixed column, so a Hy-Tek version shift
+    # can't drop it. The athlete_no (col 3-7) is before the names, so it's never
+    # mistaken for the member id. This is the swimmer's direct PB-lookup key.
+    member_id = ""
+    if len(line) > 48:
+        m = re.search(r"\d{5,9}", line[48:80])
+        if m:
+            member_id = m.group(0)
     return {
         "sex": _safe_str(line, 2, 1),
         "athlete_no": _safe_str(line, 3, 5),
         "last": _safe_str(line, 8, 20),
         "first": _safe_str(line, 28, 20),
         "uss_id": _safe_str(line, 68, 12) if len(line) > 68 else "",
+        "member_id": member_id,
         "dob": _safe_str(line, 80, 8) if len(line) > 80 else "",
         "age": _safe_int(line, 88, 2) if len(line) > 88 else None,
     }
@@ -419,6 +430,8 @@ def parse_hy3(data: bytes) -> InterpretedMeet:
                 confidence=round(swim_conf, 3),
                 raw_row=raw[:120],
                 field_confidence=field_conf,
+                asa_id=(ath_rec.get("member_id") or None),
+                age=ath_rec.get("age"),
             )
             ev.swims.append(swim)
             pending_e1 = None  # consumed
