@@ -16,6 +16,7 @@ and ranks them by empirical success (trust ledger).
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
@@ -36,6 +37,8 @@ from mediahub.context_engine.trust import rank_candidates, record_attempt
 from .cache import RunCache, WarmCache, make_swimmer_key
 from .fetch_profile import fetch_profile_page
 from .parse_pbs import PBRow, parse_pbs_from_page
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -181,16 +184,50 @@ def _name_tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9]+", folded.lower()) if len(t) >= 2}
 
 
-def _page_is_about_swimmer(page_text: str, name: str) -> bool:
-    """True if the page plausibly concerns the target athlete: every significant
-    token of their name appears in the page text. Conservative on purpose — a
-    wrong personal best is worse than a missing one, so a page that doesn't even
-    name the athlete must never supply their baseline (the same-name guard)."""
+# Generic club words that don't identify a club on their own, so the club guard
+# keys on the DISTINCTIVE part ("City of Cardiff Swimming Club" -> {cardiff}).
+_CLUB_GENERIC = {
+    "swimming",
+    "swim",
+    "swimmers",
+    "club",
+    "sc",
+    "asc",
+    "amateur",
+    "aquatics",
+    "aquatic",
+    "team",
+    "squad",
+    "and",
+    "the",
+    "of",
+    "city",
+    "county",
+}
+
+
+def _distinctive_club_tokens(club: str) -> set[str]:
+    return {t for t in _name_tokens(club) if t not in _CLUB_GENERIC and t not in _NAME_PARTICLES}
+
+
+def _page_is_about_swimmer(page_text: str, name: str, club: str = "") -> bool:
+    """True only if the page names the target athlete AND corroborates the club.
+
+    Every significant name token must appear, and — when a club is given — at
+    least one DISTINCTIVE club token must too. Matching name **and** club (not
+    name alone) is the same-name guard: two swimmers sharing a name *and* a club
+    is vanishingly rare, so this stops a different swimmer's PBs from ever being
+    used as the baseline. A wrong PB is worse than a missing one."""
     want = {t for t in _name_tokens(name) if t not in _NAME_PARTICLES}
     if not want:
         return False
     have = _name_tokens(page_text)
-    return want.issubset(have)
+    if not want.issubset(have):
+        return False
+    club_tokens = _distinctive_club_tokens(club)
+    if club_tokens and not (club_tokens & have):
+        return False
+    return True
 
 
 def _is_authority(url: str) -> bool:
@@ -265,7 +302,9 @@ def _research_candidate_urls(
 _FETCH_WORKERS = 3
 
 
-def _fetch_and_parse_url(url: str, name: str, use_interpreter: bool) -> "tuple[PBSource, bool]":
+def _fetch_and_parse_url(
+    url: str, name: str, use_interpreter: bool, club: str = ""
+) -> "tuple[PBSource, bool]":
     """Fetch + deterministically parse ONE candidate URL and apply the identity
     gate. Pure: it mutates no shared state and never writes the trust ledger, so
     it is safe to run concurrently across candidates. Returns (source, eligible);
@@ -292,7 +331,7 @@ def _fetch_and_parse_url(url: str, name: str, use_interpreter: bool) -> "tuple[P
         )
 
     pb_rows, confidence = parse_pbs_from_page(page, use_interpreter=use_interpreter)
-    identity_ok = _page_is_about_swimmer(page.text, name)
+    identity_ok = _page_is_about_swimmer(page.text, name, club)
     eligible = bool(pb_rows) and identity_ok
     source = PBSource(
         url=url,
@@ -305,20 +344,22 @@ def _fetch_and_parse_url(url: str, name: str, use_interpreter: bool) -> "tuple[P
 
 
 def _fetch_and_parse_many(
-    urls: "list[str]", name: str, use_interpreter: bool
+    urls: "list[str]", name: str, use_interpreter: bool, club: str = ""
 ) -> "dict[str, tuple[PBSource, bool]]":
     """Fetch + parse several candidate URLs concurrently. Returns a url → (source,
     eligible) map; the caller folds the results in a deterministic (ranked) order,
     so the audit trail and trust-ledger writes stay reproducible despite the
     parallel I/O. A single URL skips the pool (no thread overhead)."""
     if len(urls) <= 1:
-        return {u: _fetch_and_parse_url(u, name, use_interpreter) for u in urls}
+        return {u: _fetch_and_parse_url(u, name, use_interpreter, club) for u in urls}
 
     from concurrent.futures import ThreadPoolExecutor
 
     out: "dict[str, tuple[PBSource, bool]]" = {}
     with ThreadPoolExecutor(max_workers=min(len(urls), _FETCH_WORKERS)) as pool:
-        futures = {pool.submit(_fetch_and_parse_url, u, name, use_interpreter): u for u in urls}
+        futures = {
+            pool.submit(_fetch_and_parse_url, u, name, use_interpreter, club): u for u in urls
+        }
         for fut, u in futures.items():
             try:
                 out[u] = fut.result()
@@ -431,7 +472,7 @@ def discover_swimmer_pbs(
             return
         # Fold in ranked order so sources_tried + the trust-ledger writes stay
         # deterministic despite the parallel I/O.
-        results = _fetch_and_parse_many(ranked, name, use_interpreter)
+        results = _fetch_and_parse_many(ranked, name, use_interpreter, club)
         for url in ranked:
             source, eligible = results[url]
             sources_tried.append(source)
@@ -463,6 +504,27 @@ def discover_swimmer_pbs(
         confidence=best_source.parse_confidence if best_source else 0.0,
         cache_hit=False,
     )
+
+    # Observability: say plainly what happened for this swimmer — which source
+    # supplied the baseline and how many PBs, or that nothing passed the
+    # name+club identity gate. Silence here is exactly what made "is the lookup
+    # even working?" unanswerable.
+    if best_source is not None:
+        log.info(
+            "pb_discovery %s (%s): %d PB(s) from %s",
+            name,
+            club,
+            len(best_source.pbs),
+            best_source.domain,
+        )
+    else:
+        log.info(
+            "pb_discovery %s (%s): no source passed the name+club gate "
+            "(%d candidate page(s) tried)",
+            name,
+            club,
+            len(sources_tried),
+        )
 
     # 8. Cache to run + warm swimmer cache
     result_dict = result.to_dict()
