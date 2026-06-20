@@ -66,12 +66,12 @@ def _budget() -> int:
 
 
 def _age_range() -> tuple[int, int]:
-    def _env(name: str, default: int) -> int:
-        raw = os.environ.get(name, "").strip()
+    def _as_int(raw: str, default: int) -> int:
+        raw = (raw or "").strip()
         return int(raw) if raw.isdigit() else default
 
-    lo = _env("MEDIAHUB_SR_AGE_MIN", _AGE_MIN_DEFAULT)
-    hi = _env("MEDIAHUB_SR_AGE_MAX", _AGE_MAX_DEFAULT)
+    lo = _as_int(os.environ.get("MEDIAHUB_SR_AGE_MIN", ""), _AGE_MIN_DEFAULT)
+    hi = _as_int(os.environ.get("MEDIAHUB_SR_AGE_MAX", ""), _AGE_MAX_DEFAULT)
     return (min(lo, hi), max(lo, hi))
 
 
