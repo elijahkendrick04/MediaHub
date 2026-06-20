@@ -71,6 +71,19 @@ def _row(tiref, name, yob, swimid, time):
     )
 
 
+def _row_plain(tiref, name, yob, time):
+    """A ranking row whose time is PLAIN TEXT (no splits link) — what the great
+    majority of real rows look like. Only swimmers with recorded splits get the
+    lightbox link; reading the time solely from that link dropped ~80% of a
+    club's roster (the 54/79 production regression)."""
+    return (
+        f'<tr><td>1</td>'
+        f'<td><a href="/individualbest/personal_best.php?tiref={tiref}&mode=A">{name}</a></td>'
+        f'<td>Torfaen D</td><td>{yob}</td><td>Meet</td><td>02/02/24</td>'
+        f'<td>{time}</td></tr>'
+    )
+
+
 # Two same-surname siblings (Tincombe) to exercise time-based disambiguation
 # without any first-name nickname rule.
 ROSTER_PAGE = (
@@ -80,6 +93,8 @@ ROSTER_PAGE = (
     + _row("1361917", "Charlie Sherrard", "10", "113", "1:08.00")
     + _row("2001", "Raffaelle Tincombe", "11", "114", "1:05.00")
     + _row("2002", "Matilda Tincombe", "12", "115", "1:20.00")
+    # A swimmer whose time is plain text (no splits link) — the common case.
+    + _row_plain("3001", "Maisie Pugh", "11", "1:09.50")
     + "</table></body></html>"
 )
 
@@ -186,6 +201,21 @@ def test_roster_slice_reads_name_and_time():
     assert "1339695" in sl
 
 
+def test_roster_slice_captures_plain_text_time():
+    """Regression (the 54/79 production drop): a ranking row whose time is plain
+    text — no splits link — must still yield the time. Only swimmers with
+    recorded splits get the lightbox link, so reading time solely from the link
+    left ~80% of the roster with empty times, and those swimmers were dropped at
+    the ``if snap.pb_times`` guard."""
+    from mediahub.swimmingresults.roster import roster_slice
+
+    sl = roster_slice("TDOYEWAY", "F", 13, 100, "FR", "LC")
+    name, time_cs, date_iso, meet = sl["3001"]
+    assert name == "Maisie Pugh"
+    assert time_cs == 6950  # 1:09.50 read from PLAIN TEXT, not a splits link
+    assert date_iso == "2024-02-02"
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end: meet swimmers -> BridgedSnapshot
 # --------------------------------------------------------------------------- #
@@ -257,6 +287,23 @@ def test_siblings_disambiguated_by_time_not_nickname():
     snaps = lookup_official_pbs(meet, {"s1"}, "Torfaen Dolphins")
     assert "s1" in snaps
     assert "tiref=2001" in (snaps["s1"].source_url or "")  # Raffaelle, by time
+
+
+def test_plain_text_row_swimmer_gets_snapshot():
+    """End-to-end regression for the 54/79 drop: a swimmer whose ranking row
+    carries a plain-text time (no splits link) still produces a PB snapshot from
+    the rankings. Before the fix these were resolved to a tiref but then dropped
+    because their roster ``events`` were empty, so ``snap.pb_times`` was empty."""
+    from mediahub.swimmingresults import lookup_official_pbs
+
+    swimmers = {"s1": _sw("s1", "Maisie", "Pugh", age=13)}
+    meet = types.SimpleNamespace(
+        swimmers=swimmers, results=[_rr("s1")], start_date="2024-01-01", end_date=None
+    )
+    snaps = lookup_official_pbs(meet, {"s1"}, "Torfaen Dolphins")
+    assert "s1" in snaps  # not dropped — the plain-text time gave it a PB
+    assert "100FRLC" in snaps["s1"].pb_times
+    assert snaps["s1"].pb_times["100FRLC"][0]["time_sec"] == pytest.approx(69.50)
 
 
 def test_lookup_skips_when_club_not_found():
