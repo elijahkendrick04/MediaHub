@@ -209,8 +209,12 @@ class WebResearcher:
         if not results and _tinyfish_key():
             try:
                 results = self._search_tinyfish(query, num)
+                log.info("tinyfish search: %d result(s) for %r", len(results), query)
             except Exception:
-                pass
+                # Never silent: a swallowed error here is exactly why "is TinyFish
+                # even running?" was impossible to answer. Log it (with traceback)
+                # and fall through to the next backend.
+                log.warning("tinyfish search failed for %r", query, exc_info=True)
 
         # Cap 3: SearXNG metasearch is the PREFERRED backend when configured
         # (multi-engine, free, far sturdier than DDG HTML scraping). On any
@@ -263,6 +267,9 @@ class WebResearcher:
         # Cache and return
         if results:
             _save_cache(cache_key, [r.to_dict() for r in results])
+            log.info("search %r -> %d result(s) via %s", query, len(results), results[0].source)
+        else:
+            log.info("search %r -> 0 results (every backend empty/unavailable)", query)
 
         return results[:num]
 
