@@ -354,9 +354,14 @@ class TestExplainabilityKey:
         assert "Written by AI" in key
         assert "never invented" in key
 
-    def test_is_collapsible_disclosure(self):
+    def test_is_side_popup(self):
+        # The key now opens from a side-anchored tab into a slide-in dialog,
+        # rather than an inline <details> disclosure.
         key = webmod._render_explainability_key()
-        assert "<details" in key and "mh-explain-key" in key
+        assert "<details" not in key
+        assert 'class="mh-guide-tab"' in key
+        assert 'role="dialog"' in key
+        assert 'id="mh-guide-panel"' in key
 
 
 # =========================================================================== #

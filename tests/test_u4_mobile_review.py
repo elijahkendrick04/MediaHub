@@ -1,15 +1,7 @@
 """U.4 — mobile-aware review / approve.
 
-Two surfaces:
-
-1. The magic-link lite review page (``/m/<token>``) a volunteer opens on a
-   phone. It was approve/edit/reject only; U.4 enriches it with a run-level
-   summary (counts + progress bar), per-card quality band + confidence, and
-   a 'what to check' line — enough signal to approve informed, still
-   chrome-free and fast on one bar of signal.
-
-2. The desktop-primary review page (``/review/<id>``) gains responsive rules
-   so its triage controls become full-width 46px tap targets on a phone.
+The desktop-primary review page (``/review/<id>``) gains responsive rules so its
+triage controls become full-width 46px tap targets on a phone.
 """
 
 from __future__ import annotations
@@ -104,92 +96,6 @@ def _seed_run(world, run_id, *, profile_id, ranked=_RANKED):
         "recognition_report": {"ranked_achievements": ranked},
     }
     (runs_dir / f"{run_id}.json").write_text(json.dumps(data))
-
-
-def _mint(world, run_id, pid):
-    from mediahub.web.magic_links import mint_review_token
-
-    return mint_review_token(world.app.secret_key or "", run_id, pid)
-
-
-# ---------------------------------------------------------------------------
-# Magic-link page enrichment
-# ---------------------------------------------------------------------------
-
-
-def test_magic_page_shows_summary_and_progress(world):
-    pid = _save_org(world)
-    _seed_run(world, "mrun00000001", profile_id=pid)
-    token = _mint(world, "mrun00000001", pid)
-    c = world.app.test_client()
-    r = c.get(f"/m/{token}")
-    assert r.status_code == 200
-    html = r.get_data(as_text=True)
-    # Run-level summary: two undecided cards, a progress bar, the org name.
-    assert "to review" in html
-    assert "approved" in html
-    assert 'class="bar"' in html
-    assert 'class="summary"' in html
-    assert "Riverbend SC" in html  # brand signal: whose queue this is
-
-
-def test_magic_page_shows_band_and_confidence(world):
-    pid = _save_org(world)
-    _seed_run(world, "mrun00000002", profile_id=pid)
-    token = _mint(world, "mrun00000002", pid)
-    c = world.app.test_client()
-    html = c.get(f"/m/{token}").get_data(as_text=True)
-    # Quality bands + confidence labels surfaced as lite chips.
-    assert "ELITE" in html
-    assert "STRONG" in html
-    assert "High confidence" in html
-    assert "Medium confidence" in html
-    assert 'class="band"' in html
-    assert 'class="conf"' in html
-
-
-def test_magic_page_why_only_when_not_clean(world):
-    """The 'what to check' line shows for a needs_review card and is omitted
-    for a clean high-confidence safe card (no noise on the obvious post)."""
-    pid = _save_org(world)
-    _seed_run(world, "mrun00000003", profile_id=pid)
-    token = _mint(world, "mrun00000003", pid)
-    c = world.app.test_client()
-    html = c.get(f"/m/{token}").get_data(as_text=True)
-    # needs_review card's reason is shown...
-    assert "verify before posting" in html
-    # ...but the safe card's filler reason is not surfaced as a why line.
-    assert "High confidence evidence." not in html
-
-
-def test_magic_page_still_has_core_actions(world):
-    """Enrichment must not drop the approve / edit / reject controls."""
-    pid = _save_org(world)
-    _seed_run(world, "mrun00000004", profile_id=pid)
-    token = _mint(world, "mrun00000004", pid)
-    c = world.app.test_client()
-    html = c.get(f"/m/{token}").get_data(as_text=True)
-    assert 'value="approve"' in html
-    assert 'value="save_caption"' in html
-    assert 'value="reject"' in html
-    assert "<textarea" in html
-    # Touch-friendly buttons retained (min-height 48px on the lite page).
-    assert "min-height:48px" in html
-
-
-def test_magic_page_counts_reflect_approval(world):
-    """Approve one card via the magic action, then the summary should count
-    it as approved (the bar can't drift from the pills)."""
-    pid = _save_org(world)
-    _seed_run(world, "mrun00000005", profile_id=pid)
-    token = _mint(world, "mrun00000005", pid)
-    c = world.app.test_client()
-    # Approve card s1 through the magic action endpoint.
-    c.post(f"/m/{token}/card/s1", data={"action": "approve"})
-    html = c.get(f"/m/{token}").get_data(as_text=True)
-    assert "Approved" in html  # the per-card pill
-    # One of two cards approved now.
-    assert "1</b> approved" in html
 
 
 # ---------------------------------------------------------------------------

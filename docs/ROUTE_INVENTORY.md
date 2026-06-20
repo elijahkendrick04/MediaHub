@@ -98,8 +98,6 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_cards_bulk_export` | `POST` | `/api/runs/<run_id>/cards/bulk-export` |
 | `api_cards_bulk_status` | `POST` | `/api/runs/<run_id>/cards/bulk-status` |
 | `api_export` | `GET` | `/api/runs/<run_id>/export` |
-| `api_mint_magic_link` | `POST` | `/api/runs/<run_id>/magic-link` |
-| `api_revoke_magic_link` | `POST` | `/api/runs/<run_id>/magic-link/revoke` |
 | `api_run_newsletter` | `GET` | `/api/runs/<run_id>/newsletter` |
 | `api_run_reactions` | `GET` | `/api/runs/<run_id>/reactions` |
 | `api_recognition` | `GET` | `/api/runs/<run_id>/recognition` |
@@ -194,8 +192,6 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `login_post` | `POST` | `/login` |
 | `login_2fa` | `GET,POST` | `/login/2fa` |
 | `logout` | `GET,POST` | `/logout` |
-| `magic_review_page` | `GET` | `/m/<token>` |
-| `magic_card_action` | `POST` | `/m/<token>/card/<path:card_id>` |
 | `make_page` | `GET` | `/make` |
 | `content_type_intro` | `GET` | `/make/<ct>` |
 | `web_manifest` | `GET` | `/manifest.webmanifest` |

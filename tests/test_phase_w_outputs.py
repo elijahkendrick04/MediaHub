@@ -1,5 +1,5 @@
-"""Phase W output-layer tests — W.9 magic links, W.11/W.13 caption bundle,
-W.14 approval telemetry."""
+"""Phase W output-layer tests — W.11/W.13 caption bundle, W.14 approval
+telemetry."""
 
 from __future__ import annotations
 
@@ -10,16 +10,7 @@ import pytest
 from mediahub.observability.approval_telemetry import preference_summary, record_event
 from mediahub.web import ai_caption
 from mediahub.web.ai_caption import ClaudeUnavailableError, generate_caption_bundle
-from mediahub.web.magic_links import (
-    MagicLinkError,
-    MagicLinkExpired,
-    MagicLinkRevoked,
-    mint_review_token,
-    revoke_run_tokens,
-    verify_review_token,
-)
 
-SECRET = "test-secret-key"
 ORG = "testclub"
 
 
@@ -31,52 +22,6 @@ def _data_dir(tmp_path, monkeypatch):
 @pytest.fixture()
 def db(tmp_path):
     return tmp_path / "data.db"
-
-
-# ---------------------------------------------------------------------------
-# W.9 — magic links
-# ---------------------------------------------------------------------------
-
-
-class TestMagicLinks:
-    def test_mint_verify_roundtrip(self, db):
-        token = mint_review_token(SECRET, "run123", ORG, db_path=db)
-        out = verify_review_token(SECRET, token, db_path=db)
-        assert out == {"run_id": "run123", "profile_id": ORG}
-
-    def test_tampered_token_rejected(self, db):
-        token = mint_review_token(SECRET, "run123", ORG, db_path=db)
-        with pytest.raises(MagicLinkError):
-            verify_review_token(SECRET, token[:-3] + "abc", db_path=db)
-
-    def test_wrong_secret_rejected(self, db):
-        token = mint_review_token(SECRET, "run123", ORG, db_path=db)
-        with pytest.raises(MagicLinkError):
-            verify_review_token("other-secret", token, db_path=db)
-
-    def test_expiry_enforced(self, db):
-        token = mint_review_token(SECRET, "run123", ORG, db_path=db)
-        with pytest.raises(MagicLinkExpired):
-            # Negative max-age: any token, however fresh, is past its window.
-            verify_review_token(SECRET, token, max_age_hours=-1, db_path=db)
-
-    def test_revocation_kills_existing_tokens(self, db):
-        token = mint_review_token(SECRET, "run123", ORG, db_path=db)
-        revoke_run_tokens("run123", db_path=db)
-        with pytest.raises(MagicLinkRevoked):
-            verify_review_token(SECRET, token, db_path=db)
-        # A fresh token minted after revocation works.
-        token2 = mint_review_token(SECRET, "run123", ORG, db_path=db)
-        assert verify_review_token(SECRET, token2, db_path=db)["run_id"] == "run123"
-
-    def test_revocation_is_per_run(self, db):
-        t_other = mint_review_token(SECRET, "runOTHER", ORG, db_path=db)
-        revoke_run_tokens("run123", db_path=db)
-        assert verify_review_token(SECRET, t_other, db_path=db)["run_id"] == "runOTHER"
-
-    def test_no_secret_refused(self, db):
-        with pytest.raises(MagicLinkError):
-            mint_review_token("", "run123", ORG, db_path=db)
 
 
 # ---------------------------------------------------------------------------

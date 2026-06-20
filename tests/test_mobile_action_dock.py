@@ -2,15 +2,14 @@
 
 U.13 adds a fixed bottom-centre, thumb-reachable capsule (Create / Library /
 Approve) shown on the review/approve flow on mobile only, hidden on desktop.
-Inspired by Duties (duties.xyz); supports U.4 (approve from a phone).
+Inspired by Duties (duties.xyz).
 
 These tests pin the contract on three surfaces:
 
 * ``_layout(..., dock=...)`` — the dock renders only when a page opts in, with
   the right links and ARIA/JS hooks, and never otherwise.
 * ``/review/<run_id>`` — the real review page carries the dock; the generic
-  pages (home) and the review early-return error pages do not; the un-authed
-  magic-link mobile page (no app chrome) never grows one.
+  pages (home) and the review early-return error pages do not.
 * ``theme-components.css`` — the dock is desktop-hidden, mobile-shown, stacks
   below modals + above the bottom-tab bar it replaces, highlights the targeted
   card, and is a no-op under prefers-reduced-motion.
@@ -331,20 +330,6 @@ class TestDockOnReview:
         assert "couldn" in body.lower()  # the failure hero rendered
         assert 'class="mh-action-dock"' not in body
         assert 'class="mh-has-dock"' not in body
-
-    def test_magic_link_mobile_page_has_no_dock(self, env):
-        """The un-authed phone approval page (/m/<token>) is deliberately
-        chrome-free; it must never grow the app dock (a coach there can't
-        Create or open the Library)."""
-        run_id = self._seed(env)
-        mint = env["client"].post(f"/api/runs/{run_id}/magic-link")
-        assert mint.status_code == 200, mint.get_data(as_text=True)
-        url = (mint.get_json() or {}).get("url", "")
-        m = re.search(r"/m/([^/?\"]+)", url)
-        assert m, f"no magic token in {url!r}"
-        page = env["client"].get(f"/m/{m.group(1)}").get_data(as_text=True)
-        assert 'class="mh-action-dock"' not in page
-        assert "mh-has-dock" not in page  # not even the chrome/CSS is loaded here
 
 
 # ---------------------------------------------------------------------------

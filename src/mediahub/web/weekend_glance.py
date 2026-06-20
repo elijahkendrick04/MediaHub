@@ -274,8 +274,15 @@ def _safe_int(v) -> int:
 
 def render_weekend_glance_html(glance: Optional[WeekendGlance]) -> str:
     """Render the digest to an escaped HTML panel, or ``""`` when there is
-    nothing to show. All dynamic text (meet name, swimmer, headline, event) is
-    HTML-escaped; the counts are integers and the lede is a fixed template."""
+    nothing to show. All dynamic text (meet name) is HTML-escaped; the counts
+    are integers and the lede is a fixed template.
+
+    The panel is a headline lede + the PB / medal / standout / swims-analysed
+    stat tiles. It deliberately no longer reprints the top-ranked moments or a
+    "see all" jump link — that preview duplicated the ranked "Top achievements"
+    list rendered directly beneath it on the review surface. The structured
+    ``glance.top_moments`` are still computed (and unit-tested) for any other
+    consumer; this renderer simply doesn't reprint them."""
     if glance is None:
         return ""
 
@@ -310,22 +317,6 @@ def render_weekend_glance_html(glance: Optional[WeekendGlance]) -> str:
         f'<div class="v" data-mh-count="{glance.n_analysed}">{glance.n_analysed}</div></div>'
     )
 
-    moments_html = ""
-    for i, m in enumerate(glance.top_moments, start=1):
-        who = str(_h(m.swimmer)) or "Swimmer"
-        sub = str(_h(m.sub))
-        sub_html = f'<span class="mh-glance-moment-sub">{sub}</span>' if sub else ""
-        moments_html += (
-            f'<li class="mh-glance-moment" data-kind="{_h(m.kind)}" '
-            f'data-swimmer="{_h(m.swimmer)}" data-event="{_h(m.event)}">'
-            f'<span class="mh-glance-rank" aria-hidden="true">{i}</span>'
-            f'<span class="mh-glance-moment-body">'
-            f'<span class="mh-glance-moment-who">{who}</span>{sub_html}</span>'
-            f'<span class="mh-glance-chip mh-glance-chip--{_h(m.kind)}">{_h(m.kind_label)}</span>'
-            f"</li>"
-        )
-    moments_block = f'<ol class="mh-glance-moments">{moments_html}</ol>' if moments_html else ""
-
     return f"""
 <section class="card mh-glance mh-reveal" aria-labelledby="mh-glance-h">
   <div class="mh-glance-head">
@@ -333,6 +324,4 @@ def render_weekend_glance_html(glance: Optional[WeekendGlance]) -> str:
     <h2 id="mh-glance-h" class="mh-glance-lede">{lede_inner}</h2>
   </div>
   <div class="stat-block mh-glance-stats">{stats_html}</div>
-  {moments_block}
-  <a class="mh-glance-jump" href="#ach-list">See all {glance.n_achievements} below &darr;</a>
 </section>"""

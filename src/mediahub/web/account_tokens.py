@@ -1,7 +1,7 @@
 """Signed, expiring account tokens — password reset + email verification (PC.14).
 
-Same itsdangerous machinery as the W.9 magic links, keyed off the app
-SECRET_KEY with purpose-specific salts. The reset token additionally carries
+itsdangerous HMAC-signed tokens keyed off the app SECRET_KEY with
+purpose-specific salts. The reset token additionally carries
 a fingerprint of the account's *current* password hash, which makes every
 outstanding reset link single-use: the moment the password changes, the
 fingerprint stops matching and older links die — no server-side token table

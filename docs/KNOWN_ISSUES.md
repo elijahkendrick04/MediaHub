@@ -17,9 +17,9 @@ Live issues that we accept for now. Each has a workaround and is tracked in
   run-ids are 48-bit random (`uuid4().hex[:12]`) rather than HMAC-signed, and
   owner-less *legacy* runs stay readable by design so historical data isn't orphaned.
   Signed tokens would add defence-in-depth against guessing; the cross-tenant hole
-  itself is closed. *(Partially hardened by W.9, 2026-06-12: the magic-link
-  review surface uses HMAC-signed, expiring, revocable run-scoped tokens —
-  the signed-token pattern now exists in-tree for other routes to adopt.)*
+  itself is closed. *(The HMAC-signed, expiring-token pattern already exists in-tree
+  in `web/account_tokens.py` (password-reset / email-verification) for other routes
+  to adopt.)*
 
 ## Interpreter
 
