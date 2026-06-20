@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `49ca9a62b` · Merge pull request #918 from elijahkendrick04/claude/create-tiles-hero-polish
+**Last updated:** 2026-06-20 · `37f26b5b0` · feat: Typography system & text effects (roadmap 1.9) (#921)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
 - **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
 - **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
 - **1.12** · Phase 1 (Product) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
@@ -1219,16 +1218,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `ad2d4561e` | fix(1.9): satisfy CI hygiene — ruff format + bandit B324 |
+| 2026-06-20 | `5a83c33c1` | chore(1.9): dead-code sweep — drop unused effect/format constants |
+| 2026-06-20 | `46bdb6c79` | feat(1.9): director can request text effects; mark typography system shipped |
+| 2026-06-20 | `cc80e09a4` | feat(typography): web surface + formatting depth, wire uploads to render (1.9, build 4/4) |
+| 2026-06-20 | `dd03c5505` | feat(brand): AI font pairing, catalogue-bound + honest-error (1.9, build 3/4) |
+| 2026-06-20 | `2b88c396e` | feat(render): deterministic, APCA-policed text-effects engine (1.9, build 2/4) |
+| 2026-06-20 | `e6ac2b13a` | feat(typography): curated self-hosted font catalogue (1.9, build 1/4) |
 | 2026-06-20 | `c99d6fd0c` | fix(a11y): honour prefers-reduced-motion on the pipeline/intro diagram |
 | 2026-06-20 | `22428e9ab` | feat(pb): read PBs from the all-time rankings (covers lapsed swimmers; fewer fetches) |
 | 2026-06-20 | `7cc6bca80` | fix(pb): fall back to name+time when a file's member id isn't a valid tiref |
 | 2026-06-20 | `42841f6ac` | feat(pb): time-based matching (no nickname dictionary) + politeness throttle |
 | 2026-06-20 | `4974668c2` | docs(pb): register MEDIAHUB_SR_AGE_MIN/MAX in env inventory + .env.example |
-| 2026-06-20 | `fb81879ea` | fix(pb): prefer exact name match over fuzzy — Sussex 92→98% |
-| 2026-06-20 | `20db08d83` | feat(pb): extract member id (tiref) + age from HY3/CL2 — Swansea Uni 47→92% |
-| 2026-06-20 | `2a40ed93d` | fix(pb): comprehensive club roster + gender-fallback resolution (Sussex 0→92%) |
-| 2026-06-20 | `c3aa6f498` | polish(create): give each Create stub tile its own hero headline |
-| 2026-06-20 | `5c96572d9` | style(pb): ruff-format the swimmingresults adapter |
-| 2026-06-20 | `cbd95950d` | feat(pb): online-first PB baseline from swimmingresults.org (remove history store) |
-| 2026-06-20 | `122132e93` | Add swimmingresults.org reachability probe script |
 <!-- /ROADMAP:ACTIVITY -->
