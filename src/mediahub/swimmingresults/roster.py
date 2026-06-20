@@ -21,6 +21,7 @@ import threading
 import time
 from typing import Optional
 
+from .parse import time_to_cs
 from .transport import SR_BASE, SRFetchError, fetch
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,9 @@ _STROKE_SELECT = re.compile(r'<select[^>]*name=["\']Stroke["\'][^>]*>(.*?)</sele
 _OPTION = re.compile(r'<option[^>]*value=["\']([^"\']+)["\'][^>]*>(.*?)</option>', re.I | re.S)
 # A ranked swimmer: a tiref link whose anchor text is the swimmer's name.
 _TIREF_PAIR = re.compile(r"tiref=(\d+)[^>]*>\s*([^<]+?)\s*<", re.I)
+_ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
+# The swim time sits in the row's "splits" link (e.g. ...swimid=123>  58.16</a>).
+_SPLIT_TIME = re.compile(r"swimid=\d+[^>]*>\s*([0-9:]+\.[0-9]{2})", re.I)
 
 _STROKE_LABEL = re.compile(
     r"(\d+)\s*m?\s*(freestyle|backstroke|breaststroke|butterfly|.*medley)", re.I
@@ -107,11 +111,13 @@ def roster_slice(
     course: str,
     *,
     force_refresh: bool = False,
-) -> dict[str, str]:
-    """``{tiref: "Full Name"}`` for one club/sex/age/event/course, or ``{}``.
+) -> dict[str, tuple[str, Optional[int]]]:
+    """``{tiref: (full_name, time_cs)}`` for one club/sex/age/event/course.
 
-    Cached per slice. A fetch failure returns ``{}`` (a miss — the caller asserts
-    no PB rather than guess).
+    ``time_cs`` is the swimmer's ranked time for THIS event (centiseconds, or
+    None) — used to disambiguate same-surname siblings by performance instead of
+    a hand-maintained first-name nickname list. Cached per slice. A fetch failure
+    returns ``{}`` (a miss — the caller asserts no PB rather than guess).
     """
     sex = _sex_param(gender)
     pool = _POOL.get((course or "").upper())
@@ -136,12 +142,17 @@ def roster_slice(
         log.info("swimmingresults: roster slice failed (%s age %s): %s", club_code, age, exc)
         return {}
 
-    out: dict[str, str] = {}
-    for tiref, name in _TIREF_PAIR.findall(body):
-        name = name.strip()
+    out: dict[str, tuple[str, Optional[int]]] = {}
+    for row in _ROW.findall(body):
+        nm = _TIREF_PAIR.search(row)
+        if not nm:
+            continue
+        tiref, name = nm.group(1), nm.group(2).strip()
         # Skip non-name anchors (the page also links a few nav items by id).
-        if name and not name.isdigit() and len(name) >= 3:
-            out.setdefault(tiref, name)
+        if not name or name.isdigit() or len(name) < 3:
+            continue
+        tm = _SPLIT_TIME.search(row)
+        out.setdefault(tiref, (name, time_to_cs(tm.group(1)) if tm else None))
     with _LOCK:
         _SLICE_CACHE[key] = dict(out)
     return out

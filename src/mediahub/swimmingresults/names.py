@@ -173,6 +173,28 @@ def name_match(first_a: str, last_a: str, first_b: str, last_b: str) -> bool:
     return _close(fa.split()[0], fb.split()[0])
 
 
+def surname_match(last_a: str, last_b: str) -> bool:
+    """True if two surnames plausibly denote the same family name — exact (folded),
+    a shared token (double-barrelled), or a small typo away ("Gallahger" /
+    "Gallagher"). No nickname list involved: surnames are stable, so this lets the
+    matcher lean on surname + age + time instead of a hand-maintained first-name
+    dictionary."""
+    la, lb = fold(last_a), fold(last_b)
+    if not la or not lb:
+        return False
+    if la == lb:
+        return True
+    if set(la.split()) & set(lb.split()):
+        return True
+    return _close(la.replace(" ", ""), lb.replace(" ", ""))
+
+
+def first_lead(name: str) -> str:
+    """The folded leading given-name token of a full name."""
+    f = fold(name)
+    return f.split()[0] if f else ""
+
+
 def split_full_name(full: str) -> tuple[str, str]:
     """Split a roster display name ("Holly Greenslade", "Greenslade, Holly")
     into (first, last). Best-effort; the matcher is order-tolerant anyway."""

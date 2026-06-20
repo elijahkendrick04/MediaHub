@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time as _time
 import urllib.error
 import urllib.request
 
@@ -32,10 +34,50 @@ _UA = (
 
 _DEFAULT_TIMEOUT = 25.0
 
+# Politeness throttle: a process-wide minimum interval between requests to
+# swimmingresults.org, so a big roster sweep (hundreds of slices, fetched by a
+# thread pool) can't hammer the site and get the deployment's IP blocked. This
+# is a public governing-body site, not a paid API — being a good citizen keeps
+# the free, first-party transport working at "anyone-anytime" scale. Default
+# ~8 req/s; tune with MEDIAHUB_SR_RATE_PER_SEC (0 disables).
+_DEFAULT_RATE_PER_SEC = 8.0
+_RATE_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
+
 
 class SRFetchError(RuntimeError):
     """Raised when a swimmingresults.org page could not be fetched (transport
     error, timeout, or a non-200 status)."""
+
+
+def _rate_per_sec() -> float:
+    raw = os.environ.get("MEDIAHUB_SR_RATE_PER_SEC", "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return _DEFAULT_RATE_PER_SEC
+
+
+def _throttle() -> None:
+    """Block until at least min-interval has passed since the last request.
+
+    Serialises the *spacing* of requests across all worker threads (the actual
+    fetches still overlap on the network); a tiny, fair gate that bounds the
+    request rate to the site."""
+    rate = _rate_per_sec()
+    if rate <= 0:
+        return
+    min_interval = 1.0 / rate
+    global _LAST_REQUEST_AT
+    with _RATE_LOCK:
+        now = _time.monotonic()
+        wait = _LAST_REQUEST_AT + min_interval - now
+        if wait > 0:
+            _time.sleep(wait)
+            now = _time.monotonic()
+        _LAST_REQUEST_AT = now
 
 
 def _timeout() -> float:
@@ -64,6 +106,7 @@ def fetch(url: str, *, timeout: float | None = None) -> str:
             "Referer": SR_BASE + "/",
         },
     )
+    _throttle()
     try:
         with urllib.request.urlopen(req, timeout=timeout or _timeout()) as resp:
             status = getattr(resp, "status", 200) or 200

@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 from mediahub.pipeline.pb_bridge import BridgedSnapshot
 
-from .names import fold, name_match, split_full_name
+from .names import first_lead, fold, name_match, split_full_name, surname_match
 from .parse import parse_personal_best
 from .roster import _load_event_numbers, roster_slice
 from .transport import SR_BASE, SRFetchError, fetch
@@ -53,9 +53,10 @@ _AGE_MAX_DEFAULT = 19
 # roster cache makes repeat runs within a worker free.
 _DEFAULT_BUDGET = 1500
 
-# In-process club-roster cache: (club_code, sex, ages, events) -> {tiref: name}.
-# A club's roster changes slowly, so within a worker's lifetime we build it once.
-_ROSTER_CACHE: dict[tuple, dict[str, str]] = {}
+# In-process club-roster cache: (club_code, sex, ages, events) ->
+# {tiref: {"name", "times"}}. A club's roster changes slowly, so within a
+# worker's lifetime we build it once.
+_ROSTER_CACHE: dict[tuple, dict[str, dict]] = {}
 
 
 def _budget() -> int:
@@ -127,13 +128,15 @@ def _build_club_roster(
     *,
     force_refresh: bool,
     budget: int,
-) -> "tuple[dict[str, str], int]":
-    """The club's full ``{tiref: name}`` roster for one sex — the union across
-    every (age, event, course). Cached in-process. Returns (roster, fetches).
+) -> "tuple[dict[str, dict], int]":
+    """The club's full roster for one sex — ``{tiref: {"name", "times"}}`` where
+    ``times`` is ``{event_key: best_time_cs}`` across every (age, event, course).
+    Cached in-process. Returns (roster, fetches).
 
     Sweeping the whole roster (not just a few events) is what actually finds the
-    swimmers: every ranked swimmer of the club appears here, so a name match is
-    reliable. Bounded by ``budget``."""
+    swimmers; capturing each swimmer's times lets us tell same-surname siblings
+    apart by performance instead of a hand-maintained nickname list. Bounded by
+    ``budget``."""
     cache_key = (club_code, sex, tuple(ages), tuple(events))
     if not force_refresh and cache_key in _ROSTER_CACHE:
         return _ROSTER_CACHE[cache_key], 0
@@ -145,16 +148,23 @@ def _build_club_roster(
         for course in _COURSES
     ][: max(0, budget)]
 
-    roster: dict[str, str] = {}
+    def _one(j: tuple) -> "tuple[str, dict[str, tuple[str, Optional[int]]]]":
+        age, dist, stroke, course = j
+        event_key = f"{dist}{stroke}{course}"
+        return event_key, roster_slice(
+            club_code, sex, age, dist, stroke, course, force_refresh=force_refresh
+        )
+
+    roster: dict[str, dict] = {}
     if jobs:
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
-            for sl in pool.map(
-                lambda j: roster_slice(
-                    club_code, sex, j[0], j[1], j[2], j[3], force_refresh=force_refresh
-                ),
-                jobs,
-            ):
-                roster.update(sl)
+            for event_key, sl in pool.map(_one, jobs):
+                for tiref, (name, time_cs) in sl.items():
+                    info = roster.setdefault(tiref, {"name": name, "times": {}})
+                    if time_cs is not None:
+                        prev = info["times"].get(event_key)
+                        if prev is None or time_cs < prev:
+                            info["times"][event_key] = time_cs
     _ROSTER_CACHE[cache_key] = roster
     return roster, len(jobs)
 
@@ -176,9 +186,8 @@ def _resolve_tirefs(
     """
     # Per-swimmer candidate sexes. The rankings query needs F or M; when the file
     # doesn't give a usable gender ("X"/blank — common when a PDF's event headers
-    # don't parse a sex) we search BOTH rosters. The unique-match requirement
-    # still guards against a wrong hit, so this recovers those swimmers safely.
-    members: list[tuple[str, str, str, tuple[str, ...]]] = []
+    # don't parse a sex) we search BOTH rosters.
+    members: list[tuple[str, str, str, tuple[str, ...], dict[str, int]]] = []
     sex_ages: dict[str, set[int]] = {"F": set(), "M": set()}
     for key, sw, results in swimmers:
         first = getattr(sw, "first_name", "") or ""
@@ -190,13 +199,13 @@ def _resolve_tirefs(
         ages = _age_candidates(sw, results, meet_year)
         for s in sexes:
             sex_ages[s] |= ages
-        members.append((key, first, last, sexes))
+        members.append((key, first, last, sexes, _meet_times(results)))
 
     events = sorted(_load_event_numbers().keys())
     if not events or not members:
         return {}
 
-    rosters: dict[str, dict[str, str]] = {}
+    rosters: dict[str, dict[str, dict]] = {}
     fetches = 0
     for s in ("F", "M"):
         if not sex_ages[s] or fetches >= budget:
@@ -212,44 +221,107 @@ def _resolve_tirefs(
         fetches += used
 
     resolved: dict[str, str] = {}
-    for key, first, last, sexes in members:
-        pool: dict[str, str] = {}
+    for key, first, last, sexes, meet_times in members:
+        pool: dict[str, dict] = {}
         for s in sexes:
             pool.update(rosters.get(s, {}))
-        hit = _best_name_match(first, last, pool)
+        hit = _match_one(first, last, meet_times, pool)
         if hit:
             resolved[key] = hit
     return resolved
 
 
-def _best_name_match(first: str, last: str, index: dict[str, str]) -> Optional[str]:
-    """Return the tiref whose roster name matches (first,last), if unambiguous.
+def _meet_times(results) -> dict[str, int]:
+    """``{event_key: best finals time_cs}`` for one swimmer's swims at this meet."""
+    out: dict[str, int] = {}
+    for r in results:
+        cs = getattr(r, "finals_time_cs", None)
+        if not cs or cs <= 0:
+            continue
+        ek = f"{getattr(r, 'distance', '')}{getattr(r, 'stroke', '')}{getattr(r, 'course', '')}"
+        if ek and (ek not in out or cs < out[ek]):
+            out[ek] = int(cs)
+    return out
 
-    An EXACT (accent-folded) surname + leading-first-name match wins outright:
-    otherwise a real swimmer's exact entry could be refused just because a
-    *different* swimmer fuzzy-matched (e.g. "Sebastian Baker" vs "Sebastian
-    Walker"). Only when there's no exact match do we consider the fuzzy
-    (nickname/spelling-tolerant) candidates, and then only if unique.
+
+def _time_plausible(meet_times: dict[str, int], cand_times: dict[str, int]) -> bool:
+    """A meet swim can't be much faster than that swimmer's own lifetime best, so
+    if the meet time is >7% faster than the candidate's ranked best in any shared
+    event, it's a different (faster) person — rule the candidate out. With no
+    shared event we can't judge, so we don't rule out."""
+    for ek, mt in meet_times.items():
+        ct = cand_times.get(ek)
+        if ct and mt and mt < ct * 0.93:
+            return False
+    return True
+
+
+def _closest_by_time(
+    meet_times: dict[str, int], cands: list[str], roster: dict[str, dict]
+) -> Optional[str]:
+    """Among same-surname candidates, the one whose ranked times best match this
+    swimmer's meet times — a clear winner identifies the right sibling without
+    any first-name nickname rule."""
+    scored: list[tuple[float, str]] = []
+    for t in cands:
+        ct = roster[t]["times"]
+        gaps = [abs(mt - ct[ek]) / ct[ek] for ek, mt in meet_times.items() if ct.get(ek) and mt]
+        if gaps:
+            scored.append((min(gaps), t))
+    if not scored:
+        return None
+    scored.sort()
+    # Accept only a decisive winner (best gap clearly tighter than the runner-up).
+    if len(scored) == 1 or scored[0][0] <= 0.02 or scored[0][0] < scored[1][0] * 0.5:
+        return scored[0][1]
+    return None
+
+
+def _match_one(
+    first: str, last: str, meet_times: dict[str, int], roster: dict[str, dict]
+) -> Optional[str]:
+    """Resolve one swimmer to a tiref within a club roster, WITHOUT relying on a
+    hand-maintained nickname list:
+
+      1. exact surname + leading-first-name → win (the reliable common case);
+      2. else surname match (+ time sanity) — if unique, it's them regardless of
+         the first name (so "Lotty"→Charlotte, "JJ"→Jonathan just work);
+      3. else same-surname siblings → the closest race time picks the right one;
+      4. else the nickname/spelling-tolerant fuzzy match, only if unique.
     """
-    ff = fold(first)
     fl = fold(last)
-    f_lead = ff.split()[0] if ff else ""
-    exact: list[str] = []
-    fuzzy: list[str] = []
-    for tiref, full in index.items():
-        rf, rl = split_full_name(full)
-        rff = fold(rf)
-        r_lead = rff.split()[0] if rff else ""
-        if fl and f_lead and fold(rl) == fl and r_lead == f_lead:
-            exact.append(tiref)
-        elif name_match(first, last, rf, rl):
-            fuzzy.append(tiref)
+    f_lead = first_lead(first)
+
+    # 1) exact surname + leading first name.
+    exact = [
+        t
+        for t, info in roster.items()
+        if fl
+        and f_lead
+        and fold(split_full_name(info["name"])[1]) == fl
+        and first_lead(split_full_name(info["name"])[0]) == f_lead
+    ]
     if len(set(exact)) == 1:
         return exact[0]
-    # Unique fuzzy match only when no exact candidate exists — within one
-    # club+age pool a name should resolve to one person; otherwise refuse
-    # rather than risk the wrong id.
-    if not exact and len(set(fuzzy)) == 1:
+
+    # 2/3) surname candidates, ruled by time.
+    surname_cands = [
+        t for t, info in roster.items() if surname_match(last, split_full_name(info["name"])[1])
+    ]
+    plausible = [t for t in surname_cands if _time_plausible(meet_times, roster[t]["times"])]
+    pool = plausible or surname_cands
+    if len(set(pool)) == 1:
+        return pool[0]
+    if len(pool) > 1:
+        winner = _closest_by_time(meet_times, pool, roster)
+        if winner:
+            return winner
+
+    # 4) fuzzy first-name fallback (nickname/spelling), only if unique.
+    fuzzy = [
+        t for t, info in roster.items() if name_match(first, last, *split_full_name(info["name"]))
+    ]
+    if len(set(fuzzy)) == 1:
         return fuzzy[0]
     return None
 

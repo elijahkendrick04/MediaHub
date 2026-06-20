@@ -62,15 +62,26 @@ FORM_PAGE = """
 </form>
 """
 
-ROSTER_PAGE = """
-<html><body>
-<table>
-<tr><td>1</td><td><a href="biogs_details.php?tiref=1153374">Holly Greenslade</a></td><td>1:06.13</td></tr>
-<tr><td>2</td><td><a href="biogs_details.php?tiref=1339695">Theodora Taylor</a></td><td>1:07.20</td></tr>
-<tr><td>3</td><td><a href="biogs_details.php?tiref=1361917">Charlie Sherrard</a></td><td>1:08.00</td></tr>
-</table>
-</body></html>
-"""
+def _row(tiref, name, yob, swimid, time):
+    return (
+        f'<tr><td>1</td>'
+        f'<td><a href="/individualbest/personal_best.php?tiref={tiref}&mode=A">{name}</a></td>'
+        f'<td>Torfaen D</td><td>{yob}</td><td>Meet</td><td>01/01/24</td>'
+        f'<td><a href="/splits/index.php?swimid={swimid}" class="splits-lightbox"> {time}</a></td></tr>'
+    )
+
+
+# Two same-surname siblings (Tincombe) to exercise time-based disambiguation
+# without any first-name nickname rule.
+ROSTER_PAGE = (
+    "<html><body><table>"
+    + _row("1153374", "Holly Greenslade", "09", "111", "1:06.13")
+    + _row("1339695", "Theodora Taylor", "09", "112", "1:07.20")
+    + _row("1361917", "Charlie Sherrard", "10", "113", "1:08.00")
+    + _row("2001", "Raffaelle Tincombe", "11", "114", "1:05.00")
+    + _row("2002", "Matilda Tincombe", "12", "115", "1:20.00")
+    + "</table></body></html>"
+)
 
 
 def _fake_fetch(url: str, *, timeout=None) -> str:
@@ -163,12 +174,14 @@ def test_resolve_club_code_fuzzy():
     assert resolve_club_code("Nonexistent SC") is None
 
 
-def test_roster_slice_reads_tiref_pairs():
+def test_roster_slice_reads_name_and_time():
     from mediahub.swimmingresults.roster import roster_slice, event_number
 
     assert event_number(100, "FR") == "2"
     sl = roster_slice("TDOYEWAY", "F", 13, 100, "FR", "LC")
-    assert sl["1153374"] == "Holly Greenslade"
+    name, time_cs = sl["1153374"]
+    assert name == "Holly Greenslade"
+    assert time_cs == 6613  # 1:06.13 parsed from the splits link
     assert "1339695" in sl
 
 
@@ -184,10 +197,10 @@ def _sw(key, first, last, gender="F", age=None, asa=None):
     )
 
 
-def _rr(key, dist=100, stroke="FR", course="LC", band="13"):
+def _rr(key, dist=100, stroke="FR", course="LC", band="13", cs=9999):
     return types.SimpleNamespace(
         swimmer_key=key, age_band=band, distance=dist, stroke=stroke,
-        course=course, gender="F", finals_time_cs=9999,
+        course=course, gender="F", finals_time_cs=cs,
     )
 
 
@@ -215,6 +228,34 @@ def test_lookup_official_pbs_asa_and_roster_and_miss():
     assert s1.pb_times["50FRLC"][0]["time_sec"] == pytest.approx(30.91)
     assert s1.pb_times["50FRLC"][0]["date_iso"] == "2022-04-03"
     assert s1.tiref == "s1"  # snapshot is keyed by the canonical swimmer_key
+
+
+def test_match_by_unique_surname_without_nickname():
+    """A first name with no nickname rule still resolves when the surname is
+    unique in the club — the first name is not load-bearing."""
+    from mediahub.swimmingresults import lookup_official_pbs
+
+    swimmers = {"s1": _sw("s1", "Zzqq", "Greenslade", age=13)}  # nonsense first name
+    meet = types.SimpleNamespace(
+        swimmers=swimmers, results=[_rr("s1")], start_date="2024-01-01", end_date=None
+    )
+    snaps = lookup_official_pbs(meet, {"s1"}, "Torfaen Dolphins")
+    assert "s1" in snaps  # matched Holly Greenslade by unique surname, no nickname
+
+
+def test_siblings_disambiguated_by_time_not_nickname():
+    """Two same-surname siblings, a first name with no nickname rule ("Raffy"):
+    the meet time picks the right one (Raffaelle, tiref 2001 — 1:05 — not Matilda
+    at 1:20)."""
+    from mediahub.swimmingresults import lookup_official_pbs
+
+    swimmers = {"s1": _sw("s1", "Raffy", "Tincombe", age=13)}
+    meet = types.SimpleNamespace(
+        swimmers=swimmers, results=[_rr("s1", cs=6550)], start_date="2024-01-01", end_date=None
+    )
+    snaps = lookup_official_pbs(meet, {"s1"}, "Torfaen Dolphins")
+    assert "s1" in snaps
+    assert "tiref=2001" in (snaps["s1"].source_url or "")  # Raffaelle, by time
 
 
 def test_lookup_skips_when_club_not_found():
