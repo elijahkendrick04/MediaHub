@@ -23289,7 +23289,10 @@ Relay team broke club record"></textarea>
             ),
             "autonomy": ("Autonomy", lambda prof: _render_settings_autonomy_section(prof)),
             "clubdata": ("Club data", lambda prof: _render_settings_clubdata_section()),
-            "typography": ("Typography & fonts", lambda prof: _render_settings_typography_section(prof)),
+            "typography": (
+                "Typography & fonts",
+                lambda prof: _render_settings_typography_section(prof),
+            ),
             "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
             "account": ("Account", lambda prof: _render_settings_account_section()),
             "status": ("System status", lambda prof: _render_settings_status_public_section()),
@@ -23360,12 +23363,12 @@ Relay team broke club record"></textarea>
             moods = ", ".join(f.mood_tags[:4])
             cards += (
                 '<div class="card" style="padding:12px 14px">'
-                f'<div style="font-family:\'{_h(f.family)}\',sans-serif;font-size:21px;'
+                f"<div style=\"font-family:'{_h(f.family)}',sans-serif;font-size:21px;"
                 f'font-weight:700;line-height:1.1">{_h(f.family)}</div>'
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">'
                 f"{_h(f.klass)} · {_h(moods)}</div>"
                 f'<div style="font-size:11px;color:var(--ink-muted);margin-top:2px">'
-                f'{_h(f.licence)} · {_h(", ".join(f.surfaces))}</div>'
+                f"{_h(f.licence)} · {_h(', '.join(f.surfaces))}</div>"
                 "</div>"
             )
         catalogue = (
@@ -23418,7 +23421,8 @@ Relay team broke club record"></textarea>
             )
         role_opts = "".join(f'<option value="{_h(r)}">{_h(r)}</option>' for r in _fi.ALLOWED_ROLES)
         upload = (
-            '<div class="card"><h2 style="margin-top:0">Your club fonts</h2>' + owned
+            '<div class="card"><h2 style="margin-top:0">Your club fonts</h2>'
+            + owned
             + '<hr style="margin:14px 0;border:none;border-top:1px solid var(--line,#2a2a2a)">'
             f'<form method="post" action="{url_for("typography_upload_font")}" '
             'enctype="multipart/form-data">'
@@ -23524,9 +23528,9 @@ Relay team broke club record"></textarea>
             '<section class="mh-hero"><span class="mh-hero-eyebrow">Typography</span>'
             '<h1 style="margin-bottom:0">Suggested pairing</h1></section>'
             '<div class="card"><p style="font-size:15px">'
-            f'<strong>Headline:</strong> {_h(result["headline_family"])}<br>'
-            f'<strong>Body:</strong> {_h(result["body_family"])}<br>'
-            f'<strong>Numerals:</strong> {_h(result["numeral_family"])}</p>'
+            f"<strong>Headline:</strong> {_h(result['headline_family'])}<br>"
+            f"<strong>Body:</strong> {_h(result['body_family'])}<br>"
+            f"<strong>Numerals:</strong> {_h(result['numeral_family'])}</p>"
             f'<p style="color:var(--ink-dim)">{_h(result["reason"])}</p>{corrected}'
             f'<a class="btn" href="{back}">Back to typography</a></div>'
         )
@@ -23832,7 +23836,7 @@ Relay team broke club record"></textarea>
         for v in list_voices():
             tag = "local" if v.local else "online"
             voice_rows += (
-                "<li style=\"margin-bottom:4px\">"
+                '<li style="margin-bottom:4px">'
                 f"<strong>{_h(v.name or v.id)}</strong> "
                 f'<span class="dim">· {_h(v.language)} · {_h(v.provider)} ({tag})'
                 f"{(' · ' + _h(v.description)) if v.description else ''}</span></li>"

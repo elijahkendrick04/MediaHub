@@ -28,6 +28,7 @@ Colours are passed in as resolved hex (for the APCA decision) but emitted as the
 card's ``--mh-*`` custom properties (so an effect tracks medal tints / role
 re-assignment exactly like the rest of the card).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,9 +39,8 @@ from urllib.parse import quote
 def _esc(s: object) -> str:
     """Minimal HTML-escape (kept local to avoid a render.py import cycle)."""
     s = "" if s is None else str(s)
-    return (
-        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-    )
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
 
 # Closed vocabulary. Mirrored by ``creative_brief.design_spec.TEXT_EFFECTS`` (a
 # drift test keeps the two identical); the renderer here is the authority that
@@ -123,10 +123,7 @@ def _style_for(name: str) -> str:
     if name == "shadow":
         return "text-shadow:0 0.045em 0.14em rgba(0,0,0,0.45);"
     if name == "lift":
-        return (
-            "text-shadow:0 0.02em 0.02em rgba(0,0,0,0.35),"
-            "0 0.085em 0.22em rgba(0,0,0,0.45);"
-        )
+        return "text-shadow:0 0.02em 0.02em rgba(0,0,0,0.35),0 0.085em 0.22em rgba(0,0,0,0.45);"
     if name == "echo":
         return (
             "text-shadow:0.055em 0.055em 0 rgba(0,0,0,0.18),"
@@ -134,10 +131,7 @@ def _style_for(name: str) -> str:
             "0.165em 0.165em 0 rgba(0,0,0,0.05);"
         )
     if name == "glitch":
-        return (
-            "text-shadow:-0.022em 0 0 rgba(255,0,86,0.62),"
-            "0.022em 0 0 rgba(0,224,255,0.62);"
-        )
+        return "text-shadow:-0.022em 0 0 rgba(255,0,86,0.62),0.022em 0 0 rgba(0,224,255,0.62);"
     if name == "neon":
         # Fill inherited (stays role-legible); glow in the brand accent.
         return (
@@ -216,7 +210,9 @@ def effect_css(
         return EffectResult("outline", "outline", _outline_style(), False, True, False, "")
 
     if req == "warp":
-        return EffectResult("warp", "warp", _warp_style(), False, _is_legible(ink, ground), False, "")
+        return EffectResult(
+            "warp", "warp", _warp_style(), False, _is_legible(ink, ground), False, ""
+        )
 
     if req == "background":
         # Highlight box: ink chosen legible on the accent box by construction.
@@ -342,7 +338,9 @@ def curve_text_svg(
 def _short_hash(s: str) -> str:
     import hashlib
 
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:10]
+    # Not security-sensitive: just a stable, collision-resistant-enough id for an
+    # inline SVG <path> fragment (so two curved slots on a page don't clash).
+    return hashlib.sha1(s.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
 
 
 __all__ = [

@@ -14,6 +14,7 @@ so an arbitrary caption can never inject CSS or markup (CLAUDE.md security focus
 "XSS in generated captions"). Colours resolve to the card's ``--mh-*`` role
 tokens or a validated hex; anything else is dropped, never echoed.
 """
+
 from __future__ import annotations
 
 import re
@@ -50,9 +51,7 @@ _MAX_WEIGHT = 900
 def escape(text: object) -> str:
     """HTML-escape any value (the single escaping gate for this module)."""
     s = "" if text is None else str(text)
-    return (
-        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-    )
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 def _safe_colour(value: Optional[str]) -> Optional[str]:
@@ -172,7 +171,7 @@ def render_list(items: list[str], *, ordered: bool = False, marker: Optional[str
     mk = marker if marker in valid else valid[0]
     tag = "ol" if ordered else "ul"
     if not ordered and mk == "dash":
-        lis = "".join(f'<li>&#8211; {escape(it)}</li>' for it in items)
+        lis = "".join(f"<li>&#8211; {escape(it)}</li>" for it in items)
         return f'<ul style="list-style:none;padding-left:1em">{lis}</ul>'
     lis = "".join(f"<li>{escape(it)}</li>" for it in items)
     return f'<{tag} style="list-style-type:{mk}">{lis}</{tag}>'
@@ -187,8 +186,10 @@ def auto_link(text: str) -> str:
     """
     out = escape(text)
     return _URL_RE.sub(
-        lambda m: f'<a href="{m.group(1)}" rel="noopener noreferrer nofollow" '
-        f'target="_blank">{m.group(1)}</a>',
+        lambda m: (
+            f'<a href="{m.group(1)}" rel="noopener noreferrer nofollow" '
+            f'target="_blank">{m.group(1)}</a>'
+        ),
         out,
     )
 
@@ -231,7 +232,9 @@ class Misspelling:
     end: int
 
 
-def spellcheck(text: str, *, dictionary: Optional[set[str]] = None) -> tuple[bool, list[Misspelling]]:
+def spellcheck(
+    text: str, *, dictionary: Optional[set[str]] = None
+) -> tuple[bool, list[Misspelling]]:
     """Honest spellcheck seam. Returns ``(available, misspellings)``.
 
     Deterministic and dependency-light: when a ``dictionary`` (a set of

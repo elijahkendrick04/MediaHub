@@ -20,10 +20,11 @@ The catalogue is deterministic, offline data: no network, no AI. Keeping it in
 lock-step with the on-disk assets is :func:`verify_assets`' job (exercised by
 ``tests/test_font_catalog.py``).
 """
+
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -46,12 +47,36 @@ CLASS_VOCAB: tuple[str, ...] = ("display", "sans", "serif", "mono")
 ROLE_VOCAB: tuple[str, ...] = ("display", "headline", "body", "numeric", "mono", "accent")
 SURFACE_VOCAB: tuple[str, ...] = ("web", "renderer", "reel")
 MOOD_VOCAB: tuple[str, ...] = (
-    "bold", "impact", "heavy", "stadium", "loud", "athletic", "condensed",
-    "poster", "chunky", "retro", "playful", "geometric", "modern", "technical",
-    "clean", "precise", "neutral", "legible", "ui", "friendly", "data",
-    "monospace", "editorial", "elegant", "expressive", "warm", "sporty",
+    "bold",
+    "impact",
+    "heavy",
+    "stadium",
+    "loud",
+    "athletic",
+    "condensed",
+    "poster",
+    "chunky",
+    "retro",
+    "playful",
+    "geometric",
+    "modern",
+    "technical",
+    "clean",
+    "precise",
+    "neutral",
+    "legible",
+    "ui",
+    "friendly",
+    "data",
+    "monospace",
+    "editorial",
+    "elegant",
+    "expressive",
+    "warm",
+    "sporty",
     # reserved for per-org uploads surfaced through org_catalog()
-    "custom", "brand",
+    "custom",
+    "brand",
 )
 
 
@@ -318,7 +343,7 @@ def verify_assets() -> list[str]:
                 problems.append(f"{f.slug}: missing reel woff2 {ep.name}")
             if f"'{f.family}'" not in renderer_css:
                 problems.append(f"{f.slug}: family {f.family!r} not in _shared.css")
-            if f"\"{f.family}\"" not in reel_ts and f"'{f.family}'" not in reel_ts:
+            if f'"{f.family}"' not in reel_ts and f"'{f.family}'" not in reel_ts:
                 problems.append(f"{f.slug}: family {f.family!r} not in fonts.ts")
         if f.web_slug:
             hits = list(_WEB_FONTS.glob(f"{f.web_slug}-*.woff2"))

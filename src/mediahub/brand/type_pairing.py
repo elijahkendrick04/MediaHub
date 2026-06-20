@@ -16,6 +16,7 @@ provider is configured. :meth:`Pairing.typography_pair` maps the result back ont
 that existing renderer key, so a chosen pairing flows through the render path
 already in place.
 """
+
 from __future__ import annotations
 
 import logging
@@ -186,9 +187,7 @@ def _pairing_from_raw(raw: dict) -> Pairing:
     body, c2 = _coerce_role(
         raw.get("body"), _is_body, prefer=("inter", "space-grotesk", "hanken-grotesk")
     )
-    numeral, c3 = _coerce_role(
-        raw.get("numeral"), _is_numeral, prefer=("jetbrains-mono", "anton")
-    )
+    numeral, c3 = _coerce_role(raw.get("numeral"), _is_numeral, prefer=("jetbrains-mono", "anton"))
     reason = str(raw.get("reason") or "").strip()[:240]
     if not reason:
         reason = f"{_family(headline)} headlines over {_family(body)} body, {_family(numeral)} for times."
