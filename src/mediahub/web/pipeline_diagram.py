@@ -335,7 +335,8 @@ PIPELINE_DIAGRAM_CSS = """
 /* kit) -> MediaHub engine -> writes (captions / graphics / reels).      */
 /* SVG geometry + CSS keyframes; reuses the blueprint grid motif via an  */
 /* in-SVG <pattern>. The static wires + chips read fine with motion      */
-/* frozen, so prefers-reduced-motion (handled globally) settles clean.   */
+/* frozen, so prefers-reduced-motion (gated at the foot of this file)     */
+/* settles clean.                                                         */
 /* ===================================================================== */
 .mh-pl-lede {
   max-width: 66ch;
@@ -439,8 +440,9 @@ html:not(.mh-signed-in) .mh-pl-stage {
 .mh-pl-dot--read { fill: var(--ink); filter: drop-shadow(0 0 4px rgba(245,242,232,0.35)); }
 
 /* Travelling pulses — INVISIBLE at rest (opacity:0) and the keyframes END at
-   opacity:0, so the global reduced-motion freeze leaves the diagram as clean
-   static wires. pathLength="100" makes the dash maths path-length independent. */
+   opacity:0, so the reduced-motion freeze (foot of this file) leaves the
+   diagram as clean static wires. pathLength="100" makes the dash maths
+   path-length independent. */
 .mh-pl-pulse {
   fill: none;
   stroke-width: 2.4;
@@ -465,5 +467,19 @@ html:not(.mh-signed-in) .mh-pl-stage {
 @keyframes mh-pl-breathe {
   0%, 100% { filter: drop-shadow(0 0 10px var(--lane-glow)); }
   50%      { filter: drop-shadow(0 0 18px var(--lane-glow)); }
+}
+
+/* Honour the reduced-motion cohort. The travelling pulses rest at opacity:0
+   and the dots/engine settle to their base glow, so freezing every animation
+   leaves clean static wires + a steady engine — the "settled" state the
+   diagram was designed around. This rule lives with the animations it gates,
+   so it also covers the Create "how it works" intro slides, which reuse these
+   .mh-pl-* classes. (It was previously assumed to be handled by a global
+   freeze that did not exist, so the diagram animated regardless of the
+   preference.) */
+@media (prefers-reduced-motion: reduce) {
+  .mh-pl-pulse,
+  .mh-pl-dot,
+  .mh-pl-engine-bg { animation: none; }
 }
 """
