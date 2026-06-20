@@ -1,4 +1,13 @@
 {
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "allow": [
+      "mcp__playwright",
+      "mcp__chrome-devtools",
+      "mcp__puppeteer",
+      "mcp__browserbase"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -6,6 +15,17 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-edits.py\""
           }
         ]
       }

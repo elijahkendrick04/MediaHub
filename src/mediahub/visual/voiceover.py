@@ -19,21 +19,28 @@ caption text; we (optionally) apply deterministic pronunciation overrides for sw
 names, then synthesise.
 
 Synthesis is provider-selected via ``MEDIAHUB_TTS_PROVIDER`` (roadmap P0.4 — every
-AI surface carries a local-capable provider slot):
+AI surface carries a local-capable provider slot). Roadmap **1.7** made the local
+backend the default — *Piper replaces edge-tts* — so the zero-cost, fully-offline
+path is what a deployment uses unless an operator deliberately opts into the
+online one:
 
-    edge   (default) `edge-tts` — pure-Python, CPU-only, no GPU. It is an
-           **online** dependency: it streams audio from a Microsoft endpoint,
-           which means the caption text leaves the box. That is why the feature
-           is operator-gated and off by default.
-    piper  the local-TTS backend (Piper, MIT) — **zero-cost and fully offline**:
-           the caption text never leaves the box. The operator points
-           ``MEDIAHUB_PIPER_MODEL`` at a Piper ``.onnx`` voice model (or sets
-           ``MEDIAHUB_PIPER_VOICE`` + ``MEDIAHUB_PIPER_VOICE_DIR``); we load it
-           with the ``piper-tts`` package, synthesise a WAV, and transcode it to
-           the same MP3 the rest of the pipeline already consumes. If the
+    piper  (default) the local-TTS backend (Piper, GPL-3.0-or-later) —
+           **zero-cost and fully offline**: the caption text never leaves the
+           box. The deployed image ships a licence-clean voice (CC BY 4.0
+           ``en_GB-alba-medium``) so this works out of the box; an operator can
+           also point ``MEDIAHUB_PIPER_MODEL`` at a Piper ``.onnx`` voice model,
+           set ``MEDIAHUB_PIPER_VOICE`` + ``MEDIAHUB_PIPER_VOICE_DIR``, or simply
+           drop a single ``.onnx`` into the voice dir (auto-discovered). We load
+           it with the ``piper-tts`` package, synthesise a WAV, and transcode it
+           to the same MP3 the rest of the pipeline already consumes. If the
            package or the model file is absent we raise `VoiceoverError`
-           honestly — never a silent fall back to the cloud backend or a
+           honestly — never a silent fall back to the online backend or a
            fabricated clip.
+    edge   the opt-in online alternative, `edge-tts` — pure-Python, CPU-only, no
+           GPU, but an **online** dependency: it streams audio from a Microsoft
+           endpoint, which means the caption text leaves the box. It is no longer
+           the default (1.7); select it explicitly with
+           ``MEDIAHUB_TTS_PROVIDER=edge`` when a deployment genuinely wants it.
 
            Piper does not emit word-level timestamps, so the Piper SRT cue
            *timings* are a deterministic estimate (the measured clip duration
@@ -67,6 +74,7 @@ import time
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 # A neutral British English voice by default — sport clubs in the current wedge
 # are UK-centric. Operators can override per deployment; this is a presentation
@@ -94,16 +102,18 @@ class VoiceoverError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 _VALID_TTS_PROVIDERS: frozenset[str] = frozenset({"edge", "piper"})
-_DEFAULT_TTS_PROVIDER = "edge"
+# Roadmap 1.7 — Piper (local, zero-cost, fully offline) replaced edge-tts as the
+# default. The online 'edge' backend stays selectable for operators who want it.
+_DEFAULT_TTS_PROVIDER = "piper"
 
 
 def select_tts_provider() -> str:
     """Return the active TTS provider name.
 
-    Reads ``MEDIAHUB_TTS_PROVIDER``; unset/blank means the historical
-    default ``'edge'`` so existing deployments are byte-identical. An
-    unrecognised value raises `VoiceoverError` — an honest configuration
-    error beats silently synthesising with the wrong backend.
+    Reads ``MEDIAHUB_TTS_PROVIDER``; unset/blank means the default ``'piper'``
+    (roadmap 1.7 — the zero-cost, fully-offline local backend). An unrecognised
+    value raises `VoiceoverError` — an honest configuration error beats silently
+    synthesising with the wrong backend.
     """
     raw = os.environ.get("MEDIAHUB_TTS_PROVIDER", "").strip().lower()
     if not raw:
@@ -111,9 +121,9 @@ def select_tts_provider() -> str:
     if raw not in _VALID_TTS_PROVIDERS:
         raise VoiceoverError(
             f"MEDIAHUB_TTS_PROVIDER={raw!r} is not a recognised TTS provider. "
-            f"Valid choices: {sorted(_VALID_TTS_PROVIDERS)}. 'edge' is the "
-            "default; 'piper' is the zero-cost local backend (needs a Piper "
-            ".onnx voice model via MEDIAHUB_PIPER_MODEL)."
+            f"Valid choices: {sorted(_VALID_TTS_PROVIDERS)}. 'piper' is the "
+            "default zero-cost local backend (ships a voice model; also reads "
+            "MEDIAHUB_PIPER_MODEL); 'edge' is the opt-in online alternative."
         )
     return raw
 
@@ -298,9 +308,13 @@ def build_srt(boundaries: list[WordBoundary]) -> str:
 # Piper — the zero-cost, fully-offline local backend (roadmap R1.21)
 # ---------------------------------------------------------------------------
 #
-# Piper (https://github.com/OHF-Voice/piper1-gpl, MIT) runs a small neural TTS
-# model entirely on CPU with no network and no API key — the operator just
-# supplies a ``.onnx`` voice file. The implementation stays behind the same
+# Piper (https://github.com/OHF-Voice/piper1-gpl, GPL-3.0-or-later) runs a small
+# neural TTS model entirely on CPU with no network and no API key — a ``.onnx``
+# voice file is supplied (the deployed image ships a CC BY 4.0 default; an
+# operator can swap it). Used server-side in MediaHub's hosted-only deployment,
+# never conveyed to customers, so the GPL imposes no source-offer obligation
+# (the same hosted-only basis the repo already relies on for AGPL SearXNG).
+# The implementation stays behind the same
 # `_synthesize_raw` seam as edge so the rest of the pipeline (cache, SRT, route,
 # audio mux) is untouched: it returns the same ``(mp3_bytes, word_boundaries)``
 # tuple. Every failure mode (package absent, model absent, ffmpeg absent, empty
@@ -319,6 +333,27 @@ def _piper_voice_dir() -> Path:
     return _data_dir() / "piper_voices"
 
 
+def _autodiscover_piper_model() -> Path | None:
+    """The bundled/dropped-in default voice: a single ``.onnx`` in the voice dir.
+
+    Roadmap 1.7 ships a licence-clean default voice and makes Piper the default
+    provider, so a deployment must narrate locally with **no env configuration**.
+    When neither ``MEDIAHUB_PIPER_MODEL`` nor ``MEDIAHUB_PIPER_VOICE`` is set we
+    scan `_piper_voice_dir` for ``*.onnx`` and use it. Deterministic: with one
+    voice present it is used; with several we pick the lexicographically-first so
+    the choice is stable, never random. An absent/empty dir → ``None``, which
+    preserves the honest "no model configured" error path exactly as before.
+    """
+    vdir = _piper_voice_dir()
+    if not vdir.is_dir():
+        return None
+    try:
+        onnx = sorted(p for p in vdir.glob("*.onnx") if p.is_file())
+    except OSError:
+        return None
+    return onnx[0] if onnx else None
+
+
 def _resolve_piper_model() -> tuple[Path, Path | None] | None:
     """Locate the configured Piper model + its config, without raising.
 
@@ -326,6 +361,8 @@ def _resolve_piper_model() -> tuple[Path, Path | None] | None:
       1. ``MEDIAHUB_PIPER_MODEL`` — an explicit path to a ``.onnx`` voice model.
       2. ``MEDIAHUB_PIPER_VOICE`` — a voice name looked up in `_piper_voice_dir`
          (``<voice>.onnx``).
+      3. **Auto-discovery** (1.7) — a single ``.onnx`` dropped into / bundled in
+         `_piper_voice_dir`, so the shipped default voice works with no env set.
 
     The config sidecar is ``MEDIAHUB_PIPER_CONFIG`` when set, else the Piper
     convention ``<model>.onnx.json`` beside the model when it exists (Piper can
@@ -338,11 +375,14 @@ def _resolve_piper_model() -> tuple[Path, Path | None] | None:
         model = Path(explicit)
     else:
         name = os.environ.get("MEDIAHUB_PIPER_VOICE", "").strip()
-        if not name:
-            return None
-        if not name.endswith(".onnx"):
-            name += ".onnx"
-        model = _piper_voice_dir() / name
+        if name:
+            if not name.endswith(".onnx"):
+                name += ".onnx"
+            model = _piper_voice_dir() / name
+        else:
+            model = _autodiscover_piper_model()
+            if model is None:
+                return None
     if not model.is_file():
         return None
 
@@ -378,9 +418,9 @@ def _require_piper_model() -> tuple[Path, Path | None]:
         )
     raise VoiceoverError(
         "The Piper TTS backend is selected but no voice model is configured. "
-        "Set MEDIAHUB_PIPER_MODEL to a Piper '.onnx' file (or "
-        "MEDIAHUB_PIPER_VOICE + MEDIAHUB_PIPER_VOICE_DIR), or set "
-        "MEDIAHUB_TTS_PROVIDER=edge."
+        f"Drop a Piper '.onnx' voice into {_piper_voice_dir()} (auto-discovered), "
+        "set MEDIAHUB_PIPER_MODEL to a '.onnx' file (or MEDIAHUB_PIPER_VOICE + "
+        "MEDIAHUB_PIPER_VOICE_DIR), or set MEDIAHUB_TTS_PROVIDER=edge."
     )
 
 
@@ -415,12 +455,19 @@ def _piper_available() -> bool:
     return bool(_ffmpeg_exe())
 
 
-def _piper_wav_bytes(text: str, model_path: Path, config_path: Path | None) -> bytes:
+def _piper_wav_bytes(
+    text: str, model_path: Path, config_path: Path | None, length_scale: float | None = None
+) -> bytes:
     """Synthesise ``text`` with Piper and return a complete WAV as bytes.
 
     This is the single Piper-touching seam (tests monkeypatch it, exactly as the
     edge path's network call is patched). Importing ``piper`` or loading the
     model failing becomes a `VoiceoverError` — never a fallback.
+
+    ``length_scale`` (1.8 voice layer) tunes Piper's speaking rate when set
+    (faster → smaller). It is passed best-effort via the modern
+    ``SynthesisConfig``; a Piper build that doesn't accept it falls back to the
+    default rate rather than failing. ``None`` reproduces the pre-1.8 call.
     """
     try:
         from piper import PiperVoice
@@ -444,12 +491,27 @@ def _piper_wav_bytes(text: str, model_path: Path, config_path: Path | None) -> b
             f"Failed to load the Piper voice model at {model_path}: {exc}"
         ) from exc
 
+    syn_config = None
+    if length_scale is not None:
+        try:
+            from piper import SynthesisConfig
+
+            syn_config = SynthesisConfig(length_scale=float(length_scale))
+        except Exception:
+            syn_config = None  # older Piper without SynthesisConfig → default rate
+
     buf = io.BytesIO()
     try:
         with wave.open(buf, "wb") as wav_out:
             synth_wav = getattr(voice, "synthesize_wav", None)
             if callable(synth_wav):
-                synth_wav(text, wav_out)  # modern piper-tts (>=1.0)
+                if syn_config is not None:
+                    try:
+                        synth_wav(text, wav_out, syn_config=syn_config)  # piper-tts >=1.0
+                    except TypeError:
+                        synth_wav(text, wav_out)
+                else:
+                    synth_wav(text, wav_out)  # modern piper-tts (>=1.0)
             else:
                 voice.synthesize(text, wav_out)  # older API wrote the WAV directly
     except Exception as exc:
@@ -546,14 +608,26 @@ def _estimate_word_boundaries(text: str, total_ms: int) -> list[WordBoundary]:
     return boundaries
 
 
-def _synthesize_piper(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
+def _synthesize_piper(
+    text: str, voice: str, params: Any = None
+) -> tuple[bytes, list[WordBoundary]]:
     """The Piper branch of `_synthesize_raw`: resolve the model, synthesise a
     WAV, transcode to MP3, and estimate word boundaries for the SRT. The edge
     ``voice`` name is not a Piper concept (the model fixes the voice), so it is
     accepted and ignored — the cache is namespaced by the Piper model instead
-    (see `_cache_voice`)."""
+    (see `_cache_voice`).
+
+    Non-default ``params`` contribute a Piper ``length_scale`` (rate); the
+    default path calls ``_piper_wav_bytes`` with the original three-arg signature
+    so the seam monkeypatch stays intact."""
     model_path, config_path = _require_piper_model()
-    wav_bytes = _piper_wav_bytes(text, model_path, config_path)
+    length_scale = None
+    if params is not None and not params.is_default():
+        length_scale = params.to_piper().get("length_scale")
+    if length_scale is None:
+        wav_bytes = _piper_wav_bytes(text, model_path, config_path)
+    else:
+        wav_bytes = _piper_wav_bytes(text, model_path, config_path, length_scale=length_scale)
     total_ms = _wav_duration_ms(wav_bytes)
     mp3_bytes = _wav_to_mp3(wav_bytes)
     boundaries = _estimate_word_boundaries(text, total_ms)
@@ -565,30 +639,51 @@ def _synthesize_piper(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]
 # ---------------------------------------------------------------------------
 
 
-def _synthesize_raw(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
+def _synthesize_raw(text: str, voice: str, params: Any = None) -> tuple[bytes, list[WordBoundary]]:
     """Call the selected TTS backend and return (mp3_bytes, word_boundaries).
 
     Isolated so the entire network/codec surface sits behind one seam that tests
     monkeypatch. Dispatches on `select_tts_provider`; any failure (missing
     dependency, unreachable endpoint, missing model, empty audio) becomes a
     `VoiceoverError` — there is no fallback path.
+
+    ``params`` is an optional ``VoiceParams``-like object (1.8 voice layer) —
+    rate/pitch/volume for edge, ``length_scale`` for Piper. It is only ever
+    passed by callers who set non-default prosody, so the default-path call
+    signature stays ``(text, voice)`` and existing seam monkeypatches are intact.
     """
     provider = select_tts_provider()
+    use_params = params is not None and not params.is_default()
     if provider == "piper":
-        return _synthesize_piper(text, voice)
-    return _synthesize_edge(text, voice)
+        return (
+            _synthesize_piper(text, voice, params) if use_params else _synthesize_piper(text, voice)
+        )
+    return _synthesize_edge(text, voice, params) if use_params else _synthesize_edge(text, voice)
 
 
-def _synthesize_edge(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
+def _synthesize_edge(text: str, voice: str, params: Any = None) -> tuple[bytes, list[WordBoundary]]:
     """The default `edge-tts` backend: streams MP3 + native word boundaries from
-    the Microsoft endpoint (online; the reason voiceover is opt-in)."""
+    the Microsoft endpoint (online; the reason voiceover is opt-in).
+
+    When ``params`` carries non-default prosody, its ``to_edge()`` rate/pitch/
+    volume are passed to ``Communicate``; otherwise the call is byte-identical to
+    the pre-1.8 path (no kwargs), so existing cached MP3s are never orphaned.
+    """
     try:
         import edge_tts
     except Exception as exc:  # pragma: no cover - exercised via is_available()
         raise VoiceoverError("Text-to-speech backend (edge-tts) is not installed.") from exc
 
+    prosody: dict[str, str] = {}
+    if params is not None and not params.is_default():
+        prosody = params.to_edge()
+
     async def _run() -> tuple[bytes, list[WordBoundary]]:
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = (
+            edge_tts.Communicate(text, voice, **prosody)
+            if prosody
+            else edge_tts.Communicate(text, voice)
+        )
         audio = bytearray()
         boundaries: list[WordBoundary] = []
         async for chunk in communicate.stream():
@@ -624,12 +719,23 @@ def synthesize(
     voice: str = DEFAULT_VOICE,
     run_id: str | None = None,
     apply_pronunciation: bool = True,
+    params: Any = None,
+    profile_id: str | None = None,
 ) -> VoiceoverResult:
     """Synthesise a voiceover for the (already-approved) caption `text`, verbatim.
 
     The text is spoken as given, after an optional deterministic pronunciation
     pre-pass for swimmer names (no AI). Output is cached by content hash; a second
     call with the same text+voice returns the cached artefacts without re-synthesis.
+
+    1.8 voice layer (both optional and backward-compatible):
+
+    * ``params`` — a ``VoiceParams``-like object (rate/pitch/volume). Non-default
+      prosody is applied to synthesis *and* folded into the cache key, so a
+      re-voiced clip never serves a stale render; default/``None`` keeps the
+      pre-1.8 cache key byte-identical.
+    * ``profile_id`` — the organisation whose pronunciation lexicon should join
+      the override chain (global → org → per-run).
 
     Raises:
         ValueError: if `text` is empty after stripping.
@@ -643,9 +749,13 @@ def synthesize(
     if apply_pronunciation:
         from . import pronunciation
 
-        spoken = pronunciation.pronounce(spoken, run_id)
+        spoken = pronunciation.pronounce(spoken, run_id, profile_id)
 
-    key = cache_key(spoken, _cache_voice(voice))
+    has_params = params is not None and not params.is_default()
+    voice_token = _cache_voice(voice)
+    if has_params:
+        voice_token = f"{voice_token}|{params.cache_token()}"
+    key = cache_key(spoken, voice_token)
     cdir = cache_dir()
     mp3_path = cdir / f"{key}.mp3"
     srt_path = cdir / f"{key}.srt"
@@ -671,7 +781,10 @@ def synthesize(
             # Corrupt sidecar → fall through and re-synthesise.
             pass
 
-    audio_bytes, boundaries = _synthesize_raw(spoken, voice)
+    if has_params:
+        audio_bytes, boundaries = _synthesize_raw(spoken, voice, params)
+    else:
+        audio_bytes, boundaries = _synthesize_raw(spoken, voice)
     duration_ms = boundaries[-1].offset_ms + boundaries[-1].duration_ms if boundaries else 0
     srt = build_srt(boundaries)
 

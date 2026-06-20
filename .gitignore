@@ -21,6 +21,11 @@ env/
 .DS_Store
 Thumbs.db
 
+# Dev-loop MCP tooling (committed config in .mcp.json + .claude/settings.json).
+# The Knowledge Graph Memory MCP server writes its store here; it is a
+# contributor's local memory and is never committed (see ADR-0025 / ADR-0009).
+.claude/memory.json
+
 # Secrets and runtime
 .env
 .env.*
@@ -110,3 +115,6 @@ src/mediahub/users.jsonl
 
 # Ephemeral Claude Code agent worktrees (harness-managed; auto-cleaned).
 .claude/worktrees/
+
+# Runtime logs (MCP server logs, per-run audit JSON) — never source-tracked.
+logs/

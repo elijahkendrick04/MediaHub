@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-19 · `d62db6711` · Merge pull request #887 from elijahkendrick04/dependabot/github_actions/actions/setup-node-6
+**Last updated:** 2026-06-20 · `7f7dbbc8c` · Merge pull request #911 from elijahkendrick04/claude/ecc-repo-integration-b3qo81
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,8 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.7** · Phase 1 (Product) — Piper local TTS replaces edge-tts (unblocks the audio voice layer, 1.8) · ❌ **NOT STARTED**
-- **1.8** · Phase 1 (Product) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
 - **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
 - **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
 - **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
@@ -1221,13 +1219,15 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-19 | `5d1cc5795` | build(deps): bump actions/checkout from 6 to 7 |
-| 2026-06-19 | `15c81108b` | build(deps): bump actions/setup-node from 4 to 6 |
-| 2026-06-19 | `8f1683563` | Disclose the 1.6 avatar provider keys in the subprocessor register |
-| 2026-06-19 | `d20e56ce2` | Apply ruff-format to the 1.6 video suite |
-| 2026-06-19 | `e3a8853e2` | Build 1.6: video suite — footage path, Clip-Maker, EDL timeline, captions, reframe |
-| 2026-06-19 | `531bb7092` | Backdrop: adaptive blur (fixes busy logos), centre content, pick best logo |
-| 2026-06-19 | `019caf2b8` | Backdrop: make the logo still, and fix one logo rendering un-blurred |
-| 2026-06-19 | `31e0066b0` | Backdrop: work for any profile — fall back to the website-captured logo |
-| 2026-06-19 | `e2c0f911c` | Backdrop: soft-blur the logo so it stays identifiable, and make it dynamic |
+| 2026-06-20 | `42ee27361` | obs(pb): log every search/lookup outcome; gate PB sources on name AND club |
+| 2026-06-20 | `0576e4d7d` | harden(pb): multi-worker SQLite safety + verified TinyFish search shape |
+| 2026-06-20 | `586a0fc05` | chore: gitignore runtime logs/ directory |
+| 2026-06-20 | `9c7359019` | chore(claude): add guard-edits PreToolUse hook (adapted from ECC) |
+| 2026-06-20 | `d3e70d051` | 1.8: /api/audio/suggest never 5xxes — deterministic fallback (fix API contract) |
+| 2026-06-20 | `da230663b` | 1.8: web surface, reel bed, generation slots + consent — audio engine done (build 2/2) |
+| 2026-06-19 | `a724e2fd2` | Add browser-automation MCP servers for full web interaction |
+| 2026-06-19 | `0c07e41f3` | 1.8: wire the voice layer into synthesis + refresh env inventory (build 2, wip) |
+| 2026-06-19 | `ef74524c1` | 1.8: apply ruff-format to the audio package (hygiene hook) |
+| 2026-06-19 | `1b678c0dd` | 1.8: audio engine core — library, rights, ops, clean, voice, AI selection (build 1/2) |
+| 2026-06-19 | `f8670eba4` | compliance(pb): disclose TinyFish as a DPA sub-processor |
 <!-- /ROADMAP:ACTIVITY -->

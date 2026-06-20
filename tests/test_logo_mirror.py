@@ -230,21 +230,21 @@ class TestSignInPickerLogo:
         _seed(cp, profile_id="ext", display_name="External Logo Club",
               brand_logo_url="https://club.example/badge.png")
         body = client.get("/sign-in").get_data(as_text=True)
-        # First-party mirror src, never the raw cross-origin URL (CSP would
-        # block it). Assert on the RENDERED markup, not bare class names — the
-        # fallback CSS rules always ship in the stylesheet.
+        # First-party mirror src (the KEYED ?bg=1&chip=1 silhouette), never the raw
+        # cross-origin URL (CSP would block it). The unified chip carries a built-in
+        # initials span and wires its own onerror→initials net.
         assert "/organisation/ext/brand-logo" in body
         assert "https://club.example/badge.png" not in body
-        assert 'class="mh-logo-fallback"' in body  # the rendered initials span
-        assert "classList.add('mh-logo-failed')" in body  # the onerror handler
+        assert "mh-logo-chip__initials" in body  # the rendered initials span
+        assert "classList.add('is-empty')" in body  # the chip onerror handler
 
     def test_no_logo_renders_initials_no_broken_img(self, app_client):
         client, _, cp, _ = app_client
         _seed(cp, profile_id="solo", display_name="Solo Swim Club")
         body = client.get("/sign-in").get_data(as_text=True)
-        # No logo of any kind → no logo <img> route is emitted and no rendered
-        # fallback span (the .mh-logo-fallback CSS rule always ships, so assert
-        # on the element markup, not the bare class name).
+        # No logo of any kind → no logo route is emitted, and the tile shows a clean
+        # org-initials chip (the unified component's fallback) — never a broken img.
         assert "/organisation/solo/brand-logo" not in body
-        assert 'class="mh-logo-fallback"' not in body
+        assert "mh-logo-chip__initials" in body
+        assert ">SC<" in body  # Solo Swim Club → "SC"
         assert "Solo Swim Club" in body

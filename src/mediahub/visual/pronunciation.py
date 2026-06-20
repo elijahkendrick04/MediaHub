@@ -9,9 +9,11 @@ supplies a plain map of word -> phonetic respelling, and we substitute it into t
 caption text **before** synthesis. No AI guesses a pronunciation.
 
 The map lives in an optional JSON file under DATA_DIR (`pronunciations.json`), with
-an optional per-run override file (`runs_v4/<run_id>__pronunciations.json`). Both are
-plain `{ "written": "spoken" }` dicts. Absent files mean "no overrides" — never an
-error, never a fabricated guess.
+an optional per-organisation lexicon (`audio/lexicons/<profile_id>.json`, roadmap
+1.8) and an optional per-run override file (`runs_v4/<run_id>__pronunciations.json`).
+All are plain `{ "written": "spoken" }` dicts. Absent files mean "no overrides" —
+never an error, never a fabricated guess. The three merge in increasing
+specificity: **global → org → per-run** (the most specific wins on a clash).
 
 Substitution rules (deliberately boring and predictable):
   - whole-word only (word boundaries), so "Lee" never rewrites "Leeds";
@@ -44,6 +46,20 @@ def _runs_dir() -> Path:
     return _data_dir() / "runs_v4"
 
 
+def _safe_id(profile_id: str) -> str:
+    """A filesystem-safe slug for a profile id — guards against path traversal.
+
+    Only ``[A-Za-z0-9._-]`` survive; everything else (``/``, ``..`` components)
+    is dropped, so an org id can never escape the lexicons directory.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]", "", str(profile_id or "")).strip(".") or "_"
+
+
+def org_overrides_path(profile_id: str) -> Path:
+    """The JSON path for one organisation's pronunciation lexicon (1.8)."""
+    return _data_dir() / "audio" / "lexicons" / f"{_safe_id(profile_id)}.json"
+
+
 def _read_map(path: Path) -> dict[str, str]:
     """Read a `{written: spoken}` JSON map, tolerating absence/corruption.
 
@@ -66,12 +82,18 @@ def _read_map(path: Path) -> dict[str, str]:
     return out
 
 
-def load_overrides(run_id: str | None = None) -> dict[str, str]:
-    """Merge the global pronunciation map with an optional per-run map.
+def load_overrides(run_id: str | None = None, profile_id: str | None = None) -> dict[str, str]:
+    """Merge global, per-org (1.8), and per-run pronunciation maps.
 
-    Per-run entries win over global ones. Returns `{}` when nothing is configured.
+    Precedence is increasing specificity — global, then the organisation's
+    lexicon, then the per-run map — so the most specific entry wins on a clash.
+    Returns `{}` when nothing is configured. ``profile_id`` is optional and
+    backward-compatible: omit it and behaviour is exactly the pre-1.8 global +
+    per-run merge.
     """
     merged = _read_map(_data_dir() / "pronunciations.json")
+    if profile_id:
+        merged.update(_read_map(org_overrides_path(profile_id)))
     if run_id:
         merged.update(_read_map(_runs_dir() / f"{run_id}__pronunciations.json"))
     return merged
@@ -99,6 +121,6 @@ def apply_overrides(text: str, overrides: dict[str, str]) -> str:
     return pattern.sub(lambda m: lookup.get(m.group(0).lower(), m.group(0)), text)
 
 
-def pronounce(text: str, run_id: str | None = None) -> str:
-    """Convenience: load the configured overrides for a run and apply them."""
-    return apply_overrides(text, load_overrides(run_id))
+def pronounce(text: str, run_id: str | None = None, profile_id: str | None = None) -> str:
+    """Convenience: load the configured overrides for a run/org and apply them."""
+    return apply_overrides(text, load_overrides(run_id, profile_id))

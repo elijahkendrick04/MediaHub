@@ -75,16 +75,21 @@ installing the speech backend. If it isn't available, the app says so honestly (
 clear error) instead of using a fake robot voice. Audio is only made for a card a
 human has **approved**.
 
-Which voice engine speaks is picked by `MEDIAHUB_TTS_PROVIDER`: `edge` (the
-default, streams from a Microsoft endpoint) or `piper` — the **zero-cost,
-fully-offline local** backend, so no cloud service is ever *required* by this
-interface. For Piper the operator points `MEDIAHUB_PIPER_MODEL` at a Piper
-`.onnx` voice file (or sets `MEDIAHUB_PIPER_VOICE` + `MEDIAHUB_PIPER_VOICE_DIR`);
-MediaHub loads it with the `piper-tts` package, synthesises the audio on the
-box, and transcodes it to the same MP3 the rest of the pipeline uses. If the
-package or the model file is missing it returns an honest error — never a fake
-robot voice. (Piper has no word-level timestamps, so its subtitle *timings* are
-a deterministic estimate; the spoken words are still the verbatim caption.)
+Which voice engine speaks is picked by `MEDIAHUB_TTS_PROVIDER`. The **default is
+`piper`** (roadmap 1.7) — the **zero-cost, fully-offline local** backend, so no
+cloud service is ever *required* by this interface; the caption text never leaves
+the box. The deployed image ships a licence-clean voice (CC BY 4.0
+`en_GB-alba-medium`) and a single `.onnx` dropped into `MEDIAHUB_PIPER_VOICE_DIR`
+(default `$DATA_DIR/piper_voices`) is auto-discovered, so it works with no config;
+an operator can also point `MEDIAHUB_PIPER_MODEL` at an explicit `.onnx` or name
+one with `MEDIAHUB_PIPER_VOICE`. MediaHub loads it with the `piper-tts` package,
+synthesises the audio on the box, and transcodes it to the same MP3 the rest of
+the pipeline uses. The other option, `edge`, is an **opt-in online alternative**
+that streams from a Microsoft endpoint (caption text leaves the box) — selected
+explicitly, never the default. If the selected backend or its model is missing it
+returns an honest error — never a fake robot voice. (Piper has no word-level
+timestamps, so its subtitle *timings* are a deterministic estimate; the spoken
+words are still the verbatim caption.)
 
 ## narration.py + audio_mux.py — sound on the videos (off by default)
 

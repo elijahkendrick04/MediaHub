@@ -316,13 +316,22 @@ def test_route_approved_card_synthesizes(app_env):
 # ---------------------------------------------------------------------------
 
 
-def test_tts_provider_defaults_to_edge(monkeypatch):
+def test_tts_provider_defaults_to_piper(monkeypatch):
+    """Roadmap 1.7 — Piper (local, zero-cost, offline) replaced edge-tts as the
+    default. An unset provider now resolves to the local backend, not the online
+    Microsoft one."""
     monkeypatch.delenv("MEDIAHUB_TTS_PROVIDER", raising=False)
-    assert voiceover.select_tts_provider() == "edge"
+    assert voiceover.select_tts_provider() == "piper"
 
 
-def test_tts_provider_blank_means_edge(monkeypatch):
+def test_tts_provider_blank_means_piper(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "  ")
+    assert voiceover.select_tts_provider() == "piper"
+
+
+def test_tts_provider_edge_is_an_explicit_opt_in(monkeypatch):
+    """The online backend is still selectable — but only on purpose (1.7)."""
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "EDGE")
     assert voiceover.select_tts_provider() == "edge"
 
 
@@ -378,8 +387,8 @@ def test_tts_provider_status_shape(monkeypatch):
         "available_providers",
     }
     assert required <= set(status.keys())
-    assert status["active"] == "edge"
-    assert status["piper_available"] is False
+    assert status["active"] == "piper"  # 1.7 — local backend is the default
+    assert status["piper_available"] is False  # piper-tts not installed in CI
     assert isinstance(status["piper_model"], str)
 
 
@@ -388,6 +397,21 @@ def test_tts_provider_status_surfaces_bad_value_verbatim(monkeypatch):
     status = voiceover.tts_provider_status()
     assert status["configured"] == "espeak"
     assert status["active"] == "espeak"
+
+
+def test_default_tts_is_local_not_the_online_endpoint(monkeypatch):
+    """Roadmap 1.7 guard — Piper *replaced* edge-tts as the default. The
+    unconfigured backend must be the local/offline one (caption text never
+    leaves the box), while the online Microsoft backend stays a deliberate,
+    still-available opt-in. If someone flips the default back to 'edge' this
+    fails, forcing the conversation."""
+    monkeypatch.delenv("MEDIAHUB_TTS_PROVIDER", raising=False)
+    assert voiceover._DEFAULT_TTS_PROVIDER == "piper"
+    assert voiceover.select_tts_provider() == "piper"
+    # The online alternative is not gone — it is just no longer the default.
+    assert "edge" in voiceover._VALID_TTS_PROVIDERS
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "edge")
+    assert voiceover.select_tts_provider() == "edge"
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +522,60 @@ def test_resolve_piper_model_config_override(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_PIPER_MODEL", str(model))
     monkeypatch.setenv("MEDIAHUB_PIPER_CONFIG", str(cfg))
     assert voiceover._resolve_piper_model() == (model, cfg)
+
+
+# --- 1.7 zero-config auto-discovery (the shipped default voice) ------------
+
+
+def test_autodiscover_picks_single_voice_with_no_env(tmp_path, monkeypatch):
+    """1.7 — with no MODEL/VOICE env, a single '.onnx' in the voice dir is the
+    voice, so the shipped default narrates with zero configuration."""
+    vdir = tmp_path / "piper_voices"
+    vdir.mkdir()
+    model = vdir / "en_GB-alba-medium.onnx"
+    model.write_bytes(b"onnx")
+    cfg = vdir / "en_GB-alba-medium.onnx.json"
+    cfg.write_text("{}")
+    monkeypatch.setenv("MEDIAHUB_PIPER_VOICE_DIR", str(vdir))
+    assert voiceover._resolve_piper_model() == (model, cfg)
+    assert voiceover._autodiscover_piper_model() == model
+
+
+def test_autodiscover_is_deterministic_with_multiple_voices(tmp_path, monkeypatch):
+    """Several voices present → the lexicographically-first is picked, stably
+    (never a random or filesystem-order choice)."""
+    vdir = tmp_path / "piper_voices"
+    vdir.mkdir()
+    for name in ("zeta.onnx", "alpha.onnx", "mid.onnx"):
+        (vdir / name).write_bytes(b"onnx")
+    monkeypatch.setenv("MEDIAHUB_PIPER_VOICE_DIR", str(vdir))
+    picked = voiceover._autodiscover_piper_model()
+    assert picked == vdir / "alpha.onnx"
+    assert voiceover._autodiscover_piper_model() == picked  # stable
+
+
+def test_autodiscover_empty_dir_preserves_honest_none(tmp_path, monkeypatch):
+    """An empty/absent voice dir still yields None → the honest 'no model
+    configured' error path is unchanged when nothing is shipped."""
+    monkeypatch.setenv("MEDIAHUB_PIPER_VOICE_DIR", str(tmp_path / "absent"))
+    assert voiceover._autodiscover_piper_model() is None
+    assert voiceover._resolve_piper_model() is None
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("MEDIAHUB_PIPER_VOICE_DIR", str(tmp_path / "empty"))
+    assert voiceover._autodiscover_piper_model() is None
+
+
+def test_explicit_voice_env_overrides_autodiscovery(tmp_path, monkeypatch):
+    """An explicit MEDIAHUB_PIPER_VOICE still wins over a different auto-found
+    file — config beats convention."""
+    vdir = tmp_path / "piper_voices"
+    vdir.mkdir()
+    (vdir / "auto.onnx").write_bytes(b"onnx")
+    (vdir / "chosen.onnx").write_bytes(b"onnx")
+    monkeypatch.setenv("MEDIAHUB_PIPER_VOICE_DIR", str(vdir))
+    monkeypatch.setenv("MEDIAHUB_PIPER_VOICE", "chosen")
+    resolved = voiceover._resolve_piper_model()
+    assert resolved is not None and resolved[0] == vdir / "chosen.onnx"
 
 
 def test_require_piper_model_unconfigured_raises(tmp_path, monkeypatch):
@@ -674,8 +752,8 @@ def test_piper_and_edge_caches_do_not_collide(tmp_path, monkeypatch):
     monkeypatch.setattr(voiceover, "_piper_wav_bytes", lambda *a: _tiny_wav(500))
     monkeypatch.setattr(voiceover, "_wav_to_mp3", lambda b: b"PIPERbytes")
 
-    # Edge first (provider unset → default edge).
-    monkeypatch.delenv("MEDIAHUB_TTS_PROVIDER", raising=False)
+    # Edge first (now an explicit opt-in — the default flipped to piper in 1.7).
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "edge")
     edge_res = voiceover.synthesize("hello", voice="v1", apply_pronunciation=False)
     edge_key = edge_res.audio_path.stem
 
@@ -691,10 +769,11 @@ def test_piper_and_edge_caches_do_not_collide(tmp_path, monkeypatch):
     assert piper_res.audio_path.read_bytes() == b"PIPERbytes"
 
 
-def test_edge_cache_key_is_byte_identical_after_piper_added(monkeypatch):
+def test_edge_cache_key_is_byte_identical_when_edge_selected(monkeypatch):
     """The edge path's cache identity is unchanged by the Piper work — a hard
-    requirement so the default deployment's voice_cache never churns."""
-    monkeypatch.delenv("MEDIAHUB_TTS_PROVIDER", raising=False)
+    requirement so an edge deployment's voice_cache never churns. (Since 1.7
+    edge is an explicit opt-in, so it is selected explicitly here.)"""
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "edge")
     assert voiceover._cache_voice("en-GB-SoniaNeural") == "en-GB-SoniaNeural"
     # And the composed key matches the historical (text, voice) hash exactly.
     assert voiceover.cache_key("hi", voiceover._cache_voice("v1")) == voiceover.cache_key(

@@ -153,8 +153,10 @@ except ImportError:
     _workflow_ok = False
 
 # Voiceover: deterministic TTS of the already-approved caption (verbatim).
-# Off by default — it is an online dependency that sends caption text to a
-# Microsoft endpoint, so the operator opts in with MEDIAHUB_VOICEOVER=1.
+# Off by default (operator opts in with MEDIAHUB_VOICEOVER=1). The default
+# backend is local Piper (roadmap 1.7 — zero-cost, fully offline; caption text
+# never leaves the box); MEDIAHUB_TTS_PROVIDER=edge selects the online
+# Microsoft-endpoint alternative instead.
 try:
     from mediahub.visual import voiceover as _voiceover
 
@@ -7128,13 +7130,14 @@ body::before {
 
 /* Signed-in brand backdrop — the active org's PRIMARY logo as a large, softly
    blurred crest CENTRED and STILL behind the page content, in a faint pool of the
-   club's brand colour (.mh-bg-wash). A MODERATE blur keeps the crest identifiable
-   while softening its edges so it sits behind the headline without knifing through
-   the text. Crucially the blur is a FIXED rule on the mode classes below — NOT an
-   inline per-logo value — so it can never be dropped if a logo's adaptive numbers
-   are odd (a bad inline filter value voids the whole filter, incl. the blur). The
-   deterministic logo_bg_treatment analysis still picks the mode per logo, so it's
-   future-proof for any team's upload:
+   club's brand colour (.mh-bg-wash). A MODEST, tightly-banded blur keeps the crest
+   IDENTIFIABLE as the club's logo (soft-focus, never dissolved into an anonymous
+   blob) while softening its edges so it sits behind the headline without knifing
+   through the text. Crucially the blur is a FIXED rule on the mode classes below —
+   NOT an inline per-logo value — so it can never be dropped if a logo's adaptive
+   numbers are odd (a bad inline filter value voids the whole filter, incl. the
+   blur). The deterministic logo_bg_treatment analysis still picks the mode per
+   logo, so it's future-proof for any team's upload:
      • .mh-bg-mark--img — a COLOURFUL logo, blurred from its real artwork → a soft
        glow in the club's own colours;
      • .mh-bg-mark--ko  — a MONOCHROME logo (black/navy/grey/white/single-ink) or
@@ -7173,7 +7176,7 @@ body::before {
 .mh-bg-mark--img {
   background-repeat: no-repeat; background-position: center;
   background-size: contain;            /* preserve ANY uploaded logo's aspect ratio */
-  filter: blur(var(--mh-blur, 22px)) brightness(1.12);
+  filter: blur(var(--mh-blur, 14px)) brightness(1.12);
 }
 /* Monochrome / SVG logo — its shape in one light brand-tinted ink, softly blurred. */
 .mh-bg-mark--ko {
@@ -7181,7 +7184,7 @@ body::before {
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center;
   -webkit-mask-size: contain; mask-size: contain;   /* preserve aspect ratio */
-  filter: blur(var(--mh-blur, 22px));
+  filter: blur(var(--mh-blur, 14px));
 }
 @media (max-width: 720px) {
   /* Calmer behind dense mobile text. */
@@ -8078,30 +8081,13 @@ body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
   border-color: var(--border-h);
   box-shadow: var(--shadow-h);
 }
+/* Holder for the unified logo chip, which self-frames (fixed size, contrast-
+   aware backing, keyed logo or org-initials fallback — see .mh-logo-chip--lg in
+   theme-base.css). The old 56px lane tile + onerror→initials plumbing is gone:
+   the chip owns that now, so every card reads identically. */
 .mh-profile-card .logo {
-  width: 56px; height: 56px;
-  border-radius: 0;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
   margin-bottom: var(--sp-4);
-  font-family: var(--font-display);
-  font-weight: 900; font-size: 22px;
-  letter-spacing: 0.04em;
-  color: var(--lane-ink);
-  background: var(--lane);
-  overflow: hidden;
-  text-transform: uppercase;
-}
-.mh-profile-card .logo img {
-  width: 100%; height: 100%; object-fit: cover;
-}
-/* onerror fallback: a logo that fails to load (dead detected URL, deleted
-   file) flips the tile to the org initials instead of a broken-image icon. */
-.mh-profile-card .logo .mh-logo-fallback { display: none; }
-.mh-profile-card .logo.mh-logo-failed .mh-logo-chip,
-.mh-profile-card .logo.mh-logo-failed img { display: none; }
-.mh-profile-card .logo.mh-logo-failed .mh-logo-fallback {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; height: 100%;
 }
 .mh-profile-card .display-name {
   font-family: var(--font-display);
@@ -8904,6 +8890,10 @@ def _logo_chip_html(
     force_chip: bool = False,
     force_bare: bool = False,
     extra_attrs: str = "",
+    size: str = "",
+    tone: str = "",
+    brand_hex: str = "",
+    initials: str = "",
 ) -> str:
     """Render an uploaded logo with the chip-vs-bare decision.
 
@@ -8941,9 +8931,53 @@ def _logo_chip_html(
     extra_attrs : str
         Already-escaped attribute fragment appended to the
         ``<img>`` element (e.g. additional inline style).
+    size : str
+        ``"sm"`` / ``"md"`` / ``"lg"``. When set, render the ELEVATED chrome
+        chip: a fixed-size, contrast-aware framed chip with a built-in initials
+        fallback (overrides ``height`` and the bare/chip auto-detect). Empty →
+        the legacy chip/bare behaviour above.
+    tone : str
+        ``"light"`` / ``"dark"`` — the backing the logo reads best on
+        (``brand.logos.logo_chip_tone``). Only used in elevated mode.
+    brand_hex : str
+        Org primary hex — a subtle on-brand tint of the backing. Elevated mode.
+    initials : str
+        Fallback text shown when the logo can't load (``onerror``) or ``src_url``
+        is empty. Elevated mode. Do NOT pass an ``onerror`` in ``extra_attrs``
+        in elevated mode — the chip wires its own.
     """
     safe_src = _h(src_url)
     safe_alt = _h(alt or "")
+
+    # Elevated chrome chip (opt-in via ``size``): a fixed-size, contrast-aware
+    # framed chip with a built-in initials fallback — used by the nav avatar, the
+    # sign-in picker tiles and the settings preview so EVERY club's mark reads at
+    # the same size and weight whatever its colour / shape / format. ``src_url``
+    # is the KEYED ``?bg=1&chip=1`` silhouette (opaque backgrounds removed, and an
+    # unrenderable logo 404s so ``onerror`` swaps in the initials). ``tone`` is the
+    # backing the logo reads best on (brand.logos.logo_chip_tone); ``brand_hex``
+    # tints the backing subtly. Always framed (never bare) for a standardised look.
+    if size:
+        _sz = size if size in ("sm", "md", "lg") else "md"
+        _tone = tone if tone in ("light", "dark") else "light"
+        classes = f"mh-logo-chip mh-logo-chip--{_sz} mh-logo-chip--{_tone}"
+        chip_style = ""
+        if brand_hex and re.match(r"^#[0-9A-Fa-f]{3,8}$", brand_hex):
+            chip_style = f' style="--chip-brand:{_h(brand_hex)}"'
+        has_img = bool(src_url)
+        if not has_img:
+            classes += " is-empty"  # no logo → show the initials straight away
+        out = [f'<span class="{classes}"{chip_style} aria-hidden="true">']
+        if has_img:
+            _lazy = "" if _sz == "sm" else ' loading="lazy" decoding="async"'
+            out.append(
+                f'<img class="mh-logo-chip__img" src="{safe_src}" alt="{safe_alt}"{_lazy}'
+                " onerror=\"this.closest('.mh-logo-chip').classList.add('is-empty')\""
+                f"{extra_attrs} />"
+            )
+        out.append(f'<span class="mh-logo-chip__initials">{_h(initials or "?")}</span>')
+        out.append("</span>")
+        return "".join(out)
 
     if force_chip and force_bare:
         force_chip = False  # bare wins on contradiction
@@ -10722,7 +10756,7 @@ def _layout(
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
-    signed_in_logo = ""
+    signed_in_logo_chip_html = ""
     signed_in_bg_logos: list[str] = []
     signed_in_bg_treatment: dict = {}
     if signed_in_pid:
@@ -10737,33 +10771,72 @@ def _layout(
                         manual=getattr(_p, "brand_palette_manual", {}) or {},
                         extracted=getattr(_p, "brand_palette_extracted", {}) or {},
                     )
-                    signed_in_primary = (_eff_pal.get("primary") or "").strip()
-                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip()
+                    # Same resolution order as ClubProfile.get_brand_kit: the
+                    # AI/manual palette wins, then the legacy brand_primary/secondary
+                    # strings. The legacy fallback matters here so the brand accent
+                    # (and the backdrop wash below) still show for an org whose colour
+                    # only lives in those fields, not just freshly-captured ones.
+                    signed_in_primary = (_eff_pal.get("primary") or "").strip() or (
+                        getattr(_p, "brand_primary", "") or ""
+                    ).strip()
+                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip() or (
+                        getattr(_p, "brand_secondary", "") or ""
+                    ).strip()
                 except Exception:
                     pass
-                # Surface the org's logo in the signed-in chrome the same
-                # way the brand colours are. Prefer an uploaded logo (served
-                # per-profile, IDOR-guarded) and fall back to the website logo
-                # captured from the org's site — but route THAT through the
-                # first-party mirror, never the raw external URL: the CSP pins
-                # ``img-src 'self'`` so a cross-origin <img> renders broken.
+                # Surface the org's logo in the signed-in chrome as the unified
+                # logo chip — the KEYED silhouette (opaque/white backgrounds removed)
+                # on a contrast-aware, brand-tinted backing, with an org-initials
+                # fallback. Prefer an uploaded logo (IDOR-guarded) and fall back to
+                # the website-captured logo via the first-party mirror, never the raw
+                # external URL (the CSP pins ``img-src 'self'``). The same chip
+                # renders on the sign-in picker and the settings preview.
                 try:
+                    from mediahub.brand.logos import (
+                        logo_chip_tone as _lct,
+                        mirror_chip_tone as _mct,
+                    )
+
                     _uploaded = getattr(_p, "brand_logos", None) or []
-                    _first = _uploaded[0] if _uploaded else None
-                    _lid = (_first or {}).get("logo_id") if isinstance(_first, dict) else ""
+                    _lid = ""
+                    for _e in _uploaded:
+                        if (
+                            isinstance(_e, dict)
+                            and _e.get("logo_id")
+                            and str(_e.get("mime", "")).lower().startswith("image/")
+                        ):
+                            _lid = _e["logo_id"]
+                            break
+                    if not _lid and _uploaded and isinstance(_uploaded[0], dict):
+                        _lid = _uploaded[0].get("logo_id") or ""
+                    _chip_src = ""
+                    _chip_tone = "light"
                     if _lid:
-                        signed_in_logo = url_for(
-                            "organisation_setup_logo_serve",
-                            logo_id=_lid,
+                        _chip_src = url_for(
+                            "organisation_setup_logo_serve", logo_id=_lid, bg=1, chip=1
                         )
+                        _chip_tone = _lct(signed_in_pid, _lid)
                     else:
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
                         if _cap.startswith("http://") or _cap.startswith("https://"):
-                            signed_in_logo = url_for(
-                                "organisation_logo_mirror", profile_id=signed_in_pid
+                            _chip_src = url_for(
+                                "organisation_logo_mirror", profile_id=signed_in_pid, bg=1, chip=1
                             )
+                            _chip_tone = _mct(signed_in_pid, _cap)
+                    # Always render the chip when there's an org — logo when we have
+                    # one, org initials otherwise — so the nav always carries a
+                    # consistent, professional avatar.
+                    if signed_in_name:
+                        signed_in_logo_chip_html = _logo_chip_html(
+                            _chip_src,
+                            alt="",
+                            size="sm",
+                            tone=_chip_tone,
+                            brand_hex=signed_in_primary,
+                            initials=_avatar_initials(signed_in_name),
+                        )
                 except Exception:
-                    signed_in_logo = ""
+                    signed_in_logo_chip_html = ""
                 # The org's uploaded logos, surfaced as a brand backdrop behind
                 # every signed-in page (the "team's logo seamlessly in the
                 # background" ask — see the .mh-bg-canvas CSS and the
@@ -10775,68 +10848,76 @@ def _layout(
                 # party — the signed-in pid IS the active profile, so the serve
                 # route resolves them.
                 try:
-                    _trans: list[tuple[str, str]] = []
-                    _opaque: list[tuple[str, str]] = []
+                    from mediahub.brand.logos import (
+                        logo_bg_silhouette_path as _bg_sil,
+                        logo_bg_treatment as _bg_treat,
+                        resolve_logo_path as _rlp,
+                    )
+
+                    # Consider EVERY uploaded logo, then PICK THE FIRST one that
+                    # actually yields a paintable silhouette. Ordering: a logo whose
+                    # format keeps transparency (clean keyed artwork) comes before an
+                    # opaque one, and within each tier the most badge-like (nearest-
+                    # square) wins over a wide wordmark that would blur to a smear.
+                    # We don't pre-exclude by MIME — _render_bg_silhouette rasterises
+                    # whatever Pillow can open (HEIC/TIFF/BMP/PSD/ICO/…), and an
+                    # upload it CAN'T (PDF/EPS/corrupt) simply returns no silhouette
+                    # and we move to the next candidate. So any club, any format, gets
+                    # the best backdrop available — and never a blank/broken one.
+                    _trans_ext = {"png", "svg", "webp", "gif", "avif"}
+                    _trans_mime = {
+                        "image/png",
+                        "image/svg+xml",
+                        "image/webp",
+                        "image/gif",
+                        "image/avif",
+                    }
+
+                    def _bg_fit(_lid):
+                        # Nearest-square raw aspect (square→~1.0, wide/tall→lower).
+                        try:
+                            _pp = _rlp(signed_in_pid, _lid)
+                            if not _pp or _pp.suffix.lower() == ".svg":
+                                return 0.6  # vectors: neutral, usually fine
+                            from PIL import Image as _PImg
+
+                            with _PImg.open(_pp) as _im:
+                                _w, _hh = _im.size
+                            if _w <= 0 or _hh <= 0:
+                                return 0.0
+                            _ar = _w / _hh if _w >= _hh else _hh / _w
+                            return 1.0 / _ar
+                        except Exception:
+                            return 0.4
+
+                    _cands: list[tuple[int, float, str, str]] = []  # (tier, -fit, url, lid)
                     for _e in getattr(_p, "brand_logos", None) or []:
                         if not (isinstance(_e, dict) and _e.get("logo_id")):
                             continue
-                        _mime = str(_e.get("mime", "")).lower()
-                        if not _mime.startswith("image/"):
-                            continue
                         _lid = _e["logo_id"]
+                        _mime = str(_e.get("mime", "")).lower()
+                        _fx = str(_e.get("original_filename", "")).rsplit(".", 1)[-1].lower()
+                        _is_trans = _mime in _trans_mime or _fx in _trans_ext
                         _u = url_for("organisation_setup_logo_serve", logo_id=_lid, bg=1)
-                        if _mime in (
-                            "image/png",
-                            "image/svg+xml",
-                            "image/webp",
-                            "image/gif",
-                            "image/avif",
-                        ):
-                            _trans.append((_u, _lid))
-                        else:
-                            _opaque.append((_u, _lid))
-                    # The backdrop paints ONE logo; cap candidates for sanity.
-                    _ordered = (_trans or _opaque)[:8]
-                    if _ordered:
-                        # When a club uploaded several logos, pick the one that
-                        # reads best as a centred backdrop — a compact, badge-like
-                        # mark over a wide wordmark/lockup (which blurs to a smear).
-                        # Cheap heuristic: nearest-square raw aspect ratio wins.
-                        _pi = 0
-                        if len(_ordered) > 1:
-                            from mediahub.brand.logos import resolve_logo_path as _rlp
+                        _cands.append((0 if _is_trans else 1, -_bg_fit(_lid), _u, _lid))
 
-                            def _bg_fit(_lid):
-                                try:
-                                    _p = _rlp(signed_in_pid, _lid)
-                                    if not _p or _p.suffix.lower() == ".svg":
-                                        return 0.6  # vectors: neutral, usually fine
-                                    from PIL import Image as _PImg
+                    # Best-backing first; cap the walk so a pathological 500-logo
+                    # profile can't fan out into hundreds of rasterisations.
+                    for _tier, _negfit, _u, _lid in sorted(_cands)[:12]:
+                        _sil = _bg_sil(signed_in_pid, _lid)
+                        if _sil and _sil.suffix.lower() in (".png", ".svg"):
+                            signed_in_bg_logos = [_u]
+                            # Per-logo adaptive treatment so the watermark sits at a
+                            # consistent, tasteful presence whatever the logo's design.
+                            signed_in_bg_treatment = _bg_treat(signed_in_pid, _lid)
+                            break
 
-                                    with _PImg.open(_p) as _im:
-                                        _w, _hh = _im.size
-                                    if _w <= 0 or _hh <= 0:
-                                        return 0.0
-                                    _ar = _w / _hh if _w >= _hh else _hh / _w
-                                    return 1.0 / _ar  # square→1.0, wide/tall→lower
-                                except Exception:
-                                    return 0.4
-
-                            _pi = max(
-                                range(len(_ordered)),
-                                key=lambda i: (_bg_fit(_ordered[i][1]), -i),
-                            )
-                        _primary = _ordered[_pi]
-                        signed_in_bg_logos = [_primary[0]]
-                        # Per-logo adaptive treatment so the watermark sits at a
-                        # consistent, tasteful presence whatever the logo's design.
-                        from mediahub.brand.logos import logo_bg_treatment as _bg_treat
-
-                        signed_in_bg_treatment = _bg_treat(signed_in_pid, _primary[1])
-                    else:
-                        # No uploaded logo — fall back to the org's WEBSITE-CAPTURED
-                        # logo (mirrored first-party) so the backdrop works no matter
-                        # which profile is selected, not only ones with an upload.
+                    if not signed_in_bg_logos:
+                        # No uploaded logo we can paint — fall back to the org's
+                        # WEBSITE-CAPTURED logo (mirrored first-party) so the backdrop
+                        # works no matter which profile is selected, not only ones with
+                        # a usable upload. The mirror ?bg=1 route ships a transparent
+                        # pixel if even that can't be rasterised, so it's never broken.
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
                         if _cap.startswith("http://") or _cap.startswith("https://"):
                             from mediahub.brand.logos import mirror_bg_treatment as _mir_treat
@@ -10860,53 +10941,60 @@ def _layout(
     # captured): "image" paints a colourful logo's real artwork; "knockout" paints
     # a monochrome / SVG logo's shape in one light brand-tinted ink.
     bg_logos_html = ""
-    if signed_in_bg_logos:
-        _brand = (
-            signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
-        )
-        _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
-        _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
-        try:
-            _op = float(_t.get("opacity", 0.5))
-        except (TypeError, ValueError):
-            _op = 0.5
-        if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
-            _op = 0.5
-        _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
-        # Adaptive blur (px): busier crests blur more so they read as a clean glow.
-        # Sanitised to a plain int so --mh-blur is always a valid length.
-        try:
-            _blur = int(round(float(_t.get("blur", 22))))
-        except (TypeError, ValueError):
-            _blur = 22
-        _blur = min(60, max(8, _blur))
-        _geo = (
-            "left:50%;top:53%;"
-            "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
-            f"--op:{_op};--mh-blur:{_blur}px;"
-        )
-        if _t.get("mode") == "image":
-            # Colourful logo → its real artwork (blurred by the fixed CSS rule).
-            _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
-                f"background-image:url('{_src}')"
-                '"></span>'
+    _brand = signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
+    # Render the backdrop whenever there's a paintable logo OR at least a brand
+    # colour. A soft brand-coloured wash is a tasteful "better than nothing" when a
+    # club's logo can't be rendered as a backdrop (an unrenderable format) or the
+    # org has a brand colour but no logo at all — far nicer than a blank page. The
+    # logo crest is layered on only when we actually have one to paint.
+    if signed_in_bg_logos or _brand:
+        _hero = ""
+        if signed_in_bg_logos:
+            _t = signed_in_bg_treatment or {"mode": "knockout", "opacity": 0.5}
+            _src = _h(signed_in_bg_logos[0])  # the primary crest (?bg=1 keyed artwork)
+            try:
+                _op = float(_t.get("opacity", 0.5))
+            except (TypeError, ValueError):
+                _op = 0.5
+            if _op != _op:  # NaN guard (a NaN can be cached in older treat.json files)
+                _op = 0.5
+            _op = round(min(1.0, max(0.0, _op)), 3)  # clamp also bounds ±inf
+            # Adaptive blur (px): a busier crest earns a little more, but kept MODEST
+            # so the logo stays identifiable. Sanitised to a plain int so --mh-blur is
+            # always a valid length, and clamped to the professional band as a guard
+            # against any stale/odd value sneaking through.
+            try:
+                _blur = int(round(float(_t.get("blur", 14))))
+            except (TypeError, ValueError):
+                _blur = 14
+            _blur = min(28, max(8, _blur))
+            _geo = (
+                "left:50%;top:50%;"
+                "width:clamp(460px,54vw,820px);height:clamp(460px,54vw,820px);"
+                f"--op:{_op};--mh-blur:{_blur}px;"
             )
-        else:
-            # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
-            _hero = (
-                f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
-                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
-                '"></span>'
-            )
+            if _t.get("mode") == "image":
+                # Colourful logo → its real artwork (blurred by the fixed CSS rule).
+                _hero = (
+                    f'<span class="mh-bg-mark mh-bg-mark--img" style="{_geo}'
+                    f"background-image:url('{_src}')"
+                    '"></span>'
+                )
+            else:
+                # Monochrome / SVG → its shape in light brand-tinted ink via CSS mask.
+                _hero = (
+                    f'<span class="mh-bg-mark mh-bg-mark--ko" style="{_geo}'
+                    f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
+                    '"></span>'
+                )
         _wash = '<div class="mh-bg-wash"></div>' if _brand else ""
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
+        _marks = ('<div class="mh-bg-marks">' + _hero + "</div>") if _hero else ""
         bg_logos_html = (
             f'<div class="mh-bg-canvas" aria-hidden="true"{_brand_attr}>'
             + _wash
-            + '<div class="mh-bg-marks">'
-            + _hero
-            + "</div></div>"
+            + _marks
+            + "</div>"
         )
 
     # One-shot success/error toast queued by a prior POST (see _flash_toast).
@@ -11136,16 +11224,7 @@ def _layout(
       <button id="active-org-chip" class="mh-orgmenu-btn" type="button"
               aria-haspopup="menu" aria-expanded="false" aria-controls="mh-orgmenu-panel"
               title="Account &amp; organisation">
-        {% if signed_in_logo %}
-        <span aria-hidden="true"
-              style="display:inline-flex;align-items:center;justify-content:center;
-                     width:20px;height:20px;border-radius:5px;overflow:hidden;
-                     background:#fff;border:1px solid rgba(245,242,232,0.20)">
-          <img src="{{ signed_in_logo }}" alt=""
-               onerror="this.closest('span').style.display='none'"
-               style="width:100%;height:100%;object-fit:contain" />
-        </span>
-        {% endif %}
+        {{ signed_in_logo_chip_html | safe }}
         {% if signed_in_primary %}
         <span aria-hidden="true"
               style="display:inline-block;width:10px;height:10px;border-radius:50%;
@@ -13204,7 +13283,7 @@ def _layout(
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
-        signed_in_logo=signed_in_logo,
+        signed_in_logo_chip_html=signed_in_logo_chip_html,
         bg_logos_html=bg_logos_html,
         flash_toast=flash_toast,
         theme_seed_style=_theme_seed_style_block(),
@@ -23065,6 +23144,7 @@ Relay team broke club record"></textarea>
         "templates": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
         "members": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
         "activity": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        "audio": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
         "schedule": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
         "autonomy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></svg>',
         "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
@@ -23098,6 +23178,13 @@ Relay team broke club record"></textarea>
                 "picks the right one per moment.",
                 "templates",
                 url_for("template_gallery"),
+            ),
+            (
+                "Audio & voiceover",
+                "Music and sound-effect library, voices, name pronunciation, "
+                "your own audio, and consent settings.",
+                "audio",
+                url_for("settings_section", section="audio"),
             ),
             (
                 "Team members",
@@ -23219,6 +23306,7 @@ Relay team broke club record"></textarea>
     def settings_section(section):
         renderers = {
             "activity": ("Activity", lambda prof: _render_settings_activity_section(prof)),
+            "audio": ("Audio & voiceover", lambda prof: _render_settings_audio_section(prof)),
             "scheduling": (
                 "Auto scheduling",
                 lambda prof: _render_settings_scheduling_section(prof),
@@ -23250,6 +23338,459 @@ Relay team broke club record"></textarea>
             "</section>" + back + render(prof)
         )
         return _layout(f"{title} · Settings", body, active="settings")
+
+    # ------------------------------------------------------------------
+    # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
+    # own-audio upload + rights, and consent-gated voice features.
+    # ------------------------------------------------------------------
+    _AUDIO_UPLOAD_SUFFIXES = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"}
+    _AUDIO_MIME = {
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/opus",
+        ".flac": "audio/flac",
+    }
+    _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
+
+    def _audio_back_or_json(payload: dict, status: int = 200):
+        from flask import request as _req
+
+        wants_json = (
+            _req.headers.get("Accept", "").find("application/json") != -1
+            or _req.headers.get("X-Requested-With") == "XMLHttpRequest"
+        )
+        if wants_json:
+            return jsonify(payload), status
+        return redirect(url_for("settings_section", section="audio"))
+
+    @app.route("/api/audio/library")
+    def api_audio_library():
+        """List the audio catalogue (bundled CC0 pool + operator directories)."""
+        from flask import request as _req
+
+        try:
+            from mediahub.audio import load_library
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        lib = load_library()
+        tracks = lib.tracks(
+            kind=(_req.args.get("kind") or None),
+            mood=(_req.args.get("mood") or None),
+            platform=(_req.args.get("platform") or None),
+        )
+        return jsonify({"ok": True, "tracks": [t.to_dict() for t in tracks]})
+
+    @app.route("/api/audio/track/<track_id>")
+    def api_audio_track(track_id):
+        """Serve a catalogue track file for in-browser preview.
+
+        Only library tracks (bundled + operator directories) are addressable by
+        id here — they are deployment-global, not per-org, so there is no IDOR
+        surface, and the id resolves to a known file (no path traversal).
+        """
+        try:
+            from mediahub.audio import load_library
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        track = load_library().get(track_id)
+        if track is None or not Path(track.path).is_file():
+            return jsonify({"error": "not_found"}), 404
+        mime = _AUDIO_MIME.get(Path(track.path).suffix.lower(), "application/octet-stream")
+        return send_file(str(track.path), mimetype=mime, as_attachment=False)
+
+    @app.route("/api/audio/voices")
+    def api_audio_voices():
+        """The voice catalogue + the active TTS provider status."""
+        try:
+            from mediahub.audio import list_voices
+            from mediahub.visual import voiceover as _vo
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        try:
+            status = _vo.tts_provider_status()
+        except Exception:
+            status = {}
+        return jsonify({"ok": True, "voices": [v.to_dict() for v in list_voices()], "tts": status})
+
+    @app.route("/api/audio/lexicon", methods=["GET", "POST"])
+    def api_audio_lexicon():
+        """Per-organisation pronunciation lexicon CRUD (org-scoped).
+
+        GET returns the org's map; POST with ``op=set`` (written+spoken) or
+        ``op=remove`` (written) mutates it. Form posts redirect back to the
+        Audio settings page; XHR/JSON callers get JSON.
+        """
+        from flask import request as _req
+
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org", "message": "Sign in to manage a lexicon."}), 403
+        try:
+            from mediahub.audio.voice import OrgLexicon
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        lex = OrgLexicon(pid)
+        if _req.method == "GET":
+            return jsonify({"ok": True, "entries": lex.entries()})
+        op = (_req.form.get("op") or _req.values.get("op") or "set").strip().lower()
+        try:
+            if op == "remove":
+                lex.remove((_req.form.get("written") or "").strip())
+            else:
+                lex.set(
+                    (_req.form.get("written") or "").strip(),
+                    (_req.form.get("spoken") or "").strip(),
+                )
+        except ValueError as e:
+            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
+        return _audio_back_or_json({"ok": True, "entries": lex.entries()})
+
+    @app.route("/api/audio/upload", methods=["POST"])
+    def api_audio_upload():
+        """Upload an organisation's own audio with a licence attestation (1.8).
+
+        Stored org-scoped under DATA_DIR, fingerprinted, and recorded in the
+        rights ledger. Optionally loudness-levelled/denoised via clean.py when
+        ``enhance=1`` is set (e.g. a browser voice recording).
+        """
+        from flask import request as _req
+
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org", "message": "Sign in to upload audio."}), 403
+        f = _req.files.get("file")
+        if not f:
+            return jsonify({"error": "no_file"}), 400
+        ext = Path(f.filename or "clip.wav").suffix.lower()
+        if ext not in _AUDIO_UPLOAD_SUFFIXES:
+            return jsonify(
+                {"error": "bad_type", "message": f"Unsupported audio type {ext!r}."}
+            ), 415
+        try:
+            from mediahub.audio import rights as _rights
+            from mediahub.audio.library import Licence
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+
+        import uuid as _uuid
+
+        upload_dir = DATA_DIR / "audio_uploads" / pid
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        asset_id = _uuid.uuid4().hex[:12]
+        dest = upload_dir / f"{asset_id}{ext}"
+        f.save(str(dest))
+        try:
+            if dest.stat().st_size > _AUDIO_UPLOAD_MAX_BYTES:
+                dest.unlink(missing_ok=True)
+                return jsonify({"error": "too_large", "message": "Audio exceeds 25 MB."}), 413
+        except OSError:
+            return jsonify({"error": "save_failed"}), 500
+
+        # Optional one-tap clean-up (denoise + loudness) for recordings.
+        if (_req.form.get("enhance") or "").strip().lower() in {"1", "true", "on", "yes"}:
+            try:
+                from mediahub.audio import clean as _clean
+
+                cleaned = upload_dir / f"{asset_id}_clean.wav"
+                _clean.enhance_voice(dest, cleaned)
+                dest.unlink(missing_ok=True)
+                dest = cleaned
+            except Exception:
+                pass  # keep the original on any cleanup failure — never lose the upload
+
+        platforms = tuple(
+            p.strip().lower() for p in (_req.form.get("platforms") or "").split(",") if p.strip()
+        )
+        licence = Licence(
+            name=(_req.form.get("licence_name") or "operator-supplied").strip(),
+            url=(_req.form.get("licence_url") or "").strip(),
+            attribution=(_req.form.get("attribution") or "").strip(),
+            source="operator upload",
+            commercial_ok=(_req.form.get("commercial_ok") or "").strip().lower()
+            in {"1", "true", "on", "yes"},
+        )
+        check = _rights.check_upload(dest)
+        rec = _rights.attest_upload(
+            dest,
+            asset_id=asset_id,
+            profile_id=pid,
+            licence=licence,
+            platforms=platforms or _rights.PLATFORMS,
+            attested_by=pid,
+            notes=(_req.form.get("notes") or "").strip(),
+        )
+        return _audio_back_or_json(
+            {
+                "ok": True,
+                "asset": rec.to_dict(),
+                "duplicate": check.is_duplicate,
+                "fingerprint_method": check.fingerprint.method,
+            }
+        )
+
+    @app.route("/api/audio/voice-consent", methods=["GET", "POST"])
+    def api_audio_voice_consent():
+        """Grant/revoke the consent that gates voice cloning/changer (org-scoped)."""
+        from flask import request as _req
+
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org"}), 403
+        try:
+            from mediahub.audio.consent import FEATURES, ConsentStore
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        store = ConsentStore()
+        if _req.method == "GET":
+            return jsonify(
+                {
+                    "ok": True,
+                    "features": list(FEATURES),
+                    "active": [r.to_dict() for r in store.active(pid)],
+                }
+            )
+        feature = (_req.form.get("feature") or "").strip().lower()
+        action = (_req.form.get("action") or "grant").strip().lower()
+        try:
+            if action == "revoke":
+                store.revoke(pid, feature, by=pid)
+            else:
+                store.grant(
+                    pid,
+                    feature,
+                    voice_owner=(_req.form.get("voice_owner") or "").strip(),
+                    consent_ref=(_req.form.get("consent_ref") or "").strip(),
+                    granted_by=pid,
+                )
+        except ValueError as e:
+            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
+        return _audio_back_or_json({"ok": True})
+
+    @app.route("/api/audio/suggest")
+    def api_audio_suggest():
+        """Suggest a track for a mood/kind — AI when available, else deterministic.
+
+        Always 200 (never 5xx — a bare GET to this advisory endpoint must not
+        pollute uptime): returns the AI mood-matched pick when a provider is
+        configured, otherwise the deterministic library pick. ``method`` says
+        which path produced the suggestion ("ai" / "deterministic" / "none").
+        """
+        from flask import request as _req
+
+        try:
+            from mediahub.audio import load_library
+            from mediahub.audio.select import select_or_default
+        except Exception as e:
+            return jsonify({"ok": False, "available": False, "detail": str(e)})
+        lib = load_library()
+        mood = (_req.args.get("mood") or "").strip()
+        kind = (_req.args.get("kind") or "music").strip()
+        sel = select_or_default(
+            lib, content_key=(mood or "suggest"), kind=kind, mood_hint=(mood or None)
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "available": sel.track is not None,
+                "method": sel.method,
+                "arc": sel.arc,
+                "track": sel.track.to_dict() if sel.track else None,
+            }
+        )
+
+    def _render_settings_audio_section(prof: Optional[ClubProfile]) -> str:
+        """Audio engine settings — library, voices, lexicon, uploads, consent."""
+        from mediahub.audio import list_voices, load_library
+        from mediahub.audio.consent import FEATURES, ConsentStore
+        from mediahub.audio.voice import OrgLexicon
+
+        pid = _active_profile_id()
+        lib = load_library()
+
+        # --- Music & SFX library (with inline preview players) ---
+        track_rows = ""
+        for t in lib.all():
+            mood = ", ".join(t.mood) if t.mood else "—"
+            badge = "CC0" if t.licence.spdx == "CC0-1.0" else _h(t.licence.name)
+            src = url_for("api_audio_track", track_id=t.id)
+            track_rows += (
+                '<div class="card" style="padding:12px 14px;display:flex;align-items:center;'
+                'gap:12px;flex-wrap:wrap">'
+                f'<div style="flex:1;min-width:180px"><strong>{_h(t.title)}</strong>'
+                f'<div class="dim" style="font-size:12px">{_h(t.kind)} · {_h(mood)} · '
+                f'energy {t.energy} · <span class="tag">{badge}</span></div></div>'
+                f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
+                "</div>"
+            )
+        library_html = (
+            '<h2 style="font-size:18px;margin:24px 0 6px">Music &amp; sound effects</h2>'
+            '<p class="dim" style="margin:0 0 12px">MediaHub ships its own licence-clean '
+            "(CC0) pool so reels have sound out of the box. Set "
+            "<code>MEDIAHUB_REEL_MUSIC_LIBRARY=1</code> to use it as the default reel bed, "
+            "or point <code>MEDIAHUB_AUDIO_LIBRARY_DIR</code> at your own licensed tracks.</p>"
+            f'<div style="display:grid;gap:8px">{track_rows}</div>'
+        )
+
+        # --- Voice catalogue ---
+        voice_rows = ""
+        for v in list_voices():
+            tag = "local" if v.local else "online"
+            voice_rows += (
+                "<li style=\"margin-bottom:4px\">"
+                f"<strong>{_h(v.name or v.id)}</strong> "
+                f'<span class="dim">· {_h(v.language)} · {_h(v.provider)} ({tag})'
+                f"{(' · ' + _h(v.description)) if v.description else ''}</span></li>"
+            )
+        voices_html = (
+            '<h2 style="font-size:18px;margin:28px 0 6px">Voices</h2>'
+            '<p class="dim" style="margin:0 0 8px">Voiceover speaks the approved caption '
+            "verbatim — no AI script. The local voice is the zero-cost default; Welsh and "
+            "other voices are available on the online backend.</p>"
+            f'<ul style="margin:0 0 4px;padding-left:18px">{voice_rows}</ul>'
+        )
+
+        # --- Per-org pronunciation lexicon ---
+        if pid:
+            entries = OrgLexicon(pid).entries()
+            rows = ""
+            for written, spoken in sorted(entries.items()):
+                rows += (
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+                    f'<code style="flex:1">{_h(written)} → {_h(spoken)}</code>'
+                    f'<form method="post" action="{url_for("api_audio_lexicon")}" '
+                    'style="margin:0">'
+                    '<input type="hidden" name="op" value="remove">'
+                    f'<input type="hidden" name="written" value="{_h(written)}">'
+                    '<button class="btn btn-ghost" style="padding:4px 10px">Remove</button>'
+                    "</form></div>"
+                )
+            if not rows:
+                rows = '<p class="dim" style="margin:0 0 8px">No name overrides yet.</p>'
+            lexicon_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Name pronunciation</h2>'
+                '<p class="dim" style="margin:0 0 12px">Teach MediaHub how your swimmers\' '
+                "names are said — once. Every voiceover then gets them right (no AI guessing).</p>"
+                f"{rows}"
+                f'<form method="post" action="{url_for("api_audio_lexicon")}" '
+                'style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
+                '<input type="hidden" name="op" value="set">'
+                '<input name="written" placeholder="Written (e.g. Saoirse)" required '
+                'style="flex:1;min-width:160px;padding:8px">'
+                '<input name="spoken" placeholder="Say it (e.g. Seer-sha)" required '
+                'style="flex:1;min-width:160px;padding:8px">'
+                '<button class="btn btn-primary">Add</button></form>'
+            )
+        else:
+            lexicon_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Name pronunciation</h2>'
+                '<p class="dim">Sign in to a club to manage its pronunciation lexicon.</p>'
+            )
+
+        # --- Upload own audio + browser recorder ---
+        if pid:
+            upload_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Upload your own audio</h2>'
+                '<p class="dim" style="margin:0 0 12px">Add a track you hold the licence for. '
+                "We fingerprint it and record your licence attestation in the rights ledger.</p>"
+                f'<form method="post" action="{url_for("api_audio_upload")}" '
+                'enctype="multipart/form-data" style="display:grid;gap:8px;max-width:560px">'
+                '<input type="file" id="mh-audio-file" name="file" accept="audio/*" required>'
+                '<input name="licence_name" placeholder="Licence (e.g. Licensed, CC-BY)" '
+                'style="padding:8px">'
+                '<input name="attribution" placeholder="Attribution (if required)" '
+                'style="padding:8px">'
+                '<label style="font-size:13px"><input type="checkbox" name="commercial_ok" '
+                'value="1" checked> I confirm this is cleared for commercial club use</label>'
+                '<label style="font-size:13px"><input type="checkbox" name="enhance" value="1"> '
+                "Clean up (denoise + level) — recommended for recordings</label>"
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+                '<button class="btn btn-primary" type="submit">Upload</button>'
+                '<button class="btn btn-ghost" type="button" id="mh-rec-btn">● Record</button>'
+                '<span id="mh-rec-status" class="dim" style="font-size:12px"></span>'
+                "</div></form>"
+            )
+        else:
+            upload_html = ""
+
+        # --- Voice consent (cloning / changer; off by default) ---
+        if pid:
+            store = ConsentStore()
+            consent_rows = ""
+            for feat in FEATURES:
+                on = store.is_enabled(pid, feat)
+                state = (
+                    '<span class="tag" style="background:var(--accent);color:#0b0f17">enabled</span>'
+                    if on
+                    else '<span class="tag">off</span>'
+                )
+                if on:
+                    btn = (
+                        f'<form method="post" action="{url_for("api_audio_voice_consent")}" '
+                        'style="margin:0"><input type="hidden" name="action" value="revoke">'
+                        f'<input type="hidden" name="feature" value="{_h(feat)}">'
+                        '<button class="btn btn-ghost" style="padding:4px 10px">Revoke</button>'
+                        "</form>"
+                    )
+                else:
+                    btn = (
+                        f'<form method="post" action="{url_for("api_audio_voice_consent")}" '
+                        'style="margin:0;display:flex;gap:6px;flex-wrap:wrap">'
+                        '<input type="hidden" name="action" value="grant">'
+                        f'<input type="hidden" name="feature" value="{_h(feat)}">'
+                        '<input name="voice_owner" placeholder="Voice owner" '
+                        'style="padding:4px 8px">'
+                        '<input name="consent_ref" placeholder="Consent reference" '
+                        'style="padding:4px 8px">'
+                        '<button class="btn btn-ghost" style="padding:4px 10px">'
+                        "Enable with consent</button></form>"
+                    )
+                label = "Voice cloning" if feat == "clone" else "Voice changer"
+                consent_rows += (
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+                    'margin-bottom:8px"><div style="flex:1;min-width:160px">'
+                    f"<strong>{_h(label)}</strong> {state}</div>{btn}</div>"
+                )
+            consent_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Voice cloning &amp; changer</h2>'
+                '<p class="dim" style="margin:0 0 12px">Off by default. Enable only with the '
+                "recorded consent of the voice's owner — every grant and revocation is "
+                f"audited.</p>{consent_rows}"
+            )
+        else:
+            consent_html = ""
+
+        recorder_js = (
+            "<script>(function(){var b=document.getElementById('mh-rec-btn');"
+            "if(!b||!navigator.mediaDevices)return;var rec,chunks=[],on=false;"
+            "var st=document.getElementById('mh-rec-status');"
+            "b.addEventListener('click',function(){if(on){rec&&rec.stop();return;}"
+            "navigator.mediaDevices.getUserMedia({audio:true}).then(function(s){"
+            "rec=new MediaRecorder(s);chunks=[];rec.ondataavailable=function(e){chunks.push(e.data);};"
+            "rec.onstop=function(){var blob=new Blob(chunks,{type:'audio/webm'});"
+            "var f=new File([blob],'recording.webm',{type:'audio/webm'});"
+            "var dt=new DataTransfer();dt.items.add(f);"
+            "document.getElementById('mh-audio-file').files=dt.files;"
+            "s.getTracks().forEach(function(t){t.stop();});on=false;b.textContent='● Record';"
+            "st.textContent='Recorded — review and Upload.';};rec.start();on=true;"
+            "b.textContent='■ Stop';st.textContent='Recording…';}).catch(function(){"
+            "st.textContent='Microphone unavailable.';});});})();</script>"
+        )
+
+        return (
+            '<div style="max-width:760px">'
+            '<p class="lede" style="margin-top:0">Sound for your videos — music, effects and '
+            "voiceover — all rights-clean and explainable.</p>"
+            + library_html
+            + voices_html
+            + lexicon_html
+            + upload_html
+            + consent_html
+            + (recorder_js if pid else "")
+            + "</div>"
+        )
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
         """Activity section — recent runs for the pinned org.
@@ -28795,20 +29336,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             logo_html = ""
             if profile.brand_logo_url:
-                # Phase 1.6 Stage F: wrap detected logo in a neutral
-                # chip by default; auto-drop if the dominant colour
-                # is visually distinct from the active surface.
-                #
-                # Serve it through the first-party mirror, never the raw
-                # external URL: the CSP pins ``img-src 'self'`` so a
-                # cross-origin <img> would render as a broken image.
+                # The unified logo chip — KEYED silhouette (mirrored first-party,
+                # never the raw cross-origin URL the CSP would block) on a
+                # contrast-aware, brand-tinted backing, with an initials fallback.
                 _extracted = profile.brand_palette_extracted or {}
-                _dominant = (_extracted.get("primary") or "").strip() or None
+                _dominant = (_extracted.get("primary") or "").strip() or (
+                    getattr(profile, "brand_primary", "") or ""
+                ).strip()
+                from mediahub.brand.logos import mirror_chip_tone as _mct
+
+                _cap = (getattr(profile, "brand_logo_url", "") or "").strip()
                 logo_html = _logo_chip_html(
-                    url_for("organisation_logo_mirror", profile_id=profile.profile_id),
+                    url_for(
+                        "organisation_logo_mirror", profile_id=profile.profile_id, bg=1, chip=1
+                    ),
                     alt="Detected logo",
-                    height=60,
-                    dominant_hex=_dominant,
+                    size="lg",
+                    tone=_mct(profile.profile_id, _cap),
+                    brand_hex=_dominant,
+                    initials=_avatar_initials(profile.display_name),
                 )
             captured_meta = ""
             if profile.brand_captured_at or profile.brand_source_url:
@@ -31575,6 +32121,8 @@ what you're doing, what they should do.</p>
                 return parts[0][:2].upper()
             return (parts[0][0] + parts[-1][0]).upper()
 
+        from mediahub.brand import logos as logos_mod
+
         cards_html = ""
         for p in profiles:
             is_current = p.profile_id == current_id
@@ -31588,8 +32136,13 @@ what you're doing, what they should do.</p>
             # didn't. So: uploaded logo → per-profile serve route; else the
             # detected logo → first-party mirror route (downloads + caches the
             # bytes on first request); else initials.
-            logo_src = ""
-            _dom_hex = None
+            # Unified logo chip — the KEYED silhouette (opaque/white backgrounds
+            # removed, so no white box) on a contrast-aware, brand-tinted backing,
+            # with a built-in org-initials fallback. Every org tile reads at the
+            # same size and weight whatever its logo's colour / shape / format; an
+            # org with no usable logo simply shows its initials in the same frame.
+            _chip_src = ""
+            _chip_tone = "light"
             _uploaded = getattr(p, "brand_logos", None) or []
             _first = next(
                 (
@@ -31602,47 +32155,33 @@ what you're doing, what they should do.</p>
                 None,
             )
             if _first:
-                logo_src = url_for(
+                _chip_src = url_for(
                     "organisation_logo_serve",
                     profile_id=p.profile_id,
                     logo_id=_first.get("logo_id"),
+                    bg=1,
+                    chip=1,
                 )
-                _dom = (_first.get("ai_dominant_colours") or [None])[0]
-                _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
+                _chip_tone = logos_mod.logo_chip_tone(p.profile_id, _first.get("logo_id"))
             else:
                 _cap = (getattr(p, "brand_logo_url", "") or "").strip()
                 if _cap.startswith("http://") or _cap.startswith("https://"):
-                    logo_src = url_for("organisation_logo_mirror", profile_id=p.profile_id)
-                    _ext_pal = getattr(p, "brand_palette_extracted", None) or {}
-                    _dom = (_ext_pal.get("primary") or "").strip() or None
-                    _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
-            if logo_src:
-                # Phase 1.6 Stage F: profile-card logos are tiny
-                # uniform tiles inside a fixed .logo container; force
-                # chip mode for visual consistency across the grid
-                # (sign-in page renders many orgs side-by-side and
-                # one bare logo amid chipped ones reads as a glitch).
-                #
-                # Robustness net: if the image still fails to load (a dead
-                # detected URL, a deleted file), ``onerror`` flags the tile so
-                # the CSS swaps in the initials — a broken-image icon never
-                # reaches the user. CSP allows inline handlers (script-src
-                # 'unsafe-inline').
-                _chip = _logo_chip_html(
-                    logo_src,
-                    alt="",
-                    height=48,
-                    dominant_hex=_dom_hex,
-                    force_chip=True,
-                    extra_attrs=" onerror=\"this.closest('.logo').classList.add('mh-logo-failed')\"",
-                )
-                logo_html = (
-                    f"{_chip}"
-                    f'<span class="mh-logo-fallback" aria-hidden="true">'
-                    f"{_h(_initials(p.display_name))}</span>"
-                )
-            else:
-                logo_html = _h(_initials(p.display_name))
+                    _chip_src = url_for(
+                        "organisation_logo_mirror", profile_id=p.profile_id, bg=1, chip=1
+                    )
+                    _chip_tone = logos_mod.mirror_chip_tone(p.profile_id, _cap)
+            _ext_pal = getattr(p, "brand_palette_extracted", None) or {}
+            _brand = (_ext_pal.get("primary") or "").strip() or (
+                getattr(p, "brand_primary", "") or ""
+            ).strip()
+            logo_html = _logo_chip_html(
+                _chip_src,
+                alt="",
+                size="lg",
+                tone=_chip_tone,
+                brand_hex=_brand,
+                initials=_initials(p.display_name),
+            )
 
             ready = p.is_ready()
             captured = p.brand_capture_status in ("ok", "ok_heuristic")
@@ -32603,25 +33142,24 @@ what you're doing, what they should do.</p>
                 label = logo.get("label") or logo.get("original_filename") or "logo"
                 desc = (logo.get("ai_description") or "").strip()
                 mime = logo.get("mime") or ""
-                # Server route exposes the actual file
-                serve_url = url_for(
-                    "organisation_setup_logo_serve", logo_id=logo.get("logo_id", "")
-                )
                 delete_url = url_for(
                     "organisation_setup_logo_delete", logo_id=logo.get("logo_id", "")
                 )
                 preview = ""
                 if mime.startswith("image/"):
-                    # Phase 1.6 Stage F: thumbnail grid — every uploaded
-                    # logo gets the .mh-logo-chip wrapper (visual
-                    # consistency matters more than per-logo lightness).
-                    _dom = (logo.get("ai_dominant_colours") or [None])[0]
+                    # Unified logo chip — the KEYED silhouette (opaque/white
+                    # backgrounds removed) on a contrast-aware backing, so the upload
+                    # grid reads consistently whatever each file's colour/format.
+                    from mediahub.brand.logos import logo_chip_tone as _lct
+
+                    _lid = logo.get("logo_id", "")
                     preview = _logo_chip_html(
-                        serve_url,
+                        url_for("organisation_setup_logo_serve", logo_id=_lid, bg=1, chip=1),
                         alt=label,
-                        height=96,
-                        dominant_hex=_dom,
-                        force_chip=True,
+                        size="lg",
+                        tone=_lct(prof.profile_id, _lid),
+                        brand_hex=(getattr(prof, "brand_primary", "") or ""),
+                        initials=_avatar_initials(prof.display_name),
                     )
                 else:
                     preview = (
@@ -34203,18 +34741,38 @@ function mhSetupMode(mode) {{
         prof = _active_profile()
         if not prof:
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path, logo_bg_silhouette_path
+        from mediahub.brand.logos import (
+            resolve_logo_path,
+            logo_bg_silhouette_path,
+            transparent_pixel_png,
+        )
 
         # ?bg=1 serves the clean-alpha silhouette used by the signed-in logo
         # wall (transparent for any logo, opaque backgrounds keyed out). It's
-        # cached and immutable per logo_id, so it's safe to cache hard.
+        # cached and immutable per logo_id, so it's safe to cache hard. The
+        # Content-Type is set explicitly because the response carries nosniff —
+        # the silhouette is only ever a PNG (rasterised) or an SVG (passthrough).
         if request.args.get("bg"):
             sil = logo_bg_silhouette_path(prof.profile_id, logo_id)
             if sil:
                 resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = (
+                    "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
+                )
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            return ("", 404)
+            # The logo can't be rasterised to a paintable silhouette (an exotic or
+            # corrupt format). A chrome CHIP (?chip=1) wants a real 404 so its
+            # <img> onerror swaps in the org initials; the backdrop wants a
+            # transparent pixel (never a 404) so its CSS mask/background loads and
+            # the element hides cleanly instead of failing into a solid ink block.
+            if request.args.get("chip"):
+                return ("", 404)
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = resolve_logo_path(prof.profile_id, logo_id)
         if not path:
             return ("", 404)
@@ -34236,8 +34794,33 @@ function mhSetupMode(mode) {{
         """
         if not _session_can_use_profile(profile_id):
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path
+        from mediahub.brand.logos import (
+            resolve_logo_path,
+            logo_bg_silhouette_path,
+            transparent_pixel_png,
+        )
 
+        # ?bg=1 serves the clean-alpha KEYED silhouette (opaque/white backgrounds
+        # keyed out) — used by the sign-in picker's logo chip so a white-background
+        # upload doesn't show as a white box. ?chip=1 makes an unrenderable logo
+        # 404 (so the chip's <img> onerror swaps in the org initials); a bare ?bg=1
+        # ships a transparent pixel like the backdrop path. Cached hard.
+        if request.args.get("bg"):
+            sil = logo_bg_silhouette_path(profile_id, logo_id)
+            if sil:
+                resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Content-Type"] = (
+                    "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
+                )
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                return resp
+            if request.args.get("chip"):
+                return ("", 404)
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = resolve_logo_path(profile_id, logo_id)
         if not path:
             return ("", 404)
@@ -34272,6 +34855,7 @@ function mhSetupMode(mode) {{
             mirror_bg_silhouette_path,
             mirror_content_type,
             mirror_external_logo,
+            transparent_pixel_png,
         )
 
         # ?bg=1 serves the clean-alpha silhouette of the mirrored logo for the
@@ -34284,7 +34868,17 @@ function mhSetupMode(mode) {{
                 resp.headers["Content-Type"] = mirror_content_type(sil)
                 resp.headers["Cache-Control"] = "public, max-age=604800"
                 return resp
-            return ("", 404)
+            # Can't rasterise the mirrored logo. A chrome CHIP (?chip=1) wants a 404
+            # so its <img> onerror falls back to the org initials; the backdrop
+            # wants a transparent pixel (never a 404) so its mask/background loads
+            # and hides cleanly rather than painting a solid ink block.
+            if request.args.get("chip"):
+                return ("", 404)
+            return Response(
+                transparent_pixel_png(),
+                mimetype="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         path = mirror_external_logo(profile_id, url)
         if not path:
             return ("", 404)

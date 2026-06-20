@@ -46,6 +46,19 @@ from urllib.parse import urljoin, urlparse
 
 log = logging.getLogger(__name__)
 
+# Register optional Pillow format plugins at import so the backdrop (and any
+# other rasteriser here) can open the widest possible range of uploads — Apple
+# HEIC/HEIF in particular, which a phone exports by default. Best-effort: if the
+# plugin isn't installed those formats simply take the clean no-silhouette path
+# (a transparent backdrop) rather than crashing. AVIF/TIFF/BMP/ICO/PSD/WEBP/GIF
+# are already covered by modern Pillow itself.
+try:  # pragma: no cover - depends on an optional dependency being present
+    import pillow_heif as _pillow_heif
+
+    _pillow_heif.register_heif_opener()
+except Exception:  # noqa: BLE001 - any failure just means HEIC degrades cleanly
+    pass
+
 # Accepted file extensions. The user asked for "whatever format the
 # club likes" so this list is intentionally broad — every common
 # raster, vector, design-tool, and print format. The server validates
@@ -538,36 +551,51 @@ def mirror_content_type(path: Path) -> str:
 _BG_SILHOUETTE_MAX_DIM = 512
 
 
+def _looks_like_svg(src: Path) -> bool:
+    """Cheap sanity check that an .svg upload is actually SVG markup, so a corrupt
+    or empty file isn't handed to the browser as a mask (a mask that fails to parse
+    is treated as "no mask" → a solid ink block)."""
+    try:
+        return b"<svg" in src.read_bytes()[:2048].lower()
+    except Exception:
+        return False
+
+
 def logo_bg_silhouette_path(profile_id: str, logo_id: str) -> Optional[Path]:
     """Clean-alpha PNG of a logo for the signed-in background wall.
 
-    Returns a cached transparent silhouette suitable for use as a CSS mask.
-    Falls back to the raw logo path (SVGs, or if processing fails) and returns
-    None only when the source logo can't be found. Safe to call per request —
-    computed once, then served from cache.
+    Returns a cached transparent silhouette (PNG) suitable for use as a CSS mask,
+    or the raw file for a valid SVG (already a clean vector). Returns None whenever
+    the source can't be found OR can't be turned into something a browser will
+    paint — i.e. if we couldn't rasterise it, we don't trust it. The caller then
+    serves a transparent pixel so the backdrop degrades cleanly for ANY upload
+    (any format, corrupt file included). Safe to call per request — computed once,
+    then served from cache.
     """
     src = resolve_logo_path(profile_id, logo_id)
     if not src:
         return None
     # SVGs are already clean transparent vectors; Pillow can't rasterise them
-    # without an extra dependency, and they need no keying.
+    # without an extra dependency, and they need no keying — pass a *valid* one
+    # straight through.
     if src.suffix.lower() == ".svg":
-        return src
+        return src if _looks_like_svg(src) else None
     try:
         safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
         dst = _data_dir() / "logo_variants" / safe / f"{logo_id}_bg.png"
         if dst.exists():
             return dst
         _render_bg_silhouette(src, dst)
-        return dst if dst.exists() else src
-    except Exception:
-        log.warning(
-            "bg silhouette failed for %s/%s — serving raw logo",
-            profile_id,
-            logo_id,
-            exc_info=True,
-        )
-        return src
+        if dst.exists():
+            return dst
+    except Exception as e:
+        # Expected for unrenderable/corrupt uploads (PDF, EPS-without-gs, a truncated
+        # file, …). The transparent-pixel fallback makes this non-actionable, and the
+        # path is re-attempted per render, so keep it at debug — never spam WARNING.
+        log.debug("bg silhouette unavailable for %s/%s: %s", profile_id, logo_id, e)
+    # Couldn't rasterise to a clean PNG silhouette — return None so the caller
+    # ships a transparent pixel rather than an un-paintable (or corrupt) file.
+    return None
 
 
 def _render_bg_silhouette(src: Path, dst: Path) -> None:
@@ -616,50 +644,67 @@ def _render_bg_silhouette(src: Path, dst: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Adaptive backdrop treatment
-# A logo painted as a page watermark must sit at a consistent, tasteful presence
-# whatever a club uploads. We measure the silhouette and pick one of two modes:
+# A logo painted as a page watermark must sit at the SAME tasteful, identifiable
+# presence whatever a club uploads — that consistency is what reads as
+# "standardised and professional". We measure the silhouette and pick one of two
+# modes:
 #
-#   * "image"    — the logo is COLOURFUL (and so its colour carries its identity),
-#                  so we paint its real artwork, with a per-logo opacity (heavy
-#                  logos down, faint up), a brightness lift for dark ones, a
-#                  desaturation for over-bright ones, and a halo. Keeps brand
-#                  colour while never dazzling.
+#   * "image"    — the logo is COLOURFUL *and* light enough to read on the near-
+#                  black page, so its colour carries its identity: we paint its
+#                  real artwork, with a per-logo opacity (dense logos down, faint
+#                  ones up) inside a TIGHT band so no club's mark dominates
+#                  another's. Keeps brand colour while staying a faint watermark.
 #   * "knockout" — the logo is MONOCHROME (black / navy / grey / white / a single
-#                  ink) — colour carries no information and a brightness lift
-#                  can't rescue a near-black fill (×factor of ~0 is still ~0). So
-#                  we paint its SHAPE in one light, faintly brand-tinted ink via a
-#                  CSS mask: guaranteed to read on the near-black page, and since
-#                  the logo was already one colour, nothing is lost. SVGs (which
-#                  we can't rasterise to measure here) also take this safe path.
+#                  ink), OR a DARK colourful logo whose real colour would paint as
+#                  an invisible smudge on the near-black page (only its few bright
+#                  accents showing, off to one side — unreadable as the logo). We
+#                  paint its whole SHAPE in one light, faintly brand-tinted ink via
+#                  a CSS mask: guaranteed to read on the near-black page and
+#                  identifiable as the club's mark. SVGs (which we can't rasterise
+#                  to measure here) also take this safe path.
 #
-# Pure deterministic pixel maths (no AI, no per-logo hand-tuning), computed once
-# and cached beside the silhouette — the colour-science discipline of
+# The blur is deliberately MODEST and tightly-banded so the mark always stays
+# identifiable as the club's logo — soft-focus, never dissolved into an anonymous
+# blob. Pure deterministic pixel maths (no AI, no per-logo hand-tuning), computed
+# once and cached beside the silhouette — the colour-science discipline of
 # theming/logo_chip.py. Colourfulness is the Hasler–Süsstrunk metric.
 # ---------------------------------------------------------------------------
 
+# Schema version for the cached treatment. BUMP this whenever the calibration
+# below changes, so an already-cached *.treat.json (e.g. on the live deployment)
+# recomputes with the new tuning instead of serving a stale, differently-tuned
+# value — older entries lack the key and are ignored. This is what makes a
+# recalibration actually reach every existing profile, not just fresh uploads.
+_BG_TREAT_VERSION = 2
+# Opacity auto-balance, held inside a TIGHT band so every club's mark sits at the
+# same watermark-faint presence; the perceived-weight target keeps a dense logo
+# from out-shouting a sparse one without letting the two drift far apart.
 _BG_TREAT_W0 = 0.085  # target perceived weight on the near-black page
-_BG_TREAT_OP_MIN, _BG_TREAT_OP_MAX = 0.20, 0.88
-_BG_TREAT_TARGET_LUM, _BG_TREAT_BR_MAX = 0.40, 1.8
-_BG_TREAT_TARGET_SAT, _BG_TREAT_SAT_MIN = 0.42, 0.55
+_BG_TREAT_OP_MIN, _BG_TREAT_OP_MAX = 0.30, 0.60
 _BG_TREAT_COLOURFUL = 0.12  # Hasler–Süsstrunk: above this the logo is "colourful"
+# …but only paint real artwork if the ink is light enough to actually read on the
+# near-black page. A darker colourful logo (e.g. a navy crest) takes the knockout
+# path so its whole shape shows as a light ghost, never an invisible dark smudge.
+_BG_TREAT_DARK_FLOOR = 0.26
 _BG_TREAT_KO_POP = 0.85  # a knockout ghost reads at a fixed light luminance
-# Adaptive blur (display px): a busier shape needs MORE blur to dissolve into a
-# clean soft glow rather than a sharp, fiddly crest; a simple mark (a filled disc)
-# stays identifiable at the low end. Keyed off the silhouette's alpha-edge density.
-_BG_TREAT_BLUR_MIN, _BG_TREAT_BLUR_MAX = 16, 46
-_BG_TREAT_BLUR_BASE, _BG_TREAT_BLUR_GAIN = 12.0, 850.0
+# Adaptive blur (display px): a MODEST, tight band so the mark always stays
+# identifiable. A busier crest earns a little more blur (so its fine detail
+# doesn't knife through the page) but stays readable; a simple mark sits at the
+# low end. Keyed off the silhouette's alpha-edge density.
+_BG_TREAT_BLUR_MIN, _BG_TREAT_BLUR_MAX = 10, 20
+_BG_TREAT_BLUR_BASE, _BG_TREAT_BLUR_GAIN = 7.0, 380.0
 # Knockout / unmeasurable fallback: a light ghost at a moderate watermark weight.
-_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5, "blur": 22}
+_BG_TREAT_NEUTRAL = {"mode": "knockout", "opacity": 0.5, "blur": 14}
 
 
 def logo_bg_treatment(profile_id: str, logo_id: str) -> dict:
     """Per-logo backdrop treatment so ANY uploaded logo sits at the same tasteful
     watermark presence behind the page.
 
-    Returns a small dict for inline CSS. Always carries ``mode`` ("image" or
-    "knockout") and ``opacity``; "image" mode adds ``brightness``/``saturate``/
-    ``halo``. Deterministic and cached beside the silhouette; returns the neutral
-    knockout for SVGs (not rasterised here) or if analysis can't run.
+    Returns a small dict for inline CSS — ``mode`` ("image" or "knockout"),
+    ``opacity``, an adaptive ``blur``, and the schema ``v``. Deterministic and
+    cached beside the silhouette; returns the neutral knockout for SVGs (not
+    rasterised here) or if analysis can't run.
     """
     return _treatment_for_silhouette(logo_bg_silhouette_path(profile_id, logo_id))
 
@@ -673,11 +718,16 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
     try:
         if cache.exists():
             cached = json.loads(cache.read_text())
-            # Only trust a well-formed cache: a finite opacity, a known mode, and a
-            # blur. Older builds could persist a NaN opacity, a mode-less dict, or a
-            # pre-adaptive-blur shape; ignore those and recompute rather than feed a
-            # bad value into the CSS.
-            if isinstance(cached, dict) and cached.get("mode") in ("image", "knockout"):
+            # Only trust a well-formed cache at the CURRENT schema version: a
+            # finite opacity, a known mode, and a blur. Older builds could persist
+            # a NaN opacity, a mode-less dict, a pre-adaptive-blur shape, or an
+            # earlier calibration (no/old ``v``); ignore those and recompute rather
+            # than feed a stale or bad value into the CSS.
+            if (
+                isinstance(cached, dict)
+                and cached.get("v") == _BG_TREAT_VERSION
+                and cached.get("mode") in ("image", "knockout")
+            ):
                 _cop = cached.get("opacity")
                 if (
                     isinstance(_cop, (int, float))
@@ -717,8 +767,16 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
         )
         # Shape busyness from the alpha-edge density → how much blur the crest needs
         # to read as a clean soft glow (a detailed badge with text needs far more
-        # than a plain disc).
-        edges = float(np.abs(np.diff(alpha, axis=0)).mean() + np.abs(np.diff(alpha, axis=1)).mean())
+        # than a plain disc). Guard each axis: np.diff over a 1-px-thin silhouette
+        # (an extreme line/wordmark crop) is empty and .mean() would be NaN.
+        e0 = float(np.abs(np.diff(alpha, axis=0)).mean()) if alpha.shape[0] > 1 else 0.0
+        e1 = float(np.abs(np.diff(alpha, axis=1)).mean()) if alpha.shape[1] > 1 else 0.0
+        edges = e0 + e1
+        # Never let a non-finite metric reach the CSS (it would void the filter /
+        # opacity); fall back to the neutral knockout instead of caching a NaN. Run
+        # this BEFORE int(round(blur)) so a NaN edge can never raise there either.
+        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness, edges]).all()):
+            return dict(_BG_TREAT_NEUTRAL)
         blur = int(
             round(
                 min(
@@ -727,14 +785,12 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                 )
             )
         )
-        # Never let a non-finite metric reach the CSS (it would void the filter /
-        # opacity); fall back to the neutral knockout instead of caching a NaN.
-        if not bool(np.isfinite([coverage, lum, sat, amean, colourfulness, edges]).all()):
-            return dict(_BG_TREAT_NEUTRAL)
 
-        if colourfulness >= _BG_TREAT_COLOURFUL:
-            # Real artwork — its colour is its identity. Lift dark ones, calm
-            # over-bright ones, halo so it separates from the near-black page.
+        if colourfulness >= _BG_TREAT_COLOURFUL and lum >= _BG_TREAT_DARK_FLOOR:
+            # Real artwork — colourful AND light enough to read on the dark page,
+            # so its colour is its identity. Opacity keys off perceived weight
+            # inside the tight band: a dense fill is held back, a faint mark
+            # brought up, but the two never drift far apart.
             pop = max(lum, 0.55 * sat)
             weight = max(coverage * pop * amean, 1e-4)
             treat = {
@@ -742,19 +798,15 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                 "opacity": round(
                     min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
                 ),
-                "brightness": round(
-                    min(_BG_TREAT_BR_MAX, max(1.0, _BG_TREAT_TARGET_LUM / max(lum, 0.05))), 2
-                ),
-                "saturate": round(
-                    min(1.0, max(_BG_TREAT_SAT_MIN, _BG_TREAT_TARGET_SAT / max(sat, 0.05))), 2
-                ),
-                "halo": round(min(0.30, max(0.10, 0.30 - 0.42 * lum)), 3),
                 "blur": blur,
+                "v": _BG_TREAT_VERSION,
             }
         else:
-            # Monochrome — paint the shape as a light ghost (CSS knockout). Its
-            # on-screen luminance is fixed, so opacity keys off coverage alone:
-            # a dense fill is held back, a sparse line crest brought up.
+            # Monochrome, OR a dark colourful logo whose real colour wouldn't read
+            # on the near-black page — paint the whole shape as a light ghost (CSS
+            # knockout), so it's always visible and identifiable. Its on-screen
+            # luminance is fixed, so opacity keys off coverage alone: a dense fill
+            # is held back, a sparse line crest brought up.
             weight = max(coverage * _BG_TREAT_KO_POP * amean, 1e-4)
             treat = {
                 "mode": "knockout",
@@ -762,6 +814,7 @@ def _treatment_for_silhouette(sil: Optional[Path]) -> dict:
                     min(_BG_TREAT_OP_MAX, max(_BG_TREAT_OP_MIN, _BG_TREAT_W0 / weight)), 3
                 ),
                 "blur": blur,
+                "v": _BG_TREAT_VERSION,
             }
         try:
             cache.write_text(json.dumps(treat))
@@ -808,7 +861,7 @@ def mirror_bg_silhouette_path(
     if not src:
         return None
     if src.suffix.lower() == ".svg":
-        return src
+        return src if _looks_like_svg(src) else None
     try:
         safe = re.sub(r"[^a-z0-9._-]+", "_", (profile_id or "").lower().strip())
         key = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:16]
@@ -816,10 +869,11 @@ def mirror_bg_silhouette_path(
         if dst.exists():
             return dst
         _render_bg_silhouette(src, dst)
-        return dst if dst.exists() else src
-    except Exception:
-        log.warning("mirror bg silhouette failed for %s — serving raw", profile_id, exc_info=True)
-        return src
+        if dst.exists():
+            return dst
+    except Exception as e:
+        log.debug("mirror bg silhouette unavailable for %s: %s", profile_id, e)
+    return None
 
 
 def mirror_bg_treatment(profile_id: str, url: str) -> dict:
@@ -827,6 +881,117 @@ def mirror_bg_treatment(profile_id: str, url: str) -> dict:
     mirror (no network in the render path), so it returns the neutral knockout
     until the silhouette has been produced by the ``?bg=1`` serve route."""
     return _treatment_for_silhouette(mirror_bg_silhouette_path(profile_id, url, allow_fetch=False))
+
+
+# ---------------------------------------------------------------------------
+# Logo-chip backing tone (signed-in chrome: nav avatar, sign-in picker, settings)
+#
+# A logo displayed in the UI chrome sits on a small, consistent "chip" so every
+# club's mark reads at the same size and weight (standardised + professional). For
+# the logo to actually READ on that chip we pick the backing tone deterministically
+# from the logo's own ink: a LIGHT logo (white/pale wordmark) needs a DARK chip; a
+# dark or colourful logo sits on the LIGHT "paper" chip where the overwhelming
+# majority of logos are designed to live. We choose whichever of the two house
+# tones gives the logo the higher APCA contrast — reusing theming/contrast.py, the
+# same colour-science the rest of the app trusts. Pure deterministic maths, cached
+# beside the keyed silhouette as ``*.chip.json``. SVGs/unmeasurable default to the
+# light paper chip (safe for the vast majority of marks).
+# ---------------------------------------------------------------------------
+
+_CHIP_TONE_VERSION = 1
+_CHIP_PAPER = "#F5F2E8"  # house paper-cream — the light chip
+_CHIP_INK = "#0A0B11"  # house paper-black — the dark chip
+
+
+def _chip_tone_for_silhouette(sil: Optional[Path]) -> str:
+    """Return ``"light"`` or ``"dark"`` — the chip backing the logo reads best on.
+
+    Measured from the keyed silhouette's mean ink colour and decided by APCA
+    contrast against the two house tones. Cached beside the silhouette. Defaults to
+    ``"light"`` for SVGs (not rasterised here) or if analysis can't run."""
+    if not sil or sil.suffix.lower() == ".svg":
+        return "light"
+    cache = sil.with_suffix(".chip.json")
+    try:
+        if cache.exists():
+            cached = json.loads(cache.read_text())
+            if (
+                isinstance(cached, dict)
+                and cached.get("v") == _CHIP_TONE_VERSION
+                and cached.get("tone") in ("light", "dark")
+            ):
+                return cached["tone"]
+    except Exception:
+        pass
+    try:
+        import numpy as np
+        from PIL import Image
+
+        with Image.open(sil) as _im:
+            arr = np.asarray(_im.convert("RGBA")).astype(np.float32)
+        alpha = arr[..., 3] / 255.0
+        inked = alpha > 0.15
+        if int(inked.sum()) < 10:
+            return "light"
+        # Alpha-weighted mean ink colour → a single representative hex. Weighting by
+        # alpha keeps soft anti-aliased edges from dragging the colour toward black.
+        w = alpha[inked]
+        ink = arr[..., :3][inked]
+        mean_rgb = (ink * w[:, None]).sum(axis=0) / max(float(w.sum()), 1e-6)
+        if not bool(np.isfinite(mean_rgb).all()):
+            return "light"
+        hexcol = "#%02x%02x%02x" % tuple(int(round(min(255.0, max(0.0, c)))) for c in mean_rgb)
+
+        from mediahub.theming.contrast import apca
+
+        # Pick the house tone the logo reads BEST against (higher |APCA Lc|). Ties
+        # go to the light paper chip — the conventional home for a logo.
+        lc_paper = abs(apca(hexcol, _CHIP_PAPER))
+        lc_ink = abs(apca(hexcol, _CHIP_INK))
+        tone = "dark" if lc_ink > lc_paper else "light"
+        try:
+            cache.write_text(json.dumps({"tone": tone, "v": _CHIP_TONE_VERSION}))
+        except Exception:
+            pass
+        return tone
+    except Exception:
+        log.debug("chip tone unavailable for %s", sil, exc_info=True)
+        return "light"
+
+
+def logo_chip_tone(profile_id: str, logo_id: str) -> str:
+    """Backing tone (``"light"``/``"dark"``) for an UPLOADED logo's chrome chip."""
+    return _chip_tone_for_silhouette(logo_bg_silhouette_path(profile_id, logo_id))
+
+
+def mirror_chip_tone(profile_id: str, url: str) -> str:
+    """Backing tone for a WEBSITE-CAPTURED logo's chrome chip. Uses only an
+    already-cached mirror (no network in the render path), so it returns the light
+    default until the silhouette is produced by the ``?bg=1`` serve route."""
+    return _chip_tone_for_silhouette(mirror_bg_silhouette_path(profile_id, url, allow_fetch=False))
+
+
+# A 1×1 fully-transparent PNG, lazily decoded once. The backdrop serve routes
+# ship this (HTTP 200, image/png) whenever a logo can't be turned into a
+# silhouette — so a CSS ``mask-image``/``background-image`` always *loads* and the
+# element hides cleanly, instead of a 404. A failed mask is the dangerous case:
+# CSS treats it as "no mask", which paints the knockout element's full ink
+# rectangle. This transparent pixel is the last-resort guarantee that the backdrop
+# is safe for ANY upload — any format, colour, shape, or size.
+_TRANSPARENT_PNG: Optional[bytes] = None
+
+
+def transparent_pixel_png() -> bytes:
+    """Bytes of a 1×1 fully-transparent PNG (decoded once, then cached)."""
+    global _TRANSPARENT_PNG
+    if _TRANSPARENT_PNG is None:
+        import base64
+
+        _TRANSPARENT_PNG = base64.b64decode(
+            b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4"
+            b"2mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+    return _TRANSPARENT_PNG
 
 
 __all__ = [
@@ -843,5 +1008,8 @@ __all__ = [
     "logo_bg_treatment",
     "mirror_bg_silhouette_path",
     "mirror_bg_treatment",
+    "logo_chip_tone",
+    "mirror_chip_tone",
+    "transparent_pixel_png",
     "describe_logo_with_ai",
 ]
