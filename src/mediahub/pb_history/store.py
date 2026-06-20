@@ -20,14 +20,26 @@ one club's history can never leak into another's.
 
 from __future__ import annotations
 
+import logging
 import os
+import random
 import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
+log = logging.getLogger(__name__)
+
+# Serialises writes WITHIN a process (gunicorn's threads); ACROSS processes the
+# two gunicorn workers are serialised by SQLite's own WAL write-lock + the
+# busy_timeout below, with _with_retry as a second layer (see record_meet).
 _LOCK = threading.Lock()
+
+# How long SQLite waits for a contended write lock before raising. Generous: a
+# pb_history write is a tiny batch (milliseconds), so two workers committing at
+# once never come close. Tunable for very busy deployments.
+_BUSY_TIMEOUT_MS = 10_000
 
 
 def _db_path() -> Path:
@@ -40,12 +52,43 @@ def _db_path() -> Path:
 def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     path = db_path or _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=5.0)
+    conn = sqlite3.connect(str(path), timeout=_BUSY_TIMEOUT_MS / 1000.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+    # WAL lets the two gunicorn workers read concurrently while one writes, and
+    # is the multi-process-safe journal mode (same pattern as memory.db / the
+    # scheduler). It is a persistent property of the file; setting it per
+    # connection is an idempotent no-op after the first.
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     _ensure_schema(conn)
     return conn
+
+
+def _is_locked_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and ("locked" in msg or "busy" in msg)
+
+
+def _with_retry(op: "Callable[[], object]", *, attempts: int = 5) -> object:
+    """Run a DB op, retrying on a transient 'database is locked/busy'.
+
+    busy_timeout already makes SQLite WAIT for the lock rather than fail, so this
+    only ever fires in a pathological stall (e.g. a long WAL checkpoint while
+    both workers commit). It exists so a concurrent worker's write is never
+    SILENTLY dropped — the failure mode that loses PB history under load.
+    """
+    last: Optional[BaseException] = None
+    for i in range(attempts):
+        try:
+            return op()
+        except sqlite3.OperationalError as e:
+            if not _is_locked_error(e):
+                raise
+            last = e
+            time.sleep(min(0.4, 0.05 * (2**i)) + random.random() * 0.05)
+    assert last is not None
+    raise last
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -118,7 +161,8 @@ class PBHistoryStore:
         ]
         if not payload:
             return 0
-        try:
+
+        def _write() -> int:
             with _LOCK:
                 conn = _connect(self._db_path)
                 try:
@@ -141,7 +185,19 @@ class PBHistoryStore:
                 finally:
                     conn.close()
             return len(payload)
-        except Exception:
+
+        try:
+            return int(_with_retry(_write))
+        except Exception as exc:
+            # Surface the rare lost write instead of dropping it silently, so the
+            # operator can see it rather than wonder why a baseline is thin.
+            log.warning(
+                "pb_history: could not record %d row(s) for tenant=%r meet=%r: %s",
+                len(payload),
+                tenant_id,
+                meet_key,
+                exc,
+            )
             return 0
 
     # -- erasure (privacy) -------------------------------------------------
@@ -162,7 +218,7 @@ class PBHistoryStore:
         return self._delete("WHERE tenant_id=?", (tenant_id,))
 
     def _delete(self, where: str, params: tuple) -> int:
-        try:
+        def _do() -> int:
             with _LOCK:
                 conn = _connect(self._db_path)
                 try:
@@ -171,7 +227,11 @@ class PBHistoryStore:
                     return cur.rowcount or 0
                 finally:
                     conn.close()
-        except Exception:
+
+        try:
+            return int(_with_retry(_do))
+        except Exception as exc:
+            log.warning("pb_history: delete failed (%s): %s", where, exc)
             return 0
 
     # -- read --------------------------------------------------------------
@@ -191,8 +251,9 @@ class PBHistoryStore:
         idents = [i for i in dict.fromkeys(identities) if i]
         if not tenant_id or not idents:
             return {}
-        out: "dict[str, dict[str, dict]]" = {}
-        try:
+
+        def _read() -> "dict[str, dict[str, dict]]":
+            out: "dict[str, dict[str, dict]]" = {}
             conn = _connect(self._db_path)
             try:
                 # Chunk the IN list to stay well under SQLite's variable cap.
@@ -239,6 +300,10 @@ class PBHistoryStore:
                         }
             finally:
                 conn.close()
-        except Exception:
             return out
-        return out
+
+        try:
+            return _with_retry(_read)  # type: ignore[return-value]
+        except Exception as exc:
+            log.warning("pb_history: prior_bests read failed for tenant=%r: %s", tenant_id, exc)
+            return {}

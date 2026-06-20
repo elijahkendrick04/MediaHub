@@ -308,8 +308,13 @@ class WebResearcher:
         key = _tinyfish_key()
         if not key:
             return []
+        # GET https://api.search.tinyfish.ai?query=... with an X-API-Key header;
+        # response is {"results": [{"url","title","snippet",…}], …}. No location
+        # hint — MediaHub clubs span the UK/US/AUS, so a neutral global search
+        # beats geo-targeting to the wrong country. (Free tier: 30 req/min; the
+        # PB-history baseline keeps actual call volume to first-seen swimmers.)
         encoded = urllib.parse.quote_plus(query)
-        url = f"https://api.search.tinyfish.ai?query={encoded}&location=US&language=en"
+        url = f"https://api.search.tinyfish.ai?query={encoded}&language=en"
         req = urllib.request.Request(
             url,
             headers={"X-API-Key": key, "Accept": "application/json"},
