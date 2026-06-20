@@ -1,0 +1,393 @@
+{
+  "version": 1,
+  "generator": "scripts/make_audio_assets.py",
+  "note": "First-party, synthesised, CC0-1.0. Regenerate with the generator script.",
+  "tracks": [
+    {
+      "id": "sfx_whistle",
+      "file": "sfx/whistle.ogg",
+      "title": "Referee Whistle",
+      "kind": "sfx",
+      "mood": [
+        "sharp",
+        "attention"
+      ],
+      "energy": 4,
+      "bpm": null,
+      "duration_sec": 0.4,
+      "tags": [
+        "whistle",
+        "referee",
+        "start",
+        "sport"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "sfx_airhorn",
+      "file": "sfx/airhorn.ogg",
+      "title": "Air Horn",
+      "kind": "sfx",
+      "mood": [
+        "celebratory",
+        "loud"
+      ],
+      "energy": 5,
+      "bpm": null,
+      "duration_sec": 0.7,
+      "tags": [
+        "airhorn",
+        "celebration",
+        "win"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "sfx_splash",
+      "file": "sfx/splash.ogg",
+      "title": "Water Splash",
+      "kind": "sfx",
+      "mood": [
+        "splashy",
+        "playful"
+      ],
+      "energy": 3,
+      "bpm": null,
+      "duration_sec": 0.6,
+      "tags": [
+        "splash",
+        "water",
+        "pool",
+        "swim"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "sfx_swoosh",
+      "file": "sfx/swoosh.ogg",
+      "title": "Swoosh",
+      "kind": "sfx",
+      "mood": [
+        "transition",
+        "smooth"
+      ],
+      "energy": 2,
+      "bpm": null,
+      "duration_sec": 0.5,
+      "tags": [
+        "swoosh",
+        "transition",
+        "whoosh"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "sfx_chime",
+      "file": "sfx/chime.ogg",
+      "title": "Bright Chime",
+      "kind": "sfx",
+      "mood": [
+        "bright",
+        "positive"
+      ],
+      "energy": 2,
+      "bpm": null,
+      "duration_sec": 0.9,
+      "tags": [
+        "chime",
+        "bell",
+        "ping",
+        "notify"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "sfx_crowd",
+      "file": "sfx/crowd.ogg",
+      "title": "Crowd Wash",
+      "kind": "sfx",
+      "mood": [
+        "energetic",
+        "crowd"
+      ],
+      "energy": 4,
+      "bpm": null,
+      "duration_sec": 1.6,
+      "tags": [
+        "crowd",
+        "cheer",
+        "applause",
+        "ambience"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "ident_bright",
+      "file": "sfx/ident_bright.ogg",
+      "title": "Bright Ident",
+      "kind": "ident",
+      "mood": [
+        "bright",
+        "uplifting"
+      ],
+      "energy": 4,
+      "bpm": null,
+      "duration_sec": 1.0,
+      "tags": [
+        "ident",
+        "sting",
+        "logo",
+        "intro"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "ident_warm",
+      "file": "sfx/ident_warm.ogg",
+      "title": "Warm Ident",
+      "kind": "ident",
+      "mood": [
+        "warm",
+        "resolved"
+      ],
+      "energy": 2,
+      "bpm": null,
+      "duration_sec": 1.0,
+      "tags": [
+        "ident",
+        "sting",
+        "logo",
+        "outro"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "bed_uplift",
+      "file": "music/bed_uplift.ogg",
+      "title": "Uplift Pad",
+      "kind": "music",
+      "mood": [
+        "uplifting",
+        "warm",
+        "hopeful"
+      ],
+      "energy": 3,
+      "bpm": null,
+      "duration_sec": 8.0,
+      "tags": [
+        "bed",
+        "pad",
+        "uplifting",
+        "highlights"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "bed_drive",
+      "file": "music/bed_drive.ogg",
+      "title": "Drive Pad",
+      "kind": "music",
+      "mood": [
+        "energetic",
+        "driving",
+        "triumphant"
+      ],
+      "energy": 4,
+      "bpm": 120,
+      "duration_sec": 8.0,
+      "tags": [
+        "bed",
+        "pad",
+        "energetic",
+        "drive"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    },
+    {
+      "id": "bed_calm",
+      "file": "music/bed_calm.ogg",
+      "title": "Calm Pad",
+      "kind": "music",
+      "mood": [
+        "calm",
+        "reflective",
+        "gentle"
+      ],
+      "energy": 1,
+      "bpm": null,
+      "duration_sec": 8.0,
+      "tags": [
+        "bed",
+        "pad",
+        "calm",
+        "reflective"
+      ],
+      "licence": {
+        "name": "CC0 1.0",
+        "spdx": "CC0-1.0",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "attribution": "",
+        "source": "MediaHub first-party (synthesised, scripts/make_audio_assets.py)",
+        "commercial_ok": true
+      },
+      "platforms": [
+        "instagram",
+        "tiktok",
+        "youtube",
+        "facebook",
+        "linkedin",
+        "x"
+      ]
+    }
+  ]
+}

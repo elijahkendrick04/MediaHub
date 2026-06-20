@@ -23112,6 +23112,7 @@ Relay team broke club record"></textarea>
         "templates": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
         "members": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
         "activity": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        "audio": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
         "schedule": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
         "autonomy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></svg>',
         "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
@@ -23145,6 +23146,13 @@ Relay team broke club record"></textarea>
                 "picks the right one per moment.",
                 "templates",
                 url_for("template_gallery"),
+            ),
+            (
+                "Audio & voiceover",
+                "Music and sound-effect library, voices, name pronunciation, "
+                "your own audio, and consent settings.",
+                "audio",
+                url_for("settings_section", section="audio"),
             ),
             (
                 "Team members",
@@ -23266,6 +23274,7 @@ Relay team broke club record"></textarea>
     def settings_section(section):
         renderers = {
             "activity": ("Activity", lambda prof: _render_settings_activity_section(prof)),
+            "audio": ("Audio & voiceover", lambda prof: _render_settings_audio_section(prof)),
             "scheduling": (
                 "Auto scheduling",
                 lambda prof: _render_settings_scheduling_section(prof),
@@ -23297,6 +23306,459 @@ Relay team broke club record"></textarea>
             "</section>" + back + render(prof)
         )
         return _layout(f"{title} · Settings", body, active="settings")
+
+    # ------------------------------------------------------------------
+    # Audio engine (roadmap 1.8) — library, voices, pronunciation lexicon,
+    # own-audio upload + rights, and consent-gated voice features.
+    # ------------------------------------------------------------------
+    _AUDIO_UPLOAD_SUFFIXES = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"}
+    _AUDIO_MIME = {
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/opus",
+        ".flac": "audio/flac",
+    }
+    _AUDIO_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB — clips/beds, not albums
+
+    def _audio_back_or_json(payload: dict, status: int = 200):
+        from flask import request as _req
+
+        wants_json = (
+            _req.headers.get("Accept", "").find("application/json") != -1
+            or _req.headers.get("X-Requested-With") == "XMLHttpRequest"
+        )
+        if wants_json:
+            return jsonify(payload), status
+        return redirect(url_for("settings_section", section="audio"))
+
+    @app.route("/api/audio/library")
+    def api_audio_library():
+        """List the audio catalogue (bundled CC0 pool + operator directories)."""
+        from flask import request as _req
+
+        try:
+            from mediahub.audio import load_library
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        lib = load_library()
+        tracks = lib.tracks(
+            kind=(_req.args.get("kind") or None),
+            mood=(_req.args.get("mood") or None),
+            platform=(_req.args.get("platform") or None),
+        )
+        return jsonify({"ok": True, "tracks": [t.to_dict() for t in tracks]})
+
+    @app.route("/api/audio/track/<track_id>")
+    def api_audio_track(track_id):
+        """Serve a catalogue track file for in-browser preview.
+
+        Only library tracks (bundled + operator directories) are addressable by
+        id here — they are deployment-global, not per-org, so there is no IDOR
+        surface, and the id resolves to a known file (no path traversal).
+        """
+        try:
+            from mediahub.audio import load_library
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        track = load_library().get(track_id)
+        if track is None or not Path(track.path).is_file():
+            return jsonify({"error": "not_found"}), 404
+        mime = _AUDIO_MIME.get(Path(track.path).suffix.lower(), "application/octet-stream")
+        return send_file(str(track.path), mimetype=mime, as_attachment=False)
+
+    @app.route("/api/audio/voices")
+    def api_audio_voices():
+        """The voice catalogue + the active TTS provider status."""
+        try:
+            from mediahub.audio import list_voices
+            from mediahub.visual import voiceover as _vo
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        try:
+            status = _vo.tts_provider_status()
+        except Exception:
+            status = {}
+        return jsonify({"ok": True, "voices": [v.to_dict() for v in list_voices()], "tts": status})
+
+    @app.route("/api/audio/lexicon", methods=["GET", "POST"])
+    def api_audio_lexicon():
+        """Per-organisation pronunciation lexicon CRUD (org-scoped).
+
+        GET returns the org's map; POST with ``op=set`` (written+spoken) or
+        ``op=remove`` (written) mutates it. Form posts redirect back to the
+        Audio settings page; XHR/JSON callers get JSON.
+        """
+        from flask import request as _req
+
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org", "message": "Sign in to manage a lexicon."}), 403
+        try:
+            from mediahub.audio.voice import OrgLexicon
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        lex = OrgLexicon(pid)
+        if _req.method == "GET":
+            return jsonify({"ok": True, "entries": lex.entries()})
+        op = (_req.form.get("op") or _req.values.get("op") or "set").strip().lower()
+        try:
+            if op == "remove":
+                lex.remove((_req.form.get("written") or "").strip())
+            else:
+                lex.set(
+                    (_req.form.get("written") or "").strip(),
+                    (_req.form.get("spoken") or "").strip(),
+                )
+        except ValueError as e:
+            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
+        return _audio_back_or_json({"ok": True, "entries": lex.entries()})
+
+    @app.route("/api/audio/upload", methods=["POST"])
+    def api_audio_upload():
+        """Upload an organisation's own audio with a licence attestation (1.8).
+
+        Stored org-scoped under DATA_DIR, fingerprinted, and recorded in the
+        rights ledger. Optionally loudness-levelled/denoised via clean.py when
+        ``enhance=1`` is set (e.g. a browser voice recording).
+        """
+        from flask import request as _req
+
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org", "message": "Sign in to upload audio."}), 403
+        f = _req.files.get("file")
+        if not f:
+            return jsonify({"error": "no_file"}), 400
+        ext = Path(f.filename or "clip.wav").suffix.lower()
+        if ext not in _AUDIO_UPLOAD_SUFFIXES:
+            return jsonify(
+                {"error": "bad_type", "message": f"Unsupported audio type {ext!r}."}
+            ), 415
+        try:
+            from mediahub.audio import rights as _rights
+            from mediahub.audio.library import Licence
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+
+        import uuid as _uuid
+
+        upload_dir = DATA_DIR / "audio_uploads" / pid
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        asset_id = _uuid.uuid4().hex[:12]
+        dest = upload_dir / f"{asset_id}{ext}"
+        f.save(str(dest))
+        try:
+            if dest.stat().st_size > _AUDIO_UPLOAD_MAX_BYTES:
+                dest.unlink(missing_ok=True)
+                return jsonify({"error": "too_large", "message": "Audio exceeds 25 MB."}), 413
+        except OSError:
+            return jsonify({"error": "save_failed"}), 500
+
+        # Optional one-tap clean-up (denoise + loudness) for recordings.
+        if (_req.form.get("enhance") or "").strip().lower() in {"1", "true", "on", "yes"}:
+            try:
+                from mediahub.audio import clean as _clean
+
+                cleaned = upload_dir / f"{asset_id}_clean.wav"
+                _clean.enhance_voice(dest, cleaned)
+                dest.unlink(missing_ok=True)
+                dest = cleaned
+            except Exception:
+                pass  # keep the original on any cleanup failure — never lose the upload
+
+        platforms = tuple(
+            p.strip().lower() for p in (_req.form.get("platforms") or "").split(",") if p.strip()
+        )
+        licence = Licence(
+            name=(_req.form.get("licence_name") or "operator-supplied").strip(),
+            url=(_req.form.get("licence_url") or "").strip(),
+            attribution=(_req.form.get("attribution") or "").strip(),
+            source="operator upload",
+            commercial_ok=(_req.form.get("commercial_ok") or "").strip().lower()
+            in {"1", "true", "on", "yes"},
+        )
+        check = _rights.check_upload(dest)
+        rec = _rights.attest_upload(
+            dest,
+            asset_id=asset_id,
+            profile_id=pid,
+            licence=licence,
+            platforms=platforms or _rights.PLATFORMS,
+            attested_by=pid,
+            notes=(_req.form.get("notes") or "").strip(),
+        )
+        return _audio_back_or_json(
+            {
+                "ok": True,
+                "asset": rec.to_dict(),
+                "duplicate": check.is_duplicate,
+                "fingerprint_method": check.fingerprint.method,
+            }
+        )
+
+    @app.route("/api/audio/voice-consent", methods=["GET", "POST"])
+    def api_audio_voice_consent():
+        """Grant/revoke the consent that gates voice cloning/changer (org-scoped)."""
+        from flask import request as _req
+
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org"}), 403
+        try:
+            from mediahub.audio.consent import FEATURES, ConsentStore
+        except Exception as e:
+            return jsonify({"error": "audio_unavailable", "detail": str(e)}), 503
+        store = ConsentStore()
+        if _req.method == "GET":
+            return jsonify(
+                {
+                    "ok": True,
+                    "features": list(FEATURES),
+                    "active": [r.to_dict() for r in store.active(pid)],
+                }
+            )
+        feature = (_req.form.get("feature") or "").strip().lower()
+        action = (_req.form.get("action") or "grant").strip().lower()
+        try:
+            if action == "revoke":
+                store.revoke(pid, feature, by=pid)
+            else:
+                store.grant(
+                    pid,
+                    feature,
+                    voice_owner=(_req.form.get("voice_owner") or "").strip(),
+                    consent_ref=(_req.form.get("consent_ref") or "").strip(),
+                    granted_by=pid,
+                )
+        except ValueError as e:
+            return _audio_back_or_json({"error": "invalid", "message": str(e)}, 400)
+        return _audio_back_or_json({"ok": True})
+
+    @app.route("/api/audio/suggest")
+    def api_audio_suggest():
+        """Suggest a track for a mood/kind — AI when available, else deterministic.
+
+        Always 200 (never 5xx — a bare GET to this advisory endpoint must not
+        pollute uptime): returns the AI mood-matched pick when a provider is
+        configured, otherwise the deterministic library pick. ``method`` says
+        which path produced the suggestion ("ai" / "deterministic" / "none").
+        """
+        from flask import request as _req
+
+        try:
+            from mediahub.audio import load_library
+            from mediahub.audio.select import select_or_default
+        except Exception as e:
+            return jsonify({"ok": False, "available": False, "detail": str(e)})
+        lib = load_library()
+        mood = (_req.args.get("mood") or "").strip()
+        kind = (_req.args.get("kind") or "music").strip()
+        sel = select_or_default(
+            lib, content_key=(mood or "suggest"), kind=kind, mood_hint=(mood or None)
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "available": sel.track is not None,
+                "method": sel.method,
+                "arc": sel.arc,
+                "track": sel.track.to_dict() if sel.track else None,
+            }
+        )
+
+    def _render_settings_audio_section(prof: Optional[ClubProfile]) -> str:
+        """Audio engine settings — library, voices, lexicon, uploads, consent."""
+        from mediahub.audio import list_voices, load_library
+        from mediahub.audio.consent import FEATURES, ConsentStore
+        from mediahub.audio.voice import OrgLexicon
+
+        pid = _active_profile_id()
+        lib = load_library()
+
+        # --- Music & SFX library (with inline preview players) ---
+        track_rows = ""
+        for t in lib.all():
+            mood = ", ".join(t.mood) if t.mood else "—"
+            badge = "CC0" if t.licence.spdx == "CC0-1.0" else _h(t.licence.name)
+            src = url_for("api_audio_track", track_id=t.id)
+            track_rows += (
+                '<div class="card" style="padding:12px 14px;display:flex;align-items:center;'
+                'gap:12px;flex-wrap:wrap">'
+                f'<div style="flex:1;min-width:180px"><strong>{_h(t.title)}</strong>'
+                f'<div class="dim" style="font-size:12px">{_h(t.kind)} · {_h(mood)} · '
+                f'energy {t.energy} · <span class="tag">{badge}</span></div></div>'
+                f'<audio controls preload="none" src="{src}" style="height:34px"></audio>'
+                "</div>"
+            )
+        library_html = (
+            '<h2 style="font-size:18px;margin:24px 0 6px">Music &amp; sound effects</h2>'
+            '<p class="dim" style="margin:0 0 12px">MediaHub ships its own licence-clean '
+            "(CC0) pool so reels have sound out of the box. Set "
+            "<code>MEDIAHUB_REEL_MUSIC_LIBRARY=1</code> to use it as the default reel bed, "
+            "or point <code>MEDIAHUB_AUDIO_LIBRARY_DIR</code> at your own licensed tracks.</p>"
+            f'<div style="display:grid;gap:8px">{track_rows}</div>'
+        )
+
+        # --- Voice catalogue ---
+        voice_rows = ""
+        for v in list_voices():
+            tag = "local" if v.local else "online"
+            voice_rows += (
+                "<li style=\"margin-bottom:4px\">"
+                f"<strong>{_h(v.name or v.id)}</strong> "
+                f'<span class="dim">· {_h(v.language)} · {_h(v.provider)} ({tag})'
+                f"{(' · ' + _h(v.description)) if v.description else ''}</span></li>"
+            )
+        voices_html = (
+            '<h2 style="font-size:18px;margin:28px 0 6px">Voices</h2>'
+            '<p class="dim" style="margin:0 0 8px">Voiceover speaks the approved caption '
+            "verbatim — no AI script. The local voice is the zero-cost default; Welsh and "
+            "other voices are available on the online backend.</p>"
+            f'<ul style="margin:0 0 4px;padding-left:18px">{voice_rows}</ul>'
+        )
+
+        # --- Per-org pronunciation lexicon ---
+        if pid:
+            entries = OrgLexicon(pid).entries()
+            rows = ""
+            for written, spoken in sorted(entries.items()):
+                rows += (
+                    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+                    f'<code style="flex:1">{_h(written)} → {_h(spoken)}</code>'
+                    f'<form method="post" action="{url_for("api_audio_lexicon")}" '
+                    'style="margin:0">'
+                    '<input type="hidden" name="op" value="remove">'
+                    f'<input type="hidden" name="written" value="{_h(written)}">'
+                    '<button class="btn btn-ghost" style="padding:4px 10px">Remove</button>'
+                    "</form></div>"
+                )
+            if not rows:
+                rows = '<p class="dim" style="margin:0 0 8px">No name overrides yet.</p>'
+            lexicon_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Name pronunciation</h2>'
+                '<p class="dim" style="margin:0 0 12px">Teach MediaHub how your swimmers\' '
+                "names are said — once. Every voiceover then gets them right (no AI guessing).</p>"
+                f"{rows}"
+                f'<form method="post" action="{url_for("api_audio_lexicon")}" '
+                'style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
+                '<input type="hidden" name="op" value="set">'
+                '<input name="written" placeholder="Written (e.g. Saoirse)" required '
+                'style="flex:1;min-width:160px;padding:8px">'
+                '<input name="spoken" placeholder="Say it (e.g. Seer-sha)" required '
+                'style="flex:1;min-width:160px;padding:8px">'
+                '<button class="btn btn-primary">Add</button></form>'
+            )
+        else:
+            lexicon_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Name pronunciation</h2>'
+                '<p class="dim">Sign in to a club to manage its pronunciation lexicon.</p>'
+            )
+
+        # --- Upload own audio + browser recorder ---
+        if pid:
+            upload_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Upload your own audio</h2>'
+                '<p class="dim" style="margin:0 0 12px">Add a track you hold the licence for. '
+                "We fingerprint it and record your licence attestation in the rights ledger.</p>"
+                f'<form method="post" action="{url_for("api_audio_upload")}" '
+                'enctype="multipart/form-data" style="display:grid;gap:8px;max-width:560px">'
+                '<input type="file" id="mh-audio-file" name="file" accept="audio/*" required>'
+                '<input name="licence_name" placeholder="Licence (e.g. Licensed, CC-BY)" '
+                'style="padding:8px">'
+                '<input name="attribution" placeholder="Attribution (if required)" '
+                'style="padding:8px">'
+                '<label style="font-size:13px"><input type="checkbox" name="commercial_ok" '
+                'value="1" checked> I confirm this is cleared for commercial club use</label>'
+                '<label style="font-size:13px"><input type="checkbox" name="enhance" value="1"> '
+                "Clean up (denoise + level) — recommended for recordings</label>"
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+                '<button class="btn btn-primary" type="submit">Upload</button>'
+                '<button class="btn btn-ghost" type="button" id="mh-rec-btn">● Record</button>'
+                '<span id="mh-rec-status" class="dim" style="font-size:12px"></span>'
+                "</div></form>"
+            )
+        else:
+            upload_html = ""
+
+        # --- Voice consent (cloning / changer; off by default) ---
+        if pid:
+            store = ConsentStore()
+            consent_rows = ""
+            for feat in FEATURES:
+                on = store.is_enabled(pid, feat)
+                state = (
+                    '<span class="tag" style="background:var(--accent);color:#0b0f17">enabled</span>'
+                    if on
+                    else '<span class="tag">off</span>'
+                )
+                if on:
+                    btn = (
+                        f'<form method="post" action="{url_for("api_audio_voice_consent")}" '
+                        'style="margin:0"><input type="hidden" name="action" value="revoke">'
+                        f'<input type="hidden" name="feature" value="{_h(feat)}">'
+                        '<button class="btn btn-ghost" style="padding:4px 10px">Revoke</button>'
+                        "</form>"
+                    )
+                else:
+                    btn = (
+                        f'<form method="post" action="{url_for("api_audio_voice_consent")}" '
+                        'style="margin:0;display:flex;gap:6px;flex-wrap:wrap">'
+                        '<input type="hidden" name="action" value="grant">'
+                        f'<input type="hidden" name="feature" value="{_h(feat)}">'
+                        '<input name="voice_owner" placeholder="Voice owner" '
+                        'style="padding:4px 8px">'
+                        '<input name="consent_ref" placeholder="Consent reference" '
+                        'style="padding:4px 8px">'
+                        '<button class="btn btn-ghost" style="padding:4px 10px">'
+                        "Enable with consent</button></form>"
+                    )
+                label = "Voice cloning" if feat == "clone" else "Voice changer"
+                consent_rows += (
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+                    'margin-bottom:8px"><div style="flex:1;min-width:160px">'
+                    f"<strong>{_h(label)}</strong> {state}</div>{btn}</div>"
+                )
+            consent_html = (
+                '<h2 style="font-size:18px;margin:28px 0 6px">Voice cloning &amp; changer</h2>'
+                '<p class="dim" style="margin:0 0 12px">Off by default. Enable only with the '
+                "recorded consent of the voice's owner — every grant and revocation is "
+                f"audited.</p>{consent_rows}"
+            )
+        else:
+            consent_html = ""
+
+        recorder_js = (
+            "<script>(function(){var b=document.getElementById('mh-rec-btn');"
+            "if(!b||!navigator.mediaDevices)return;var rec,chunks=[],on=false;"
+            "var st=document.getElementById('mh-rec-status');"
+            "b.addEventListener('click',function(){if(on){rec&&rec.stop();return;}"
+            "navigator.mediaDevices.getUserMedia({audio:true}).then(function(s){"
+            "rec=new MediaRecorder(s);chunks=[];rec.ondataavailable=function(e){chunks.push(e.data);};"
+            "rec.onstop=function(){var blob=new Blob(chunks,{type:'audio/webm'});"
+            "var f=new File([blob],'recording.webm',{type:'audio/webm'});"
+            "var dt=new DataTransfer();dt.items.add(f);"
+            "document.getElementById('mh-audio-file').files=dt.files;"
+            "s.getTracks().forEach(function(t){t.stop();});on=false;b.textContent='● Record';"
+            "st.textContent='Recorded — review and Upload.';};rec.start();on=true;"
+            "b.textContent='■ Stop';st.textContent='Recording…';}).catch(function(){"
+            "st.textContent='Microphone unavailable.';});});})();</script>"
+        )
+
+        return (
+            '<div style="max-width:760px">'
+            '<p class="lede" style="margin-top:0">Sound for your videos — music, effects and '
+            "voiceover — all rights-clean and explainable.</p>"
+            + library_html
+            + voices_html
+            + lexicon_html
+            + upload_html
+            + consent_html
+            + (recorder_js if pid else "")
+            + "</div>"
+        )
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
         """Activity section — recent runs for the pinned org.

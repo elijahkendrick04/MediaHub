@@ -598,6 +598,29 @@ def _card_mix_profile(card: Any, brief: Optional[dict] = None) -> Optional[str]:
     return None
 
 
+def _library_bed_for(content_key: str):
+    """A bundled-library music bed for a render, or None (roadmap 1.8).
+
+    Only when the operator opted in (``MEDIAHUB_REEL_MUSIC_LIBRARY``) *and* has
+    supplied no licensed music directory of their own — their music always wins.
+    The pick is the deterministic content-hash one (``AudioLibrary.pick``), not
+    the AI selector: it must be cheap and stable because it feeds the cache key
+    on every render (including cache hits). The AI mood-match is an explicit
+    web-surface suggestion, not baked into the hot path. Best-effort: any failure
+    returns None and the render stays on its prior (silent / operator-bed) path.
+    """
+    try:
+        from mediahub.visual import audio_mux
+
+        if not audio_mux.library_bed_enabled() or audio_mux.music_candidates():
+            return None
+        from mediahub.audio import load_library
+
+        return load_library().pick(content_key, kind="music", commercial_only=True)
+    except Exception:
+        return None
+
+
 def _story_audio_plan(card_props: dict, brand_dict: dict, *, mix_profile: Optional[str] = None):
     """The audio plan for one story render, or None for today's silent path.
 
@@ -623,7 +646,12 @@ def _story_audio_plan(card_props: dict, brand_dict: dict, *, mix_profile: Option
             card_props.get("eventName") or "",
             card_props.get("resultValue") or "",
         )
-        return audio_mux.build_audio_plan(script=script, content_key=key, mix_profile=mix_profile)
+        return audio_mux.build_audio_plan(
+            script=script,
+            content_key=key,
+            mix_profile=mix_profile,
+            library_track=_library_bed_for(key),
+        )
     except Exception:
         return None
 
@@ -656,7 +684,12 @@ def _reel_audio_plan(
         key = "reel:{}:{}:{}".format(
             meet_name or "", len(cards_props), first.get("athleteFullName") or ""
         )
-        return audio_mux.build_audio_plan(script=script, content_key=key, mix_profile=mix_profile)
+        return audio_mux.build_audio_plan(
+            script=script,
+            content_key=key,
+            mix_profile=mix_profile,
+            library_track=_library_bed_for(key),
+        )
     except Exception:
         return None
 

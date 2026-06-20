@@ -158,6 +158,10 @@ include = ["mediahub*"]
 [tool.setuptools.package-data]
 "mediahub.graphic_renderer" = ["layouts/*.html", "layouts/*.css"]
 "mediahub" = ["**/*.json"]
+# Roadmap 1.8 — the bundled, licence-clean audio pool (audio/assets/*). These
+# first-party CC0 SFX/idents/beds ship in the wheel so the reel engine has sound
+# with no operator setup. Regenerate with scripts/make_audio_assets.py.
+"mediahub.audio" = ["assets/manifest.json", "assets/**/*"]
 # Phase 1.6 Stage C — Adaptive Theming Engine static CSS files. The
 # loader in mediahub.web.theme_tokens reads these at import time.
 "mediahub.web" = ["static/theme/*.css"]
