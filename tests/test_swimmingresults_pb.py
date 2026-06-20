@@ -122,6 +122,7 @@ def _patch_fetch_and_caches(monkeypatch):
     roster._EVENTNO.clear()
     roster._EVENTNO_AT = 0.0
     roster._SLICE_CACHE.clear()
+    lookup._ROSTER_CACHE.clear()
     yield
 
 
@@ -345,6 +346,96 @@ def test_lookup_logs_unmatched_swimmers_by_name():
     lines: list[str] = []
     lookup_official_pbs(meet, set(swimmers), "Torfaen Dolphins", step=lines.append)
     assert any("unmatched" in ln.lower() and "Nobody Nemo" in ln for ln in lines)
+
+
+def test_match_one_resolves_diminutive_and_spelling_variants():
+    """The matcher resolves a diminutive (Vivi->Vivienne, a clean prefix) and a
+    1-edit spelling variant (Mia<->Miya, both directions) when the lone
+    same-surname candidate is in the searched pool — surname + a real
+    nickname/prefix/spelling relationship, no first-name dictionary needed."""
+    from mediahub.swimmingresults.lookup import _match_one
+
+    peel = {"P": {"name": "Vivienne Peel", "events": {"100FRLC": {"time_cs": 7000}}, "sex": "F"}}
+    assert _match_one("Vivi", "Peel", {"100FRLC": 7200}, peel) == "P"
+
+    croft = {"C": {"name": "Miya Croft", "events": {"50FRLC": {"time_cs": 3000}}, "sex": "F"}}
+    assert _match_one("Mia", "Croft", {"50FRLC": 3100}, croft) == "C"
+    croft2 = {"C": {"name": "Mia Croft", "events": {"50FRLC": {"time_cs": 3000}}, "sex": "F"}}
+    assert _match_one("Miya", "Croft", {"50FRLC": 3100}, croft2) == "C"
+
+
+def test_match_one_does_not_force_genuinely_different_same_surname():
+    """Two same-surname candidates, neither a nickname/prefix of the meet first
+    name, with times that don't single one out → no match (never a false match)."""
+    from mediahub.swimmingresults.lookup import _match_one
+
+    roster = {
+        "A": {"name": "George Peel", "events": {"100FRLC": {"time_cs": 6000}}, "sex": "M"},
+        "B": {"name": "Harold Peel", "events": {"100FRLC": {"time_cs": 6010}}, "sex": "M"},
+    }
+    assert _match_one("Vivi", "Peel", {"100FRLC": 9000}, roster) is None
+
+
+def test_resolved_but_no_roster_time_recovered_via_pb_page(monkeypatch):
+    """A swimmer confidently resolved by name+club+age but whose all-time ranking
+    rows carried no usable time (here a DQ-only row → empty roster events) is NOT
+    dropped: we fall back to the authoritative personal_best.php for the resolved
+    member id and recover her PBs."""
+    from mediahub.swimmingresults import clubs, lookup
+    from mediahub.swimmingresults import roster as roster_mod
+    from mediahub.swimmingresults import lookup_official_pbs
+
+    notime_roster = (
+        "<html><body><table>"
+        '<tr><td>1</td>'
+        '<td><a href="/individualbest/personal_best.php?tiref=1153374&mode=A">Holly Greenslade</a></td>'
+        "<td>Torfaen D</td><td>09</td><td>Meet</td><td>01/01/24</td><td>DQ</td></tr>"
+        "</table></body></html>"
+    )
+
+    def fake(url, *, timeout=None):
+        if "eventrankings.php" in url:
+            return notime_roster
+        if "personal_best.php" in url:
+            return PB_PAGE  # the authoritative record DOES carry PBs
+        if "/eventrankings/" in url:
+            return FORM_PAGE
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    monkeypatch.setattr(clubs, "fetch", fake)
+    monkeypatch.setattr(roster_mod, "fetch", fake)
+    monkeypatch.setattr(lookup, "fetch", fake)
+
+    swimmers = {"s1": _sw("s1", "Holly", "Greenslade", age=13)}
+    meet = types.SimpleNamespace(
+        swimmers=swimmers, results=[_rr("s1")], start_date="2024-01-01", end_date=None
+    )
+    snaps = lookup_official_pbs(meet, {"s1"}, "Torfaen Dolphins")
+    assert "s1" in snaps  # resolved off the timeless roster, recovered via the PB page
+    assert "50FRLC" in snaps["s1"].pb_times  # PBs came from personal_best.php
+
+
+def test_unmatched_report_flags_sex_mismatch():
+    """When the lone same-surname candidate is the opposite sex to the swimmer's
+    parsed gender, the report shows BOTH — so a gender-parse bug (the cause hides
+    behind a generic 'none resolved') is obvious in the logs."""
+    from mediahub.swimmingresults.lookup import _unmatched_report
+
+    roster = {"P": {"name": "Vivienne Peel", "events": {}, "sex": "F"}}
+    swimmers = {"s1": types.SimpleNamespace(first_name="Vivi", last_name="Peel", gender="M")}
+    r = dict(_unmatched_report({"s1"}, {}, swimmers, roster))["Vivi Peel"]
+    assert "sex=F" in r and "gender=M" in r and "Vivienne Peel" in r
+
+
+def test_unmatched_report_flags_resolved_but_empty():
+    """A swimmer resolved to a tiref but with no recoverable PB is reported as
+    'resolved … but no usable PB time', distinct from an unresolved name."""
+    from mediahub.swimmingresults.lookup import _unmatched_report
+
+    roster = {"P": {"name": "Vivienne Peel", "events": {}, "sex": "F"}}
+    swimmers = {"s1": types.SimpleNamespace(first_name="Vivi", last_name="Peel", gender="F")}
+    r = dict(_unmatched_report({"s1"}, {}, swimmers, roster, {"s1": "P"}))["Vivi Peel"]
+    assert "resolved to Vivienne Peel" in r and "no usable PB time" in r
 
 
 def test_lookup_skips_when_club_not_found():

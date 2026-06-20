@@ -160,7 +160,7 @@ def _build_club_roster(
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
             for event_key, sl in pool.map(_one, jobs):
                 for tiref, (name, time_cs, date_iso, meet) in sl.items():
-                    info = roster.setdefault(tiref, {"name": name, "events": {}})
+                    info = roster.setdefault(tiref, {"name": name, "events": {}, "sex": sex})
                     if time_cs is not None:
                         prev = info["events"].get(event_key)
                         if prev is None or time_cs < prev["time_cs"]:
@@ -486,6 +486,7 @@ def lookup_official_pbs(
     # 2. Roster resolution (no-id swimmers + those whose id was rejected).
     n_by_roster = 0
     roster_by_tiref: dict[str, dict] = {}
+    roster_tirefs: dict[str, str] = {}
     club_code = resolve_club_code(club_name, force_refresh=force_refresh) if need_roster else None
     if need_roster and not club_code:
         emit(
@@ -502,6 +503,7 @@ def lookup_official_pbs(
         # Build PBs straight from the all-time rankings we already swept — no
         # per-swimmer personal_best.php fetch (fewer requests) and it covers
         # swimmers whose membership has lapsed (no personal-best page).
+        resolved_empty: dict[str, str] = {}
         for key, tiref in roster_tirefs.items():
             entry = roster_by_tiref.get(tiref)
             if not entry:
@@ -510,6 +512,27 @@ def lookup_official_pbs(
             if snap.pb_times:
                 snapshots[key] = snap
                 n_by_roster += 1
+            else:
+                # Confidently resolved by name+club+age, but the all-time ranking
+                # rows we swept carried no usable time for this swimmer (e.g. she
+                # only appears in rows without a parseable time — a DQ-only event,
+                # or a column shape the row reader can't pull a time from). Fall
+                # back to the AUTHORITATIVE personal_best.php for the resolved
+                # member id rather than dropping a swimmer we did identify.
+                resolved_empty[key] = tiref
+        if resolved_empty:
+            n_recovered = 0
+            for key, snap in _fetch_snapshots(resolved_empty, force_refresh=force_refresh).items():
+                if snap is not None and snap.pb_times:
+                    snapshots[key] = snap
+                    n_by_roster += 1
+                    n_recovered += 1
+            if n_recovered:
+                log.info(
+                    "swimmingresults: recovered %d resolved-but-no-roster-time swimmer(s) "
+                    "via personal_best.php",
+                    n_recovered,
+                )
 
     with_pbs = sum(1 for s in snapshots.values() if s.pb_times)
     summary = (
@@ -527,7 +550,7 @@ def lookup_official_pbs(
     # the exact gaps are visible in the platform logs instead of only a count.
     # The operator can then tell a genuine "no ranked time" miss (nothing to fix)
     # apart from a name/age quirk worth recovering — without guessing.
-    unmatched = _unmatched_report(our, snapshots, swimmers_by_key, roster_by_tiref)
+    unmatched = _unmatched_report(our, snapshots, swimmers_by_key, roster_by_tiref, roster_tirefs)
     if unmatched:
         detail = "; ".join(f"{name} [{reason}]" for name, reason in unmatched)
         line = f"PB baseline: {len(unmatched)} unmatched — {detail}"
@@ -541,14 +564,30 @@ def _unmatched_report(
     snapshots: dict,
     swimmers_by_key: dict,
     roster_by_tiref: dict,
+    resolved_tirefs: Optional[dict] = None,
 ) -> "list[tuple[str, str]]":
     """``[(swimmer_name, reason), …]`` for every requested swimmer with no PB
     snapshot, sorted by name. The reason is derived from the roster we already
-    swept: whether any ranked swimmer shares the surname (so a true "not ranked
-    for this club" miss is distinguishable from a same-surname disambiguation
-    that fell through). Never raises — diagnostics must not fail a run."""
+    swept so the operator can act without guessing:
+
+      * resolved to a tiref but STILL no PB (even from personal_best.php) → a
+        genuinely-empty official record, nothing to recover;
+      * one-or-more same-surname candidates, EACH shown with its sex + tiref next
+        to the swimmer's own parsed gender — so a wrong-gender parse (the lone
+        candidate is F but the swimmer parsed M, so the opposite-sex roster was
+        searched) is visible at a glance and distinct from a real
+        first-name/age mismatch;
+      * no same-surname candidate at all → genuinely not ranked for this club.
+
+    Never raises — diagnostics must not fail a run."""
+    resolved_tirefs = resolved_tirefs or {}
     matched = {k for k, s in snapshots.items() if getattr(s, "pb_times", None)}
-    roster_surnames = [split_full_name(e.get("name", ""))[1] for e in roster_by_tiref.values()]
+    # (surname, full_name, sex, tiref) index over the swept roster.
+    cands: list[tuple[str, str, str, str]] = []
+    for tiref, e in roster_by_tiref.items():
+        surn = split_full_name(e.get("name", ""))[1]
+        if surn:
+            cands.append((surn, e.get("name", ""), (e.get("sex") or "?"), tiref))
     out: list[tuple[str, str]] = []
     for key in our:
         if key in matched:
@@ -558,19 +597,28 @@ def _unmatched_report(
             continue
         first = (getattr(sw, "first_name", "") or "").strip()
         last = (getattr(sw, "last_name", "") or "").strip()
+        gender = (getattr(sw, "gender", "") or "").strip().upper() or "?"
         name = (f"{first} {last}").strip() or str(key)
-        if not roster_by_tiref:
+        rt = resolved_tirefs.get(key)
+        if rt is not None:
+            cand = roster_by_tiref.get(rt) or {}
+            reason = (
+                f"resolved to {cand.get('name', '?')} (tiref={rt}) but no usable PB "
+                "time, even from personal_best.php"
+            )
+        elif not roster_by_tiref:
             reason = "no club roster available"
         elif not last:
             reason = "no surname parsed from the file"
         else:
-            n_same = sum(1 for rs in roster_surnames if rs and surname_match(last, rs))
-            if n_same == 0:
+            same = [(nm, sx, t) for (surn, nm, sx, t) in cands if surname_match(last, surn)]
+            if not same:
                 reason = "no ranked swimmer with that surname in the club's all-time rankings"
             else:
+                desc = ", ".join(f"{nm} (sex={sx}, tiref={t})" for nm, sx, t in same)
                 reason = (
-                    f"{n_same} same-surname candidate(s), none uniquely resolved "
-                    "(first-name/age/time)"
+                    f"{len(same)} same-surname candidate(s) vs swimmer gender={gender}: "
+                    f"{desc} — none resolved (first-name/age/time or sex mismatch)"
                 )
         out.append((name, reason))
     out.sort(key=lambda t: t[0].lower())
