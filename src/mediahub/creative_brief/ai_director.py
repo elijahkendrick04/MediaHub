@@ -205,9 +205,14 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
         '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
+        '  "text_effects": {"headline|result|kicker|event|meta": "none|shadow|outline|neon|gradient|extrude|curve"} (optional flourish — usually {} ),\n'
         '  "rationale": <one sentence: why this composition fits THIS result>\n'
         "}\n\n"
         "colour_roles values must be one of: " + ", ".join(token_roles) + ".\n"
+        "text_effects is an optional flourish: leave it {} for most cards, and at "
+        "most add ONE slot (a loud headline neon/outline/gradient, or a curved "
+        "kicker) when the moment is genuinely big. The renderer auto-downgrades any "
+        "effect that would hurt legibility, so never reach for one to force drama.\n"
         "Choose the archetype that fits the moment (a medal → spotlight; a standout "
         "time with no photo → big_number or minimal poster; a great photo → "
         "full-bleed or diagonal). Lead with the most newsworthy hero_stat. Pick "

@@ -1,11 +1,31 @@
 """typography — MediaHub's first-party type pipeline.
 
-Currently houses the **club custom-font upload pipeline** (roadmap G1.10):
-validate → subset → self-host an uploaded brand typeface, with no Google Fonts
-CDN and an honest error when the subsetting toolchain is absent. See
-:mod:`mediahub.typography.font_intake`.
+Houses two halves of the **typography system** (roadmap 1.9):
+
+* the **club custom-font upload pipeline** (roadmap G1.10): validate → subset →
+  self-host an uploaded brand typeface, with no Google Fonts CDN and an honest
+  error when the subsetting toolchain is absent —
+  :mod:`mediahub.typography.font_intake`;
+* the **curated self-hosted font catalogue** — the source of truth for the
+  first-party faces MediaHub ships across its three surfaces, browsable by
+  mood / class / surface and merged with an org's uploads —
+  :mod:`mediahub.typography.catalog`.
 """
 
+from .catalog import (
+    CatalogError,
+    CatalogFont,
+    CLASS_VOCAB,
+    MOOD_VOCAB,
+    ROLE_VOCAB,
+    SURFACE_VOCAB,
+    for_surface,
+    get,
+    load_catalog,
+    org_catalog,
+    search,
+    verify_assets,
+)
 from .font_intake import (
     FontIntakeError,
     FontValidationError,
@@ -37,6 +57,20 @@ from .font_intake import (
 )
 
 __all__ = [
+    # catalogue
+    "CatalogError",
+    "CatalogFont",
+    "CLASS_VOCAB",
+    "MOOD_VOCAB",
+    "ROLE_VOCAB",
+    "SURFACE_VOCAB",
+    "for_surface",
+    "get",
+    "load_catalog",
+    "org_catalog",
+    "search",
+    "verify_assets",
+    # font intake
     "FontIntakeError",
     "FontValidationError",
     "FontEmbeddingNotPermitted",

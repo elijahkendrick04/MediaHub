@@ -209,6 +209,29 @@ def _type_pairing(pairing_id: str = "anton-inter") -> dict:
     }
 
 
+def ai_type_pairing(context) -> dict:
+    """AI-proposed type pairing in the same shape as :func:`_type_pairing` (1.9).
+
+    The opt-in upgrade over the deterministic default: asks the cloud LLM (via
+    :mod:`mediahub.brand.type_pairing`) for a catalogue-bound pairing and returns
+    it in the DesignTokens ``type`` shape, plus the model's ``reason``. Raises
+    ``mediahub.media_ai.llm.ClaudeUnavailableError`` when no provider is
+    configured — the honest error the operator must see. Deliberately NOT called
+    inside :func:`resolve_design_tokens` (which stays deterministic, no-network);
+    a caller invokes this only when a club explicitly asks for a suggestion.
+    """
+    from mediahub.brand.type_pairing import suggest_pairing
+
+    pair = suggest_pairing(context)
+    return {
+        "pairing": pair.typography_pair(),
+        **pair.families(),
+        "reason": pair.reason,
+        "corrected": pair.corrected,
+        "source": "ai",
+    }
+
+
 def resolve_design_tokens(profile_id: str, *, brand_kit=None) -> dict:
     """The full generation DesignTokens contract for one profile.
 
