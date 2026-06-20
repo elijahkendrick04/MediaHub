@@ -511,9 +511,14 @@ def lookup_official_pbs(
                 n_by_roster += 1
 
     with_pbs = sum(1 for s in snapshots.values() if s.pb_times)
-    emit(
+    summary = (
         f"PB baseline: {with_pbs} of {len(our)} swimmer(s) matched on "
         f"swimmingresults.org with official PBs "
         f"({n_by_id} by member id, {n_by_roster} by name+club+age)."
     )
+    emit(summary)
+    # Also log it: emit() only drives the in-UI progress stream, so without this
+    # the resolution rate never reaches the platform logs (Render), where the
+    # operator checks coverage after a run.
+    log.info("%s", summary)
     return snapshots

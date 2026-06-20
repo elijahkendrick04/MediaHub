@@ -40,6 +40,37 @@ import time
 import uuid
 
 log = logging.getLogger(__name__)
+
+
+def _setup_app_logging() -> None:
+    """Route the app's own ``INFO`` logs to stdout so they appear in the hosting
+    platform's log stream (Render captures stdout/stderr).
+
+    Without this the root logger defaults to ``WARNING`` and every ``log.info``
+    in the package — including the PB-baseline resolution summary the operator
+    needs to see — is silently dropped, so the deployed logs show only gunicorn
+    access lines. Configures the ``mediahub`` package logger (not root, to avoid
+    fighting gunicorn's own loggers); level via ``MEDIAHUB_LOG_LEVEL``
+    (default ``INFO``). Idempotent.
+    """
+    import sys  # noqa: PLC0415
+
+    level_name = (os.environ.get("MEDIAHUB_LOG_LEVEL") or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    pkg = logging.getLogger("mediahub")
+    pkg.setLevel(level)
+    if not any(getattr(h, "_mediahub_stdout", False) for h in pkg.handlers):
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        handler._mediahub_stdout = True  # tag so a re-init can't double-add
+        pkg.addHandler(handler)
+    # Propagation stays on (the default): once this handler exists the root
+    # logger's last-resort stderr handler no longer fires for our records, so
+    # there's no double print, and leaving it on keeps pytest's ``caplog``
+    # (which captures via the root logger) working for ``mediahub.*`` loggers.
+
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -14008,6 +14039,7 @@ def create_app() -> Flask:
     # malformed provider keys) instead of running degraded.
     from mediahub.web.env_check import validate_environment
 
+    _setup_app_logging()
     validate_environment()
 
     # Python's mimetypes database omits font/woff2 on some Linux systems,

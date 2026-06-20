@@ -34,11 +34,33 @@ _OPTION = re.compile(r'<option[^>]*value=["\']([^"\']+)["\'][^>]*>(.*?)</option>
 # A ranked swimmer: a tiref link whose anchor text is the swimmer's name.
 _TIREF_PAIR = re.compile(r"tiref=(\d+)[^>]*>\s*([^<]+?)\s*<", re.I)
 _ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
-# The swim time sits in the row's "splits" link (e.g. ...swimid=123>  58.16</a>).
+# The swim time: most rows show it as plain text; only swimmers with recorded
+# splits wrap it in a "splits" link. So take the time token directly from the
+# row (a swim time has a colon and/or a dot; the date uses slashes, so it can't
+# be confused). Prefer the rightmost (the time is the last column).
 _SPLIT_TIME = re.compile(r"swimid=\d+[^>]*>\s*([0-9:]+\.[0-9]{2})", re.I)
+_TIME_TOKEN = re.compile(r"\d{1,2}:\d{2}\.\d{2}|(?<!\d)\d{2}\.\d{2}(?!\d)")
 _ROW_DATE = re.compile(r"\b(\d{2}/\d{2}/\d{2,4})\b")
 # The meet where the time was set — an external results link in the row.
 _MEET_LINK = re.compile(r'class=["\']external["\'][^>]*>\s*([^<]+?)\s*<', re.I)
+
+
+def _row_time_cs(row: str) -> Optional[int]:
+    """The swimmer's time for this event, in centiseconds, from a ranking row.
+
+    Uses the splits link when present, else the last time-shaped token in the
+    row (rankings put the time last). Returns None if no positive time is found.
+    """
+    m = _SPLIT_TIME.search(row)
+    if m:
+        cs = time_to_cs(m.group(1))
+        if cs and cs > 0:
+            return cs
+    for tok in reversed(_TIME_TOKEN.findall(row)):
+        cs = time_to_cs(tok)
+        if cs and cs > 0:
+            return cs
+    return None
 
 
 def _row_date_iso(s: str) -> str:
@@ -172,14 +194,13 @@ def roster_slice(
         # Skip non-name anchors (the page also links a few nav items by id).
         if not name or name.isdigit() or len(name) < 3:
             continue
-        tm = _SPLIT_TIME.search(row)
         dm = _ROW_DATE.search(row)
         mm = _MEET_LINK.search(row)
         out.setdefault(
             tiref,
             (
                 name,
-                time_to_cs(tm.group(1)) if tm else None,
+                _row_time_cs(row),
                 _row_date_iso(dm.group(1)) if dm else "",
                 mm.group(1).strip() if mm else "",
             ),
