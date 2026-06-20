@@ -32,6 +32,7 @@ def render_browser_body(
     list_url: str = "",
     suggest_url: str = "",
     card_label: str = "",
+    stock_url: str = "",
 ) -> str:
     """The Elements browser page body (HTML + scoped CSS + JS)."""
     in_card = bool(add_url and list_url)
@@ -123,6 +124,7 @@ def render_browser_body(
   <div class="eb-head">
     <h1>Elements</h1>
     {ai_badge}
+    {f'<a class="eb-link" href="{_h(stock_url)}" style="margin-left:auto">Browse stock photos &rarr;</a>' if stock_url else ""}
   </div>
   <p class="eb-sub">A curated, on-brand set of sport-editorial stickers, chips, dividers and frames —
     every one painted in your club colours automatically.</p>
@@ -241,4 +243,109 @@ def render_browser_body(
 """
 
 
-__all__ = ["render_browser_body"]
+def render_stock_body(*, search_url: str, import_url: str, sources: dict) -> str:
+    """The licence-clean stock browser body (search → add to library)."""
+    boot = {"searchUrl": search_url, "importUrl": import_url}
+    paid_on = [s for s in ("pexels", "pixabay") if sources.get(s)]
+    paid_note = (
+        f" · paid sources on: {', '.join(paid_on)}"
+        if paid_on
+        else " · free sources only (Openverse, Wikimedia)"
+    )
+    return f"""
+<div class="sb-wrap">
+  <style>
+    .sb-wrap {{ max-width:1100px; margin:0 auto; padding:8px 0 64px; }}
+    .sb-wrap h1 {{ font-size:22px; margin:0 0 4px; }}
+    .sb-sub {{ color:var(--ink-muted,#9aa3b2); font-size:13px; margin:0 0 16px; }}
+    .sb-row {{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }}
+    .sb-search {{ flex:1; min-width:240px; padding:13px 16px; font-size:15px; border-radius:12px;
+      border:1px solid var(--line,#2a3140); background:var(--panel,#141821); color:var(--ink,#e8ecf3); outline:none; }}
+    .sb-search:focus {{ border-color:var(--accent,#FFB81C); }}
+    .sb-kind {{ padding:11px 14px; border-radius:12px; border:1px solid var(--line,#2a3140);
+      background:var(--panel,#141821); color:var(--ink,#e8ecf3); }}
+    .sb-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; margin-top:18px; }}
+    .sb-card {{ border:1px solid var(--line,#2a3140); border-radius:14px; overflow:hidden; background:var(--panel,#141821); }}
+    .sb-thumb {{ aspect-ratio:4/3; background:var(--bg,#0b0e14) center/cover no-repeat; }}
+    .sb-thumb video {{ width:100%; height:100%; object-fit:cover; }}
+    .sb-meta {{ padding:10px 12px; }}
+    .sb-attr {{ font-size:11px; color:var(--ink-dim,#7e8696); margin:2px 0 8px; }}
+    .sb-lic {{ font-size:11px; color:var(--accent,#FFB81C); font-weight:700; }}
+    .sb-add {{ width:100%; padding:8px; border-radius:8px; border:none; cursor:pointer;
+      background:var(--accent,#FFB81C); color:#10131a; font-weight:700; font-size:12px; }}
+    .sb-add:disabled {{ opacity:.5; cursor:default; }}
+    .sb-empty {{ color:var(--ink-dim,#7e8696); padding:40px; text-align:center; }}
+    .sb-toast {{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+      background:var(--accent,#FFB81C); color:#10131a; padding:10px 18px; border-radius:10px;
+      font-weight:700; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; }}
+    .sb-toast.show {{ opacity:1; }}
+  </style>
+  <h1>Stock library</h1>
+  <p class="sb-sub">Licence-clean photos &amp; video from open collections — every result keeps its
+    licence &amp; attribution, and only commercially-usable assets are shown.{_h(paid_note)}</p>
+  <div class="sb-row">
+    <input type="search" id="sb-search" class="sb-search" placeholder="Search stock — “swimming pool”, “starting blocks”, “crowd”…" autocomplete="off">
+    <select id="sb-kind" class="sb-kind"><option value="photo">Photos</option><option value="video">Video</option></select>
+  </div>
+  <div class="sb-grid" id="sb-grid"><div class="sb-empty">Search to find licence-clean stock to add to your library.</div></div>
+  <div class="sb-toast" id="sb-toast"></div>
+</div>
+<script>
+(function() {{
+  var BOOT = {_script_json(boot)};
+  var grid = document.getElementById('sb-grid');
+  var searchEl = document.getElementById('sb-search');
+  var kindEl = document.getElementById('sb-kind');
+  var toastEl = document.getElementById('sb-toast');
+  var timer = null;
+
+  function toast(m) {{ toastEl.textContent=m; toastEl.classList.add('show'); setTimeout(function(){{toastEl.classList.remove('show');}},1800); }}
+
+  function esc(s) {{ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }}
+
+  function card(r) {{
+    var d = document.createElement('div'); d.className='sb-card';
+    var thumb = r.kind === 'video'
+      ? '<div class="sb-thumb"><video src="' + esc(r.direct_url) + '" muted preload="metadata"></video></div>'
+      : '<div class="sb-thumb" style="background-image:url(\\'' + esc(r.thumb_url || r.direct_url) + '\\')"></div>';
+    var attr = (r.licence && r.licence.attribution) ? ('© ' + esc(r.licence.attribution)) : '';
+    var lic = (r.licence && r.licence.name) ? esc(r.licence.name) : '';
+    d.innerHTML = thumb + '<div class="sb-meta"><div class="sb-lic">' + lic + '</div>' +
+      '<div class="sb-attr">' + attr + '</div>' +
+      '<button type="button" class="sb-add">Add to library</button></div>';
+    d.querySelector('.sb-add').addEventListener('click', function(ev) {{
+      var b = ev.target; b.disabled = true;
+      fetch(BOOT.importUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{
+        direct_url: r.direct_url, title: r.title, source_url: r.source_url, source_site: r.source_site,
+        licence: (r.licence||{{}}).name, licence_url: (r.licence||{{}}).url,
+        attribution: (r.licence||{{}}).attribution, kind: r.kind, permission_status: r.permission_status
+      }})}}).then(function(x){{return x.json();}}).then(function(j){{
+        toast(j.ok ? 'Added to your library' : (j.user_message || j.error || 'Could not add'));
+        b.disabled = !j.ok; b.textContent = j.ok ? 'Added ✓' : 'Add to library';
+      }}).catch(function(){{ toast('Could not add'); b.disabled=false; }});
+    }});
+    return d;
+  }}
+
+  function run() {{
+    var q = searchEl.value.trim();
+    if (!q) {{ grid.innerHTML = '<div class="sb-empty">Search to find licence-clean stock to add to your library.</div>'; return; }}
+    grid.innerHTML = '<div class="sb-empty">Searching…</div>';
+    fetch(BOOT.searchUrl + '?q=' + encodeURIComponent(q) + '&kind=' + encodeURIComponent(kindEl.value), {{headers:{{'Accept':'application/json'}}}})
+      .then(function(r){{return r.json();}})
+      .then(function(d){{
+        grid.innerHTML = '';
+        var rs = d.results || [];
+        if (!rs.length) {{ grid.innerHTML = '<div class="sb-empty">No licence-clean results — try different words.</div>'; return; }}
+        rs.forEach(function(r){{ grid.appendChild(card(r)); }});
+      }}).catch(function(){{ grid.innerHTML = '<div class="sb-empty">Search failed — try again.</div>'; }});
+  }}
+
+  searchEl.addEventListener('input', function(){{ clearTimeout(timer); timer=setTimeout(run, 400); }});
+  kindEl.addEventListener('change', run);
+}})();
+</script>
+"""
+
+
+__all__ = ["render_browser_body", "render_stock_body"]

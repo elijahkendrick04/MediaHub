@@ -39138,8 +39138,156 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             list_url=list_url,
             suggest_url=suggest_url,
             card_label=card_label,
+            stock_url=url_for("stock_page"),
         )
         return _layout("Elements", body, active="elements")
+
+    # ---------------------------------------------------------------- #
+    # Roadmap 1.10 build 3 — licence-clean stock pool (search + import).
+    # ---------------------------------------------------------------- #
+    @app.route("/api/stock/search")
+    def api_stock_search():
+        """Search the licence-clean stock pool (Openverse/Wikimedia; paid gated)."""
+        from flask import request as _req
+        from mediahub.elements import stock as _stock
+
+        q = (_req.args.get("q") or "").strip()
+        kind = (_req.args.get("kind") or "photo").strip()
+        if kind not in ("photo", "video"):
+            kind = "photo"
+        results = _stock.search(q, kind=kind, limit=24) if q else []
+        return jsonify(
+            {
+                "results": [r.to_dict() for r in results],
+                "sources": _stock.available_sources(),
+                "kind": kind,
+            }
+        )
+
+    @app.route("/api/media-library/import-stock", methods=["POST"])
+    def api_import_stock():
+        """Import a chosen stock result into the org library, recording its rights.
+
+        Mirrors the venue import, but org-scoped (to the active profile's library)
+        and persists a StockRightsRecord so the licence + attribution + commercial
+        gate stay auditable per asset.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import request as _req
+        from mediahub.elements import stock as _stock
+
+        profile_id = _active_profile_id()
+        if not profile_id or not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+
+        body = _req.get_json(silent=True) or {}
+        direct_url = str(body.get("direct_url") or "").strip()
+        if not direct_url.startswith(("http://", "https://")):
+            return jsonify({"error": "bad_media_url"}), 400
+        kind = "video" if str(body.get("kind") or "photo") == "video" else "photo"
+        title = str(body.get("title") or "").strip()
+        source_url = str(body.get("source_url") or "").strip()
+        source_site = str(body.get("source_site") or "").strip()
+        licence = _stock.parse_licence(
+            str(body.get("licence") or ""),
+            url=str(body.get("licence_url") or ""),
+            attribution=str(body.get("attribution") or ""),
+            source=source_site,
+        )
+        # Only licence-clean (commercially usable) assets enter the library.
+        if not licence.commercial_ok:
+            return jsonify(
+                {
+                    "error": "licence_not_clear",
+                    "user_message": "That asset's licence isn't cleared for club use.",
+                }
+            ), 409
+
+        import requests as _requests
+
+        want_prefix = "video/" if kind == "video" else "image/"
+        max_bytes = (60 if kind == "video" else 15) * 1024 * 1024
+        try:
+            resp = _requests.get(direct_url, timeout=20, stream=True)
+            resp.raise_for_status()
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            if not ctype.startswith(want_prefix):
+                return jsonify({"error": "wrong_media_type"}), 400
+            data = resp.raw.read(max_bytes + 1, decode_content=True)
+        except Exception as e:
+            return jsonify({"error": f"download_failed: {e}"}), 502
+        if len(data) > max_bytes:
+            return jsonify({"error": "media_too_large", "max_mb": max_bytes // (1024 * 1024)}), 400
+
+        ext_map = (
+            {"video/webm": ".webm", "video/ogg": ".ogv", "video/mp4": ".mp4"}
+            if kind == "video"
+            else {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+        )
+        ext = ext_map.get(ctype.split(";")[0].strip(), ".mp4" if kind == "video" else ".jpg")
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest = upload_dir / f"stock_{uuid.uuid4().hex[:12]}{ext}"
+        dest.write_bytes(data)
+
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        asset = MediaAsset(
+            id="",
+            filename=dest.name,
+            path=str(dest),
+            type="footage" if kind == "video" else "other",
+            description_raw=title or "stock asset",
+            profile_id=profile_id,
+            source_url=source_url or direct_url,
+            source_attribution=licence.attribution or None,
+            source_licence=licence.name or None,
+            permission_status=str(body.get("permission_status") or "approved_public"),
+            approval_status="approved",
+            tags=["stock", source_site] if source_site else ["stock"],
+        )
+        asset = store.save(asset)
+
+        try:
+            _stock.get_ledger().record(
+                _stock.StockRightsRecord(
+                    asset_id=asset.id,
+                    profile_id=profile_id,
+                    source=source_site or "stock",
+                    source_url=source_url or direct_url,
+                    kind=kind,
+                    licence=licence,
+                )
+            )
+        except Exception as e:  # rights record is best-effort; asset already saved
+            log.warning("stock rights record failed for %s: %s", asset.id, e)
+
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": asset.id,
+                    "url": url_for("api_media_library_file", asset_id=asset.id),
+                    "label": title or "stock asset",
+                    "licence": licence.to_dict(),
+                },
+            }
+        )
+
+    @app.route("/stock")
+    def stock_page():
+        """Standalone licence-clean stock browser (search → add to library)."""
+        from mediahub.elements import stock as _stock
+        from mediahub.web import elements_browser as _eb
+
+        body = _eb.render_stock_body(
+            search_url=url_for("api_stock_search"),
+            import_url=url_for("api_import_stock"),
+            sources=_stock.available_sources(),
+        )
+        return _layout("Stock", body, active="media")
 
     @app.route("/api/media-library/list.json")
     def api_media_library_list_json():
