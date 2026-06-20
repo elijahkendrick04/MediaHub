@@ -548,9 +548,7 @@ def _unmatched_report(
     for this club" miss is distinguishable from a same-surname disambiguation
     that fell through). Never raises — diagnostics must not fail a run."""
     matched = {k for k, s in snapshots.items() if getattr(s, "pb_times", None)}
-    roster_surnames = [
-        split_full_name(e.get("name", ""))[1] for e in roster_by_tiref.values()
-    ]
+    roster_surnames = [split_full_name(e.get("name", ""))[1] for e in roster_by_tiref.values()]
     out: list[tuple[str, str]] = []
     for key in our:
         if key in matched:
