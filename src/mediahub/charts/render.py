@@ -123,7 +123,8 @@ def _header(spec: ChartSpec, c: ChartColours, *, x: int, top: int, width: int, s
     out: list[str] = []
     ty = top
     if spec.title:
-        size = round(0.055 * short)
+        # Shrink the headline deterministically if it would overrun the width.
+        size = _fit_size(spec.title, round(0.055 * short), width, char_factor=0.46)
         ty += size
         out.append(
             _text(
@@ -145,6 +146,16 @@ def _footer(spec: ChartSpec, c: ChartColours, *, x: int, bottom: int, width: int
     parts = [p for p in (spec.source_note, spec.footnote) if p]
     line = "  ·  ".join(parts)
     return _text(x, bottom, _esc(line), size, c.muted, family=_fonts.body_stack())
+
+
+def _fit_size(text: str, base: int, max_width: float, *, char_factor: float, floor: float = 0.5) -> int:
+    """Deterministically shrink ``base`` so ``text`` fits ``max_width`` (estimated)."""
+    if not text:
+        return base
+    est = len(text) * base * char_factor
+    if est <= max_width or est <= 0:
+        return base
+    return max(int(base * max_width / est), int(base * floor))
 
 
 def _empty_state(box: _Box, c: ChartColours, short: int) -> str:
@@ -233,10 +244,15 @@ def _render_bars(spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, hor
                 out.append(_rect(plot_l, by + 1, max(0, bw), max(1, bh - 2), fill, rx=round(0.004 * short)))
                 if n_series == 1:
                     dv = p.display or format_value(p.value, value_axis.value_format)
-                    out.append(
-                        _text(x2 + round(0.01 * short), by + bh / 2 + label_size * 0.35, _esc(dv),
-                              label_size, c.ink, family=_fonts.body_stack(), weight="700")
-                    )
+                    ly = by + bh / 2 + label_size * 0.35
+                    lbl_w = len(dv) * label_size * 0.62
+                    if x2 + round(0.01 * short) + lbl_w > plot_r:
+                        # Bar reaches the edge — set the value inside it, in legible ink.
+                        out.append(_text(x2 - round(0.014 * short), ly, _esc(dv), label_size,
+                                         c.on_accent, family=_fonts.body_stack(), weight="700", anchor="end"))
+                    else:
+                        out.append(_text(x2 + round(0.01 * short), ly, _esc(dv), label_size,
+                                         c.ink, family=_fonts.body_stack(), weight="700"))
             out.append(
                 _text(box.left, box.top + ci * slot + slot / 2 + label_size * 0.35,
                       _esc(_clip(categories[ci], 18)), label_size, c.muted, family=_fonts.body_stack())
