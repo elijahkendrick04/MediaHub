@@ -25422,6 +25422,7 @@ Relay team broke club record"></textarea>
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
   <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
+  <a class="btn" href="{url_for("plan_analytics_page")}" title="Log how posts did — what works feeds the plan">Performance</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -25891,6 +25892,7 @@ function mhPlanGenerate(btn) {{
     <a class="btn" href="{today_url}">Today</a>
     <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
     <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
+    <a class="btn" href="{url_for("plan_analytics_page")}" title="What's working — performance feeding the plan">Performance</a>
   </div>
   <div class="mh-cal-legend">{legend}</div>
 </div>
@@ -26386,6 +26388,249 @@ function mhBoardDrop(e) {{
 </script>
 """
         return _layout("Plan board", body, active="create")
+
+    # ---- 1.14 — the first-party performance-analytics loop -----------------
+
+    @app.route("/api/plan/analytics/record", methods=["POST"])
+    def api_plan_analytics_record():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.store import METRIC_KEYS, record_metric
+
+        body = request.get_json(silent=True) or {}
+        metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
+        if not any(metrics.values()):
+            metrics = {k: (body.get("metrics") or {}).get(k, 0) for k in METRIC_KEYS}
+        rec = record_metric(
+            pid,
+            str(body.get("post_type") or ""),
+            str(body.get("posted_date") or ""),
+            metrics,
+            posted_hour=body.get("posted_hour"),
+            pack_id=str(body.get("pack_id") or ""),
+            platform=str(body.get("platform") or ""),
+        )
+        if rec is None:
+            return jsonify(
+                {"error": "Pick a post type and a valid date (and at least one metric)."}
+            ), 400
+        return jsonify({"ok": True, "metric": rec.to_dict()})
+
+    @app.route("/api/plan/analytics/delete", methods=["POST"])
+    def api_plan_analytics_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.store import delete_metric
+
+        body = request.get_json(silent=True) or {}
+        return jsonify({"ok": bool(delete_metric(pid, str(body.get("id") or "")))})
+
+    @app.route("/api/plan/analytics/digest", methods=["POST"])
+    def api_plan_analytics_digest():
+        """AI performance digest — phrases the deterministic attribution numbers.
+        Honest provider errors; the planner already uses the numbers without it."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.attribution import attribute
+        from mediahub.analytics.digest import performance_digest
+        from mediahub.analytics.store import load_metrics
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        attribution = attribute(load_metrics(pid))
+        if attribution.n_posts == 0:
+            return jsonify({"error": "Record a few posts first — nothing to summarise yet."}), 400
+        try:
+            digest = performance_digest(attribution)
+        except ClaudeUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 503
+        except Exception as exc:
+            app.logger.exception("performance digest failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "digest": digest})
+
+    @app.route("/plan/analytics")
+    def plan_analytics_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.analytics.attribution import MIN_SAMPLES, attribute
+        from mediahub.analytics.store import METRIC_KEYS, engagement_score, load_metrics
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import load_sport_profile
+
+        prof = _active_profile()
+        sport = _org_calendar_sport(prof)
+        metrics = load_metrics(pid)
+        attribution = attribute(metrics)
+
+        # Post-type dropdown for the recording form (this sport's enabled types).
+        try:
+            spts = post_types_for(load_sport_profile(sport))
+        except Exception:
+            spts = []
+        type_titles = {spt.slug: spt.title for spt in spts}
+        type_opts = "".join(
+            f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in spts
+        )
+
+        # The attribution table — what's working, with an index bar.
+        if attribution.by_type:
+            rows = ""
+            for tp in attribution.by_type:
+                title = _h(type_titles.get(tp.post_type, tp.post_type.replace("_", " ").title()))
+                pct = round((tp.index - 1.0) * 100)
+                trusted = tp.n >= MIN_SAMPLES
+                cls = "mh-an-up" if pct >= 0 else "mh-an-down"
+                bar_w = max(4, min(100, round(tp.index * 50)))
+                pct_txt = f'{"+" if pct >= 0 else ""}{pct}%'
+                note = (
+                    ""
+                    if trusted
+                    else ' <span class="dim" style="font-size:11px">(needs ≥2 to count)</span>'
+                )
+                rows += (
+                    f"<tr><td>{title}{note}</td>"
+                    f'<td style="text-align:right;font-variant-numeric:tabular-nums">{int(tp.n)}</td>'
+                    f'<td style="text-align:right;font-variant-numeric:tabular-nums">{tp.avg_engagement:.0f}</td>'
+                    f'<td><div class="mh-an-bar"><span class="{cls}" style="width:{bar_w}%"></span></div></td>'
+                    f'<td class="{cls}" style="text-align:right;font-variant-numeric:tabular-nums">{pct_txt}</td></tr>'
+                )
+            best_bits = []
+            if attribution.best_dow_label():
+                best_bits.append(f"<strong>{_h(attribution.best_dow_label())}</strong>")
+            if attribution.best_hour is not None:
+                best_bits.append(f"around <strong>{int(attribution.best_hour):02d}:00</strong>")
+            best_line = (
+                f'<p class="dim" style="font-size:12.5px">Your posts have done best on '
+                + " ".join(best_bits)
+                + ".</p>"
+                if best_bits
+                else ""
+            )
+            table = (
+                '<div class="card"><h2 style="margin-top:0">What’s working</h2>'
+                '<p class="dim" style="font-size:12.5px;margin-top:0">Engagement = likes + 2&times;comments + '
+                "3&times;shares + 2&times;saves. The planner nudges the types that beat your own average.</p>"
+                '<table class="mh-an-table"><thead><tr><th>Post type</th><th>Posts</th>'
+                "<th>Avg engagement</th><th>vs your average</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>{best_line}</div>"
+            )
+        else:
+            table = (
+                '<div class="card" style="text-align:center;padding:36px 24px">'
+                '<h2 style="margin:0 0 6px">No performance recorded yet</h2>'
+                '<p class="dim" style="max-width:520px;margin:0 auto">Post an approved card by hand, '
+                "then come back and log how it did. Once you&rsquo;ve a couple in a type, the planner "
+                "starts ranking what actually works for your club. Nothing is auto-collected.</p></div>"
+            )
+
+        # Recent recorded posts (with delete).
+        recent = ""
+        for m in sorted(metrics, key=lambda x: x.recorded_at, reverse=True)[:12]:
+            title = _h(type_titles.get(m.post_type, m.post_type.replace("_", " ").title()))
+            eng = _h(str(engagement_score(m.metrics)))
+            recent += (
+                f'<div class="mh-an-row" data-id="{_h(m.id)}">'
+                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}</span></span>'
+                f'<span class="dim" style="font-variant-numeric:tabular-nums">{eng} eng</span>'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" '
+                f'onclick="mhAnDelete(this)">remove</button></div>'
+            )
+
+        metric_inputs = "".join(
+            f'<label class="mh-an-mlabel">{_h(k)}<input type="number" min="0" id="mh-an-{_h(k)}" '
+            f'value="0" style="width:88px"/></label>'
+            for k in METRIC_KEYS
+        )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Performance</span>
+  <h1>What actually <em class="editorial">works.</em></h1>
+  <p class="lede">Post by hand, then log how it did &mdash; MediaHub learns which post types earn your club
+  the most engagement and feeds that straight back into the plan. First-party and honest: nothing is
+  auto-collected (that waits on publishing integrations), and the numbers are yours.
+  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the plan &rarr;</a></p>
+</section>
+
+{table}
+
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0">Log a post&rsquo;s performance</h2>
+  <div class="mh-an-form">
+    <label class="mh-an-mlabel">Post type<select id="mh-an-type" style="min-width:170px">{type_opts}</select></label>
+    <label class="mh-an-mlabel">Date posted<input type="date" id="mh-an-date"/></label>
+    <label class="mh-an-mlabel">Hour (0&ndash;23, optional)<input type="number" min="0" max="23" id="mh-an-hour" style="width:88px"/></label>
+    {metric_inputs}
+    <button type="button" class="btn primary" onclick="mhAnRecord(this)">Log it</button>
+  </div>
+  <span class="dim" id="mh-an-status" style="font-size:12.5px"></span>
+  <div id="mh-an-recent" style="margin-top:14px">{recent}</div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <button type="button" class="btn" id="mh-an-digest-btn" onclick="mhAnDigest(this)" data-loader-text="Writing">AI performance digest</button>
+    <span class="dim" style="font-size:12px">An optional written summary of the numbers above. Needs an AI provider; the planner uses the numbers either way.</span>
+  </div>
+  <div id="mh-an-digest" style="margin-top:10px"></div>
+</div>
+
+<script>
+var MH_AN = {{
+  record: {json.dumps(url_for("api_plan_analytics_record"))},
+  del: {json.dumps(url_for("api_plan_analytics_delete"))},
+  digest: {json.dumps(url_for("api_plan_analytics_digest"))},
+  keys: {json.dumps(list(METRIC_KEYS))}
+}};
+function mhAnStatus(m, warn) {{
+  var s = document.getElementById('mh-an-status');
+  if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+function mhAnRecord(btn) {{
+  var metrics = {{}};
+  MH_AN.keys.forEach(function(k){{ metrics[k] = parseInt(document.getElementById('mh-an-'+k).value || '0', 10) || 0; }});
+  var hour = document.getElementById('mh-an-hour').value;
+  var payload = {{
+    post_type: document.getElementById('mh-an-type').value,
+    posted_date: document.getElementById('mh-an-date').value,
+    posted_hour: hour === '' ? null : parseInt(hour, 10),
+    metrics: metrics
+  }};
+  mhAnStatus('Saving…');
+  fetch(MH_AN.record, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (!j.ok) {{ mhAnStatus(j.error || 'Could not save.', true); return; }}
+      window.location.reload();
+    }}).catch(function(){{ mhAnStatus('Could not save.', true); }});
+}}
+function mhAnDelete(btn) {{
+  var row = btn.closest('.mh-an-row'); if (!row) return;
+  fetch(MH_AN.del, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: row.dataset.id}})}})
+    .then(function(r){{return r.json();}}).then(function(){{ window.location.reload(); }});
+}}
+function mhAnDigest(btn) {{
+  var box = document.getElementById('mh-an-digest');
+  btn.disabled = true; box.innerHTML = '<span class="dim">Writing…</span>';
+  fetch(MH_AN.digest, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: '{{}}'}})
+    .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, j:j}}; }}); }})
+    .then(function(res){{
+      btn.disabled = false;
+      var j = res.j || {{}};
+      if (!res.ok || !j.ok) {{ box.innerHTML = '<p class="dim" style="color:var(--warn)">' + (j.error || 'Could not write a digest.') + '</p>'; return; }}
+      var d = j.digest || {{}};
+      var html = '';
+      if (d.summary) html += '<p style="font-weight:600;margin:0 0 6px">' + d.summary.replace(/</g,'&lt;') + '</p>';
+      (d.takeaways || []).forEach(function(t){{ html += '<li style="margin:2px 0">' + (t.text||'').replace(/</g,'&lt;') + '</li>'; }});
+      box.innerHTML = html ? ('<ul style="margin:0;padding-left:18px">' + html + '</ul>') : '<p class="dim">No takeaways.</p>';
+    }}).catch(function(){{ btn.disabled = false; box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
+}}
+</script>
+"""
+        return _layout("Performance", body, active="create")
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",

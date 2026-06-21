@@ -30,6 +30,12 @@ MediaHub's strategy brain and its single caption writer.
   free-text draft with one click (seeded from the idea text verbatim — no AI, so
   it works with no provider) which then flows into the previews and the
   calendar. Page: **Plan → Board**.
+- **The performance loop** feeds the plan back from real results: the club logs
+  how a posted card did, and `signals.gather_performance_signals` turns the
+  deterministic attribution (`../analytics/`) into a bounded, explained ranking
+  nudge — "your spotlights beat your average, rank more". Page: **Plan →
+  Performance**. The ranker stays deterministic; the analytics index is just
+  another source-grounded signal.
 - **The writer** (`engine.py`, `director.py`) makes all the captions. It first
   *plans* the set of posts (which angle, which platform), then *writes* each
   caption. Every content type goes through here, so there isn't a separate

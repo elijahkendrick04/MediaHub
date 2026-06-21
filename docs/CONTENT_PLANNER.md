@@ -99,13 +99,35 @@ never hard-blocked: it's the club's own plan, so the human decides. Curated key
 packs never invent a club's fixtures — precise meet dates and deadlines stay
 operator-entered. Tests: `tests/test_planner_calendar.py`.
 
+## 3b. The board + the performance loop (roadmap 1.14)
+
+Two more surfaces hang off the plan, both reached from the calendar bar:
+
+- **The board** (`/plan/board`, `content_engine/board.py`) — a committee
+  **whiteboard / Kanban** of free-form idea cards in four columns mirroring the
+  content lifecycle (idea → drafted → approved → scheduled). Drag a card as it
+  progresses; **promote** a good idea into a real free-text draft (seeded from
+  the idea text verbatim — no AI, so it works with no provider) which then flows
+  into the previews and the calendar.
+- **The performance loop** (`/plan/analytics`, `analytics/`) — the club logs how
+  a posted card did (manual entry; auto-ingest is a documented **post-P4** seam,
+  since MediaHub never auto-publishes), and the **deterministic** attribution
+  (`analytics/attribution.py`) feeds the planner: `gather_performance_signals`
+  turns each well-sampled type's index-vs-own-average into a source-grounded
+  **own** signal, and the ranker applies a small, bounded, *explained* nudge
+  (`+8 / −6` max; a type needs ≥2 posts to count). The ranker stays
+  deterministic — same recorded metrics → same plan. An optional AI **digest**
+  only *phrases* the same numbers (number-guarded, honest-errors without a
+  provider); the loop works without it.
+
 ## 4. Boundaries
 
 - **Planner ≠ publisher.** The plan only recommends; nothing publishes from it.
   Approved content is exported or downloaded for manual posting. The plan shows
   each type's default review disposition (`draft_only` / `approval_required`)
   for context only. The calendar's "schedule" is the same: a planning date the
-  club posts by, not a machine-publish trigger.
+  club posts by, not a machine-publish trigger. The performance loop is
+  manual-entry first-party data — no third-party aggregator, no auto-collection.
 - **Planner ≠ detector.** "Is this a PB?" and card ranking inside a run stay
   with the deterministic recognition engine; the planner reads its outputs
   (achievement counts, queue states) and never overrides them.
