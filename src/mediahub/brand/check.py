@@ -170,10 +170,12 @@ def _contrast_finding(brief, brand_kit) -> BrandCheckFinding:
     roles = resolved_role_vars_for_brief(brief, brand_kit)
     report = check_roles(roles)
     detail = report.explain()
-    # Contrast is never "locked" in the palette sense — it is always enforced as
-    # a hard legibility floor, so flag it locked so a failure blocks approval.
+    # Contrast is reported but not a *kit lock*: legibility is already enforced
+    # deterministically at render time (the renderer's compliance gate refuses
+    # an illegible role assignment), so it never gates approval here — only the
+    # owner's chosen palette/fonts/logo locks do (locked=False).
     return BrandCheckFinding(
-        "contrast", report.passes, report.score, detail, list(report.failures), locked=True
+        "contrast", report.passes, report.score, detail, list(report.failures), locked=False
     )
 
 

@@ -103,10 +103,12 @@ def test_unlocked_off_palette_is_not_an_approval_blocker():
     assert pal not in report.locked_failures
 
 
-def test_contrast_finding_is_always_locked():
-    report = check_brief(_brief(), _kit())
+def test_contrast_is_reported_but_not_a_kit_lock():
+    # Contrast is reported as a finding, but it is not a lockable kit token —
+    # legibility is enforced at render time, so it never gates approval here.
+    report = check_brief(_brief(), _kit(locks=["palette", "fonts", "logo"]))
     contrast = next(f for f in report.findings if f.check == "contrast")
-    assert contrast.locked is True  # legibility is a hard floor regardless of kit locks
+    assert contrast.locked is False
 
 
 def test_font_mismatch_flagged_only_when_kit_pins_a_pairing():

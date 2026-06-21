@@ -1737,6 +1737,22 @@ def _get_wf_store() -> Optional["WorkflowStore"]:
     return _wf_store
 
 
+_approval_ledger = None  # 1.12 group-approver votes (lazy, like _wf_store)
+
+
+def _get_approval_ledger():
+    """The per-card approval-votes ledger (roadmap 1.12 group-approver rules)."""
+    global _approval_ledger
+    if _approval_ledger is None:
+        try:
+            from mediahub.workflow.approvals import ApprovalLedger
+
+            _approval_ledger = ApprovalLedger(RUNS_DIR)
+        except ImportError:
+            pass
+    return _approval_ledger
+
+
 # Per-card inspector overrides (UI 1.18) ride the existing workflow
 # ``edited_captions`` bag under dotted ``insp.*`` keys — no underscore, so the
 # pack builder's ``tone_slot`` caption parser skips them cleanly. This is the
@@ -33070,6 +33086,103 @@ what you're doing, what they should do.</p>
             return True
         return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
 
+    def _resolved_kit_for_run(run_id: str, run_data=None):
+        """The brand kit the pipeline applies to this run (default kit today).
+
+        Returns (profile, kit) or (None, None) when no profile resolves.
+        """
+        run_data = run_data if run_data is not None else (_load_run(run_id) or {})
+        profile_id = run_data.get("profile_id", "")
+        prof = load_profile(profile_id) if profile_id else _active_profile()
+        if prof is None:
+            return None, None
+        from mediahub.brand import kits as _kits
+
+        return prof, _kits.resolve_kit_for(prof)
+
+    def _brand_lock_block_reason(run_id: str, card_id: str):
+        """A locked-token brand violation that blocks approval, or None.
+
+        Opt-in governance: only fires when the run's resolved kit has locked
+        tokens (palette / fonts / logo) AND the card's brief fails one of those
+        exact tokens. A kit with no locks → None, so every existing club's
+        approval flow is byte-identical. Never raises — a check error never
+        blocks a human approving their own content.
+        """
+        try:
+            run_data = _load_run(run_id) or {}
+            prof, kit = _resolved_kit_for_run(run_id, run_data)
+            if prof is None or kit is None or not kit.locks:
+                return None
+            brief_dict = _latest_brief_for_card(run_id, card_id)
+            if not brief_dict:
+                return None
+            from mediahub.brand.check import check_brief
+            from mediahub.creative_brief.generator import CreativeBrief
+
+            brand_kit = _resolve_run_brand_kit(run_data.get("profile_id", ""), run_id, run_data)
+            report = check_brief(CreativeBrief.from_dict(brief_dict), kit, brand_kit=brand_kit)
+            blocking = [f for f in report.findings if not f.passed and f.check in kit.locks]
+            if not blocking:
+                return None
+            checks = ", ".join(f.check for f in blocking)
+            return (
+                f"This card is off-brand on the kit's locked token(s): {checks}. "
+                "Use Brand Assist auto-fix or edit the design before approving."
+            )
+        except Exception:
+            return None
+
+    def _group_approval_block(run_id: str, card_id: str):
+        """Record the current user's approval vote and evaluate the kit's
+        group-approver rule. Returns (blocked, info_dict).
+
+        ``blocked`` is True when more approvals are still required — the card is
+        held in QUEUE. Default-safe: no rule, an unbound (pilot) workspace, or
+        the operator → never blocks. ``info_dict`` carries the pending detail
+        for the response/UI (1.18 renders it richly).
+        """
+        try:
+            prof, kit = _resolved_kit_for_run(run_id)
+            if prof is None or kit is None:
+                return False, {}
+            from mediahub.workflow import governance as _gov
+
+            if not _gov.rule_is_active(kit.approver_rule):
+                return False, {}
+            pid = prof.profile_id
+            store = _tenancy.MembershipStore()
+            # Group rules only apply to bound (members-only) workspaces; a pilot
+            # workspace is a single trust domain with no distinct approvers.
+            if not store.is_bound(pid):
+                return False, {}
+            # The operator is the super-admin and can always finalise.
+            if _auth.is_dev_operator():
+                return False, {}
+            email = _auth.current_user_email() or ""
+            ledger = _get_approval_ledger()
+            if ledger is None:
+                return False, {}
+            approvers = ledger.record(run_id, card_id, email)
+            owner_emails = [
+                m.email
+                for m in store.list_for_profile(pid)
+                if m.role == _tenancy.ROLE_OWNER and m.status == _tenancy.STATUS_ACTIVE
+            ]
+            satisfied, still_needed, reason = _gov.evaluate(
+                kit.approver_rule, approver_emails=approvers, owner_emails=owner_emails
+            )
+            if satisfied:
+                return False, {"approvals": approvers}
+            return True, {
+                "pending_approval": True,
+                "approvals": approvers,
+                "approvals_needed": still_needed,
+                "reason": reason,
+            }
+        except Exception:
+            return False, {}
+
     def _brand_swatch_row(palette: dict) -> str:
         from mediahub.brand.palette import ALL_SLOTS
 
@@ -33139,7 +33252,17 @@ what you're doing, what they should do.</p>
             'placeholder="font pairing id (optional)" style="max-width:260px" />'
             f'<input class="mh-input" name="tone" value="{_h(kit.tone)}" '
             'placeholder="tone override (optional)" style="max-width:260px" />'
-            f'<div>{lock_checks}</div>'
+            '<div style="font-size:12px;color:var(--ink-muted)">Lock tokens (block off-brand approval):</div>'
+            f"<div>{lock_checks}</div>"
+            '<div style="font-size:12px;color:var(--ink-muted)">Group approval (members-only workspaces):</div>'
+            '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
+            f'<label style="font-size:12px;color:var(--ink-muted)">Min approvers '
+            f'<input class="mh-input" type="number" min="1" max="10" name="min_approvers" '
+            f'value="{int((kit.approver_rule or {}).get("min_approvers", 1))}" style="max-width:80px" /></label>'
+            f'<label style="font-size:12px;color:var(--ink-muted)">'
+            f'<input type="checkbox" name="require_owner" value="1" '
+            f"{'checked' if (kit.approver_rule or {}).get('require_owner') else ''}/> require an owner</label>"
+            "</div>"
             '<div><button class="btn" type="submit">Save kit</button></div>'
             "</form>"
             # Palette-file import (Adobe .ase / Color JSON).
@@ -33158,9 +33281,9 @@ what you're doing, what they should do.</p>
             f'<span class="pill">{_h(role_label)}</span>{default_badge}</div>'
             f'<div style="margin:10px 0">{_brand_swatch_row(kit.palette)}</div>'
             f'<p style="font-size:12px;color:var(--ink-muted);margin:4px 0">'
-            f'Locked: {_h(locks_txt)}'
-            + (f' · Font: {_h(kit.font_pairing)}' if kit.font_pairing else "")
-            + (f' · Tone: {_h(kit.tone)}' if kit.tone else "")
+            f"Locked: {_h(locks_txt)}"
+            + (f" · Font: {_h(kit.font_pairing)}" if kit.font_pairing else "")
+            + (f" · Tone: {_h(kit.tone)}" if kit.tone else "")
             + "</p>"
             f'<div style="margin-top:10px">{actions}</div>'
             f"{edit_form}</div>"
@@ -33171,18 +33294,14 @@ what you're doing, what they should do.</p>
         bits = ['<h2 style="margin-top:28px">Brand identity</h2>']
         # Tone + voice summary
         tone = (prof.tone or prof.caption_tone or "warm-club").replace("-", " ")
-        bits.append(
-            f'<p><strong>Tone:</strong> {_h(tone)}</p>'
-        )
+        bits.append(f"<p><strong>Tone:</strong> {_h(tone)}</p>")
         if (prof.brand_voice_summary or "").strip():
-            bits.append(f'<p><strong>Voice:</strong> {_h(prof.brand_voice_summary)}</p>')
+            bits.append(f"<p><strong>Voice:</strong> {_h(prof.brand_voice_summary)}</p>")
         # Guidelines mandatory rules
         rules = prof.brand_guidelines_mandatory_rules or []
         if rules:
             items = "".join(f"<li>{_h(r)}</li>" for r in rules[:12])
-            bits.append(
-                f'<p><strong>Non-negotiable guideline rules:</strong></p><ul>{items}</ul>'
-            )
+            bits.append(f"<p><strong>Non-negotiable guideline rules:</strong></p><ul>{items}</ul>")
         # Phrases to use / avoid
         use = prof.brand_phrases_to_use or []
         avoid = prof.brand_phrases_to_avoid or []
@@ -33217,7 +33336,7 @@ what you're doing, what they should do.</p>
                     "</div>"
                 )
             if cards:
-                bits.append('<p><strong>Logos</strong></p>')
+                bits.append("<p><strong>Logos</strong></p>")
                 bits.append(
                     f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">{cards}</div>'
                 )
@@ -33268,7 +33387,7 @@ what you're doing, what they should do.</p>
             "content — primary livery, sponsor co-brands, event and team sub-brands.</p>"
             "</section>"
             f"{banner}"
-            '<h2>Brand kits</h2>'
+            "<h2>Brand kits</h2>"
             f"{kit_cards}{create_form}"
             f"{_brand_identity_html(prof)}"
             '<p style="margin-top:24px"><a class="btn secondary" '
@@ -33312,7 +33431,7 @@ what you're doing, what they should do.</p>
         pid = _active_profile_id()
         if not pid or not _brand_can_admin(pid):
             abort(404)
-        from mediahub.brand.kits import BrandKitRef, new_kit_id, upsert_kit, normalise_kit
+        from mediahub.brand.kits import new_kit_id, upsert_kit, normalise_kit
 
         prof = _active_profile()
         raw = {
@@ -33340,6 +33459,14 @@ what you're doing, what they should do.</p>
         if existing is None:
             return _brand_redirect(err="Kit not found.")
         locks = [t for t in request.form.getlist("lock") if t in LOCKABLE_TOKENS]
+        from mediahub.workflow.governance import normalise_approver_rule
+
+        approver_rule = normalise_approver_rule(
+            {
+                "min_approvers": request.form.get("min_approvers", "1"),
+                "require_owner": bool(request.form.get("require_owner")),
+            }
+        )
         raw = existing.to_dict()
         raw.update(
             {
@@ -33348,6 +33475,7 @@ what you're doing, what they should do.</p>
                 "font_pairing": (request.form.get("font_pairing") or "").strip(),
                 "tone": (request.form.get("tone") or "").strip(),
                 "locks": locks,
+                "approver_rule": approver_rule,
             }
         )
         kit = normalise_kit(raw)
@@ -36058,9 +36186,15 @@ function mhSetupMode(mode) {{
   <span class="mh-hero-eyebrow">Content builder</span>
   <h1>{meet_name}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{len(approved):02d} approved {"card" if len(approved) == 1 else "cards"}</span><span class="sep">·</span>
-    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
-    <a href="{_grouped_url}" style="color:var(--ink-muted);text-decoration:none">All recommendations</a>
+    <span>{len(approved):02d} approved {
+            "card" if len(approved) == 1 else "cards"
+        }</span><span class="sep">·</span>
+    <a href="{
+            _review_url
+        }" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
+    <a href="{
+            _grouped_url
+        }" style="color:var(--ink-muted);text-decoration:none">All recommendations</a>
   </div>
 </section>
 
@@ -36071,21 +36205,27 @@ function mhSetupMode(mode) {{
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
     <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+            onclick="generateReel(this, {
+            repr(_reel_url)
+        })">&#x25B6; Generate reel from this meet</button>
     <button class="btn secondary" style="font-size:12px;padding:6px 14px"
             onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
   </div>
 </div>
 <div id="reel-panel" class="no-print" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
-{(
-    '<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;'
-    'align-items:center;flex-wrap:wrap;gap:10px">'
-    '<div><div style="font-size:13px;font-weight:700">Charts &amp; insights</div>'
-    '<div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Brand-styled stat graphics from this '
-    "meet's results — PBs, medals, drops, splits — with AI-picked highlights and grounded takeaways.</div></div>"
-    f'<a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_charts_url)}">Open charts &amp; insights &rarr;</a>'
-    '</div>'
-) if _charts_url else ''}
+{
+            (
+                '<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;'
+                'align-items:center;flex-wrap:wrap;gap:10px">'
+                '<div><div style="font-size:13px;font-weight:700">Charts &amp; insights</div>'
+                '<div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Brand-styled stat graphics from this '
+                "meet's results — PBs, medals, drops, splits — with AI-picked highlights and grounded takeaways.</div></div>"
+                f'<a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_charts_url)}">Open charts &amp; insights &rarr;</a>'
+                "</div>"
+            )
+            if _charts_url
+            else ""
+        }
 
 <div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -36093,10 +36233,18 @@ function mhSetupMode(mode) {{
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}?download=1">Download .html</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_text_url)}&download=1">Download .txt</a>
-    <a class="btn" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_zip_url)}">Download .zip</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+            _h(_newsletter_html_url)
+        }" target="_blank" rel="noopener">Preview HTML &rarr;</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+            _h(_newsletter_html_url)
+        }?download=1">Download .html</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+            _h(_newsletter_text_url)
+        }&download=1">Download .txt</a>
+    <a class="btn" style="font-size:12px;padding:6px 12px" href="{
+            _h(_newsletter_zip_url)
+        }">Download .zip</a>
   </div>
 </div>
 
@@ -36108,14 +36256,20 @@ function mhSetupMode(mode) {{
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
-    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_print_url)}" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+            _h(_certs_url)
+        }">Download certificates (.zip of PDFs)</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{
+            _h(_certs_print_url)
+        }" title="A4 + 3mm bleed and crop marks, ready for a professional print shop">Print-shop pack (bleed + crop marks)</a>
   </div>
 </div>
 
 <div class="no-print">{_turn_into_html}</div>
 
-<h2 style="margin:18px 0 12px">Approved cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(approved)}</span></h2>
+<h2 style="margin:18px 0 12px">Approved cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {
+            len(approved)
+        }</span></h2>
 {cards_html}
 
 <div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
@@ -36186,6 +36340,25 @@ function mhSetupMode(mode) {{
                 if reason:
                     log.info("consent gate blocked approval run=%s card=%s", run_id, card_id)
                     return jsonify({"error": "consent_blocked", "reason": reason}), 403
+            # 1.12 brand-lock gate: a kit may lock palette/fonts/logo so a
+            # volunteer can't ship off-brand. Opt-in — no locks → no effect.
+            if status in (CardStatus.APPROVED, CardStatus.POSTED):
+                brand_reason = _brand_lock_block_reason(run_id, card_id)
+                if brand_reason:
+                    log.info("brand-lock gate blocked approval run=%s card=%s", run_id, card_id)
+                    return jsonify({"error": "brand_locked", "reason": brand_reason}), 403
+            # 1.12 group-approver rule: record this vote; hold the card in QUEUE
+            # until the kit's rule is met. Default-safe (no rule / pilot org /
+            # operator → no effect).
+            if status == CardStatus.APPROVED:
+                held, info = _group_approval_block(run_id, card_id)
+                if held:
+                    return jsonify({"ok": True, "status": "queue", **info})
+            # A reject or re-queue resets the approval round for this card.
+            if status in (CardStatus.REJECTED, CardStatus.QUEUE):
+                _led = _get_approval_ledger()
+                if _led is not None:
+                    _led.clear(run_id, card_id)
             notes = payload.get("notes")
             ws.set_status(run_id, card_id, status, notes=notes)
             # Phase W: approval telemetry (W.14) + records-on-approval (W.3).
@@ -36293,6 +36466,25 @@ function mhSetupMode(mode) {{
                     )
                     n_blocked += 1
                     continue
+                # 1.12 brand-lock gate — same opt-in rule as the single-card path.
+                brand_reason = _brand_lock_block_reason(run_id, cid)
+                if brand_reason:
+                    results.append(
+                        {"id": cid, "ok": False, "error": "brand_locked", "reason": brand_reason}
+                    )
+                    n_blocked += 1
+                    continue
+            # 1.12 group-approver rule — record the vote; hold until satisfied so
+            # bulk-approve can't bypass a governed workspace's rule.
+            if status == CardStatus.APPROVED:
+                held, info = _group_approval_block(run_id, cid)
+                if held:
+                    results.append({"id": cid, "ok": True, "status": "queue", **info})
+                    continue
+            if status in (CardStatus.REJECTED, CardStatus.QUEUE):
+                _led = _get_approval_ledger()
+                if _led is not None:
+                    _led.clear(run_id, cid)
             ws.set_status(run_id, cid, status)
             if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
                 _action = {
@@ -43484,7 +43676,7 @@ voice, and queues them for one-click approval.</p>
             )
         gallery = (
             '<div class="mh-chartpack-grid" style="display:grid;'
-            'grid-template-columns:repeat(auto-fill,minmax(280px,1fr));'
+            "grid-template-columns:repeat(auto-fill,minmax(280px,1fr));"
             f'gap:16px;margin-top:16px">{"".join(tiles)}</div>'
         )
 
@@ -43492,9 +43684,9 @@ voice, and queues them for one-click approval.</p>
         ins_url = url_for("api_run_charts_insights", run_id=run_id)
         head = (
             '<section class="mh-hero" style="padding:var(--sp-7) 0 var(--sp-4)">'
-            '<h1>Charts &amp; insights</h1>'
-            f'<p class="muted">{_h(meet_name)} &middot; {len(cands)} chart{"" if len(cands)==1 else "s"} '
-            'from your own results, in your brand colours.</p>'
+            "<h1>Charts &amp; insights</h1>"
+            f'<p class="muted">{_h(meet_name)} &middot; {len(cands)} chart{"" if len(cands) == 1 else "s"} '
+            "from your own results, in your brand colours.</p>"
             f'<p style="margin-top:8px"><a class="muted" href="{_h(_pack_url)}" '
             'style="text-decoration:none">&larr; Back to content builder</a></p></section>'
         )
