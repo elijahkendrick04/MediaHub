@@ -27,7 +27,9 @@ Public surface:
 """
 
 from .aggregates import MeetAggregates, compute_aggregates
+from .caption import generate_chart_caption
 from .csv_input import CsvImport, parse_csv_to_spec
+from .export import EXPORT_FORMATS, chart_png_bytes, chart_png_path
 from .diagrams import (
     DiagramSpec,
     athlete_journey,
@@ -42,6 +44,7 @@ from .models import (
     Axis,
     ChartSpec,
     DataPoint,
+    ReferenceLine,
     Series,
     format_time_cs,
     format_value,
@@ -55,6 +58,7 @@ __all__ = [
     "Axis",
     "ChartSpec",
     "DataPoint",
+    "ReferenceLine",
     "Series",
     "format_value",
     "format_time_cs",
@@ -73,4 +77,8 @@ __all__ = [
     "season_timeline_from_meets",
     "athlete_journey",
     "training_flow",
+    "EXPORT_FORMATS",
+    "chart_png_path",
+    "chart_png_bytes",
+    "generate_chart_caption",
 ]

@@ -77,6 +77,7 @@ class DataPoint:
     display: str = ""  # pre-formatted value text ("1:02.34"); else derived from format
     source_ref: str = ""  # provenance back to the canonical row (explainability)
     note: str = ""  # optional short annotation rendered near the point
+    emphasis: bool = False  # the standout datum — painted in accent, the rest recede
 
     def to_dict(self) -> dict:
         d: dict = {"label": self.label, "value": self.value}
@@ -88,6 +89,8 @@ class DataPoint:
             d["source_ref"] = self.source_ref
         if self.note:
             d["note"] = self.note
+        if self.emphasis:
+            d["emphasis"] = True
         return d
 
     @classmethod
@@ -103,6 +106,42 @@ class DataPoint:
             display=str(data.get("display", "")).strip(),
             source_ref=str(data.get("source_ref", "")).strip(),
             note=str(data.get("note", "")).strip(),
+            emphasis=bool(data.get("emphasis", False)),
+        )
+
+
+@dataclass(frozen=True)
+class ReferenceLine:
+    """A horizontal marker on the value axis at a real, known value — a club record,
+    a qualifying time, a season-best line. It is the chart's intelligence: it shows
+    *where the story sits* relative to a benchmark. The value is always a real number
+    from the deterministic data (club_records, standards) — never an invented line."""
+
+    value: float  # where the line sits on the value axis
+    label: str = ""  # the marker label, e.g. "Club record" / "County QT"
+    display: str = ""  # pre-formatted value ("1:01.20"); else derived from the axis
+    role: str = "secondary"  # colour role: "secondary" | "accent" | "on_surface"
+    source_ref: str = ""  # provenance for the benchmark (explainability)
+
+    def to_dict(self) -> dict:
+        d: dict = {"value": self.value, "label": self.label, "role": self.role}
+        if self.display:
+            d["display"] = self.display
+        if self.source_ref:
+            d["source_ref"] = self.source_ref
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Optional["ReferenceLine"]:
+        if not isinstance(data, dict) or "value" not in data:
+            return None
+        role = str(data.get("role", "secondary")).strip().lower()
+        return cls(
+            value=_safe_float(data.get("value"), 0.0),
+            label=str(data.get("label", "")).strip(),
+            display=str(data.get("display", "")).strip(),
+            role=role if role in ("secondary", "accent", "on_surface") else "secondary",
+            source_ref=str(data.get("source_ref", "")).strip(),
         )
 
 
@@ -193,6 +232,8 @@ class ChartSpec:
     # Table kinds carry their own grid rather than series:
     columns: tuple[str, ...] = ()
     rows: tuple[tuple[str, ...], ...] = ()
+    # Benchmark markers (club record, qualifying time) drawn across the value axis.
+    reference_lines: tuple[ReferenceLine, ...] = ()
     # Stable id + free-form hints (e.g. {"highlight_label": "Smith, J"}).
     chart_id: str = ""
     meta: dict = field(default_factory=dict)
@@ -225,6 +266,7 @@ class ChartSpec:
             "footnote": self.footnote,
             "columns": list(self.columns),
             "rows": [list(r) for r in self.rows],
+            "reference_lines": [r.to_dict() for r in self.reference_lines],
             "chart_id": self.chart_id,
             "meta": dict(self.meta),
         }
@@ -245,6 +287,11 @@ class ChartSpec:
             tuple(str(c) for c in row) for row in rows_raw if isinstance(row, (list, tuple))
         )
         meta = data.get("meta", {})
+        ref_lines = tuple(
+            r
+            for r in (ReferenceLine.from_dict(x) for x in (data.get("reference_lines", []) or []))
+            if r is not None
+        )
         return cls(
             kind=kind,
             title=str(data.get("title", "")).strip(),
@@ -258,6 +305,7 @@ class ChartSpec:
             footnote=str(data.get("footnote", "")).strip(),
             columns=tuple(str(c) for c in (data.get("columns", []) or [])),
             rows=rows,
+            reference_lines=ref_lines,
             chart_id=str(data.get("chart_id", "")).strip(),
             meta=dict(meta) if isinstance(meta, dict) else {},
         )
@@ -324,6 +372,7 @@ __all__ = [
     "DataPoint",
     "Series",
     "Axis",
+    "ReferenceLine",
     "ChartSpec",
     "format_value",
     "format_time_cs",

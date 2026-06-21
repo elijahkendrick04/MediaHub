@@ -28,10 +28,25 @@ on it are always checked so they're easy to read.
 
 The rest of the box: `aggregates.py` + `series.py` turn real meet data into chart
 shapes; `csv_input.py` imports a spreadsheet (and flags any cell that isn't a
-number instead of guessing); `recommend.py` + `insights.py` are the two small AI
-jobs; and `diagrams.py` draws the picture *shapes* that aren't really charts — a
-**committee org chart**, a **season timeline**, an **athlete's journey**, and a
-**training flow** — from the club's roster and fixtures, in the same brand colours.
+number instead of guessing); `recommend.py` + `insights.py` + `caption.py` are the
+small AI jobs (pick the best chart, write takeaways, write a post caption — all
+using only numbers the chart really shows); `export.py` turns a chart into a
+ready-to-post **PNG** at Instagram/story/square sizes; and `diagrams.py` draws the
+picture *shapes* that aren't really charts — a **committee org chart**, a **season
+timeline**, an **athlete's journey**, and a **training flow** — from the club's
+roster and fixtures, in the same brand colours.
+
+### The clever extras
+
+- **It points at the story.** A progression line can draw the **club record** and
+  the **qualifying time** as marker lines, so you can *see* how close a swimmer is
+  and whether they qualified. The standout bar (the leader, the biggest drop) glows
+  in your accent colour while the rest step back. (Those marker lines are always
+  real, known numbers — never made up.)
+- **You can actually post it.** Download a chart as a PNG sized for Instagram, and
+  get a caption written from the chart's own numbers, ready to paste.
+- **It's readable to screen-readers.** Every picture carries a hidden title and
+  description so it isn't a blank to someone using assistive tech.
 
 ## The kinds of chart it can draw
 

@@ -14291,6 +14291,24 @@ _CHARTS_PAGE_JS = """
       card.appendChild(ul); show(card);
     }).catch(function(){ busy(insBtn,false); show(msg('Could not reach the writer. Try again.')); });
   });
+
+  // Per-chart grounded caption: fetch, show in the tile, offer copy-to-clipboard.
+  document.addEventListener('click', function(ev){
+    var btn = ev.target.closest ? ev.target.closest('.mh-cap-btn') : null;
+    if(!btn) return;
+    var tile = btn.closest('.mh-chartpack-tile'); if(!tile) return;
+    var out = tile.querySelector('.mh-cap-out'); if(!out) return;
+    busy(btn, true, 'Writing…');
+    fetch(btn.getAttribute('data-cap-url'), {method:'POST'}).then(function(r){return r.json();}).then(function(j){
+      busy(btn, false);
+      out.style.display='block'; out.textContent='';
+      if(j.available===false || !j.caption){ out.textContent = j.message || 'AI captions are not configured on this deployment.'; return; }
+      var p=document.createElement('div'); p.textContent=j.caption; out.appendChild(p);
+      var copy=document.createElement('button'); copy.className='btn secondary'; copy.style.cssText='font-size:11px;padding:3px 10px;margin-top:8px'; copy.textContent='Copy';
+      copy.addEventListener('click', function(){ navigator.clipboard && navigator.clipboard.writeText(j.caption); copy.textContent='Copied'; });
+      out.appendChild(copy);
+    }).catch(function(){ busy(btn,false); out.style.display='block'; out.textContent='Could not reach the caption writer. Try again.'; });
+  });
 })();
 </script>
 """
@@ -42832,7 +42850,9 @@ voice, and queues them for one-click approval.</p>
 
     @app.route("/api/runs/<run_id>/chart/<chart_id>", methods=["GET"])
     def api_run_chart_svg(run_id: str, chart_id: str):
-        """Render one candidate chart as brand-styled SVG (deterministic)."""
+        """Render one candidate chart. ``?fmt=png`` rasterises a ready-to-post PNG
+        (Instagram/Facebook don't accept SVG); default is the deterministic SVG.
+        ``?format=square|portrait|story|landscape|wide`` picks the size."""
         if not _charts_ok:
             return jsonify({"error": "charts_unavailable"}), 503
         from dataclasses import replace as _dc_replace
@@ -42847,6 +42867,35 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "chart_not_found"}), 404
         spec = match.spec
         fmt = (request.args.get("format") or "").strip().lower()
+        want_png = (request.args.get("fmt") or "").strip().lower() == "png"
+
+        if want_png:
+            # Postable PNG via the still renderer's warm-pool path (needs Chromium).
+            from mediahub.charts.export import EXPORT_FORMATS, chart_png_path
+
+            size_fmt = fmt if fmt in EXPORT_FORMATS else "square"
+            try:
+                png = chart_png_path(spec, fmt=size_fmt, brand_kit=ctx["brand_kit"])
+            except Exception as e:  # Playwright/Chromium missing → honest error
+                return jsonify(
+                    {
+                        "error": "png_unavailable",
+                        "detail": str(e),
+                        "user_message": (
+                            "PNG export needs the image renderer, which isn't "
+                            "available right now. The SVG download always works."
+                        ),
+                    }
+                ), 503
+            from flask import send_file as _send_file
+
+            return _send_file(
+                str(png),
+                mimetype="image/png",
+                as_attachment=bool(request.args.get("download")),
+                download_name=f"{chart_id}_{size_fmt}.png",
+            )
+
         if fmt in _CHART_FORMATS:
             w, h = _CHART_FORMATS[fmt]
             spec = _dc_replace(spec, width=w, height=h)
@@ -42858,6 +42907,33 @@ voice, and queues them for one-click approval.</p>
         if request.args.get("download"):
             resp.headers["Content-Disposition"] = f'attachment; filename="{chart_id}.svg"'
         return resp
+
+    @app.route("/api/runs/<run_id>/chart/<chart_id>/caption", methods=["POST"])
+    def api_run_chart_caption(run_id: str, chart_id: str):
+        """A grounded, postable caption for one chart. Honest 200 when no AI is set."""
+        if not _charts_ok:
+            return jsonify({"error": "charts_unavailable"}), 503
+        from mediahub.charts.caption import generate_chart_caption
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        ctx, cands, err = _charts_candidates_for(run_id)
+        if err is not None:
+            return err
+        match = next((c for c in (cands or []) if c.chart_id == chart_id), None)
+        if match is None:
+            return jsonify({"error": "chart_not_found"}), 404
+        tone = (request.args.get("tone") or "editorial").strip().lower()
+        try:
+            out = generate_chart_caption(match.spec, tone=tone)
+        except ClaudeUnavailableError as e:
+            return jsonify({"available": False, "error": "no_ai", "message": str(e)})
+        return jsonify(
+            {
+                "available": True,
+                "caption": out.get("caption", ""),
+                "provider": out.get("provider", ""),
+            }
+        )
 
     @app.route("/api/runs/<run_id>/charts/recommend", methods=["POST"])
     def api_run_charts_recommend(run_id: str):
@@ -42946,7 +43022,12 @@ voice, and queues them for one-click approval.</p>
         tiles = []
         for c in cands:
             svg_url = url_for("api_run_chart_svg", run_id=run_id, chart_id=c.chart_id)
-            dl_url = svg_url + "?download=1"
+            cap_url = url_for("api_run_chart_caption", run_id=run_id, chart_id=c.chart_id)
+            # Ready-to-post PNGs (Instagram/Facebook don't accept SVG) + the vector.
+            png_sq = svg_url + "?fmt=png&format=square&download=1"
+            png_pt = svg_url + "?fmt=png&format=portrait&download=1"
+            png_st = svg_url + "?fmt=png&format=story&download=1"
+            svg_dl = svg_url + "?download=1"
             tiles.append(
                 f'<div class="card mh-chartpack-tile" data-chart-id="{_h(c.chart_id)}" '
                 'style="padding:14px;display:flex;flex-direction:column;gap:10px">'
@@ -42957,8 +43038,20 @@ voice, and queues them for one-click approval.</p>
                 f'<div class="muted" style="font-size:12px;margin-top:2px">{_h(c.summary)}</div></div>'
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:auto">'
                 f'<span class="tag">{_h(c.headline_stat)}</span>'
-                f'<a class="btn secondary" style="font-size:12px;padding:5px 12px;margin-left:auto" '
-                f'href="{_h(dl_url)}">Download SVG</a></div></div>'
+                f'<button class="btn secondary mh-cap-btn" data-cap-url="{_h(cap_url)}" '
+                'style="font-size:12px;padding:5px 12px">✍ Caption</button>'
+                '<span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">'
+                f'<a class="btn" style="font-size:12px;padding:5px 12px" href="{_h(png_pt)}" '
+                'title="1080×1350 — Instagram post">PNG ◫</a>'
+                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(png_sq)}" '
+                'title="1080×1080 — square">▣</a>'
+                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(png_st)}" '
+                'title="1080×1920 — story">▮</a>'
+                f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(svg_dl)}" '
+                'title="Vector SVG">SVG</a>'
+                "</span></div>"
+                '<div class="mh-cap-out" style="display:none;font-size:13px;line-height:1.5;'
+                'background:var(--panel);border-radius:8px;padding:10px"></div></div>'
             )
         gallery = (
             '<div class="mh-chartpack-grid" style="display:grid;'
