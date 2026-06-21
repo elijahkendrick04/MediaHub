@@ -17,3 +17,9 @@ says yes.
 - `review_comments.py` — Frame.io-style feedback notes a reviewer pins to a
   moment on a generated reel (or story card). Saved per run with the time,
   the note and who left it, so the markers show up on the video scrubber.
+- `governance.py` — the **group-approval rule** (1.12): how many different
+  people must approve a card, and whether one must be an owner, before it can
+  go live. Pure rule maths — the approval route asks it the question.
+- `approvals.py` — remembers *which* people have approved each card so far,
+  in a small file next to the run, so the rule above can be checked. A reject
+  or re-queue wipes the votes so approval starts fresh.

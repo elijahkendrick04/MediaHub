@@ -33207,7 +33207,7 @@ what you're doing, what they should do.</p>
         role_label = kit.role.replace("_", " ").title()
         default_badge = (
             '<span class="pill" style="background:rgba(34,197,94,0.10);'
-            'border-color:rgba(34,197,94,0.30);color:var(--ok,#22c55e)">Default</span>'
+            'border-color:rgba(34,197,94,0.30);color:var(--good)">Default</span>'
             if is_default
             else ""
         )
@@ -33363,8 +33363,8 @@ what you're doing, what they should do.</p>
             banner += f'<div class="mh-notice" style="margin-bottom:14px">{_h(notice)}</div>'
         if err:
             banner += (
-                '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--danger,#ef4444);'
-                f'color:var(--danger,#ef4444)">{_h(err)}</div>'
+                '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--bad);'
+                f'color:var(--bad)">{_h(err)}</div>'
             )
         kit_cards = "".join(_brand_kit_card_html(prof, k, default_id) for k in all_kits)
         create_form = (
