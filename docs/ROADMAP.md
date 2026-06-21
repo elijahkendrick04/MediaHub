@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `8cf69b62f` · Merge pull request #959 from elijahkendrick04/claude/gracious-dirac-fzdwro
+**Last updated:** 2026-06-21 · `18726a486` · Merge pull request #961 from elijahkendrick04/claude/amazing-meitner-bwq8of
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1214,6 +1214,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `ab1a5ea23` | ci: re-trigger checks (docs-only push didn't fire CI) |
+| 2026-06-21 | `c5bb6131b` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_RATE |
+| 2026-06-21 | `51619a1ad` | Globally rate-limit stock-thumb fetches (stop the retry storm) |
 | 2026-06-21 | `7f0106b0e` | Keep runs on /activity (not the signed-in home); fix ruff formatting |
 | 2026-06-21 | `32476350a` | Make signed-in home a content workspace; move explainer to a Help page |
 | 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
@@ -1223,6 +1226,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
 | 2026-06-21 | `791c7b0bc` | feat(data_hub): web grid UI, JSON API + connector framework (1.13 build 3) |
 | 2026-06-21 | `a00b5a9bf` | feat(data_hub,bulk): derived columns + AI scaffold + review-queued bulk generation (1.13 build 2) |
-| 2026-06-21 | `b43501de8` | feat(data_hub): canonical table views + editable org tables + CSV/XLSX round-trip (1.13 build 1) |
-| 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
 <!-- /ROADMAP:ACTIVITY -->
