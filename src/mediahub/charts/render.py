@@ -71,9 +71,7 @@ def render_chart_svg(
     # Headline chrome.
     frag.append(_header(spec, colours, x=pad, top=head_top, width=w - 2 * pad, short=short))
     if foot_h:
-        frag.append(
-            _footer(spec, colours, x=pad, bottom=h - pad, width=w - 2 * pad, short=short)
-        )
+        frag.append(_footer(spec, colours, x=pad, bottom=h - pad, width=w - 2 * pad, short=short))
 
     box = _Box(plot_left, plot_top, plot_right, plot_bottom)
     if spec.is_empty():
@@ -128,12 +126,26 @@ def _header(spec: ChartSpec, c: ChartColours, *, x: int, top: int, width: int, s
         ty += size
         out.append(
             _text(
-                x, ty, _esc(spec.title), size, c.ink,
-                family=_fonts.display_stack(), weight="400", spacing="0.5px",
+                x,
+                ty,
+                _esc(spec.title),
+                size,
+                c.ink,
+                family=_fonts.display_stack(),
+                weight="400",
+                spacing="0.5px",
             )
         )
         # Accent rule under the title.
-        out.append(_rect(x, ty + round(0.012 * short), round(0.10 * short), max(3, round(0.006 * short)), c.accent))
+        out.append(
+            _rect(
+                x,
+                ty + round(0.012 * short),
+                round(0.10 * short),
+                max(3, round(0.006 * short)),
+                c.accent,
+            )
+        )
     if spec.subtitle:
         size = round(0.028 * short)
         ty += round(0.05 * short)
@@ -141,14 +153,18 @@ def _header(spec: ChartSpec, c: ChartColours, *, x: int, top: int, width: int, s
     return "".join(out)
 
 
-def _footer(spec: ChartSpec, c: ChartColours, *, x: int, bottom: int, width: int, short: int) -> str:
+def _footer(
+    spec: ChartSpec, c: ChartColours, *, x: int, bottom: int, width: int, short: int
+) -> str:
     size = round(0.020 * short)
     parts = [p for p in (spec.source_note, spec.footnote) if p]
     line = "  ·  ".join(parts)
     return _text(x, bottom, _esc(line), size, c.muted, family=_fonts.body_stack())
 
 
-def _fit_size(text: str, base: int, max_width: float, *, char_factor: float, floor: float = 0.5) -> int:
+def _fit_size(
+    text: str, base: int, max_width: float, *, char_factor: float, floor: float = 0.5
+) -> int:
     """Deterministically shrink ``base`` so ``text`` fits ``max_width`` (estimated)."""
     if not text:
         return base
@@ -163,15 +179,22 @@ def _empty_state(box: _Box, c: ChartColours, short: int) -> str:
     cx = (box.left + box.right) / 2
     cy = (box.top + box.bottom) / 2
     return _text(
-        cx, cy, "No data to chart yet", size, c.muted,
-        family=_fonts.body_stack(), anchor="middle",
+        cx,
+        cy,
+        "No data to chart yet",
+        size,
+        c.muted,
+        family=_fonts.body_stack(),
+        anchor="middle",
     )
 
 
 # --------------------------------------------------------------------------- #
 # bar / hbar
 # --------------------------------------------------------------------------- #
-def _render_bars(spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, horizontal: bool) -> str:
+def _render_bars(
+    spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, horizontal: bool
+) -> str:
     series = [s for s in spec.series if s.points]
     if not series:
         return ""
@@ -208,18 +231,34 @@ def _render_bars(spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, hor
                 y = _v2y(p.value, vlo, vhi, plot_t, plot_b)
                 bh = plot_b - y
                 fill = _bar_fill(spec, c, s, p, ci, si, n_series)
-                out.append(_rect(bx + 1, y, max(1, bw - 2), max(0, bh), fill, rx=round(0.004 * short)))
+                out.append(
+                    _rect(bx + 1, y, max(1, bw - 2), max(0, bh), fill, rx=round(0.004 * short))
+                )
                 if n_series == 1:
                     dv = p.display or format_value(p.value, value_axis.value_format)
                     out.append(
-                        _text(bx + bw / 2, y - round(0.012 * short), _esc(dv), label_size, c.ink,
-                              family=_fonts.body_stack(), weight="700", anchor="middle")
+                        _text(
+                            bx + bw / 2,
+                            y - round(0.012 * short),
+                            _esc(dv),
+                            label_size,
+                            c.ink,
+                            family=_fonts.body_stack(),
+                            weight="700",
+                            anchor="middle",
+                        )
                     )
             # category label
             out.append(
-                _text(box.left + ci * slot + slot / 2, box.bottom - round(0.012 * short),
-                      _esc(_clip(categories[ci], 16)), label_size, c.muted,
-                      family=_fonts.body_stack(), anchor="middle")
+                _text(
+                    box.left + ci * slot + slot / 2,
+                    box.bottom - round(0.012 * short),
+                    _esc(_clip(categories[ci], 16)),
+                    label_size,
+                    c.muted,
+                    family=_fonts.body_stack(),
+                    anchor="middle",
+                )
             )
     else:
         # Horizontal bars. Reserve a strip on the left for category labels.
@@ -241,27 +280,56 @@ def _render_bars(spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, hor
                 x2 = _v2x(p.value, vlo, vhi, plot_l, plot_r)
                 bw = x2 - plot_l
                 fill = _bar_fill(spec, c, s, p, ci, si, n_series)
-                out.append(_rect(plot_l, by + 1, max(0, bw), max(1, bh - 2), fill, rx=round(0.004 * short)))
+                out.append(
+                    _rect(plot_l, by + 1, max(0, bw), max(1, bh - 2), fill, rx=round(0.004 * short))
+                )
                 if n_series == 1:
                     dv = p.display or format_value(p.value, value_axis.value_format)
                     ly = by + bh / 2 + label_size * 0.35
                     lbl_w = len(dv) * label_size * 0.62
                     if x2 + round(0.01 * short) + lbl_w > plot_r:
                         # Bar reaches the edge — set the value inside it, in legible ink.
-                        out.append(_text(x2 - round(0.014 * short), ly, _esc(dv), label_size,
-                                         c.on_accent, family=_fonts.body_stack(), weight="700", anchor="end"))
+                        out.append(
+                            _text(
+                                x2 - round(0.014 * short),
+                                ly,
+                                _esc(dv),
+                                label_size,
+                                c.on_accent,
+                                family=_fonts.body_stack(),
+                                weight="700",
+                                anchor="end",
+                            )
+                        )
                     else:
-                        out.append(_text(x2 + round(0.01 * short), ly, _esc(dv), label_size,
-                                         c.ink, family=_fonts.body_stack(), weight="700"))
+                        out.append(
+                            _text(
+                                x2 + round(0.01 * short),
+                                ly,
+                                _esc(dv),
+                                label_size,
+                                c.ink,
+                                family=_fonts.body_stack(),
+                                weight="700",
+                            )
+                        )
             out.append(
-                _text(box.left, box.top + ci * slot + slot / 2 + label_size * 0.35,
-                      _esc(_clip(categories[ci], 18)), label_size, c.muted, family=_fonts.body_stack())
+                _text(
+                    box.left,
+                    box.top + ci * slot + slot / 2 + label_size * 0.35,
+                    _esc(_clip(categories[ci], 18)),
+                    label_size,
+                    c.muted,
+                    family=_fonts.body_stack(),
+                )
             )
     out.append(_legend(series, c, box, short) if n_series > 1 else "")
     return "".join(out)
 
 
-def _bar_fill(spec: ChartSpec, c: ChartColours, s: Series, p, ci: int, si: int, n_series: int) -> str:
+def _bar_fill(
+    spec: ChartSpec, c: ChartColours, s: Series, p, ci: int, si: int, n_series: int
+) -> str:
     """The fill for one bar. Single-series bars are one clean accent colour
     (with medal-awareness and an optional ``meta['highlight_label']`` pop), not a
     rainbow ramp; grouped bars get one colour per series."""
@@ -325,7 +393,11 @@ def _render_line(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> str
     plot_b = box.bottom - cat_h
     plot_t = box.top
     out: list[str] = []
-    out.append(_value_grid_v(box, plot_t, plot_b, vlo, vhi, ticks, spec.y_axis, c, short, invert=lower_better))
+    out.append(
+        _value_grid_v(
+            box, plot_t, plot_b, vlo, vhi, ticks, spec.y_axis, c, short, invert=lower_better
+        )
+    )
     dot = max(2.5, round(0.007 * short))
     label_size = round(0.020 * short)
 
@@ -338,7 +410,9 @@ def _render_line(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> str
             pts.append((px, py))
         if len(pts) >= 2:
             d = "M" + " L".join(f"{x:.2f},{y:.2f}" for x, y in pts)
-            out.append(f'<path d="{d}" fill="none" stroke="{fill}" stroke-width="{max(2, round(0.005*short))}" stroke-linejoin="round" stroke-linecap="round"/>')
+            out.append(
+                f'<path d="{d}" fill="none" stroke="{fill}" stroke-width="{max(2, round(0.005*short))}" stroke-linejoin="round" stroke-linecap="round"/>'
+            )
         for (px, py), p in zip(pts, s.points):
             out.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{dot:.2f}" fill="{fill}"/>')
         # End-of-line value label for single series.
@@ -346,16 +420,35 @@ def _render_line(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> str
             ex, ey = pts[-1]
             p = s.points[-1]
             dv = p.display or format_value(p.value, spec.y_axis.value_format)
-            out.append(_text(ex - round(0.01 * short), ey - round(0.014 * short), _esc(dv),
-                             round(0.024 * short), c.ink, family=_fonts.body_stack(), weight="700", anchor="end"))
+            out.append(
+                _text(
+                    ex - round(0.01 * short),
+                    ey - round(0.014 * short),
+                    _esc(dv),
+                    round(0.024 * short),
+                    c.ink,
+                    family=_fonts.body_stack(),
+                    weight="700",
+                    anchor="end",
+                )
+            )
     # x labels (first/mid/last to avoid crowding).
     n0 = series[0].points
     idxs = sorted(set([0, len(n0) // 2, len(n0) - 1])) if n0 else []
     for i in idxs:
         if i < len(n0):
             px = _v2x(_pt_x(n0[i], i), xlo, xhi, box.left, box.right)
-            out.append(_text(px, box.bottom - round(0.012 * short), _esc(_clip(n0[i].label, 14)),
-                             label_size, c.muted, family=_fonts.body_stack(), anchor="middle"))
+            out.append(
+                _text(
+                    px,
+                    box.bottom - round(0.012 * short),
+                    _esc(_clip(n0[i].label, 14)),
+                    label_size,
+                    c.muted,
+                    family=_fonts.body_stack(),
+                    anchor="middle",
+                )
+            )
     out.append(_legend(series, c, box, short) if len(series) > 1 else "")
     return "".join(out)
 
@@ -385,10 +478,29 @@ def _render_pie(spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, donu
         out.append(_arc_slice(cx, cy, r, inner, angle, a2, fill))
         angle = a2
     if donut:
-        out.append(_text(cx, cy - round(0.005 * short), _esc(format_value(total, spec.y_axis.value_format)),
-                         round(0.06 * short), c.ink, family=_fonts.display_stack(), anchor="middle"))
-        out.append(_text(cx, cy + round(0.035 * short), "TOTAL", round(0.02 * short), c.muted,
-                         family=_fonts.body_stack(), anchor="middle", spacing="2px"))
+        out.append(
+            _text(
+                cx,
+                cy - round(0.005 * short),
+                _esc(format_value(total, spec.y_axis.value_format)),
+                round(0.06 * short),
+                c.ink,
+                family=_fonts.display_stack(),
+                anchor="middle",
+            )
+        )
+        out.append(
+            _text(
+                cx,
+                cy + round(0.035 * short),
+                "TOTAL",
+                round(0.02 * short),
+                c.muted,
+                family=_fonts.body_stack(),
+                anchor="middle",
+                spacing="2px",
+            )
+        )
     # Legend down the right side with values.
     lx = box.left + box.w * 0.72
     ly = box.top + box.h * 0.5 - (len(pts) * round(0.045 * short)) / 2
@@ -398,9 +510,16 @@ def _render_pie(spec: ChartSpec, c: ChartColours, box: _Box, short: int, *, donu
         ry = ly + i * round(0.05 * short)
         out.append(_rect(lx, ry, sw, sw, fill, rx=round(0.004 * short)))
         dv = p.display or format_value(p.value, spec.y_axis.value_format)
-        out.append(_text(lx + sw + round(0.014 * short), ry + sw * 0.82,
-                         _esc(f"{_clip(p.label, 16)}  {dv}"), round(0.024 * short), c.ink,
-                         family=_fonts.body_stack()))
+        out.append(
+            _text(
+                lx + sw + round(0.014 * short),
+                ry + sw * 0.82,
+                _esc(f"{_clip(p.label, 16)}  {dv}"),
+                round(0.024 * short),
+                c.ink,
+                family=_fonts.body_stack(),
+            )
+        )
     return "".join(out)
 
 
@@ -426,12 +545,31 @@ def _render_scatter(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> 
         for i, p in enumerate(s.points):
             px = _v2x(_pt_x(p, i), xlo, xhi, box.left, box.right)
             py = _v2y(p.value, ylo, yhi, box.top, plot_b)
-            out.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{dot:.2f}" fill="{fill}" fill-opacity="0.85"/>')
+            out.append(
+                f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{dot:.2f}" fill="{fill}" fill-opacity="0.85"/>'
+            )
     # x axis end labels
-    out.append(_text(box.left, box.bottom - round(0.012 * short), _esc(format_value(xlo, spec.x_axis.value_format)),
-                     round(0.02 * short), c.muted, family=_fonts.body_stack()))
-    out.append(_text(box.right, box.bottom - round(0.012 * short), _esc(format_value(xhi, spec.x_axis.value_format)),
-                     round(0.02 * short), c.muted, family=_fonts.body_stack(), anchor="end"))
+    out.append(
+        _text(
+            box.left,
+            box.bottom - round(0.012 * short),
+            _esc(format_value(xlo, spec.x_axis.value_format)),
+            round(0.02 * short),
+            c.muted,
+            family=_fonts.body_stack(),
+        )
+    )
+    out.append(
+        _text(
+            box.right,
+            box.bottom - round(0.012 * short),
+            _esc(format_value(xhi, spec.x_axis.value_format)),
+            round(0.02 * short),
+            c.muted,
+            family=_fonts.body_stack(),
+            anchor="end",
+        )
+    )
     out.append(_legend(series, c, box, short) if len(series) > 1 else "")
     return "".join(out)
 
@@ -461,8 +599,19 @@ def _render_table(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> st
         for ci in range(n_col):
             label = cols[ci] if ci < len(cols) else ""
             anchor, tx = _cell_anchor(ci, box.left, col_w)
-            out.append(_text(tx, y + head_h * 0.66, _esc(_clip(label, 18)), head_size, c.on_accent,
-                             family=_fonts.body_stack(), weight="700", anchor=anchor, spacing="0.4px"))
+            out.append(
+                _text(
+                    tx,
+                    y + head_h * 0.66,
+                    _esc(_clip(label, 18)),
+                    head_size,
+                    c.on_accent,
+                    family=_fonts.body_stack(),
+                    weight="700",
+                    anchor=anchor,
+                    spacing="0.4px",
+                )
+            )
         y += head_h
 
     for ri, row in enumerate(rows):
@@ -477,8 +626,17 @@ def _render_table(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> st
                 medal_key = ("gold", "silver", "bronze")[ci - 1]
                 ink = _medal_ink(c, medal_key)
             fam = _fonts.mono_stack() if _looks_time(val) else _fonts.body_stack()
-            out.append(_text(tx, ry + row_h * 0.64, _esc(_clip(str(val), 22)), cell_size, ink,
-                             family=fam, anchor=anchor))
+            out.append(
+                _text(
+                    tx,
+                    ry + row_h * 0.64,
+                    _esc(_clip(str(val), 22)),
+                    cell_size,
+                    ink,
+                    family=fam,
+                    anchor=anchor,
+                )
+            )
     # bottom rule
     out.append(_rect(box.left, y + len(rows) * row_h, box.w, max(1, round(0.004 * short)), c.grid))
     return "".join(out)
@@ -516,7 +674,9 @@ def _medal_ink(c: ChartColours, key: str) -> str:
 
 def _looks_time(val: str) -> bool:
     s = str(val).strip()
-    return bool(s) and (":" in s or s.replace(".", "", 1).isdigit()) and any(ch.isdigit() for ch in s)
+    return (
+        bool(s) and (":" in s or s.replace(".", "", 1).isdigit()) and any(ch.isdigit() for ch in s)
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -538,43 +698,105 @@ def _render_split_ladder(spec: ChartSpec, c: ChartColours, box: _Box, short: int
         ry = box.top + i * row_h
         bar_w = (p.value / vhi) * (plot_r - plot_l) if vhi else 0
         fill = c.ramp(0) if i % 2 == 0 else c.ramp(1)
-        out.append(_text(box.left, ry + row_h * 0.6, _esc(_clip(p.label, 12)), label_size, c.muted,
-                         family=_fonts.body_stack()))
-        out.append(_rect(plot_l, ry + row_h * 0.2, max(1, bar_w), row_h * 0.6, fill, rx=round(0.004 * short)))
+        out.append(
+            _text(
+                box.left,
+                ry + row_h * 0.6,
+                _esc(_clip(p.label, 12)),
+                label_size,
+                c.muted,
+                family=_fonts.body_stack(),
+            )
+        )
+        out.append(
+            _rect(
+                plot_l, ry + row_h * 0.2, max(1, bar_w), row_h * 0.6, fill, rx=round(0.004 * short)
+            )
+        )
         dv = p.display or format_value(p.value, spec.y_axis.value_format)
-        out.append(_text(plot_r + round(0.012 * short), ry + row_h * 0.6, _esc(dv), label_size, c.ink,
-                         family=_fonts.mono_stack(), weight="700"))
+        out.append(
+            _text(
+                plot_r + round(0.012 * short),
+                ry + row_h * 0.6,
+                _esc(dv),
+                label_size,
+                c.ink,
+                family=_fonts.mono_stack(),
+                weight="700",
+            )
+        )
     return "".join(out)
 
 
 # --------------------------------------------------------------------------- #
 # shared: value grids, legends, scales, ticks
 # --------------------------------------------------------------------------- #
-def _value_grid_v(box: _Box, top: float, bottom: float, vlo: float, vhi: float, ticks, axis,
-                  c: ChartColours, short: int, *, invert: bool = False) -> str:
+def _value_grid_v(
+    box: _Box,
+    top: float,
+    bottom: float,
+    vlo: float,
+    vhi: float,
+    ticks,
+    axis,
+    c: ChartColours,
+    short: int,
+    *,
+    invert: bool = False,
+) -> str:
     out: list[str] = []
     size = round(0.020 * short)
     for t in ticks:
         if t < vlo - 1e-9 or t > vhi + 1e-9:
             continue
         ty = _v2y(t, vlo, vhi, top, bottom, invert=invert)
-        out.append(f'<line x1="{box.left:.2f}" y1="{ty:.2f}" x2="{box.right:.2f}" y2="{ty:.2f}" stroke="{c.grid}" stroke-width="1"/>')
-        out.append(_text(box.left, ty - round(0.006 * short), _esc(format_value(t, axis.value_format)),
-                         size, c.muted, family=_fonts.body_stack()))
+        out.append(
+            f'<line x1="{box.left:.2f}" y1="{ty:.2f}" x2="{box.right:.2f}" y2="{ty:.2f}" stroke="{c.grid}" stroke-width="1"/>'
+        )
+        out.append(
+            _text(
+                box.left,
+                ty - round(0.006 * short),
+                _esc(format_value(t, axis.value_format)),
+                size,
+                c.muted,
+                family=_fonts.body_stack(),
+            )
+        )
     return "".join(out)
 
 
-def _value_grid_h(box: _Box, left: float, right: float, vlo: float, vhi: float, ticks, axis,
-                  c: ChartColours, short: int) -> str:
+def _value_grid_h(
+    box: _Box,
+    left: float,
+    right: float,
+    vlo: float,
+    vhi: float,
+    ticks,
+    axis,
+    c: ChartColours,
+    short: int,
+) -> str:
     out: list[str] = []
     size = round(0.020 * short)
     for t in ticks:
         if t < vlo - 1e-9 or t > vhi + 1e-9:
             continue
         tx = _v2x(t, vlo, vhi, left, right)
-        out.append(f'<line x1="{tx:.2f}" y1="{box.top:.2f}" x2="{tx:.2f}" y2="{box.bottom:.2f}" stroke="{c.grid}" stroke-width="1"/>')
-        out.append(_text(tx, box.bottom + round(0.022 * short), _esc(format_value(t, axis.value_format)),
-                         size, c.muted, family=_fonts.body_stack(), anchor="middle"))
+        out.append(
+            f'<line x1="{tx:.2f}" y1="{box.top:.2f}" x2="{tx:.2f}" y2="{box.bottom:.2f}" stroke="{c.grid}" stroke-width="1"/>'
+        )
+        out.append(
+            _text(
+                tx,
+                box.bottom + round(0.022 * short),
+                _esc(format_value(t, axis.value_format)),
+                size,
+                c.muted,
+                family=_fonts.body_stack(),
+                anchor="middle",
+            )
+        )
     return "".join(out)
 
 
@@ -588,13 +810,23 @@ def _legend(series: list[Series], c: ChartColours, box: _Box, short: int) -> str
         fill = c.series_colour(s.role, si)
         out.append(_rect(x, y - sw, sw, sw, fill, rx=round(0.004 * short)))
         label = _esc(_clip(s.name or f"Series {si + 1}", 18))
-        out.append(_text(x + sw + round(0.008 * short), y - sw * 0.12, label, size, c.muted,
-                         family=_fonts.body_stack()))
+        out.append(
+            _text(
+                x + sw + round(0.008 * short),
+                y - sw * 0.12,
+                label,
+                size,
+                c.muted,
+                family=_fonts.body_stack(),
+            )
+        )
         x += round(0.20 * box.w)
     return "".join(out)
 
 
-def _v2y(v: float, lo: float, hi: float, top: float, bottom: float, *, invert: bool = False) -> float:
+def _v2y(
+    v: float, lo: float, hi: float, top: float, bottom: float, *, invert: bool = False
+) -> float:
     span = (hi - lo) or 1.0
     frac = (v - lo) / span
     if invert:
@@ -661,8 +893,18 @@ def _rect(x, y, w, h, fill: str, *, rx: int = 0) -> str:
     return f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" fill="{fill}"{rxs}/>'
 
 
-def _text(x, y, text: str, size: int, fill: str, *, family: str, weight: str = "400",
-          anchor: str = "start", spacing: str = "0") -> str:
+def _text(
+    x,
+    y,
+    text: str,
+    size: int,
+    fill: str,
+    *,
+    family: str,
+    weight: str = "400",
+    anchor: str = "start",
+    spacing: str = "0",
+) -> str:
     ls = f' letter-spacing="{spacing}"' if spacing and spacing != "0" else ""
     return (
         f'<text x="{x:.2f}" y="{y:.2f}" font-family="{family}" font-size="{size}" '
@@ -670,7 +912,9 @@ def _text(x, y, text: str, size: int, fill: str, *, family: str, weight: str = "
     )
 
 
-def _arc_slice(cx: float, cy: float, r: float, inner: float, a1: float, a2: float, fill: str) -> str:
+def _arc_slice(
+    cx: float, cy: float, r: float, inner: float, a1: float, a2: float, fill: str
+) -> str:
     """A pie/donut slice from angle a1→a2 (radians)."""
     large = 1 if (a2 - a1) > math.pi else 0
     x1, y1 = cx + r * math.cos(a1), cy + r * math.sin(a1)

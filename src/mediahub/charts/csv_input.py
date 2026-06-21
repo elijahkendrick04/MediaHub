@@ -100,11 +100,17 @@ def parse_csv_to_spec(
             value = _to_number(cell)
             if value is None:
                 warnings.append(
-                    CsvWarning(ri, f"'{cell}' under '{series_names[si]}' isn't a number — skipped.", cell=cell)
+                    CsvWarning(
+                        ri,
+                        f"'{cell}' under '{series_names[si]}' isn't a number — skipped.",
+                        cell=cell,
+                    )
                 )
                 continue
             series_points[si].append(
-                DataPoint(label=label, value=value, display=cell, source_ref=f"csv:row{ri}:col{si + 1}")
+                DataPoint(
+                    label=label, value=value, display=cell, source_ref=f"csv:row{ri}:col{si + 1}"
+                )
             )
 
     series = tuple(

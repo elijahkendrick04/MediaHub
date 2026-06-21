@@ -44,7 +44,9 @@ class MeetAggregates:
     swimmers_with_pb: int = 0  # distinct swimmers who set >=1 PB (the conversion numerator)
     pb_rate_pct: float = 0.0  # distinct PB swimmers as a % of swimmers who raced (<=100)
     pbs_by_swimmer: dict[str, int] = field(default_factory=dict)
-    medals_by_swimmer: dict[str, dict[str, int]] = field(default_factory=dict)  # name → {gold,silver,bronze}
+    medals_by_swimmer: dict[str, dict[str, int]] = field(
+        default_factory=dict
+    )  # name → {gold,silver,bronze}
     biggest_drop: Optional[dict] = None  # {swimmer, event, seconds, pct, source_ref}
     most_pbs: Optional[tuple[str, int]] = None
     # fact name → list of source refs (provenance for every headline number)

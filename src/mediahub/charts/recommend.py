@@ -113,7 +113,9 @@ def _unusable():
 def _candidates_block(cands: list[ChartCandidate]) -> str:
     lines = []
     for c in cands:
-        lines.append(f"  - id={c.chart_id} | {c.title} ({c.kind}) — {c.summary}; headline: {c.headline_stat}")
+        lines.append(
+            f"  - id={c.chart_id} | {c.title} ({c.kind}) — {c.summary}; headline: {c.headline_stat}"
+        )
     return "\n".join(lines)
 
 

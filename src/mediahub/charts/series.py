@@ -21,7 +21,14 @@ from typing import Optional
 from .aggregates import MeetAggregates, compute_aggregates
 from .models import Axis, ChartSpec, DataPoint, Series, format_time_cs
 
-_STROKE_NAMES = {"FR": "Free", "BK": "Back", "BR": "Breast", "FL": "Fly", "IM": "IM", "MEDLEY": "Medley"}
+_STROKE_NAMES = {
+    "FR": "Free",
+    "BK": "Back",
+    "BR": "Breast",
+    "FL": "Fly",
+    "IM": "IM",
+    "MEDLEY": "Medley",
+}
 _COURSE_TAGS = {"LC": "LC", "SC": "SC", "Y": "SCY"}
 _SOURCE = "Source: meet results file"
 
@@ -81,7 +88,9 @@ def medal_split_chart(agg: MeetAggregates) -> Optional[ChartSpec]:
     pts = []
     for label, n in (("Gold", agg.n_gold), ("Silver", agg.n_silver), ("Bronze", agg.n_bronze)):
         if n > 0:
-            pts.append(DataPoint(label=label, value=float(n), display=str(n), source_ref=f"medal:{label}"))
+            pts.append(
+                DataPoint(label=label, value=float(n), display=str(n), source_ref=f"medal:{label}")
+            )
     if not pts:
         return None
     return ChartSpec(
@@ -103,10 +112,7 @@ def medal_table_chart(agg: MeetAggregates, *, top: int = 10) -> Optional[ChartSp
         agg.medals_by_swimmer.items(),
         key=lambda kv: (-kv[1]["gold"], -kv[1]["silver"], -kv[1]["bronze"], kv[0]),
     )[:top]
-    rows = tuple(
-        (name, str(m["gold"]), str(m["silver"]), str(m["bronze"]))
-        for name, m in ranked
-    )
+    rows = tuple((name, str(m["gold"]), str(m["silver"]), str(m["bronze"])) for name, m in ranked)
     return ChartSpec(
         kind="medal_table",
         title="Medal table",
@@ -144,7 +150,9 @@ def biggest_drops_chart(run_data: dict, *, top: int = 8) -> Optional[ChartSpec]:
     )
 
 
-def club_record_board_chart(records, *, title: str = "Club records", top: int = 14) -> Optional[ChartSpec]:
+def club_record_board_chart(
+    records, *, title: str = "Club records", top: int = 14
+) -> Optional[ChartSpec]:
     """Table: the club-record book (from ``club_records.list_records``)."""
     rows = []
     for r in (records or [])[:top]:
@@ -238,8 +246,13 @@ def progression_chart(
     if len(clean) < 2:
         return None
     pts = tuple(
-        DataPoint(label=lbl, value=float(cs), display=format_time_cs(cs), x=float(i),
-                  source_ref=f"history:{swimmer_name}:{lbl}")
+        DataPoint(
+            label=lbl,
+            value=float(cs),
+            display=format_time_cs(cs),
+            x=float(i),
+            source_ref=f"history:{swimmer_name}:{lbl}",
+        )
         for i, (lbl, cs) in enumerate(clean)
     )
     return ChartSpec(
@@ -279,12 +292,24 @@ def build_chart_candidates(run_data: dict, *, records=None) -> list[ChartCandida
         )
 
     add(pbs_per_swimmer_chart(agg), "Personal bests set, by swimmer", f"{agg.n_pbs} PBs")
-    add(medal_split_chart(agg), "Gold / silver / bronze split of the medal haul", f"{agg.n_medals} medals")
+    add(
+        medal_split_chart(agg),
+        "Gold / silver / bronze split of the medal haul",
+        f"{agg.n_medals} medals",
+    )
     add(medal_table_chart(agg), "Per-swimmer medal tally, ranked", f"{agg.n_gold} gold")
-    add(biggest_drops_chart(run_data), "The biggest time improvements of the meet", _drop_headline(agg))
+    add(
+        biggest_drops_chart(run_data),
+        "The biggest time improvements of the meet",
+        _drop_headline(agg),
+    )
     add(split_ladder_chart(run_data), "Per-50 splits for a standout swim or relay", "splits")
     if records:
-        add(club_record_board_chart(records), "The club-record book", f"{len(list(records))} records")
+        add(
+            club_record_board_chart(records),
+            "The club-record book",
+            f"{len(list(records))} records",
+        )
     return out
 
 
@@ -306,12 +331,14 @@ def _collect_drops(run_data: dict) -> list[dict]:
                     secs = None
                 break
         if secs and secs > 0:
-            out.append({
-                "swimmer": str(a.get("swimmer_name", "")).strip(),
-                "event": str(a.get("event", "")).strip(),
-                "seconds": secs,
-                "source_ref": str(a.get("swim_id") or f"drop:{a.get('swimmer_name','')}"),
-            })
+            out.append(
+                {
+                    "swimmer": str(a.get("swimmer_name", "")).strip(),
+                    "event": str(a.get("event", "")).strip(),
+                    "seconds": secs,
+                    "source_ref": str(a.get("swim_id") or f"drop:{a.get('swimmer_name','')}"),
+                }
+            )
     # de-dup identical (swimmer,event) keeping the largest drop
     best: dict[tuple, dict] = {}
     for d in out:

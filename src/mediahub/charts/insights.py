@@ -141,10 +141,7 @@ def _numbers_ok(text: str, allowed: set[float]) -> bool:
             n = float(tok)
         except ValueError:
             return False
-        if not any(
-            abs(n - a) < 0.6 or round(a) == n or int(a) == int(n)
-            for a in allowed
-        ):
+        if not any(abs(n - a) < 0.6 or round(a) == n or int(a) == int(n) for a in allowed):
             return False
     return True
 

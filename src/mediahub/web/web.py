@@ -42779,7 +42779,9 @@ voice, and queues them for one-click approval.</p>
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             return None, (jsonify({"error": "run_not_found"}), 404)
         raw_pid = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
-        profile_id = re.sub(r"[^a-z0-9_-]", "-", str(raw_pid).lower()).strip("-") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", str(raw_pid).lower()).strip("-") or (
+            "_run_" + run_id
+        )
         try:
             brand_kit = _resolve_run_brand_kit(profile_id, run_id) if _v8_ok else None
         except Exception:
@@ -42811,20 +42813,22 @@ voice, and queues them for one-click approval.</p>
         ctx, cands, err = _charts_candidates_for(run_id)
         if err is not None:
             return err
-        return jsonify({
-            "charts": [
-                {
-                    "chart_id": c.chart_id,
-                    "title": c.title,
-                    "kind": c.kind,
-                    "summary": c.summary,
-                    "headline_stat": c.headline_stat,
-                    "n_points": c.n_points,
-                    "svg_url": url_for("api_run_chart_svg", run_id=run_id, chart_id=c.chart_id),
-                }
-                for c in (cands or [])
-            ]
-        })
+        return jsonify(
+            {
+                "charts": [
+                    {
+                        "chart_id": c.chart_id,
+                        "title": c.title,
+                        "kind": c.kind,
+                        "summary": c.summary,
+                        "headline_stat": c.headline_stat,
+                        "n_points": c.n_points,
+                        "svg_url": url_for("api_run_chart_svg", run_id=run_id, chart_id=c.chart_id),
+                    }
+                    for c in (cands or [])
+                ]
+            }
+        )
 
     @app.route("/api/runs/<run_id>/chart/<chart_id>", methods=["GET"])
     def api_run_chart_svg(run_id: str, chart_id: str):
@@ -42867,7 +42871,13 @@ voice, and queues them for one-click approval.</p>
         if err is not None:
             return err
         if not cands:
-            return jsonify({"available": True, "recommendation": None, "message": "No charts for this run yet."})
+            return jsonify(
+                {
+                    "available": True,
+                    "recommendation": None,
+                    "message": "No charts for this run yet.",
+                }
+            )
         agg = _charts.compute_aggregates(ctx["run_data"])
         try:
             rec = _charts.recommend_chart(cands, agg)
@@ -42913,7 +42923,11 @@ voice, and queues them for one-click approval.</p>
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
-        meet_name = (ctx["run_data"].get("meet") or {}).get("name") or ctx["run_data"].get("meet_name") or "Meet"
+        meet_name = (
+            (ctx["run_data"].get("meet") or {}).get("name")
+            or ctx["run_data"].get("meet_name")
+            or "Meet"
+        )
         _pack_url = url_for("content_pack", run_id=run_id)
 
         if not cands:
@@ -42921,7 +42935,7 @@ voice, and queues them for one-click approval.</p>
                 f'<section class="mh-hero" style="padding:var(--sp-7) 0"><h1>Charts &amp; insights</h1>'
                 f'<p class="muted">{_h(meet_name)}</p>'
                 '<div class="card" style="margin-top:16px"><p>No charts yet — this run has no detected '
-                'PBs, medals or splits to plot. Process a meet with standout results to see stat graphics here.</p>'
+                "PBs, medals or splits to plot. Process a meet with standout results to see stat graphics here.</p>"
                 f'<p><a class="btn secondary" href="{_h(_pack_url)}">&larr; Back to content builder</a></p></div></section>'
             )
             return _layout("Charts & insights", body, active="home")
@@ -42967,11 +42981,11 @@ voice, and queues them for one-click approval.</p>
             '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
             '<div><div style="font-weight:700">AI highlights</div>'
             '<div class="muted" style="font-size:12px;margin-top:2px">Which chart leads the story, and the '
-            'takeaways — grounded in the numbers above, never invented.</div></div>'
+            "takeaways — grounded in the numbers above, never invented.</div></div>"
             '<div style="display:flex;gap:6px;flex-wrap:wrap">'
             '<button id="mh-rec-btn" class="btn" style="font-size:12px;padding:6px 14px">Recommend a chart</button>'
             '<button id="mh-ins-btn" class="btn secondary" style="font-size:12px;padding:6px 14px">Write takeaways</button>'
-            '</div></div>'
+            "</div></div>"
             '<div id="mh-ai-out" style="display:none"></div></div>'
         )
         js = _CHARTS_PAGE_JS.replace("__REC_URL__", rec_url).replace("__INS_URL__", ins_url)

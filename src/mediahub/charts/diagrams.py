@@ -126,7 +126,9 @@ class DiagramSpec:
 # --------------------------------------------------------------------------- #
 # builders — structured data → DiagramSpec
 # --------------------------------------------------------------------------- #
-def org_chart_from_roster(members, *, title: str = "Committee", subtitle: str = "") -> Optional[DiagramSpec]:
+def org_chart_from_roster(
+    members, *, title: str = "Committee", subtitle: str = ""
+) -> Optional[DiagramSpec]:
     """Committee/coaching org chart from a roster of ``{name, role, reports_to}``."""
     nodes: list[DiagramNode] = []
     name_to_id: dict[str, str] = {}
@@ -147,12 +149,18 @@ def org_chart_from_roster(members, *, title: str = "Committee", subtitle: str = 
         parent = rep if rep in id_set else name_to_id.get(rep.lower(), "")
         resolved.append(DiagramNode(id=n.id, label=n.label, sublabel=n.sublabel, parent=parent))
     return DiagramSpec(
-        kind="org_chart", title=title, subtitle=subtitle, nodes=tuple(resolved),
-        source_note="Source: club roster", chart_id="org_chart",
+        kind="org_chart",
+        title=title,
+        subtitle=subtitle,
+        nodes=tuple(resolved),
+        source_note="Source: club roster",
+        chart_id="org_chart",
     )
 
 
-def season_timeline_from_meets(meets, *, title: str = "Season timeline", subtitle: str = "") -> Optional[DiagramSpec]:
+def season_timeline_from_meets(
+    meets, *, title: str = "Season timeline", subtitle: str = ""
+) -> Optional[DiagramSpec]:
     """Horizontal season timeline from a list of ``{date, name}`` fixtures/meets."""
     items = []
     for i, mt in enumerate(meets or []):
@@ -169,8 +177,12 @@ def season_timeline_from_meets(meets, *, title: str = "Season timeline", subtitl
         for i, (date, label, _) in enumerate(items)
     )
     return DiagramSpec(
-        kind="timeline", title=title, subtitle=subtitle, nodes=nodes,
-        source_note="Source: club fixtures", chart_id="season_timeline",
+        kind="timeline",
+        title=title,
+        subtitle=subtitle,
+        nodes=nodes,
+        source_note="Source: club fixtures",
+        chart_id="season_timeline",
     )
 
 
@@ -181,28 +193,43 @@ def athlete_journey(swimmer_name: str, milestones, *, subtitle: str = "") -> Opt
         label = str(_get(ms, "label") or "").strip()
         if not label:
             continue
-        nodes.append(DiagramNode(id=f"m{i}", label=label, sublabel=str(_get(ms, "detail") or "").strip()))
+        nodes.append(
+            DiagramNode(id=f"m{i}", label=label, sublabel=str(_get(ms, "detail") or "").strip())
+        )
     if not nodes:
         return None
     return DiagramSpec(
-        kind="journey", title=swimmer_name.strip() or "Journey", subtitle=subtitle or "Career milestones",
-        nodes=tuple(nodes), source_note="Source: club history", chart_id="athlete_journey",
+        kind="journey",
+        title=swimmer_name.strip() or "Journey",
+        subtitle=subtitle or "Career milestones",
+        nodes=tuple(nodes),
+        source_note="Source: club history",
+        chart_id="athlete_journey",
     )
 
 
-def training_flow(steps, *, title: str = "Training week", subtitle: str = "") -> Optional[DiagramSpec]:
+def training_flow(
+    steps, *, title: str = "Training week", subtitle: str = ""
+) -> Optional[DiagramSpec]:
     """A linear process flow from ordered ``{label, detail}`` steps."""
     nodes = []
     for i, st in enumerate(steps or []):
         label = str(_get(st, "label") or "").strip()
         if not label:
             continue
-        nodes.append(DiagramNode(id=f"s{i}", label=label, sublabel=str(_get(st, "detail") or "").strip()))
+        nodes.append(
+            DiagramNode(id=f"s{i}", label=label, sublabel=str(_get(st, "detail") or "").strip())
+        )
     if not nodes:
         return None
     edges = tuple((f"s{i}", f"s{i + 1}") for i in range(len(nodes) - 1))
     return DiagramSpec(
-        kind="flow", title=title, subtitle=subtitle, nodes=nodes, edges=edges, chart_id="training_flow",
+        kind="flow",
+        title=title,
+        subtitle=subtitle,
+        nodes=nodes,
+        edges=edges,
+        chart_id="training_flow",
     )
 
 
@@ -239,9 +266,17 @@ def render_diagram_svg(
     if foot_h:
         frag.append(_footer(spec, c, x=pad, bottom=h - pad, width=w - 2 * pad, short=short))
     if spec.is_empty():
-        frag.append(_text((box.left + box.right) / 2, (box.top + box.bottom) / 2,
-                          "Nothing to diagram yet", round(0.03 * short), c.muted,
-                          family=_fonts.body_stack(), anchor="middle"))
+        frag.append(
+            _text(
+                (box.left + box.right) / 2,
+                (box.top + box.bottom) / 2,
+                "Nothing to diagram yet",
+                round(0.03 * short),
+                c.muted,
+                family=_fonts.body_stack(),
+                anchor="middle",
+            )
+        )
     elif spec.kind == "org_chart":
         frag.append(_render_org_chart(spec, c, box, short))
     elif spec.kind == "timeline":
@@ -285,7 +320,9 @@ def _render_org_chart(spec: DiagramSpec, c: ChartColours, box: _Box, short: int)
     for nid in depth:
         n = by_id[nid]
         is_root = not n.parent
-        _node_box(out, cx(nid), cy(nid), node_w, node_h, c, short, n.label, n.sublabel, accent=is_root)
+        _node_box(
+            out, cx(nid), cy(nid), node_w, node_h, c, short, n.label, n.sublabel, accent=is_root
+        )
     return "".join(out)
 
 
@@ -305,17 +342,23 @@ def _render_timeline(spec: DiagramSpec, c: ChartColours, box: _Box, short: int) 
     def _x(i: int) -> float:
         return usable_l + (i * step if n > 1 else (usable_r - usable_l) / 2)
 
-    out = [f'<line x1="{_x(0):.1f}" y1="{midy:.1f}" x2="{_x(n - 1):.1f}" y2="{midy:.1f}" stroke="{c.grid}" stroke-width="3"/>']
+    out = [
+        f'<line x1="{_x(0):.1f}" y1="{midy:.1f}" x2="{_x(n - 1):.1f}" y2="{midy:.1f}" stroke="{c.grid}" stroke-width="3"/>'
+    ]
     for i, node in enumerate(nodes):
         x = _x(i)
-        up = (i % 2 == 0)
+        up = i % 2 == 0
         out.append(f'<circle cx="{x:.1f}" cy="{midy:.1f}" r="{dot}" fill="{c.accent}"/>')
         stalk = round(0.10 * short)
         ey = midy - stalk if up else midy + stalk
-        out.append(f'<line x1="{x:.1f}" y1="{midy:.1f}" x2="{x:.1f}" y2="{ey:.1f}" stroke="{c.grid}" stroke-width="2"/>')
+        out.append(
+            f'<line x1="{x:.1f}" y1="{midy:.1f}" x2="{x:.1f}" y2="{ey:.1f}" stroke="{c.grid}" stroke-width="2"/>'
+        )
         ch = round(0.075 * short)
         cyb = ey - ch if up else ey
-        _node_box(out, x, cyb + ch / 2, card_w, ch, c, short, node.label, node.sublabel, accent=False)
+        _node_box(
+            out, x, cyb + ch / 2, card_w, ch, c, short, node.label, node.sublabel, accent=False
+        )
     return "".join(out)
 
 
@@ -326,17 +369,36 @@ def _render_journey(spec: DiagramSpec, c: ChartColours, box: _Box, short: int) -
     railx = box.left + box.w * 0.10
     dot = max(6, round(0.013 * short))
     out: list[str] = []
-    out.append(f'<line x1="{railx:.1f}" y1="{box.top:.1f}" x2="{railx:.1f}" y2="{box.bottom:.1f}" stroke="{c.grid}" stroke-width="3"/>')
+    out.append(
+        f'<line x1="{railx:.1f}" y1="{box.top:.1f}" x2="{railx:.1f}" y2="{box.bottom:.1f}" stroke="{c.grid}" stroke-width="3"/>'
+    )
     for i, node in enumerate(nodes):
         cy = box.top + i * row_h + row_h / 2
         out.append(f'<circle cx="{railx:.1f}" cy="{cy:.1f}" r="{dot}" fill="{c.accent}"/>')
         tx = railx + round(0.04 * short)
         title_size = _fit_size(node.label, round(0.034 * short), box.right - tx, char_factor=0.5)
-        out.append(_text(tx, cy - round(0.004 * short), _esc(node.label), title_size, c.ink,
-                         family=_fonts.display_stack(), weight="400"))
+        out.append(
+            _text(
+                tx,
+                cy - round(0.004 * short),
+                _esc(node.label),
+                title_size,
+                c.ink,
+                family=_fonts.display_stack(),
+                weight="400",
+            )
+        )
         if node.sublabel:
-            out.append(_text(tx, cy + round(0.030 * short), _esc(_clip(node.sublabel, 60)),
-                             round(0.022 * short), c.muted, family=_fonts.body_stack()))
+            out.append(
+                _text(
+                    tx,
+                    cy + round(0.030 * short),
+                    _esc(_clip(node.sublabel, 60)),
+                    round(0.022 * short),
+                    c.muted,
+                    family=_fonts.body_stack(),
+                )
+            )
     return "".join(out)
 
 
@@ -368,28 +430,61 @@ def _render_flow(spec: DiagramSpec, c: ChartColours, box: _Box, short: int) -> s
     for a, b in spec.edges:
         if a in centres and b in centres:
             (x1, y1), (x2, y2) = centres[a], centres[b]
-            out.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{c.grid}" stroke-width="2"/>')
+            out.append(
+                f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{c.grid}" stroke-width="2"/>'
+            )
     for i, node in enumerate(nodes):
         cxn, cyn = positions[i]
         _node_box(out, cxn, cyn, bw, bh, c, short, node.label, node.sublabel, accent=(i == 0))
     return "".join(out)
 
 
-def _node_box(out: list[str], cx: float, cy: float, w: float, h: float, c: ChartColours,
-              short: int, label: str, sublabel: str, *, accent: bool) -> None:
+def _node_box(
+    out: list[str],
+    cx: float,
+    cy: float,
+    w: float,
+    h: float,
+    c: ChartColours,
+    short: int,
+    label: str,
+    sublabel: str,
+    *,
+    accent: bool,
+) -> None:
     x, y = cx - w / 2, cy - h / 2
     fill = c.accent if accent else _mix(c.ground, c.ink, 0.08)
     ink = c.on_accent if accent else c.ink
     sub_ink = _mix(ink, fill, 0.35)
     out.append(_rect(x, y, w, h, fill, rx=round(0.012 * short)))
-    out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{round(0.012*short)}" fill="none" stroke="{c.grid if not accent else fill}" stroke-width="1.5"/>')
+    out.append(
+        f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{round(0.012*short)}" fill="none" stroke="{c.grid if not accent else fill}" stroke-width="1.5"/>'
+    )
     title_size = _fit_size(label, round(0.026 * short), w * 0.9, char_factor=0.55)
-    out.append(_text(cx, cy + (0 if not sublabel else -round(0.006 * short)) + title_size * 0.18,
-                     _esc(_clip(label, 26)), title_size, ink, family=_fonts.body_stack(),
-                     weight="700", anchor="middle"))
+    out.append(
+        _text(
+            cx,
+            cy + (0 if not sublabel else -round(0.006 * short)) + title_size * 0.18,
+            _esc(_clip(label, 26)),
+            title_size,
+            ink,
+            family=_fonts.body_stack(),
+            weight="700",
+            anchor="middle",
+        )
+    )
     if sublabel:
-        out.append(_text(cx, cy + round(0.026 * short), _esc(_clip(sublabel, 30)),
-                         round(0.018 * short), sub_ink, family=_fonts.body_stack(), anchor="middle"))
+        out.append(
+            _text(
+                cx,
+                cy + round(0.026 * short),
+                _esc(_clip(sublabel, 30)),
+                round(0.018 * short),
+                sub_ink,
+                family=_fonts.body_stack(),
+                anchor="middle",
+            )
+        )
 
 
 def _layout_tree(nodes):
@@ -437,7 +532,20 @@ def _get(obj, name: str):
 def _pretty_date(iso: str) -> str:
     s = (iso or "").strip()
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        months = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ]
         try:
             return f"{int(s[8:10])} {months[int(s[5:7]) - 1]} {s[0:4]}"
         except (ValueError, IndexError):
