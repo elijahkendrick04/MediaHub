@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `cbe583b2b` · Merge pull request #943: Redesign the My Season timeline view
+**Last updated:** 2026-06-21 · `4baae2db7` · Merge pull request #946 from elijahkendrick04/claude/amazing-meitner-bwq8of
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
+| 2026-06-21 | `2e1886d0e` | Make stock-thumb proxy rate-limit-robust (cache + bounded concurrency + retry) |
 | 2026-06-21 | `98b6ea4fd` | Apply ruff-format to the season view changes |
 | 2026-06-21 | `e72028415` | Redesign the My Season timeline view |
 | 2026-06-21 | `9d0ddd757` | Fix trailing whitespace on swimmers; make podium dimensional |
@@ -1225,6 +1227,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `d43029fa0` | docs(1.12): mark Brand platform depth shipped in the parity map |
 | 2026-06-21 | `4f8e1c26e` | brand(1.12): theme-token hygiene + folder READMEs |
 | 2026-06-21 | `fa3cdcc4c` | brand(1.12): build 5 — kit-edit -> re-render sweep with diff preview |
-| 2026-06-21 | `88a494254` | brand(1.12): build 4 — governance: token locks + group-approver rules |
-| 2026-06-21 | `15f986ab0` | brand(1.12): build 3 — brand-platform web surface + palette-file import |
 <!-- /ROADMAP:ACTIVITY -->
