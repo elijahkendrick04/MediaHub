@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `313e4a340` · Move athlete spotlight into the meet-recap review flow; tidy review surface (#931)
+**Last updated:** 2026-06-21 · `6448985bf` · Charts & insights (roadmap 1.11) (#933)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
 - **1.12** · Phase 1 (Product) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
 - **1.13** · Phase 1 (Product) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
 - **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
@@ -1217,16 +1216,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `31ac25748` | charts(1.11): add chart_id to the second tenant-isolation sweep too |
+| 2026-06-21 | `a68652c7a` | ci: re-trigger checks for the charts(1.11) branch |
+| 2026-06-21 | `41d101628` | charts(1.11): register the chart-SVG route in the tenant-isolation sweep |
+| 2026-06-21 | `7f496ecc1` | charts(1.11): apply ruff-format (pre-commit hygiene) |
+| 2026-06-21 | `ccd2d041c` | charts(1.11): build 5 — web routes, content-builder surface + UI |
+| 2026-06-21 | `70d773876` | charts(1.11): build 4 — data-driven diagram formats |
+| 2026-06-21 | `46adb9530` | charts(1.11): build 3 — grounded AI surfaces (recommend + insights) |
+| 2026-06-21 | `08c972024` | charts(1.11): build 2 — data plumbing (aggregates, series builders, CSV) |
+| 2026-06-21 | `0306fa405` | charts(1.11): build 1 — deterministic brand-styled chart SVG engine |
 | 2026-06-20 | `23346101b` | Make Athlete Spotlight live only inside the meet-recap flow |
 | 2026-06-20 | `e3e7058b0` | Move athlete spotlight into the meet-recap review flow; tidy review surface |
 | 2026-06-20 | `816e57b9f` | feat(pb): recover resolved-but-no-roster-time swimmers + reveal the real gap |
-| 2026-06-20 | `a3ba1c8cf` | style(pb): ruff-format lookup.py (collapse comprehension to one line) |
-| 2026-06-20 | `500f3e15a` | feat(pb): name the unmatched swimmers (with a reason) in the resolution summary |
-| 2026-06-20 | `d2093f2cd` | fix(runs): keep heartbeat alive during long progress-silent steps (large fresh PDF) |
-| 2026-06-20 | `532d1d431` | fix(1.10): declare Pexels/Pixabay stock keys as non-subprocessors (DPA guard) |
-| 2026-06-20 | `75ae6f495` | feat(1.10): telestration draw layer + mascot stickers; ship 1.10 (build 4/4) |
-| 2026-06-20 | `f237c8fc9` | feat(1.10): licence-clean stock pool + shared rights ledger (build 3/4) |
-| 2026-06-20 | `5d97fbbd3` | style(1.10): ruff-format the build-2 element routes in web.py |
-| 2026-06-20 | `6232a0244` | feat(1.10): element embedding search + Elements browse tab (build 2/4) |
-| 2026-06-20 | `69700a46a` | feat(1.10): brand-token element library + renderer injection (build 1/4) |
 <!-- /ROADMAP:ACTIVITY -->
