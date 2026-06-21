@@ -12,7 +12,7 @@
       "tags": ["swimming", "stroke", "freestyle", "front-crawl", "speed", "race"],
       "keywords": "freestyle front crawl swimmer arm recovery fastest stroke sprint",
       "mood": ["dynamic", "fast"],
-      "slots": ["ACCENT", "GROUND", "OUTLINE"],
+      "slots": ["ACCENT", "OUTLINE"],
       "aspect": 1.0
     },
     {
@@ -24,7 +24,7 @@
       "tags": ["swimming", "stroke", "butterfly", "fly", "power"],
       "keywords": "butterfly fly stroke double arm recovery powerful dolphin kick",
       "mood": ["powerful", "dynamic"],
-      "slots": ["ACCENT", "GROUND", "OUTLINE"],
+      "slots": ["ACCENT", "OUTLINE"],
       "aspect": 1.0
     },
     {
@@ -36,7 +36,7 @@
       "tags": ["swimming", "stroke", "backstroke", "back"],
       "keywords": "backstroke back crawl face up reaching arm",
       "mood": ["smooth", "dynamic"],
-      "slots": ["ACCENT", "GROUND", "OUTLINE"],
+      "slots": ["ACCENT", "OUTLINE"],
       "aspect": 1.0
     },
     {
@@ -48,7 +48,7 @@
       "tags": ["swimming", "stroke", "breaststroke", "breast"],
       "keywords": "breaststroke frog kick glide head up sweep pull",
       "mood": ["steady", "technical"],
-      "slots": ["ACCENT", "GROUND", "OUTLINE"],
+      "slots": ["ACCENT", "OUTLINE"],
       "aspect": 1.0
     },
     {
@@ -60,7 +60,7 @@
       "tags": ["swimming", "dive", "start", "blocks", "race", "sprint"],
       "keywords": "racing dive starting block streamline entry race start",
       "mood": ["explosive", "dynamic"],
-      "slots": ["ACCENT", "GROUND", "SECONDARY", "OUTLINE"],
+      "slots": ["ACCENT", "SECONDARY", "OUTLINE"],
       "aspect": 1.0
     },
     {
