@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `6448985bf` · Charts & insights (roadmap 1.11) (#933)
+**Last updated:** 2026-06-21 · `5b29db65e` · Charts & insights 1.11 — quality uplift (#935)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1216,16 +1216,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `3777659bb` | charts(1.11): ruff-format the web.py additions (pre-commit hygiene) |
+| 2026-06-21 | `7980c0787` | charts(1.11): refresh the folder README for the I1–I5 uplift |
+| 2026-06-21 | `659c040ed` | charts(1.11): I5 — grounded, postable chart captions (graphic + words) |
+| 2026-06-21 | `ac33bb058` | charts(1.11): I4 — visual-regression lock for the renderer |
+| 2026-06-21 | `0f7a00dc4` | charts(1.11): I3 — richer deterministic chart coverage |
+| 2026-06-21 | `0a12abea0` | charts(1.11): I2 — postable PNG export at social formats |
+| 2026-06-21 | `d0e080bfa` | charts(1.11): I1 — reference lines, standout emphasis, accessibility |
 | 2026-06-21 | `31ac25748` | charts(1.11): add chart_id to the second tenant-isolation sweep too |
 | 2026-06-21 | `a68652c7a` | ci: re-trigger checks for the charts(1.11) branch |
 | 2026-06-21 | `41d101628` | charts(1.11): register the chart-SVG route in the tenant-isolation sweep |
 | 2026-06-21 | `7f496ecc1` | charts(1.11): apply ruff-format (pre-commit hygiene) |
 | 2026-06-21 | `ccd2d041c` | charts(1.11): build 5 — web routes, content-builder surface + UI |
-| 2026-06-21 | `70d773876` | charts(1.11): build 4 — data-driven diagram formats |
-| 2026-06-21 | `46adb9530` | charts(1.11): build 3 — grounded AI surfaces (recommend + insights) |
-| 2026-06-21 | `08c972024` | charts(1.11): build 2 — data plumbing (aggregates, series builders, CSV) |
-| 2026-06-21 | `0306fa405` | charts(1.11): build 1 — deterministic brand-styled chart SVG engine |
-| 2026-06-20 | `23346101b` | Make Athlete Spotlight live only inside the meet-recap flow |
-| 2026-06-20 | `e3e7058b0` | Move athlete spotlight into the meet-recap review flow; tidy review surface |
-| 2026-06-20 | `816e57b9f` | feat(pb): recover resolved-but-no-roster-time swimmers + reveal the real gap |
 <!-- /ROADMAP:ACTIVITY -->
