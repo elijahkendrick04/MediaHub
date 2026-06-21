@@ -27,6 +27,7 @@ Public surface:
 """
 
 from .aggregates import MeetAggregates, compute_aggregates
+from .caption import generate_chart_caption
 from .csv_input import CsvImport, parse_csv_to_spec
 from .export import EXPORT_FORMATS, chart_png_bytes, chart_png_path
 from .diagrams import (
@@ -79,4 +80,5 @@ __all__ = [
     "EXPORT_FORMATS",
     "chart_png_path",
     "chart_png_bytes",
+    "generate_chart_caption",
 ]
