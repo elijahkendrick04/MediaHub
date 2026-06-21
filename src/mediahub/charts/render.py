@@ -66,6 +66,7 @@ def render_chart_svg(
 
     frag: list[str] = []
     frag.append(_svg_open(w, h, embed_fonts))
+    frag.append(_a11y(spec))  # <title>/<desc> for screen readers + alt text
     # Brand ground.
     frag.append(_rect(0, 0, w, h, colours.ground))
     # Headline chrome.
@@ -260,6 +261,7 @@ def _render_bars(
                     anchor="middle",
                 )
             )
+        out.append(_reference_lines_v(spec, c, box, plot_t, plot_b, vlo, vhi, value_axis, short))
     else:
         # Horizontal bars. Reserve a strip on the left for category labels.
         cat_w = round(0.22 * box.w)
@@ -323,6 +325,7 @@ def _render_bars(
                     family=_fonts.body_stack(),
                 )
             )
+        out.append(_reference_lines_h(spec, c, box, plot_l, plot_r, vlo, vhi, value_axis, short))
     out.append(_legend(series, c, box, short) if n_series > 1 else "")
     return "".join(out)
 
@@ -331,8 +334,10 @@ def _bar_fill(
     spec: ChartSpec, c: ChartColours, s: Series, p, ci: int, si: int, n_series: int
 ) -> str:
     """The fill for one bar. Single-series bars are one clean accent colour
-    (with medal-awareness and an optional ``meta['highlight_label']`` pop), not a
-    rainbow ramp; grouped bars get one colour per series."""
+    (with medal-awareness and standout emphasis), not a rainbow ramp; grouped bars
+    get one colour per series. When any datum carries ``emphasis`` (the
+    record-breaker, the biggest drop), it pops in accent and the rest recede — the
+    editorial 'point at the story' move."""
     if n_series > 1:
         return c.series_colour(s.role, si)
     low = (p.label or "").strip().lower()
@@ -341,9 +346,12 @@ def _bar_fill(
             from .palette import MEDAL_COLOURS
 
             return MEDAL_COLOURS[medal]
+    # Per-point emphasis (preferred) or a meta highlight label — same effect.
+    any_emphasis = any(pt.emphasis for pt in s.points)
     highlight = str(spec.meta.get("highlight_label", "")).strip().lower()
-    if highlight:
-        if low == highlight:
+    if any_emphasis or highlight:
+        is_star = p.emphasis or (highlight and low == highlight)
+        if is_star:
             return c.accent
         from .palette import _mix
 
@@ -355,8 +363,9 @@ def _bar_domain(spec: ChartSpec, axis) -> tuple[float, float]:
     vals = [p.value for s in spec.series for p in s.points]
     if not vals:
         return (0.0, 1.0)
-    dmax = max(vals)
-    dmin = min(vals)
+    ref_vals = [r.value for r in spec.reference_lines]  # keep benchmarks in frame
+    dmax = max(vals + ref_vals)
+    dmin = min(vals + ref_vals)
     lo = axis.min if axis.min is not None else min(0.0, dmin)
     hi = axis.max if axis.max is not None else dmax
     if hi <= lo:
@@ -379,7 +388,8 @@ def _render_line(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> str
     if xhi <= xlo:
         xhi = xlo + 1.0
     vals = [p.value for s in series for p in s.points]
-    vlo, vhi = (min(vals), max(vals)) if vals else (0.0, 1.0)
+    allv = vals + [r.value for r in spec.reference_lines]  # keep benchmarks in frame
+    vlo, vhi = (min(allv), max(allv)) if allv else (0.0, 1.0)
     span = (vhi - vlo) or 1.0
     vlo -= span * 0.12
     vhi += span * 0.12
@@ -414,7 +424,9 @@ def _render_line(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> str
                 f'<path d="{d}" fill="none" stroke="{fill}" stroke-width="{max(2, round(0.005*short))}" stroke-linejoin="round" stroke-linecap="round"/>'
             )
         for (px, py), p in zip(pts, s.points):
-            out.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{dot:.2f}" fill="{fill}"/>')
+            r = dot * 1.8 if p.emphasis else dot
+            f = c.accent if p.emphasis else fill
+            out.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{r:.2f}" fill="{f}"/>')
         # End-of-line value label for single series.
         if len(series) == 1 and pts:
             ex, ey = pts[-1]
@@ -449,6 +461,11 @@ def _render_line(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> str
                     anchor="middle",
                 )
             )
+    out.append(
+        _reference_lines_v(
+            spec, c, box, plot_t, plot_b, vlo, vhi, spec.y_axis, short, invert=lower_better
+        )
+    )
     out.append(_legend(series, c, box, short) if len(series) > 1 else "")
     return "".join(out)
 
@@ -531,7 +548,7 @@ def _render_scatter(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> 
     if not series:
         return ""
     xs = [_pt_x(p, i) for s in series for i, p in enumerate(s.points)]
-    ys = [p.value for s in series for p in s.points]
+    ys = [p.value for s in series for p in s.points] + [r.value for r in spec.reference_lines]
     xlo, xhi = _pad_domain(min(xs), max(xs))
     ylo, yhi = _pad_domain(min(ys), max(ys))
     yticks = _nice_ticks(ylo, yhi)
@@ -545,9 +562,12 @@ def _render_scatter(spec: ChartSpec, c: ChartColours, box: _Box, short: int) -> 
         for i, p in enumerate(s.points):
             px = _v2x(_pt_x(p, i), xlo, xhi, box.left, box.right)
             py = _v2y(p.value, ylo, yhi, box.top, plot_b)
+            r = dot * 1.8 if p.emphasis else dot
+            f = c.accent if p.emphasis else fill
             out.append(
-                f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{dot:.2f}" fill="{fill}" fill-opacity="0.85"/>'
+                f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{r:.2f}" fill="{f}" fill-opacity="0.85"/>'
             )
+    out.append(_reference_lines_v(spec, c, box, box.top, plot_b, ylo, yhi, spec.y_axis, short))
     # x axis end labels
     out.append(
         _text(
@@ -800,6 +820,111 @@ def _value_grid_h(
     return "".join(out)
 
 
+# --------------------------------------------------------------------------- #
+# reference lines — the chart's intelligence: a benchmark (club record,
+# qualifying time) drawn across the value axis with a labelled marker. Every
+# value is a real number from the deterministic data; nothing is invented.
+# --------------------------------------------------------------------------- #
+def _ref_colour(c: ChartColours, role: str) -> str:
+    return {"accent": c.accent, "on_surface": c.ink}.get(role, c.secondary)
+
+
+def _reference_lines_v(
+    spec: ChartSpec,
+    c: ChartColours,
+    box: _Box,
+    plot_t: float,
+    plot_b: float,
+    vlo: float,
+    vhi: float,
+    axis,
+    short: int,
+    *,
+    invert: bool = False,
+) -> str:
+    """Horizontal benchmark lines for value-on-Y charts (vertical bars, line)."""
+    if not spec.reference_lines:
+        return ""
+    out: list[str] = []
+    size = round(0.020 * short)
+    for rl in spec.reference_lines:
+        if rl.value < vlo - 1e-9 or rl.value > vhi + 1e-9:
+            continue
+        y = _v2y(rl.value, vlo, vhi, plot_t, plot_b, invert=invert)
+        col = _ref_colour(c, rl.role)
+        out.append(
+            f'<line x1="{box.left:.1f}" y1="{y:.1f}" x2="{box.right:.1f}" y2="{y:.1f}" '
+            f'stroke="{col}" stroke-width="2" stroke-dasharray="7 5"/>'
+        )
+        dv = rl.display or format_value(rl.value, axis.value_format)
+        text = f"{rl.label}  {dv}".strip()
+        w = len(text) * size * 0.58 + round(0.018 * short)
+        h = size + round(0.012 * short)
+        rx = box.right - w
+        ry = y - h - round(0.004 * short)
+        out.append(_rect(rx, ry, w, h, c.ground, rx=round(0.005 * short)))
+        out.append(
+            _text(
+                box.right - round(0.009 * short),
+                ry + h * 0.72,
+                _esc(text),
+                size,
+                col,
+                family=_fonts.body_stack(),
+                weight="700",
+                anchor="end",
+            )
+        )
+    return "".join(out)
+
+
+def _reference_lines_h(
+    spec: ChartSpec,
+    c: ChartColours,
+    box: _Box,
+    plot_l: float,
+    plot_r: float,
+    vlo: float,
+    vhi: float,
+    axis,
+    short: int,
+) -> str:
+    """Vertical benchmark lines for value-on-X charts (horizontal bars)."""
+    if not spec.reference_lines:
+        return ""
+    out: list[str] = []
+    size = round(0.020 * short)
+    for rl in spec.reference_lines:
+        if rl.value < vlo - 1e-9 or rl.value > vhi + 1e-9:
+            continue
+        x = _v2x(rl.value, vlo, vhi, plot_l, plot_r)
+        col = _ref_colour(c, rl.role)
+        out.append(
+            f'<line x1="{x:.1f}" y1="{box.top:.1f}" x2="{x:.1f}" y2="{box.bottom:.1f}" '
+            f'stroke="{col}" stroke-width="2" stroke-dasharray="7 5"/>'
+        )
+        dv = rl.display or format_value(rl.value, axis.value_format)
+        text = f"{rl.label}  {dv}".strip()
+        w = len(text) * size * 0.58 + round(0.018 * short)
+        h = size + round(0.012 * short)
+        rx = min(max(box.left, x - w / 2), box.right - w)
+        ry = box.top + round(0.004 * short)
+        out.append(_rect(rx, ry, w, h, c.ground, rx=round(0.005 * short)))
+        out.append(
+            _text(
+                rx + w / 2,
+                ry + h * 0.72,
+                _esc(text),
+                size,
+                col,
+                family=_fonts.body_stack(),
+                weight="700",
+                anchor="middle",
+            )
+        )
+    return "".join(out)
+
+
 def _legend(series: list[Series], c: ChartColours, box: _Box, short: int) -> str:
     out: list[str] = []
     sw = round(0.022 * short)
@@ -883,9 +1008,17 @@ def _svg_open(w: int, h: int, embed_fonts: bool) -> str:
     style = _fonts.font_face_css(embed_fonts)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" role="img">'
+        f'viewBox="0 0 {w} {h}" role="img" aria-labelledby="mhc-t mhc-d">'
         f"<style>{style}</style>"
     )
+
+
+def _a11y(spec: ChartSpec) -> str:
+    """``<title>``/``<desc>`` so assistive tech and alt-text read the chart's meaning."""
+    title = _esc(spec.title or spec.kind.replace("_", " ").title())
+    parts = [p for p in (spec.subtitle, spec.source_note, spec.footnote) if p]
+    desc = _esc(". ".join(parts)) or title
+    return f'<title id="mhc-t">{title}</title><desc id="mhc-d">{desc}</desc>'
 
 
 def _rect(x, y, w, h, fill: str, *, rx: int = 0) -> str:

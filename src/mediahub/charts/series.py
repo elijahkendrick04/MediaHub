@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .aggregates import MeetAggregates, compute_aggregates
-from .models import Axis, ChartSpec, DataPoint, Series, format_time_cs
+from .models import Axis, ChartSpec, DataPoint, ReferenceLine, Series, format_time_cs
 
 _STROKE_NAMES = {
     "FR": "Free",
@@ -65,8 +65,15 @@ def pbs_per_swimmer_chart(agg: MeetAggregates, *, top: int = 10) -> Optional[Cha
     if not agg.pbs_by_swimmer:
         return None
     rows = sorted(agg.pbs_by_swimmer.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+    lead = rows[0][1] if rows else 0
     pts = tuple(
-        DataPoint(label=name, value=float(n), display=str(n), source_ref=f"pbs:{name}")
+        DataPoint(
+            label=name,
+            value=float(n),
+            display=str(n),
+            source_ref=f"pbs:{name}",
+            emphasis=(n == lead and lead > 0),  # the leader pops, the rest recede
+        )
         for name, n in rows
     )
     return ChartSpec(
@@ -136,8 +143,9 @@ def biggest_drops_chart(run_data: dict, *, top: int = 8) -> Optional[ChartSpec]:
             value=round(d["seconds"], 2),
             display=f"−{d['seconds']:.2f}s",
             source_ref=d["source_ref"],
+            emphasis=(i == 0),  # the biggest drop of the meet leads the story
         )
-        for d in drops[:top]
+        for i, d in enumerate(drops[:top])
     )
     return ChartSpec(
         kind="hbar",
@@ -238,13 +246,18 @@ def progression_chart(
     points: list[tuple[str, int]],
     *,
     event: str = "",
+    club_record_cs: Optional[int] = None,
+    qualifying_cs: Optional[int] = None,
 ) -> Optional[ChartSpec]:
     """Progression line for a swimmer's times (lower is better). ``points`` is an
     ordered list of ``(date_or_label, time_cs)`` — provided by the caller from real
-    history; this builder never invents intermediate points."""
+    history; this builder never invents intermediate points. ``club_record_cs`` /
+    ``qualifying_cs`` (real benchmarks, when known) become reference lines that show
+    how close the swimmer is to the record and whether they've hit the standard."""
     clean = [(str(lbl), int(cs)) for lbl, cs in (points or []) if cs and int(cs) > 0]
     if len(clean) < 2:
         return None
+    best_cs = min(cs for _, cs in clean)  # the season best (fastest) is the story
     pts = tuple(
         DataPoint(
             label=lbl,
@@ -252,9 +265,31 @@ def progression_chart(
             display=format_time_cs(cs),
             x=float(i),
             source_ref=f"history:{swimmer_name}:{lbl}",
+            emphasis=(cs == best_cs),
         )
         for i, (lbl, cs) in enumerate(clean)
     )
+    refs = []
+    if club_record_cs and int(club_record_cs) > 0:
+        refs.append(
+            ReferenceLine(
+                float(int(club_record_cs)),
+                "Club record",
+                display=format_time_cs(int(club_record_cs)),
+                role="accent",
+                source_ref="club_record",
+            )
+        )
+    if qualifying_cs and int(qualifying_cs) > 0:
+        refs.append(
+            ReferenceLine(
+                float(int(qualifying_cs)),
+                "Qualifying time",
+                display=format_time_cs(int(qualifying_cs)),
+                role="secondary",
+                source_ref="qualifying_time",
+            )
+        )
     return ChartSpec(
         kind="progression",
         title=swimmer_name.strip() or "Season progression",
@@ -262,6 +297,7 @@ def progression_chart(
         series=(Series(name=event or "Time", points=pts, role="accent"),),
         y_axis=Axis(title="Time", value_format="time_cs", lower_is_better=True),
         x_axis=Axis(kind="time"),
+        reference_lines=tuple(refs),
         source_note="Source: club history",
         chart_id="progression",
     )
