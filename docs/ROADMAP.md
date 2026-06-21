@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `1e845bc69` · Redraw element library into a premium, dimensional pictogram set (#940)
+**Last updated:** 2026-06-21 · `cbe583b2b` · Merge pull request #943: Redesign the My Season timeline view
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `98b6ea4fd` | Apply ruff-format to the season view changes |
+| 2026-06-21 | `e72028415` | Redesign the My Season timeline view |
 | 2026-06-21 | `9d0ddd757` | Fix trailing whitespace on swimmers; make podium dimensional |
 | 2026-06-21 | `e8252702d` | Route venue-backdrop picker thumbnails through the stock-thumb proxy |
 | 2026-06-21 | `fe6cdcff7` | Rebuild swimmer pictograms as tapered, jointed silhouettes |
@@ -1225,6 +1227,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `fa3cdcc4c` | brand(1.12): build 5 — kit-edit -> re-render sweep with diff preview |
 | 2026-06-21 | `88a494254` | brand(1.12): build 4 — governance: token locks + group-approver rules |
 | 2026-06-21 | `15f986ab0` | brand(1.12): build 3 — brand-platform web surface + palette-file import |
-| 2026-06-21 | `0e839f0f9` | brand(1.12): build 2 — deterministic Brand Check + AI Brand Assist |
-| 2026-06-21 | `3fb49a05a` | brand(1.12): build 1 — multi-kit data model + back-compat resolver |
 <!-- /ROADMAP:ACTIVITY -->
