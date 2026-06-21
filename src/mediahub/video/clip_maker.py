@@ -29,7 +29,7 @@ from typing import Callable, Optional
 from mediahub.video import captions as _captions
 from mediahub.video import moments as _moments
 from mediahub.video import reframe as _reframe
-from mediahub.video.edl import EDL, Clip, TextOverlay, Transition
+from mediahub.video.edl import MAX_SPEED, MIN_SPEED, EDL, Clip, TextOverlay, Transition
 from mediahub.video.moments import Moment
 from mediahub.video.probe import ClipProbe
 
@@ -84,6 +84,9 @@ def build_clip_edl(
     colours: Optional[BrandColours] = None,
     transition_kind: str = "cut",
     transition_ms: int = 400,
+    look: str = "none",
+    audio_plan=None,
+    slow_mo: float = 1.0,
     fps: int = 30,
 ) -> EDL:
     """Assemble an EDL from chosen moments + per-moment crops + a caption track.
@@ -91,11 +94,15 @@ def build_clip_edl(
     Pure and deterministic: no FFmpeg, no transcription — those happen in
     :func:`clip_maker` and are passed in. Each moment becomes one clip on the
     target canvas; the first joins with a hard cut, the rest with the chosen
-    transition. The caption track and an optional brand title ride on top.
+    transition. The caption track, an optional brand title, the named colour
+    ``look``, the ``audio_plan`` and an optional ``slow_mo`` (< 1.0 ⇒ motion-
+    interpolated slow motion) all ride on top.
     """
     colours = colours or BrandColours()
     width, height = canvas_for(format_name)
     crops = crops or []
+    speed = max(MIN_SPEED, min(MAX_SPEED, float(slow_mo) or 1.0))
+    smooth = speed < 0.999  # interpolate frames only when actually slowing down
 
     clips: list[Clip] = []
     for i, m in enumerate(chosen):
@@ -108,6 +115,8 @@ def build_clip_edl(
                 out_ms=m.end_ms,
                 crop=tuple(crop) if crop else None,  # type: ignore[arg-type]
                 transition_in=trans,
+                speed=speed,
+                smooth=smooth,
             )
         )
     if not clips:
@@ -137,6 +146,8 @@ def build_clip_edl(
         captions=track,
         keep_audio=True,
         background=colours.background or DEFAULT_BACKGROUND,
+        look=look or "none",
+        audio=audio_plan if (audio_plan is not None and not audio_plan.is_empty()) else None,
     )
 
 
@@ -153,20 +164,38 @@ def clip_maker(
     transition_kind: str = "cut",
     transition_ms: int = 400,
     label_moments: bool = False,
+    caption_style: str = "static",
+    look: str = "none",
+    enhance_audio: bool = False,
+    with_music: bool = False,
+    music_mood: str = "uplifting",
+    music_platform: str = "instagram",
+    loudness: str = "social",
+    remove_silence: bool = False,
+    remove_fillers: bool = False,
+    aggressive_fillers: bool = False,
+    slow_mo: float = 1.0,
     fps: int = 30,
     # Injection seams (default to the real, FFmpeg-backed engine pieces):
     probe_fn: Optional[Callable] = None,
     detect_fn: Optional[Callable] = None,
     reframe_fn: Optional[Callable] = None,
     caption_fn: Optional[Callable] = None,
+    silence_fn: Optional[Callable] = None,
+    filler_fn: Optional[Callable] = None,
+    music_fn: Optional[Callable] = None,
 ) -> ClipMakerResult:
     """Turn a footage clip into a branded :class:`ClipMakerResult`.
 
     Deterministic where it matters: the same clip yields the same moments,
-    crops, and timeline. Captions ride only on the single-moment cut (a
-    multi-moment montage has no single transcript timeline — honest gap, noted
-    in the manifest). The optional ``label_moments`` adds AI moment names, which
-    never change which moments were detected.
+    crops, timeline, grade and soundtrack. Captions ride only on the
+    single-moment cut (a multi-moment montage or a silence-tightened clip has no
+    single transcript timeline — honest gap, noted in the manifest). The optional
+    ``label_moments`` adds AI moment names, which never change which moments were
+    detected. ``look`` applies a deterministic colour grade; ``enhance_audio`` /
+    ``with_music`` build a soundtrack (deterministic DSP + a library music pick);
+    ``remove_silence`` tightens the *whole* clip by cutting dead air instead of
+    picking highlights.
     """
     source = str(source)
     colours = colours or BrandColours()
@@ -176,11 +205,30 @@ def clip_maker(
     probe = (probe_fn or _default_probe)(source)
     duration_ms = probe.duration_ms
 
-    detect = detect_fn or _moments.detect_moments
-    chosen = detect(
-        source, duration_ms=duration_ms, target_len_ms=target_len_ms, max_moments=target_moments
-    )
-    chosen = list(chosen)[:target_moments]
+    silence_note = "off"
+    tighten = remove_silence or remove_fillers
+    if tighten:
+        # Tighten the whole clip: keep the speech, cut the dead air and/or the
+        # fillers (Descript "Remove Gaps" + "Remove Filler Words"). When both are
+        # on, a segment survives only if both passes keep it (interval intersect).
+        keeps: Optional[list] = None
+        if remove_silence:
+            keeps = _silence_keeps(source, duration_ms, silence_fn)
+        if remove_fillers:
+            fk = _filler_keeps(source, duration_ms, aggressive_fillers, filler_fn)
+            keeps = fk if keeps is None else _intersect_keeps(keeps, fk)
+        keeps = keeps or [(0, duration_ms)]
+        chosen = [Moment(s, e, 1.0, "speech", f"kept {s // 1000}-{e // 1000}s") for (s, e) in keeps]
+        what = "+".join(
+            (["dead air"] if remove_silence else []) + (["fillers"] if remove_fillers else [])
+        )
+        silence_note = f"removed {_silence_removed(keeps, duration_ms) // 1000}s ({what})"
+    else:
+        detect = detect_fn or _moments.detect_moments
+        chosen = detect(
+            source, duration_ms=duration_ms, target_len_ms=target_len_ms, max_moments=target_moments
+        )
+        chosen = list(chosen)[:target_moments]
 
     if label_moments:
         labelled: list[Moment] = []
@@ -200,12 +248,22 @@ def clip_maker(
             crops.append(crop)
             reframed = reframed or bool(crop)
 
-    # Captions — single-moment only (verbatim transcript over that window).
+    # Captions — single-clip only (one verbatim transcript window). A montage or
+    # a silence-tightened clip has many windows, so captions are skipped honestly.
+    # A slow-mo replay also skips them: retiming the clip would desync burned cues.
     caption_track: Optional[dict] = None
     captions_note = "off"
-    if with_captions and chosen:
-        if target_moments == 1:
-            cap = caption_fn or _captions.windowed_caption_track
+    slowed = float(slow_mo) < 0.999
+    if slowed and with_captions and chosen:
+        captions_note = "skipped-slowmo"
+    elif with_captions and chosen:
+        if len(chosen) == 1:
+            default_cap = (
+                _captions.windowed_karaoke_track
+                if caption_style == "karaoke"
+                else _captions.windowed_caption_track
+            )
+            cap = caption_fn or default_cap
             caption_track = cap(
                 source,
                 in_ms=chosen[0].start_ms,
@@ -215,9 +273,25 @@ def clip_maker(
                 onground=colours.onground,
                 accent=colours.accent,
             )
-            captions_note = "burned" if caption_track else "no-speech-or-asr-off"
+            note = "burned-karaoke" if caption_style == "karaoke" else "burned"
+            captions_note = note if caption_track else "no-speech-or-asr-off"
         else:
-            captions_note = "skipped-multimoment"
+            if remove_silence:
+                captions_note = "skipped-silencecut"
+            elif remove_fillers:
+                captions_note = "skipped-fillercut"
+            else:
+                captions_note = "skipped-multimoment"
+
+    audio_plan = _build_audio_plan(
+        enhance_audio=enhance_audio,
+        with_music=with_music,
+        mood=music_mood,
+        platform=music_platform,
+        loudness=loudness,
+        content_key=source,
+        music_fn=music_fn,
+    )
 
     edl = build_clip_edl(
         source,
@@ -230,6 +304,9 @@ def clip_maker(
         colours=colours,
         transition_kind=transition_kind,
         transition_ms=transition_ms,
+        look=look,
+        audio_plan=audio_plan,
+        slow_mo=slow_mo,
         fps=fps,
     )
 
@@ -242,6 +319,10 @@ def clip_maker(
         "moments": [m.to_dict() for m in chosen],
         "reframed": reframed,
         "captions": captions_note,
+        "look": look or "none",
+        "slow_mo": float(slow_mo),
+        "silence": silence_note,
+        "audio": audio_plan.to_dict() if (audio_plan and not audio_plan.is_empty()) else None,
         "timeline_ms": edl.total_timeline_ms(),
     }
     return ClipMakerResult(edl=edl, moments=chosen, manifest=manifest)
@@ -251,6 +332,100 @@ def _default_probe(source: str) -> ClipProbe:
     from mediahub.video.probe import probe_clip
 
     return probe_clip(source)
+
+
+def _silence_keeps(source: str, duration_ms: int, silence_fn: Optional[Callable]) -> list:
+    """The speech windows to keep after cutting dead air (honest fallback).
+
+    Defers to ``video.silence.plan_jump_cuts``; on any failure (no FFmpeg, etc.)
+    it keeps the whole clip rather than a broken split — the tighten is an
+    enhancement, never a render-blocker.
+    """
+    if duration_ms <= 0:
+        return [(0, 0)]
+    fn = silence_fn
+    if fn is None:
+        from mediahub.video.silence import plan_jump_cuts as fn  # type: ignore[no-redef]
+    try:
+        keeps = list(fn(source, duration_ms))
+    except Exception:
+        keeps = []
+    return keeps or [(0, duration_ms)]
+
+
+def _silence_removed(keeps: list, duration_ms: int) -> int:
+    kept = sum(max(0, e - s) for s, e in keeps)
+    return max(0, duration_ms - kept)
+
+
+def _filler_keeps(
+    source: str, duration_ms: int, aggressive: bool, filler_fn: Optional[Callable]
+) -> list:
+    """Speech windows to keep after cutting filler words. Honest whole-clip fallback."""
+    if duration_ms <= 0:
+        return [(0, 0)]
+    fn = filler_fn
+    if fn is None:
+        from mediahub.video.filler import detect_filler_spans as fn  # type: ignore[no-redef]
+    try:
+        spans = list(fn(source, aggressive=aggressive))
+    except Exception:
+        spans = []
+    from mediahub.video.silence import plan_keep_segments
+
+    # Cut fillers precisely: no edge padding (a 0.2s "um" must not survive being
+    # re-padded back) and a small min-keep so the words around it are retained.
+    keeps = plan_keep_segments(spans, duration_ms, pad_ms=0, min_keep_ms=120)
+    return keeps or [(0, duration_ms)]
+
+
+def _intersect_keeps(a: list, b: list) -> list:
+    """Interval-intersect two keep-lists (a segment survives only if both keep it)."""
+    out: list = []
+    for s1, e1 in a:
+        for s2, e2 in b:
+            s, e = max(s1, s2), min(e1, e2)
+            if e - s > 0:
+                out.append((s, e))
+    return sorted(out)
+
+
+def _build_audio_plan(
+    *,
+    enhance_audio: bool,
+    with_music: bool,
+    mood: str,
+    platform: str,
+    loudness: str,
+    content_key: str,
+    music_fn: Optional[Callable],
+):
+    """Build an :class:`~mediahub.video.edl.AudioPlan` (or ``None`` when inert).
+
+    The music *mood* is a fixed caller input here (Clip-Maker has no director);
+    the *pick* is the deterministic library floor. An honest ``None`` music path
+    (empty library) keeps the plan voice-only rather than faking a track.
+    """
+    from mediahub.video.edl import AudioPlan
+
+    if not (enhance_audio or with_music):
+        return None
+    music_path = ""
+    if with_music:
+        resolver = music_fn
+        if resolver is None:
+            from mediahub.video.reel_builder import resolve_music as resolver  # type: ignore[no-redef]
+        try:
+            music_path = resolver(mood, platform=platform, content_key=content_key) or ""
+        except Exception:
+            music_path = ""
+    plan = AudioPlan(
+        music=music_path,
+        enhance_voice=bool(enhance_audio),
+        loudness=(loudness or "social") if enhance_audio else "",
+        duck=True,
+    )
+    return None if plan.is_empty() else plan
 
 
 __all__ = [

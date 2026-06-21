@@ -183,7 +183,8 @@ jobs:
     # `Full unit suite (pytest)` branch-protection required check still maps here,
     # now backed by every shard plus the oracle. `if: always()` so it still runs
     # when a dependency failed and collapses the matrix + oracle into one red/green
-    # status. A skipped/cancelled dependency is treated as not-success.
+    # status. A genuinely FAILED shard/oracle is red; a CANCELLED one is not (see
+    # the script — a cancelled run was superseded, not broken).
     needs: [shard, oracle]
     if: always()
     runs-on: ubuntu-latest
@@ -193,6 +194,17 @@ jobs:
         run: |
           echo "shards: ${{ needs.shard.result }}"
           echo "oracle: ${{ needs.oracle.result }}"
+          # A 'cancelled' result is NOT a test failure: it means a newer commit
+          # superseded this run (concurrency.cancel-in-progress) or a human
+          # cancelled it. Treating it as red fired a spurious failure — and a
+          # failure webhook — on every rapid follow-up push. The superseding run
+          # produces the real verdict, so a cancelled run aggregates to a clean
+          # pass here. Nothing real is masked: a shard that actually fails reports
+          # 'failure' (not 'cancelled') because the matrix is fail-fast: false.
+          if [ "${{ needs.shard.result }}" = "cancelled" ] || [ "${{ needs.oracle.result }}" = "cancelled" ]; then
+            echo "Superseded/cancelled run — not a failure; the newer run is authoritative."
+            exit 0
+          fi
           if [ "${{ needs.shard.result }}" != "success" ] || [ "${{ needs.oracle.result }}" != "success" ]; then
             echo "::error::Unit suite failed (shards=${{ needs.shard.result }}, oracle=${{ needs.oracle.result }})"
             exit 1

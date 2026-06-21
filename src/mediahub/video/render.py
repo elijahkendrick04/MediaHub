@@ -85,11 +85,19 @@ _RENDER_VERSION = "v1"
 
 
 def cache_key(edl: EDL) -> str:
-    """Stable content hash over the timeline + each source's fingerprint."""
+    """Stable content hash over the timeline + each source's fingerprint.
+
+    Folds in every clip source *and* the audio plan's music bed (so swapping or
+    re-encoding the bed re-renders), while an EDL with no audio plan hashes
+    exactly as before this feature — ``to_dict`` omits the inert keys.
+    """
+    sources = {c.source: _source_fingerprint(c.source) for c in edl.clips}
+    if edl.audio is not None and edl.audio.music:
+        sources[edl.audio.music] = _source_fingerprint(edl.audio.music)
     payload = {
         "version": _RENDER_VERSION,
         "edl": edl.to_dict(),
-        "sources": {c.source: _source_fingerprint(c.source) for c in edl.clips},
+        "sources": sources,
     }
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
@@ -209,6 +217,10 @@ def _write_manifest(cached: Path, edl: EDL, *, duration_ms: int) -> None:
             for c in edl.clips
         ],
         "reframed": reframed,
+        "graded": bool(edl.look and edl.look != "none")
+        or any(not c.adjust.is_identity() for c in edl.clips),
+        "look": edl.look,
+        "audio_plan": edl.audio.to_dict() if (edl.audio and not edl.audio.is_empty()) else None,
         "overlays": [o.to_dict() for o in edl.overlays],
         "captions": {"cues": len((edl.captions or {}).get("cues") or [])},
         "created_at": time.time(),
@@ -305,11 +317,11 @@ def render_edl(edl: EDL, out_path: Path | str, *, timeout: int = 600) -> Path:
     with tempfile.TemporaryDirectory(prefix="mh_video_render_") as td:
         ass_paths: list[str] = []
         if edl.captions and (edl.captions.get("cues")):
-            from mediahub.visual.subtitle_burn import ass_document
+            from mediahub.video.caption_render import ass_for_track
 
             cap_file = Path(td) / "captions.ass"
             cap_file.write_text(
-                ass_document(edl.captions, width=edl.width, height=edl.height, fps=edl.fps),
+                ass_for_track(edl.captions, width=edl.width, height=edl.height, fps=edl.fps),
                 encoding="utf-8",
             )
             ass_paths.append(str(cap_file))
@@ -337,10 +349,21 @@ def render_edl(edl: EDL, out_path: Path | str, *, timeout: int = 600) -> Path:
         _run_ffmpeg(args, timeout=timeout)
         if not tmp_out.exists() or tmp_out.stat().st_size < 1024:
             raise RuntimeError("FFmpeg reported success but the MP4 is missing or empty")
+
+        # Soundtrack post-pass: clean the voice + lay a ducked music bed + land
+        # the loudness, re-encoding only the audio. An empty/absent plan is a
+        # no-op, so the no-soundtrack path stays byte-identical.
+        final_tmp = tmp_out
+        if edl.audio is not None and not edl.audio.is_empty():
+            from mediahub.video.audio_post import apply_audio_plan
+
+            final_tmp = Path(td) / "out_audio.mp4"
+            apply_audio_plan(tmp_out, final_tmp, edl.audio, timeout=timeout)
+
         cached.parent.mkdir(parents=True, exist_ok=True)
         import shutil
 
-        shutil.move(str(tmp_out), str(cached))
+        shutil.move(str(final_tmp), str(cached))
 
     _write_manifest(cached, edl, duration_ms=duration_ms)
     _write_poster(cached)

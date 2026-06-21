@@ -71,6 +71,205 @@ OVERLAY_POSITIONS: tuple[str, ...] = ("top", "center", "bottom", "lower-third")
 DEFAULT_TRANSITION_MS = 500
 
 
+def _clampf(v: float, lo: float, hi: float) -> float:
+    """Clamp a float into ``[lo, hi]`` (tolerant of bad input → ``lo``)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return lo
+    return lo if f < lo else hi if f > hi else f
+
+
+# --------------------------------------------------------------------------
+# Colour / clarity grade (deterministic — colour-science maths, no AI)
+# --------------------------------------------------------------------------
+#
+# A per-clip (and, via ``EDL.look``, a whole-timeline) colour + clarity grade.
+# This is the footage twin of the still renderer's colour science: fixed FFmpeg
+# filter graphs (``eq``/``colorbalance``/``hqdn3d``/``unsharp``) with **no model
+# in the loop**, so the same numbers always compile to the same filter string and
+# a graded render stays content-cacheable. It lives on the deterministic side of
+# the engine boundary exactly like ``audio/clean`` and ``logo_chip`` colour maths.
+
+
+@dataclass
+class ColorAdjust:
+    """A deterministic per-clip colour + clarity adjustment.
+
+    Every field is a neutral identity by default, so an un-graded clip compiles
+    to *no* extra filter and renders byte-for-byte as before. ``brightness`` is
+    additive (-1..1); ``contrast``/``saturation``/``gamma`` are multipliers about
+    1.0; ``warmth`` shifts colour temperature (-1 cool .. +1 warm) via a midtone
+    ``colorbalance``; ``denoise`` (0..1) drives ``hqdn3d`` spatial strength and
+    ``sharpen`` (0..2) drives a post-scale ``unsharp``.
+    """
+
+    brightness: float = 0.0
+    contrast: float = 1.0
+    saturation: float = 1.0
+    gamma: float = 1.0
+    warmth: float = 0.0
+    denoise: float = 0.0
+    sharpen: float = 0.0
+
+    def is_identity(self) -> bool:
+        return (
+            abs(self.brightness) < 1e-6
+            and abs(self.contrast - 1.0) < 1e-6
+            and abs(self.saturation - 1.0) < 1e-6
+            and abs(self.gamma - 1.0) < 1e-6
+            and abs(self.warmth) < 1e-6
+            and self.denoise <= 1e-6
+            and self.sharpen <= 1e-6
+        )
+
+    def merged_over(self, base: "ColorAdjust") -> "ColorAdjust":
+        """Compose this adjust *on top of* ``base`` (a named look under a clip edit).
+
+        Multipliers multiply, additive/temperature terms add; clarity terms take
+        the stronger (max). Deterministic, so a look + per-clip tweak collapses to
+        one stable grade rather than two stacked filter passes.
+        """
+        return ColorAdjust(
+            brightness=_clampf(base.brightness + self.brightness, -1.0, 1.0),
+            contrast=_clampf(base.contrast * self.contrast, 0.0, 3.0),
+            saturation=_clampf(base.saturation * self.saturation, 0.0, 3.0),
+            gamma=_clampf(base.gamma * self.gamma, 0.1, 10.0),
+            warmth=_clampf(base.warmth + self.warmth, -1.0, 1.0),
+            denoise=_clampf(max(base.denoise, self.denoise), 0.0, 1.0),
+            sharpen=_clampf(max(base.sharpen, self.sharpen), 0.0, 2.0),
+        )
+
+    def _eq_filter(self) -> str:
+        parts: list[str] = []
+        if abs(self.contrast - 1.0) >= 1e-6:
+            parts.append(f"contrast={self.contrast:g}")
+        if abs(self.brightness) >= 1e-6:
+            parts.append(f"brightness={self.brightness:g}")
+        if abs(self.saturation - 1.0) >= 1e-6:
+            parts.append(f"saturation={self.saturation:g}")
+        if abs(self.gamma - 1.0) >= 1e-6:
+            parts.append(f"gamma={self.gamma:g}")
+        return ("eq=" + ":".join(parts)) if parts else ""
+
+    def pre_scale_filters(self) -> list[str]:
+        """Colour/denoise filters applied at source resolution (before scale)."""
+        out: list[str] = []
+        if self.denoise > 1e-6:
+            out.append(f"hqdn3d={4.0 * _clampf(self.denoise, 0.0, 1.0):g}")
+        eq = self._eq_filter()
+        if eq:
+            out.append(eq)
+        if abs(self.warmth) >= 1e-6:
+            w = _clampf(self.warmth, -1.0, 1.0)
+            out.append(f"colorbalance=rm={0.3 * w:g}:bm={-0.3 * w:g}")
+        return out
+
+    def post_scale_filters(self) -> list[str]:
+        """Clarity filters applied at canvas resolution (after scale/pad)."""
+        if self.sharpen > 1e-6:
+            return [f"unsharp=5:5:{_clampf(self.sharpen, 0.0, 2.0):g}:5:5:0"]
+        return []
+
+    def to_dict(self) -> dict:
+        return {
+            "brightness": float(self.brightness),
+            "contrast": float(self.contrast),
+            "saturation": float(self.saturation),
+            "gamma": float(self.gamma),
+            "warmth": float(self.warmth),
+            "denoise": float(self.denoise),
+            "sharpen": float(self.sharpen),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Optional[dict]) -> "ColorAdjust":
+        d = d or {}
+        return cls(
+            brightness=_clampf(d.get("brightness", 0.0), -1.0, 1.0),
+            contrast=_clampf(d.get("contrast", 1.0), 0.0, 3.0),
+            saturation=_clampf(d.get("saturation", 1.0), 0.0, 3.0),
+            gamma=_clampf(d.get("gamma", 1.0), 0.1, 10.0),
+            warmth=_clampf(d.get("warmth", 0.0), -1.0, 1.0),
+            denoise=_clampf(d.get("denoise", 0.0), 0.0, 1.0),
+            sharpen=_clampf(d.get("sharpen", 0.0), 0.0, 2.0),
+        )
+
+
+# Named whole-timeline "looks" — fixed, tasteful grades a club can pick by name.
+# Each is a ColorAdjust, so a look is just a base grade every clip is composed
+# over (``EDL.look``). Deliberately small and legible — a sport reel wants a few
+# honest looks, not a LUT marketplace.
+LOOKS: dict[str, ColorAdjust] = {
+    "none": ColorAdjust(),
+    "vivid": ColorAdjust(contrast=1.12, saturation=1.28),
+    "punch": ColorAdjust(contrast=1.16, saturation=1.16, sharpen=0.6),
+    "warm": ColorAdjust(warmth=0.35, saturation=1.08),
+    "cool": ColorAdjust(warmth=-0.32, saturation=1.05),
+    "bright": ColorAdjust(brightness=0.06, contrast=1.05, saturation=1.05),
+    "film": ColorAdjust(contrast=1.06, saturation=0.92, warmth=0.14, gamma=0.96),
+    "mono": ColorAdjust(saturation=0.0, contrast=1.08),
+    "clean": ColorAdjust(denoise=0.5, sharpen=0.4),
+}
+DEFAULT_LOOK = "none"
+
+
+def look_adjust(name: object) -> ColorAdjust:
+    """The :class:`ColorAdjust` for a named look (unknown/empty → identity)."""
+    return LOOKS.get(str(name or "").strip().lower(), LOOKS["none"])
+
+
+# --------------------------------------------------------------------------
+# Audio plan (a music bed + cleanup over the footage voice; applied by render)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class AudioPlan:
+    """How a timeline's soundtrack is built: footage voice + an optional bed.
+
+    The *plan* is data (it rides in the EDL and folds into the render cache key);
+    the *application* is a deterministic post-pass (``video.audio_post``) that
+    reuses the ``audio`` engine. ``music`` is a path to a bed clip ("" = none);
+    ``duck`` sidechain-ducks the bed under the footage voice; ``enhance_voice``
+    runs the deterministic denoise + loudness pass; ``loudness`` is a final EBU
+    R128 target name ("" = leave levels alone). All-default ⇒ :meth:`is_empty`
+    and the render is byte-identical to the no-audio-plan path.
+    """
+
+    music: str = ""
+    music_gain_db: float = -18.0
+    duck: bool = True
+    enhance_voice: bool = False
+    loudness: str = ""
+    music_fade_ms: int = 800
+
+    def is_empty(self) -> bool:
+        return not (self.music or self.enhance_voice or self.loudness)
+
+    def to_dict(self) -> dict:
+        return {
+            "music": self.music,
+            "music_gain_db": float(self.music_gain_db),
+            "duck": bool(self.duck),
+            "enhance_voice": bool(self.enhance_voice),
+            "loudness": self.loudness,
+            "music_fade_ms": int(self.music_fade_ms),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Optional[dict]) -> "AudioPlan":
+        d = d or {}
+        return cls(
+            music=str(d.get("music", "")),
+            music_gain_db=float(d.get("music_gain_db", -18.0)),
+            duck=bool(d.get("duck", True)),
+            enhance_voice=bool(d.get("enhance_voice", False)),
+            loudness=str(d.get("loudness", "")),
+            music_fade_ms=int(d.get("music_fade_ms", 800)),
+        )
+
+
 class EDLError(ValueError):
     """Raised when an EDL is structurally invalid (an honest, specific error)."""
 
@@ -120,6 +319,8 @@ class Clip:
     mute: bool = False
     crop: Optional[tuple[int, int, int, int]] = None
     transition_in: Transition = field(default_factory=Transition)
+    adjust: ColorAdjust = field(default_factory=ColorAdjust)  # per-clip colour/clarity grade
+    smooth: bool = False  # motion-interpolate (smooth slow-mo via minterpolate)
 
     @property
     def source_span_ms(self) -> int:
@@ -133,7 +334,7 @@ class Clip:
         return round(span / self.speed) if span and self.speed > 0 else 0
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "source": self.source,
             "in_ms": int(self.in_ms),
             "out_ms": int(self.out_ms),
@@ -141,7 +342,14 @@ class Clip:
             "mute": bool(self.mute),
             "crop": list(self.crop) if self.crop else None,
             "transition_in": self.transition_in.to_dict(),
+            # Omit an identity grade so an un-graded clip serialises (and
+            # cache-keys) exactly as before this feature existed.
+            "adjust": self.adjust.to_dict() if not self.adjust.is_identity() else None,
         }
+        # Omit smooth when off so an un-interpolated clip stays byte-identical.
+        if self.smooth:
+            d["smooth"] = True
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Clip":
@@ -154,6 +362,8 @@ class Clip:
             mute=bool(d.get("mute", False)),
             crop=tuple(int(v) for v in crop) if crop else None,  # type: ignore[arg-type]
             transition_in=Transition.from_dict(d.get("transition_in")),
+            adjust=ColorAdjust.from_dict(d.get("adjust")),
+            smooth=bool(d.get("smooth", False)),
         )
 
 
@@ -196,6 +406,8 @@ class EDL:
     captions: Optional[dict] = None  # a subtitle_burn track dict, or None
     keep_audio: bool = True
     background: str = "#000000"  # pad colour for letter/pillar-boxed clips
+    look: str = DEFAULT_LOOK  # named whole-timeline colour look ("none" = identity)
+    audio: Optional[AudioPlan] = None  # music bed + voice cleanup plan, or None
 
     def total_timeline_ms(self) -> int:
         """Composite duration: sum of clip timelines minus transition overlaps."""
@@ -206,8 +418,32 @@ class EDL:
                 total -= max(0, clip.transition_in.duration_ms)
         return max(0, total)
 
+    def clip_start_offsets_ms(self) -> list[int]:
+        """Timeline start (ms) of each clip once it is the *dominant* frame.
+
+        Mirrors :func:`compile_filtergraph`'s ``running_ms`` walk exactly: clip 0
+        starts at 0; each later clip starts at the running boundary. For an xfade
+        that boundary is the instant the incoming clip is fully on screen (the
+        dissolve overlaps the *outgoing* clip), so a caption keyed to this offset
+        never bleeds over the previous clip mid-transition. Used to place
+        per-beat captions on the assembled reel timeline.
+        """
+        offsets: list[int] = []
+        running = 0
+        for i, clip in enumerate(self.clips):
+            if i == 0:
+                offsets.append(0)
+                running = clip.timeline_ms
+                continue
+            offsets.append(running)
+            if clip.transition_in.is_cut:
+                running += clip.timeline_ms
+            else:
+                running += clip.timeline_ms - max(0, clip.transition_in.duration_ms)
+        return offsets
+
     def to_dict(self) -> dict:
-        return {
+        d = {
             "width": self.width,
             "height": self.height,
             "fps": self.fps,
@@ -217,9 +453,18 @@ class EDL:
             "keep_audio": self.keep_audio,
             "background": self.background,
         }
+        # Omit the look/audio keys when they are at their inert defaults so an
+        # un-enhanced timeline serialises (and content-cache-keys) byte-for-byte
+        # identically to before these features existed.
+        if (self.look or DEFAULT_LOOK) != DEFAULT_LOOK:
+            d["look"] = self.look
+        if self.audio is not None and not self.audio.is_empty():
+            d["audio"] = self.audio.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "EDL":
+        audio = d.get("audio")
         return cls(
             width=int(d.get("width", 1080)),
             height=int(d.get("height", 1920)),
@@ -229,6 +474,8 @@ class EDL:
             captions=d.get("captions"),
             keep_audio=bool(d.get("keep_audio", True)),
             background=str(d.get("background", "#000000")),
+            look=str(d.get("look", DEFAULT_LOOK) or DEFAULT_LOOK),
+            audio=AudioPlan.from_dict(audio) if audio else None,
         )
 
 
@@ -288,6 +535,8 @@ def validate(edl: EDL) -> None:
             raise EDLError(
                 f"overlay {j}: unknown position {o.position!r}; valid: {sorted(OVERLAY_POSITIONS)}"
             )
+    if edl.look and edl.look != DEFAULT_LOOK and edl.look not in LOOKS:
+        raise EDLError(f"unknown look {edl.look!r}; valid: {sorted(LOOKS)}")
 
 
 # --------------------------------------------------------------------------
@@ -322,13 +571,20 @@ def atempo_chain(speed: float) -> str:
 
 
 def video_clip_chain(
-    idx: int, clip: Clip, *, width: int, height: int, fps: int, background: str
+    idx: int, clip: Clip, *, width: int, height: int, fps: int, background: str, look: str = ""
 ) -> str:
     """The filter chain that turns input ``idx``'s video into a canvas-fit clip.
 
-    trim → reset PTS (folding in speed) → optional reframe crop → scale-to-fit →
-    pad to canvas → fps → format. Ends with the ``[v{idx}]`` label.
+    trim → reset PTS (folding in speed) → optional reframe crop → colour grade →
+    scale-to-fit → pad to canvas → fps → clarity → format. Ends with the
+    ``[v{idx}]`` label. The grade is the clip's own ``adjust`` composed over the
+    timeline ``look`` (deterministic colour-science); an identity grade adds no
+    filter, so an un-graded clip compiles byte-for-byte as before.
     """
+    grade = clip.adjust.merged_over(look_adjust(look))
+    pre = grade.pre_scale_filters()  # colour/denoise at source resolution
+    post = grade.post_scale_filters()  # clarity (sharpen) at canvas resolution
+
     parts = [f"[{idx}:v]"]
     if clip.out_ms:
         parts.append(f"trim=start={_ms_to_s(clip.in_ms)}:end={_ms_to_s(clip.out_ms)}")
@@ -339,13 +595,20 @@ def video_clip_chain(
         parts.append("setpts=PTS-STARTPTS")
     else:
         parts.append(f"setpts=(PTS-STARTPTS)/{clip.speed:g}")
+    # Motion-interpolate for smooth slow-mo: synthesise the in-between frames a
+    # slowed clip would otherwise stutter through (deterministic block-motion
+    # estimation, the same maths Premiere/Resolve "Optical Flow" use).
+    if clip.smooth:
+        parts.append(f"minterpolate=fps={fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1")
     if clip.crop:
         x, y, w, h = clip.crop
         parts.append(f"crop={w}:{h}:{x}:{y}")
+    parts.extend(pre)
     parts.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
     parts.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={_pad_colour(background)}")
     parts.append("setsar=1")
     parts.append(f"fps={fps}")
+    parts.extend(post)
     parts.append("format=yuv420p")
     chain = parts[0] + ",".join(parts[1:]) if len(parts) > 1 else parts[0]
     return f"{chain}[v{idx}]"
@@ -438,6 +701,8 @@ def compile_filtergraph(
                 mute=c.mute,
                 crop=c.crop,
                 transition_in=c.transition_in,
+                adjust=c.adjust,
+                smooth=c.smooth,
             )
         )
 
@@ -448,7 +713,13 @@ def compile_filtergraph(
     for i, c in enumerate(resolved):
         lines.append(
             video_clip_chain(
-                i, c, width=edl.width, height=edl.height, fps=edl.fps, background=edl.background
+                i,
+                c,
+                width=edl.width,
+                height=edl.height,
+                fps=edl.fps,
+                background=edl.background,
+                look=edl.look,
             )
         )
         # Accurate audio-stream presence from the probe; unknown ⇒ assume present.
@@ -496,9 +767,14 @@ __all__ = [
     "OVERLAY_POSITIONS",
     "MIN_SPEED",
     "MAX_SPEED",
+    "LOOKS",
+    "DEFAULT_LOOK",
     "EDLError",
     "Transition",
     "Clip",
+    "ColorAdjust",
+    "AudioPlan",
+    "look_adjust",
     "TextOverlay",
     "EDL",
     "CompiledGraph",

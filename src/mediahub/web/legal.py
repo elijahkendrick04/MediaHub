@@ -292,6 +292,48 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "an org enables it, HeyGen MUST move to legal.SUBPROCESSORS (and the club "
         "DPA) before any data flows."
     ),
+    "RUNWAY_API_KEY": (
+        "the opt-in, disclosed generative-b-roll seam (roadmap 1.6, video/broll.py). "
+        "The Runway network integration is NOT wired in this build — "
+        "generate_broll() honest-errors and the key is read only to report "
+        "availability — so no Club Data is transmitted to Runway and it is not yet "
+        "an active Art. 28 sub-processor. When the integration is built and an org "
+        "enables it, Runway MUST move to legal.SUBPROCESSORS (and the club DPA) "
+        "before any data flows."
+    ),
+    "PIKA_API_KEY": (
+        "the opt-in, disclosed generative-b-roll seam (roadmap 1.6, video/broll.py). "
+        "The Pika network integration is NOT wired in this build — generate_broll() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to Pika and it is not yet an active Art. 28 "
+        "sub-processor. When the integration is built and an org enables it, Pika "
+        "MUST move to legal.SUBPROCESSORS (and the club DPA) before any data flows."
+    ),
+    "LUMA_API_KEY": (
+        "the opt-in, disclosed generative-b-roll seam (roadmap 1.6, video/broll.py). "
+        "The Luma (Dream Machine) network integration is NOT wired in this build — "
+        "generate_broll() honest-errors and the key is read only to report "
+        "availability — so no Club Data is transmitted to Luma and it is not yet an "
+        "active Art. 28 sub-processor. When the integration is built and an org "
+        "enables it, Luma MUST move to legal.SUBPROCESSORS (and the club DPA) before "
+        "any data flows."
+    ),
+    "LUMAAI_API_KEY": (
+        "alternate env name for the opt-in, disclosed generative-b-roll Luma seam "
+        "(roadmap 1.6, video/broll.py) — see LUMA_API_KEY above. The network "
+        "integration is NOT wired; generate_broll() honest-errors and the key is "
+        "read only to report availability, so no Club Data is transmitted. Luma "
+        "MUST move to legal.SUBPROCESSORS before any data flows."
+    ),
+    "KLING_API_KEY": (
+        "the opt-in, disclosed generative-b-roll seam (roadmap 1.6, video/broll.py). "
+        "The Kling (Kuaishou) network integration is NOT wired in this build — "
+        "generate_broll() honest-errors and the key is read only to report "
+        "availability — so no Club Data is transmitted to Kling and it is not yet an "
+        "active Art. 28 sub-processor. When the integration is built and an org "
+        "enables it, Kling MUST move to legal.SUBPROCESSORS (and the club DPA) "
+        "before any data flows."
+    ),
     "MEDIAHUB_SWIM_ENGLAND_API_KEY": (
         "the flag-gated Swim England Rankings / approved-systems connector seam "
         "(roadmap 1.13, data_hub/connectors/builtin.py; founder application F.5). "
@@ -301,6 +343,30 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "active Art. 28 sub-processor. When the integration is built and an org "
         "enables it, Swim England MUST move to legal.SUBPROCESSORS (and the club "
         "DPA) before any data flows."
+    ),
+    "SYNC_API_KEY": (
+        "the opt-in, disclosed lip-sync/dubbing seam (roadmap 1.6, video/dub.py). "
+        "The sync.so network integration is NOT wired in this build — dub_clip() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to sync.so and it is not yet an active Art. 28 "
+        "sub-processor. When wired and an org enables it, sync.so MUST move to "
+        "legal.SUBPROCESSORS (and the club DPA) before any data flows."
+    ),
+    "ELEVENLABS_API_KEY": (
+        "the opt-in, disclosed dubbing seam (roadmap 1.6, video/dub.py). The "
+        "ElevenLabs Dubbing integration is NOT wired in this build — dub_clip() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to ElevenLabs and it is not yet an active Art. 28 "
+        "sub-processor. When wired and an org enables it, ElevenLabs MUST move to "
+        "legal.SUBPROCESSORS (and the club DPA) before any data flows."
+    ),
+    "RASK_API_KEY": (
+        "the opt-in, disclosed lip-sync/dubbing seam (roadmap 1.6, video/dub.py). "
+        "The Rask AI network integration is NOT wired in this build — dub_clip() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to Rask and it is not yet an active Art. 28 "
+        "sub-processor. When wired and an org enables it, Rask MUST move to "
+        "legal.SUBPROCESSORS (and the club DPA) before any data flows."
     ),
 }
 
