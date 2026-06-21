@@ -1414,9 +1414,14 @@ def _near_miss_is_close_call(category: str) -> bool:
 
 
 def _render_explainability_key() -> str:
-    """A compact "how to read these cards" key, so the review surface reads as
-    the intelligence it is to a first-time volunteer. Every gloss describes the
-    deterministic engine's own outputs — it makes nothing up."""
+    """The "how to read these cards" guide, as a side-anchored popup.
+
+    A slim tab pinned to the right edge of the screen opens a slide-in panel
+    explaining how to read the review surface — so the explainer is always one
+    click away without taking a column of vertical space at the top of the page.
+    Every gloss describes the deterministic engine's own outputs — it makes
+    nothing up. The panel is reduced-motion-safe and closes on the ✕, a click on
+    the backdrop, or Escape."""
 
     def _row(term: str, body: str) -> str:
         return (
@@ -1424,11 +1429,8 @@ def _render_explainability_key() -> str:
             f'<span class="mh-key-body">{body}</span></div>'
         )
 
-    return (
-        '<details class="mh-explain-key">'
-        '<summary><span aria-hidden="true">&#9432;</span> How to read these cards</summary>'
-        '<div class="mh-key-grid">'
-        + _row(
+    rows = (
+        _row(
             "Band",
             "How big the moment is — <b>Elite</b> (gold, a record, a huge PB) "
             "down through <b>Strong</b>, <b>Story</b> and <b>Nice</b>. It sets "
@@ -1458,7 +1460,93 @@ def _render_explainability_key() -> str:
             "&amp; diagnostics</b> with the reason in plain English — so you can "
             "see nothing good was dropped silently.",
         )
-        + "</div></details>"
+    )
+
+    # The launcher tab (fixed to the right edge), the dimming backdrop and the
+    # slide-in dialog. Markup + a small self-contained controller; the look
+    # lives in the shared stylesheet (.mh-guide-*). The panel starts `hidden`
+    # so it is out of the a11y tree and never flashes before JS wires it up.
+    return (
+        '<button type="button" class="mh-guide-tab" id="mh-guide-open" '
+        'aria-haspopup="dialog" aria-controls="mh-guide-panel" aria-expanded="false">'
+        '<span class="mh-guide-tab-icon" aria-hidden="true">&#9432;</span>'
+        "<span>How to read these cards</span></button>"
+        '<div class="mh-guide-overlay" id="mh-guide-overlay" hidden></div>'
+        '<aside class="mh-guide-panel" id="mh-guide-panel" role="dialog" '
+        'aria-modal="true" aria-labelledby="mh-guide-title" hidden>'
+        '<div class="mh-guide-panel-head">'
+        '<h2 id="mh-guide-title"><span aria-hidden="true">&#9432;</span> '
+        "How to read these cards</h2>"
+        '<button type="button" class="mh-guide-close" id="mh-guide-close" '
+        'aria-label="Close guide">&times;</button>'
+        "</div>"
+        '<div class="mh-key-grid">' + rows + "</div></aside>"
+        "<script>(function(){"
+        "var openBtn=document.getElementById('mh-guide-open');"
+        "var panel=document.getElementById('mh-guide-panel');"
+        "var overlay=document.getElementById('mh-guide-overlay');"
+        "var closeBtn=document.getElementById('mh-guide-close');"
+        "if(!openBtn||!panel||!overlay){return;}"
+        "var lastFocus=null,hideTimer=null;"
+        "function open(){"
+        "if(hideTimer){clearTimeout(hideTimer);hideTimer=null;}"
+        "lastFocus=document.activeElement;"
+        "panel.hidden=false;overlay.hidden=false;"
+        "requestAnimationFrame(function(){requestAnimationFrame(function(){"
+        "panel.classList.add('is-open');overlay.classList.add('is-open');});});"
+        "openBtn.setAttribute('aria-expanded','true');"
+        "if(closeBtn){closeBtn.focus();}"
+        "document.addEventListener('keydown',onKey);}"
+        "function close(){"
+        "panel.classList.remove('is-open');overlay.classList.remove('is-open');"
+        "openBtn.setAttribute('aria-expanded','false');"
+        "document.removeEventListener('keydown',onKey);"
+        "hideTimer=setTimeout(function(){panel.hidden=true;overlay.hidden=true;},280);"
+        "if(lastFocus&&lastFocus.focus){lastFocus.focus();}}"
+        "function onKey(e){if(e.key==='Escape'||e.key==='Esc'){close();}}"
+        "openBtn.addEventListener('click',open);"
+        "if(closeBtn){closeBtn.addEventListener('click',close);}"
+        "overlay.addEventListener('click',close);"
+        "})();</script>"
+    )
+
+
+def _render_meet_recap_tabs(run_id: str, active: str) -> str:
+    """A segmented control that switches a processed meet between its two recap
+    surfaces: **Review & approve all achievements** (the full ranked queue) and
+    **Athlete spotlight** (one swimmer's story). ``active`` is ``"review"`` or
+    ``"spotlight"``.
+
+    Both tabs are real navigation — clicking one opens that page scoped to this
+    run (``/review/<id>`` and ``/spotlight?run_id=<id>``) — so the two surfaces
+    live on one screen the user can click between, within the meet-recap flow.
+    """
+    review_url = url_for("review", run_id=run_id)
+    spotlight_url = url_for("spotlight_landing", run_id=run_id)
+    _check_svg = (
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<polyline points="9 11 12 14 22 4"/>'
+        '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>'
+    )
+    _person_svg = (
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+        'stroke-linejoin="round" aria-hidden="true">'
+        '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>'
+    )
+
+    def _tab(href: str, label: str, icon: str, is_active: bool) -> str:
+        cls = "mh-recap-tab is-active" if is_active else "mh-recap-tab"
+        cur = ' aria-current="page"' if is_active else ""
+        return f'<a class="{cls}"{cur} href="{href}">{icon}<span>{label}</span></a>'
+
+    return (
+        '<nav class="mh-recap-tabs" aria-label="Meet recap views">'
+        + _tab(review_url, "Review &amp; approve all achievements", _check_svg, active == "review")
+        + _tab(spotlight_url, "Athlete spotlight", _person_svg, active == "spotlight")
+        + "</nav>"
     )
 
 
@@ -7511,21 +7599,57 @@ a.card:hover, .card[data-interactive]:hover {
   .mh-factor-track, .mh-factor-mult { max-width: 160px; }
 }
 
-/* "How to read these cards" key — makes the surface read as the intelligence
-   it is to a first-time volunteer. */
-.mh-explain-key {
-  margin: var(--sp-4) 0 0 0; border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm); background: rgba(255,255,255,0.015);
+/* "How to read these cards" — a side-anchored guide. A slim tab pinned to the
+   right edge opens a slide-in dialog, so the explainer is always one click away
+   without taking column space at the top of the review surface. Reduced-motion
+   safe; closes on the ✕, a backdrop click, or Escape (controller is inlined
+   beside the markup in _render_explainability_key). */
+.mh-guide-tab {
+  position: fixed; right: 0; top: 42%; transform: translateY(-50%);
+  z-index: 90; display: inline-flex; align-items: center; gap: 9px;
+  padding: 14px 9px; writing-mode: vertical-rl;
+  background: var(--panel2); color: var(--ink-dim);
+  border: 1px solid var(--chrome); border-right: 0;
+  border-radius: 10px 0 0 10px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  box-shadow: -5px 0 20px rgba(0,0,0,0.28);
+  transition: color 120ms ease, background 120ms ease, transform 120ms ease;
 }
-.mh-explain-key > summary {
-  cursor: pointer; user-select: none; list-style: none; padding: 11px 16px;
-  font-size: 12.5px; font-weight: 600; color: var(--ink-dim);
-  display: flex; align-items: center; gap: 7px;
+.mh-guide-tab:hover { color: var(--ink); background: var(--panel); transform: translateY(-50%) translateX(-3px); }
+.mh-guide-tab:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-guide-tab-icon { writing-mode: horizontal-tb; font-size: 14px; color: var(--lane); }
+.mh-guide-overlay {
+  position: fixed; inset: 0; z-index: 1100; background: rgba(0,0,0,0.5);
+  opacity: 0; transition: opacity 200ms ease;
 }
-.mh-explain-key > summary::-webkit-details-marker { display: none; }
-.mh-explain-key[open] > summary { border-bottom: 1px solid var(--hairline); }
-.mh-key-grid { padding: 13px 16px; display: flex; flex-direction: column; gap: 11px; }
-.mh-key-row { display: grid; grid-template-columns: 124px 1fr; gap: 14px; align-items: baseline; }
+.mh-guide-overlay.is-open { opacity: 1; }
+.mh-guide-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 1101;
+  width: min(390px, 92vw);
+  background: var(--panel); border-left: 1px solid var(--chrome);
+  box-shadow: -18px 0 44px rgba(0,0,0,0.5);
+  transform: translateX(100%);
+  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.mh-guide-panel.is-open { transform: translateX(0); }
+.mh-guide-panel-head {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 17px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--hairline);
+}
+.mh-guide-panel-head h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.mh-guide-close {
+  flex: none; width: 32px; height: 32px; border-radius: 8px;
+  background: transparent; border: 1px solid var(--chrome);
+  color: var(--ink-dim); font-size: 19px; line-height: 1; cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.mh-guide-close:hover { color: var(--ink); border-color: var(--lane); }
+.mh-key-grid { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.mh-key-row { display: grid; grid-template-columns: 104px 1fr; gap: 14px; align-items: baseline; }
 .mh-key-term {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.08em; color: var(--lane);
@@ -7533,6 +7657,9 @@ a.card:hover, .card[data-interactive]:hover {
 .mh-key-body { font-size: 12.5px; color: var(--ink-dim); line-height: 1.45; }
 .mh-key-body b { color: var(--ink); font-weight: 600; }
 @media (max-width: 640px) { .mh-key-row { grid-template-columns: 1fr; gap: 2px; } }
+@media (prefers-reduced-motion: reduce) {
+  .mh-guide-tab, .mh-guide-overlay, .mh-guide-panel { transition: none; }
+}
 
 /* The "why not" near-miss discoverability hint under the decision list. */
 .mh-nearmiss-hint {
@@ -14457,11 +14584,6 @@ def create_app() -> Flask:
             "public_wall_json",
             "public_wall_rss",
             "public_wall_card_png",
-            # W.9 — magic-link mobile approvals: the signed, expiring,
-            # revocable token IS the access control; the approver has no
-            # login by design (pool-deck phone).
-            "magic_review_page",
-            "magic_card_action",
         }
     )
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -15258,7 +15380,6 @@ def create_app() -> Flask:
             "/sign-out",
             "/auth",
             "/oauth",
-            "/magic",
             "/r/",
             "/embed/",
         )
@@ -18451,13 +18572,14 @@ def create_app() -> Flask:
             workflow_summary_card = f"""
 <div class="card" style="border-left:3px solid var(--accent);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
   <div style="flex:1;min-width:min(240px,100%)">
-    <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
+    <h2 style="margin-bottom:6px">Review &amp; approve all achievements</h2>
     <p class="dim" style="margin:0;font-size:13px;max-width:560px">
       Approve the achievements you want to post — anything you skip simply
       stays in the queue. Approved cards flow into the
       <strong>Content builder</strong>, where you pick a caption, create graphics
       and video, then schedule or download. Nothing is created until
-      you&rsquo;ve approved it.
+      you&rsquo;ve approved it. Want one swimmer&rsquo;s story instead? Switch to
+      <strong>Athlete spotlight</strong> above.
     </p>
   </div>
 </div>
@@ -18478,37 +18600,9 @@ def create_app() -> Flask:
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
       {_bulk_approve_btn}
-      <button type="button" class="btn secondary" id="mh-magic-link-btn"
-              data-mint-url="{url_for("api_mint_magic_link", run_id=run_id)}"
-              title="Create a no-login link so a coach can approve this pack from their phone">
-        &#128241; Approve from a phone</button>
       <a class="btn" href="{_pack_url}" style="align-self:flex-end">Open content builder &rarr;</a>
     </div>
   </div>
-  <div id="mh-magic-link-out" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px"></div>
-  <script>
-  (function() {{
-    var btn = document.getElementById('mh-magic-link-btn');
-    var out = document.getElementById('mh-magic-link-out');
-    if (!btn) return;
-    btn.addEventListener('click', function() {{
-      btn.disabled = true; btn.textContent = 'Creating link…';
-      fetch(btn.dataset.mintUrl, {{method: 'POST'}})
-        .then(function(r) {{ return r.json(); }})
-        .then(function(j) {{
-          btn.disabled = false; btn.innerHTML = '&#128241; Approve from a phone';
-          if (!j.ok) {{ out.style.display = ''; out.textContent = 'Could not create the link.'; return; }}
-          out.style.display = '';
-          out.innerHTML = '<strong>Review link</strong> (works for 72 hours, no login — anyone with it can approve, so share carefully):'
-            + '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">'
-            + '<input type="text" readonly value="' + j.url.replace(/"/g, '&quot;') + '" style="flex:1;font-size:12px;padding:6px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)"/>'
-            + '<button type="button" class="btn secondary" style="font-size:12px" onclick="navigator.clipboard.writeText(this.previousElementSibling.value);this.textContent=\\'Copied\\'">Copy</button></div>'
-            + (j.notified ? '<div class="muted" style="margin-top:4px;font-size:12px">Also pushed to your notification channel.</div>' : '');
-        }})
-        .catch(function() {{ btn.disabled = false; btn.innerHTML = '&#128241; Approve from a phone'; }});
-    }});
-  }})();
-  </script>
   <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span class="muted" style="font-size:12px;font-family:var(--font-mono);letter-spacing:0.14em;text-transform:uppercase">Filter</span>
     <nav class="mh-tabs" role="tablist" aria-label="Filter cards by workflow status">
@@ -18816,6 +18910,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <span style="color:var(--ink-faint)">{_h(dispatch_log.get("chosen_filename") or data.get("file_name", ""))}</span>
   </div>
 </section>
+
+{_render_meet_recap_tabs(run_id, "review")}
 
 {_sample_banner_html}
 
@@ -25716,10 +25812,14 @@ function mhPlanGenerate(btn) {{
 
         # Session Update and Sponsor Post are no longer their own tiles —
         # Free Text now interprets any such prompt (and adds photos) into a
-        # graphic, so a single "describe it" path covers them. The content
-        # types + their routes stay for deep links/back-compat; they're just
-        # not surfaced as separate Create cards.
-        _hidden_cts = {"session_update", "sponsor_activation"}
+        # graphic, so a single "describe it" path covers them.
+        #
+        # Athlete Spotlight is no longer a standalone tile either: it lives
+        # inside the meet-recap flow, reached from the Review ⇄ Athlete spotlight
+        # view switch on a processed meet (it always needed a processed meet
+        # anyway). The content type + its routes stay for the toggle, deep links
+        # and back-compat; it's just not surfaced as a separate Create card.
+        _hidden_cts = {"session_update", "sponsor_activation", "athlete_spotlight"}
 
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so
@@ -26435,6 +26535,9 @@ function mhPlanGenerate(btn) {{
             runs_opts += f'<option value="{_h(r["id"])}" {sel}>{label}</option>'
 
         swimmers_html = ""
+        # When scoped to an accessible run, the meet-recap view switch lets the
+        # user toggle back to Review & approve for the same meet (set below).
+        _recap_tabs = ""
         if run_id_param:
             run_data = _load_run(run_id_param)
             # Tenant isolation: a tampered ?run_id= pointing at another
@@ -26443,6 +26546,7 @@ function mhPlanGenerate(btn) {{
             if run_data and not _can_access_run(run_id_param, run_data, _active_pid):
                 run_data = None
             if run_data:
+                _recap_tabs = _render_meet_recap_tabs(run_id_param, "spotlight")
                 # A malformed run_data (missing recognition_report keys,
                 # weird achievement shapes) would otherwise bubble out of
                 # list_swimmers_in_run and 500 the page.
@@ -26498,6 +26602,8 @@ function mhPlanGenerate(btn) {{
   <h1>One swimmer. <em class="editorial">One story.</em></h1>
   <p class="lede">Pick a processed meet, then pick a swimmer. We pull every achievement they earned into a single-athlete content pack ranked by impact.</p>
 </section>
+
+{_recap_tabs}
 
 <div class="card">
   <h2>Choose a meet</h2>
@@ -44600,319 +44706,6 @@ voice, and queues them for one-click approval.</p>
             as_attachment=True,
             download_name=f"{draft_id}-poster{'-print' if print_mode else ''}.pdf",
         )
-
-    # ---- W.9: magic-link mobile approvals -----------------------------------
-
-    @app.route("/api/runs/<run_id>/magic-link", methods=["POST"])
-    def api_mint_magic_link(run_id: str):
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            abort(404)
-        from mediahub.web.magic_links import mint_review_token
-
-        pid = _run_owner_profile_id(run_id) or _phase_w_org() or ""
-        token = mint_review_token(app.secret_key or "", run_id, pid)
-        link = url_for("magic_review_page", token=token, _external=True)
-        # Best-effort push to the org's configured channels (ntfy/webhook).
-        sent = False
-        try:
-            from mediahub.notify.channels import Notification, all_channels
-
-            n = Notification(
-                title="MediaHub: pack ready to review",
-                message="Tap to approve this run's cards from your phone — no login needed.",
-                tags=("incoming_envelope",),
-                click_url=link,
-            )
-            for ch in all_channels():
-                try:
-                    sent = ch.send(n) or sent
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        try:
-            from mediahub.workflow.autonomy import AuditLog
-
-            AuditLog().record(
-                pid or "-",
-                f"magiclink:{run_id}",
-                "magic_link_minted",
-                tool="api_mint_magic_link",
-                args={"run_id": run_id, "notified": sent},
-                result="minted",
-            )
-        except Exception:
-            pass
-        return jsonify({"ok": True, "url": link, "notified": sent, "expires_hours": 72})
-
-    @app.route("/api/runs/<run_id>/magic-link/revoke", methods=["POST"])
-    def api_revoke_magic_link(run_id: str):
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            abort(404)
-        from mediahub.web.magic_links import revoke_run_tokens
-
-        revoke_run_tokens(run_id)
-        return jsonify({"ok": True, "revoked": True})
-
-    def _magic_ctx_or_error(token: str):
-        from mediahub.web.magic_links import (
-            MagicLinkError,
-            MagicLinkExpired,
-            MagicLinkRevoked,
-            verify_review_token,
-        )
-
-        try:
-            return verify_review_token(app.secret_key or "", token), None
-        except MagicLinkExpired:
-            return None, "This review link has expired. Ask for a fresh one."
-        except MagicLinkRevoked:
-            return None, "This review link was revoked. Ask for a fresh one."
-        except MagicLinkError:
-            return None, "This review link isn't valid."
-
-    def _magic_page(token: str, ctx: dict, flash: str = "") -> str:
-        """Mobile-first lite review: approve / edit caption / reject only.
-
-        Deliberately self-contained HTML (no app chrome, no JS framework):
-        pool-deck phones on one bar of signal are the target device.
-        """
-        run_id = ctx["run_id"]
-        data = _load_run(run_id) or {}
-        from mediahub.content_pack.builder import build_grouped_pack
-
-        pack = build_grouped_pack(data, ctx.get("profile_id") or "", RUNS_DIR)
-        items = (
-            list(pack.get("main_feed") or [])
-            + list(pack.get("stories") or [])
-            + list(pack.get("needs_review") or [])
-        )
-
-        # Lite, self-contained chips. The desktop confidence/band helpers paint
-        # with app CSS classes + vars that don't exist on this chrome-free page,
-        # so the phone surface gets its own inline-styled equivalents — enough
-        # signal to approve with confidence, none of the weight.
-        _band_colors = {
-            "elite": ("#3a2d00", "#ffd54f", "#7a5c00"),
-            "strong": ("#10243a", "#9cc4ff", "#274b73"),
-            "story": ("#1a1c26", "#c7c3b8", "#3a3c46"),
-            "nice": ("#1a1c26", "#9a968c", "#3a3c46"),
-        }
-        _conf_colors = {"high": "#7bd88a", "medium": "#ffd54f", "low": "#ff8a80"}
-
-        n_total = n_appr = n_rej = 0
-        cards_html = []
-        for item in items:
-            a = item.get("achievement") or {}
-            card_id = a.get("swim_id") or ""
-            if not card_id:
-                continue
-            status = item.get("wf_status", "queue")
-            n_total += 1
-            if status == "approved":
-                n_appr += 1
-            elif status == "rejected":
-                n_rej += 1
-            consent = item.get("consent") or {}
-            blocked = bool(item.get("consent_blocked"))
-            caption = item.get("caption_only") or a.get("headline") or ""
-            pill = {
-                "approved": '<span class="pill ok">Approved</span>',
-                "rejected": '<span class="pill bad">Rejected</span>',
-                "edited": '<span class="pill warn">Edited</span>',
-            }.get(status, '<span class="pill">Waiting</span>')
-            block_html = (
-                f'<p class="blocked">&#9888; {_h(consent.get("reason") or "blocked: no consent on file")}</p>'
-                if blocked
-                else ""
-            )
-            # Band + confidence chips so a phone reviewer sees how strong the
-            # card is and how sure the engine is, the same two axes the desktop
-            # review surfaces — without a graphic render on one bar of signal.
-            band = (item.get("quality_band") or "nice").strip().lower()
-            _bg, _fg, _bd = _band_colors.get(band, _band_colors["nice"])
-            conf_label = (a.get("confidence_label") or "medium").strip().lower()
-            _cc = _conf_colors.get(conf_label, "#ffd54f")
-            meta_html = (
-                '<div class="meta">'
-                f'<span class="band" style="background:{_bg};color:{_fg};'
-                f'border-color:{_bd}">{_h(band.upper().replace("_", " "))}</span>'
-                f'<span class="conf"><span class="dot" style="background:{_cc}">'
-                f"</span>{_h(conf_label.capitalize())} confidence</span>"
-                "</div>"
-            )
-            # "What to check" — the deterministic safe-to-post reason, surfaced
-            # only when the card isn't already a clean high-confidence post, so
-            # the reviewer gets the glance-before-approving the desktop page gives.
-            s2p = item.get("safe_to_post") or {}
-            reason = (s2p.get("reason") or "").strip()
-            why_html = (
-                f'<p class="why">{_h(reason)}</p>' if reason and s2p.get("level") != "safe" else ""
-            )
-            action_url = url_for("magic_card_action", token=token, card_id=card_id)
-            cards_html.append(
-                f"""
-<div class="card{" is-blocked" if blocked else ""}">
-  <div class="card-top">{pill}<span class="evt">{_h(a.get("event", ""))}</span></div>
-  {meta_html}
-  <h2>{_h(a.get("headline", ""))}</h2>
-  {why_html}
-  {block_html}
-  <form method="POST" action="{action_url}">
-    <textarea name="caption" rows="3" dir="auto" {"disabled" if blocked else ""}>{_h(caption)}</textarea>
-    <div class="btns">
-      <button class="approve" name="action" value="approve" {"disabled" if blocked else ""}>Approve</button>
-      <button class="save" name="action" value="save_caption" {"disabled" if blocked else ""}>Save edit</button>
-      <button class="reject" name="action" value="reject">Reject</button>
-    </div>
-  </form>
-</div>"""
-            )
-
-        # Run-level summary so the reviewer sees progress at a glance instead of
-        # scrolling a flat list. Counts come from the same workflow states the
-        # cards render, so the bar can't drift from the pills.
-        n_wait = max(0, n_total - n_appr - n_rej)
-        pct = int(round((n_appr / n_total) * 100)) if n_total else 0
-        _rej_chip = f'<span class="bad"><b>{n_rej}</b> rejected</span>' if n_rej else ""
-        summary_html = (
-            (
-                '<div class="summary">'
-                '<div class="counts">'
-                f"<span><b>{n_wait}</b> to review</span>"
-                f'<span class="ok"><b>{n_appr}</b> approved</span>'
-                f"{_rej_chip}"
-                "</div>"
-                f'<div class="bar"><span style="width:{pct}%"></span></div>'
-                "</div>"
-            )
-            if n_total
-            else ""
-        )
-        # Brand signal — the club's own name, so the reviewer knows whose queue
-        # this is (a volunteer may help several clubs).
-        org_name = ""
-        try:
-            _mp = load_profile(ctx.get("profile_id") or "")
-            org_name = (_mp.display_name or "") if _mp else ""
-        except Exception:
-            org_name = ""
-        org_html = f'<p class="org">{_h(org_name)}</p>' if org_name else ""
-
-        meet_name = ((data.get("meet") or {}).get("name")) or data.get("file_name") or run_id
-        flash_html = f'<p class="flash">{_h(flash)}</p>' if flash else ""
-        return f"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<meta name="robots" content="noindex"/>
-<title>Approve — {_h(meet_name)}</title>
-<style>
-  :root {{ color-scheme: dark; }}
-  * {{ box-sizing: border-box; }}
-  body {{ margin:0; padding:14px; background:#0A0B11; color:#F5F2E8;
-         font:16px/1.45 system-ui, -apple-system, sans-serif; }}
-  h1 {{ font-size:20px; margin:6px 0 2px; }}
-  .org {{ color:#c7c3b8; font-size:13px; font-weight:600; margin:0 0 6px; }}
-  .sub {{ color:#9a968c; font-size:13px; margin:0 0 14px; }}
-  .summary {{ border:1px solid #2a2c36; border-radius:12px; padding:12px 14px; margin-bottom:16px; background:#11131c; }}
-  .counts {{ display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:#c7c3b8; margin-bottom:10px; }}
-  .counts b {{ color:#F5F2E8; }}
-  .counts .ok b {{ color:#7bd88a; }}
-  .counts .bad b {{ color:#ff8a80; }}
-  .bar {{ height:8px; border-radius:999px; background:#1c1e28; overflow:hidden; }}
-  .bar > span {{ display:block; height:100%; background:#3ddc97; border-radius:999px; transition:width .3s; min-width:2px; }}
-  .card {{ border:1px solid #2a2c36; border-radius:12px; padding:14px; margin-bottom:14px; background:#11131c; }}
-  .card.is-blocked {{ opacity:0.75; border-color:#7a2733; }}
-  .card-top {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }}
-  .evt {{ color:#9a968c; font-size:12px; }}
-  .meta {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }}
-  .band {{ font-size:10px; font-weight:700; letter-spacing:0.08em; padding:3px 8px; border-radius:6px; border:1px solid #3a3c46; }}
-  .conf {{ font-size:11px; color:#c7c3b8; display:inline-flex; align-items:center; gap:6px; }}
-  .conf .dot {{ width:8px; height:8px; border-radius:999px; display:inline-block; }}
-  .why {{ font-size:12px; color:#9a968c; margin:0 0 8px; line-height:1.45; }}
-  h2 {{ font-size:16px; margin:0 0 8px; }}
-  .pill {{ font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid #444; }}
-  .pill.ok {{ border-color:#2e7d32; color:#7bd88a; }}
-  .pill.bad {{ border-color:#a33; color:#ff8a80; }}
-  .pill.warn {{ border-color:#b8860b; color:#ffd54f; }}
-  .blocked {{ color:#ff8a80; font-size:13px; }}
-  textarea {{ width:100%; background:#0A0B11; color:#F5F2E8; border:1px solid #2a2c36;
-             border-radius:8px; padding:10px; font-size:15px; }}
-  .btns {{ display:flex; gap:8px; margin-top:10px; }}
-  button {{ flex:1; min-height:48px; border-radius:10px; border:1px solid #2a2c36;
-           font-size:15px; font-weight:700; cursor:pointer; }}
-  .approve {{ background:#1d4d27; color:#c9f0cf; border-color:#2e7d32; }}
-  .save {{ background:#1c2433; color:#cfe0ff; }}
-  .reject {{ background:#33161b; color:#ffc4be; border-color:#7a2733; }}
-  button:disabled {{ opacity:0.45; }}
-  .flash {{ background:#1d4d27; border:1px solid #2e7d32; padding:10px 12px; border-radius:8px; }}
-  .done {{ color:#9a968c; font-size:13px; text-align:center; margin:20px 0; }}
-</style></head><body>
-{org_html}
-<h1>{_h(meet_name)}</h1>
-<p class="sub">Approve from your phone — changes save instantly. This link expires
-and can be revoked by the club.</p>
-{flash_html}
-{summary_html}
-{"".join(cards_html) or '<p class="done">Nothing waiting for review.</p>'}
-<p class="done">MediaHub &middot; secure review link</p>
-</body></html>"""
-
-    @app.route("/m/<token>")
-    def magic_review_page(token: str):
-        ctx, err = _magic_ctx_or_error(token)
-        if ctx is None:
-            return (
-                "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
-                "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-                "<title>Link unavailable</title>"
-                "<style>body{font-family:system-ui;background:var(--bg,black);"
-                "color:white;padding:32px 18px;text-align:center}</style></head>"
-                f"<body><h1>\U0001f512</h1><p>{_h(err)}</p></body></html>",
-                410,
-            )
-        flash = (request.args.get("ok") or "").strip()
-        return _magic_page(token, ctx, flash)
-
-    @app.route("/m/<token>/card/<path:card_id>", methods=["POST"])
-    def magic_card_action(token: str, card_id: str):
-        ctx, err = _magic_ctx_or_error(token)
-        if ctx is None:
-            abort(410)
-        run_id = ctx["run_id"]
-        action = (request.form.get("action") or "").strip()
-        ws = WorkflowStore(RUNS_DIR)
-        pid = ctx.get("profile_id") or _run_owner_profile_id(run_id) or ""
-        flash = ""
-        if action == "approve":
-            ws.set_status(run_id, card_id, CardStatus.APPROVED, notes="via magic link")
-            _phase_w_after_status_change(pid, run_id, card_id, "approved", via="magic_link")
-            flash = "Approved."
-        elif action == "reject":
-            ws.set_status(run_id, card_id, CardStatus.REJECTED, notes="via magic link")
-            _phase_w_after_status_change(pid, run_id, card_id, "rejected", via="magic_link")
-            flash = "Rejected."
-        elif action == "save_caption":
-            caption = (request.form.get("caption") or "").strip()
-            if caption:
-                ws.set_edits(run_id, card_id, {"caption": caption})
-                _phase_w_after_status_change(pid, run_id, card_id, "edited", via="magic_link")
-                flash = "Caption saved."
-        try:
-            from mediahub.workflow.autonomy import AuditLog
-
-            AuditLog().record(
-                pid or "-",
-                f"magiclink:{run_id}",
-                "magic_link_action",
-                tool="magic_card_action",
-                args={"run_id": run_id, "card_id": card_id, "action": action},
-                result=flash or "noop",
-            )
-        except Exception:
-            pass
-        return redirect(url_for("magic_review_page", token=token, ok=flash))
 
     # ---- W.14 + W.3 approval-seam hook --------------------------------------
 

@@ -4218,6 +4218,44 @@ kbd {
   .mh-insp-loading::after { animation: none; }
 }
 /* =====================================================================
+   MEET-RECAP VIEW SWITCH
+   =====================================================================
+   A segmented control at the head of a processed meet's recap, toggling
+   between the full review/approve queue (/review/<id>) and the athlete-
+   spotlight surface (/spotlight?run_id=<id>). Both tabs are real links —
+   the two surfaces live on one screen the user can click between. Built by
+   src/mediahub/web/web.py::_render_meet_recap_tabs. */
+.mh-recap-tabs {
+  display: inline-flex; gap: 4px; padding: 5px;
+  margin: 0 0 var(--sp-6);
+  background: var(--panel2); border: 1px solid var(--chrome);
+  border-radius: 999px; max-width: 100%;
+}
+.mh-recap-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 17px; border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 13px; font-weight: 600; line-height: 1;
+  color: var(--ink-dim); text-decoration: none; white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease;
+}
+.mh-recap-tab svg { flex: none; opacity: 0.85; }
+.mh-recap-tab:hover { color: var(--ink); background: rgba(255, 255, 255, 0.04); }
+.mh-recap-tab:focus-visible { outline: 2px solid var(--lane); outline-offset: 2px; }
+.mh-recap-tab.is-active {
+  background: var(--lane); color: var(--lane-ink);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+.mh-recap-tab.is-active:hover { color: var(--lane-ink); background: var(--lane-h); }
+.mh-recap-tab.is-active svg { opacity: 1; }
+@media (max-width: 560px) {
+  .mh-recap-tabs { display: flex; flex-direction: column; width: 100%; border-radius: 14px; }
+  .mh-recap-tab { justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-recap-tab { transition: none; }
+}
+/* =====================================================================
    UI 1.30 — "WEEKEND AT A GLANCE" SUMMARY PANEL
    =====================================================================
    A digest at the head of the /review surface: a fixed-template factual
@@ -4258,82 +4296,13 @@ kbd {
   color: var(--ink);
   text-wrap: balance;
 }
-.mh-glance-stats { margin-bottom: var(--sp-5); }
-
-/* Top moments — a compact ranked list lifted straight from the report. */
-.mh-glance-moments {
-  list-style: none; margin: 0; padding: 0;
-  display: flex; flex-direction: column; gap: var(--sp-2);
-}
-.mh-glance-moment {
-  display: flex; align-items: center; gap: var(--sp-4);
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-left: 3px solid var(--ink-faint);
-  border-radius: var(--radius);
-  transition: border-color var(--dur-fast, 120ms) var(--ease-out-quick, ease),
-              transform   var(--dur-fast, 120ms) var(--ease-out-quick, ease);
-}
-.mh-glance-moment:hover { border-color: var(--rule); transform: translateX(2px); }
-.mh-glance-moment[data-kind="gold"]   { border-left-color: var(--medal); }
-.mh-glance-moment[data-kind="silver"] { border-left-color: var(--ink-dim); }
-.mh-glance-moment[data-kind="bronze"] { border-left-color: var(--medal-deep); }
-.mh-glance-moment[data-kind="medal"]  { border-left-color: var(--medal); }
-.mh-glance-moment[data-kind="pb"]     { border-left-color: var(--good); }
-.mh-glance-moment[data-kind="record"] { border-left-color: var(--info); }
-.mh-glance-rank {
-  flex: none;
-  font-family: var(--font-display);
-  font-size: 22px; font-weight: 900;
-  font-variant-numeric: tabular-nums lining-nums;
-  color: var(--ink-faint);
-  min-width: 1.1em; text-align: center; line-height: 1;
-}
-.mh-glance-moment-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.mh-glance-moment-who {
-  font-family: var(--font-body);
-  font-size: 14px; font-weight: 700; color: var(--ink);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.mh-glance-moment-sub {
-  font-size: 12.5px; color: var(--ink-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.mh-glance-chip {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 9.5px; font-weight: 600;
-  letter-spacing: 0.12em; text-transform: uppercase;
-  padding: 4px 8px; border-radius: var(--radius-pill);
-  border: 1px solid var(--ink-faint); color: var(--ink-muted);
-  white-space: nowrap;
-}
-.mh-glance-chip--gold,
-.mh-glance-chip--medal  { color: var(--medal);      border-color: var(--medal);      background: var(--medal-glow); }
-.mh-glance-chip--silver { color: var(--ink-dim);    border-color: var(--rule); }
-.mh-glance-chip--bronze { color: var(--medal-deep); border-color: var(--medal-deep); }
-.mh-glance-chip--pb     { color: var(--good);       border-color: var(--good);       background: var(--good-bg); }
-.mh-glance-chip--record { color: var(--info);       border-color: var(--info);       background: var(--info-bg); }
-.mh-glance-jump {
-  display: inline-block; margin-top: var(--sp-4);
-  font-family: var(--font-mono);
-  font-size: 11px; letter-spacing: 0.08em;
-  color: var(--ink-muted); text-decoration: none;
-  border-bottom: 1px dashed var(--rule); padding-bottom: 1px;
-  transition: color var(--dur-fast, 120ms) var(--ease-out-quick, ease),
-              border-color var(--dur-fast, 120ms) var(--ease-out-quick, ease);
-}
-.mh-glance-jump:hover { color: var(--lane); border-bottom-color: var(--lane); }
-
-@media (max-width: 640px) {
-  .mh-glance-moment { flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
-  .mh-glance-chip { order: 3; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mh-glance-moment { transition: none; }
-  .mh-glance-moment:hover { transform: none; }
-}
+/* The stat tiles are the last element in the panel — no trailing margin.
+   The panel's entrance is the shared, reduced-motion-safe .mh-reveal system
+   (carried on the section element); this block intentionally declares no
+   block-local motion of its own. The top-ranked "moments" preview + "see all"
+   jump link were removed: that list duplicated the ranked "Top achievements"
+   shown directly below it on the review surface. */
+.mh-glance-stats { margin-bottom: 0; }
 
 /* =====================================================================
    UI 1.11 — Tabbed code-example switcher + syntax highlighting

@@ -277,68 +277,6 @@ class TestRecordsFlow:
 
 
 # ---------------------------------------------------------------------------
-# W.9 — magic-link mobile approvals end-to-end
-# ---------------------------------------------------------------------------
-
-
-class TestMagicLinks:
-    def test_mint_requires_run_access(self, env):
-        c = env["client"]
-        _pin(c, "org-beta")
-        assert c.post(f"/api/runs/{env['run_id']}/magic-link").status_code == 404
-
-    def test_phone_flow_end_to_end(self, env):
-        c = env["client"]
-        _pin(c, "org-alpha")
-        r = c.post(f"/api/runs/{env['run_id']}/magic-link")
-        assert r.status_code == 200
-        url = r.get_json()["url"]
-        path = url.split("://", 1)[-1].split("/", 1)[1]
-        path = "/" + path
-
-        # The lite page renders with no session at all (fresh client).
-        env["wm"].app.config["TESTING"] = True
-        with env["wm"].app.test_client() as anon:
-            page = anon.get(path)
-            assert page.status_code == 200
-            assert b"Maya Patel" in page.data or b"NEW CLUB RECORD" in page.data
-            assert b"Approve" in page.data
-
-            # Approve from the phone.
-            act = anon.post(path + "/card/swim-1", data={"action": "approve"})
-            assert act.status_code == 302
-
-        from mediahub.workflow.store import WorkflowStore
-
-        ws = WorkflowStore(Path(env["tmp"]) / "runs_v4")
-        state = ws.load(env["run_id"]).get("swim-1")
-        assert state is not None and state.status.value == "approved"
-        assert "magic link" in (state.notes or "")
-
-        # Audit parity: the action is in the org's audit ledger.
-        from mediahub.workflow.autonomy import AuditLog
-
-        entries = AuditLog().read("org-alpha")
-        kinds = {e.get("kind") for e in entries}
-        assert "magic_link_action" in kinds
-
-    def test_revoked_link_dies(self, env):
-        c = env["client"]
-        _pin(c, "org-alpha")
-        url = c.post(f"/api/runs/{env['run_id']}/magic-link").get_json()["url"]
-        path = "/" + url.split("://", 1)[-1].split("/", 1)[1]
-        assert c.post(f"/api/runs/{env['run_id']}/magic-link/revoke").status_code == 200
-        with env["wm"].app.test_client() as anon:
-            r = anon.get(path)
-            assert r.status_code == 410
-            assert b"revoked" in r.data
-
-    def test_garbage_token_is_410(self, env):
-        with env["wm"].app.test_client() as anon:
-            assert anon.get("/m/not-a-real-token").status_code == 410
-
-
-# ---------------------------------------------------------------------------
 # W.12 — certificates export guards
 # ---------------------------------------------------------------------------
 

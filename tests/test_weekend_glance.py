@@ -363,18 +363,21 @@ class TestRenderStructure:
         for label in ("PBs", "Medals", "Standout moments", "Swims analysed"):
             assert f">{label}<" in html
 
-    def test_moments_rendered_with_attributes(self):
+    def test_top_moments_preview_not_rendered(self):
+        # The top-ranked moments preview was removed — it duplicated the ranked
+        # "Top achievements" list shown directly below the panel on /review.
         html = self._html()
-        assert '<ol class="mh-glance-moments">' in html
-        assert 'data-kind="pb"' in html
-        assert 'data-kind="gold"' in html
-        assert 'data-swimmer="Jane Smith"' in html
-        assert 'class="mh-glance-chip mh-glance-chip--gold"' in html
+        assert "mh-glance-moments" not in html
+        assert "mh-glance-moment" not in html
+        assert "mh-glance-chip" not in html
+        assert "mh-glance-rank" not in html
 
-    def test_jump_link_to_ach_list(self):
+    def test_no_jump_link(self):
+        # The "see all … below" jump link went with the moments preview.
         html = self._html()
-        assert 'href="#ach-list"' in html
-        assert "See all" in html
+        assert "mh-glance-jump" not in html
+        assert 'href="#ach-list"' not in html
+        assert "See all" not in html
 
     def test_medal_breakdown_title(self):
         html = self._html(ranked=[
@@ -397,33 +400,17 @@ class TestRenderStructure:
 # --------------------------------------------------------------------------- #
 
 class TestRenderEscaping:
-    def test_swimmer_name_escaped(self):
-        html = render_weekend_glance_html(build_weekend_glance(_run(ranked=[
-            _ach(swimmer='<script>alert(1)</script>', type="pb_confirmed"),
-        ])))
-        assert "<script>alert(1)</script>" not in html
-        assert "&lt;script&gt;" in html
-
-    def test_headline_escaped(self):
-        html = render_weekend_glance_html(build_weekend_glance(_run(ranked=[
-            _ach(swimmer="Jo", headline='<img src=x onerror=alert(1)>', type="pb_confirmed"),
-        ])))
-        assert "<img src=x" not in html
-        assert "&lt;img" in html
-
+    # The meet name (composed into the lede) is the only dynamic field the
+    # panel renders now — the moments preview that surfaced swimmer / headline /
+    # event was removed, so those per-moment escaping tests went with it. The
+    # builder still computes (and escapes-at-render-for any future consumer)
+    # those fields; here we pin the one field the panel actually outputs.
     def test_meet_name_escaped_in_lede(self):
         html = render_weekend_glance_html(build_weekend_glance(_run(
             meet='<b>EVIL</b>', ranked=[_ach(type="pb_confirmed")],
         )))
         assert "<b>EVIL</b>" not in html
         assert "&lt;b&gt;EVIL&lt;/b&gt;" in html
-
-    def test_event_attribute_escaped(self):
-        html = render_weekend_glance_html(build_weekend_glance(_run(ranked=[
-            _ach(event='100m " onmouseover="x', type="pb_confirmed"),
-        ])))
-        assert 'onmouseover="x' not in html
-        assert "&#34;" in html or "&quot;" in html
 
 
 # --------------------------------------------------------------------------- #
@@ -446,32 +433,39 @@ class TestContracts:
 
     def test_css_rules_present(self):
         css = CSS_PATH.read_text(encoding="utf-8")
+        # The panel reduced to a lede + stat tiles; the moment/chip/jump rules
+        # were removed with the preview list they styled.
         for sel in (
             ".mh-glance",
             ".mh-glance-eyebrow",
             ".mh-glance-lede",
-            ".mh-glance-moments",
-            ".mh-glance-moment",
-            ".mh-glance-chip",
-            ".mh-glance-chip--gold",
-            ".mh-glance-chip--pb",
-            ".mh-glance-jump",
+            ".mh-glance-stats",
         ):
             assert sel in css, f"missing CSS rule {sel}"
+        for gone in (".mh-glance-moments", ".mh-glance-chip", ".mh-glance-jump"):
+            assert gone not in css, f"dead CSS rule {gone} should have been removed"
 
-    def test_css_motion_is_reduced_motion_gated(self):
+    def _ui130_block(self):
         css = CSS_PATH.read_text(encoding="utf-8")
-        block = css[css.find("UI 1.30"):]
-        assert "prefers-reduced-motion: reduce" in block
-        rm = block[block.find("prefers-reduced-motion"):]
-        assert "transform: none" in rm
+        start = css.find("UI 1.30")
+        end = css.find("/* ===", start)  # the next section divider bounds the block
+        return css[start:end] if end != -1 else css[start:]
+
+    def test_css_motion_is_reduced_motion_safe(self):
+        # The panel no longer declares block-local motion; its entrance is the
+        # shared, reduced-motion-gated .mh-reveal system carried on the section.
+        html = render_weekend_glance_html(
+            build_weekend_glance(_run(ranked=[_ach(type="pb_confirmed")]))
+        )
+        assert "mh-reveal" in html
+        # The old per-moment hover transition/transform is gone with the preview.
+        assert "transform: translateX" not in self._ui130_block()
 
     def test_css_uses_brand_tokens_not_hardcoded_hex(self):
-        css = CSS_PATH.read_text(encoding="utf-8")
-        block = css[css.find("UI 1.30"):]
-        # The medal/lane/ink accents must come from the design tokens, not
-        # ad-hoc hex (keeps the panel on-theme through the cascade).
-        assert "var(--medal)" in block and "var(--lane)" in block
+        block = self._ui130_block()
+        # The medal accent (spine + eyebrow) must come from the design token,
+        # not ad-hoc hex (keeps the panel on-theme through the cascade).
+        assert "var(--medal)" in block
         assert not re.search(r"color:\s*#[0-9a-fA-F]{3,6}", block), "no hardcoded hex colours"
 
 
@@ -570,7 +564,8 @@ class TestReviewIntegration:
         # Lede reflects the meet + the real counts.
         assert "GLANCE TEST INVITATIONAL:" in body
         assert "1 personal best and 1 medal across 18 analysed swims." in body
-        # Top swimmers surface in the digest.
+        # Top swimmers still surface on the page — now in the ranked "Top
+        # achievements" list below the panel, not re-printed inside the digest.
         assert "Jane Smith" in body and "Tom Davies" in body
 
     def test_panel_sits_above_top_achievements(self, review_env):
@@ -593,16 +588,18 @@ class TestReviewIntegration:
         assert 'id="mh-glance-h"' not in body  # nothing to summarise -> no panel
         assert "Traceback" not in body
 
-    def test_panel_escapes_malicious_swimmer_name(self, review_env):
-        ranked = [_ach(swimmer='<script>alert(1)</script>', type="pb_confirmed", rank=1)]
-        payload = _review_payload("org-test", ranked)
+    def test_panel_escapes_malicious_meet_name(self, review_env):
+        # The lede is the panel's only remaining dynamic field (the moments
+        # preview, which surfaced swimmer names, was removed). It must still
+        # HTML-escape the meet name it composes into the headline.
+        ranked = [_ach(swimmer="Jane Smith", type="pb_confirmed", rank=1)]
+        payload = _review_payload("org-test", ranked, meet='<script>alert(1)</script>')
         run_id = _seed_run(review_env["tmp_path"], review_env["wm"], "org-test", payload)
 
         body = review_env["client"].get(f"/review/{run_id}").get_data(as_text=True)
         assert 'id="mh-glance-h"' in body
         # Scope the XSS assertion to the glance panel itself (the rest of the
-        # review page is out of this feature's scope). The panel must escape the
-        # name everywhere it surfaces it — visible text and data-attribute alike.
+        # review page is out of this feature's scope).
         start = body.find('<section class="card mh-glance')
         assert start != -1
         panel = body[start:body.find("</section>", start)]
