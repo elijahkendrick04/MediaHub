@@ -123,18 +123,19 @@ human approves before export.
 Done across the builds: animated captions, **beat-synced cutting**,
 **frame-interpolated slow-mo**, filler-word removal, the **caption-edit route**,
 the **visual timeline editor** (manual trim/reorder/speed/smooth/mute/look/
-transition + inline caption-text editing, saving the EDL), **director depth**
-(per-beat emphasis weights → screen time, the cross-clip virality judgement, and
-multi-beat captions offset onto the assembled timeline), and **all the gated
-generative seams** — b-roll (`broll.py`), lip-sync/dubbing (`dub.py`),
-object-removal/inpainting (`object_removal.py`), and eye-contact (`eye_contact.py`).
-Still open:
+transition + **per-clip colour-grade sliders** + inline caption-text editing,
+saving the EDL), **director depth** (per-beat emphasis weights → screen time, the
+cross-clip virality judgement, and multi-beat captions offset onto the assembled
+timeline), and **all the gated generative seams** — b-roll (`broll.py`),
+lip-sync/dubbing (`dub.py`), object-removal/inpainting (`object_removal.py`), and
+eye-contact (`eye_contact.py`). Still open:
 
 1. **Wiring the generative seams' networks** — the provider adapters are scaffolded
    and honest-error today; building each network integration is gated on the
    provider moving into `legal.SUBPROCESSORS` (and the club DPA) first. (GEN)
-2. **Timeline-editor polish** — drag-to-reorder, a waveform/thumbnail scrubber,
-   and per-clip grade sliders (the EDL already carries `ColorAdjust`). (DET)
+2. **Timeline-editor polish** — drag-to-reorder and a waveform/thumbnail scrubber.
+   (Per-clip grade sliders for brightness/contrast/saturation/warmth are done —
+   the EDL's per-clip `ColorAdjust` is now reachable from the editor.) (DET)
 
 Sources for the landscape survey are the 2026 competitor research under
 `docs/research/` and the per-cluster web survey captured during this build

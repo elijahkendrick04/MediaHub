@@ -9925,6 +9925,11 @@ _VIDEO_STUDIO_HTML = """
   .vs-ed-clip input,.vs-ed-clip select,.vs-ed-cue input{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:5px;color:var(--ink,#f0f0f2);padding:4px 6px;font-size:12px}
   .vs-ed-cue{margin:4px 0}
   .vs-ed-cue input{width:100%}
+  .vs-ed-grade{flex-basis:100%;display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:4px;padding-top:7px;border-top:1px dashed var(--border,#2a2a30)}
+  .vs-ed-g{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-muted,#9a9aa3)}
+  .vs-ed-g .vs-ed-glab{min-width:62px;letter-spacing:.02em}
+  .vs-ed-g input[type=range]{width:96px;accent-color:var(--accent,#22d3ee);padding:0}
+  .vs-ed-g .vs-ed-gval{min-width:30px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-dim,#b8b8c0)}
 </style>
 
 <script>
@@ -10138,9 +10143,14 @@ _VIDEO_STUDIO_HTML = """
     jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
   }
 
-  // ---- timeline editor (manual trim / speed / look / transition / captions) ----
+  // ---- timeline editor (manual trim / speed / look / transition / grade / captions) ----
   function transOpts(sel){
     return TRANSITIONS.map(function(t){ return '<option value="'+t+'"'+(t===sel?' selected':'')+'>'+t+'</option>'; }).join('');
+  }
+  function adjIsIdentity(a){
+    return Math.abs(a.brightness||0)<1e-6 && Math.abs((a.contrast==null?1:a.contrast)-1)<1e-6
+      && Math.abs((a.saturation==null?1:a.saturation)-1)<1e-6 && Math.abs((a.gamma==null?1:a.gamma)-1)<1e-6
+      && Math.abs(a.warmth||0)<1e-6 && (a.denoise||0)<=1e-6 && (a.sharpen||0)<=1e-6;
   }
   function openEditor(id){
     editorPid = id;
@@ -10154,10 +10164,18 @@ _VIDEO_STUDIO_HTML = """
       $('vs-editor').hidden = false;
     });
   }
+  function gradeSlider(key, label, mn, mx, st, val){
+    return '<label class="vs-ed-g"><span class="vs-ed-glab">'+label+'</span>'
+      + '<input type="range" class="vs-ed-'+key+'" min="'+mn+'" max="'+mx+'" step="'+st+'" value="'+val+'">'
+      + '<output class="vs-ed-gval">'+(+val).toFixed(2)+'</output></label>';
+  }
   function renderEditorRows(){
     var clips = editorEdl.clips || [];
     $('vs-ed-clips').innerHTML = clips.map(function(c,i){
       var tr = (c.transition_in && c.transition_in.kind) || 'cut';
+      var a = c.adjust || {};
+      var gb = (a.brightness!=null?a.brightness:0), gc = (a.contrast!=null?a.contrast:1);
+      var gs = (a.saturation!=null?a.saturation:1), gw = (a.warmth!=null?a.warmth:0);
       return '<div class="vs-ed-clip" data-i="'+i+'">'
         + '<span class="vs-ed-num">'+(i+1)+'</span>'
         + 'in <input type="number" class="vs-ed-in" min="0" step="100" value="'+(c.in_ms||0)+'">'
@@ -10169,6 +10187,12 @@ _VIDEO_STUDIO_HTML = """
         + '<button class="btn ghost vs-ed-up" data-i="'+i+'" title="move up">&uarr;</button>'
         + '<button class="btn ghost vs-ed-down" data-i="'+i+'" title="move down">&darr;</button>'
         + '<button class="btn ghost vs-ed-del" data-i="'+i+'" title="remove">&times;</button>'
+        + '<div class="vs-ed-grade" title="Per-clip colour grade (deterministic; an untouched grade renders identically)">'
+        +   gradeSlider('bri', 'Brightness', -0.5, 0.5, 0.02, gb)
+        +   gradeSlider('con', 'Contrast', 0.5, 1.8, 0.02, gc)
+        +   gradeSlider('sat', 'Saturation', 0, 2, 0.02, gs)
+        +   gradeSlider('warm', 'Warmth', -1, 1, 0.05, gw)
+        + '</div>'
         + '</div>';
     }).join('') || '<p class="muted">No clips.</p>';
     var cues = (editorEdl.captions && editorEdl.captions.cues) || [];
@@ -10187,6 +10211,14 @@ _VIDEO_STUDIO_HTML = """
       c.mute = row.querySelector('.vs-ed-mute').checked;
       var ts = row.querySelector('.vs-ed-trans');
       if(ts){ c.transition_in = c.transition_in || {}; c.transition_in.kind = ts.value; }
+      // Per-clip grade: edit the four exposed knobs, preserve any others, and
+      // null an identity grade so an untouched clip stays byte-identical (mirrors
+      // ColorAdjust.is_identity on the server).
+      var a = c.adjust || {};
+      var f = function(sel, dflt){ var v = parseFloat(row.querySelector(sel).value); return isNaN(v) ? dflt : v; };
+      a.brightness = f('.vs-ed-bri', 0); a.contrast = f('.vs-ed-con', 1);
+      a.saturation = f('.vs-ed-sat', 1); a.warmth = f('.vs-ed-warm', 0);
+      c.adjust = adjIsIdentity(a) ? null : a;
     });
     if(editorEdl.captions && editorEdl.captions.cues){
       Array.prototype.forEach.call($('vs-ed-caps').querySelectorAll('.vs-ed-cue'), function(row){
@@ -10213,6 +10245,13 @@ _VIDEO_STUDIO_HTML = """
     if(b.classList.contains('vs-ed-up')) moveClip(i,-1);
     else if(b.classList.contains('vs-ed-down')) moveClip(i,1);
     else if(b.classList.contains('vs-ed-del')) removeClip(i);
+  });
+  $('vs-ed-clips').addEventListener('input', function(e){
+    var inp = e.target;
+    if(inp && inp.tagName === 'INPUT' && inp.type === 'range'){
+      var out = inp.parentNode.querySelector('.vs-ed-gval');
+      if(out) out.textContent = (parseFloat(inp.value)||0).toFixed(2);
+    }
   });
   $('vs-ed-close').addEventListener('click', function(){ $('vs-editor').hidden = true; });
   $('vs-ed-save').addEventListener('click', function(){

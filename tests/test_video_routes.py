@@ -265,6 +265,7 @@ def test_studio_page_has_timeline_editor(app):
         body = c.get("/video").data
         assert b"Edit timeline" in body  # per-project editor entry point
         assert b"vstudio-modal" in body and b"vs-ed-clips" in body  # the editor sheet
+        assert b"vs-ed-grade" in body and b"gradeSlider" in body  # per-clip grade sliders
         # the editor's GET/POST URL template must be resolved (no leftover placeholder)
         assert b"__PROJECT_TMPL__" not in body
         assert b"/api/video/projects/__PID__" in body  # client-side id-substitution template
@@ -300,6 +301,68 @@ def test_timeline_editor_save_path_persists_and_reopens_approval(app):
         assert saved["edl"]["clips"][0]["source"] == "b.mp4"  # reorder persisted
         assert saved["edl"]["clips"][0]["out_ms"] == 2000  # trim persisted
         assert saved["status"] == "draft"  # editing reopens approval (rule 6)
+
+
+def test_timeline_editor_persists_per_clip_grade(app):
+    """A per-clip colour grade posted from the editor survives the save round-trip."""
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            status="approved",
+            edl=EDL(clips=[Clip(source="a.mp4", in_ms=0, out_ms=3000)]),
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        new_edl = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]
+        # The editor writes a non-identity grade onto the clip.
+        new_edl["clips"][0]["adjust"] = {
+            "brightness": 0.1,
+            "contrast": 1.2,
+            "saturation": 1.3,
+            "warmth": 0.4,
+        }
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": new_edl})
+        assert r.status_code == 200
+        adj = r.get_json()["project"]["edl"]["clips"][0]["adjust"]
+        assert adj is not None
+        assert adj["contrast"] == 1.2 and adj["warmth"] == 0.4  # grade persisted
+
+
+def test_timeline_editor_identity_grade_stays_omitted(app):
+    """An identity grade serialises back as null (un-graded clip stays byte-identical)."""
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            status="approved",
+            edl=EDL(clips=[Clip(source="a.mp4", in_ms=0, out_ms=3000)]),
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        new_edl = c.get(f"/api/video/projects/{proj.id}").get_json()["project"]["edl"]
+        # An identity grade (the client nulls these, but tolerate one arriving).
+        new_edl["clips"][0]["adjust"] = {
+            "brightness": 0.0,
+            "contrast": 1.0,
+            "saturation": 1.0,
+            "warmth": 0.0,
+        }
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": new_edl})
+        assert r.status_code == 200
+        assert r.get_json()["project"]["edl"]["clips"][0]["adjust"] is None  # omitted
 
 
 def test_reel_requires_asset_ids(app):
@@ -353,7 +416,8 @@ def test_enhance_music_attaches_audio_plan(app):
     with application.test_client() as c:
         _pin(c, "alpha")
         r = c.post(
-            f"/api/video/projects/{proj.id}/enhance", json={"enhance_audio": True, "with_music": False}
+            f"/api/video/projects/{proj.id}/enhance",
+            json={"enhance_audio": True, "with_music": False},
         )
         assert r.status_code == 200
         assert r.get_json()["project"]["edl"]["audio"]["enhance_voice"] is True
@@ -370,7 +434,10 @@ def test_enhance_foreign_profile_404(app):
     )
     with application.test_client() as c:
         _pin(c, "beta")
-        assert c.post(f"/api/video/projects/{proj.id}/enhance", json={"look": "vivid"}).status_code == 404
+        assert (
+            c.post(f"/api/video/projects/{proj.id}/enhance", json={"look": "vivid"}).status_code
+            == 404
+        )
 
 
 def test_caption_edit_route_corrects_text_and_reopens_approval(app):
@@ -411,7 +478,9 @@ def test_caption_edit_route_no_captions_is_400(app):
     )
     with application.test_client() as c:
         _pin(c, "alpha")
-        r = c.post(f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "index": 0, "text": "x"})
+        r = c.post(
+            f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "index": 0, "text": "x"}
+        )
         assert r.status_code == 400
 
 
