@@ -53,6 +53,10 @@ _ARG_FILL = {
     # it with a junk token is exactly the guarantee to pin.
     "token": "no-such-wall-token",
     "pack_id": "no-such-pack",
+    # 1.11: the charts SVG route carries a chart id. A foreign account must be
+    # refused by _can_access_run before any chart (which embeds athlete names)
+    # is ever rendered, so sweeping it with a junk id pins that guarantee.
+    "chart_id": "no-such-chart",
 }
 _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
 
