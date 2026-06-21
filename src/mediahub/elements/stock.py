@@ -22,10 +22,13 @@ preserved per asset and `commercial_ok` is auditable per platform.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import random
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -405,8 +408,48 @@ _PROXY_HOST_SUFFIXES = (
 _THUMB_MAX_BYTES = 12 * 1024 * 1024  # a thumbnail/poster is far smaller
 _THUMB_TIMEOUT = 12  # seconds
 _THUMB_MAX_HOPS = 3
-_THUMB_UA = "MediaHub/1.0 (stock thumbnail proxy)"
+# A descriptive, contactable UA — Wikimedia's User-Agent policy rate-limits or
+# blocks generic/empty agents harder.
+_THUMB_UA = "MediaHub/1.0 (+https://github.com/elijahkendrick04/mediahub) stock-thumb-proxy"
 _THUMB_OK_CT_PREFIXES = ("image/", "video/")
+
+# Wikimedia (and friends) return 429/503 when a grid's worth of tiles is fetched
+# at once from one IP — worst from a datacenter IP, which is exactly the deploy.
+# Two guards keep the gallery from showing "No preview":
+#   * a small semaphore bounds how many upstream fetches run concurrently, so a
+#     burst of 24 tile requests becomes a few polite waves instead of a stampede;
+#   * a short jittered retry rides out a transient 429/503.
+# Successful bytes are then cached on disk (keyed by URL), so repeat views — and
+# every other viewer — serve first-party with no upstream hit at all.
+_THUMB_RETRY_STATUSES = (429, 503)
+_THUMB_MAX_RETRIES = 3
+_THUMB_FETCH_GATE = threading.Semaphore(
+    max(1, int(os.environ.get("MEDIAHUB_STOCK_THUMB_CONCURRENCY", "4")))
+)
+
+# content-type <-> cache-file extension (raster/video only; SVG is refused — it
+# can carry script, same rule as the brand-logo mirror).
+_THUMB_CT_TO_EXT = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/avif": "avif",
+    "video/webm": "webm",
+    "video/mp4": "mp4",
+    "video/ogg": "ogv",
+}
+_THUMB_EXT_TO_CT = {
+    "jpg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
+    "avif": "image/avif",
+    "webm": "video/webm",
+    "mp4": "video/mp4",
+    "ogv": "video/ogg",
+}
 
 
 def is_proxy_host(host: str) -> bool:
@@ -415,16 +458,63 @@ def is_proxy_host(host: str) -> bool:
     return any(h == s or h.endswith("." + s) for s in _PROXY_HOST_SUFFIXES)
 
 
+def _thumb_cache_dir() -> Path:
+    base = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[2])))
+    d = base / "stock_thumb_cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _thumb_cache_key(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
+
+
+def _thumb_cache_get(key: str) -> Optional[tuple[bytes, str]]:
+    try:
+        d = _thumb_cache_dir()
+    except Exception:  # pragma: no cover - disk
+        return None
+    for ext, ctype in _THUMB_EXT_TO_CT.items():
+        p = d / f"{key}.{ext}"
+        if p.exists():
+            try:
+                return p.read_bytes(), ctype
+            except OSError:  # pragma: no cover - disk
+                return None
+    return None
+
+
+def _thumb_cache_put(key: str, data: bytes, ctype: str) -> None:
+    ext = _THUMB_CT_TO_EXT.get(ctype)
+    if not ext:
+        return
+    try:
+        tmp = _thumb_cache_dir() / f"{key}.{ext}.part"
+        tmp.write_bytes(data)
+        tmp.replace(_thumb_cache_dir() / f"{key}.{ext}")  # atomic publish
+    except OSError:  # pragma: no cover - disk
+        pass
+
+
 def fetch_thumb(url: str, *, timeout: int = _THUMB_TIMEOUT) -> tuple[Optional[bytes], str]:
     """Fetch a stock thumbnail's bytes for first-party serving under the CSP.
 
     Host-allow-listed to the known stock CDNs, SSRF-checked on every redirect
-    hop, size-capped, and image/video-only. Returns ``(data, content_type)`` —
-    or ``(None, "")`` on any refusal/failure. Never raises.
+    hop, size-capped, and image/video-only. Served from an on-disk cache when
+    available; on a cold miss the upstream fetch is concurrency-bounded and
+    retries a transient 429/503 so a gallery's burst doesn't trip the source's
+    rate limit. Returns ``(data, content_type)`` — or ``(None, "")`` on any
+    refusal/failure. Never raises.
     """
     url = (url or "").strip()
     if not (url.startswith("http://") or url.startswith("https://")):
         return None, ""
+
+    key = _thumb_cache_key(url)
+    cached = _thumb_cache_get(key)
+    if cached is not None:
+        return cached
+
     try:
         import requests
 
@@ -432,8 +522,21 @@ def fetch_thumb(url: str, *, timeout: int = _THUMB_TIMEOUT) -> tuple[Optional[by
     except Exception:  # pragma: no cover - both are core deps
         return None, ""
 
+    # Bound upstream concurrency so 24 simultaneous tile fetches become a few
+    # polite waves rather than a 429-tripping stampede.
+    with _THUMB_FETCH_GATE:
+        data, ctype = _fetch_thumb_upstream(url, requests, is_url_safe, timeout)
+    if data:
+        _thumb_cache_put(key, data, ctype)
+    return data, ctype
+
+
+def _fetch_thumb_upstream(url, requests, is_url_safe, timeout):  # noqa: ANN001
+    """Network fetch behind the cache + concurrency gate. Never raises."""
     current = url
-    for _ in range(_THUMB_MAX_HOPS):
+    attempts = 0
+    # Bounded by hops + retries so the loop always terminates.
+    for _ in range(_THUMB_MAX_HOPS + _THUMB_MAX_RETRIES + 1):
         host = urlparse(current).hostname or ""
         # Allow-list first (cheap), then SSRF-resolve the host (re-checked every
         # hop so a redirect can't smuggle the fetch onto a private address).
@@ -456,6 +559,16 @@ def fetch_thumb(url: str, *, timeout: int = _THUMB_TIMEOUT) -> tuple[Optional[by
             if not nxt:
                 return None, ""
             current = urljoin(current, nxt)
+            continue
+        if r.status_code in _THUMB_RETRY_STATUSES and attempts < _THUMB_MAX_RETRIES:
+            attempts += 1
+            try:
+                r.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+            # Jittered backoff spreads a synchronised burst apart so the retry
+            # lands after the rate-limit window, not on top of it.
+            time.sleep(min(2.0, 0.4 * attempts) + random.uniform(0.0, 0.3))
             continue
         if r.status_code != 200:
             return None, ""
@@ -481,7 +594,7 @@ def fetch_thumb(url: str, *, timeout: int = _THUMB_TIMEOUT) -> tuple[Optional[by
         if not data:
             return None, ""
         return data, ctype
-    return None, ""  # too many redirects
+    return None, ""  # too many redirects/retries
 
 
 # --------------------------------------------------------------------------- #
