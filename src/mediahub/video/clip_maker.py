@@ -84,6 +84,8 @@ def build_clip_edl(
     colours: Optional[BrandColours] = None,
     transition_kind: str = "cut",
     transition_ms: int = 400,
+    look: str = "none",
+    audio_plan=None,
     fps: int = 30,
 ) -> EDL:
     """Assemble an EDL from chosen moments + per-moment crops + a caption track.
@@ -91,7 +93,8 @@ def build_clip_edl(
     Pure and deterministic: no FFmpeg, no transcription — those happen in
     :func:`clip_maker` and are passed in. Each moment becomes one clip on the
     target canvas; the first joins with a hard cut, the rest with the chosen
-    transition. The caption track and an optional brand title ride on top.
+    transition. The caption track, an optional brand title, the named colour
+    ``look`` and the ``audio_plan`` all ride on top.
     """
     colours = colours or BrandColours()
     width, height = canvas_for(format_name)
@@ -137,6 +140,8 @@ def build_clip_edl(
         captions=track,
         keep_audio=True,
         background=colours.background or DEFAULT_BACKGROUND,
+        look=look or "none",
+        audio=audio_plan if (audio_plan is not None and not audio_plan.is_empty()) else None,
     )
 
 
@@ -153,20 +158,33 @@ def clip_maker(
     transition_kind: str = "cut",
     transition_ms: int = 400,
     label_moments: bool = False,
+    look: str = "none",
+    enhance_audio: bool = False,
+    with_music: bool = False,
+    music_mood: str = "uplifting",
+    music_platform: str = "instagram",
+    loudness: str = "social",
+    remove_silence: bool = False,
     fps: int = 30,
     # Injection seams (default to the real, FFmpeg-backed engine pieces):
     probe_fn: Optional[Callable] = None,
     detect_fn: Optional[Callable] = None,
     reframe_fn: Optional[Callable] = None,
     caption_fn: Optional[Callable] = None,
+    silence_fn: Optional[Callable] = None,
+    music_fn: Optional[Callable] = None,
 ) -> ClipMakerResult:
     """Turn a footage clip into a branded :class:`ClipMakerResult`.
 
     Deterministic where it matters: the same clip yields the same moments,
-    crops, and timeline. Captions ride only on the single-moment cut (a
-    multi-moment montage has no single transcript timeline — honest gap, noted
-    in the manifest). The optional ``label_moments`` adds AI moment names, which
-    never change which moments were detected.
+    crops, timeline, grade and soundtrack. Captions ride only on the
+    single-moment cut (a multi-moment montage or a silence-tightened clip has no
+    single transcript timeline — honest gap, noted in the manifest). The optional
+    ``label_moments`` adds AI moment names, which never change which moments were
+    detected. ``look`` applies a deterministic colour grade; ``enhance_audio`` /
+    ``with_music`` build a soundtrack (deterministic DSP + a library music pick);
+    ``remove_silence`` tightens the *whole* clip by cutting dead air instead of
+    picking highlights.
     """
     source = str(source)
     colours = colours or BrandColours()
@@ -176,11 +194,21 @@ def clip_maker(
     probe = (probe_fn or _default_probe)(source)
     duration_ms = probe.duration_ms
 
-    detect = detect_fn or _moments.detect_moments
-    chosen = detect(
-        source, duration_ms=duration_ms, target_len_ms=target_len_ms, max_moments=target_moments
-    )
-    chosen = list(chosen)[:target_moments]
+    silence_note = "off"
+    if remove_silence:
+        # Tighten the whole clip: keep the speech, cut the dead air. This is a
+        # distinct mode from highlight detection (Descript "Remove Gaps").
+        keeps = _silence_keeps(source, duration_ms, silence_fn)
+        chosen = [
+            Moment(s, e, 1.0, "speech", f"kept {s // 1000}-{e // 1000}s") for (s, e) in keeps
+        ]
+        silence_note = f"removed {_silence_removed(keeps, duration_ms) // 1000}s of dead air"
+    else:
+        detect = detect_fn or _moments.detect_moments
+        chosen = detect(
+            source, duration_ms=duration_ms, target_len_ms=target_len_ms, max_moments=target_moments
+        )
+        chosen = list(chosen)[:target_moments]
 
     if label_moments:
         labelled: list[Moment] = []
@@ -200,11 +228,12 @@ def clip_maker(
             crops.append(crop)
             reframed = reframed or bool(crop)
 
-    # Captions — single-moment only (verbatim transcript over that window).
+    # Captions — single-clip only (one verbatim transcript window). A montage or
+    # a silence-tightened clip has many windows, so captions are skipped honestly.
     caption_track: Optional[dict] = None
     captions_note = "off"
     if with_captions and chosen:
-        if target_moments == 1:
+        if len(chosen) == 1:
             cap = caption_fn or _captions.windowed_caption_track
             caption_track = cap(
                 source,
@@ -217,7 +246,17 @@ def clip_maker(
             )
             captions_note = "burned" if caption_track else "no-speech-or-asr-off"
         else:
-            captions_note = "skipped-multimoment"
+            captions_note = "skipped-silencecut" if remove_silence else "skipped-multimoment"
+
+    audio_plan = _build_audio_plan(
+        enhance_audio=enhance_audio,
+        with_music=with_music,
+        mood=music_mood,
+        platform=music_platform,
+        loudness=loudness,
+        content_key=source,
+        music_fn=music_fn,
+    )
 
     edl = build_clip_edl(
         source,
@@ -230,6 +269,8 @@ def clip_maker(
         colours=colours,
         transition_kind=transition_kind,
         transition_ms=transition_ms,
+        look=look,
+        audio_plan=audio_plan,
         fps=fps,
     )
 
@@ -242,6 +283,9 @@ def clip_maker(
         "moments": [m.to_dict() for m in chosen],
         "reframed": reframed,
         "captions": captions_note,
+        "look": look or "none",
+        "silence": silence_note,
+        "audio": audio_plan.to_dict() if (audio_plan and not audio_plan.is_empty()) else None,
         "timeline_ms": edl.total_timeline_ms(),
     }
     return ClipMakerResult(edl=edl, moments=chosen, manifest=manifest)
@@ -251,6 +295,68 @@ def _default_probe(source: str) -> ClipProbe:
     from mediahub.video.probe import probe_clip
 
     return probe_clip(source)
+
+
+def _silence_keeps(source: str, duration_ms: int, silence_fn: Optional[Callable]) -> list:
+    """The speech windows to keep after cutting dead air (honest fallback).
+
+    Defers to ``video.silence.plan_jump_cuts``; on any failure (no FFmpeg, etc.)
+    it keeps the whole clip rather than a broken split — the tighten is an
+    enhancement, never a render-blocker.
+    """
+    if duration_ms <= 0:
+        return [(0, 0)]
+    fn = silence_fn
+    if fn is None:
+        from mediahub.video.silence import plan_jump_cuts as fn  # type: ignore[no-redef]
+    try:
+        keeps = list(fn(source, duration_ms))
+    except Exception:
+        keeps = []
+    return keeps or [(0, duration_ms)]
+
+
+def _silence_removed(keeps: list, duration_ms: int) -> int:
+    kept = sum(max(0, e - s) for s, e in keeps)
+    return max(0, duration_ms - kept)
+
+
+def _build_audio_plan(
+    *,
+    enhance_audio: bool,
+    with_music: bool,
+    mood: str,
+    platform: str,
+    loudness: str,
+    content_key: str,
+    music_fn: Optional[Callable],
+):
+    """Build an :class:`~mediahub.video.edl.AudioPlan` (or ``None`` when inert).
+
+    The music *mood* is a fixed caller input here (Clip-Maker has no director);
+    the *pick* is the deterministic library floor. An honest ``None`` music path
+    (empty library) keeps the plan voice-only rather than faking a track.
+    """
+    from mediahub.video.edl import AudioPlan
+
+    if not (enhance_audio or with_music):
+        return None
+    music_path = ""
+    if with_music:
+        resolver = music_fn
+        if resolver is None:
+            from mediahub.video.reel_builder import resolve_music as resolver  # type: ignore[no-redef]
+        try:
+            music_path = resolver(mood, platform=platform, content_key=content_key) or ""
+        except Exception:
+            music_path = ""
+    plan = AudioPlan(
+        music=music_path,
+        enhance_voice=bool(enhance_audio),
+        loudness=(loudness or "social") if enhance_audio else "",
+        duck=True,
+    )
+    return None if plan.is_empty() else plan
 
 
 __all__ = [

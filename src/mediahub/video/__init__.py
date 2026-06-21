@@ -8,21 +8,29 @@ approval-before-export flow.
 The pieces, smallest to largest:
 
 * :mod:`.probe`       — measure a clip (duration, shape, audio) via ``ffmpeg -i``.
-* :mod:`.edl`         — the Edit Decision List + its deterministic FFmpeg compiler.
+* :mod:`.edl`         — the Edit Decision List (+ colour grade + audio plan) and
+  its deterministic FFmpeg compiler.
 * :mod:`.moments`     — deterministic highlight detection (+ optional AI labelling).
+* :mod:`.silence`     — deterministic dead-air detection + jump-cut planning.
 * :mod:`.reframe`     — saliency-tracked aspect reframe (16:9 ↔ 9:16 ↔ 1:1).
+* :mod:`.enhance`     — deterministic enhancement passes (stabilise, looks, upscale).
 * :mod:`.captions`    — the editable styled caption layer over the ASR seam.
+* :mod:`.audio_post`  — soundtrack pass: clean voice + ducked music + loudness.
 * :mod:`.render`      — render an EDL to MP4, cache-keyed, server-side, honest.
-* :mod:`.clip_maker`  — Clip-Maker-for-sport: footage → branded cut (the centrepiece).
+* :mod:`.clip_maker`  — Clip-Maker-for-sport: footage → branded cut (one clip).
+* :mod:`.director`    — AI judgement: order/look/mood/hook for a reel (honest default).
+* :mod:`.reel_builder`— assemble a branded reel from many clips (the centrepiece).
 * :mod:`.matting`     — video background removal, behind a provider slot (flagged).
 * :mod:`.avatars`     — opt-in, disclosed AI avatars, behind a provider slot (flagged).
 * :mod:`.ingest`      — bring footage into the media library (consent-aware).
 * :mod:`.projects`    — per-profile persistence for saved timelines + approval state.
 
-The standing rules hold throughout: detection/ranking/compilation are
-**deterministic**; the one judgement surface (moment labelling) is AI and
-honest-erroring; rendering is **server-side** and cached; a **human approves
-before export**; and synthetic people are opt-in and disclosed.
+The standing rules hold throughout: detection/ranking/compilation, the colour
+grade, the silence cuts and the soundtrack DSP are all **deterministic**; the
+judgement surfaces (moment labelling, the reel director's order/look/mood/hook)
+are AI and honest-erroring with a deterministic default; rendering is
+**server-side** and cached; a **human approves before export**; and synthetic
+people are opt-in and disclosed.
 """
 
 from .edl import EDL, Clip, EDLError, TextOverlay, Transition, compile_filtergraph, validate

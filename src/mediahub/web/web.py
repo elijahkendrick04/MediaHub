@@ -9799,13 +9799,31 @@ _VIDEO_STUDIO_HTML = """
           <option value="3">3 (montage)</option>
         </select>
       </label>
+      <label>Look
+        <select id="vs-look">__LOOK_OPTIONS__</select>
+      </label>
       <label class="vstudio-check"><input type="checkbox" id="vs-captions" checked> Captions (spoken words on screen)</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-reframe" checked> Reframe to fit (keep the subject)</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-enhance-audio"> Clean &amp; level the audio</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-music"> Add a music bed</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-silence"> Remove silences (tighten talking clips)</label>
       <button class="btn primary" id="vs-make" type="button">Make clip &rarr;</button>
       <span id="vs-make-status" class="muted" aria-live="polite"></span>
     </div>
   </section>
 </div>
+
+<section class="vstudio-panel vstudio-reel" id="vs-reel-bar" style="margin-top:var(--sp-5)" hidden>
+  <h2 class="vstudio-h">&#10024; AI reel &middot; from <span id="vs-reel-count">0</span> selected clip(s)</h2>
+  <p class="muted">Tick &ldquo;reel&rdquo; on two or more clips above, and the director will
+  order the best moments, grade them, score them to music and write a hook &mdash; one
+  branded reel for you to approve.</p>
+  <div class="vstudio-reel-row">
+    <input type="text" id="vs-reel-brief" maxlength="200" placeholder="What's this reel about? (optional context for the director)">
+    <button class="btn primary" id="vs-reel-make" type="button">Direct the reel &rarr;</button>
+    <span id="vs-reel-status" class="muted" aria-live="polite"></span>
+  </div>
+</section>
 
 <section class="vstudio-panel" style="margin-top:var(--sp-5)">
   <h2 class="vstudio-h">3 &middot; Your clips</h2>
@@ -9839,6 +9857,12 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--border,#33333a)}
   .vstudio-badge.approved{color:#34d399;border-color:#34d39955}
   .vstudio-badge.draft{color:#fbbf24;border-color:#fbbf2455}
+  .vstudio-pick{position:absolute;top:4px;right:4px;display:flex;align-items:center;gap:3px;font-size:10px;color:#fff;background:rgba(0,0,0,.62);border-radius:5px;padding:2px 5px;cursor:pointer;user-select:none}
+  .vstudio-pick input{margin:0;cursor:pointer}
+  .vstudio-reel-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .vstudio-reel-row input[type=text]{flex:1 1 220px;background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:8px 10px;font-size:14px}
+  .vstudio-enh{align-items:center}
+  .vstudio-enh select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:5px 7px;font-size:12px}
 </style>
 
 <script>
@@ -9851,7 +9875,11 @@ _VIDEO_STUDIO_HTML = """
   var RENDER_TMPL = "__PROJECT_RENDER_TMPL__";
   var APPROVE_TMPL = "__PROJECT_APPROVE_TMPL__";
   var FILE_TMPL = "__PROJECT_FILE_TMPL__";
+  var REEL_URL = "__REEL_URL__";
+  var ENHANCE_TMPL = "__PROJECT_ENHANCE_TMPL__";
+  var LOOK_OPTIONS = "__LOOK_OPTIONS__";
   var selectedId = null;
+  var reelSet = {};
   var mediaRecorder = null, recChunks = [];
 
   function $(id){ return document.getElementById(id); }
@@ -9918,10 +9946,15 @@ _VIDEO_STUDIO_HTML = """
       wrap.innerHTML = items.map(function(a){
         return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
           + '<video src="'+esc(a.file_url)+'#t=0.1" preload="metadata" muted playsinline></video>'
+          + '<label class="vstudio-pick" title="Include in AI reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
           + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption></figure>';
       }).join('');
       Array.prototype.forEach.call(wrap.querySelectorAll('.vstudio-tile'), function(el){
-        el.addEventListener('click', function(){ selectFootage(el.getAttribute('data-id'), items); });
+        el.addEventListener('click', function(ev){ if(ev.target.closest('.vstudio-pick')) return; selectFootage(el.getAttribute('data-id'), items); });
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-reel-pick'), function(cb){
+        cb.addEventListener('click', function(ev){ ev.stopPropagation(); });
+        cb.addEventListener('change', function(){ toggleReel(cb.getAttribute('data-id'), cb.checked); });
       });
     });
   }
@@ -9946,9 +9979,37 @@ _VIDEO_STUDIO_HTML = """
       title: $('vs-title').value,
       target_moments: parseInt($('vs-moments').value,10)||1,
       with_captions: $('vs-captions').checked,
-      with_reframe: $('vs-reframe').checked
+      with_reframe: $('vs-reframe').checked,
+      look: $('vs-look').value,
+      enhance_audio: $('vs-enhance-audio').checked,
+      with_music: $('vs-music').checked,
+      remove_silence: $('vs-silence').checked
     }).then(function(j){
       if(j.ok){ status.textContent = 'Clip created. Render it below.'; loadProjects(); }
+      else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
+    });
+  });
+
+  // ---- AI reel (multi-clip) ----
+  function toggleReel(id, on){
+    if(on){ reelSet[id] = true; } else { delete reelSet[id]; }
+    var n = Object.keys(reelSet).length;
+    $('vs-reel-count').textContent = n;
+    $('vs-reel-bar').hidden = (n < 1);
+  }
+  $('vs-reel-make').addEventListener('click', function(){
+    var ids = Object.keys(reelSet);
+    if(!ids.length){ return; }
+    var status = $('vs-reel-status'); status.textContent = 'The director is watching '+ids.length+' clip(s)...';
+    var btn = $('vs-reel-make'); btn.disabled = true;
+    jpost(REEL_URL, {
+      asset_ids: ids,
+      format: $('vs-format').value,
+      brief_context: $('vs-reel-brief').value,
+      with_captions: true, with_reframe: true, with_music: true, enhance_audio: true
+    }).then(function(j){
+      btn.disabled = false;
+      if(j.ok){ status.textContent = 'Reel directed. Render it below.'; loadProjects(); }
       else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
     });
   });
@@ -9966,14 +10027,35 @@ _VIDEO_STUDIO_HTML = """
         var approveBtn = (p.rendered && p.status!=='approved')
           ? '<button class="btn primary vs-approve" data-id="'+esc(p.id)+'">Approve</button>' : '';
         var renderBtn = '<button class="btn ghost vs-render" data-id="'+esc(p.id)+'">'+(p.rendered?'Re-render':'Render')+'</button>';
+        var enhanceRow = '<div class="row vstudio-enh">'
+          + '<select class="vs-look-sel" data-id="'+esc(p.id)+'" aria-label="Colour look">'+LOOK_OPTIONS+'</select>'
+          + '<button class="btn ghost vs-apply" data-id="'+esc(p.id)+'">Apply look</button>'
+          + '<button class="btn ghost vs-music" data-id="'+esc(p.id)+'" title="Clean voice + add a music bed">+ Music</button>'
+          + '<button class="btn ghost vs-stab" data-id="'+esc(p.id)+'" title="Steady shaky footage">Stabilise</button>'
+          + '</div>';
         return '<div class="vstudio-proj">'+preview
           + '<div class="name">'+esc(p.name)+'</div>'
           + '<span class="vstudio-badge '+esc(p.status)+'">'+esc(p.status)+'</span> '
           + '<span class="muted" style="font-size:12px">'+esc(p.format)+' &middot; '+p.clips+' clip(s) &middot; '+fmtDur(p.duration_ms)+'</span>'
-          + '<div class="row">'+renderBtn+approveBtn+exportBtn+'</div></div>';
+          + enhanceRow
+          + '<div class="row">'+renderBtn+approveBtn+exportBtn+'</div>'
+          + '<span class="muted vs-enh-status" data-id="'+esc(p.id)+'" style="font-size:12px"></span></div>';
       }).join('');
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-render'), function(b){ b.addEventListener('click', function(){ renderProject(b.getAttribute('data-id'), b); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-approve'), function(b){ b.addEventListener('click', function(){ approveProject(b.getAttribute('data-id')); }); });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-apply'), function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-id'); var sel=wrap.querySelector('.vs-look-sel[data-id="'+id+'"]'); enhanceProject(id, {look: sel?sel.value:'none'}, b); }); });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-music'), function(b){ b.addEventListener('click', function(){ enhanceProject(b.getAttribute('data-id'), {enhance_audio:true, with_music:true}, b); }); });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-stab'), function(b){ b.addEventListener('click', function(){ enhanceProject(b.getAttribute('data-id'), {stabilize:true}, b); }); });
+    });
+  }
+  function enhanceProject(id, body, btn){
+    var st = document.querySelector('.vs-enh-status[data-id="'+id+'"]');
+    if(btn){ btn.disabled = true; }
+    if(st){ st.textContent = 'Applying...'; }
+    jpost(url(ENHANCE_TMPL, id), body).then(function(j){
+      if(btn){ btn.disabled = false; }
+      if(j.ok){ if(st){ st.textContent = 'Applied — re-render to see it.'; } loadProjects(); }
+      else { if(st){ st.textContent = 'Failed: '+(j.message||j.error||'error'); } }
     });
   }
   function renderProject(id, btn){
@@ -44298,6 +44380,13 @@ voice, and queues them for one-click approval.</p>
                 break
         return BrandColours(ground="", onground="", accent=accent, background=background)
 
+    def _video_safe_look(raw) -> str:
+        """Coerce a requested colour look to a known name ('none' otherwise)."""
+        from mediahub.video.edl import LOOKS
+
+        name = str(raw or "none").strip().lower()
+        return name if name in LOOKS else "none"
+
     @app.route("/video")
     def video_studio_page():
         """Video Studio — upload/record footage, run Clip-Maker, review + export."""
@@ -44338,11 +44427,17 @@ voice, and queues them for one-click approval.</p>
             "planned but not yet rendered. Captions also need server speech-to-text "
             "(<code>MEDIAHUB_ASR_PROVIDER</code>).</p>"
         )
+        from mediahub.video.enhance import describe_look, look_names
+
+        look_options = "".join(
+            f'<option value="{_h(n)}">{_h(describe_look(n))}</option>' for n in look_names()
+        )
         body = (
             _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
             .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
             .replace("__FOOTAGE_LIST_URL__", url_for("api_video_footage_list"))
             .replace("__CLIPMAKER_URL__", url_for("api_video_clip_maker"))
+            .replace("__REEL_URL__", url_for("api_video_reel"))
             .replace("__PROJECTS_URL__", url_for("api_video_projects_list"))
             .replace(
                 "__PROJECT_RENDER_TMPL__", url_for("api_video_project_render", project_id="__PID__")
@@ -44352,8 +44447,13 @@ voice, and queues them for one-click approval.</p>
                 url_for("api_video_project_approve", project_id="__PID__"),
             )
             .replace(
+                "__PROJECT_ENHANCE_TMPL__",
+                url_for("api_video_project_enhance", project_id="__PID__"),
+            )
+            .replace(
                 "__PROJECT_FILE_TMPL__", url_for("api_video_project_file", project_id="__PID__")
             )
+            .replace("__LOOK_OPTIONS__", look_options)
             .replace("__ENGINE_NOTE__", engine_note)
         )
         return _layout("Video studio", body, active="video")
@@ -44454,6 +44554,11 @@ voice, and queues them for one-click approval.</p>
         title = (payload.get("title") or "").strip()[:120]
         with_captions = bool(payload.get("with_captions", True))
         with_reframe = bool(payload.get("with_reframe", True))
+        look = _video_safe_look(payload.get("look"))
+        enhance_audio = bool(payload.get("enhance_audio", False))
+        with_music = bool(payload.get("with_music", False))
+        remove_silence = bool(payload.get("remove_silence", False))
+        music_mood = (payload.get("music_mood") or "uplifting").strip().lower()[:24]
 
         from mediahub.video.clip_maker import clip_maker
         from mediahub.video.probe import ProbeUnavailable
@@ -44466,6 +44571,11 @@ voice, and queues them for one-click approval.</p>
                 title=title,
                 with_captions=with_captions,
                 with_reframe=with_reframe,
+                look=look,
+                enhance_audio=enhance_audio,
+                with_music=with_music,
+                music_mood=music_mood,
+                remove_silence=remove_silence,
                 colours=_video_brand_colours(),
             )
         except ProbeUnavailable:
@@ -44492,6 +44602,180 @@ voice, and queues them for one-click approval.</p>
         )
         proj = _video_project_store().save(proj)
         return jsonify({"ok": True, "project_id": proj.id, "manifest": result.manifest})
+
+    @app.route("/api/video/reel", methods=["POST"])
+    def api_video_reel():
+        """Build an AI-directed reel from several footage clips and save it.
+
+        The headline footage flow: pick a handful of clips, the director (AI
+        judgement, honest default) orders the strongest detected moments, picks a
+        look, a music mood and a hook, and the deterministic engine assembles a
+        branded, captioned, graded, scored vertical reel — for human approval
+        before export, like everything else.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        payload = request.get_json(silent=True) or {}
+        raw_ids = payload.get("asset_ids") or []
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({"error": "asset_ids_required"}), 400
+        asset_ids = [str(a).strip() for a in raw_ids if str(a).strip()][:8]
+        if not asset_ids:
+            return jsonify({"error": "asset_ids_required"}), 400
+        store = _v8_get_media_store()
+        paths: list[str] = []
+        profile_id = None
+        for aid in asset_ids:
+            asset = store.get(aid)
+            if not asset or asset.type != "footage":
+                return jsonify({"error": "footage_not_found", "asset_id": aid}), 404
+            if not _session_can_access_profile(asset.profile_id):
+                return jsonify({"error": "forbidden"}), 403
+            if not Path(asset.path).exists():
+                return jsonify({"error": "footage_missing_on_disk", "asset_id": aid}), 410
+            paths.append(asset.path)
+            profile_id = asset.profile_id
+
+        fmt = (payload.get("format") or "story").strip().lower()
+        from mediahub.visual.motion import MOTION_FORMATS
+
+        if fmt not in MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        try:
+            max_beats = max(1, min(5, int(payload.get("max_beats", 5))))
+        except (TypeError, ValueError):
+            max_beats = 5
+        brief = (payload.get("brief_context") or "").strip()[:200]
+        with_captions = bool(payload.get("with_captions", True))
+        with_reframe = bool(payload.get("with_reframe", True))
+        with_music = bool(payload.get("with_music", True))
+        enhance_audio = bool(payload.get("enhance_audio", True))
+
+        from mediahub.video.probe import ProbeUnavailable
+        from mediahub.video.reel_builder import make_reel
+
+        try:
+            result = make_reel(
+                paths,
+                format_name=fmt,
+                max_beats=max_beats,
+                with_captions=with_captions,
+                with_reframe=with_reframe,
+                with_music=with_music,
+                enhance_audio=enhance_audio,
+                brief_context=brief,
+                colours=_video_brand_colours(),
+            )
+        except ProbeUnavailable:
+            return jsonify(
+                {
+                    "error": "engine_unavailable",
+                    "message": "The video engine (FFmpeg) isn't available to analyse "
+                    "footage on this deployment.",
+                }
+            ), 503
+        except Exception as e:  # honest surface; never a fabricated reel
+            log.warning("reel build failed: %s", e)
+            return jsonify({"error": "reel_failed", "message": str(e)[:200]}), 500
+
+        from mediahub.video.projects import VideoProject
+
+        name = (result.plan.hook or brief or "AI reel").strip()[:80] or "AI reel"
+        proj = VideoProject(
+            id="",
+            profile_id=profile_id,
+            name=name,
+            edl=result.edl,
+            source_asset_id=asset_ids[0],
+            format_name=fmt,
+        )
+        proj = _video_project_store().save(proj)
+        return jsonify({"ok": True, "project_id": proj.id, "manifest": result.manifest})
+
+    def _video_stabilize_edl(edl, project_id: str) -> None:
+        """Stabilise each distinct source and repoint the EDL clips at the result.
+
+        Two-pass vidstab per source (cached under the project's render dir, keyed
+        by source path), then the clip's ``source`` is repointed at the steadied
+        file. Honest-errors when FFmpeg lacks vidstab.
+        """
+        import hashlib as _hashlib
+
+        from mediahub.video.enhance import is_stabilize_available, stabilize_source
+
+        if not is_stabilize_available():
+            from mediahub.video.enhance import VideoEnhanceUnavailable
+
+            raise VideoEnhanceUnavailable(
+                "Stabilisation needs an FFmpeg build with vidstab, which isn't "
+                "available on this deployment."
+            )
+        stab_dir = _video_render_dir(project_id) / "stabilized"
+        stab_dir.mkdir(parents=True, exist_ok=True)
+        mapping: dict[str, str] = {}
+        for c in edl.clips:
+            if str(stab_dir) in c.source:
+                continue  # already stabilised
+            if c.source in mapping:
+                c.source = mapping[c.source]
+                continue
+            out = stab_dir / (_hashlib.sha256(c.source.encode("utf-8")).hexdigest()[:16] + ".mp4")
+            if not out.exists():
+                stabilize_source(c.source, out)
+            mapping[c.source] = str(out)
+            c.source = str(out)
+
+    @app.route("/api/video/projects/<project_id>/enhance", methods=["POST"])
+    def api_video_project_enhance(project_id: str):
+        """Apply a colour look / soundtrack / stabilisation to a saved project.
+
+        A post-hoc enhancement pass over any project's timeline (the grade, the
+        music bed + voice cleanup, the stabiliser). Like any edit it reopens
+        approval (rule 6) so a human re-confirms the changed cut before export.
+        """
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        from mediahub.video.edl import AudioPlan
+
+        edl = proj.edl
+        changed = False
+        if "look" in payload:
+            edl.look = _video_safe_look(payload.get("look"))
+            changed = True
+        if payload.get("enhance_audio") is not None or payload.get("with_music") is not None:
+            enhance_audio = bool(payload.get("enhance_audio", False))
+            with_music = bool(payload.get("with_music", False))
+            mood = (payload.get("music_mood") or "uplifting").strip().lower()[:24]
+            music_path = ""
+            if with_music:
+                try:
+                    from mediahub.video.reel_builder import resolve_music
+
+                    music_path = resolve_music(mood, content_key=project_id) or ""
+                except Exception:
+                    music_path = ""
+            plan = AudioPlan(
+                music=music_path,
+                enhance_voice=enhance_audio,
+                loudness="social" if enhance_audio else "",
+                duck=True,
+            )
+            edl.audio = None if plan.is_empty() else plan
+            changed = True
+        if bool(payload.get("stabilize")):
+            try:
+                _video_stabilize_edl(edl, project_id)
+                changed = True
+            except Exception as e:
+                return jsonify({"error": "stabilize_failed", "message": str(e)[:200]}), 503
+        if changed:
+            proj.edl = edl
+            proj.status = "draft"  # an edit reopens approval (rule 6)
+            store.save(proj)
+        return jsonify({"ok": True, "project": proj.to_dict()})
 
     @app.route("/api/video/projects")
     def api_video_projects_list():

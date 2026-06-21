@@ -242,6 +242,112 @@ def test_update_rejects_invalid_edl(app):
         assert r.status_code == 400
 
 
+# --- AI editing surfaces: looks, reel director, enhance --------------------
+
+
+def test_studio_page_has_ai_editing_controls(app):
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.get("/video")
+        assert r.status_code == 200
+        body = r.data
+        assert b"AI reel" in body  # the director surface
+        assert b"Look" in body and b"Vivid" in body  # the grade picker
+        assert b"Clean &amp; level the audio" in body  # the soundtrack option
+        assert b"Remove silences" in body  # the tighten option
+
+
+def test_reel_requires_asset_ids(app):
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        assert c.post("/api/video/reel", json={}).status_code == 400
+        assert c.post("/api/video/reel", json={"asset_ids": []}).status_code == 400
+
+
+def test_reel_unknown_footage_404(app):
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post("/api/video/reel", json={"asset_ids": ["ma_missing"]})
+        assert r.status_code == 404
+
+
+def test_enhance_look_sets_grade_and_reopens_approval(app):
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            status="approved",
+            edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]),
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}/enhance", json={"look": "vivid"})
+        assert r.status_code == 200
+        data = r.get_json()["project"]
+        assert data["edl"]["look"] == "vivid"
+        assert data["status"] == "draft"  # an enhancement reopens approval (rule 6)
+
+
+def test_enhance_music_attaches_audio_plan(app):
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(
+            f"/api/video/projects/{proj.id}/enhance", json={"enhance_audio": True, "with_music": False}
+        )
+        assert r.status_code == 200
+        assert r.get_json()["project"]["edl"]["audio"]["enhance_voice"] is True
+
+
+def test_enhance_foreign_profile_404(app):
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
+    with application.test_client() as c:
+        _pin(c, "beta")
+        assert c.post(f"/api/video/projects/{proj.id}/enhance", json={"look": "vivid"}).status_code == 404
+
+
+def test_enhance_stabilize_honest_error_without_vidstab(app, monkeypatch):
+    application, _ = app
+    from mediahub.video import enhance as _enh
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    # Force the "no vidstab" path so the honest-error surfaces regardless of host.
+    monkeypatch.setattr(_enh, "is_stabilize_available", lambda: False)
+    store = get_store()
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}/enhance", json={"stabilize": True})
+        assert r.status_code == 503
+        assert "message" in r.get_json()
+
+
 # --- full flow (gated on FFmpeg) ------------------------------------------
 
 
