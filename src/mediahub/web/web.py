@@ -39434,6 +39434,30 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             }
         )
 
+    @app.route("/api/stock/thumb")
+    def api_stock_thumb():
+        """First-party proxy for licence-clean stock thumbnails.
+
+        The stock results carry cross-origin thumbnail URLs (Wikimedia/Openverse,
+        + flag-gated paid). The app CSP pins ``img-src 'self'``, so the browser
+        blocks those <img> loads and the grid shows blank tiles. This streams the
+        bytes through our own origin — host-allow-listed to the known stock CDNs,
+        SSRF-checked, size-capped, image/video-only — so the grid renders without
+        loosening the CSP for the whole app (same rationale as the brand-logo
+        mirror). Caller's ``onerror`` falls back to a placeholder on a 404.
+        """
+        from flask import request as _req
+        from mediahub.elements import stock as _stock
+
+        data, ctype = _stock.fetch_thumb(_req.args.get("u") or "")
+        if not data:
+            return ("", 404)
+        return Response(
+            data,
+            mimetype=ctype or "application/octet-stream",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @app.route("/api/media-library/import-stock", methods=["POST"])
     def api_import_stock():
         """Import a chosen stock result into the org library, recording its rights.
@@ -39555,6 +39579,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         body = _eb.render_stock_body(
             search_url=url_for("api_stock_search"),
             import_url=url_for("api_import_stock"),
+            proxy_url=url_for("api_stock_thumb"),
             sources=_stock.available_sources(),
         )
         return _layout("Stock", body, active="media")

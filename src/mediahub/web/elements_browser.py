@@ -243,9 +243,17 @@ def render_browser_body(
 """
 
 
-def render_stock_body(*, search_url: str, import_url: str, sources: dict) -> str:
-    """The licence-clean stock browser body (search → add to library)."""
-    boot = {"searchUrl": search_url, "importUrl": import_url}
+def render_stock_body(
+    *, search_url: str, import_url: str, sources: dict, proxy_url: str = ""
+) -> str:
+    """The licence-clean stock browser body (search → add to library).
+
+    ``proxy_url`` is the first-party thumbnail proxy (``/api/stock/thumb``).
+    Stock thumbnails are cross-origin and the app CSP pins ``img-src 'self'``,
+    so each tile loads through the proxy (same origin) rather than the raw CDN
+    URL — otherwise the browser blocks the load and the tile renders blank.
+    """
+    boot = {"searchUrl": search_url, "importUrl": import_url, "proxyUrl": proxy_url}
     paid_on = [s for s in ("pexels", "pixabay") if sources.get(s)]
     paid_note = (
         f" · paid sources on: {', '.join(paid_on)}"
@@ -266,8 +274,13 @@ def render_stock_body(*, search_url: str, import_url: str, sources: dict) -> str
       background:var(--panel,#141821); color:var(--ink,#e8ecf3); }}
     .sb-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; margin-top:18px; }}
     .sb-card {{ border:1px solid var(--line,#2a3140); border-radius:14px; overflow:hidden; background:var(--panel,#141821); }}
-    .sb-thumb {{ aspect-ratio:4/3; background:var(--bg,#0b0e14) center/cover no-repeat; }}
-    .sb-thumb video {{ width:100%; height:100%; object-fit:cover; }}
+    .sb-thumb {{ position:relative; aspect-ratio:4/3; background:var(--bg,#0b0e14);
+      display:flex; align-items:center; justify-content:center; overflow:hidden; }}
+    .sb-thumb img {{ width:100%; height:100%; object-fit:cover; display:block; }}
+    .sb-noimg {{ font-size:11px; color:var(--ink-dim,#7e8696); letter-spacing:.04em; }}
+    .sb-play {{ position:absolute; inset:0; margin:auto; width:40px; height:40px; pointer-events:none;
+      display:flex; align-items:center; justify-content:center; padding-left:3px;
+      background:rgba(0,0,0,.5); color:#fff; border-radius:999px; font-size:15px; }}
     .sb-meta {{ padding:10px 12px; }}
     .sb-attr {{ font-size:11px; color:var(--ink-dim,#7e8696); margin:2px 0 8px; }}
     .sb-lic {{ font-size:11px; color:var(--accent,#FFB81C); font-weight:700; }}
@@ -303,16 +316,35 @@ def render_stock_body(*, search_url: str, import_url: str, sources: dict) -> str
 
   function esc(s) {{ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }}
 
+  // Thumbnails are cross-origin (Wikimedia/Openverse/…); the app CSP pins
+  // img-src 'self', so route every tile through our first-party proxy. The
+  // proxy URL is a fixed prefix + encodeURIComponent(...), so it's safe to drop
+  // straight into the src attribute (no quotes/brackets survive the encode).
+  function proxied(u) {{ return u ? (BOOT.proxyUrl + '?u=' + encodeURIComponent(u)) : ''; }}
+
   function card(r) {{
     var d = document.createElement('div'); d.className='sb-card';
-    var thumb = r.kind === 'video'
-      ? '<div class="sb-thumb"><video src="' + esc(r.direct_url) + '" muted preload="metadata"></video></div>'
-      : '<div class="sb-thumb" style="background-image:url(\\'' + esc(r.thumb_url || r.direct_url) + '\\')"></div>';
+    var isVideo = r.kind === 'video';
+    // For video we show the poster frame (Wikimedia renders one as thumb_url)
+    // with a play badge — never the heavy clip — so it stays light and clears
+    // the media-src CSP. The full clip is fetched server-side only on import.
+    var posterSrc = proxied(r.thumb_url || (isVideo ? '' : r.direct_url));
+    var thumbInner = posterSrc
+      ? '<img class="sb-img" src="' + posterSrc + '" alt="" loading="lazy">'
+      : '<div class="sb-noimg">' + (isVideo ? 'Video' : 'No preview') + '</div>';
+    var thumb = '<div class="sb-thumb">' + thumbInner + (isVideo ? '<span class="sb-play">&#9654;</span>' : '') + '</div>';
     var attr = (r.licence && r.licence.attribution) ? ('© ' + esc(r.licence.attribution)) : '';
     var lic = (r.licence && r.licence.name) ? esc(r.licence.name) : '';
     d.innerHTML = thumb + '<div class="sb-meta"><div class="sb-lic">' + lic + '</div>' +
       '<div class="sb-attr">' + attr + '</div>' +
       '<button type="button" class="sb-add">Add to library</button></div>';
+    // Graceful fallback if a thumbnail fails to load (dead CDN link, refused host).
+    var imgEl = d.querySelector('.sb-img');
+    if (imgEl) {{
+      imgEl.addEventListener('error', function() {{
+        var box = imgEl.parentNode; if (box) box.innerHTML = '<div class="sb-noimg">No preview</div>';
+      }});
+    }}
     d.querySelector('.sb-add').addEventListener('click', function(ev) {{
       var b = ev.target; b.disabled = true;
       fetch(BOOT.importUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{
