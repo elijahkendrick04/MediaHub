@@ -12,6 +12,8 @@ from mediahub.video.captions import (
     cue_count,
     delete_cue,
     edit_cue_text,
+    merge_tracks,
+    offset_track,
     restyle,
     retime_cue,
     shift_track,
@@ -63,6 +65,36 @@ def test_shift_track_clamps_at_zero():
 def test_shift_track_forward():
     out = shift_track(_track(), 15)
     assert [c["from"] for c in out["cues"]] == [15, 45, 75]
+
+
+def test_offset_track_shifts_cues_and_karaoke_words():
+    t = {
+        "color": "#FFF",
+        "scrim": "#000",
+        "style": "karaoke",
+        "cues": [{"from": 10, "dur": 30, "text": "hi", "words": [{"from": 12, "dur": 8, "text": "hi"}]}],
+    }
+    out = offset_track(t, 60)
+    assert out["cues"][0]["from"] == 70
+    assert out["cues"][0]["words"][0]["from"] == 72  # the word stamp moves too
+    assert t["cues"][0]["from"] == 10  # original untouched
+
+
+def test_offset_track_clamps_at_zero():
+    t = {"cues": [{"from": 5, "dur": 10, "text": "x"}]}
+    assert offset_track(t, -50)["cues"][0]["from"] == 0
+
+
+def test_merge_tracks_concatenates_and_takes_first_style():
+    a = {"color": "#AAA", "scrim": "#111", "style": "karaoke", "cues": [{"from": 0, "dur": 10, "text": "a"}]}
+    b = {"color": "#BBB", "scrim": "#222", "cues": [{"from": 100, "dur": 10, "text": "b"}]}
+    merged = merge_tracks([a, None, b])
+    assert [c["text"] for c in merged["cues"]] == ["a", "b"]
+    assert merged["color"] == "#AAA" and merged["style"] == "karaoke"  # first track's style
+
+
+def test_merge_tracks_none_when_nothing_to_merge():
+    assert merge_tracks([None, {}, {"cues": []}]) is None
 
 
 def test_restyle_recomputes_legible_colours():

@@ -418,6 +418,30 @@ class EDL:
                 total -= max(0, clip.transition_in.duration_ms)
         return max(0, total)
 
+    def clip_start_offsets_ms(self) -> list[int]:
+        """Timeline start (ms) of each clip once it is the *dominant* frame.
+
+        Mirrors :func:`compile_filtergraph`'s ``running_ms`` walk exactly: clip 0
+        starts at 0; each later clip starts at the running boundary. For an xfade
+        that boundary is the instant the incoming clip is fully on screen (the
+        dissolve overlaps the *outgoing* clip), so a caption keyed to this offset
+        never bleeds over the previous clip mid-transition. Used to place
+        per-beat captions on the assembled reel timeline.
+        """
+        offsets: list[int] = []
+        running = 0
+        for i, clip in enumerate(self.clips):
+            if i == 0:
+                offsets.append(0)
+                running = clip.timeline_ms
+                continue
+            offsets.append(running)
+            if clip.transition_in.is_cut:
+                running += clip.timeline_ms
+            else:
+                running += clip.timeline_ms - max(0, clip.transition_in.duration_ms)
+        return offsets
+
     def to_dict(self) -> dict:
         d = {
             "width": self.width,

@@ -142,6 +142,106 @@ def test_build_reel_edl_beat_snaps_clip_lengths():
     assert edl.clips[0].out_ms == 2000  # 1.8s snapped to 4 beats = 2.0s
 
 
+# --- per-beat weight (director depth) -------------------------------------
+
+
+def test_build_reel_edl_weight_one_is_byte_identical():
+    # An even (1.0) weight must produce the exact same EDL as no weight at all,
+    # so an un-weighted reel keeps its content-cache key.
+    mbc = [[Moment(1000, 3000, 0.9, "energy", "x")]]
+    plain = build_reel_edl(["a.mp4"], [ClipBeat(0, 0)], mbc)
+    weighted = build_reel_edl(["a.mp4"], [ClipBeat(0, 0, weight=1.0)], mbc)
+    assert plain.to_dict() == weighted.to_dict()
+
+
+def test_build_reel_edl_weight_scales_screen_time():
+    mbc = [[Moment(1000, 3000, 0.9, "energy", "x")]]  # 2000ms moment
+    edl = build_reel_edl(["a.mp4"], [ClipBeat(0, 0, weight=1.5)], mbc)
+    assert edl.clips[0].out_ms - edl.clips[0].in_ms == 3000  # 2000 * 1.5
+
+
+def test_build_reel_edl_weight_floored_for_short_moment():
+    from mediahub.video.reel_builder import MIN_WEIGHTED_BEAT_MS
+
+    mbc = [[Moment(0, 1000, 0.9, "energy", "x")]]  # 1000ms, weight 0.6 → 600 < floor
+    edl = build_reel_edl(["a.mp4"], [ClipBeat(0, 0, weight=0.6)], mbc)
+    assert edl.clips[0].out_ms - edl.clips[0].in_ms == MIN_WEIGHTED_BEAT_MS
+
+
+# --- multi-beat captions (director depth) ---------------------------------
+
+
+def _fake_caption_each(src, *, in_ms, out_ms, fps, ground="", onground="", accent=""):
+    # one cue per beat, frame 0 of its own window, tagged with the source window
+    return {
+        "color": "#FFF",
+        "scrim": "#000",
+        "style": "karaoke",
+        "cues": [{"from": 0, "dur": 30, "text": f"{src}:{in_ms}", "words": [{"from": 0, "dur": 15, "text": "w"}]}],
+    }
+
+
+def test_make_reel_captions_multiple_beats_offset_on_timeline():
+    res = make_reel(
+        ["a.mp4", "b.mp4"],
+        with_captions=True,
+        caption_beats=2,
+        caption_style="karaoke",
+        with_reframe=False,
+        with_music=False,
+        probe_fn=_fake_probe,
+        detect_fn=_fake_detect,
+        plan_fn=_fake_plan,
+        caption_fn=_fake_caption_each,
+    )
+    cues = res.edl.captions["cues"]
+    assert len(cues) == 2  # both beats captioned and merged into one track
+    # beat 0 stays at frame 0; beat 1 is offset to its place on the timeline (>0)
+    assert cues[0]["from"] == 0
+    assert cues[1]["from"] > 0
+    # karaoke word stamps are offset with their cue
+    assert cues[1]["words"][0]["from"] == cues[1]["from"]
+    assert res.manifest["captioned_beats"] == 2
+    assert res.manifest["captions"] == "burned-2beats-karaoke"
+
+
+def test_make_reel_single_caption_path_unchanged():
+    # caption_beats=1 keeps the lead-only behaviour (one cue, no offset).
+    res = make_reel(
+        ["a.mp4", "b.mp4"],
+        with_captions=True,
+        caption_beats=1,
+        with_reframe=False,
+        with_music=False,
+        probe_fn=_fake_probe,
+        detect_fn=_fake_detect,
+        plan_fn=_fake_plan,
+        caption_fn=_fake_caption_each,
+    )
+    assert len(res.edl.captions["cues"]) == 1
+    assert res.manifest["captioned_beats"] == 1
+
+
+def test_make_reel_multibeat_skips_silent_beats_honestly():
+    # a caption fn that only returns speech for the first clip → 1 captioned, honest
+    def lead_only(src, *, in_ms, out_ms, fps, ground="", onground="", accent=""):
+        return _fake_caption_each(src, in_ms=in_ms, out_ms=out_ms, fps=fps) if src == "a.mp4" else None
+
+    res = make_reel(
+        ["a.mp4", "b.mp4"],
+        with_captions=True,
+        caption_beats=3,
+        with_reframe=False,
+        with_music=False,
+        probe_fn=_fake_probe,
+        detect_fn=_fake_detect,
+        plan_fn=_fake_plan,
+        caption_fn=lead_only,
+    )
+    assert res.manifest["captioned_beats"] == 1
+    assert len(res.edl.captions["cues"]) == 1
+
+
 def test_make_reel_beat_syncs_to_music_bpm(monkeypatch):
     import mediahub.visual.audio_mux as am
 

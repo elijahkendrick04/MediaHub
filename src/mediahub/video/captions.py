@@ -303,6 +303,45 @@ def restyle(track: dict, *, ground: str = "", onground: str = "", accent: str = 
     return out
 
 
+def offset_track(track: dict, delta_frames: int) -> dict:
+    """Shift a whole track by ``delta_frames`` — **karaoke-aware**. Pure.
+
+    Like :func:`shift_track` but also nudges each cue's per-word ``words`` stamps,
+    so an animated (karaoke) track stays in sync when it is placed later on a reel
+    timeline. Frames clamp at 0. Returns a new track.
+    """
+    out = copy.deepcopy(track)
+    d = int(delta_frames)
+    for c in out.get("cues") or []:
+        c["from"] = max(0, int(c.get("from", 0)) + d)
+        for w in c.get("words") or []:
+            w["from"] = max(0, int(w.get("from", 0)) + d)
+    return out
+
+
+def merge_tracks(tracks: list[Optional[dict]]) -> Optional[dict]:
+    """Concatenate several (already frame-offset) caption tracks into one. Pure.
+
+    The footage reel captions more than its lead beat: each captioned beat's track
+    is built over its own window, offset to its place on the timeline
+    (:func:`offset_track`), then merged here. Cues are concatenated in order with
+    their karaoke ``words`` preserved; the style (colour/scrim/accent/style) comes
+    from the first non-empty track. Returns ``None`` when nothing has cues, so the
+    reel's captions stay honestly optional.
+    """
+    base: Optional[dict] = None
+    cues: list[dict] = []
+    for t in tracks:
+        if not t:
+            continue
+        if base is None:
+            base = {k: v for k, v in t.items() if k != "cues"}
+        cues.extend(copy.deepcopy(c) for c in (t.get("cues") or []))
+    if base is None or not cues:
+        return None
+    return {**base, "cues": cues}
+
+
 def clamp_to_frames(track: dict, total_frames: int) -> dict:
     """Drop/clip cues that fall outside ``[0, total_frames)`` (timeline trim).
 
@@ -332,6 +371,8 @@ __all__ = [
     "retime_cue",
     "delete_cue",
     "shift_track",
+    "offset_track",
+    "merge_tracks",
     "restyle",
     "clamp_to_frames",
 ]

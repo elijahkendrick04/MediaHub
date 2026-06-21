@@ -189,6 +189,23 @@ def test_total_timeline_ms_subtracts_transition_overlap():
     assert edl.total_timeline_ms() == 6500
 
 
+def test_clip_start_offsets_mirror_running_ms_walk():
+    # clip0 [0,2000); clip1 (cut) dominant at 2000; clip2 (320ms dissolve) fully
+    # on screen at 4000 — the offsets used to place per-beat reel captions.
+    c1 = _clip(src="b.mp4", out_ms=2000)
+    c1.transition_in = Transition(kind="cut")
+    c2 = _clip(src="c.mp4", out_ms=2000)
+    c2.transition_in = Transition(kind="dissolve", duration_ms=320)
+    edl = EDL(clips=[_clip(out_ms=2000), c1, c2])
+    assert edl.clip_start_offsets_ms() == [0, 2000, 4000]
+    # the dissolve overlaps, so the composite is shorter than the last offset + clip
+    assert edl.total_timeline_ms() == 2000 + 2000 + 2000 - 320
+
+
+def test_clip_start_offsets_single_clip():
+    assert EDL(clips=[_clip(out_ms=2000)]).clip_start_offsets_ms() == [0]
+
+
 def test_edl_roundtrips_through_dict():
     c2 = _clip(src="b.mp4", speed=2.0, crop=(1, 2, 3, 4))
     c2.transition_in = Transition(kind="wipeleft", duration_ms=300)

@@ -65,7 +65,8 @@ provider slot (GEN, opt-in+disclosed) · ⏸ deferred.
 | Moment naming | a 2–4 word label on a detected moment | ✅ `moments.label_moment` |
 | **Hook / title generation** | a short, factual on-screen hook | ✅ `director.suggest_hook` |
 | Music mood→track | mood is AI; the *pick* is the deterministic library floor | ✅ `director` + `audio/library` |
-| Clip/virality ranking across clips | which clip is most "hype" (over real signal) | 🟦 (extends director) |
+| **Clip/virality ranking across clips** | per-beat emphasis weight (over real signal) → screen time | ✅ `director.ClipBeat.weight` |
+| **Per-beat durations / multi-beat captions** | the "money shot" earns more seconds; caption N beats, not just the lead | ✅ `reel_builder` (weight + `caption_beats`) |
 | B-roll **stock** matching (semantic) | which library clip fits a line | ⏸ (no stock library yet) |
 | Caption styling/emphasis pick | which words to emphasise | ⏸ |
 
@@ -122,17 +123,17 @@ human approves before export.
 Done across the builds: animated captions, **beat-synced cutting**,
 **frame-interpolated slow-mo**, filler-word removal, the **caption-edit route**,
 the **visual timeline editor** (manual trim/reorder/speed/smooth/mute/look/
-transition + inline caption-text editing, saving the EDL), and **all the gated
+transition + inline caption-text editing, saving the EDL), **director depth**
+(per-beat emphasis weights → screen time, the cross-clip virality judgement, and
+multi-beat captions offset onto the assembled timeline), and **all the gated
 generative seams** — b-roll (`broll.py`), lip-sync/dubbing (`dub.py`),
 object-removal/inpainting (`object_removal.py`), and eye-contact (`eye_contact.py`).
 Still open:
 
-1. **Director depth** — per-beat durations/weights, multiple captioned beats,
-   cross-clip virality ranking. (AIJ)
-2. **Wiring the generative seams' networks** — the provider adapters are scaffolded
+1. **Wiring the generative seams' networks** — the provider adapters are scaffolded
    and honest-error today; building each network integration is gated on the
    provider moving into `legal.SUBPROCESSORS` (and the club DPA) first. (GEN)
-3. **Timeline-editor polish** — drag-to-reorder, a waveform/thumbnail scrubber,
+2. **Timeline-editor polish** — drag-to-reorder, a waveform/thumbnail scrubber,
    and per-clip grade sliders (the EDL already carries `ColorAdjust`). (DET)
 
 Sources for the landscape survey are the 2026 competitor research under

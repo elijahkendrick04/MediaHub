@@ -35,17 +35,48 @@ DEFAULT_LOOK = "punch"
 DEFAULT_MOOD = "uplifting"
 MAX_BEATS = 5
 _PER_CLIP_CAP = 2  # at most N beats from one clip, so a montage keeps variety
+MIN_WEIGHT = 0.6  # a beat can be tightened to 60% of its detected length…
+MAX_WEIGHT = 1.8  # …or held up to 180% (the "money shot" earns more screen time)
+
+
+def clamp_weight(value: object) -> float:
+    """Coerce a model's per-beat emphasis into the safe ``[MIN, MAX]`` range.
+
+    The weight is the director's *virality judgement* over a real moment — how
+    much screen time it deserves relative to the others — never a fabricated fact.
+    Anything unparseable falls back to ``1.0`` (even emphasis), so a missing or
+    garbage weight leaves the beat at its detected length.
+    """
+    try:
+        w = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if w != w:  # NaN
+        return 1.0
+    return max(MIN_WEIGHT, min(MAX_WEIGHT, w))
 
 
 @dataclass(frozen=True)
 class ClipBeat:
-    """One beat of the reel: clip ``asset_index``'s moment ``moment_index``."""
+    """One beat of the reel: clip ``asset_index``'s moment ``moment_index``.
+
+    ``weight`` is the director's per-beat emphasis (1.0 = the moment's own
+    detected length; >1 holds it longer, <1 tightens it) — the AI's cross-clip
+    virality judgement turned into screen time. It only *scales* a real moment;
+    it never invents one.
+    """
 
     asset_index: int
     moment_index: int
+    weight: float = 1.0
 
     def to_dict(self) -> dict:
-        return {"asset_index": self.asset_index, "moment_index": self.moment_index}
+        d = {"asset_index": self.asset_index, "moment_index": self.moment_index}
+        # Omit an even (1.0) weight so an un-weighted plan serialises exactly as
+        # before this feature existed (and reel cache keys stay byte-identical).
+        if self.weight != 1.0:
+            d["weight"] = round(self.weight, 3)
+        return d
 
 
 @dataclass
@@ -125,7 +156,13 @@ def _sanitise_hook(text: object) -> str:
 
 
 def _valid_beats(raw_order: object, clips_meta: list[dict], *, max_beats: int) -> list[ClipBeat]:
-    """Coerce a model's ``order`` into real, in-range, de-duplicated beats."""
+    """Coerce a model's ``order`` into real, in-range, de-duplicated beats.
+
+    A per-item ``weight`` (optional) is clamped to the safe emphasis range; an
+    absent or unparseable weight defaults to even (1.0). The clip/moment indices
+    are validated against the real clips so a hallucinated index can never reach
+    the renderer.
+    """
     beats: list[ClipBeat] = []
     seen: set[tuple[int, int]] = set()
     n_clips = len(clips_meta)
@@ -143,7 +180,7 @@ def _valid_beats(raw_order: object, clips_meta: list[dict], *, max_beats: int) -
         if (ci, mi) in seen:
             continue
         seen.add((ci, mi))
-        beats.append(ClipBeat(ci, mi))
+        beats.append(ClipBeat(ci, mi, weight=clamp_weight(item.get("weight"))))
         if len(beats) >= max_beats:
             break
     return beats
@@ -211,12 +248,15 @@ def plan_reel(
             "- Only ORDER and SELECT among the moments given. NEVER invent an event, "
             "time, name, or result.\n"
             f"- Use at most {max_beats} beats. Lead with the strongest hook.\n"
+            "- Give each beat a 'weight' from "
+            f"{MIN_WEIGHT} to {MAX_WEIGHT}: ~1.0 normal, higher for the standout "
+            '"money shot" (it earns more screen time), lower to tighten a filler beat.\n'
             f"- 'look' MUST be one of: {sorted(LOOKS)}.\n"
             "- 'hook' is <= 6 words, grounded only in the context; '' if unsure.\n\n"
             f"Context: {brief_context or 'club sport footage'}\n"
             f"Clips: {json.dumps(_clips_payload(clips_meta))}\n\n"
-            'Return JSON: {"order":[{"clip":int,"moment":int}],"look":str,'
-            '"music_mood":str,"hook":str,"why":str}'
+            'Return JSON: {"order":[{"clip":int,"moment":int,"weight":float}],'
+            '"look":str,"music_mood":str,"hook":str,"why":str}'
         )
         data = _llm.generate_json(prompt, max_tokens=400, fallback={})
     except Exception:
@@ -271,8 +311,11 @@ __all__ = [
     "DEFAULT_LOOK",
     "DEFAULT_MOOD",
     "MAX_BEATS",
+    "MIN_WEIGHT",
+    "MAX_WEIGHT",
     "ClipBeat",
     "ReelPlan",
+    "clamp_weight",
     "default_order",
     "plan_reel",
     "suggest_hook",

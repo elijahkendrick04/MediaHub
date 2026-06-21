@@ -120,3 +120,56 @@ def test_reel_plan_to_dict_roundtrips_shape():
     d = p.to_dict()
     assert d["order"] == [{"asset_index": 0, "moment_index": 1}]
     assert d["look"] == "film" and d["source"] == "ai"
+
+
+# --- per-beat weight (cross-clip virality emphasis) ------------------------
+
+
+def test_clamp_weight_bounds_and_garbage():
+    assert director.clamp_weight(1.5) == 1.5
+    assert director.clamp_weight(9.0) == director.MAX_WEIGHT
+    assert director.clamp_weight(0.0) == director.MIN_WEIGHT
+    assert director.clamp_weight("nope") == 1.0
+    assert director.clamp_weight(None) == 1.0
+    assert director.clamp_weight(float("nan")) == 1.0
+
+
+def test_clip_beat_weight_omitted_at_default_present_otherwise():
+    # An even (1.0) weight serialises exactly as before the feature existed, so a
+    # plan that doesn't weight stays byte-identical in cache keys.
+    assert director.ClipBeat(0, 0).to_dict() == {"asset_index": 0, "moment_index": 0}
+    assert director.ClipBeat(0, 0, weight=1.5).to_dict() == {
+        "asset_index": 0,
+        "moment_index": 0,
+        "weight": 1.5,
+    }
+
+
+def test_default_order_beats_are_evenly_weighted():
+    # No AI ⇒ no virality judgement ⇒ every beat keeps its detected length.
+    order = default_order(_meta([[0.9, 0.8], [0.7]]), max_beats=5)
+    assert order and all(b.weight == 1.0 for b in order)
+
+
+def test_plan_reel_parses_and_clamps_per_beat_weight(monkeypatch):
+    import mediahub.media_ai.llm as llm
+
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(
+        llm,
+        "generate_json",
+        lambda *a, **k: {
+            "order": [
+                {"clip": 0, "moment": 0, "weight": 1.7},  # money shot
+                {"clip": 1, "moment": 0, "weight": 9.0},  # clamped to MAX
+                {"clip": 0, "moment": 1},  # missing → 1.0
+            ],
+            "look": "punch",
+        },
+    )
+    plan = plan_reel(_meta([[0.9, 0.5], [0.7]]))
+    assert plan.source == "ai"
+    weights = {(b.asset_index, b.moment_index): b.weight for b in plan.order}
+    assert weights[(0, 0)] == 1.7
+    assert weights[(1, 0)] == director.MAX_WEIGHT
+    assert weights[(0, 1)] == 1.0

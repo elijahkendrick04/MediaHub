@@ -44992,6 +44992,12 @@ voice, and queues them for one-click approval.</p>
         with_music = bool(payload.get("with_music", True))
         enhance_audio = bool(payload.get("enhance_audio", True))
         caption_style = "static" if payload.get("animated_captions") is False else "karaoke"
+        # Caption more of the montage than just the lead beat by default (each
+        # window is offset to its place on the timeline); 1 = lead only.
+        try:
+            caption_beats = max(1, min(max_beats, int(payload.get("caption_beats", 3))))
+        except (TypeError, ValueError):
+            caption_beats = 3
 
         from mediahub.video.probe import ProbeUnavailable
         from mediahub.video.reel_builder import make_reel
@@ -45003,6 +45009,7 @@ voice, and queues them for one-click approval.</p>
                 max_beats=max_beats,
                 with_captions=with_captions,
                 caption_style=caption_style,
+                caption_beats=caption_beats,
                 with_reframe=with_reframe,
                 with_music=with_music,
                 enhance_audio=enhance_audio,

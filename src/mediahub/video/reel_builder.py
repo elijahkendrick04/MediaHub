@@ -40,6 +40,7 @@ from mediahub.video.probe import ClipProbe
 DEFAULT_FORMAT = "story"
 DEFAULT_TRANSITION = "dissolve"
 DEFAULT_TRANSITION_MS = 320
+MIN_WEIGHTED_BEAT_MS = 900  # a weighted beat never tightens below ~0.9s (readable)
 
 
 @dataclass
@@ -135,7 +136,14 @@ def build_reel_edl(
             continue
         crop = crops[i] if i < len(crops) and crops[i] else None
         trans = Transition("cut") if not clips else Transition(transition_kind, transition_ms)
-        out_ms = m.start_ms + snap_to_beats(m.end_ms - m.start_ms, beat_ms)
+        # The director's per-beat weight scales the moment's screen time. An even
+        # 1.0 weight leaves the span exactly as before (byte-identical render and
+        # cache key); a weighted beat is floored so it never tightens below the
+        # readable minimum.
+        weight = getattr(beat, "weight", 1.0) or 1.0
+        base_span = m.end_ms - m.start_ms
+        span = base_span if weight == 1.0 else max(MIN_WEIGHTED_BEAT_MS, round(base_span * weight))
+        out_ms = m.start_ms + snap_to_beats(span, beat_ms)
         clips.append(
             Clip(
                 source=src,
@@ -188,6 +196,7 @@ def make_reel(
     max_beats: int = 5,
     with_captions: bool = True,
     caption_style: str = "karaoke",
+    caption_beats: int = 1,
     with_reframe: bool = True,
     with_music: bool = True,
     beat_sync: bool = True,
@@ -266,17 +275,20 @@ def make_reel(
             reframed = reframed or bool(crop)
         crops.append(crop)
 
-    # 4) Caption the lead beat only (one verbatim transcript window; honest gap
-    #    noted for the rest of the montage).
+    # 4) Captions. The lead beat always carries verbatim captions; the director
+    #    can caption more of the montage (``caption_beats`` > 1), each window
+    #    offset to its place on the assembled timeline (assembled after the EDL is
+    #    built, below, so beat-sync + weights are reflected).
+    cap = caption_fn or (
+        _default_karaoke_caption if caption_style == "karaoke" else _default_caption
+    )
+    n_caption = max(1, min(int(caption_beats), len(beats))) if (with_captions and beats) else 0
     caption_track: Optional[dict] = None
     captions_note = "off"
-    if with_captions and beats:
+    if n_caption == 1:
         lead = beats[0]
         try:
             m = moments_by_clip[lead.asset_index][lead.moment_index]
-            cap = caption_fn or (
-                _default_karaoke_caption if caption_style == "karaoke" else _default_caption
-            )
             caption_track = cap(
                 sources[lead.asset_index],
                 in_ms=m.start_ms,
@@ -332,6 +344,20 @@ def make_reel(
         fps=fps,
     )
 
+    # Multi-beat captions are assembled here, once the timeline (with beat-sync
+    # and per-beat weights) is final, so each cue is offset under its own clip.
+    captioned_beats = 1 if (n_caption == 1 and caption_track) else 0
+    if n_caption > 1:
+        merged, captioned_beats = _assemble_reel_captions(
+            edl, beats, sources, cap, fps=fps, colours=colours, n=n_caption
+        )
+        edl.captions = merged
+        if captioned_beats:
+            base = "karaoke" if caption_style == "karaoke" else "static"
+            captions_note = f"burned-{captioned_beats}beats-{base}"
+        else:
+            captions_note = "no-speech-or-asr-off"
+
     manifest = {
         "kind": "reel",
         "format": format_name,
@@ -341,11 +367,64 @@ def make_reel(
         "beats": [b.to_dict() for b in beats],
         "reframed": reframed,
         "captions": captions_note,
+        "captioned_beats": captioned_beats,
         "music": Path(music_path).name if music_path else "",
         "beat_synced": round(60000.0 / beat_ms, 1) if beat_ms else False,
         "timeline_ms": edl.total_timeline_ms(),
     }
     return ReelResult(edl=edl, plan=plan, moments_by_clip=moments_by_clip, manifest=manifest)
+
+
+def _assemble_reel_captions(
+    edl: EDL,
+    beats: list[_director.ClipBeat],
+    sources: list[str],
+    cap_fn: Callable,
+    *,
+    fps: int,
+    colours: BrandColours,
+    n: int,
+) -> tuple[Optional[dict], int]:
+    """Caption the first ``n`` beats, each offset to its place on the timeline.
+
+    Builds each caption over the *actual EDL clip window* (so beat-sync and
+    per-beat weights are reflected), rebases it to that clip's dominant-start
+    frame (:meth:`EDL.clip_start_offsets_ms`), and merges them into one track.
+    Beats with no speech (or ASR off) are skipped honestly. Returns
+    ``(merged_track_or_None, count_actually_captioned)``.
+    """
+    from mediahub.video import captions as _captions
+
+    offsets = edl.clip_start_offsets_ms()
+    tracks: list[Optional[dict]] = []
+    captioned = 0
+    for i in range(min(n, len(beats), len(edl.clips))):
+        beat = beats[i]
+        clip = edl.clips[i]
+        try:
+            src = sources[beat.asset_index]
+        except (IndexError, KeyError):
+            continue
+        track = cap_fn(
+            src,
+            in_ms=clip.in_ms,
+            out_ms=clip.out_ms,
+            fps=fps,
+            ground=colours.ground,
+            onground=colours.onground,
+            accent=colours.accent,
+        )
+        if not track:
+            continue
+        off_frames = round(offsets[i] / 1000 * fps)
+        tracks.append(_captions.offset_track(track, off_frames))
+        captioned += 1
+    merged = _captions.merge_tracks(tracks)
+    if merged and (colours.ground or colours.accent):
+        merged = _captions.restyle(
+            merged, ground=colours.ground, onground=colours.onground, accent=colours.accent
+        )
+    return merged, captioned
 
 
 def _default_probe(source: str) -> ClipProbe:
