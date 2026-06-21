@@ -3812,9 +3812,9 @@ var _venueResults = {};
 function mhThumbRetry(img) {
   var n = (parseInt(img.getAttribute('data-try') || '0', 10)) + 1;
   img.setAttribute('data-try', n);
-  if (n <= 5) {
+  if (n <= 9) {
     var base = img.getAttribute('data-src') || img.src;
-    setTimeout(function(){ img.src = base + (base.indexOf('?') < 0 ? '?' : '&') + '_r=' + n; }, 700 * n);
+    setTimeout(function(){ img.src = base + (base.indexOf('?') < 0 ? '?' : '&') + '_r=' + n; }, Math.min(3500, 900 * n));
   } else {
     img.onerror = null; img.style.visibility = 'hidden';
   }
@@ -8491,7 +8491,7 @@ body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
 }
 .mh-template:hover .mh-template-icon { border-color: var(--lane); }
 .mh-template-icon svg { width: 20px; height: 20px; }
-.mh-template h3 {
+.mh-template h3, .mh-template h2 {
   font-family: var(--font-display);
   font-size: 18px; font-weight: 800; color: var(--ink);
   letter-spacing: 0.01em; margin: 0 0 var(--sp-1);
@@ -11896,6 +11896,8 @@ def _layout(
            aria-label="Account and organisation">
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">Settings</a>
+        <a href="{{ url_for('help_page') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">Switch organisation</a>
         <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">Sign out</a>
@@ -14754,6 +14756,356 @@ _CHARTS_PAGE_JS = """
 """
 
 
+# --------------------------------------------------------------------------- #
+# Shared product-story sections (the "how it works / what it does" explainer).
+#
+# These were once built inline in the home() route and shown to everyone. They
+# are product story, not session state, so they render byte-identically wherever
+# they are used. As of the signed-in home rebuild they serve two surfaces:
+#   * the signed-OUT landing page (home()) — the marketing/explainer body, and
+#   * the in-app Help page (help_page()) — the same explainer, reached from the
+#     account menu, so a signed-in club can look up "how does this work?" without
+#     the homepage having to carry the sales pitch.
+# The signed-IN home no longer renders them (it is a content-creation workspace),
+# which is why they live at module scope and are called from both routes.
+# --------------------------------------------------------------------------- #
+def _home_io_headline_html() -> str:
+    """UI 1.3 — inline-media display headline: a results sheet → story, feed and
+    reel, each output inlined as a real first-party sample SVG (no external
+    fetch). One upload, four posting-ready formats, every fact from the file."""
+
+    def _inline_thumb(filename: str, kind: str, alt: str) -> str:
+        src = url_for("static", filename="samples/" + filename)
+        return (
+            f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
+            f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
+            f'src="{src}" width="144" height="200" '
+            f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+            "</span>"
+        )
+
+    return (
+        '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
+        '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
+        '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
+        "From a results sheet "
+        + _inline_thumb("results-sheet.svg", "results", "Event 14, 100m freestyle finishing times")
+        + " to a story "
+        + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
+        + ", a feed graphic "
+        + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
+        + " and a reel "
+        + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
+        + "."
+        "</h2>"
+        '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
+        "Every name, time and place comes straight from the file you "
+        "uploaded. Nothing is invented, and nothing posts without you.</p>"
+        "</section>"
+    )
+
+
+def _home_engine_bento_html() -> str:
+    """UI 1.2 — the "what the engine does" bento: real, deterministic sample
+    outputs (story card, reel poster, feed graphic, the detected-&-ranked
+    intelligence read-out, the brand-kit application and the moment taxonomy),
+    rendered as first-party inline SVG that consume the live brand tokens."""
+    return (
+        '<section class="mh-section" id="mh-ch-engine">'
+        '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
+        + _reveal_lines(
+            [
+                "A results sheet in.",
+                'A <em class="editorial">weekend</em> of content out.',
+            ]
+        )
+        + '<div class="mh-bento mh-reveal-group">'
+        + '<div class="mh-bento-tile feature is-story">'
+        + _sample_graphics.story_card_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-reel">'
+        + _sample_graphics.reel_poster_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-feed">'
+        + _sample_graphics.feed_graphic_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile wide is-rank">'
+        + _sample_graphics.detected_ranked_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-brand">'
+        + _sample_graphics.brand_kit_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-moments">'
+        + _sample_graphics.moments_svg()
+        + "</div>"
+        + "</div>"
+        + '<p class="mh-bento-caption">Real sample output — every name, '
+        "time and place comes from the file you upload, set in your club’s "
+        "palette and type. Nothing is invented.</p>"
+        "</section>"
+    )
+
+
+def _home_audience_html() -> str:
+    """ "Made for" — three audience cards (club committees, coaches, university
+    teams). The "who it's for" reassurance block; product story, shown on the
+    landing page and Help."""
+    return (
+        '<section class="mh-section" id="mh-ch-audience">'
+        '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
+        + _reveal_lines(
+            [
+                "Built for the people who",
+                'already <em class="editorial">post the results</em>.',
+            ]
+        )
+        + '<div class="mh-audience-row mh-reveal-group">'
+        '<div class="mh-audience" data-mh-tilt>'
+        '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
+        '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
+        '<h3 class="mh-audience-title">Club committees</h3>'
+        '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
+        "</div>"
+        '<div class="mh-audience" data-mh-tilt>'
+        '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></svg></span>'
+        '<span class="mh-audience-role">Coach · Performance · Selection</span>'
+        '<h3 class="mh-audience-title">Coaches</h3>'
+        '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
+        "</div>"
+        '<div class="mh-audience" data-mh-tilt>'
+        '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
+        '<span class="mh-audience-role">Society · University · Team</span>'
+        '<h3 class="mh-audience-title">University teams</h3>'
+        '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures, all in your colours, with the right tone for an Instagram feed.</p>'
+        "</div>"
+        "</div>"
+        "</section>"
+    )
+
+
+def _home_promise_html() -> str:
+    """ "Human in the loop, by design" — the lane-yellow trust panel. Makes it
+    explicit that the AI generates but the operator keeps approval, and that the
+    engine never invents results or auto-posts."""
+    return (
+        '<section class="mh-section" id="mh-ch-promise">'
+        '<div class="mh-promise">'
+        + _reveal_lines(
+            ["Human in the loop,", "<em>by design</em>."],
+            cls="mh-promise-title",
+        )
+        + '<p class="mh-promise-lede mh-reveal">'
+        "MediaHub is an intelligence layer, not an auto-poster. Every "
+        "piece of content stops at a review queue you control."
+        "</p>"
+        '<ul class="mh-promise-list mh-reveal-group">'
+        '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
+        '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        "<div><b>Source-grounded captions</b><span>Every claim links back to the parsed result. No invented times, no invented places.</span></div></li>"
+        '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
+        '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        "<div><b>We don't auto-post</b><span>MediaHub never posts to your social channels. You approve, then export or download and post it yourself.</span></div></li>"
+        '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
+        '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        "<div><b>We don't sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>"
+        "</ul>"
+        "</div>"
+        "</section>"
+    )
+
+
+def _home_faq_html() -> str:
+    """UI 1.22 — FAQ accordion. Native <details>/<summary>, no JavaScript, so
+    every row is keyboard- and screen-reader-operable. Answers are static,
+    trusted product copy routed through _h() so the pattern stays escape-safe."""
+    faq_items = [
+        (
+            "Does anything post to our socials automatically?",
+            "No. MediaHub is an intelligence layer, not an auto-poster. "
+            "Every caption, graphic and reel stops at a review queue you "
+            "control. Nothing leaves this deployment without an explicit "
+            "approval click.",
+        ),
+        (
+            "Will it ever invent a time or a result?",
+            "Never. Every claim on a card is grounded in the result line "
+            "you uploaded. If the file does not contain a time, the caption "
+            "does not claim one; ambiguous rows are flagged for your review "
+            "rather than guessed.",
+        ),
+        (
+            "What files can we upload?",
+            "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
+            "exported result files (HY3, SDIF, SportSystems), plus entry "
+            "lists and heat sheets. The engine parses the file into "
+            "structured results before it writes a single word.",
+        ),
+        (
+            "How does it learn our club brand?",
+            "It reads your club website, social profiles and brand "
+            "guidelines once, then locks your palette, fonts, logo and tone "
+            "onto every card. Set up once, reuse forever, and your data is "
+            "never used to re-train a shared model.",
+        ),
+        (
+            "What can it produce from one upload?",
+            "Posting-ready story cards, feed graphics, athlete spotlights, "
+            "meet recaps and branded motion reels. Every name, time and "
+            "place is sized for the formats your club actually posts.",
+        ),
+        (
+            "Which sports does it work for?",
+            "Swimming is the first wedge, but the engine is sport-agnostic "
+            "by design: athletics, rugby, netball, rowing and more run "
+            "through the same ingest, detect, rank, brand and generate "
+            "pipeline.",
+        ),
+        (
+            "Is our athlete data kept private?",
+            "Yes. Athlete and result data stays on the deployment you "
+            "control and is never sold; content featuring minors never "
+            "auto-publishes. You can audit exactly what is stored on the "
+            "privacy page.",
+        ),
+    ]
+    faq_rows = "".join(
+        (
+            '<details class="mh-faq-item">'
+            '<summary class="mh-faq-q">'
+            f'<span class="mh-faq-q-text">{_h(q)}</span>'
+            '<span class="mh-faq-icon" aria-hidden="true"></span>'
+            "</summary>"
+            '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
+            f"<p>{_h(a)}</p>"
+            "</div></div>"
+            "</details>"
+        )
+        for q, a in faq_items
+    )
+    return (
+        '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
+        '<div class="mh-section-eyebrow-strip mh-reveal">'
+        '<span class="label">Common questions</span></div>'
+        + _reveal_lines(
+            ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
+            cls="mh-faq-title",
+            el_id="mh-faq-h",
+        )
+        + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
+        + "</section>"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Signed-in home — the content-creation workspace.
+#
+# This builds the lean dashboard a pinned, ready organisation sees instead of
+# the marketing landing page: a quick-action grid to the working surfaces it
+# actually uses (including "All activity", which is where this org's own runs
+# live — org-scoped — rather than on the home). It reuses the Create-page tile
+# language (`.mh-template`) so the signed-in chrome stays one coherent system.
+# --------------------------------------------------------------------------- #
+def _home_signed_in_quick_actions_html() -> str:
+    """Quick-action grid: jump straight to the surfaces a returning club uses."""
+
+    def _icon(paths: str) -> str:
+        return (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
+            f'aria-hidden="true">{paths}</svg>'
+        )
+
+    def _tile(endpoint: str, icon: str, title: str, desc: str, cta: str) -> str:
+        return (
+            f'<a href="{url_for(endpoint)}" class="mh-template mh-glow-border">'
+            f'<div class="mh-template-icon">{icon}</div>'
+            '<div style="display:flex;align-items:center;gap:10px;'
+            'flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+            f'<h3 style="margin:0">{_h(title)}</h3></div>'
+            f"<p>{_h(desc)}</p>"
+            f'<span class="mh-template-cta">{_h(cta)}</span>'
+            "</a>"
+        )
+
+    tiles = (
+        _tile(
+            "make_page",
+            _icon(
+                '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+                '<polyline points="14 2 14 8 20 8"/>'
+                '<line x1="12" y1="18" x2="12" y2="12"/>'
+                '<line x1="9" y1="15" x2="15" y2="15"/>'
+            ),
+            "Create new content",
+            "Upload a results file, paste a brief, or describe a moment — the "
+            "engine drafts the captions, graphics and reels.",
+            "Start creating",
+        )
+        + _tile(
+            "season_timeline_page",
+            _icon(
+                '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>'
+                '<polyline points="17 6 23 6 23 12"/>'
+            ),
+            "My Season",
+            "Every meet you've processed on one timeline, with the moments "
+            "detected and the recap ready to make.",
+            "Open timeline",
+        )
+        + _tile(
+            "media_library_page",
+            _icon(
+                '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'
+                '<circle cx="8.5" cy="8.5" r="1.5"/>'
+                '<polyline points="21 15 16 10 5 21"/>'
+            ),
+            "Media library",
+            "Your athlete and team photography, ready to drop into cards, " "spotlights and reels.",
+            "Open library",
+        )
+        + _tile(
+            "organisation_page",
+            _icon(
+                '<circle cx="12" cy="8" r="7"/>'
+                '<polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>'
+            ),
+            "Brand & profile",
+            "Tune the palette, logo, fonts and voice every card is locked to.",
+            "Edit profile",
+        )
+        + _tile(
+            "activity_page",
+            _icon('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
+            "All activity",
+            "Every run for this organisation, with status, matched swims and a "
+            "link back into each review.",
+            "View activity",
+        )
+        + _tile(
+            "help_page",
+            _icon(
+                '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>'
+                '<path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'
+            ),
+            "Help & how it works",
+            "The pipeline, the formats and the questions clubs ask first — the "
+            "product tour, any time you need it.",
+            "Open help",
+        )
+    )
+    return (
+        '<section class="mh-section">'
+        '<div class="mh-section-eyebrow-strip mh-reveal">'
+        '<span class="label">Your workspace</span></div>'
+        + _reveal_lines(["What would you like", 'to <em class="editorial">make</em>?'])
+        + f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+        + "</section>"
+    )
+
+
 def create_app() -> Flask:
     # Fail-fast env validation (security/secrets-and-config): production
     # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
@@ -14986,6 +15338,14 @@ def create_app() -> Flask:
             "organisation_setup_reread",
             "organisation_setup_logo_serve",
             "organisation_setup_logo_delete",
+            # The sign-in picker renders org logos BEFORE the user has picked
+            # an active org. Without these exemptions the gate intercepts logo
+            # requests and 302-redirects to /sign-in (HTML), which Chrome
+            # can't decode as an image — producing net::ERR_ABORTED.
+            # Both routes carry their own IDOR guard (_session_can_use_profile)
+            # so exempting them from the org-ready gate does not weaken security.
+            "organisation_logo_serve",
+            "organisation_logo_mirror",
             "organisation_set_active",
             # Phase 1.5 — the profile-picker page must be reachable without
             # an active org (it's how the user PICKS one). Same for the POST
@@ -15375,7 +15735,7 @@ def create_app() -> Flask:
     def home():
         """Rebuilt home page (Phase 1.5 polish).
 
-        Two-button hero — "Create organisation" + "Sign in to existing" —
+        Two-button hero — "Sign up" (primary) + "Sign in" (secondary) —
         plus the established four-step explainer. When an org is already
         pinned, the hero swaps in a "Continue as <name>" CTA pointing at
         Create, with the sign-in / create paths still accessible below
@@ -15445,28 +15805,16 @@ def create_app() -> Flask:
                 "motion videos in your voice. Set up once. Reuse forever. "
                 "Nothing posts without you."
             )
-            if n_orgs > 0:
-                # Signed-out session with existing organisations: a first-time
-                # visitor has no account, so onboarding is always the primary
-                # action. Sign in is secondary — visible for returning users
-                # switching tenants, but never the hero emphasis.
-                hero_actions = (
-                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    "Set up my organisation &rarr;</a>"
-                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    "Sign in</a>"
-                )
-            else:
-                # Fresh deployment with no organisations yet: lead with
-                # Set up my organisation, but still surface Sign in so the
-                # button is always present (the picker shows a friendly
-                # "no orgs yet" panel) and never looks broken.
-                hero_actions = (
-                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    "Set up my organisation &rarr;</a>"
-                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    "Sign in</a>"
-                )
+            # Sign up is the unambiguous entry point for a first-time visitor.
+            # 'Set up my organisation' reads as configuring an existing org;
+            # 'Sign in' implies an account already exists. Both mislead new
+            # users. Sign in stays visible as secondary for returning users.
+            hero_actions = (
+                f'<a class="mh-cta-primary" href="{url_for("signup_page")}">'
+                "Sign up &rarr;</a>"
+                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                "Sign in</a>"
+            )
             eyebrow = "The content engine for sports clubs"
             lane_no = "01"
 
@@ -15547,164 +15895,11 @@ def create_app() -> Flask:
             f"{word_cycle_js}"
         )
 
-        # --- UI 1.3 — Inline media thumbnails in a display headline. ---
-        # Samara-style: a large statement sentence with four *real* sample
-        # outputs inlined — the results sheet a club uploads, then the story
-        # card, feed graphic and reel the engine returns. The thumbnails are
-        # first-party SVGs served from /static/samples (no external fetch);
-        # they mirror the same facts/formats as the larger sample row below,
-        # so the band reads as a one-line proof of the whole pipeline.
-        def _inline_thumb(filename: str, kind: str, alt: str) -> str:
-            src = url_for("static", filename="samples/" + filename)
-            return (
-                f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
-                f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
-                f'src="{src}" width="144" height="200" '
-                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
-                "</span>"
-            )
-
-        pipeline_html = (
-            '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
-            '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
-            "From a results sheet "
-            + _inline_thumb(
-                "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
-            )
-            + " to a story "
-            + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
-            + ", a feed graphic "
-            + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
-            + " and a reel "
-            + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
-            + "."
-            "</h2>"
-            '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
-            "Every name, time and place comes straight from the file you "
-            "uploaded. Nothing is invented, and nothing posts without you.</p>"
-            "</section>"
-        )
-
-        # --- Engine showcase (UI 1.2, rebuilt) — the "what the engine does"
-        # section now *shows* what MediaHub produces instead of describing it.
-        # Each tile frames a real, deterministic sample output rendered by
-        # web/sample_graphics.py: a story card, a meet reel, a feed graphic,
-        # the detected-&-ranked intelligence read-out, the brand-kit
-        # application and the moment taxonomy. They are first-party inline
-        # SVG (no external fetch) that consume the live brand tokens and
-        # self-hosted fonts, so they mirror the real Playwright/Remotion
-        # output a first-time visitor would get from their own meet file.
-        # The grid + tilt + reveal infrastructure (Umbrel-style bento, U.16
-        # tilt) carries over; the heading reuses the U.5 scroll-reveal helper.
-        bento_html = (
-            '<section class="mh-section" id="mh-ch-engine">'
-            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
-            + _reveal_lines(
-                [
-                    "A results sheet in.",
-                    'A <em class="editorial">weekend</em> of content out.',
-                ]
-            )
-            + '<div class="mh-bento mh-reveal-group">'
-            # Story card — the 2×2 showpiece (Tom Davies / 52.41 carries
-            # through from the looping product demo for one coherent story).
-            + '<div class="mh-bento-tile feature is-story">'
-            + _sample_graphics.story_card_svg()
-            + "</div>"
-            # Meet reel poster frame.
-            + '<div class="mh-bento-tile is-reel">'
-            + _sample_graphics.reel_poster_svg()
-            + "</div>"
-            # Feed graphic — top-three finals podium.
-            + '<div class="mh-bento-tile is-feed">'
-            + _sample_graphics.feed_graphic_svg()
-            + "</div>"
-            # Detected & ranked — the intelligence read-out (wide).
-            + '<div class="mh-bento-tile wide is-rank">'
-            + _sample_graphics.detected_ranked_svg()
-            + "</div>"
-            # Your brand, applied.
-            + '<div class="mh-bento-tile is-brand">'
-            + _sample_graphics.brand_kit_svg()
-            + "</div>"
-            # Moments we detect — the taxonomy.
-            + '<div class="mh-bento-tile is-moments">'
-            + _sample_graphics.moments_svg()
-            + "</div>"
-            + "</div>"
-            + '<p class="mh-bento-caption">Real sample output — every name, '
-            "time and place comes from the file you upload, set in your club’s "
-            "palette and type. Nothing is invented.</p>"
-            "</section>"
-        )
-
-        # --- Made for — three audience cards. Shown to everyone since the
-        # product story doesn't change between fresh visitors and pinned
-        # tenants; this is the "who it's for" reassurance block.
-        audience_html = (
-            '<section class="mh-section" id="mh-ch-audience">'
-            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
-            + _reveal_lines(
-                [
-                    "Built for the people who",
-                    'already <em class="editorial">post the results</em>.',
-                ]
-            )
-            + '<div class="mh-audience-row mh-reveal-group">'
-            '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
-            '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
-            '<h3 class="mh-audience-title">Club committees</h3>'
-            '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
-            "</div>"
-            '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></svg></span>'
-            '<span class="mh-audience-role">Coach · Performance · Selection</span>'
-            '<h3 class="mh-audience-title">Coaches</h3>'
-            '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
-            "</div>"
-            '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
-            '<span class="mh-audience-role">Society · University · Team</span>'
-            '<h3 class="mh-audience-title">University teams</h3>'
-            '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures, all in your colours, with the right tone for an Instagram feed.</p>'
-            "</div>"
-            "</div>"
-            "</section>"
-        )
-
-        # --- Promise / what we don't do. Lane-yellow left-stripe trust
-        # panel. Particularly important because the AI is doing the
-        # generation; the panel makes it explicit that you keep approval.
-        promise_html = (
-            '<section class="mh-section" id="mh-ch-promise">'
-            '<div class="mh-promise">'
-            + _reveal_lines(
-                ["Human in the loop,", "<em>by design</em>."],
-                cls="mh-promise-title",
-            )
-            + '<p class="mh-promise-lede mh-reveal">'
-            "MediaHub is an intelligence layer, not an auto-poster. Every "
-            "piece of content stops at a review queue you control."
-            "</p>"
-            '<ul class="mh-promise-list mh-reveal-group">'
-            '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
-            '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            "<div><b>Source-grounded captions</b><span>Every claim links back to the parsed result. No invented times, no invented places.</span></div></li>"
-            '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
-            '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't auto-post</b><span>MediaHub never posts to your social channels. You approve, then export or download and post it yourself.</span></div></li>"
-            '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
-            '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>"
-            "</ul>"
-            "</div>"
-            "</section>"
-        )
+        # The product-story explainer sections (input→output headline, the
+        # "what the engine does" bento, the "made for" audience cards, the
+        # human-in-the-loop promise and the FAQ) are built by the module-level
+        # `_home_*` helpers above. The signed-OUT landing page assembles them
+        # below; the signed-IN home omits them (they live on the Help page).
 
         # --- Final CTA strip before the footer. Two variants based on
         # whether the user has a pinned org. Picks up the masthead lane-
@@ -15746,17 +15941,35 @@ def create_app() -> Flask:
                 "</section>"
             )
 
-        # U.8 — animated how-it-works pipeline diagram. Placed explicitly in
-        # the return below (hero -> diagram -> "see it work" demo -> inline-
-        # thumbnail headline), so the diagram is the hero's first visual.
-        # `pipeline_html` here is just the UI 1.3 inline-thumbnail headline
-        # built above.
+        # ================================================================ #
+        # Signed-in home — a content-creation workspace, not a sales page.
+        #
+        # A returning club doesn't need "what the engine does" pitched back at
+        # it every visit; it needs to get to work. So the pinned-org home is a
+        # lean dashboard: the "Ready to file" hero, a quick-action grid to the
+        # surfaces they actually use (their runs live on the org-scoped
+        # /activity page, reached from the "All activity" tile), then the
+        # create-focused final CTA. The product-story explainer (how it works /
+        # what it does / promise / FAQ) moved to the in-app Help page, reached
+        # from the account menu. Signed-OUT visitors still get the full landing.
+        # ================================================================ #
+        if prof and prof.is_ready():
+            return _layout(
+                "Home",
+                '<div class="mh-fx mh-spotlight">'
+                + hero_html
+                + "</div>"
+                + _home_signed_in_quick_actions_html()
+                + final_cta_html,
+                active="home",
+            )
 
+        # --- Signed-out landing page — the full product-story explainer. ---
         # UI 1.29 — sticky chaptered scroll-spy nav. Each (anchor-id, label)
-        # maps to a section id set above; _layout renders the sticky side rail
-        # and the IntersectionObserver scroll-spy wires the active state. The
-        # rail only appears on wide desktop viewports (where there is gutter
-        # room) and degrades to a plain in-page anchor list without JS.
+        # maps to a section id below; _layout renders the sticky side rail and
+        # the IntersectionObserver scroll-spy wires the active state. The rail
+        # only appears on wide desktop viewports (where there is gutter room)
+        # and degrades to a plain in-page anchor list without JS.
         home_chapters = [
             ("mh-ch-overview", "Overview"),
             ("mh-ch-how", "How it works"),
@@ -15765,93 +15978,6 @@ def create_app() -> Flask:
             ("mh-ch-promise", "Our promise"),
             ("mh-ch-start", "Get started"),
         ]
-
-        # --- UI 1.22 — FAQ accordion (Limitless / status-page inspired). ---
-        # Expandable Q&A that answers the objections a club raises before it
-        # trusts the engine. Built from native <details>/<summary> — NO
-        # JavaScript — so every row is keyboard- and screen-reader-operable
-        # even with JS disabled; the open/close motion is a pure CSS
-        # grid-template-rows transition with a +/- marker (reduced-motion
-        # gated in the stylesheet). Answers are static, trusted product copy,
-        # but routed through _h() so the pattern stays escape-safe. Sits after
-        # the "what we don't do" promise panel and before the final CTA.
-        faq_items = [
-            (
-                "Does anything post to our socials automatically?",
-                "No. MediaHub is an intelligence layer, not an auto-poster. "
-                "Every caption, graphic and reel stops at a review queue you "
-                "control. Nothing leaves this deployment without an explicit "
-                "approval click.",
-            ),
-            (
-                "Will it ever invent a time or a result?",
-                "Never. Every claim on a card is grounded in the result line "
-                "you uploaded. If the file does not contain a time, the caption "
-                "does not claim one; ambiguous rows are flagged for your review "
-                "rather than guessed.",
-            ),
-            (
-                "What files can we upload?",
-                "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
-                "exported result files (HY3, SDIF, SportSystems), plus entry "
-                "lists and heat sheets. The engine parses the file into "
-                "structured results before it writes a single word.",
-            ),
-            (
-                "How does it learn our club brand?",
-                "It reads your club website, social profiles and brand "
-                "guidelines once, then locks your palette, fonts, logo and tone "
-                "onto every card. Set up once, reuse forever, and your data is "
-                "never used to re-train a shared model.",
-            ),
-            (
-                "What can it produce from one upload?",
-                "Posting-ready story cards, feed graphics, athlete spotlights, "
-                "meet recaps and branded motion reels. Every name, time and "
-                "place is sized for the formats your club actually posts.",
-            ),
-            (
-                "Which sports does it work for?",
-                "Swimming is the first wedge, but the engine is sport-agnostic "
-                "by design: athletics, rugby, netball, rowing and more run "
-                "through the same ingest, detect, rank, brand and generate "
-                "pipeline.",
-            ),
-            (
-                "Is our athlete data kept private?",
-                "Yes. Athlete and result data stays on the deployment you "
-                "control and is never sold; content featuring minors never "
-                "auto-publishes. You can audit exactly what is stored on the "
-                "privacy page.",
-            ),
-        ]
-        faq_rows = "".join(
-            (
-                '<details class="mh-faq-item">'
-                '<summary class="mh-faq-q">'
-                f'<span class="mh-faq-q-text">{_h(q)}</span>'
-                '<span class="mh-faq-icon" aria-hidden="true"></span>'
-                "</summary>"
-                '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
-                f"<p>{_h(a)}</p>"
-                "</div></div>"
-                "</details>"
-            )
-            for q, a in faq_items
-        )
-        faq_html = (
-            '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
-            '<div class="mh-section-eyebrow-strip mh-reveal">'
-            '<span class="label">Common questions</span></div>'
-            + _reveal_lines(
-                ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
-                cls="mh-faq-title",
-                el_id="mh-faq-h",
-            )
-            + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
-            + "</section>"
-        )
-
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -15859,14 +15985,88 @@ def create_app() -> Flask:
             + "</div>"
             + _pipeline_diagram_section_html()
             + demo_section_html
-            + pipeline_html
-            + bento_html
-            + audience_html
-            + promise_html
-            + faq_html
+            + _home_io_headline_html()
+            + _home_engine_bento_html()
+            + _home_audience_html()
+            + _home_promise_html()
+            + _home_faq_html()
             + final_cta_html,
             active="home",
             chapters=home_chapters,
+        )
+
+    # ---- HELP — the product-story explainer (how it works / what it does /
+    # who it's for / promise / FAQ), moved off the signed-in home into a
+    # dedicated page reached from the account menu. The signed-in home is now a
+    # content-creation workspace, so this is where a returning club looks up
+    # "how does this actually work?". Public: a signed-out visitor sees the same
+    # explainer the landing page carries, so there's nothing to gate.
+    @app.route("/help")
+    def help_page():
+        intro = (
+            "Everything MediaHub does from a single upload — what goes in, what "
+            "comes out, and the questions clubs ask first. It's all one click "
+            "from Create whenever you need it."
+        )
+        header_html = (
+            '<section class="mh-hero" data-lane="">'
+            '<span class="mh-hero-eyebrow">Help &amp; how it works</span>'
+            '<h1>How MediaHub <em class="editorial">works</em>.</h1>'
+            f'<p class="lede">{_h(intro)}</p>'
+            '<div class="mh-hero-actions">'
+            f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
+            "Create new content &rarr;</a>"
+            f'<a class="mh-cta-secondary" href="{url_for("status_page")}">'
+            "System status</a>"
+            "</div>"
+            "</section>"
+        )
+
+        # The looping "see it work" product demo, wrapped exactly as the landing
+        # page wraps it (its non-chapter id keeps it out of any scroll-spy rail).
+        demo_section_html = (
+            '<section class="mh-section mh-reveal" id="mh-see-it-work">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">See it work</span></div>'
+            + _reveal_lines(["One result in.", 'A post you <em class="editorial">approve</em>.'])
+            + _hero_product_demo()
+            + "</section>"
+        )
+
+        # Closing "still stuck?" strip — points at the operator-facing surfaces
+        # that answer the rest (live status, the privacy data inventory, roadmap).
+        closing_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">Still stuck?</span></div>'
+            + _reveal_lines(["Can't find the", '<em class="editorial">answer</em>?'])
+            + '<p class="mh-reveal" style="color:var(--ink-dim);max-width:62ch">'
+            "Check the live system status, audit exactly what's stored about your "
+            "club on the privacy page, or see what's shipping next on the roadmap."
+            "</p>"
+            '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
+            f'<a class="btn" href="{url_for("status_page")}">System status</a>'
+            f'<a class="btn secondary" href="{url_for("privacy_page")}">'
+            "Privacy &amp; data</a>"
+            f'<a class="btn secondary" href="{url_for("research_page")}">Roadmap</a>'
+            "</div>"
+            "</section>"
+        )
+
+        return _layout(
+            "Help",
+            '<div class="mh-fx mh-spotlight">'
+            + header_html
+            + "</div>"
+            + _pipeline_diagram_section_html()
+            + demo_section_html
+            + _home_io_headline_html()
+            + _home_engine_bento_html()
+            + _home_audience_html()
+            + _home_promise_html()
+            + _home_faq_html()
+            + closing_html,
+            active="help",
         )
 
     # ---- MOBILE PARITY &mdash; operator diagnostic: is the phone as good as PC? ----
@@ -24111,7 +24311,7 @@ Relay team broke club record"></textarea>
                 f'<a href="{href}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h3 style="margin:0">{_h(title)}</h3>'
+                f'<h2 style="margin:0">{_h(title)}</h2>'
                 "</div>"
                 f"<p>{_h(desc)}</p>"
                 '<span class="mh-template-cta">Open</span>'
@@ -25821,6 +26021,8 @@ Relay team broke club record"></textarea>
   {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
+  <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
+  <a class="btn" href="{url_for("plan_analytics_page")}" title="Log how posts did — what works feeds the plan">Performance</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -26042,6 +26244,1107 @@ function mhPlanGenerate(btn) {{
 </script>
 """
         return _layout("Content plan", body, active="create")
+
+    # ---- 1.14 — the Plan calendar (drag-reschedule + key dates) ------------
+
+    def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
+        """Resolve the sport whose key-date pack the calendar shows, from the
+        organisation type (same mapping the Plan page uses)."""
+        from mediahub.sport_profiles import list_sport_profiles
+
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        try:
+            avail = {p.sport for p in list_sport_profiles()}
+        except Exception:
+            avail = {"swimming"}
+        s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
+        return s if s in avail else fallback
+
+    def _parse_month_param(raw: str):
+        """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
+        from mediahub.content_engine.calendar import today_utc
+
+        t = today_utc()
+        s = (raw or "").strip()
+        if len(s) == 7 and s[4] == "-":
+            try:
+                y, m = int(s[:4]), int(s[5:7])
+                if 1 <= m <= 12 and 1970 <= y <= 2200:
+                    return y, m
+            except ValueError:
+                pass
+        return t.year, t.month
+
+    @app.route("/api/plan/calendar", methods=["GET"])
+    def api_plan_calendar():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.calendar import build_calendar, grid_bounds
+
+        year, month = _parse_month_param(request.args.get("m", ""))
+        sport = _org_calendar_sport(_active_profile())
+        start, end = grid_bounds(year, month)
+        model = build_calendar(pid, sport, start=start, end=end)
+        out = model.to_dict()
+        out["year"], out["month"] = year, month
+        return jsonify({"ok": True, "org_id": pid, "calendar": out})
+
+    @app.route("/api/plan/calendar/schedule", methods=["POST"])
+    def api_plan_calendar_schedule():
+        """Set / move / clear the day a draft is planned to post (1.14).
+
+        Planning only — nothing is published. Re-evaluates the soft blackout
+        gate and returns a ``warning`` when the chosen day is a blackout; the
+        human decides whether to keep it (we never hard-block their own plan).
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        pack_id = str(body.get("pack_id") or "").strip()
+        # Empty / null date clears the schedule (back to the side rail).
+        new_date = body.get("date")
+        new_date = "" if new_date in (None, "") else str(new_date).strip()
+        channel = body.get("channel")
+        channel = None if channel is None else str(channel).strip()
+
+        from mediahub.club_platform.stub_pack_store import load_pack, set_planned_date
+
+        rec = load_pack(pack_id)
+        if rec is None:
+            return jsonify({"error": "Draft not found."}), 404
+        # Tenant isolation: only the owning org may reschedule its draft.
+        if (rec.get("profile_id") or "") != pid:
+            return jsonify({"error": "Draft not found."}), 404
+
+        updated = set_planned_date(pack_id, new_date, channel=channel)
+        if updated is None:
+            return jsonify({"error": "Invalid date (expected YYYY-MM-DD)."}), 400
+
+        warning = ""
+        planned = updated.get("planned_date")
+        if planned:
+            from mediahub.content_engine.inputs import load_planner_inputs
+
+            blackouts = set(load_planner_inputs(pid).get("blackout_dates") or [])
+            if planned in blackouts:
+                warning = (
+                    f"Heads up — {planned} is a blackout date you set. "
+                    "The draft is planned there anyway; move it if that wasn't intended."
+                )
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack_id,
+                "planned_date": planned,
+                "planned_channel": updated.get("planned_channel") or "",
+                "warning": warning,
+            }
+        )
+
+    @app.route("/plan/calendar")
+    def plan_calendar_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from datetime import date as _date
+
+        from mediahub.content_engine.calendar import (
+            build_calendar,
+            grid_bounds,
+            month_matrix,
+            today_utc,
+        )
+
+        prof = _active_profile()
+        sport = _org_calendar_sport(prof)
+        year, month = _parse_month_param(request.args.get("m", ""))
+        start, end = grid_bounds(year, month)
+        model = build_calendar(pid, sport, start=start, end=end)
+        by_date = model.entries_by_date()
+        weeks = month_matrix(year, month)
+        today = today_utc()
+
+        month_name = _date(year, month, 1).strftime("%B %Y")
+        prev_y, prev_m = (year - 1, 12) if month == 1 else (year, month - 1)
+        next_y, next_m = (year + 1, 1) if month == 12 else (year, month + 1)
+        prev_url = url_for("plan_calendar_page", m=f"{prev_y:04d}-{prev_m:02d}")
+        next_url = url_for("plan_calendar_page", m=f"{next_y:04d}-{next_m:02d}")
+        today_url = url_for("plan_calendar_page", m=f"{today.year:04d}-{today.month:02d}")
+
+        # Per-kind chip styling — colour-coded, escaped, deterministic.
+        _kind_style = {
+            "blackout": ("var(--bad)", "rgba(255,107,107,.12)"),
+            "key_date": ("var(--medal)", "rgba(244,213,141,.12)"),
+            "event": ("var(--lane)", "rgba(212,255,58,.12)"),
+            "anniversary": ("var(--ink-dim)", "rgba(182,178,166,.10)"),
+            "posted": ("var(--good)", "rgba(94,227,154,.12)"),
+        }
+
+        def _entry_chip(e) -> str:
+            if e.kind == "planned_draft":
+                ch = e.meta.get("channel") or ""
+                ch_html = f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
+                warn = (
+                    '<span title="On a blackout date you set" '
+                    'style="color:var(--bad);font-weight:700"> ⚠</span>'
+                    if e.meta.get("on_blackout")
+                    else ""
+                )
+                draft_url = url_for("stub_pack_view", pack_id=e.ref)
+                return (
+                    f'<div class="mh-cal-draft" draggable="true" data-pack="{_h(e.ref)}" '
+                    f'data-href="{_h(draft_url)}" '
+                    f'title="{_h(e.title)} — drag to a day to move, or to the side rail to unschedule">'
+                    f'<span class="mh-cal-draft-dot"></span>'
+                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span></div>'
+                )
+            fg, bg = _kind_style.get(e.kind, ("var(--ink-dim)", "rgba(182,178,166,.10)"))
+            note = e.meta.get("note") or e.meta.get("venue") or ""
+            title_attr = f"{e.title}" + (f" — {note}" if note else "")
+            return (
+                f'<div class="mh-cal-chip" style="color:{fg};background:{bg}" '
+                f'title="{_h(title_attr)}">{_h(e.title)}</div>'
+            )
+
+        cells = ""
+        for week in weeks:
+            for day in week:
+                iso = day.isoformat()
+                in_month = day.month == month
+                is_today = day == today
+                chips = "".join(_entry_chip(e) for e in by_date.get(iso, []))
+                classes = "mh-cal-cell"
+                if not in_month:
+                    classes += " mh-cal-spill"
+                if is_today:
+                    classes += " mh-cal-today"
+                cells += (
+                    f'<div class="{classes}" data-date="{iso}" '
+                    f'ondragover="mhCalOver(event)" ondragleave="mhCalLeave(event)" '
+                    f'ondrop="mhCalDrop(event)">'
+                    f'<div class="mh-cal-daynum">{day.day}</div>'
+                    f'<div class="mh-cal-stack">{chips}</div></div>'
+                )
+
+        dow_head = "".join(
+            f'<div class="mh-cal-dow">{d}</div>'
+            for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        )
+
+        # Side rail — unscheduled drafts to drag onto a day.
+        def _rail_card(d: dict) -> str:
+            return (
+                f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
+                f'data-pack="{_h(d["pack_id"])}" '
+                f'data-href="{_h(url_for("stub_pack_view", pack_id=d["pack_id"]))}" '
+                f'title="Drag onto a day to plan when to post it">'
+                f'<span class="mh-cal-draft-dot"></span>'
+                f'<span class="mh-cal-draft-t">{_h(d["title"])}'
+                f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span></div>"
+            )
+
+        rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
+        if not rail:
+            rail = (
+                '<p class="dim" style="font-size:12px;margin:6px 2px">No unscheduled drafts. '
+                f'<a href="{url_for("make_page")}" style="text-decoration:underline">Make content</a>, '
+                "then drag it onto a day to plan when to post.</p>"
+            )
+
+        legend = "".join(
+            f'<span class="mh-cal-leg"><span class="mh-cal-leg-sw" style="background:{c}"></span>{lbl}</span>'
+            for lbl, c in (
+                ("Key date", "var(--medal)"),
+                ("Event", "var(--lane)"),
+                ("Planned draft", "var(--accent)"),
+                ("Posted", "var(--good)"),
+                ("Blackout", "var(--bad)"),
+                ("Anniversary", "var(--ink-dim)"),
+            )
+        )
+
+        counts = model.counts()
+        notes_html = "".join(
+            f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>' for n in model.notes
+        )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Calendar</span>
+  <h1>Your content<br><em class="editorial">on a calendar.</em></h1>
+  <p class="lede">Planned drafts, key dates, your events and what you&rsquo;ve already posted, all in one month view.
+  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.
+  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the ranked plan &rarr;</a></p>
+</section>
+
+<div class="mh-cal-bar">
+  <div class="mh-cal-nav">
+    <a class="btn" href="{prev_url}" aria-label="Previous month">&larr;</a>
+    <strong class="mh-cal-month">{_h(month_name)}</strong>
+    <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
+    <a class="btn" href="{today_url}">Today</a>
+    <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
+    <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
+    <a class="btn" href="{url_for("plan_analytics_page")}" title="What's working — performance feeding the plan">Performance</a>
+  </div>
+  <div class="mh-cal-legend">{legend}</div>
+</div>
+
+<span class="dim" id="mh-cal-status" style="font-size:12.5px;display:block;min-height:18px;margin:2px 2px 8px"></span>
+
+<div class="mh-cal-wrap">
+  <div class="mh-cal-grid-wrap">
+    <div class="mh-cal-dows">{dow_head}</div>
+    <div class="mh-cal-grid">{cells}</div>
+    <p class="dim" style="font-size:12px;margin-top:10px">
+      Showing {int(counts.get("planned_draft", 0))} planned ·
+      {int(counts.get("key_date", 0))} key date{"s" if counts.get("key_date", 0) != 1 else ""} ·
+      {int(counts.get("event", 0))} event{"s" if counts.get("event", 0) != 1 else ""} ·
+      {int(counts.get("posted", 0))} posted in this month.
+    </p>
+    {f'<ul style="margin:6px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
+  </div>
+  <aside class="mh-cal-rail" ondragover="mhCalOver(event)" ondragleave="mhCalLeave(event)" ondrop="mhCalUnschedule(event)">
+    <h2 style="margin:0 0 2px 0;font-size:15px">Unscheduled drafts</h2>
+    <p class="dim" style="font-size:11.5px;margin:0 0 8px 0">Drag onto a day to plan it. Drag a planned draft back here to unschedule.</p>
+    {rail}
+  </aside>
+</div>
+
+<script>
+var MH_CAL_SCHEDULE_URL = {json.dumps(url_for("api_plan_calendar_schedule"))};
+function mhCalOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-cal-drop'); }}
+function mhCalLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-cal-drop'); }}
+function mhCalStatus(msg, warn) {{
+  var s = document.getElementById('mh-cal-status');
+  if (!s) return; s.textContent = msg || ''; s.style.color = warn ? 'var(--warn)' : 'var(--ink-muted)';
+}}
+function mhCalSchedule(packId, date) {{
+  if (!packId) return;
+  mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
+  fetch(MH_CAL_SCHEDULE_URL, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ pack_id: packId, date: date || '' }})
+  }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
+    if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
+    if (j.warning) {{ mhCalStatus(j.warning, true); setTimeout(function(){{ window.location.reload(); }}, 1200); }}
+    else {{ window.location.reload(); }}
+  }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
+}}
+document.addEventListener('dragstart', function (e) {{
+  var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.pack || '');
+  e.dataTransfer.effectAllowed = 'move';
+}});
+function mhCalDrop(e) {{
+  e.preventDefault();
+  var cell = e.currentTarget; if (cell) cell.classList.remove('mh-cal-drop');
+  var packId = e.dataTransfer.getData('text/plain');
+  var date = cell ? cell.dataset.date : '';
+  if (packId && date) mhCalSchedule(packId, date);
+}}
+function mhCalUnschedule(e) {{
+  e.preventDefault();
+  var rail = e.currentTarget; if (rail) rail.classList.remove('mh-cal-drop');
+  var packId = e.dataTransfer.getData('text/plain');
+  if (packId) mhCalSchedule(packId, '');
+}}
+// A plain click on a draft chip opens the draft (drag still works).
+document.addEventListener('click', function (e) {{
+  var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
+  if (card && card.dataset.href) window.location.href = card.dataset.href;
+}});
+</script>
+"""
+        return _layout("Plan calendar", body, active="create")
+
+    # ---- 1.14 — per-channel previews + safe zones + IG grid ----------------
+
+    def _safe_zone_overlay(fmt: dict) -> str:
+        """Dashed 'keep key content here' box inset by the platform safe zone,
+        plus shaded chrome bands. Empty for full-bleed feed formats."""
+        sz = fmt.get("safe_zone") or {}
+        t, r, b, left = (
+            float(sz.get("top", 0)),
+            float(sz.get("right", 0)),
+            float(sz.get("bottom", 0)),
+            float(sz.get("left", 0)),
+        )
+        if not (t or r or b or left):
+            return ""
+        return (
+            f'<div class="mh-cp-safe" style="top:{t * 100:.1f}%;right:{r * 100:.1f}%;'
+            f'bottom:{b * 100:.1f}%;left:{left * 100:.1f}%"><span>safe area</span></div>'
+            '<div class="mh-cp-chrome mh-cp-chrome-top" '
+            f'style="height:{t * 100:.1f}%"></div>'
+            '<div class="mh-cp-chrome mh-cp-chrome-bottom" '
+            f'style="height:{b * 100:.1f}%"></div>'
+        )
+
+    def _channel_frame_html(card: dict, pv: dict) -> str:
+        fmt = pv["format"]
+        w, h = int(fmt["width"]), int(fmt["height"])
+        cap = pv["caption"]
+        shown = _h(cap["shown"])
+        more = ""
+        if cap["truncated"]:
+            more = (
+                ' <span class="mh-cp-more">… more</span>'
+                f'<span class="mh-cp-hidden">{_h(cap["hidden"])}</span>'
+            )
+        over = (
+            f'<span class="mh-cp-bad">over the {int(pv["caption_limit"])}-char limit</span>'
+            if cap["over_limit"]
+            else ""
+        )
+        tags = pv["hashtags"]
+        tag_txt = f'{int(tags["count"])} hashtag{"s" if tags["count"] != 1 else ""}'
+        if tags["limit"] is not None:
+            tag_cls = "mh-cp-good" if tags["within"] else "mh-cp-bad"
+            tag_txt += f' <span class="{tag_cls}">/ {int(tags["limit"])} max</span>'
+        media_label = _h(str(card.get("platform") or pv["platform_name"]))
+        return (
+            '<figure class="mh-cp-card">'
+            f'<div class="mh-cp-frame" style="aspect-ratio:{w}/{h}">'
+            f'<div class="mh-cp-media"><span class="mh-cp-media-label">{media_label}</span></div>'
+            f"{_safe_zone_overlay(fmt)}"
+            f'<span class="mh-cp-ratio">{_h(fmt["aspect"])} · {w}×{h}</span>'
+            "</div>"
+            '<figcaption class="mh-cp-cap">'
+            f'<p class="mh-cp-cap-text">{shown}{more}</p>'
+            f'<p class="mh-cp-meta">{int(cap["length"])} / {int(pv["caption_limit"])} chars {over} · {tag_txt}</p>'
+            "</figcaption></figure>"
+        )
+
+    @app.route("/api/channel-preview", methods=["POST"])
+    def api_channel_preview():
+        """Compute a single card's per-platform preview (caption fold, hashtag
+        cap, safe zone) for live editor previews. Pure text/geometry rules —
+        no stored data read — but org-gated for consistency."""
+        if not _active_profile_id():
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.channel_preview import preview_card
+
+        body = request.get_json(silent=True) or {}
+        card = {
+            "caption": str(body.get("caption") or ""),
+            "hashtags": body.get("hashtags") or [],
+            "platform": body.get("platform_label") or "",
+        }
+        pv = preview_card(
+            card, str(body.get("platform") or "instagram"), format_name=body.get("format")
+        )
+        if pv is None:
+            return jsonify({"error": "Unknown platform."}), 400
+        return jsonify({"ok": True, "preview": pv})
+
+    @app.route("/plan/preview/<pack_id>")
+    def plan_preview_page(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.channel_preview import all_platforms, platform as _platform, preview_card
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+
+        spec = _platform(request.args.get("platform", "")) or all_platforms()[0]
+        fmt_name = request.args.get("format", "") or spec.default_format
+        if fmt_name not in spec.format_names():
+            fmt_name = spec.default_format
+
+        # Platform tabs (links) + format tabs (links).
+        plat_tabs = "".join(
+            f'<a class="mh-cp-tab{" active" if p.slug == spec.slug else ""}" '
+            f'href="{url_for("plan_preview_page", pack_id=pack_id, platform=p.slug)}">{_h(p.name)}</a>'
+            for p in all_platforms()
+        )
+        fmt_tabs = "".join(
+            f'<a class="mh-cp-fmt{" active" if fn == fmt_name else ""}" '
+            f'href="{url_for("plan_preview_page", pack_id=pack_id, platform=spec.slug, format=fn)}">{_h(fn)}</a>'
+            for fn in spec.format_names()
+        )
+
+        cards = rec.get("cards") or []
+        frames = ""
+        for card in cards:
+            pv = preview_card(card, spec.slug, format_name=fmt_name)
+            if pv is not None:
+                frames += _channel_frame_html(card, pv)
+        if not frames:
+            frames = '<p class="dim">This draft has no cards to preview yet.</p>'
+
+        title = _h(rec.get("title") or "Draft")
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Channel preview</span>
+  <h1>How it looks <em class="editorial">before you post.</em></h1>
+  <p class="lede">&ldquo;{title}&rdquo; the way each platform shows it &mdash; the crop, the
+  <strong>safe zone</strong> the app&rsquo;s own buttons cover, and where the caption folds behind
+  &ldquo;more&rdquo;. Nothing posts from here; copy it across by hand when you&rsquo;re happy.
+  <a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">Back to the draft &rarr;</a></p>
+</section>
+
+<div class="mh-cp-bar">
+  <div class="mh-cp-tabs">{plat_tabs}</div>
+  <div class="mh-cp-fmts">{fmt_tabs}</div>
+</div>
+<p class="dim" style="font-size:11.5px;margin:0 0 14px">{_h(spec.source)}</p>
+
+<div class="mh-cp-grid">{frames}</div>
+<script>
+document.addEventListener('click', function (e) {{
+  var more = e.target.closest ? e.target.closest('.mh-cp-more') : null;
+  if (!more) return;
+  var hidden = more.nextElementSibling;
+  if (hidden && hidden.classList.contains('mh-cp-hidden')) {{
+    hidden.classList.toggle('show');
+    more.style.display = hidden.classList.contains('show') ? 'none' : '';
+  }}
+}});
+</script>
+"""
+        return _layout("Channel preview", body, active="create")
+
+    @app.route("/plan/grid")
+    def plan_grid_page():
+        """Instagram-style grid preview of the planned feed — drafts the club has
+        scheduled (newest planned first), then unscheduled drafts."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.channel_preview import instagram_grid
+        from mediahub.club_platform.stub_pack_store import list_packs, load_pack
+
+        # Build feed cells from this org's drafts (planned ones first, by date).
+        planned: list[dict] = []
+        unplanned: list[dict] = []
+        for meta in list_packs(limit=60):
+            rec = load_pack(meta.get("pack_id", ""))
+            if rec is None or (rec.get("profile_id") or "") != pid:
+                continue
+            cell = {
+                "pack_id": rec.get("pack_id", ""),
+                "title": rec.get("title") or "Draft",
+                "planned_date": rec.get("planned_date") or "",
+                "stub_type": rec.get("stub_type") or "",
+            }
+            (planned if cell["planned_date"] else unplanned).append(cell)
+        planned.sort(key=lambda c: c["planned_date"], reverse=True)
+        cells = planned + unplanned
+
+        def _cell_html(c: dict) -> str:
+            if c.get("placeholder"):
+                return '<div class="mh-grid-cell mh-grid-empty"></div>'
+            badge = (
+                f'<span class="mh-grid-when">{_h(c["planned_date"])}</span>'
+                if c.get("planned_date")
+                else '<span class="mh-grid-when mh-grid-unplanned">unscheduled</span>'
+            )
+            return (
+                f'<a class="mh-grid-cell" href="{url_for("plan_preview_page", pack_id=c["pack_id"])}" '
+                f'title="{_h(c["title"])}">'
+                f'<span class="mh-grid-type">{_h(str(c["stub_type"]).replace("_", " "))}</span>'
+                f'<span class="mh-grid-title">{_h(c["title"])}</span>{badge}</a>'
+            )
+
+        if cells:
+            rows = instagram_grid(cells, columns=3)
+            grid_html = (
+                '<div class="mh-grid">'
+                + "".join(_cell_html(c) for row in rows for c in row)
+                + "</div>"
+            )
+        else:
+            grid_html = (
+                '<div class="card" style="text-align:center;padding:40px 24px">'
+                '<h2 style="margin:0 0 6px">No posts to preview yet</h2>'
+                f'<p class="dim">Make a draft, then it shows here as a feed tile. '
+                f'<a href="{url_for("make_page")}" style="text-decoration:underline">Create &rarr;</a></p></div>'
+            )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Grid preview</span>
+  <h1>Your feed, <em class="editorial">as a grid.</em></h1>
+  <p class="lede">A quick Instagram-style look at how your planned drafts sit together &mdash;
+  scheduled posts first, newest at the top. Tap a tile to preview it per channel.
+  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+</section>
+{grid_html}
+"""
+        return _layout("Grid preview", body, active="create")
+
+    # ---- 1.14 — the planning board (Kanban / whiteboard) -------------------
+
+    @app.route("/api/plan/board", methods=["GET"])
+    def api_plan_board():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import board_by_column, load_board
+
+        cols = board_by_column(load_board(pid))
+        return jsonify(
+            {
+                "ok": True,
+                "board": {c: [card.to_dict() for card in cards] for c, cards in cols.items()},
+            }
+        )
+
+    @app.route("/api/plan/board/add", methods=["POST"])
+    def api_plan_board_add():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import add_card
+
+        body = request.get_json(silent=True) or {}
+        card = add_card(pid, str(body.get("title") or ""), str(body.get("note") or ""))
+        if card is None:
+            return jsonify({"error": "Give the idea a title (the board may also be full)."}), 400
+        return jsonify({"ok": True, "card": card.to_dict()})
+
+    @app.route("/api/plan/board/move", methods=["POST"])
+    def api_plan_board_move():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import move_card
+
+        body = request.get_json(silent=True) or {}
+        card = move_card(pid, str(body.get("card_id") or ""), str(body.get("column") or ""))
+        if card is None:
+            return jsonify({"error": "Unknown card or column."}), 400
+        return jsonify({"ok": True, "card": card.to_dict()})
+
+    @app.route("/api/plan/board/delete", methods=["POST"])
+    def api_plan_board_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import delete_card
+
+        body = request.get_json(silent=True) or {}
+        ok = delete_card(pid, str(body.get("card_id") or ""))
+        return jsonify({"ok": bool(ok)})
+
+    @app.route("/api/plan/board/promote", methods=["POST"])
+    def api_plan_board_promote():
+        """Promote an idea card into a real free-text draft and advance it to
+        'drafted'. The draft is seeded from the idea text verbatim (no AI — works
+        with no provider) as a starting point the club then edits / regenerates."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.club_platform.stub_pack_store import save_pack
+        from mediahub.content_engine.board import link_pack, load_board
+
+        body = request.get_json(silent=True) or {}
+        card_id = str(body.get("card_id") or "")
+        card = next((c for c in load_board(pid) if c.id == card_id), None)
+        if card is None:
+            return jsonify({"error": "Unknown card."}), 400
+        if card.pack_id:
+            return jsonify({"ok": True, "pack_id": card.pack_id, "already": True})
+        seed = (card.note or card.title).strip()
+        pack = save_pack(
+            "free_text",
+            {"free_text": seed},
+            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": 0.5}],
+            profile_id=pid,
+        )
+        updated = link_pack(pid, card_id, pack["pack_id"], column="drafted")
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack["pack_id"],
+                "card": updated.to_dict() if updated else None,
+            }
+        )
+
+    @app.route("/plan/board")
+    def plan_board_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.content_engine.board import (
+            COLUMN_LABELS,
+            COLUMNS,
+            board_by_column,
+            load_board,
+        )
+
+        cols = board_by_column(load_board(pid))
+
+        def _card_html(card) -> str:
+            note = f'<p class="mh-bd-note">{_h(card.note)}</p>' if card.note else ""
+            if card.pack_id:
+                actions = (
+                    f'<a class="mh-bd-act" href="{url_for("stub_pack_view", pack_id=card.pack_id)}">Open draft &rarr;</a>'
+                    f'<a class="mh-bd-act" href="{url_for("plan_preview_page", pack_id=card.pack_id)}">Preview</a>'
+                )
+            elif card.column == "idea":
+                actions = (
+                    f'<button type="button" class="mh-bd-act" onclick="mhBoardPromote(this)" '
+                    f'data-card="{_h(card.id)}" title="Turn this idea into a free-text draft">Promote to draft</button>'
+                )
+            else:
+                actions = ""
+            return (
+                f'<div class="mh-bd-card" draggable="true" data-card="{_h(card.id)}">'
+                f'<div class="mh-bd-card-head"><strong>{_h(card.title)}</strong>'
+                f'<button type="button" class="mh-bd-del" onclick="mhBoardDelete(this)" '
+                f'data-card="{_h(card.id)}" title="Delete">&times;</button></div>'
+                f"{note}"
+                f'<div class="mh-bd-actions">{actions}</div></div>'
+            )
+
+        columns_html = ""
+        for col in COLUMNS:
+            cards = cols.get(col, [])
+            cards_html = "".join(_card_html(c) for c in cards)
+            add_form = (
+                '<div class="mh-bd-add">'
+                f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
+                f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
+                "</div>"
+                if col == "idea"
+                else ""
+            )
+            columns_html += (
+                f'<section class="mh-bd-col" data-col="{_h(col)}" '
+                f'ondragover="mhBoardOver(event)" ondragleave="mhBoardLeave(event)" ondrop="mhBoardDrop(event)">'
+                f'<h2 class="mh-bd-col-h">{_h(COLUMN_LABELS[col])}'
+                f'<span class="mh-bd-count">{len(cards)}</span></h2>'
+                f"{add_form}"
+                f'<div class="mh-bd-cards">{cards_html}</div>'
+                "</section>"
+            )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Board</span>
+  <h1>The committee <em class="editorial">whiteboard.</em></h1>
+  <p class="lede">Throw ideas on the board, drag them as they progress, and turn a good one into a
+  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.
+  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+</section>
+
+<span class="dim" id="mh-bd-status" style="font-size:12.5px;display:block;min-height:18px;margin:0 2px 8px"></span>
+<div class="mh-bd-board">{columns_html}</div>
+
+<script>
+var MH_BD = {{
+  add: {json.dumps(url_for("api_plan_board_add"))},
+  move: {json.dumps(url_for("api_plan_board_move"))},
+  del: {json.dumps(url_for("api_plan_board_delete"))},
+  promote: {json.dumps(url_for("api_plan_board_promote"))}
+}};
+function mhBoardStatus(m, warn) {{
+  var s = document.getElementById('mh-bd-status');
+  if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+function mhBoardPost(url, payload, ok) {{
+  fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (j.ok === false || j.error) {{ mhBoardStatus(j.error || 'Could not update.', true); return; }}
+      ok ? ok(j) : window.location.reload();
+    }}).catch(function(){{ mhBoardStatus('Could not update.', true); }});
+}}
+function mhBoardAdd(inp) {{
+  var t = inp.value.trim(); if (!t) return;
+  mhBoardPost(MH_BD.add, {{title: t}});
+}}
+function mhBoardDelete(btn) {{ mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}); }}
+function mhBoardPromote(btn) {{
+  btn.disabled = true; mhBoardStatus('Creating a draft from this idea…');
+  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}});
+}}
+document.addEventListener('dragstart', function(e) {{
+  var card = e.target.closest ? e.target.closest('.mh-bd-card') : null;
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.card);
+  e.dataTransfer.effectAllowed = 'move';
+}});
+function mhBoardOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-bd-drop'); }}
+function mhBoardLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-bd-drop'); }}
+function mhBoardDrop(e) {{
+  e.preventDefault();
+  var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
+  var id = e.dataTransfer.getData('text/plain');
+  if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+}}
+</script>
+"""
+        return _layout("Plan board", body, active="create")
+
+    # ---- 1.14 — the first-party performance-analytics loop -----------------
+
+    @app.route("/api/plan/analytics/record", methods=["POST"])
+    def api_plan_analytics_record():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.store import METRIC_KEYS, record_metric
+
+        body = request.get_json(silent=True) or {}
+        metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
+        if not any(metrics.values()):
+            metrics = {k: (body.get("metrics") or {}).get(k, 0) for k in METRIC_KEYS}
+        rec = record_metric(
+            pid,
+            str(body.get("post_type") or ""),
+            str(body.get("posted_date") or ""),
+            metrics,
+            posted_hour=body.get("posted_hour"),
+            pack_id=str(body.get("pack_id") or ""),
+            platform=str(body.get("platform") or ""),
+        )
+        if rec is None:
+            return jsonify(
+                {"error": "Pick a post type and a valid date (and at least one metric)."}
+            ), 400
+        return jsonify({"ok": True, "metric": rec.to_dict()})
+
+    @app.route("/api/plan/analytics/delete", methods=["POST"])
+    def api_plan_analytics_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.store import delete_metric
+
+        body = request.get_json(silent=True) or {}
+        return jsonify({"ok": bool(delete_metric(pid, str(body.get("id") or "")))})
+
+    @app.route("/api/plan/analytics/digest", methods=["POST"])
+    def api_plan_analytics_digest():
+        """AI performance digest — phrases the deterministic attribution numbers.
+        Honest provider errors; the planner already uses the numbers without it."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.attribution import attribute
+        from mediahub.analytics.digest import performance_digest
+        from mediahub.analytics.store import load_metrics
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        attribution = attribute(load_metrics(pid))
+        if attribution.n_posts == 0:
+            return jsonify({"error": "Record a few posts first — nothing to summarise yet."}), 400
+        try:
+            digest = performance_digest(attribution)
+        except ClaudeUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 503
+        except Exception as exc:
+            app.logger.exception("performance digest failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "digest": digest})
+
+    @app.route("/plan/analytics")
+    def plan_analytics_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.analytics.attribution import MIN_SAMPLES, attribute
+        from mediahub.analytics.store import METRIC_KEYS, engagement_score, load_metrics
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import load_sport_profile
+
+        prof = _active_profile()
+        sport = _org_calendar_sport(prof)
+        metrics = load_metrics(pid)
+        attribution = attribute(metrics)
+
+        # Post-type dropdown for the recording form (this sport's enabled types).
+        try:
+            spts = post_types_for(load_sport_profile(sport))
+        except Exception:
+            spts = []
+        type_titles = {spt.slug: spt.title for spt in spts}
+        type_opts = "".join(
+            f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in spts
+        )
+
+        # The attribution table — what's working, with an index bar.
+        if attribution.by_type:
+            rows = ""
+            for tp in attribution.by_type:
+                title = _h(type_titles.get(tp.post_type, tp.post_type.replace("_", " ").title()))
+                pct = round((tp.index - 1.0) * 100)
+                trusted = tp.n >= MIN_SAMPLES
+                cls = "mh-an-up" if pct >= 0 else "mh-an-down"
+                bar_w = max(4, min(100, round(tp.index * 50)))
+                pct_txt = f'{"+" if pct >= 0 else ""}{pct}%'
+                note = (
+                    ""
+                    if trusted
+                    else ' <span class="dim" style="font-size:11px">(needs ≥2 to count)</span>'
+                )
+                rows += (
+                    f"<tr><td>{title}{note}</td>"
+                    f'<td style="text-align:right;font-variant-numeric:tabular-nums">{int(tp.n)}</td>'
+                    f'<td style="text-align:right;font-variant-numeric:tabular-nums">{tp.avg_engagement:.0f}</td>'
+                    f'<td><div class="mh-an-bar"><span class="{cls}" style="width:{bar_w}%"></span></div></td>'
+                    f'<td class="{cls}" style="text-align:right;font-variant-numeric:tabular-nums">{pct_txt}</td></tr>'
+                )
+            best_bits = []
+            if attribution.best_dow_label():
+                best_bits.append(f"<strong>{_h(attribution.best_dow_label())}</strong>")
+            if attribution.best_hour is not None:
+                best_bits.append(f"around <strong>{int(attribution.best_hour):02d}:00</strong>")
+            best_line = (
+                f'<p class="dim" style="font-size:12.5px">Your posts have done best on '
+                + " ".join(best_bits)
+                + ".</p>"
+                if best_bits
+                else ""
+            )
+            table = (
+                '<div class="card"><h2 style="margin-top:0">What’s working</h2>'
+                '<p class="dim" style="font-size:12.5px;margin-top:0">Engagement = likes + 2&times;comments + '
+                "3&times;shares + 2&times;saves. The planner nudges the types that beat your own average.</p>"
+                '<table class="mh-an-table"><thead><tr><th>Post type</th><th>Posts</th>'
+                "<th>Avg engagement</th><th>vs your average</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>{best_line}</div>"
+            )
+        else:
+            table = (
+                '<div class="card" style="text-align:center;padding:36px 24px">'
+                '<h2 style="margin:0 0 6px">No performance recorded yet</h2>'
+                '<p class="dim" style="max-width:520px;margin:0 auto">Post an approved card by hand, '
+                "then come back and log how it did. Once you&rsquo;ve a couple in a type, the planner "
+                "starts ranking what actually works for your club. Nothing is auto-collected.</p></div>"
+            )
+
+        # Recent recorded posts (with delete).
+        recent = ""
+        for m in sorted(metrics, key=lambda x: x.recorded_at, reverse=True)[:12]:
+            title = _h(type_titles.get(m.post_type, m.post_type.replace("_", " ").title()))
+            eng = _h(str(engagement_score(m.metrics)))
+            recent += (
+                f'<div class="mh-an-row" data-id="{_h(m.id)}">'
+                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}</span></span>'
+                f'<span class="dim" style="font-variant-numeric:tabular-nums">{eng} eng</span>'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" '
+                f'onclick="mhAnDelete(this)">remove</button></div>'
+            )
+
+        metric_inputs = "".join(
+            f'<label class="mh-an-mlabel">{_h(k)}<input type="number" min="0" id="mh-an-{_h(k)}" '
+            f'value="0" style="width:88px"/></label>'
+            for k in METRIC_KEYS
+        )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Performance</span>
+  <h1>What actually <em class="editorial">works.</em></h1>
+  <p class="lede">Post by hand, then log how it did &mdash; MediaHub learns which post types earn your club
+  the most engagement and feeds that straight back into the plan. First-party and honest: nothing is
+  auto-collected (that waits on publishing integrations), and the numbers are yours.
+  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the plan &rarr;</a></p>
+</section>
+
+{table}
+
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0">Log a post&rsquo;s performance</h2>
+  <div class="mh-an-form">
+    <label class="mh-an-mlabel">Post type<select id="mh-an-type" style="min-width:170px">{type_opts}</select></label>
+    <label class="mh-an-mlabel">Date posted<input type="date" id="mh-an-date"/></label>
+    <label class="mh-an-mlabel">Hour (0&ndash;23, optional)<input type="number" min="0" max="23" id="mh-an-hour" style="width:88px"/></label>
+    {metric_inputs}
+    <button type="button" class="btn primary" onclick="mhAnRecord(this)">Log it</button>
+  </div>
+  <span class="dim" id="mh-an-status" style="font-size:12.5px"></span>
+  <div id="mh-an-recent" style="margin-top:14px">{recent}</div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <button type="button" class="btn" id="mh-an-digest-btn" onclick="mhAnDigest(this)" data-loader-text="Writing">AI performance digest</button>
+    <span class="dim" style="font-size:12px">An optional written summary of the numbers above. Needs an AI provider; the planner uses the numbers either way.</span>
+  </div>
+  <div id="mh-an-digest" style="margin-top:10px"></div>
+</div>
+
+<script>
+var MH_AN = {{
+  record: {json.dumps(url_for("api_plan_analytics_record"))},
+  del: {json.dumps(url_for("api_plan_analytics_delete"))},
+  digest: {json.dumps(url_for("api_plan_analytics_digest"))},
+  keys: {json.dumps(list(METRIC_KEYS))}
+}};
+function mhAnStatus(m, warn) {{
+  var s = document.getElementById('mh-an-status');
+  if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+function mhAnRecord(btn) {{
+  var metrics = {{}};
+  MH_AN.keys.forEach(function(k){{ metrics[k] = parseInt(document.getElementById('mh-an-'+k).value || '0', 10) || 0; }});
+  var hour = document.getElementById('mh-an-hour').value;
+  var payload = {{
+    post_type: document.getElementById('mh-an-type').value,
+    posted_date: document.getElementById('mh-an-date').value,
+    posted_hour: hour === '' ? null : parseInt(hour, 10),
+    metrics: metrics
+  }};
+  mhAnStatus('Saving…');
+  fetch(MH_AN.record, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (!j.ok) {{ mhAnStatus(j.error || 'Could not save.', true); return; }}
+      window.location.reload();
+    }}).catch(function(){{ mhAnStatus('Could not save.', true); }});
+}}
+function mhAnDelete(btn) {{
+  var row = btn.closest('.mh-an-row'); if (!row) return;
+  fetch(MH_AN.del, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: row.dataset.id}})}})
+    .then(function(r){{return r.json();}}).then(function(){{ window.location.reload(); }});
+}}
+function mhAnDigest(btn) {{
+  var box = document.getElementById('mh-an-digest');
+  btn.disabled = true; box.innerHTML = '<span class="dim">Writing…</span>';
+  fetch(MH_AN.digest, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: '{{}}'}})
+    .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, j:j}}; }}); }})
+    .then(function(res){{
+      btn.disabled = false;
+      var j = res.j || {{}};
+      if (!res.ok || !j.ok) {{ box.innerHTML = '<p class="dim" style="color:var(--warn)">' + (j.error || 'Could not write a digest.') + '</p>'; return; }}
+      var d = j.digest || {{}};
+      var html = '';
+      if (d.summary) html += '<p style="font-weight:600;margin:0 0 6px">' + d.summary.replace(/</g,'&lt;') + '</p>';
+      (d.takeaways || []).forEach(function(t){{ html += '<li style="margin:2px 0">' + (t.text||'').replace(/</g,'&lt;') + '</li>'; }});
+      box.innerHTML = html ? ('<ul style="margin:0;padding-left:18px">' + html + '</ul>') : '<p class="dim">No takeaways.</p>';
+    }}).catch(function(){{ btn.disabled = false; box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
+}}
+</script>
+"""
+        return _layout("Performance", body, active="create")
+
+    # ---- 1.14 — sponsor A/B ad-variant export sets (prepare, never spend) ---
+
+    def _pack_sponsor(rec: dict, prof) -> str:
+        """The sponsor to tag an ad set with: the draft's own sponsor_name, else
+        the org profile's. Only a label — never fabricated."""
+        fd = rec.get("form_data") or {}
+        return (
+            str(fd.get("sponsor_name") or "").strip()
+            or str(getattr(prof, "sponsor_name", "") or "").strip()
+        )
+
+    @app.route("/plan/ad-variants/<pack_id>")
+    def plan_ad_variants_page(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.ad_export import all_ad_platforms, ad_platform, build_variant_set
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+        prof = _active_profile()
+        sponsor = _pack_sponsor(rec, prof)
+
+        spec = ad_platform(request.args.get("platform", "")) or all_ad_platforms()[0]
+        vset = build_variant_set(rec.get("cards") or [], sponsor, spec.slug)
+
+        tabs = "".join(
+            f'<a class="mh-cp-tab{" active" if p.slug == spec.slug else ""}" '
+            f'href="{url_for("plan_ad_variants_page", pack_id=pack_id, platform=p.slug)}">{_h(p.name)}</a>'
+            for p in all_ad_platforms()
+        )
+        sizes_html = "".join(
+            f"<li><strong>{_h(s.name)}</strong> &mdash; {int(s.width)}&times;{int(s.height)} "
+            f'<span class="dim">({_h(s.aspect_label())})</span></li>'
+            for s in spec.sizes
+        )
+        variants_html = ""
+        for v in vset.variants:
+            tags = (
+                '<p class="dim" style="font-size:11.5px;margin:4px 0 0">'
+                + " ".join(f"#{_h(h)}" for h in v.hashtags)
+                + "</p>"
+                if v.hashtags
+                else ""
+            )
+            variants_html += (
+                '<div class="mh-av-variant"><span class="mh-av-label">'
+                f'{_h(v.label)}</span><div style="flex:1"><p style="margin:0">{_h(v.caption)}</p>'
+                f"{tags}</div></div>"
+            )
+        if not variants_html:
+            variants_html = (
+                '<p class="dim">This draft has no copy to turn into ad variants yet. '
+                f'<a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">'
+                "Add or regenerate cards</a> first.</p>"
+            )
+
+        sponsor_line = (
+            f"tagged for <strong>{_h(sponsor)}</strong>"
+            if sponsor
+            else '<span style="color:var(--warn)">no sponsor set on this draft or your profile</span>'
+        )
+        export_url = url_for("api_plan_ad_variants_export", pack_id=pack_id, platform=spec.slug)
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Sponsor ad set</span>
+  <h1>A/B creative, <em class="editorial">ready to run.</em></h1>
+  <p class="lede">Turn this sponsor draft&rsquo;s angles into an A/B ad set ({sponsor_line}), sized for the
+  platform&rsquo;s ad manager. <strong>MediaHub prepares the creative; it never buys or places ads</strong> &mdash;
+  you upload these by hand where a human controls targeting and spend.
+  <a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">Back to the draft &rarr;</a></p>
+</section>
+
+<div class="mh-cp-bar"><div class="mh-cp-tabs">{tabs}</div>
+  <a class="btn" href="{export_url}">Export manifest (.txt)</a></div>
+<p class="dim" style="font-size:11.5px;margin:0 0 14px">{_h(spec.source)}</p>
+
+<div class="mh-av-grid">
+  <div class="card"><h2 style="margin-top:0">Sizes to prepare</h2>
+    <ul class="mh-av-sizes">{sizes_html}</ul></div>
+  <div class="card"><h2 style="margin-top:0">Variants ({len(vset.variants)})</h2>
+    {variants_html}</div>
+</div>
+"""
+        return _layout("Sponsor ad set", body, active="create")
+
+    @app.route("/api/plan/ad-variants/<pack_id>/export")
+    def api_plan_ad_variants_export(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.ad_export import build_variant_set, manifest_text
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+        sponsor = _pack_sponsor(rec, _active_profile())
+        vset = build_variant_set(
+            rec.get("cards") or [], sponsor, str(request.args.get("platform") or "meta")
+        )
+        if vset is None:
+            return jsonify({"error": "Unknown ad platform."}), 400
+        text = manifest_text(vset)
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f"ad-set-{vset.platform.slug}-{pack_id}")
+        return app.response_class(
+            text,
+            mimetype="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{safe}.txt"'},
+        )
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
@@ -28773,6 +30076,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
             f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
+            f'<a class="btn secondary" href="{url_for("plan_preview_page", pack_id=pack_id)}" '
+            f'title="See this draft the way each platform shows it — crop, safe zone, caption fold">'
+            f"Preview per channel</a>"
+            f'<a class="btn secondary" href="{url_for("plan_ad_variants_page", pack_id=pack_id)}" '
+            f'title="Turn these angles into a sponsor A/B ad set, sized for ad managers (prepared, never placed)">'
+            f"Prepare ad set</a>"
             f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"

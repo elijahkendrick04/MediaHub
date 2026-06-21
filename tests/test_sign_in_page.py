@@ -162,12 +162,12 @@ class TestHomeHeroSwitching:
         c, _, _ = app_two_profiles
         # A fresh session is signed out — the home page must NOT resume
         # the last-used org. With profiles on disk but none pinned, the
-        # signed-out hero surfaces both CTAs.
+        # signed-out hero surfaces Sign up (primary) and Sign in (secondary).
         resp = c.get("/")
         body = resp.get_data(as_text=True)
         # Hero copy + both CTAs.
         assert "Sign in" in body
-        assert "Set up my organisation" in body
+        assert "Sign up" in body
         assert 'class="mh-cta-primary"' in body
         assert 'class="mh-cta-secondary"' in body
         # The signed-in-only CTA must be absent — we are signed out.
@@ -177,8 +177,8 @@ class TestHomeHeroSwitching:
         c, _, _ = app_no_profiles
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        # Primary CTA leads to organisation setup.
-        assert "Set up my organisation" in body
+        # Primary CTA leads to sign up for new users.
+        assert "Sign up" in body
         # AND the secondary CTA offers the sign-in path — the user
         # must see both options even on a fresh deployment so the
         # "Sign in" button never looks broken.

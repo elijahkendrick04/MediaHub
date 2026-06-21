@@ -256,9 +256,11 @@ def test_home_renders_diagram_for_fresh_visitor(client):
         assert label in body
 
 
-def test_home_renders_diagram_for_pinned_org(client):
-    # Seed + pin a real organisation so home() takes the returning-tenant
-    # branch; the diagram is unconditional and must render there too.
+def test_pinned_home_omits_diagram_now_on_help(client):
+    # The signed-in home became a content-creation workspace; the how-it-works
+    # diagram (and the rest of the product-story explainer) moved to the Help
+    # page, reached from the account menu. Seed + pin a real organisation so
+    # home() takes the returning-tenant branch.
     from mediahub.web.club_profile import ClubProfile, save_profile
 
     save_profile(ClubProfile(
@@ -268,10 +270,17 @@ def test_home_renders_diagram_for_pinned_org(client):
     pinned = client.post("/api/organisation/active", data={"profile_id": "otter-sc"})
     assert pinned.status_code == 200, pinned.get_data(as_text=True)
 
-    body = _home_body(client)
-    assert "mh-pl-stage" in body
-    assert "mh-pl-svg--h" in body and "mh-pl-svg--v" in body
-    assert ">THE ENGINE</text>" in body
+    # The diagram's SVG text is markup-only (the .mh-pl-stage class name also
+    # appears in the always-shipped CSS), so it is the honest signal that the
+    # section itself is gone from the signed-in home.
+    home = _home_body(client)
+    assert ">THE ENGINE</text>" not in home
+
+    # …and renders in full on the Help page.
+    help_body = client.get("/help").get_data(as_text=True)
+    assert "mh-pl-stage" in help_body
+    assert "mh-pl-svg--h" in help_body and "mh-pl-svg--v" in help_body
+    assert ">THE ENGINE</text>" in help_body
 
 
 def test_home_injects_pipeline_css(client):

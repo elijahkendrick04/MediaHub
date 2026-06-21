@@ -1,0 +1,43 @@
+# MediaHub key-date pack — Football
+#
+# Curated, provenance-stamped annual hooks a football club can build content
+# around. The club's own fixtures, kick-off dates and deadlines are entered by
+# the operator on the Plan page (content_engine.inputs) and are NOT invented
+# here — these are the always-on, sport-agnostic + football observances.
+#
+# Shipped, read-only config (see data/key_dates/swimming.yaml for the schema).
+# Loaded by mediahub.content_engine.key_dates.load_key_date_pack("football").
+
+sport: football
+display_name: Football
+
+key_dates:
+  - name: New Year — new half of the season
+    kind: season
+    rule: { type: fixed, month: 1, day: 1 }
+    note: "Turn-of-the-year reset — the run-in to the back half of the campaign."
+    source: "Calendar (fixed 1 January)."
+
+  - name: International Women's Day
+    kind: observance
+    rule: { type: fixed, month: 3, day: 8 }
+    note: "Spotlight the club's women's and girls' sides, coaches and volunteers."
+    source: "United Nations international day (un.org) — fixed 8 March."
+
+  - name: International Day of Sport for Development and Peace
+    kind: sport
+    rule: { type: fixed, month: 4, day: 6 }
+    note: "Celebrate grassroots football's community role beyond the table."
+    source: "United Nations international day (un.org) — fixed 6 April."
+
+  - name: Olympic Day
+    kind: sport
+    rule: { type: fixed, month: 6, day: 23 }
+    note: "Aspirational hook linking the club to the Olympic movement."
+    source: "International Olympic Committee Olympic Day (olympics.com) — fixed 23 June."
+
+  - name: International Day of Charity
+    kind: observance
+    rule: { type: fixed, month: 9, day: 5 }
+    note: "Hook for the club's fundraising and community fixtures."
+    source: "United Nations International Day of Charity (un.org) — fixed 5 September."

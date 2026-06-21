@@ -69,12 +69,37 @@ def _seed_run(tmp_path, run_id="r1", profile_id="club-a"):
             "start_date": "2026-03-14",
             "course": "LC",
             "swimmers": {
-                "s1": {"first_name": "Maya", "last_name": "Patel", "gender": "F", "identity_confidence": "high"},
-                "s2": {"first_name": "Sam", "last_name": "Okafor", "gender": "M", "identity_confidence": "high"},
+                "s1": {
+                    "first_name": "Maya",
+                    "last_name": "Patel",
+                    "gender": "F",
+                    "identity_confidence": "high",
+                },
+                "s2": {
+                    "first_name": "Sam",
+                    "last_name": "Okafor",
+                    "gender": "M",
+                    "identity_confidence": "high",
+                },
             },
             "results": [
-                {"swimmer_key": "s1", "distance": 100, "stroke": "FR", "course": "LC", "finals_time_cs": 6532, "place": 1, "status": "completed"},
-                {"swimmer_key": "s2", "distance": 50, "stroke": "BK", "course": "LC", "finals_time_cs": 3210, "place": 2, "status": "completed"},
+                {
+                    "swimmer_key": "s1",
+                    "distance": 100,
+                    "stroke": "FR",
+                    "course": "LC",
+                    "finals_time_cs": 6532,
+                    "place": 1,
+                    "status": "completed",
+                },
+                {
+                    "swimmer_key": "s2",
+                    "distance": 50,
+                    "stroke": "BK",
+                    "course": "LC",
+                    "finals_time_cs": None,
+                    "status": "dq",
+                },
             ],
         },
         "our_swim_count": 2,
@@ -214,7 +239,12 @@ def test_derive_via_form(app_env):
         tid = loc.rsplit("/", 1)[-1]
         r = c.post(
             f"/api/data-hub/table/{tid}/derive",
-            data={"output_title": "Full name", "derivation_id": "full_name", "col1": "first", "col2": "last"},
+            data={
+                "output_title": "Full name",
+                "derivation_id": "full_name",
+                "col1": "first",
+                "col2": "last",
+            },
         )
         assert r.status_code == 302
         page = c.get(f"/data-hub/table/{tid}")
@@ -226,11 +256,15 @@ def test_derive_via_json(app_env):
     app, wm, _ = app_env
     with app.test_client() as c:
         _login(c)
-        tid = c.post(
-            "/api/data-hub/import",
-            data={"file": (io.BytesIO(b"Name,BirthYear\nMaya,2012\n"), "r.csv")},
-            content_type="multipart/form-data",
-        ).headers["Location"].rsplit("/", 1)[-1]
+        tid = (
+            c.post(
+                "/api/data-hub/import",
+                data={"file": (io.BytesIO(b"Name,BirthYear\nMaya,2012\n"), "r.csv")},
+                content_type="multipart/form-data",
+            )
+            .headers["Location"]
+            .rsplit("/", 1)[-1]
+        )
         r = c.post(
             f"/api/data-hub/table/{tid}/derive",
             json={
@@ -273,7 +307,10 @@ def test_create_table_json(app_env):
         _login(c)
         r = c.post(
             "/api/data-hub/create-table",
-            json={"title": "Sponsors", "columns": [{"title": "Name", "type": "text"}, {"title": "Tier", "type": "text"}]},
+            json={
+                "title": "Sponsors",
+                "columns": [{"title": "Name", "type": "text"}, {"title": "Tier", "type": "text"}],
+            },
         )
         assert r.status_code == 200
         body = r.get_json()
@@ -288,7 +325,10 @@ def test_bulk_queues_cards_for_review(app_env):
     _seed_run(tmp)
     with app.test_client() as c:
         _login(c)
-        r = c.post("/api/data-hub/bulk", data={"run_id": "r1", "format_slug": "certificate", "pb_only": "1"})
+        r = c.post(
+            "/api/data-hub/bulk",
+            data={"run_id": "r1", "format_slug": "certificate", "pb_only": "1"},
+        )
         assert r.status_code == 302
         assert "msg=" in r.headers["Location"]
     # The PB card is now in the review queue as QUEUE (never auto-approved).
@@ -306,7 +346,10 @@ def test_bulk_json_returns_job(app_env):
     _seed_run(tmp)
     with app.test_client() as c:
         _login(c)
-        r = c.post("/api/data-hub/bulk", json={"run_id": "r1", "format_slug": "certificate", "pb_only": True})
+        r = c.post(
+            "/api/data-hub/bulk",
+            json={"run_id": "r1", "format_slug": "certificate", "pb_only": True},
+        )
         assert r.status_code == 200
         job = r.get_json()["job"]
         job_id = job["job_id"]
@@ -350,26 +393,53 @@ def test_delete_org_table_route(app_env):
     app, wm, _ = app_env
     with app.test_client() as c:
         _login(c)
-        tid = c.post(
-            "/api/data-hub/import",
-            data={"file": (io.BytesIO(b"Name\nMaya\n"), "r.csv")},
-            content_type="multipart/form-data",
-        ).headers["Location"].rsplit("/", 1)[-1]
+        tid = (
+            c.post(
+                "/api/data-hub/import",
+                data={"file": (io.BytesIO(b"Name\nMaya\n"), "r.csv")},
+                content_type="multipart/form-data",
+            )
+            .headers["Location"]
+            .rsplit("/", 1)[-1]
+        )
         r = c.post(f"/api/data-hub/table/{tid}/delete")
         assert r.status_code == 302
         # gone afterwards
         assert c.get(f"/data-hub/table/{tid}").status_code == 404
 
 
+def test_grid_has_accessibility_affordances(app_env):
+    app, wm, tmp = app_env
+    _seed_run(tmp)
+    with app.test_client() as c:
+        _login(c)
+        r = c.get("/data-hub/table/results:r1")
+        assert r.status_code == 200
+        html = r.data.decode()
+        # Screen-reader caption + column scopes for the data grid.
+        assert 'class="dh-sr"' in html
+        assert 'scope="col"' in html
+        # Provenance badge is announced, not just a hover tooltip.
+        assert 'aria-label="Where this came from' in html
+        # The filter box is labelled.
+        assert 'aria-label="Filter rows in this table"' in html
+        # The DQ swim is flagged → the marker carries an aria-label.
+        assert 'aria-label="Needs review' in html
+
+
 def test_org_table_tenant_isolation(app_env):
     app, wm, _ = app_env
     with app.test_client() as c:
         _login(c, "club-a")
-        tid = c.post(
-            "/api/data-hub/import",
-            data={"file": (io.BytesIO(b"Name\nMaya\n"), "r.csv")},
-            content_type="multipart/form-data",
-        ).headers["Location"].rsplit("/", 1)[-1]
+        tid = (
+            c.post(
+                "/api/data-hub/import",
+                data={"file": (io.BytesIO(b"Name\nMaya\n"), "r.csv")},
+                content_type="multipart/form-data",
+            )
+            .headers["Location"]
+            .rsplit("/", 1)[-1]
+        )
     with app.test_client() as c2:
         _login(c2, "club-b")
         r = c2.get(f"/data-hub/table/{tid}")

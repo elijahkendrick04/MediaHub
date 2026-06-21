@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `6f57fa40a` · Merge pull request #956 from elijahkendrick04/claude/amazing-carson-kl0nm3
+**Last updated:** 2026-06-21 · `ff9b64837` · Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) (#973)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
 - **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
 - **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
 - **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
@@ -1214,14 +1213,12 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
-| 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
-| 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
-| 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
-| 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
-| 2026-06-21 | `791c7b0bc` | feat(data_hub): web grid UI, JSON API + connector framework (1.13 build 3) |
-| 2026-06-21 | `a00b5a9bf` | feat(data_hub,bulk): derived columns + AI scaffold + review-queued bulk generation (1.13 build 2) |
-| 2026-06-21 | `b43501de8` | feat(data_hub): canonical table views + editable org tables + CSV/XLSX round-trip (1.13 build 1) |
-| 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
-| 2026-06-21 | `2e1886d0e` | Make stock-thumb proxy rate-limit-robust (cache + bounded concurrency + retry) |
+| 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
+| 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
+| 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
+| 2026-06-21 | `643f25c7a` | Planning board (Kanban / whiteboard) (roadmap 1.14, build 3/4) |
+| 2026-06-21 | `4cf5e4a73` | Per-channel previews + safe zones + grid (roadmap 1.14, build 2/4) |
+| 2026-06-21 | `df7e3f1c8` | a11y: render /settings tiles as h2 (not h3) under the hero h1 |
+| 2026-06-21 | `014a40dff` | docs: refresh ENV_INVENTORY for the 1.14 calendar env usage |
+| 2026-06-21 | `ab1a5ea23` | ci: re-trigger checks (docs-only push didn't fire CI) |
 <!-- /ROADMAP:ACTIVITY -->

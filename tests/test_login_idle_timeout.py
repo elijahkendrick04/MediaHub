@@ -90,8 +90,8 @@ class TestLoginIdleTimeout:
             sess["login_seen_at"] = int(time.time()) - 10_000_000
 
         body = client.get("/").get_data(as_text=True)
-        # Neutral signed-out hero — both setup CTAs, no signed-in CTA.
-        assert "Set up my organisation" in body
+        # Neutral signed-out hero — Sign up primary, Sign in secondary.
+        assert "Sign up" in body
         assert "Create new content" not in body
         # API reports signed-out, and the stale pin has been cleared.
         api = client.get("/api/organisation/active").get_json()

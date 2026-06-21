@@ -428,6 +428,36 @@ _THUMB_FETCH_GATE = threading.Semaphore(
     max(1, int(os.environ.get("MEDIAHUB_STOCK_THUMB_CONCURRENCY", "4")))
 )
 
+# Global outbound rate gate. Concurrency alone isn't enough: a grid of 24 tiles,
+# each client-retried, each re-scheduling a warm, each retrying a 429, amplifies
+# into a request *storm* that trips the source's (Wikimedia's) hard rate limit
+# from a datacenter IP — which is why almost nothing loads. This serialises ALL
+# upstream thumbnail fetches to a polite few-per-second so we stay under the
+# limit no matter how many retries pile up; the disk cache then fills steadily.
+_THUMB_RATE_LOCK = threading.Lock()
+_THUMB_RATE_NEXT = 0.0
+
+
+def _thumb_rate_gate() -> None:
+    """Block until this thread may make the next upstream request, holding the
+    global request rate at ``MEDIAHUB_STOCK_THUMB_RATE`` per second (default 2).
+    A rate <= 0 disables the gate (used by tests)."""
+    try:
+        rate = float(os.environ.get("MEDIAHUB_STOCK_THUMB_RATE", "2"))
+    except ValueError:
+        rate = 2.0
+    if rate <= 0:
+        return
+    interval = 1.0 / rate
+    global _THUMB_RATE_NEXT
+    with _THUMB_RATE_LOCK:
+        now = time.monotonic()
+        wait = max(0.0, _THUMB_RATE_NEXT - now)
+        _THUMB_RATE_NEXT = max(now, _THUMB_RATE_NEXT) + interval
+    if wait > 0:
+        time.sleep(wait)
+
+
 # content-type <-> cache-file extension (raster/video only; SVG is refused — it
 # can carry script, same rule as the brand-logo mirror).
 _THUMB_CT_TO_EXT = {
@@ -544,6 +574,7 @@ def _fetch_thumb_upstream(url, requests, is_url_safe, timeout):  # noqa: ANN001
         if not is_proxy_host(host) or not is_url_safe(current):
             log.debug("stock thumb proxy refused host: %s", host)
             return None, ""
+        _thumb_rate_gate()  # stay under the source's rate limit globally
         try:
             r = requests.get(
                 current,

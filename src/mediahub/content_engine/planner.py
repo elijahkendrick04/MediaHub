@@ -340,6 +340,29 @@ def _score_item(
         elif age >= STALE_TYPE_DAYS:
             apply(6, f"nothing drafted in this type for {age}d", pack_sig)
 
+    # --- OWN: measured performance (the analytics loop, 1.14) -----------
+    # A type the club's own posts have over/under-performed earns a small,
+    # bounded, explained nudge. Deterministic: it reads a stored attribution
+    # index, so the same recorded metrics always produce the same plan.
+    perf_sig = next(
+        (s for s in signals if s.kind == "performance" and s.payload.get("post_type") == slug),
+        None,
+    )
+    if perf_sig is not None:
+        idx = float(perf_sig.payload.get("index", 1.0) or 1.0)
+        if idx >= 1.15:
+            apply(
+                min(8, round((idx - 1.0) * 20)),
+                f"outperforms your average — {perf_sig.summary}",
+                perf_sig,
+            )
+        elif idx <= 0.85:
+            apply(
+                max(-6, round((idx - 1.0) * 20)),
+                f"underperforms your average — {perf_sig.summary}",
+                perf_sig,
+            )
+
     return PlanItem(
         post_type=slug,
         title=spt.title,

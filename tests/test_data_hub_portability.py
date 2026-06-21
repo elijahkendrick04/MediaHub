@@ -12,9 +12,7 @@ from mediahub.data_hub.models import DataColumn, Provenance
 _HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
 
 CLEAN_CSV = (
-    "Swimmer,PBs,Time,Joined\n"
-    "Maya Patel,3,1:05.32,2024-05-01\n"
-    "Sam Okafor,2,31.24,2023-09-10\n"
+    "Swimmer,PBs,Time,Joined\nMaya Patel,3,1:05.32,2024-05-01\nSam Okafor,2,31.24,2023-09-10\n"
 )
 
 
@@ -105,3 +103,29 @@ def test_xlsx_without_openpyxl_is_honest_error():
     res = portability.import_bytes(b"PK\x03\x04rest", "book.xlsx")
     assert not res.ok
     assert any("openpyxl" in w.message for w in res.warnings)
+
+
+@pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl not installed")
+def test_xlsx_native_cell_types_import():
+    """A real spreadsheet stores native ints/floats, not strings — importing
+    one must infer the right kinds and keep the values, not flag them."""
+    import io
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Swimmer", "PBs", "Best time", "Joined"])
+    ws.append(["Maya Patel", 3, 65.32, "2024-05-01"])
+    ws.append(["Sam Okafor", 2, 31.24, "2023-09-10"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    res = portability.import_bytes(buf.getvalue(), "native.xlsx")
+    assert res.ok
+    assert res.table.row_count == 2
+    types = {c.key: c.type for c in res.table.columns}
+    assert types == {"swimmer": "text", "pbs": "int", "best_time": "number", "joined": "date"}
+    assert res.table.cell(0, "pbs").value == 3
+    assert res.table.cell(0, "best_time").value == 65.32
+    assert res.table.flagged_count == 0  # native numeric cells are not ambiguous
