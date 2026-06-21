@@ -42927,7 +42927,13 @@ voice, and queues them for one-click approval.</p>
             out = generate_chart_caption(match.spec, tone=tone)
         except ClaudeUnavailableError as e:
             return jsonify({"available": False, "error": "no_ai", "message": str(e)})
-        return jsonify({"available": True, "caption": out.get("caption", ""), "provider": out.get("provider", "")})
+        return jsonify(
+            {
+                "available": True,
+                "caption": out.get("caption", ""),
+                "provider": out.get("provider", ""),
+            }
+        )
 
     @app.route("/api/runs/<run_id>/charts/recommend", methods=["POST"])
     def api_run_charts_recommend(run_id: str):
@@ -43043,7 +43049,7 @@ voice, and queues them for one-click approval.</p>
                 'title="1080×1920 — story">▮</a>'
                 f'<a class="btn secondary" style="font-size:12px;padding:5px 10px" href="{_h(svg_dl)}" '
                 'title="Vector SVG">SVG</a>'
-                '</span></div>'
+                "</span></div>"
                 '<div class="mh-cap-out" style="display:none;font-size:13px;line-height:1.5;'
                 'background:var(--panel);border-radius:8px;padding:10px"></div></div>'
             )
