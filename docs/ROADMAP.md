@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `ff9b64837` · Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) (#973)
+**Last updated:** 2026-06-21 · `77b4b3d2e` · Video suite: full AI editing layer + timeline editor (grade sliders / drag-reorder / waveform scrubb
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1213,12 +1213,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `e90907c9a` | video editor: drag-to-reorder + audio-waveform scrubber, and fix two studio-breaking bugs |
 | 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
+| 2026-06-21 | `f36e05c43` | ci(unit-suite): a cancelled (superseded) run is not a failure |
 | 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
+| 2026-06-21 | `2eab60c3b` | video suite: timeline editor — per-clip colour-grade sliders |
 | 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
+| 2026-06-21 | `e3e517eb3` | video suite: director depth — per-beat weights, cross-clip virality, multi-beat captions |
 | 2026-06-21 | `643f25c7a` | Planning board (Kanban / whiteboard) (roadmap 1.14, build 3/4) |
 | 2026-06-21 | `4cf5e4a73` | Per-channel previews + safe zones + grid (roadmap 1.14, build 2/4) |
 | 2026-06-21 | `df7e3f1c8` | a11y: render /settings tiles as h2 (not h3) under the hero h1 |
-| 2026-06-21 | `014a40dff` | docs: refresh ENV_INVENTORY for the 1.14 calendar env usage |
-| 2026-06-21 | `ab1a5ea23` | ci: re-trigger checks (docs-only push didn't fire CI) |
 <!-- /ROADMAP:ACTIVITY -->
