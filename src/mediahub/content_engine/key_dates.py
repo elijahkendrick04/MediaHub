@@ -93,9 +93,7 @@ def _nth_weekday(year: int, month: int, weekday: int, n: int) -> Optional[date]:
     if not (1 <= month <= 12) or not (0 <= weekday <= 6) or n == 0:
         return None
     days_in_month = _calmod.monthrange(year, month)[1]
-    matches = [
-        d for d in range(1, days_in_month + 1) if date(year, month, d).weekday() == weekday
-    ]
+    matches = [d for d in range(1, days_in_month + 1) if date(year, month, d).weekday() == weekday]
     idx = n - 1 if n > 0 else n  # n>0 → 1-based from start; n<0 → from end
     try:
         return date(year, month, matches[idx])

@@ -25788,9 +25788,7 @@ function mhPlanGenerate(btn) {{
         def _entry_chip(e) -> str:
             if e.kind == "planned_draft":
                 ch = e.meta.get("channel") or ""
-                ch_html = (
-                    f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
-                )
+                ch_html = f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
                 warn = (
                     '<span title="On a blackout date you set" '
                     'style="color:var(--bad);font-weight:700"> ⚠</span>'
@@ -25848,7 +25846,7 @@ function mhPlanGenerate(btn) {{
                 f'<span class="mh-cal-draft-dot"></span>'
                 f'<span class="mh-cal-draft-t">{_h(d["title"])}'
                 f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
-                f'{"s" if int(d["n_cards"]) != 1 else ""}</span></span></div>'
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span></div>"
             )
 
         rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
@@ -25873,8 +25871,7 @@ function mhPlanGenerate(btn) {{
 
         counts = model.counts()
         notes_html = "".join(
-            f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>'
-            for n in model.notes
+            f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>' for n in model.notes
         )
 
         body = f"""
