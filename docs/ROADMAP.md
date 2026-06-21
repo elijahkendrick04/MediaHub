@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `71bcf67d8` · Planner calendar/board + previews + analytics (roadmap 1.14) (#962)
+**Last updated:** 2026-06-21 · `ff9b64837` · Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) (#973)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1213,6 +1213,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
 | 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
 | 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
 | 2026-06-21 | `643f25c7a` | Planning board (Kanban / whiteboard) (roadmap 1.14, build 3/4) |
@@ -1220,6 +1221,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `df7e3f1c8` | a11y: render /settings tiles as h2 (not h3) under the hero h1 |
 | 2026-06-21 | `014a40dff` | docs: refresh ENV_INVENTORY for the 1.14 calendar env usage |
 | 2026-06-21 | `ab1a5ea23` | ci: re-trigger checks (docs-only push didn't fire CI) |
-| 2026-06-21 | `b9a8e8174` | style: ruff-format the 1.14 calendar files |
-| 2026-06-21 | `c5bb6131b` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_RATE |
 <!-- /ROADMAP:ACTIVITY -->
