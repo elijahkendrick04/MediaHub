@@ -35,6 +35,8 @@ _GRID_CSS = """
 .dh-prov.derived{color:#c9a6ff}.dh-prov.connector{color:#76d4d0}.dh-prov.registry{color:#aab4cc}
 .dh-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}
 .dh-meta{color:var(--dim,#8a94ad);font-size:12px}
+.dh-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style>
 """
 
@@ -44,7 +46,11 @@ def _prov_badge(cell: DataCell, *, first: bool) -> str:
     if not first:
         return ""
     cls = Provenance.normalise(cell.provenance)
-    return f'<span class="dh-prov {_h(cls)}" title="{_h(Provenance.label(cls))}">{_h(Provenance.label(cls))}</span>'
+    label = Provenance.label(cls)
+    return (
+        f'<span class="dh-prov {_h(cls)}" role="img" '
+        f'aria-label="Where this came from: {_h(label)}" title="{_h(label)}">{_h(label)}</span>'
+    )
 
 
 def _sort_link(
@@ -76,7 +82,7 @@ def render_grid(
         link = _sort_link(
             table.table_id, col.key, col.title, sort=sort, direction=direction, query=query
         )
-        head_cells.append(f'<th class="dh-col{frozen}">{link}</th>')
+        head_cells.append(f'<th scope="col" class="dh-col{frozen}">{link}</th>')
     thead = "<thead><tr>" + "".join(head_cells) + "</tr></thead>"
 
     body_rows = []
@@ -88,12 +94,19 @@ def render_grid(
             frozen = " dh-frozen" if col.frozen else ""
             flag = " dh-flag" if cell.flagged else ""
             mark = (
-                '<span class="dh-mark" title="Needs review">&#9888;</span>' if cell.flagged else ""
+                '<span class="dh-mark" role="img" aria-label="Needs review" '
+                'title="Needs review">&#9888;</span>'
+                if cell.flagged
+                else ""
             )
             title_attr = f' title="{_h(cell.note)}"' if cell.note else ""
+            # Flagged cells are announced to screen readers with the reason.
+            cell_aria = (
+                f' aria-label="Needs review: {_h(cell.note)}"' if cell.flagged and cell.note else ""
+            )
             badge = _prov_badge(cell, first=(i == 0))
             tds.append(
-                f'<td class="dh-cell{frozen}{flag}"{title_attr}>{mark}{_h(cell.display)}{badge}</td>'
+                f'<td class="dh-cell{frozen}{flag}"{title_attr}{cell_aria}>{mark}{_h(cell.display)}{badge}</td>'
             )
         body_rows.append("<tr>" + "".join(tds) + "</tr>")
     tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
@@ -101,7 +114,12 @@ def render_grid(
     note = ""
     if len(rows) > max_rows:
         note = f'<p class="dh-meta">Showing first {max_rows} of {len(rows)} rows.</p>'
-    grid = f'<div class="dh-wrap"><table class="dh-grid">{thead}{tbody}</table></div>'
+    flag_note = f" {table.flagged_count} cell(s) flagged for review." if table.flagged_count else ""
+    caption = (
+        f'<caption class="dh-sr">{_h(table.title)} — {table.row_count} rows, '
+        f"{len(table.columns)} columns.{flag_note}</caption>"
+    )
+    grid = f'<div class="dh-wrap"><table class="dh-grid">{caption}{thead}{tbody}</table></div>'
     return _GRID_CSS + grid + note
 
 
@@ -111,7 +129,7 @@ def render_toolbar(table: DataTable, *, query: str = "") -> str:
         f'<form method="get" action="{url_for("data_hub_table", table_id=table.table_id)}" '
         'style="display:flex;gap:6px">'
         f'<input type="text" name="q" value="{_h(query)}" placeholder="Filter rows…" '
-        'style="padding:6px 8px;min-width:180px">'
+        'aria-label="Filter rows in this table" style="padding:6px 8px;min-width:180px">'
         '<button class="btn secondary" type="submit">Filter</button>'
         "</form>"
     )

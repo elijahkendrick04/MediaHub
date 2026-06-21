@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -72,8 +73,13 @@ def test_resolve_all_when_no_query(run_env):
 def test_bulk_queues_every_card_for_review(run_env):
     tmp, runs = run_env
     job = bulk.bulk_generate(
-        "club-a", "r1", "certificate",
-        row_query={"pb_only": True}, runs_dir=runs, jobs_dir=tmp / "bj", generator=_ok_gen,
+        "club-a",
+        "r1",
+        "certificate",
+        row_query={"pb_only": True},
+        runs_dir=runs,
+        jobs_dir=tmp / "bj",
+        generator=_ok_gen,
     )
     assert job.n_total == 2
     assert job.n_queued == 2
@@ -92,8 +98,13 @@ def test_bulk_never_clobbers_a_human_decision(run_env):
     ws = WorkflowStore(runs)
     ws.set_status("r1", "s1", CardStatus.APPROVED)
     job = bulk.bulk_generate(
-        "club-a", "r1", "certificate",
-        row_query={"pb_only": True}, runs_dir=runs, jobs_dir=tmp / "bj", generator=_ok_gen,
+        "club-a",
+        "r1",
+        "certificate",
+        row_query={"pb_only": True},
+        runs_dir=runs,
+        jobs_dir=tmp / "bj",
+        generator=_ok_gen,
     )
     # s1 is skipped (already decided); s3 queued. Approval survives.
     assert job.n_skipped == 1
@@ -110,8 +121,13 @@ def test_bulk_records_honest_render_failure(run_env):
         return GenOutput(False, error="renderer unavailable")
 
     job = bulk.bulk_generate(
-        "club-a", "r1", "certificate",
-        row_query={"pb_only": True}, runs_dir=runs, jobs_dir=tmp / "bj", generator=bad_gen,
+        "club-a",
+        "r1",
+        "certificate",
+        row_query={"pb_only": True},
+        runs_dir=runs,
+        jobs_dir=tmp / "bj",
+        generator=bad_gen,
     )
     assert job.n_failed == 2
     assert all("unavailable" in i.error for i in job.items)
@@ -122,8 +138,13 @@ def test_bulk_records_honest_render_failure(run_env):
 def test_cap_limits_a_job(run_env):
     tmp, runs = run_env
     job = bulk.bulk_generate(
-        "club-a", "r1", "certificate",
-        runs_dir=runs, jobs_dir=tmp / "bj", generator=_ok_gen, cap=1,
+        "club-a",
+        "r1",
+        "certificate",
+        runs_dir=runs,
+        jobs_dir=tmp / "bj",
+        generator=_ok_gen,
+        cap=1,
     )
     assert job.n_total == 1
 
@@ -131,8 +152,13 @@ def test_cap_limits_a_job(run_env):
 def test_render_off_just_queues(run_env):
     tmp, runs = run_env
     job = bulk.bulk_generate(
-        "club-a", "r1", "certificate",
-        row_query={"pb_only": True}, runs_dir=runs, jobs_dir=tmp / "bj", render=False,
+        "club-a",
+        "r1",
+        "certificate",
+        row_query={"pb_only": True},
+        runs_dir=runs,
+        jobs_dir=tmp / "bj",
+        render=False,
     )
     assert job.n_queued == 2
     assert all(not i.output_path for i in job.items)
@@ -142,8 +168,13 @@ def test_job_persisted_and_tenant_scoped(run_env):
     tmp, runs = run_env
     jobs_dir = tmp / "bj"
     job = bulk.bulk_generate(
-        "club-a", "r1", "certificate",
-        row_query={"pb_only": True}, runs_dir=runs, jobs_dir=jobs_dir, generator=_ok_gen,
+        "club-a",
+        "r1",
+        "certificate",
+        row_query={"pb_only": True},
+        runs_dir=runs,
+        jobs_dir=jobs_dir,
+        generator=_ok_gen,
     )
     # Reload as the owner.
     loaded = bstore.load_job("club-a", job.job_id, jobs_dir=jobs_dir)
@@ -164,3 +195,51 @@ def test_plan_missing_run_raises(run_env):
     _, runs = run_env
     with pytest.raises(ValueError):
         bulk.plan_bulk("club-a", "nope", "certificate", runs_dir=runs)
+
+
+def test_real_certificate_render_contract(tmp_path, monkeypatch):
+    """The shipped certificate generator (render=True, no fake) honours the
+    contract: the card is queued for review, and either a real PDF is produced
+    or the item fails with an honest reason — never a crash, never a fake file."""
+    pytest.importorskip("playwright")
+    pytest.importorskip("mediahub.graphic_renderer.print_export")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "profiles"))
+    (tmp_path / "profiles").mkdir(parents=True, exist_ok=True)
+    runs = tmp_path / "runs_v4"
+    runs.mkdir()
+
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    save_profile(ClubProfile(profile_id="club-a", display_name="Aqua Club"))
+    run = {
+        "run_id": "r1",
+        "profile_id": "club-a",
+        "meet": {"name": "Spring Open", "start_date": "2026-03-14"},
+        "recognition_report": {
+            "ranked_achievements": [
+                _ach("s1", "Maya Patel", "confirmed_official_pb", "pb_confirmed")
+            ]
+        },
+    }
+    (runs / "r1.json").write_text(json.dumps(run))
+
+    job = bulk.bulk_generate(
+        "club-a",
+        "r1",
+        "certificate",
+        row_query={"pb_only": True},
+        runs_dir=runs,
+        jobs_dir=tmp_path / "bj",
+        render=True,
+    )
+    # Card queued for review regardless of the artifact outcome.
+    assert "s1" in WorkflowStore(runs).load("r1")
+    item = job.items[0]
+    assert item.status in (ITEM_QUEUED, ITEM_FAILED)
+    if item.output_path:
+        pdf = Path(item.output_path)
+        assert pdf.exists()
+        assert pdf.read_bytes()[:5] == b"%PDF-"  # a real PDF, not a stub
+    else:
+        assert item.error  # honest reason when a renderer/dep is missing
