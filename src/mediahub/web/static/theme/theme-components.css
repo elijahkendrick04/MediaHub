@@ -540,6 +540,20 @@ input[type=color]:hover { border-color: var(--lane); }
   opacity: 0.7;
   letter-spacing: 0;
 }
+/* Phone: a three/four-segment filter is wider than a narrow Android
+   viewport. Let the control scroll within its own bounds (segments stay
+   full-size and tappable) so it never forces a horizontal page scroll. */
+@media (max-width: 560px) {
+  .mh-segmented {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .mh-segmented::-webkit-scrollbar { display: none; }
+  .mh-segmented a,
+  .mh-segmented button { white-space: nowrap; flex: 0 0 auto; }
+}
 
 /* ---------------------------------------------------------------------
    MOBILE NAVIGATION — hamburger drawer
@@ -4803,7 +4817,7 @@ kbd {
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.mh-cal-nav { display: flex; align-items: center; gap: 8px; }
+.mh-cal-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mh-cal-month {
   font-family: var(--font-display);
   font-weight: 800;
@@ -4917,6 +4931,18 @@ kbd {
   .mh-cal-wrap { grid-template-columns: 1fr; }
   .mh-cal-rail { position: static; }
   .mh-cal-cell { min-height: 74px; }
+}
+/* Phone: the seven-item month/view toolbar can't fit one row, and the
+   primary month nav (← month →) should read as its own line above the
+   secondary view-switch links so neither pushes past the viewport. */
+@media (max-width: 560px) {
+  .mh-cal-nav { width: 100%; justify-content: center; row-gap: 8px; }
+  .mh-cal-month { min-width: 0; flex: 1 1 auto; }
+  .mh-cal-nav .btn { flex: 0 0 auto; }
+  .mh-cal-dow { font-size: 9px; letter-spacing: 0.06em; }
+  .mh-cal-dows, .mh-cal-grid { gap: 4px; }
+  .mh-cal-cell { min-height: 60px; padding: 4px 3px 5px; border-radius: 7px; }
+  .mh-cal-daynum { font-size: 11px; }
 }
 
 /* ── Channel previews + safe zones + grid (roadmap 1.14) ───────────────────
