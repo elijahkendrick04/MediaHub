@@ -81,16 +81,14 @@ class SwimEnglandRankingsConnector(Connector):
     description = "Verified swim times from the Swim England approved-systems API."
     external = True
 
-    ENV_KEY = "MEDIAHUB_SWIM_ENGLAND_API_KEY"
-
     def is_configured(self, params: dict | None = None) -> bool:
-        return bool(os.environ.get(self.ENV_KEY))
+        return bool(os.environ.get("MEDIAHUB_SWIM_ENGLAND_API_KEY"))
 
     def fetch(self, profile_id: str, params: dict | None = None) -> ConnectorResult:
         if not self.is_configured(params):
             raise ConnectorNotConfigured(
                 "The Swim England Rankings API isn't connected yet. An operator must "
-                f"set {self.ENV_KEY} once access is granted (founder task F.5)."
+                "set MEDIAHUB_SWIM_ENGLAND_API_KEY once access is granted (founder task F.5)."
             )
         # The live integration is gated on the F.5 approval; until then there is
         # no offline data path here (honest, not fabricated).

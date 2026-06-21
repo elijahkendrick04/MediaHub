@@ -292,6 +292,16 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "an org enables it, HeyGen MUST move to legal.SUBPROCESSORS (and the club "
         "DPA) before any data flows."
     ),
+    "MEDIAHUB_SWIM_ENGLAND_API_KEY": (
+        "the flag-gated Swim England Rankings / approved-systems connector seam "
+        "(roadmap 1.13, data_hub/connectors/builtin.py; founder application F.5). "
+        "The live fetch is NOT wired in this build — the connector honest-errors "
+        "before any network call and the key is read only to report availability "
+        "— so no Club Data is transmitted to Swim England and it is not yet an "
+        "active Art. 28 sub-processor. When the integration is built and an org "
+        "enables it, Swim England MUST move to legal.SUBPROCESSORS (and the club "
+        "DPA) before any data flows."
+    ),
 }
 
 

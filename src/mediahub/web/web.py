@@ -45389,9 +45389,9 @@ voice, and queues them for one-click approval.</p>
         jobs = _bulk_store.list_jobs(pid)
         msg = ""
         if request.args.get("msg"):
-            msg = f'<div class="card" style="border-color:#2e7d52"><p>{_h(request.args.get("msg"))}</p></div>'
+            msg = f'<div class="card" style="border-color:var(--mh-success)"><p>{_h(request.args.get("msg"))}</p></div>'
         if request.args.get("err"):
-            msg = f'<div class="card" style="border-color:#a33"><p>{_h(request.args.get("err"))}</p></div>'
+            msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
         body = msg + _ui.render_index(
             canonical=canonical,
             org_tables=org_tables,
@@ -45453,7 +45453,7 @@ voice, and queues them for one-click approval.</p>
             f'<select name="col1" style="padding:6px"><option value="">Column…</option>{col_opts}</select>'
             f'<select name="col2" style="padding:6px"><option value="">2nd column (if needed)…</option>{col_opts}</select>'
             '<button class="btn" type="submit">Add column</button></form></div>'
-            '<div class="card" style="margin-top:12px;border-color:#5a2a2a">'
+            '<div class="card" style="margin-top:12px;border-color:var(--mh-error)">'
             f'<form method="post" action="{delete_url}" onsubmit="return confirm(\'Delete this table?\')">'
             '<button class="btn secondary" type="submit">Delete this table</button></form></div>'
         )
