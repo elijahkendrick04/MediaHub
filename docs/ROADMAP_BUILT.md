@@ -180,6 +180,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **1.9** · Phase 1 (Product) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth *(completed 2026-06-20)*
 - ✅ **1.10** · Phase 1 (Product) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer *(completed 2026-06-20)*
 - ✅ **1.11** · Phase 1 (Product) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats *(completed 2026-06-21)*
+- ✅ **1.12** · Phase 1 (Product) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep *(completed 2026-06-21)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
