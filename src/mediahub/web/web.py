@@ -3794,6 +3794,19 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
 // searched server-side (venue_search), imported into the org's library with
 // licence + attribution preserved, then attached to this graphic.
 var _venueResults = {};
+// Stock-thumb proxy serves cache-only (a miss 404s while it warms in the
+// background); retry a few times with backoff so the warmed tile loads, then
+// hide the broken preview. The &_r= buster forces a fresh request each try.
+function mhThumbRetry(img) {
+  var n = (parseInt(img.getAttribute('data-try') || '0', 10)) + 1;
+  img.setAttribute('data-try', n);
+  if (n <= 5) {
+    var base = img.getAttribute('data-src') || img.src;
+    setTimeout(function(){ img.src = base + (base.indexOf('?') < 0 ? '?' : '&') + '_r=' + n; }, 700 * n);
+  } else {
+    img.onerror = null; img.style.visibility = 'hidden';
+  }
+}
 function mhVenueSearchOpen(btn, createUrl, cardId, fmt) {
   var slot = document.querySelector('.mh-venue-results[data-card="' + cardId + '"]');
   if (!slot) return;
@@ -3815,7 +3828,7 @@ function mhVenueSearchOpen(btn, createUrl, cardId, fmt) {
         html += '<button type="button" title="' + ((ph.title || '') + (ph.licence ? ' · ' + ph.licence : '')).replace(/"/g, '&quot;') + '"' +
           ' onclick=' + _attrEsc('mhVenueImport(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(fmt) + ', ' + i + ')') +
           ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid var(--border);background:var(--bg);line-height:0;margin:0 4px 4px 0">' +
-          '<img src="' + ph.thumb_url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
+          '<img src="' + ph.thumb_url + '" data-src="' + ph.thumb_url + '" onerror="mhThumbRetry(this)" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
       });
       slot.innerHTML = html;
     })
@@ -40142,6 +40155,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if kind not in ("photo", "video"):
             kind = "photo"
         results = _stock.search(q, kind=kind, limit=24) if q else []
+        # Warm the thumbnail cache in the background (off the request threads) so
+        # the per-tile proxy serves cache hits by the time the grid requests them.
+        if results:
+            _stock.prewarm_thumbs(
+                [(r.thumb_url or ("" if r.kind == "video" else r.direct_url)) for r in results]
+            )
         return jsonify(
             {
                 "results": [r.to_dict() for r in results],
@@ -40156,16 +40175,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         The stock results carry cross-origin thumbnail URLs (Wikimedia/Openverse,
         + flag-gated paid). The app CSP pins ``img-src 'self'``, so the browser
-        blocks those <img> loads and the grid shows blank tiles. This streams the
-        bytes through our own origin — host-allow-listed to the known stock CDNs,
-        SSRF-checked, size-capped, image/video-only — so the grid renders without
-        loosening the CSP for the whole app (same rationale as the brand-logo
-        mirror). Caller's ``onerror`` falls back to a placeholder on a 404.
+        blocks those <img> loads and the grid shows blank tiles. We serve the
+        bytes from our own origin — host-allow-listed to the known stock CDNs,
+        SSRF-checked, size-capped, image/video-only — without loosening the CSP.
+
+        Cache-only on purpose: a hit is a fast disk read; a miss kicks off
+        background warming and 404s so the request thread never blocks on a slow,
+        rate-limited upstream fetch (which would starve the small gunicorn pool
+        and 502 the service). The client re-requests shortly and the warmed tile
+        loads; after a few tries it falls back to a "No preview" placeholder.
         """
         from flask import request as _req
         from mediahub.elements import stock as _stock
 
-        data, ctype = _stock.fetch_thumb(_req.args.get("u") or "")
+        data, ctype = _stock.serve_thumb(_req.args.get("u") or "")
         if not data:
             return ("", 404)
         return Response(
@@ -44873,14 +44896,22 @@ voice, and queues them for one-click approval.</p>
             # downloads it server-side, where the CSP doesn't apply.
             from urllib.parse import quote as _quote
 
+            from mediahub.elements import stock as _stock
+
             thumb_proxy = url_for("api_stock_thumb")
             out = []
+            raw_thumbs = []
             for r in results:
                 d = r.to_dict() if hasattr(r, "to_dict") else dict(r)
                 tu = str(d.get("thumb_url") or "")
                 if tu.startswith(("http://", "https://")):
+                    raw_thumbs.append(tu)
                     d["thumb_url"] = f"{thumb_proxy}?u={_quote(tu, safe='')}"
                 out.append(d)
+            # Warm the cache in the background so the picker's proxied previews
+            # are cache hits (the proxy never fetches on a request thread).
+            if raw_thumbs:
+                _stock.prewarm_thumbs(raw_thumbs)
             return jsonify({"query": q, "results": out})
         except Exception as e:
             return jsonify({"error": str(e), "results": []}), 500

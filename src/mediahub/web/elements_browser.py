@@ -338,11 +338,20 @@ def render_stock_body(
     d.innerHTML = thumb + '<div class="sb-meta"><div class="sb-lic">' + lic + '</div>' +
       '<div class="sb-attr">' + attr + '</div>' +
       '<button type="button" class="sb-add">Add to library</button></div>';
-    // Graceful fallback if a thumbnail fails to load (dead CDN link, refused host).
+    // The proxy serves cache-only (a miss 404s while it warms in the background),
+    // so retry a few times with backoff — the warmed tile then loads. The &_r=
+    // cache-buster forces a fresh request each try; after a few, show a
+    // placeholder. (dead CDN links / refused hosts also land here.)
     var imgEl = d.querySelector('.sb-img');
-    if (imgEl) {{
+    if (imgEl && posterSrc) {{
+      var tries = 0;
       imgEl.addEventListener('error', function() {{
-        var box = imgEl.parentNode; if (box) box.innerHTML = '<div class="sb-noimg">No preview</div>';
+        tries++;
+        if (tries <= 5) {{
+          setTimeout(function(){{ imgEl.src = posterSrc + '&_r=' + tries; }}, 700 * tries);
+        }} else {{
+          var box = imgEl.parentNode; if (box) box.innerHTML = '<div class="sb-noimg">No preview</div>';
+        }}
       }});
     }}
     d.querySelector('.sb-add').addEventListener('click', function(ev) {{

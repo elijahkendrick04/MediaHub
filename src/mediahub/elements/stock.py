@@ -22,6 +22,7 @@ preserved per asset and `commercial_ok` is auditable per platform.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import logging
 import os
@@ -598,6 +599,90 @@ def _fetch_thumb_upstream(url, requests, is_url_safe, timeout):  # noqa: ANN001
 
 
 # --------------------------------------------------------------------------- #
+# background warmer + cache-only request path
+# --------------------------------------------------------------------------- #
+# The deployed app runs a small gunicorn pool (e.g. 2 workers x 4 threads). If
+# the per-tile proxy fetched upstream *on the request thread*, a gallery's burst
+# of ~24 tiles — each held for seconds while a rate-limited source is retried —
+# would saturate the pool, starve the health check, and 502 the whole service.
+# So the request path (``serve_thumb``) is cache-ONLY: it serves a cached tile
+# (a fast disk read) or, on a miss, hands the URL to a background pool and
+# returns nothing. The pool does the slow fetching off the request threads; the
+# client re-requests the tile a moment later and gets the now-cached bytes.
+_THUMB_WARM_POOL: Optional[concurrent.futures.ThreadPoolExecutor] = None
+_THUMB_WARM_LOCK = threading.Lock()
+_THUMB_WARMING: set[str] = set()  # in-flight keys, deduped
+
+
+def _warm_pool() -> concurrent.futures.ThreadPoolExecutor:
+    global _THUMB_WARM_POOL
+    if _THUMB_WARM_POOL is None:
+        with _THUMB_WARM_LOCK:
+            if _THUMB_WARM_POOL is None:
+                n = max(1, int(os.environ.get("MEDIAHUB_STOCK_THUMB_CONCURRENCY", "4")))
+                _THUMB_WARM_POOL = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=n, thread_name_prefix="stock-thumb-warm"
+                )
+    return _THUMB_WARM_POOL
+
+
+def _warm_one(url: str, key: str) -> None:
+    try:
+        fetch_thumb(url)  # does the patient (retried) fetch + disk-cache
+    except Exception:  # pragma: no cover - defensive; warmer must never raise
+        pass
+    finally:
+        with _THUMB_WARM_LOCK:
+            _THUMB_WARMING.discard(key)
+
+
+def prewarm_thumbs(urls: list[str]) -> int:
+    """Fire-and-forget: fetch + cache these thumbnails in the background so the
+    per-tile proxy serves cache hits off the scarce request threads. Dedupes
+    in-flight URLs, skips already-cached and off-list ones, and never raises.
+    Returns how many warm tasks were scheduled."""
+    scheduled = 0
+    for raw in urls or []:
+        url = (raw or "").strip()
+        if not url.startswith(("http://", "https://")):
+            continue
+        if not is_proxy_host(urlparse(url).hostname or ""):
+            continue
+        key = _thumb_cache_key(url)
+        if _thumb_cache_get(key) is not None:
+            continue
+        with _THUMB_WARM_LOCK:
+            if key in _THUMB_WARMING:
+                continue
+            _THUMB_WARMING.add(key)
+        try:
+            _warm_pool().submit(_warm_one, url, key)
+            scheduled += 1
+        except Exception:  # pragma: no cover - pool full/shutdown
+            with _THUMB_WARM_LOCK:
+                _THUMB_WARMING.discard(key)
+    return scheduled
+
+
+def serve_thumb(url: str) -> tuple[Optional[bytes], str]:
+    """Request-path thumbnail: serve from the disk cache only — never block a
+    request thread on a slow upstream fetch (that starves the small gunicorn
+    pool and 502s the service). On a cache miss, kick off background warming and
+    return ``(None, "")`` so the route 404s; the client re-requests shortly and
+    the warmed tile loads. Never raises."""
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return None, ""
+    if not is_proxy_host(urlparse(url).hostname or ""):
+        return None, ""  # off-list → never fetched or cached
+    cached = _thumb_cache_get(_thumb_cache_key(url))
+    if cached is not None:
+        return cached
+    prewarm_thumbs([url])
+    return None, ""
+
+
+# --------------------------------------------------------------------------- #
 # rights ledger (shared Licence vocabulary, persisted, auditable)
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -772,6 +857,8 @@ __all__ = [
     "search",
     "available_sources",
     "fetch_thumb",
+    "serve_thumb",
+    "prewarm_thumbs",
     "is_proxy_host",
     "StockRightsRecord",
     "StockRightsLedger",

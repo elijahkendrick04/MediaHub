@@ -18,6 +18,7 @@ def _isolate_thumb_cache(tmp_path, monkeypatch):
     unique tmp dir per test so cached bytes never leak across tests or into the
     repo. (Web-route tests' app_env sets the same DATA_DIR afterwards.)"""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    stock._THUMB_WARMING.clear()  # the in-flight-warm dedupe set is module-global
 
 
 # --------------------------------------------------------------------------- #
@@ -332,6 +333,69 @@ def test_fetch_thumb_gives_up_after_persistent_429(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# request-path: cache-only serve + background warm (never blocks a worker thread)
+# --------------------------------------------------------------------------- #
+class _SyncPool:
+    """A ThreadPoolExecutor stand-in that runs submitted work inline, so the
+    background warmer is deterministic in tests."""
+
+    def submit(self, fn, *a, **k):
+        fn(*a, **k)
+        return None
+
+
+def test_serve_thumb_cache_hit(monkeypatch):
+    """A cached tile is served without touching the network."""
+    stock._thumb_cache_put(
+        stock._thumb_cache_key("https://upload.wikimedia.org/c.jpg"), b"HIT", "image/jpeg"
+    )
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("cache hit must not fetch"))
+    assert stock.serve_thumb("https://upload.wikimedia.org/c.jpg") == (b"HIT", "image/jpeg")
+
+
+def test_serve_thumb_miss_warms_then_hits(monkeypatch):
+    """A miss returns (None, '') and schedules a background warm; once warmed,
+    a subsequent serve is a cache hit."""
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr(stock, "_THUMB_WARM_POOL", _SyncPool())  # warm inline
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(body=b"WARMED"))
+    u = "https://upload.wikimedia.org/warm.jpg"
+    assert stock.serve_thumb(u) == (None, "")  # miss → schedules warm (run inline)
+    # Warmer populated the cache, so the next serve is a hit (no network).
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("should be cached now"))
+    assert stock.serve_thumb(u) == (b"WARMED", "image/jpeg")
+
+
+def test_serve_thumb_offlist_never_warms(monkeypatch):
+    """An off-list host is refused and never scheduled for warming."""
+    monkeypatch.setattr(
+        stock, "_THUMB_WARM_POOL", _SyncPool()
+    )  # would run inline if (wrongly) scheduled
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("off-list host must not fetch"))
+    assert stock.serve_thumb("https://evil.com/x.jpg") == (None, "")
+    assert not stock._THUMB_WARMING
+
+
+def test_prewarm_skips_cached_and_offlist(monkeypatch):
+    """prewarm only schedules allow-listed, not-yet-cached URLs."""
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr(stock, "_THUMB_WARM_POOL", _SyncPool())
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(body=b"X"))
+    stock._thumb_cache_put(
+        stock._thumb_cache_key("https://upload.wikimedia.org/already.jpg"), b"X", "image/jpeg"
+    )
+    scheduled = stock.prewarm_thumbs(
+        [
+            "https://upload.wikimedia.org/already.jpg",  # cached → skip
+            "https://evil.com/x.jpg",  # off-list → skip
+            "ftp://upload.wikimedia.org/x.jpg",  # bad scheme → skip
+            "https://upload.wikimedia.org/new.jpg",  # eligible → 1
+        ]
+    )
+    assert scheduled == 1
+
+
+# --------------------------------------------------------------------------- #
 # rights ledger (shared Licence vocabulary, persisted)
 # --------------------------------------------------------------------------- #
 def test_rights_ledger_roundtrip(tmp_path):
@@ -455,9 +519,9 @@ def test_stock_page_renders(app_env):
     assert b"<video" not in resp.data
 
 
-def test_stock_thumb_route_proxies(app_env, monkeypatch):
+def test_stock_thumb_route_serves_cache_hit(app_env, monkeypatch):
     app, _wm, _ = app_env
-    monkeypatch.setattr(stock, "fetch_thumb", lambda u: (b"IMG-BYTES", "image/png"))
+    monkeypatch.setattr(stock, "serve_thumb", lambda u: (b"IMG-BYTES", "image/png"))
     with app.test_client() as c:
         resp = c.get("/api/stock/thumb?u=https://upload.wikimedia.org/x.jpg")
     assert resp.status_code == 200
@@ -466,9 +530,10 @@ def test_stock_thumb_route_proxies(app_env, monkeypatch):
     assert "max-age" in resp.headers.get("Cache-Control", "")
 
 
-def test_stock_thumb_route_404_on_refusal(app_env, monkeypatch):
+def test_stock_thumb_route_404_on_miss(app_env, monkeypatch):
+    # Cache miss / refusal → 404 (the client retries while the warmer fills in).
     app, _wm, _ = app_env
-    monkeypatch.setattr(stock, "fetch_thumb", lambda u: (None, ""))
+    monkeypatch.setattr(stock, "serve_thumb", lambda u: (None, ""))
     with app.test_client() as c:
         resp = c.get("/api/stock/thumb?u=https://evil.com/x.jpg")
     assert resp.status_code == 404
