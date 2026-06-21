@@ -4790,3 +4790,456 @@ kbd {
 @media (max-width: 760px) {
   .mh-charts-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Plan calendar (roadmap 1.14) ──────────────────────────────────────────
+   Month grid that unifies planned drafts, key dates, events, posted history
+   and blackouts; planned drafts drag between days (and to the side rail to
+   unschedule). Dark-first, editorial — no generic-SaaS calendar look. */
+.mh-cal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.mh-cal-nav { display: flex; align-items: center; gap: 8px; }
+.mh-cal-month {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(18px, 2.4vw, 24px);
+  letter-spacing: -0.01em;
+  min-width: 7.5em;
+  text-align: center;
+}
+.mh-cal-legend { display: flex; gap: 12px; flex-wrap: wrap; }
+.mh-cal-leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+.mh-cal-leg-sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.mh-cal-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+}
+.mh-cal-dows {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mh-cal-dow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  text-align: center;
+}
+.mh-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.mh-cal-cell {
+  min-height: 96px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 5px 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.mh-cal-spill { opacity: 0.5; }
+.mh-cal-today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.mh-cal-drop { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 10%, var(--panel)); }
+.mh-cal-daynum {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  text-align: right;
+  padding-right: 2px;
+}
+.mh-cal-today .mh-cal-daynum { color: var(--accent); }
+.mh-cal-stack { display: flex; flex-direction: column; gap: 3px; }
+.mh-cal-chip {
+  font-size: 10.5px;
+  line-height: 1.25;
+  padding: 2px 6px;
+  border-radius: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mh-cal-draft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--accent) 9%, var(--panel));
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  color: var(--ink);
+  cursor: grab;
+  user-select: none;
+}
+.mh-cal-draft:active { cursor: grabbing; }
+.mh-cal-draft-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+.mh-cal-draft-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mh-cal-rail {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 14px;
+  position: sticky;
+  top: 16px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.mh-cal-rail.mh-cal-drop { border-color: var(--accent); }
+.mh-cal-rail-card { margin: 6px 0; }
+@media (max-width: 860px) {
+  .mh-cal-wrap { grid-template-columns: 1fr; }
+  .mh-cal-rail { position: static; }
+  .mh-cal-cell { min-height: 74px; }
+}
+
+/* ── Channel previews + safe zones + grid (roadmap 1.14) ───────────────────
+   Show a card the way each platform will before the club posts by hand: the
+   crop/aspect, the safe zone the app chrome covers, where the caption folds. */
+.mh-cp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.mh-cp-tabs, .mh-cp-fmts { display: flex; gap: 6px; flex-wrap: wrap; }
+.mh-cp-tab, .mh-cp-fmt {
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  color: var(--ink-dim);
+  text-decoration: none;
+  background: var(--panel);
+}
+.mh-cp-fmt { font-size: 11.5px; padding: 3px 9px; text-transform: capitalize; }
+.mh-cp-tab.active, .mh-cp-fmt.active {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 12%, var(--panel));
+}
+.mh-cp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 18px;
+}
+.mh-cp-card { margin: 0; }
+.mh-cp-frame {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.mh-cp-media {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg,
+      color-mix(in oklab, var(--accent) 16%, var(--panel)),
+      color-mix(in oklab, var(--medal) 12%, var(--bg)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mh-cp-media-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  opacity: 0.7;
+}
+.mh-cp-safe {
+  position: absolute;
+  border: 1.5px dashed color-mix(in oklab, var(--accent) 70%, white);
+  border-radius: 6px;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.mh-cp-safe span {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--accent) 70%, white);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+  padding: 1px 5px;
+  border-radius: 0 0 5px 5px;
+}
+.mh-cp-chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: repeating-linear-gradient(45deg,
+    color-mix(in oklab, var(--bad) 22%, transparent) 0 6px,
+    transparent 6px 12px);
+  pointer-events: none;
+}
+.mh-cp-chrome-top { top: 0; }
+.mh-cp-chrome-bottom { bottom: 0; }
+.mh-cp-ratio {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--bg) 66%, transparent);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.mh-cp-cap { margin-top: 10px; }
+.mh-cp-cap-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.mh-cp-more { color: var(--ink-muted); cursor: pointer; font-weight: 600; }
+.mh-cp-hidden { display: none; color: var(--ink); }
+.mh-cp-hidden.show { display: inline; }
+.mh-cp-meta {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.mh-cp-good { color: var(--good); }
+.mh-cp-bad { color: var(--bad); font-weight: 600; }
+
+/* Instagram-style grid preview */
+.mh-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  max-width: 560px;
+}
+.mh-grid-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--ink);
+  overflow: hidden;
+  transition: border-color 0.12s ease;
+}
+.mh-grid-cell:hover { border-color: var(--accent); }
+.mh-grid-empty { background: color-mix(in oklab, var(--panel) 50%, transparent); border-style: dashed; }
+.mh-grid-type {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lane);
+}
+.mh-grid-title {
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  flex: 1;
+}
+.mh-grid-when {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.mh-grid-unplanned { color: var(--ink-muted); }
+@media (max-width: 520px) {
+  .mh-cp-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Planning board / Kanban whiteboard (roadmap 1.14) ─────────────────────
+   Committee brainstorm board: idea cards drag across idea→drafted→approved→
+   scheduled; an idea promotes into a real draft. Dark-first, editorial. */
+.mh-bd-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.mh-bd-col {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px 10px 14px;
+  min-height: 120px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.mh-bd-col.mh-bd-drop {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--panel));
+}
+.mh-bd-col-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.mh-bd-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: var(--bg);
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+.mh-bd-add { margin-bottom: 10px; }
+.mh-bd-add-title {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 7px 9px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.mh-bd-add-title:focus { border-color: var(--accent); outline: none; }
+.mh-bd-cards { display: flex; flex-direction: column; gap: 8px; }
+.mh-bd-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  cursor: grab;
+}
+.mh-bd-card:active { cursor: grabbing; }
+.mh-bd-card-head { display: flex; align-items: flex-start; gap: 6px; }
+.mh-bd-card-head strong { flex: 1; font-size: 13px; line-height: 1.3; }
+.mh-bd-del {
+  background: none;
+  border: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.mh-bd-del:hover { color: var(--bad); }
+.mh-bd-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-muted);
+}
+.mh-bd-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.mh-bd-act {
+  font-size: 11.5px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+.mh-bd-act:hover { text-decoration: underline; }
+@media (max-width: 760px) {
+  .mh-bd-board { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 460px) {
+  .mh-bd-board { grid-template-columns: 1fr; }
+}
+
+/* ── Performance analytics (roadmap 1.14) ──────────────────────────────────
+   The first-party performance loop: which post types earn the most engagement
+   and when, feeding the planner. Manual entry (no auto-collection). */
+.mh-an-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.mh-an-table th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.mh-an-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.mh-an-bar {
+  position: relative;
+  height: 8px;
+  width: 100%;
+  min-width: 60px;
+  background: var(--bg);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.mh-an-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
+.mh-an-up { color: var(--good); }
+.mh-an-up.mh-an-bar span, span.mh-an-up { background: var(--good); }
+.mh-an-down { color: var(--warn); }
+span.mh-an-down { background: var(--warn); }
+.mh-an-form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+.mh-an-mlabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+.mh-an-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}

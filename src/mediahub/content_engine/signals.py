@@ -222,6 +222,57 @@ def gather_own_signals(
     return signals
 
 
+def gather_performance_signals(
+    profile_id: str,
+    *,
+    data_dir: Optional[Path] = None,
+    now: Optional[date] = None,
+) -> list[Signal]:
+    """The club's own measured post performance (``analytics``) as planner
+    signals — one per post type with enough samples to trust. Deterministic and
+    read-only: it reads the stored metrics and computes a fixed attribution, so
+    the same numbers always produce the same signals (and the same plan).
+
+    Classed as an **own** signal — it is the club's first-party data. The planner
+    turns an above/below-average index into a small, bounded, explained nudge.
+    """
+    if not profile_id:
+        return []
+    try:
+        from mediahub.analytics.attribution import MIN_SAMPLES, attribute
+        from mediahub.analytics.store import load_metrics
+    except Exception:  # pragma: no cover - analytics is a sibling package
+        return []
+    metrics = load_metrics(profile_id, data_dir=data_dir)
+    attribution = attribute(metrics)
+    if attribution.n_posts == 0:
+        return []
+    signals: list[Signal] = []
+    for tp in attribution.by_type:
+        if tp.n < MIN_SAMPLES:
+            continue
+        pct = round((tp.index - 1.0) * 100)
+        direction = "above" if pct >= 0 else "below"
+        signals.append(
+            Signal(
+                source="own",
+                kind="performance",
+                summary=(
+                    f"Your {tp.post_type.replace('_', ' ')} posts run {abs(pct)}% "
+                    f"{direction} your average engagement ({tp.n} posts measured)."
+                ),
+                provenance=f"analytics/{profile_id}.json",
+                payload={
+                    "post_type": tp.post_type,
+                    "index": tp.index,
+                    "n": tp.n,
+                    "pct": pct,
+                },
+            )
+        )
+    return signals
+
+
 # ---------------------------------------------------------------------------
 # EXTERNAL — discovered context + calendar facts
 # ---------------------------------------------------------------------------
@@ -400,9 +451,11 @@ def gather_all_signals(
     data_dir: Optional[Path] = None,
     now: Optional[date] = None,
 ) -> list[Signal]:
-    """All three sources, in own → external → direct order."""
+    """All three sources, in own → external → direct order. Performance signals
+    (the analytics loop) ride with **own** — the club's first-party data."""
     return (
         gather_own_signals(profile_id, data_dir=data_dir, now=now)
+        + gather_performance_signals(profile_id, data_dir=data_dir, now=now)
         + gather_external_signals(profile_id, data_dir=data_dir, now=now)
         + gather_direct_signals(profile_id, data_dir=data_dir, now=now)
     )
@@ -414,4 +467,5 @@ __all__ = [
     "gather_direct_signals",
     "gather_external_signals",
     "gather_own_signals",
+    "gather_performance_signals",
 ]

@@ -16,6 +16,26 @@ MediaHub's strategy brain and its single caption writer.
   the same structured events / blackout dates / goals for you to review and
   save. The AI only proposes the inputs; the planner above still does the
   ranking.
+- **The calendar** (`calendar.py`, `key_dates.py`) gives the plan a *month
+  view*: planned drafts, club-aware key dates (the curated, provenance-stamped
+  packs in `../../../data/key_dates/`), your events, blackout dates, meet
+  anniversaries and what you've already posted, all on one grid. Drag a draft
+  onto a day to plan when to post it (a planning intention — MediaHub never
+  posts for you; you still post by hand on the day). Page: **Plan → Open
+  calendar**. It is a read model over the same stores the planner reads, so the
+  calendar and the ranked plan can never disagree.
+- **The board** (`board.py`) is the committee whiteboard: a per-org Kanban of
+  free-form idea cards in four columns (idea → drafted → approved → scheduled).
+  Drag a card as it progresses, and **promote** a good idea into a real
+  free-text draft with one click (seeded from the idea text verbatim — no AI, so
+  it works with no provider) which then flows into the previews and the
+  calendar. Page: **Plan → Board**.
+- **The performance loop** feeds the plan back from real results: the club logs
+  how a posted card did, and `signals.gather_performance_signals` turns the
+  deterministic attribution (`../analytics/`) into a bounded, explained ranking
+  nudge — "your spotlights beat your average, rank more". Page: **Plan →
+  Performance**. The ranker stays deterministic; the analytics index is just
+  another source-grounded signal.
 - **The writer** (`engine.py`, `director.py`) makes all the captions. It first
   *plans* the set of posts (which angle, which platform), then *writes* each
   caption. Every content type goes through here, so there isn't a separate

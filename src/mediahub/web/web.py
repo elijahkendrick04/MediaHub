@@ -25621,6 +25621,8 @@ Relay team broke club record"></textarea>
   {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
+  <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
+  <a class="btn" href="{url_for("plan_analytics_page")}" title="Log how posts did — what works feeds the plan">Performance</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -25842,6 +25844,993 @@ function mhPlanGenerate(btn) {{
 </script>
 """
         return _layout("Content plan", body, active="create")
+
+    # ---- 1.14 — the Plan calendar (drag-reschedule + key dates) ------------
+
+    def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
+        """Resolve the sport whose key-date pack the calendar shows, from the
+        organisation type (same mapping the Plan page uses)."""
+        from mediahub.sport_profiles import list_sport_profiles
+
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        try:
+            avail = {p.sport for p in list_sport_profiles()}
+        except Exception:
+            avail = {"swimming"}
+        s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
+        return s if s in avail else fallback
+
+    def _parse_month_param(raw: str):
+        """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
+        from mediahub.content_engine.calendar import today_utc
+
+        t = today_utc()
+        s = (raw or "").strip()
+        if len(s) == 7 and s[4] == "-":
+            try:
+                y, m = int(s[:4]), int(s[5:7])
+                if 1 <= m <= 12 and 1970 <= y <= 2200:
+                    return y, m
+            except ValueError:
+                pass
+        return t.year, t.month
+
+    @app.route("/api/plan/calendar", methods=["GET"])
+    def api_plan_calendar():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.calendar import build_calendar, grid_bounds
+
+        year, month = _parse_month_param(request.args.get("m", ""))
+        sport = _org_calendar_sport(_active_profile())
+        start, end = grid_bounds(year, month)
+        model = build_calendar(pid, sport, start=start, end=end)
+        out = model.to_dict()
+        out["year"], out["month"] = year, month
+        return jsonify({"ok": True, "org_id": pid, "calendar": out})
+
+    @app.route("/api/plan/calendar/schedule", methods=["POST"])
+    def api_plan_calendar_schedule():
+        """Set / move / clear the day a draft is planned to post (1.14).
+
+        Planning only — nothing is published. Re-evaluates the soft blackout
+        gate and returns a ``warning`` when the chosen day is a blackout; the
+        human decides whether to keep it (we never hard-block their own plan).
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        pack_id = str(body.get("pack_id") or "").strip()
+        # Empty / null date clears the schedule (back to the side rail).
+        new_date = body.get("date")
+        new_date = "" if new_date in (None, "") else str(new_date).strip()
+        channel = body.get("channel")
+        channel = None if channel is None else str(channel).strip()
+
+        from mediahub.club_platform.stub_pack_store import load_pack, set_planned_date
+
+        rec = load_pack(pack_id)
+        if rec is None:
+            return jsonify({"error": "Draft not found."}), 404
+        # Tenant isolation: only the owning org may reschedule its draft.
+        if (rec.get("profile_id") or "") != pid:
+            return jsonify({"error": "Draft not found."}), 404
+
+        updated = set_planned_date(pack_id, new_date, channel=channel)
+        if updated is None:
+            return jsonify({"error": "Invalid date (expected YYYY-MM-DD)."}), 400
+
+        warning = ""
+        planned = updated.get("planned_date")
+        if planned:
+            from mediahub.content_engine.inputs import load_planner_inputs
+
+            blackouts = set(load_planner_inputs(pid).get("blackout_dates") or [])
+            if planned in blackouts:
+                warning = (
+                    f"Heads up — {planned} is a blackout date you set. "
+                    "The draft is planned there anyway; move it if that wasn't intended."
+                )
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack_id,
+                "planned_date": planned,
+                "planned_channel": updated.get("planned_channel") or "",
+                "warning": warning,
+            }
+        )
+
+    @app.route("/plan/calendar")
+    def plan_calendar_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from datetime import date as _date
+
+        from mediahub.content_engine.calendar import (
+            build_calendar,
+            grid_bounds,
+            month_matrix,
+            today_utc,
+        )
+
+        prof = _active_profile()
+        sport = _org_calendar_sport(prof)
+        year, month = _parse_month_param(request.args.get("m", ""))
+        start, end = grid_bounds(year, month)
+        model = build_calendar(pid, sport, start=start, end=end)
+        by_date = model.entries_by_date()
+        weeks = month_matrix(year, month)
+        today = today_utc()
+
+        month_name = _date(year, month, 1).strftime("%B %Y")
+        prev_y, prev_m = (year - 1, 12) if month == 1 else (year, month - 1)
+        next_y, next_m = (year + 1, 1) if month == 12 else (year, month + 1)
+        prev_url = url_for("plan_calendar_page", m=f"{prev_y:04d}-{prev_m:02d}")
+        next_url = url_for("plan_calendar_page", m=f"{next_y:04d}-{next_m:02d}")
+        today_url = url_for("plan_calendar_page", m=f"{today.year:04d}-{today.month:02d}")
+
+        # Per-kind chip styling — colour-coded, escaped, deterministic.
+        _kind_style = {
+            "blackout": ("var(--bad)", "rgba(255,107,107,.12)"),
+            "key_date": ("var(--medal)", "rgba(244,213,141,.12)"),
+            "event": ("var(--lane)", "rgba(212,255,58,.12)"),
+            "anniversary": ("var(--ink-dim)", "rgba(182,178,166,.10)"),
+            "posted": ("var(--good)", "rgba(94,227,154,.12)"),
+        }
+
+        def _entry_chip(e) -> str:
+            if e.kind == "planned_draft":
+                ch = e.meta.get("channel") or ""
+                ch_html = f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
+                warn = (
+                    '<span title="On a blackout date you set" '
+                    'style="color:var(--bad);font-weight:700"> ⚠</span>'
+                    if e.meta.get("on_blackout")
+                    else ""
+                )
+                draft_url = url_for("stub_pack_view", pack_id=e.ref)
+                return (
+                    f'<div class="mh-cal-draft" draggable="true" data-pack="{_h(e.ref)}" '
+                    f'data-href="{_h(draft_url)}" '
+                    f'title="{_h(e.title)} — drag to a day to move, or to the side rail to unschedule">'
+                    f'<span class="mh-cal-draft-dot"></span>'
+                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span></div>'
+                )
+            fg, bg = _kind_style.get(e.kind, ("var(--ink-dim)", "rgba(182,178,166,.10)"))
+            note = e.meta.get("note") or e.meta.get("venue") or ""
+            title_attr = f"{e.title}" + (f" — {note}" if note else "")
+            return (
+                f'<div class="mh-cal-chip" style="color:{fg};background:{bg}" '
+                f'title="{_h(title_attr)}">{_h(e.title)}</div>'
+            )
+
+        cells = ""
+        for week in weeks:
+            for day in week:
+                iso = day.isoformat()
+                in_month = day.month == month
+                is_today = day == today
+                chips = "".join(_entry_chip(e) for e in by_date.get(iso, []))
+                classes = "mh-cal-cell"
+                if not in_month:
+                    classes += " mh-cal-spill"
+                if is_today:
+                    classes += " mh-cal-today"
+                cells += (
+                    f'<div class="{classes}" data-date="{iso}" '
+                    f'ondragover="mhCalOver(event)" ondragleave="mhCalLeave(event)" '
+                    f'ondrop="mhCalDrop(event)">'
+                    f'<div class="mh-cal-daynum">{day.day}</div>'
+                    f'<div class="mh-cal-stack">{chips}</div></div>'
+                )
+
+        dow_head = "".join(
+            f'<div class="mh-cal-dow">{d}</div>'
+            for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        )
+
+        # Side rail — unscheduled drafts to drag onto a day.
+        def _rail_card(d: dict) -> str:
+            return (
+                f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
+                f'data-pack="{_h(d["pack_id"])}" '
+                f'data-href="{_h(url_for("stub_pack_view", pack_id=d["pack_id"]))}" '
+                f'title="Drag onto a day to plan when to post it">'
+                f'<span class="mh-cal-draft-dot"></span>'
+                f'<span class="mh-cal-draft-t">{_h(d["title"])}'
+                f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
+                f"{'s' if int(d['n_cards']) != 1 else ''}</span></span></div>"
+            )
+
+        rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
+        if not rail:
+            rail = (
+                '<p class="dim" style="font-size:12px;margin:6px 2px">No unscheduled drafts. '
+                f'<a href="{url_for("make_page")}" style="text-decoration:underline">Make content</a>, '
+                "then drag it onto a day to plan when to post.</p>"
+            )
+
+        legend = "".join(
+            f'<span class="mh-cal-leg"><span class="mh-cal-leg-sw" style="background:{c}"></span>{lbl}</span>'
+            for lbl, c in (
+                ("Key date", "var(--medal)"),
+                ("Event", "var(--lane)"),
+                ("Planned draft", "var(--accent)"),
+                ("Posted", "var(--good)"),
+                ("Blackout", "var(--bad)"),
+                ("Anniversary", "var(--ink-dim)"),
+            )
+        )
+
+        counts = model.counts()
+        notes_html = "".join(
+            f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>' for n in model.notes
+        )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Calendar</span>
+  <h1>Your content<br><em class="editorial">on a calendar.</em></h1>
+  <p class="lede">Planned drafts, key dates, your events and what you&rsquo;ve already posted, all in one month view.
+  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.
+  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the ranked plan &rarr;</a></p>
+</section>
+
+<div class="mh-cal-bar">
+  <div class="mh-cal-nav">
+    <a class="btn" href="{prev_url}" aria-label="Previous month">&larr;</a>
+    <strong class="mh-cal-month">{_h(month_name)}</strong>
+    <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
+    <a class="btn" href="{today_url}">Today</a>
+    <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
+    <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
+    <a class="btn" href="{url_for("plan_analytics_page")}" title="What's working — performance feeding the plan">Performance</a>
+  </div>
+  <div class="mh-cal-legend">{legend}</div>
+</div>
+
+<span class="dim" id="mh-cal-status" style="font-size:12.5px;display:block;min-height:18px;margin:2px 2px 8px"></span>
+
+<div class="mh-cal-wrap">
+  <div class="mh-cal-grid-wrap">
+    <div class="mh-cal-dows">{dow_head}</div>
+    <div class="mh-cal-grid">{cells}</div>
+    <p class="dim" style="font-size:12px;margin-top:10px">
+      Showing {int(counts.get("planned_draft", 0))} planned ·
+      {int(counts.get("key_date", 0))} key date{"s" if counts.get("key_date", 0) != 1 else ""} ·
+      {int(counts.get("event", 0))} event{"s" if counts.get("event", 0) != 1 else ""} ·
+      {int(counts.get("posted", 0))} posted in this month.
+    </p>
+    {f'<ul style="margin:6px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
+  </div>
+  <aside class="mh-cal-rail" ondragover="mhCalOver(event)" ondragleave="mhCalLeave(event)" ondrop="mhCalUnschedule(event)">
+    <h2 style="margin:0 0 2px 0;font-size:15px">Unscheduled drafts</h2>
+    <p class="dim" style="font-size:11.5px;margin:0 0 8px 0">Drag onto a day to plan it. Drag a planned draft back here to unschedule.</p>
+    {rail}
+  </aside>
+</div>
+
+<script>
+var MH_CAL_SCHEDULE_URL = {json.dumps(url_for("api_plan_calendar_schedule"))};
+function mhCalOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-cal-drop'); }}
+function mhCalLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-cal-drop'); }}
+function mhCalStatus(msg, warn) {{
+  var s = document.getElementById('mh-cal-status');
+  if (!s) return; s.textContent = msg || ''; s.style.color = warn ? 'var(--warn)' : 'var(--ink-muted)';
+}}
+function mhCalSchedule(packId, date) {{
+  if (!packId) return;
+  mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
+  fetch(MH_CAL_SCHEDULE_URL, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ pack_id: packId, date: date || '' }})
+  }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
+    if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
+    if (j.warning) {{ mhCalStatus(j.warning, true); setTimeout(function(){{ window.location.reload(); }}, 1200); }}
+    else {{ window.location.reload(); }}
+  }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
+}}
+document.addEventListener('dragstart', function (e) {{
+  var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.pack || '');
+  e.dataTransfer.effectAllowed = 'move';
+}});
+function mhCalDrop(e) {{
+  e.preventDefault();
+  var cell = e.currentTarget; if (cell) cell.classList.remove('mh-cal-drop');
+  var packId = e.dataTransfer.getData('text/plain');
+  var date = cell ? cell.dataset.date : '';
+  if (packId && date) mhCalSchedule(packId, date);
+}}
+function mhCalUnschedule(e) {{
+  e.preventDefault();
+  var rail = e.currentTarget; if (rail) rail.classList.remove('mh-cal-drop');
+  var packId = e.dataTransfer.getData('text/plain');
+  if (packId) mhCalSchedule(packId, '');
+}}
+// A plain click on a draft chip opens the draft (drag still works).
+document.addEventListener('click', function (e) {{
+  var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
+  if (card && card.dataset.href) window.location.href = card.dataset.href;
+}});
+</script>
+"""
+        return _layout("Plan calendar", body, active="create")
+
+    # ---- 1.14 — per-channel previews + safe zones + IG grid ----------------
+
+    def _safe_zone_overlay(fmt: dict) -> str:
+        """Dashed 'keep key content here' box inset by the platform safe zone,
+        plus shaded chrome bands. Empty for full-bleed feed formats."""
+        sz = fmt.get("safe_zone") or {}
+        t, r, b, left = (
+            float(sz.get("top", 0)),
+            float(sz.get("right", 0)),
+            float(sz.get("bottom", 0)),
+            float(sz.get("left", 0)),
+        )
+        if not (t or r or b or left):
+            return ""
+        return (
+            f'<div class="mh-cp-safe" style="top:{t * 100:.1f}%;right:{r * 100:.1f}%;'
+            f'bottom:{b * 100:.1f}%;left:{left * 100:.1f}%"><span>safe area</span></div>'
+            '<div class="mh-cp-chrome mh-cp-chrome-top" '
+            f'style="height:{t * 100:.1f}%"></div>'
+            '<div class="mh-cp-chrome mh-cp-chrome-bottom" '
+            f'style="height:{b * 100:.1f}%"></div>'
+        )
+
+    def _channel_frame_html(card: dict, pv: dict) -> str:
+        fmt = pv["format"]
+        w, h = int(fmt["width"]), int(fmt["height"])
+        cap = pv["caption"]
+        shown = _h(cap["shown"])
+        more = ""
+        if cap["truncated"]:
+            more = (
+                ' <span class="mh-cp-more">… more</span>'
+                f'<span class="mh-cp-hidden">{_h(cap["hidden"])}</span>'
+            )
+        over = (
+            f'<span class="mh-cp-bad">over the {int(pv["caption_limit"])}-char limit</span>'
+            if cap["over_limit"]
+            else ""
+        )
+        tags = pv["hashtags"]
+        tag_txt = f'{int(tags["count"])} hashtag{"s" if tags["count"] != 1 else ""}'
+        if tags["limit"] is not None:
+            tag_cls = "mh-cp-good" if tags["within"] else "mh-cp-bad"
+            tag_txt += f' <span class="{tag_cls}">/ {int(tags["limit"])} max</span>'
+        media_label = _h(str(card.get("platform") or pv["platform_name"]))
+        return (
+            '<figure class="mh-cp-card">'
+            f'<div class="mh-cp-frame" style="aspect-ratio:{w}/{h}">'
+            f'<div class="mh-cp-media"><span class="mh-cp-media-label">{media_label}</span></div>'
+            f"{_safe_zone_overlay(fmt)}"
+            f'<span class="mh-cp-ratio">{_h(fmt["aspect"])} · {w}×{h}</span>'
+            "</div>"
+            '<figcaption class="mh-cp-cap">'
+            f'<p class="mh-cp-cap-text">{shown}{more}</p>'
+            f'<p class="mh-cp-meta">{int(cap["length"])} / {int(pv["caption_limit"])} chars {over} · {tag_txt}</p>'
+            "</figcaption></figure>"
+        )
+
+    @app.route("/api/channel-preview", methods=["POST"])
+    def api_channel_preview():
+        """Compute a single card's per-platform preview (caption fold, hashtag
+        cap, safe zone) for live editor previews. Pure text/geometry rules —
+        no stored data read — but org-gated for consistency."""
+        if not _active_profile_id():
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.channel_preview import preview_card
+
+        body = request.get_json(silent=True) or {}
+        card = {
+            "caption": str(body.get("caption") or ""),
+            "hashtags": body.get("hashtags") or [],
+            "platform": body.get("platform_label") or "",
+        }
+        pv = preview_card(
+            card, str(body.get("platform") or "instagram"), format_name=body.get("format")
+        )
+        if pv is None:
+            return jsonify({"error": "Unknown platform."}), 400
+        return jsonify({"ok": True, "preview": pv})
+
+    @app.route("/plan/preview/<pack_id>")
+    def plan_preview_page(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.channel_preview import all_platforms, platform as _platform, preview_card
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+
+        spec = _platform(request.args.get("platform", "")) or all_platforms()[0]
+        fmt_name = request.args.get("format", "") or spec.default_format
+        if fmt_name not in spec.format_names():
+            fmt_name = spec.default_format
+
+        # Platform tabs (links) + format tabs (links).
+        plat_tabs = "".join(
+            f'<a class="mh-cp-tab{" active" if p.slug == spec.slug else ""}" '
+            f'href="{url_for("plan_preview_page", pack_id=pack_id, platform=p.slug)}">{_h(p.name)}</a>'
+            for p in all_platforms()
+        )
+        fmt_tabs = "".join(
+            f'<a class="mh-cp-fmt{" active" if fn == fmt_name else ""}" '
+            f'href="{url_for("plan_preview_page", pack_id=pack_id, platform=spec.slug, format=fn)}">{_h(fn)}</a>'
+            for fn in spec.format_names()
+        )
+
+        cards = rec.get("cards") or []
+        frames = ""
+        for card in cards:
+            pv = preview_card(card, spec.slug, format_name=fmt_name)
+            if pv is not None:
+                frames += _channel_frame_html(card, pv)
+        if not frames:
+            frames = '<p class="dim">This draft has no cards to preview yet.</p>'
+
+        title = _h(rec.get("title") or "Draft")
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Channel preview</span>
+  <h1>How it looks <em class="editorial">before you post.</em></h1>
+  <p class="lede">&ldquo;{title}&rdquo; the way each platform shows it &mdash; the crop, the
+  <strong>safe zone</strong> the app&rsquo;s own buttons cover, and where the caption folds behind
+  &ldquo;more&rdquo;. Nothing posts from here; copy it across by hand when you&rsquo;re happy.
+  <a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">Back to the draft &rarr;</a></p>
+</section>
+
+<div class="mh-cp-bar">
+  <div class="mh-cp-tabs">{plat_tabs}</div>
+  <div class="mh-cp-fmts">{fmt_tabs}</div>
+</div>
+<p class="dim" style="font-size:11.5px;margin:0 0 14px">{_h(spec.source)}</p>
+
+<div class="mh-cp-grid">{frames}</div>
+<script>
+document.addEventListener('click', function (e) {{
+  var more = e.target.closest ? e.target.closest('.mh-cp-more') : null;
+  if (!more) return;
+  var hidden = more.nextElementSibling;
+  if (hidden && hidden.classList.contains('mh-cp-hidden')) {{
+    hidden.classList.toggle('show');
+    more.style.display = hidden.classList.contains('show') ? 'none' : '';
+  }}
+}});
+</script>
+"""
+        return _layout("Channel preview", body, active="create")
+
+    @app.route("/plan/grid")
+    def plan_grid_page():
+        """Instagram-style grid preview of the planned feed — drafts the club has
+        scheduled (newest planned first), then unscheduled drafts."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.channel_preview import instagram_grid
+        from mediahub.club_platform.stub_pack_store import list_packs, load_pack
+
+        # Build feed cells from this org's drafts (planned ones first, by date).
+        planned: list[dict] = []
+        unplanned: list[dict] = []
+        for meta in list_packs(limit=60):
+            rec = load_pack(meta.get("pack_id", ""))
+            if rec is None or (rec.get("profile_id") or "") != pid:
+                continue
+            cell = {
+                "pack_id": rec.get("pack_id", ""),
+                "title": rec.get("title") or "Draft",
+                "planned_date": rec.get("planned_date") or "",
+                "stub_type": rec.get("stub_type") or "",
+            }
+            (planned if cell["planned_date"] else unplanned).append(cell)
+        planned.sort(key=lambda c: c["planned_date"], reverse=True)
+        cells = planned + unplanned
+
+        def _cell_html(c: dict) -> str:
+            if c.get("placeholder"):
+                return '<div class="mh-grid-cell mh-grid-empty"></div>'
+            badge = (
+                f'<span class="mh-grid-when">{_h(c["planned_date"])}</span>'
+                if c.get("planned_date")
+                else '<span class="mh-grid-when mh-grid-unplanned">unscheduled</span>'
+            )
+            return (
+                f'<a class="mh-grid-cell" href="{url_for("plan_preview_page", pack_id=c["pack_id"])}" '
+                f'title="{_h(c["title"])}">'
+                f'<span class="mh-grid-type">{_h(str(c["stub_type"]).replace("_", " "))}</span>'
+                f'<span class="mh-grid-title">{_h(c["title"])}</span>{badge}</a>'
+            )
+
+        if cells:
+            rows = instagram_grid(cells, columns=3)
+            grid_html = (
+                '<div class="mh-grid">'
+                + "".join(_cell_html(c) for row in rows for c in row)
+                + "</div>"
+            )
+        else:
+            grid_html = (
+                '<div class="card" style="text-align:center;padding:40px 24px">'
+                '<h2 style="margin:0 0 6px">No posts to preview yet</h2>'
+                f'<p class="dim">Make a draft, then it shows here as a feed tile. '
+                f'<a href="{url_for("make_page")}" style="text-decoration:underline">Create &rarr;</a></p></div>'
+            )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Grid preview</span>
+  <h1>Your feed, <em class="editorial">as a grid.</em></h1>
+  <p class="lede">A quick Instagram-style look at how your planned drafts sit together &mdash;
+  scheduled posts first, newest at the top. Tap a tile to preview it per channel.
+  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+</section>
+{grid_html}
+"""
+        return _layout("Grid preview", body, active="create")
+
+    # ---- 1.14 — the planning board (Kanban / whiteboard) -------------------
+
+    @app.route("/api/plan/board", methods=["GET"])
+    def api_plan_board():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import board_by_column, load_board
+
+        cols = board_by_column(load_board(pid))
+        return jsonify(
+            {
+                "ok": True,
+                "board": {c: [card.to_dict() for card in cards] for c, cards in cols.items()},
+            }
+        )
+
+    @app.route("/api/plan/board/add", methods=["POST"])
+    def api_plan_board_add():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import add_card
+
+        body = request.get_json(silent=True) or {}
+        card = add_card(pid, str(body.get("title") or ""), str(body.get("note") or ""))
+        if card is None:
+            return jsonify({"error": "Give the idea a title (the board may also be full)."}), 400
+        return jsonify({"ok": True, "card": card.to_dict()})
+
+    @app.route("/api/plan/board/move", methods=["POST"])
+    def api_plan_board_move():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import move_card
+
+        body = request.get_json(silent=True) or {}
+        card = move_card(pid, str(body.get("card_id") or ""), str(body.get("column") or ""))
+        if card is None:
+            return jsonify({"error": "Unknown card or column."}), 400
+        return jsonify({"ok": True, "card": card.to_dict()})
+
+    @app.route("/api/plan/board/delete", methods=["POST"])
+    def api_plan_board_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import delete_card
+
+        body = request.get_json(silent=True) or {}
+        ok = delete_card(pid, str(body.get("card_id") or ""))
+        return jsonify({"ok": bool(ok)})
+
+    @app.route("/api/plan/board/promote", methods=["POST"])
+    def api_plan_board_promote():
+        """Promote an idea card into a real free-text draft and advance it to
+        'drafted'. The draft is seeded from the idea text verbatim (no AI — works
+        with no provider) as a starting point the club then edits / regenerates."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.club_platform.stub_pack_store import save_pack
+        from mediahub.content_engine.board import link_pack, load_board
+
+        body = request.get_json(silent=True) or {}
+        card_id = str(body.get("card_id") or "")
+        card = next((c for c in load_board(pid) if c.id == card_id), None)
+        if card is None:
+            return jsonify({"error": "Unknown card."}), 400
+        if card.pack_id:
+            return jsonify({"ok": True, "pack_id": card.pack_id, "already": True})
+        seed = (card.note or card.title).strip()
+        pack = save_pack(
+            "free_text",
+            {"free_text": seed},
+            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": 0.5}],
+            profile_id=pid,
+        )
+        updated = link_pack(pid, card_id, pack["pack_id"], column="drafted")
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack["pack_id"],
+                "card": updated.to_dict() if updated else None,
+            }
+        )
+
+    @app.route("/plan/board")
+    def plan_board_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.content_engine.board import (
+            COLUMN_LABELS,
+            COLUMNS,
+            board_by_column,
+            load_board,
+        )
+
+        cols = board_by_column(load_board(pid))
+
+        def _card_html(card) -> str:
+            note = f'<p class="mh-bd-note">{_h(card.note)}</p>' if card.note else ""
+            if card.pack_id:
+                actions = (
+                    f'<a class="mh-bd-act" href="{url_for("stub_pack_view", pack_id=card.pack_id)}">Open draft &rarr;</a>'
+                    f'<a class="mh-bd-act" href="{url_for("plan_preview_page", pack_id=card.pack_id)}">Preview</a>'
+                )
+            elif card.column == "idea":
+                actions = (
+                    f'<button type="button" class="mh-bd-act" onclick="mhBoardPromote(this)" '
+                    f'data-card="{_h(card.id)}" title="Turn this idea into a free-text draft">Promote to draft</button>'
+                )
+            else:
+                actions = ""
+            return (
+                f'<div class="mh-bd-card" draggable="true" data-card="{_h(card.id)}">'
+                f'<div class="mh-bd-card-head"><strong>{_h(card.title)}</strong>'
+                f'<button type="button" class="mh-bd-del" onclick="mhBoardDelete(this)" '
+                f'data-card="{_h(card.id)}" title="Delete">&times;</button></div>'
+                f"{note}"
+                f'<div class="mh-bd-actions">{actions}</div></div>'
+            )
+
+        columns_html = ""
+        for col in COLUMNS:
+            cards = cols.get(col, [])
+            cards_html = "".join(_card_html(c) for c in cards)
+            add_form = (
+                '<div class="mh-bd-add">'
+                f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
+                f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
+                "</div>"
+                if col == "idea"
+                else ""
+            )
+            columns_html += (
+                f'<section class="mh-bd-col" data-col="{_h(col)}" '
+                f'ondragover="mhBoardOver(event)" ondragleave="mhBoardLeave(event)" ondrop="mhBoardDrop(event)">'
+                f'<h2 class="mh-bd-col-h">{_h(COLUMN_LABELS[col])}'
+                f'<span class="mh-bd-count">{len(cards)}</span></h2>'
+                f"{add_form}"
+                f'<div class="mh-bd-cards">{cards_html}</div>'
+                "</section>"
+            )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Board</span>
+  <h1>The committee <em class="editorial">whiteboard.</em></h1>
+  <p class="lede">Throw ideas on the board, drag them as they progress, and turn a good one into a
+  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.
+  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+</section>
+
+<span class="dim" id="mh-bd-status" style="font-size:12.5px;display:block;min-height:18px;margin:0 2px 8px"></span>
+<div class="mh-bd-board">{columns_html}</div>
+
+<script>
+var MH_BD = {{
+  add: {json.dumps(url_for("api_plan_board_add"))},
+  move: {json.dumps(url_for("api_plan_board_move"))},
+  del: {json.dumps(url_for("api_plan_board_delete"))},
+  promote: {json.dumps(url_for("api_plan_board_promote"))}
+}};
+function mhBoardStatus(m, warn) {{
+  var s = document.getElementById('mh-bd-status');
+  if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+function mhBoardPost(url, payload, ok) {{
+  fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (j.ok === false || j.error) {{ mhBoardStatus(j.error || 'Could not update.', true); return; }}
+      ok ? ok(j) : window.location.reload();
+    }}).catch(function(){{ mhBoardStatus('Could not update.', true); }});
+}}
+function mhBoardAdd(inp) {{
+  var t = inp.value.trim(); if (!t) return;
+  mhBoardPost(MH_BD.add, {{title: t}});
+}}
+function mhBoardDelete(btn) {{ mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}); }}
+function mhBoardPromote(btn) {{
+  btn.disabled = true; mhBoardStatus('Creating a draft from this idea…');
+  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}});
+}}
+document.addEventListener('dragstart', function(e) {{
+  var card = e.target.closest ? e.target.closest('.mh-bd-card') : null;
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.card);
+  e.dataTransfer.effectAllowed = 'move';
+}});
+function mhBoardOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-bd-drop'); }}
+function mhBoardLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-bd-drop'); }}
+function mhBoardDrop(e) {{
+  e.preventDefault();
+  var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
+  var id = e.dataTransfer.getData('text/plain');
+  if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+}}
+</script>
+"""
+        return _layout("Plan board", body, active="create")
+
+    # ---- 1.14 — the first-party performance-analytics loop -----------------
+
+    @app.route("/api/plan/analytics/record", methods=["POST"])
+    def api_plan_analytics_record():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.store import METRIC_KEYS, record_metric
+
+        body = request.get_json(silent=True) or {}
+        metrics = {k: body.get(k, 0) for k in METRIC_KEYS}
+        if not any(metrics.values()):
+            metrics = {k: (body.get("metrics") or {}).get(k, 0) for k in METRIC_KEYS}
+        rec = record_metric(
+            pid,
+            str(body.get("post_type") or ""),
+            str(body.get("posted_date") or ""),
+            metrics,
+            posted_hour=body.get("posted_hour"),
+            pack_id=str(body.get("pack_id") or ""),
+            platform=str(body.get("platform") or ""),
+        )
+        if rec is None:
+            return jsonify(
+                {"error": "Pick a post type and a valid date (and at least one metric)."}
+            ), 400
+        return jsonify({"ok": True, "metric": rec.to_dict()})
+
+    @app.route("/api/plan/analytics/delete", methods=["POST"])
+    def api_plan_analytics_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.store import delete_metric
+
+        body = request.get_json(silent=True) or {}
+        return jsonify({"ok": bool(delete_metric(pid, str(body.get("id") or "")))})
+
+    @app.route("/api/plan/analytics/digest", methods=["POST"])
+    def api_plan_analytics_digest():
+        """AI performance digest — phrases the deterministic attribution numbers.
+        Honest provider errors; the planner already uses the numbers without it."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.analytics.attribution import attribute
+        from mediahub.analytics.digest import performance_digest
+        from mediahub.analytics.store import load_metrics
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        attribution = attribute(load_metrics(pid))
+        if attribution.n_posts == 0:
+            return jsonify({"error": "Record a few posts first — nothing to summarise yet."}), 400
+        try:
+            digest = performance_digest(attribution)
+        except ClaudeUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 503
+        except Exception as exc:
+            app.logger.exception("performance digest failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "digest": digest})
+
+    @app.route("/plan/analytics")
+    def plan_analytics_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.analytics.attribution import MIN_SAMPLES, attribute
+        from mediahub.analytics.store import METRIC_KEYS, engagement_score, load_metrics
+        from mediahub.club_platform.post_types import post_types_for
+        from mediahub.sport_profiles import load_sport_profile
+
+        prof = _active_profile()
+        sport = _org_calendar_sport(prof)
+        metrics = load_metrics(pid)
+        attribution = attribute(metrics)
+
+        # Post-type dropdown for the recording form (this sport's enabled types).
+        try:
+            spts = post_types_for(load_sport_profile(sport))
+        except Exception:
+            spts = []
+        type_titles = {spt.slug: spt.title for spt in spts}
+        type_opts = "".join(
+            f'<option value="{_h(spt.slug)}">{_h(spt.title)}</option>' for spt in spts
+        )
+
+        # The attribution table — what's working, with an index bar.
+        if attribution.by_type:
+            rows = ""
+            for tp in attribution.by_type:
+                title = _h(type_titles.get(tp.post_type, tp.post_type.replace("_", " ").title()))
+                pct = round((tp.index - 1.0) * 100)
+                trusted = tp.n >= MIN_SAMPLES
+                cls = "mh-an-up" if pct >= 0 else "mh-an-down"
+                bar_w = max(4, min(100, round(tp.index * 50)))
+                pct_txt = f'{"+" if pct >= 0 else ""}{pct}%'
+                note = (
+                    ""
+                    if trusted
+                    else ' <span class="dim" style="font-size:11px">(needs ≥2 to count)</span>'
+                )
+                rows += (
+                    f"<tr><td>{title}{note}</td>"
+                    f'<td style="text-align:right;font-variant-numeric:tabular-nums">{int(tp.n)}</td>'
+                    f'<td style="text-align:right;font-variant-numeric:tabular-nums">{tp.avg_engagement:.0f}</td>'
+                    f'<td><div class="mh-an-bar"><span class="{cls}" style="width:{bar_w}%"></span></div></td>'
+                    f'<td class="{cls}" style="text-align:right;font-variant-numeric:tabular-nums">{pct_txt}</td></tr>'
+                )
+            best_bits = []
+            if attribution.best_dow_label():
+                best_bits.append(f"<strong>{_h(attribution.best_dow_label())}</strong>")
+            if attribution.best_hour is not None:
+                best_bits.append(f"around <strong>{int(attribution.best_hour):02d}:00</strong>")
+            best_line = (
+                f'<p class="dim" style="font-size:12.5px">Your posts have done best on '
+                + " ".join(best_bits)
+                + ".</p>"
+                if best_bits
+                else ""
+            )
+            table = (
+                '<div class="card"><h2 style="margin-top:0">What’s working</h2>'
+                '<p class="dim" style="font-size:12.5px;margin-top:0">Engagement = likes + 2&times;comments + '
+                "3&times;shares + 2&times;saves. The planner nudges the types that beat your own average.</p>"
+                '<table class="mh-an-table"><thead><tr><th>Post type</th><th>Posts</th>'
+                "<th>Avg engagement</th><th>vs your average</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>{best_line}</div>"
+            )
+        else:
+            table = (
+                '<div class="card" style="text-align:center;padding:36px 24px">'
+                '<h2 style="margin:0 0 6px">No performance recorded yet</h2>'
+                '<p class="dim" style="max-width:520px;margin:0 auto">Post an approved card by hand, '
+                "then come back and log how it did. Once you&rsquo;ve a couple in a type, the planner "
+                "starts ranking what actually works for your club. Nothing is auto-collected.</p></div>"
+            )
+
+        # Recent recorded posts (with delete).
+        recent = ""
+        for m in sorted(metrics, key=lambda x: x.recorded_at, reverse=True)[:12]:
+            title = _h(type_titles.get(m.post_type, m.post_type.replace("_", " ").title()))
+            eng = _h(str(engagement_score(m.metrics)))
+            recent += (
+                f'<div class="mh-an-row" data-id="{_h(m.id)}">'
+                f'<span style="flex:1">{title} <span class="dim">· {_h(m.posted_date)}</span></span>'
+                f'<span class="dim" style="font-variant-numeric:tabular-nums">{eng} eng</span>'
+                f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" '
+                f'onclick="mhAnDelete(this)">remove</button></div>'
+            )
+
+        metric_inputs = "".join(
+            f'<label class="mh-an-mlabel">{_h(k)}<input type="number" min="0" id="mh-an-{_h(k)}" '
+            f'value="0" style="width:88px"/></label>'
+            for k in METRIC_KEYS
+        )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Performance</span>
+  <h1>What actually <em class="editorial">works.</em></h1>
+  <p class="lede">Post by hand, then log how it did &mdash; MediaHub learns which post types earn your club
+  the most engagement and feeds that straight back into the plan. First-party and honest: nothing is
+  auto-collected (that waits on publishing integrations), and the numbers are yours.
+  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the plan &rarr;</a></p>
+</section>
+
+{table}
+
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0">Log a post&rsquo;s performance</h2>
+  <div class="mh-an-form">
+    <label class="mh-an-mlabel">Post type<select id="mh-an-type" style="min-width:170px">{type_opts}</select></label>
+    <label class="mh-an-mlabel">Date posted<input type="date" id="mh-an-date"/></label>
+    <label class="mh-an-mlabel">Hour (0&ndash;23, optional)<input type="number" min="0" max="23" id="mh-an-hour" style="width:88px"/></label>
+    {metric_inputs}
+    <button type="button" class="btn primary" onclick="mhAnRecord(this)">Log it</button>
+  </div>
+  <span class="dim" id="mh-an-status" style="font-size:12.5px"></span>
+  <div id="mh-an-recent" style="margin-top:14px">{recent}</div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <button type="button" class="btn" id="mh-an-digest-btn" onclick="mhAnDigest(this)" data-loader-text="Writing">AI performance digest</button>
+    <span class="dim" style="font-size:12px">An optional written summary of the numbers above. Needs an AI provider; the planner uses the numbers either way.</span>
+  </div>
+  <div id="mh-an-digest" style="margin-top:10px"></div>
+</div>
+
+<script>
+var MH_AN = {{
+  record: {json.dumps(url_for("api_plan_analytics_record"))},
+  del: {json.dumps(url_for("api_plan_analytics_delete"))},
+  digest: {json.dumps(url_for("api_plan_analytics_digest"))},
+  keys: {json.dumps(list(METRIC_KEYS))}
+}};
+function mhAnStatus(m, warn) {{
+  var s = document.getElementById('mh-an-status');
+  if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+function mhAnRecord(btn) {{
+  var metrics = {{}};
+  MH_AN.keys.forEach(function(k){{ metrics[k] = parseInt(document.getElementById('mh-an-'+k).value || '0', 10) || 0; }});
+  var hour = document.getElementById('mh-an-hour').value;
+  var payload = {{
+    post_type: document.getElementById('mh-an-type').value,
+    posted_date: document.getElementById('mh-an-date').value,
+    posted_hour: hour === '' ? null : parseInt(hour, 10),
+    metrics: metrics
+  }};
+  mhAnStatus('Saving…');
+  fetch(MH_AN.record, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (!j.ok) {{ mhAnStatus(j.error || 'Could not save.', true); return; }}
+      window.location.reload();
+    }}).catch(function(){{ mhAnStatus('Could not save.', true); }});
+}}
+function mhAnDelete(btn) {{
+  var row = btn.closest('.mh-an-row'); if (!row) return;
+  fetch(MH_AN.del, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: row.dataset.id}})}})
+    .then(function(r){{return r.json();}}).then(function(){{ window.location.reload(); }});
+}}
+function mhAnDigest(btn) {{
+  var box = document.getElementById('mh-an-digest');
+  btn.disabled = true; box.innerHTML = '<span class="dim">Writing…</span>';
+  fetch(MH_AN.digest, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: '{{}}'}})
+    .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, j:j}}; }}); }})
+    .then(function(res){{
+      btn.disabled = false;
+      var j = res.j || {{}};
+      if (!res.ok || !j.ok) {{ box.innerHTML = '<p class="dim" style="color:var(--warn)">' + (j.error || 'Could not write a digest.') + '</p>'; return; }}
+      var d = j.digest || {{}};
+      var html = '';
+      if (d.summary) html += '<p style="font-weight:600;margin:0 0 6px">' + d.summary.replace(/</g,'&lt;') + '</p>';
+      (d.takeaways || []).forEach(function(t){{ html += '<li style="margin:2px 0">' + (t.text||'').replace(/</g,'&lt;') + '</li>'; }});
+      box.innerHTML = html ? ('<ul style="margin:0;padding-left:18px">' + html + '</ul>') : '<p class="dim">No takeaways.</p>';
+    }}).catch(function(){{ btn.disabled = false; box.innerHTML = '<p class="dim" style="color:var(--warn)">Could not write a digest.</p>'; }});
+}}
+</script>
+"""
+        return _layout("Performance", body, active="create")
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
@@ -28573,6 +29562,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
             f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
+            f'<a class="btn secondary" href="{url_for("plan_preview_page", pack_id=pack_id)}" '
+            f'title="See this draft the way each platform shows it — crop, safe zone, caption fold">'
+            f"Preview per channel</a>"
             f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"

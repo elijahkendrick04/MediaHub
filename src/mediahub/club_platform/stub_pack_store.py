@@ -16,16 +16,27 @@ Each pack has:
   title:      human-friendly title (taken from form input where possible)
   form_data:  the raw form values that produced the cards
   cards:      list of {platform, caption, hashtags, confidence, notes}
+
+Optional fields (absent on older packs — back-compatible):
+  planned_date:    "YYYY-MM-DD" the club intends to post this draft (roadmap
+                   1.14 Plan calendar). This is a PLANNING intention only —
+                   MediaHub never posts to a social channel; a human posts
+                   manually on the day. None/absent = unscheduled.
+  planned_channel: optional platform label for that planned post (e.g.
+                   "instagram"); free-form, advisory.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _data_dir() -> Path:
@@ -122,6 +133,47 @@ def update_pack(
     return rec
 
 
+def set_planned_date(
+    pack_id: str, planned_date: Optional[str], *, channel: Optional[str] = None
+) -> Optional[dict]:
+    """Set (or clear) the day the club intends to post this draft — the Plan
+    calendar's schedule mutation (roadmap 1.14).
+
+    ``planned_date`` is an ISO ``YYYY-MM-DD`` string, or None/"" to unschedule
+    (send the draft back to the calendar's side rail). ``channel`` is an optional
+    advisory platform label. Returns the updated record, or None when the pack is
+    missing or the date is malformed.
+
+    Planning only — nothing is published; a human still posts manually on the day.
+    """
+    rec = load_pack(pack_id)
+    if rec is None:
+        return None
+    raw = (planned_date or "").strip()
+    if raw:
+        if not _ISO_DATE.match(raw):
+            return None
+        try:
+            datetime.strptime(raw, "%Y-%m-%d")
+        except ValueError:
+            return None
+        rec["planned_date"] = raw
+    else:
+        rec.pop("planned_date", None)
+    if channel is not None:
+        ch = channel.strip()[:40]
+        if ch:
+            rec["planned_channel"] = ch
+        else:
+            rec.pop("planned_channel", None)
+    if not rec.get("planned_date"):
+        # An unscheduled draft carries no channel either.
+        rec.pop("planned_channel", None)
+    path = _packs_dir() / f"{pack_id}.json"
+    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    return rec
+
+
 def load_pack(pack_id: str) -> Optional[dict]:
     """Load a single pack record, or None if missing/invalid."""
     if not pack_id or not pack_id.replace("-", "").isalnum():
@@ -157,6 +209,7 @@ def list_packs(limit: int = 50) -> list[dict]:
                     "stub_type": canonical_slug(data.get("stub_type", "other")),
                     "title": data.get("title", "Untitled"),
                     "n_cards": len(data.get("cards") or []),
+                    "planned_date": data.get("planned_date") or None,
                 }
             )
         except (OSError, json.JSONDecodeError):
