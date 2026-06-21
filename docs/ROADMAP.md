@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `5b29db65e` · Charts & insights 1.11 — quality uplift (#935)
+**Last updated:** 2026-06-21 · `3f21fa1a9` · Brand platform depth (roadmap 1.12) (#937)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.12** · Phase 1 (Product) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
 - **1.13** · Phase 1 (Product) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
 - **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
 - **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
@@ -1216,16 +1215,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `d43029fa0` | docs(1.12): mark Brand platform depth shipped in the parity map |
+| 2026-06-21 | `4f8e1c26e` | brand(1.12): theme-token hygiene + folder READMEs |
+| 2026-06-21 | `fa3cdcc4c` | brand(1.12): build 5 — kit-edit -> re-render sweep with diff preview |
+| 2026-06-21 | `88a494254` | brand(1.12): build 4 — governance: token locks + group-approver rules |
+| 2026-06-21 | `15f986ab0` | brand(1.12): build 3 — brand-platform web surface + palette-file import |
+| 2026-06-21 | `0e839f0f9` | brand(1.12): build 2 — deterministic Brand Check + AI Brand Assist |
+| 2026-06-21 | `3fb49a05a` | brand(1.12): build 1 — multi-kit data model + back-compat resolver |
 | 2026-06-21 | `3777659bb` | charts(1.11): ruff-format the web.py additions (pre-commit hygiene) |
 | 2026-06-21 | `7980c0787` | charts(1.11): refresh the folder README for the I1–I5 uplift |
 | 2026-06-21 | `659c040ed` | charts(1.11): I5 — grounded, postable chart captions (graphic + words) |
 | 2026-06-21 | `ac33bb058` | charts(1.11): I4 — visual-regression lock for the renderer |
 | 2026-06-21 | `0f7a00dc4` | charts(1.11): I3 — richer deterministic chart coverage |
-| 2026-06-21 | `0a12abea0` | charts(1.11): I2 — postable PNG export at social formats |
-| 2026-06-21 | `d0e080bfa` | charts(1.11): I1 — reference lines, standout emphasis, accessibility |
-| 2026-06-21 | `31ac25748` | charts(1.11): add chart_id to the second tenant-isolation sweep too |
-| 2026-06-21 | `a68652c7a` | ci: re-trigger checks for the charts(1.11) branch |
-| 2026-06-21 | `41d101628` | charts(1.11): register the chart-SVG route in the tenant-isolation sweep |
-| 2026-06-21 | `7f496ecc1` | charts(1.11): apply ruff-format (pre-commit hygiene) |
-| 2026-06-21 | `ccd2d041c` | charts(1.11): build 5 — web routes, content-builder surface + UI |
 <!-- /ROADMAP:ACTIVITY -->
