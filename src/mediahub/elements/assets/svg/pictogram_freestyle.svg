@@ -1,14 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Freestyle swimmer">
-  <!-- water line -->
-  <path d="M4 64 Q18 58 32 64 T60 64 T88 64 T96 64" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
-  <path d="M4 74 Q18 68 32 74 T60 74 T88 74 T96 74" fill="none" stroke="__OUTLINE__" stroke-width="2.4" stroke-linecap="round"/>
-  <!-- body sweeping forward -->
-  <path d="M18 58 C30 50 46 48 64 50 C74 51 82 49 88 44"
-        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- head -->
-  <circle cx="70" cy="46" r="8" fill="__ACCENT__"/>
-  <!-- recovery arm arc -->
-  <path d="M44 52 C40 34 50 24 64 26" fill="none" stroke="__ACCENT__" stroke-width="7" stroke-linecap="round"/>
-  <!-- kick splash -->
-  <path d="M16 56 l-9 6 M18 62 l-10 3" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+  <!-- water: faint echo then a bold brand ripple the figure cuts through -->
+  <path d="M5 78 Q19 72 33 78 T61 78 T89 78 T97 78" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <path d="M5 70 Q19 64 33 70 T61 70 T89 70 T97 70" fill="none" stroke="__ACCENT__" stroke-width="3.4" stroke-linecap="round"/>
+  <!-- recovery arm arcing forward over the head -->
+  <path d="M56 50 C52 33 58 24 71 25" fill="none" stroke="__ACCENT__" stroke-width="8" stroke-linecap="round"/>
+  <!-- torso + trailing legs, one confident tapered sweep -->
+  <path d="M11 64 C27 58 41 56 57 53" fill="none" stroke="__ACCENT__" stroke-width="12.5" stroke-linecap="round"/>
+  <!-- lead arm reaching forward into the entry -->
+  <path d="M62 53 C74 55 83 57 93 61" fill="none" stroke="__ACCENT__" stroke-width="8" stroke-linecap="round"/>
+  <!-- head at the leading shoulder -->
+  <circle cx="70" cy="49" r="9" fill="__ACCENT__"/>
+  <!-- kick splash off the feet -->
+  <path d="M12 60 l-7 -5 M9 66 l-6 -2" stroke="__ACCENT__" stroke-width="3.4" stroke-linecap="round"/>
 </svg>

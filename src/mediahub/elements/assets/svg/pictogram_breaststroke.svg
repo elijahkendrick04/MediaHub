@@ -1,11 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Breaststroke swimmer">
-  <path d="M4 64 Q18 58 32 64 T60 64 T88 64 T96 64" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
-  <!-- body gliding forward, head up -->
-  <path d="M20 60 C34 54 50 54 66 56 C74 57 82 55 88 50"
-        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- head up out of the water -->
-  <circle cx="72" cy="50" r="8" fill="__ACCENT__"/>
-  <!-- arms sweeping out in the breaststroke pull -->
-  <path d="M52 58 C44 50 40 50 34 54" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
-  <path d="M52 58 C48 66 44 68 38 68" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M5 80 Q19 74 33 80 T61 80 T89 80 T97 80" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <path d="M5 72 Q19 66 33 72 T61 72 T89 72 T97 72" fill="none" stroke="__ACCENT__" stroke-width="3.4" stroke-linecap="round"/>
+  <!-- arms sweeping out wide in the breaststroke pull -->
+  <path d="M58 56 C49 50 41 51 35 58" fill="none" stroke="__ACCENT__" stroke-width="7.5" stroke-linecap="round"/>
+  <!-- body gliding forward along the surface, head lifted -->
+  <path d="M13 62 C29 57 45 56 61 53" fill="none" stroke="__ACCENT__" stroke-width="12.5" stroke-linecap="round"/>
+  <!-- second sweeping arm -->
+  <path d="M60 55 C54 62 47 65 40 64" fill="none" stroke="__ACCENT__" stroke-width="7.5" stroke-linecap="round"/>
+  <!-- head lifted to breathe -->
+  <circle cx="73" cy="48" r="9" fill="__ACCENT__"/>
+  <!-- glide ripple off the lead -->
+  <path d="M86 52 q7 1 9 6" fill="none" stroke="__ACCENT__" stroke-width="3.2" stroke-linecap="round" opacity="0.8"/>
 </svg>

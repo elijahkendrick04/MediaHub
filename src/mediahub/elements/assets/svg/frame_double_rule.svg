@@ -1,4 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Double-rule frame">
-  <rect x="4" y="4" width="92" height="92" rx="2" fill="none" stroke="__ACCENT__" stroke-width="3"/>
-  <rect x="9" y="9" width="82" height="82" rx="1" fill="none" stroke="__OUTLINE__" stroke-width="1.5"/>
+  <rect x="4" y="4" width="92" height="92" rx="3" fill="none" stroke="__ACCENT__" stroke-width="3"/>
+  <rect x="9.5" y="9.5" width="81" height="81" rx="1.5" fill="none" stroke="__OUTLINE__" stroke-width="1.5"/>
+  <g fill="__ACCENT__">
+    <rect x="46" y="1.5" width="8" height="5" rx="1.5"/>
+    <rect x="46" y="93.5" width="8" height="5" rx="1.5"/>
+  </g>
 </svg>

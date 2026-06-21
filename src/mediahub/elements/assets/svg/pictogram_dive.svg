@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Racing dive off the blocks">
-  <!-- starting block -->
-  <path d="M10 70 h26 v6 h-26 z" fill="__SECONDARY__"/>
-  <path d="M14 76 v14 M32 76 v14" stroke="__SECONDARY__" stroke-width="5" stroke-linecap="round"/>
-  <!-- water line -->
-  <path d="M40 82 Q56 76 72 82 T96 82" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <!-- starting block: angled top, solid riser -->
+  <path d="M6 60 H40 L34 68 H6 Z" fill="__SECONDARY__"/>
+  <rect x="6" y="68" width="20" height="24" rx="2" fill="__SECONDARY__"/>
+  <rect x="6" y="60" width="34" height="3" rx="1.5" fill="__ACCENT__"/>
+  <!-- water line into the entry -->
+  <path d="M42 86 Q58 80 74 86 T98 86" fill="none" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <!-- trailing streamline arms locked overhead -->
+  <path d="M40 56 C30 48 28 41 33 33" fill="none" stroke="__ACCENT__" stroke-width="7.5" stroke-linecap="round"/>
   <!-- diving body, streamlined toward the water -->
-  <path d="M28 60 C40 52 56 56 70 70 C74 74 80 78 86 78"
-        fill="none" stroke="__ACCENT__" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- head leading -->
-  <circle cx="80" cy="76" r="7.5" fill="__ACCENT__"/>
-  <!-- trailing arms streamlined -->
-  <path d="M30 60 C22 50 22 44 30 40" fill="none" stroke="__ACCENT__" stroke-width="6.5" stroke-linecap="round"/>
+  <path d="M38 58 C50 52 62 58 74 72" fill="none" stroke="__ACCENT__" stroke-width="12.5" stroke-linecap="round"/>
+  <!-- head leading the entry -->
+  <circle cx="78" cy="76" r="8.5" fill="__ACCENT__"/>
   <!-- entry splash -->
-  <path d="M86 72 l7 -4 M88 80 l8 2" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+  <path d="M86 70 l7 -4 M88 80 l8 1" stroke="__ACCENT__" stroke-width="3.4" stroke-linecap="round"/>
 </svg>

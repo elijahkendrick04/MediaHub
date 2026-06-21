@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 16" role="img" aria-label="Tick rule">
-  <rect x="2" y="6" width="14" height="4" rx="2" fill="__ACCENT__"/>
-  <line x1="22" y1="8" x2="158" y2="8" stroke="__OUTLINE__" stroke-width="3" stroke-linecap="round"/>
+  <rect x="2" y="4" width="20" height="8" rx="4" fill="__ACCENT__"/>
+  <line x1="28" y1="8" x2="150" y2="8" stroke="__OUTLINE__" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="156" cy="8" r="2.2" fill="__OUTLINE__"/>
 </svg>

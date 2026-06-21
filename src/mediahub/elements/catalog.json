@@ -133,7 +133,7 @@
       "tags": ["coach", "whistle", "official", "start", "training"],
       "keywords": "coach whistle official referee start training session",
       "mood": ["energetic", "bold"],
-      "slots": ["ACCENT", "SECONDARY", "GROUND", "OUTLINE"],
+      "slots": ["ACCENT", "SECONDARY", "GROUND", "ON_GROUND", "OUTLINE"],
       "aspect": 1.0
     },
     {
@@ -169,7 +169,7 @@
       "tags": ["pb", "personal-best", "chip", "label", "result"],
       "keywords": "personal best PB chip tag tick achievement label",
       "mood": ["bold", "celebratory"],
-      "slots": ["ACCENT", "GROUND"],
+      "slots": ["ACCENT", "GROUND", "ON_GROUND"],
       "aspect": 2.5,
       "carries_text": true
     },
@@ -208,7 +208,7 @@
       "tags": ["ribbon", "award", "prize", "medal", "star"],
       "keywords": "award ribbon prize medal star recognition rosette",
       "mood": ["celebratory", "formal"],
-      "slots": ["ACCENT", "SECONDARY", "GROUND"],
+      "slots": ["ACCENT", "SECONDARY", "GROUND", "ON_GROUND"],
       "aspect": 0.67
     },
     {
