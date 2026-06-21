@@ -111,8 +111,7 @@ def dispatch(file_bytes: bytes, filename: str) -> tuple[Meet, DispatchLog]:
                 log.chosen_filename = best[2]
                 log.chosen_score = round(best[0], 3)
                 log.notes.append(
-                    f"Picked '{best[2]}' inside zip via {best[1].format_id} "
-                    f"(score {best[0]:.2f})."
+                    f"Picked '{best[2]}' inside zip via {best[1].format_id} (score {best[0]:.2f})."
                 )
                 meet = best[1].parse(best[3], best[2])
                 meet.source_filename = f"{filename} :: {best[2]}"

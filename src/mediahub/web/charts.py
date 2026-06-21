@@ -277,8 +277,7 @@ def area_chart(
     dots = ""
     if show_dots:
         dots = "".join(
-            f'<circle class="mh-chart-area-dot" cx="{x}" cy="{y}" r="2.2" '
-            f'style="--mh-dot-i:{i}" />'
+            f'<circle class="mh-chart-area-dot" cx="{x}" cy="{y}" r="2.2" style="--mh-dot-i:{i}" />'
             for i, (x, y) in enumerate(coords)
         )
 

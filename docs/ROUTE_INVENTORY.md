@@ -27,6 +27,13 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_audio_upload` | `POST` | `/api/audio/upload` |
 | `api_audio_voice_consent` | `GET,POST` | `/api/audio/voice-consent` |
 | `api_audio_voices` | `GET` | `/api/audio/voices` |
+| `api_brand_kit_create` | `POST` | `/api/brand/kits` |
+| `api_brand_kit_update` | `POST` | `/api/brand/kits/<kit_id>` |
+| `api_brand_kit_set_default` | `POST` | `/api/brand/kits/<kit_id>/default` |
+| `api_brand_kit_delete` | `POST` | `/api/brand/kits/<kit_id>/delete` |
+| `api_brand_kit_palette_import` | `POST` | `/api/brand/kits/<kit_id>/palette/import` |
+| `api_brand_kit_resweep_apply` | `POST` | `/api/brand/kits/<kit_id>/resweep/apply` |
+| `api_brand_kit_resweep_preview` | `GET,POST` | `/api/brand/kits/<kit_id>/resweep/preview` |
 | `api_club_qa_submit` | `POST` | `/api/club-qa` |
 | `api_club_qa_status` | `GET` | `/api/club-qa/<job_id>` |
 | `api_stub_pack_assistant` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/assistant` |
@@ -82,6 +89,9 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_reel_job_status` | `GET` | `/api/reel-jobs/<job_id>` |
 | `api_card_assistant` | `POST` | `/api/runs/<run_id>/card/<card_id>/assistant` |
 | `api_assistant_suggestions` | `GET` | `/api/runs/<run_id>/card/<card_id>/assistant/suggestions` |
+| `api_card_brand_check` | `GET` | `/api/runs/<run_id>/card/<card_id>/brand-check` |
+| `api_card_brand_advise` | `POST` | `/api/runs/<run_id>/card/<card_id>/brand-check/advise` |
+| `api_card_brand_autofix` | `POST` | `/api/runs/<run_id>/card/<card_id>/brand-check/autofix` |
 | `api_element_suggestions` | `GET` | `/api/runs/<run_id>/card/<card_id>/element-suggestions` |
 | `api_card_elements` | `GET,POST` | `/api/runs/<run_id>/card/<card_id>/elements` |
 | `api_card_motion` | `GET,POST` | `/api/runs/<run_id>/card/<card_id>/motion` |
@@ -97,6 +107,11 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_regenerate_variants` | `POST` | `/api/runs/<run_id>/cards/<card_id>/regenerate-variants` |
 | `api_cards_bulk_export` | `POST` | `/api/runs/<run_id>/cards/bulk-export` |
 | `api_cards_bulk_status` | `POST` | `/api/runs/<run_id>/cards/bulk-status` |
+| `api_run_chart_svg` | `GET` | `/api/runs/<run_id>/chart/<chart_id>` |
+| `api_run_chart_caption` | `POST` | `/api/runs/<run_id>/chart/<chart_id>/caption` |
+| `api_run_charts` | `GET` | `/api/runs/<run_id>/charts` |
+| `api_run_charts_insights` | `POST` | `/api/runs/<run_id>/charts/insights` |
+| `api_run_charts_recommend` | `POST` | `/api/runs/<run_id>/charts/recommend` |
 | `api_export` | `GET` | `/api/runs/<run_id>/export` |
 | `api_run_newsletter` | `GET` | `/api/runs/<run_id>/newsletter` |
 | `api_run_reactions` | `GET` | `/api/runs/<run_id>/reactions` |
@@ -121,6 +136,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_llm_status` | `GET` | `/api/settings/llm-status` |
 | `api_status_json` | `GET` | `/api/status` |
 | `api_stock_search` | `GET` | `/api/stock/search` |
+| `api_stock_thumb` | `GET` | `/api/stock/thumb` |
 | `api_studio_render` | `POST` | `/api/studio/render` |
 | `upload_from_url_status` | `GET` | `/api/upload/from-url/<job_id>/status` |
 | `api_variant_job_status` | `GET` | `/api/variant-jobs/<job_id>` |
@@ -130,8 +146,11 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_video_projects_list` | `GET` | `/api/video/projects` |
 | `api_video_project` | `GET,POST` | `/api/video/projects/<project_id>` |
 | `api_video_project_approve` | `POST` | `/api/video/projects/<project_id>/approve` |
+| `api_video_project_caption` | `POST` | `/api/video/projects/<project_id>/caption` |
+| `api_video_project_enhance` | `POST` | `/api/video/projects/<project_id>/enhance` |
 | `api_video_project_file` | `GET` | `/api/video/projects/<project_id>/file` |
 | `api_video_project_render` | `POST` | `/api/video/projects/<project_id>/render` |
+| `api_video_reel` | `POST` | `/api/video/reel` |
 | `api_visual_get` | `GET` | `/api/visual/<vid>` |
 | `api_visual_png` | `GET` | `/api/visual/<vid>/png/<format_name>` |
 | `api_web_research_submit` | `POST` | `/api/web-research` |
@@ -148,6 +167,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `billing_checkout` | `POST` | `/billing/checkout` |
 | `billing_confirm` | `GET` | `/billing/confirm` |
 | `billing_portal` | `POST` | `/billing/portal` |
+| `brand_home_page` | `GET` | `/brand` |
 | `club_data_page` | `GET` | `/club-data` |
 | `club_qa_console` | `GET` | `/club-qa` |
 | `complaints_form` | `GET` | `/complaints` |
@@ -259,6 +279,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `review` | `GET` | `/review/<run_id>` |
 | `run_status` | `GET` | `/runs/<run_id>` |
 | `sponsor_variant_view` | `GET` | `/runs/<run_id>/card/<card_id>/sponsor-variant` |
+| `run_charts_page` | `GET` | `/runs/<run_id>/charts` |
 | `turn_into_pack_view` | `GET` | `/runs/<run_id>/pack/<pack_id>` |
 | `run_refetch` | `POST` | `/runs/<run_id>/refetch` |
 | `run_results_table` | `GET` | `/runs/<run_id>/results` |

@@ -206,6 +206,39 @@ def test_clip_maker_remove_silence_builds_keep_segments():
     assert "removed" in res.manifest["silence"]
 
 
+def test_clip_maker_remove_fillers_builds_keep_segments():
+    # filler spans at 2000-2300 and 4000-4300 → kept speech around them.
+    res = clip_maker(
+        "a.mp4",
+        with_captions=True,
+        with_reframe=False,
+        remove_fillers=True,
+        probe_fn=lambda s: ClipProbe(duration_ms=6000, width=1080, height=1920, has_audio=True),
+        filler_fn=lambda src, aggressive=False: [(2000, 2300), (4000, 4300)],
+    )
+    # the two filler spans split the clip into 3 kept windows
+    assert len(res.edl.clips) >= 2
+    assert res.manifest["captions"] == "skipped-fillercut"
+    assert "fillers" in res.manifest["silence"]
+
+
+def test_clip_maker_silence_and_fillers_intersect():
+    # silence keeps [0,3000],[3500,6000]; fillers cut 1000-1200 → both applied.
+    res = clip_maker(
+        "a.mp4",
+        with_captions=False,
+        with_reframe=False,
+        remove_silence=True,
+        remove_fillers=True,
+        probe_fn=lambda s: ClipProbe(duration_ms=6000, width=1080, height=1920, has_audio=True),
+        silence_fn=lambda src, dur: [(0, 3000), (3500, 6000)],
+        filler_fn=lambda src, aggressive=False: [(1000, 1200)],
+    )
+    spans = [(c.in_ms, c.out_ms) for c in res.edl.clips]
+    # the 1000-1200 filler carves the first silence-kept window in two
+    assert any(e <= 1200 for _s, e in spans) and any(s >= 1000 for s, _e in spans)
+
+
 def test_clip_maker_look_and_music_thread_into_edl():
     res = clip_maker(
         "a.mp4",

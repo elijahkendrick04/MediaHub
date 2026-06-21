@@ -445,7 +445,7 @@ def build_activity_feed(
                 if ev:
                     events.append(ev)
 
-    events.sort(key=lambda e: (parse_ts(e.ts) or _EPOCH), reverse=True)
+    events.sort(key=lambda e: parse_ts(e.ts) or _EPOCH, reverse=True)
     if limit is not None and limit >= 0:
         events = events[:limit]
     return events

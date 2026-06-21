@@ -172,6 +172,8 @@ def clip_maker(
     music_platform: str = "instagram",
     loudness: str = "social",
     remove_silence: bool = False,
+    remove_fillers: bool = False,
+    aggressive_fillers: bool = False,
     slow_mo: float = 1.0,
     fps: int = 30,
     # Injection seams (default to the real, FFmpeg-backed engine pieces):
@@ -180,6 +182,7 @@ def clip_maker(
     reframe_fn: Optional[Callable] = None,
     caption_fn: Optional[Callable] = None,
     silence_fn: Optional[Callable] = None,
+    filler_fn: Optional[Callable] = None,
     music_fn: Optional[Callable] = None,
 ) -> ClipMakerResult:
     """Turn a footage clip into a branded :class:`ClipMakerResult`.
@@ -203,12 +206,23 @@ def clip_maker(
     duration_ms = probe.duration_ms
 
     silence_note = "off"
-    if remove_silence:
-        # Tighten the whole clip: keep the speech, cut the dead air. This is a
-        # distinct mode from highlight detection (Descript "Remove Gaps").
-        keeps = _silence_keeps(source, duration_ms, silence_fn)
+    tighten = remove_silence or remove_fillers
+    if tighten:
+        # Tighten the whole clip: keep the speech, cut the dead air and/or the
+        # fillers (Descript "Remove Gaps" + "Remove Filler Words"). When both are
+        # on, a segment survives only if both passes keep it (interval intersect).
+        keeps: Optional[list] = None
+        if remove_silence:
+            keeps = _silence_keeps(source, duration_ms, silence_fn)
+        if remove_fillers:
+            fk = _filler_keeps(source, duration_ms, aggressive_fillers, filler_fn)
+            keeps = fk if keeps is None else _intersect_keeps(keeps, fk)
+        keeps = keeps or [(0, duration_ms)]
         chosen = [Moment(s, e, 1.0, "speech", f"kept {s // 1000}-{e // 1000}s") for (s, e) in keeps]
-        silence_note = f"removed {_silence_removed(keeps, duration_ms) // 1000}s of dead air"
+        what = "+".join(
+            (["dead air"] if remove_silence else []) + (["fillers"] if remove_fillers else [])
+        )
+        silence_note = f"removed {_silence_removed(keeps, duration_ms) // 1000}s ({what})"
     else:
         detect = detect_fn or _moments.detect_moments
         chosen = detect(
@@ -262,7 +276,12 @@ def clip_maker(
             note = "burned-karaoke" if caption_style == "karaoke" else "burned"
             captions_note = note if caption_track else "no-speech-or-asr-off"
         else:
-            captions_note = "skipped-silencecut" if remove_silence else "skipped-multimoment"
+            if remove_silence:
+                captions_note = "skipped-silencecut"
+            elif remove_fillers:
+                captions_note = "skipped-fillercut"
+            else:
+                captions_note = "skipped-multimoment"
 
     audio_plan = _build_audio_plan(
         enhance_audio=enhance_audio,
@@ -337,6 +356,38 @@ def _silence_keeps(source: str, duration_ms: int, silence_fn: Optional[Callable]
 def _silence_removed(keeps: list, duration_ms: int) -> int:
     kept = sum(max(0, e - s) for s, e in keeps)
     return max(0, duration_ms - kept)
+
+
+def _filler_keeps(
+    source: str, duration_ms: int, aggressive: bool, filler_fn: Optional[Callable]
+) -> list:
+    """Speech windows to keep after cutting filler words. Honest whole-clip fallback."""
+    if duration_ms <= 0:
+        return [(0, 0)]
+    fn = filler_fn
+    if fn is None:
+        from mediahub.video.filler import detect_filler_spans as fn  # type: ignore[no-redef]
+    try:
+        spans = list(fn(source, aggressive=aggressive))
+    except Exception:
+        spans = []
+    from mediahub.video.silence import plan_keep_segments
+
+    # Cut fillers precisely: no edge padding (a 0.2s "um" must not survive being
+    # re-padded back) and a small min-keep so the words around it are retained.
+    keeps = plan_keep_segments(spans, duration_ms, pad_ms=0, min_keep_ms=120)
+    return keeps or [(0, duration_ms)]
+
+
+def _intersect_keeps(a: list, b: list) -> list:
+    """Interval-intersect two keep-lists (a segment survives only if both keep it)."""
+    out: list = []
+    for s1, e1 in a:
+        for s2, e2 in b:
+            s, e = max(s1, s2), min(e1, e2)
+            if e - s > 0:
+                out.append((s, e))
+    return sorted(out)
 
 
 def _build_audio_plan(

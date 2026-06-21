@@ -9809,6 +9809,7 @@ _VIDEO_STUDIO_HTML = """
       <label class="vstudio-check"><input type="checkbox" id="vs-enhance-audio"> Clean &amp; level the audio</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-music"> Add a music bed</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-silence"> Remove silences (tighten talking clips)</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-fillers"> Remove filler words (um, uh)</label>
       <button class="btn primary" id="vs-make" type="button">Make clip &rarr;</button>
       <span id="vs-make-status" class="muted" aria-live="polite"></span>
     </div>
@@ -9987,7 +9988,8 @@ _VIDEO_STUDIO_HTML = """
       slow_mo: $('vs-slowmo').checked,
       enhance_audio: $('vs-enhance-audio').checked,
       with_music: $('vs-music').checked,
-      remove_silence: $('vs-silence').checked
+      remove_silence: $('vs-silence').checked,
+      remove_fillers: $('vs-fillers').checked
     }).then(function(j){
       if(j.ok){ status.textContent = 'Clip created. Render it below.'; loadProjects(); }
       else { status.textContent = 'Failed: '+(j.message||j.error||'error'); }
@@ -44562,6 +44564,7 @@ voice, and queues them for one-click approval.</p>
         enhance_audio = bool(payload.get("enhance_audio", False))
         with_music = bool(payload.get("with_music", False))
         remove_silence = bool(payload.get("remove_silence", False))
+        remove_fillers = bool(payload.get("remove_fillers", False))
         music_mood = (payload.get("music_mood") or "uplifting").strip().lower()[:24]
         caption_style = "karaoke" if payload.get("animated_captions") else "static"
         slow_mo = 0.5 if payload.get("slow_mo") else 1.0
@@ -44583,6 +44586,8 @@ voice, and queues them for one-click approval.</p>
                 with_music=with_music,
                 music_mood=music_mood,
                 remove_silence=remove_silence,
+                remove_fillers=remove_fillers,
+                slow_mo=slow_mo,
                 colours=_video_brand_colours(),
             )
         except ProbeUnavailable:

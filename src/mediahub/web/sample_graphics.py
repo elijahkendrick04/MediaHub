@@ -94,10 +94,10 @@ def _corner_marks(w: int, h: int, m: int = 14, length: int = 9) -> str:
     return (
         f'<g class="mhg-ft" stroke="currentColor" stroke-width="1.4" '
         f'fill="none" style="opacity:0.5">'
-        f'<path d="M{m} {m+length} V{m} H{m+length}"/>'
-        f'<path d="M{w-m-length} {m} H{w-m} V{m+length}"/>'
-        f'<path d="M{m} {h-m-length} V{h-m} H{m+length}"/>'
-        f'<path d="M{w-m-length} {h-m} H{w-m} V{h-m-length}"/>'
+        f'<path d="M{m} {m + length} V{m} H{m + length}"/>'
+        f'<path d="M{w - m - length} {m} H{w - m} V{m + length}"/>'
+        f'<path d="M{m} {h - m - length} V{h - m} H{m + length}"/>'
+        f'<path d="M{w - m - length} {h - m} H{w - m} V{h - m - length}"/>'
         "</g>"
     )
 
@@ -150,7 +150,7 @@ def story_card_svg() -> str:
         + '<text x="192" y="521" class="mhg-m mhg-i" font-size="20" '
         'font-weight="700">53.15</text>'
         # footer lockup — wordmark + lane + grounded confidence
-         + f'<line x1="28" y1="576" x2="{w-28}" y2="576" class="mhg-i" '
+         + f'<line x1="28" y1="576" x2="{w - 28}" y2="576" class="mhg-i" '
         'stroke="currentColor" stroke-width="1" style="opacity:0.14"/>'
         + '<rect x="28" y="592" width="26" height="26" rx="5" '
         'fill="var(--lane,#D4FF3A)"/>'
@@ -159,7 +159,7 @@ def story_card_svg() -> str:
         'letter-spacing="1">RIVERSIDE SC</text>'
         + '<text x="64" y="617" class="mhg-m mhg-ft" font-size="10" '
         'letter-spacing="1.5">SOURCE-GROUNDED &#183; 0.96</text>'
-        + f'<text x="{w-26}" y="614" text-anchor="end" class="mhg-d mhg-l" '
+        + f'<text x="{w - 26}" y="614" text-anchor="end" class="mhg-d mhg-l" '
         'font-size="40" style="opacity:0.9">04</text>' + _corner_marks(w, h) + "</svg>"
     )
 
@@ -201,7 +201,7 @@ def reel_poster_svg() -> str:
         'stroke="var(--lane,#D4FF3A)" stroke-width="1.5" style="opacity:0.8"/>'
         + '<text x="59" y="57" text-anchor="middle" class="mhg-m mhg-l" '
         'font-size="13" letter-spacing="2">REEL</text>'
-        + f'<text x="{w-28}" y="58" text-anchor="end" class="mhg-m mhg-i" '
+        + f'<text x="{w - 28}" y="58" text-anchor="end" class="mhg-m mhg-i" '
         'font-size="15" style="font-variant-numeric:tabular-nums">0:15</text>'
         # play affordance — the video signifier
          + '<circle cx="180" cy="262" r="62" class="mhg-l" fill="currentColor" '
@@ -272,14 +272,14 @@ def feed_graphic_svg() -> str:
         'letter-spacing="2">FRIDAY FINALS &#183; SENIOR</text>'
         + bars
         # baseline + footer
-        + f'<line x1="28" y1="{base}" x2="{w-28}" y2="{base}" class="mhg-i" '
+        + f'<line x1="28" y1="{base}" x2="{w - 28}" y2="{base}" class="mhg-i" '
         'stroke="currentColor" stroke-width="2" style="opacity:0.20"/>'
         + '<rect x="28" y="416" width="22" height="22" rx="5" '
         'fill="var(--lane,#D4FF3A)"/>'
         + '<text x="39" y="432" text-anchor="middle" class="mhg-d mhg-li" '
         'font-size="12">R</text>' + '<text x="58" y="432" class="mhg-m mhg-i" font-size="12" '
         'letter-spacing="1">RIVERSIDE SC</text>'
-        + f'<text x="{w-28}" y="432" text-anchor="end" class="mhg-m mhg-ft" '
+        + f'<text x="{w - 28}" y="432" text-anchor="end" class="mhg-m mhg-ft" '
         'font-size="11" letter-spacing="1.5">FEED &#183; 1080&#215;1350</text>' + "</svg>"
     )
 
@@ -304,19 +304,19 @@ def detected_ranked_svg() -> str:
         y = y0 + i * row_h
         fill_w = round(bar_w * score)
         body += (
-            f'<text x="28" y="{y+16}" class="mhg-d mhg-ft" font-size="22">{rank}</text>'
+            f'<text x="28" y="{y + 16}" class="mhg-d mhg-ft" font-size="22">{rank}</text>'
             f'<rect x="46" y="{y}" width="40" height="22" rx="5" fill="{bf}"/>'
-            f'<text x="66" y="{y+15}" text-anchor="middle" class="mhg-d {bink}" '
+            f'<text x="66" y="{y + 15}" text-anchor="middle" class="mhg-d {bink}" '
             f'font-size="12">{badge}</text>'
-            f'<text x="96" y="{y+10}" class="mhg-b mhg-i" font-size="14">{who}</text>'
-            f'<text x="96" y="{y+24}" class="mhg-m mhg-dim" font-size="10" '
+            f'<text x="96" y="{y + 10}" class="mhg-b mhg-i" font-size="14">{who}</text>'
+            f'<text x="96" y="{y + 24}" class="mhg-m mhg-dim" font-size="10" '
             f'letter-spacing="0.5">{ev}</text>'
             # score bar — proportional to the real content-worthiness score
-            f'<rect x="{bar_x}" y="{y+6}" width="{bar_w}" height="6" rx="3" '
+            f'<rect x="{bar_x}" y="{y + 6}" width="{bar_w}" height="6" rx="3" '
             f'class="mhg-i" fill="currentColor" style="opacity:0.12"/>'
-            f'<rect x="{bar_x}" y="{y+6}" width="{fill_w}" height="6" rx="3" '
+            f'<rect x="{bar_x}" y="{y + 6}" width="{fill_w}" height="6" rx="3" '
             f'class="mhg-l" fill="currentColor"/>'
-            f'<text x="{bar_x+bar_w+8}" y="{y+13}" class="mhg-m mhg-i" '
+            f'<text x="{bar_x + bar_w + 8}" y="{y + 13}" class="mhg-m mhg-i" '
             f'font-size="12" style="font-variant-numeric:tabular-nums">{score:.2f}</text>'
         )
     return (
@@ -327,7 +327,7 @@ def detected_ranked_svg() -> str:
         + '<rect x="28" y="26" width="9" height="9" class="mhg-l" fill="currentColor"/>'
         + '<text x="44" y="35" class="mhg-m mhg-l" font-size="12" '
         'letter-spacing="2">DETECTED &amp; RANKED</text>'
-        + f'<text x="{w-28}" y="35" text-anchor="end" class="mhg-m mhg-ft" '
+        + f'<text x="{w - 28}" y="35" text-anchor="end" class="mhg-m mhg-ft" '
         'font-size="10" letter-spacing="1.5">CONTENT-WORTHINESS</text>'
         # big stat
          + '<text x="26" y="86" class="mhg-d mhg-i" font-size="68" '
@@ -336,7 +336,7 @@ def detected_ranked_svg() -> str:
         + '<text x="120" y="84" class="mhg-m mhg-dim" font-size="10" '
         'letter-spacing="1">FROM 42 SWIMS READ</text>'
         # divider above rows
-         + f'<line x1="28" y1="84" x2="{w-28}" y2="84" class="mhg-i" '
+         + f'<line x1="28" y1="84" x2="{w - 28}" y2="84" class="mhg-i" '
         'stroke="currentColor" stroke-width="1" style="opacity:0.12"/>'
         + body
         + '<text x="28" y="218" class="mhg-m mhg-ft" font-size="9" '
@@ -417,9 +417,9 @@ def moments_svg() -> str:
         op = "opacity:0.6;" if dot == "mhg-ft" else ""
         muted = f' style="{op}"' if op else ""
         rows += (
-            f'<circle cx="34" cy="{y-4}" r="4" class="{dot}" fill="currentColor"{muted}/>'
+            f'<circle cx="34" cy="{y - 4}" r="4" class="{dot}" fill="currentColor"{muted}/>'
             f'<text x="48" y="{y}" class="mhg-b mhg-i" font-size="13"{muted}>{label}</text>'
-            f'<text x="{w-28}" y="{y}" text-anchor="end" class="mhg-m mhg-dim" '
+            f'<text x="{w - 28}" y="{y}" text-anchor="end" class="mhg-m mhg-dim" '
             f'font-size="13" style="{op}font-variant-numeric:tabular-nums">&#215;{count}</text>'
         )
     return (
@@ -429,7 +429,7 @@ def moments_svg() -> str:
         + '<rect x="28" y="30" width="9" height="9" class="mhg-l" fill="currentColor"/>'
         + '<text x="44" y="39" class="mhg-m mhg-l" font-size="12" '
         'letter-spacing="2">WE DETECT</text>'
-        + f'<line x1="28" y1="52" x2="{w-28}" y2="52" class="mhg-i" '
+        + f'<line x1="28" y1="52" x2="{w - 28}" y2="52" class="mhg-i" '
         'stroke="currentColor" stroke-width="1" style="opacity:0.12"/>'
         + rows
         + '<text x="28" y="224" class="mhg-m mhg-ft" font-size="9" '
