@@ -317,11 +317,11 @@ def render_edl(edl: EDL, out_path: Path | str, *, timeout: int = 600) -> Path:
     with tempfile.TemporaryDirectory(prefix="mh_video_render_") as td:
         ass_paths: list[str] = []
         if edl.captions and (edl.captions.get("cues")):
-            from mediahub.visual.subtitle_burn import ass_document
+            from mediahub.video.caption_render import ass_for_track
 
             cap_file = Path(td) / "captions.ass"
             cap_file.write_text(
-                ass_document(edl.captions, width=edl.width, height=edl.height, fps=edl.fps),
+                ass_for_track(edl.captions, width=edl.width, height=edl.height, fps=edl.fps),
                 encoding="utf-8",
             )
             ass_paths.append(str(cap_file))

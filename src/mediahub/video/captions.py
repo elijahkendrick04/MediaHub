@@ -127,6 +127,107 @@ def windowed_caption_track(
     )
 
 
+def windowed_karaoke_track(
+    source: Path | str,
+    *,
+    in_ms: int,
+    out_ms: int,
+    fps: int = 30,
+    ground: str = "",
+    onground: str = "",
+    accent: str = "",
+    language: str = "",
+) -> Optional[dict]:
+    """Build an **animated (karaoke) caption track** for a clip window.
+
+    Like :func:`windowed_caption_track`, but each line keeps its constituent
+    **word stamps** so ``video.caption_render`` can burn the word-by-word
+    highlight sweep (the signature reel caption look). The on-screen words are
+    the *verbatim* transcript — there is no AI writing here, only word timing the
+    ASR already produced. Honest ``None`` when ASR is unavailable or the window
+    has no speech, so a render proceeds without it.
+    """
+    p = Path(source)
+    try:
+        data = p.read_bytes()
+    except OSError:
+        return None
+    if not data or out_ms <= in_ms:
+        return None
+    try:
+        from mediahub.visual import subtitle_burn, transcribe
+    except Exception:
+        return None
+    ct = "video/mp4" if p.suffix.lower() in {".mp4", ".m4v", ".mov"} else ""
+    try:
+        tr = transcribe.transcribe_audio(data, content_type=ct, language=language)
+    except Exception:
+        return None
+
+    words = tr.words() or []
+    if not words:
+        # No word-level timing → karaoke would have nothing to sweep; fall back to
+        # the static track so captions still appear (honest, never empty-faked).
+        return windowed_caption_track(
+            source,
+            in_ms=in_ms,
+            out_ms=out_ms,
+            fps=fps,
+            ground=ground,
+            onground=onground,
+            accent=accent,
+            language=language,
+        )
+
+    # Keep words overlapping the window, rebased to a zero origin.
+    kept: list[tuple[str, int, int]] = []
+    for w in words:
+        a, b = w.start_ms, w.end_ms
+        if b <= in_ms or a >= out_ms:
+            continue
+        kept.append((w.text, max(0, a - in_ms), max(1, min(b, out_ms) - in_ms)))
+    if not kept:
+        return None
+
+    total_frames = max(1, round((out_ms - in_ms) / 1000 * fps))
+    cues = subtitle_burn.cues_from_stamps(kept)  # group words into lines
+    color, scrim = subtitle_burn.caption_colours(ground, onground, accent)
+
+    def _f(ms: int) -> int:
+        return max(0, min(total_frames - 1, round(ms / 1000 * fps)))
+
+    out_cues: list[dict] = []
+    for cue in cues:
+        line_words = [w for w in kept if cue.start_ms <= w[1] < cue.end_ms]
+        if not line_words:
+            continue
+        c_from = _f(cue.start_ms)
+        c_dur = max(1, min(total_frames - c_from, _f(cue.end_ms) - c_from + 1))
+        wf: list[dict] = []
+        for i, (text, a, _b) in enumerate(line_words):
+            start_f = _f(a)
+            # Gap-absorbing duration so the sweep is continuous across the line.
+            nxt = _f(line_words[i + 1][1]) if i + 1 < len(line_words) else c_from + c_dur
+            wf.append({"from": start_f, "dur": max(1, nxt - start_f), "text": text})
+        out_cues.append(
+            {
+                "from": c_from,
+                "dur": c_dur,
+                "text": " ".join(t for t, _a, _b in line_words),
+                "words": wf,
+            }
+        )
+    if not out_cues:
+        return None
+    return {
+        "color": color,
+        "scrim": scrim,
+        "accent": accent or "",
+        "style": "karaoke",
+        "cues": out_cues,
+    }
+
+
 # --------------------------------------------------------------------------
 # Deterministic edit transforms (pure; return a new track)
 # --------------------------------------------------------------------------
@@ -225,6 +326,7 @@ def clamp_to_frames(track: dict, total_frames: int) -> dict:
 __all__ = [
     "caption_track_from_footage",
     "windowed_caption_track",
+    "windowed_karaoke_track",
     "cue_count",
     "edit_cue_text",
     "retime_cue",

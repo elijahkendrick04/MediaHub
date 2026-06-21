@@ -171,6 +171,7 @@ def make_reel(
     per_clip_moments: int = 2,
     max_beats: int = 5,
     with_captions: bool = True,
+    caption_style: str = "karaoke",
     with_reframe: bool = True,
     with_music: bool = True,
     enhance_audio: bool = True,
@@ -256,7 +257,9 @@ def make_reel(
         lead = beats[0]
         try:
             m = moments_by_clip[lead.asset_index][lead.moment_index]
-            cap = caption_fn or _default_caption
+            cap = caption_fn or (
+                _default_karaoke_caption if caption_style == "karaoke" else _default_caption
+            )
             caption_track = cap(
                 sources[lead.asset_index],
                 in_ms=m.start_ms,
@@ -266,7 +269,8 @@ def make_reel(
                 onground=colours.onground,
                 accent=colours.accent,
             )
-            captions_note = "burned-lead" if caption_track else "no-speech-or-asr-off"
+            note = "burned-lead-karaoke" if caption_style == "karaoke" else "burned-lead"
+            captions_note = note if caption_track else "no-speech-or-asr-off"
         except (IndexError, KeyError):
             captions_note = "off"
 
@@ -323,6 +327,12 @@ def _default_caption(source: str, **kw) -> Optional[dict]:
     from mediahub.video import captions as _captions
 
     return _captions.windowed_caption_track(source, **kw)
+
+
+def _default_karaoke_caption(source: str, **kw) -> Optional[dict]:
+    from mediahub.video import captions as _captions
+
+    return _captions.windowed_karaoke_track(source, **kw)
 
 
 __all__ = [

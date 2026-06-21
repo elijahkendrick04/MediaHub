@@ -9803,6 +9803,7 @@ _VIDEO_STUDIO_HTML = """
         <select id="vs-look">__LOOK_OPTIONS__</select>
       </label>
       <label class="vstudio-check"><input type="checkbox" id="vs-captions" checked> Captions (spoken words on screen)</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-animated"> Animated captions (word-by-word)</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-reframe" checked> Reframe to fit (keep the subject)</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-enhance-audio"> Clean &amp; level the audio</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-music"> Add a music bed</label>
@@ -9979,6 +9980,7 @@ _VIDEO_STUDIO_HTML = """
       title: $('vs-title').value,
       target_moments: parseInt($('vs-moments').value,10)||1,
       with_captions: $('vs-captions').checked,
+      animated_captions: $('vs-animated').checked,
       with_reframe: $('vs-reframe').checked,
       look: $('vs-look').value,
       enhance_audio: $('vs-enhance-audio').checked,
@@ -44559,6 +44561,7 @@ voice, and queues them for one-click approval.</p>
         with_music = bool(payload.get("with_music", False))
         remove_silence = bool(payload.get("remove_silence", False))
         music_mood = (payload.get("music_mood") or "uplifting").strip().lower()[:24]
+        caption_style = "karaoke" if payload.get("animated_captions") else "static"
 
         from mediahub.video.clip_maker import clip_maker
         from mediahub.video.probe import ProbeUnavailable
@@ -44571,6 +44574,7 @@ voice, and queues them for one-click approval.</p>
                 title=title,
                 with_captions=with_captions,
                 with_reframe=with_reframe,
+                caption_style=caption_style,
                 look=look,
                 enhance_audio=enhance_audio,
                 with_music=with_music,
@@ -44650,6 +44654,7 @@ voice, and queues them for one-click approval.</p>
         with_reframe = bool(payload.get("with_reframe", True))
         with_music = bool(payload.get("with_music", True))
         enhance_audio = bool(payload.get("enhance_audio", True))
+        caption_style = "static" if payload.get("animated_captions") is False else "karaoke"
 
         from mediahub.video.probe import ProbeUnavailable
         from mediahub.video.reel_builder import make_reel
@@ -44660,6 +44665,7 @@ voice, and queues them for one-click approval.</p>
                 format_name=fmt,
                 max_beats=max_beats,
                 with_captions=with_captions,
+                caption_style=caption_style,
                 with_reframe=with_reframe,
                 with_music=with_music,
                 enhance_audio=enhance_audio,

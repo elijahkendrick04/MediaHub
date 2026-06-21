@@ -46,6 +46,11 @@ spoken words on screen → brand it → a human says yes → download.**
 - **`captions.py`** — puts the **spoken words on screen**, using the speech-to-
   text tool (1.4). The words are exactly what was said — no AI writing — and you
   can fix the text or the timing afterwards.
+- **`caption_render.py`** — draws the captions onto the video. As well as a plain
+  caption, it can do the **animated "word-by-word" caption** (the highlight that
+  sweeps across each word as it's said — the look every reel app has). It's still
+  the exact spoken words, just timed; and it's kept here in the video folder so the
+  data-driven reels' captions are left untouched.
 - **`audio_post.py`** — builds the **soundtrack** over a finished cut: cleans the
   voice (denoise + even out the loudness), lays a **music bed that automatically
   ducks under the speech**, and lands the whole mix at a sensible level. It reuses

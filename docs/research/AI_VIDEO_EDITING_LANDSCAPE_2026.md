@@ -50,7 +50,7 @@ provider slot (GEN, opt-in+disclosed) · ⏸ deferred.
 | **Music bed + automatic ducking** | library pick + `sidechaincompress` | ✅ `audio_post.py` (+ `audio/`) |
 | **Deterministic upscale** | `scale=…:flags=lanczos` | ✅ `enhance.py` |
 | Captions / subtitles (timing + render) | ASR → ASS burn (`subtitle_burn`) | ✅ `captions.py` |
-| Karaoke / word-highlight captions | ASS `\k`/`\kf` tags over word stamps | 🟦 extend `subtitle_burn` |
+| **Karaoke / word-highlight captions** | ASS `\kf` sweep over word stamps | ✅ `caption_render.py` + `captions.windowed_karaoke_track` |
 | Beat-synced cutting | onset/tempo (`track_bpm` exists) → snap beats | 🟦 (reuse `audio_mux.track_bpm`) |
 | Frame interpolation (smooth slow-mo) | `minterpolate=mi_mode=mci` | 🟦 per-clip flag |
 | Filler-word removal | ASR transcript + lexicon match at stamps | 🟦 (needs ASR) |
@@ -100,6 +100,10 @@ enhancement layer** and the **AI reel director** on top:
 - **Audio plan** on the EDL (`AudioPlan`) applied by a soundtrack post-pass
   (`audio_post.py`): voice denoise + loudness + a ducked music bed, video copied.
 - **Silence/jump-cut planning** (`silence.py`) — tighten talking clips.
+- **Animated (karaoke) captions** (`caption_render.py` + `captions.windowed_karaoke_track`)
+  — the word-by-word `\kf` highlight sweep, the signature reel caption look. Added
+  in the video package only, so the shared reel engine's caption output stays
+  byte-identical (a static track dispatches to the unchanged `subtitle_burn`).
 - **Stabilisation + deterministic upscale** (`enhance.py`).
 - **AI reel director** (`director.py`) + **multi-clip reel builder**
   (`reel_builder.py`) — the "import several clips → AI edits → one branded reel".
@@ -114,16 +118,20 @@ human approves before export.
 
 ## Roadmap — the remaining builds (high value, fits the engine first)
 
-1. **Karaoke captions** — word-highlight ASS (`\kf`) over the existing ASR
-   stamps; a `caption_style` on the track. (DET)
-2. **Beat-synced reel cutting** — snap beat onsets (`audio_mux.track_bpm`) to the
+1. **Beat-synced reel cutting** — snap beat onsets (`audio_mux.track_bpm`) to the
    reel's cut points; fold into `reel_builder`. (DET)
-3. **Filler-word + smarter silence** — lexicon trim over the ASR transcript,
+2. **Filler-word + smarter silence** — lexicon trim over the ASR transcript,
    caption-preserving tighten. (DET over ASR)
-4. **Frame-interpolated slow-mo** — a per-clip `smooth` flag → `minterpolate`. (DET)
-5. **Director depth** — per-beat durations/weights, multiple captioned beats,
+3. **Frame-interpolated slow-mo** — a per-clip `smooth` flag → `minterpolate`. (DET)
+4. **Caption-edit route + UI** — wire `captions.py`'s edit transforms
+   (`edit_cue_text`/`retime_cue`/`delete_cue`/`shift_track`) to a footage route
+   so the words/timing are correctable after the fact (the README's promise). (DET)
+5. **A visual timeline editor** — manual trim/reorder/per-clip speed + transition
+   + per-clip grade in the UI (today the product is auto-clip / auto-reel; the EDL
+   already supports all of this, but only via a raw EDL POST). (DET)
+6. **Director depth** — per-beat durations/weights, multiple captioned beats,
    cross-clip virality ranking. (AIJ)
-6. **Gated GEN slots** — text-to-video b-roll, lip-sync/dubbing, object removal,
+7. **Gated GEN slots** — text-to-video b-roll, lip-sync/dubbing, object removal,
    eye-contact — each an off-by-default, disclosed provider slot mirroring
    `avatars.py`/`matting.py`, behind explicit opt-in + human approval.
 

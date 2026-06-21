@@ -158,6 +158,7 @@ def clip_maker(
     transition_kind: str = "cut",
     transition_ms: int = 400,
     label_moments: bool = False,
+    caption_style: str = "static",
     look: str = "none",
     enhance_audio: bool = False,
     with_music: bool = False,
@@ -232,7 +233,12 @@ def clip_maker(
     captions_note = "off"
     if with_captions and chosen:
         if len(chosen) == 1:
-            cap = caption_fn or _captions.windowed_caption_track
+            default_cap = (
+                _captions.windowed_karaoke_track
+                if caption_style == "karaoke"
+                else _captions.windowed_caption_track
+            )
+            cap = caption_fn or default_cap
             caption_track = cap(
                 source,
                 in_ms=chosen[0].start_ms,
@@ -242,7 +248,8 @@ def clip_maker(
                 onground=colours.onground,
                 accent=colours.accent,
             )
-            captions_note = "burned" if caption_track else "no-speech-or-asr-off"
+            note = "burned-karaoke" if caption_style == "karaoke" else "burned"
+            captions_note = note if caption_track else "no-speech-or-asr-off"
         else:
             captions_note = "skipped-silencecut" if remove_silence else "skipped-multimoment"
 

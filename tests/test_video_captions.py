@@ -99,3 +99,115 @@ def test_windowed_caption_track_no_asr_is_none(tmp_path, monkeypatch):
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"\x00\x00\x00\x18ftypmp42")
     assert windowed_caption_track(clip, in_ms=0, out_ms=6000) is None
+
+
+# --- animated (karaoke) captions ------------------------------------------
+
+from dataclasses import dataclass  # noqa: E402
+
+from mediahub.video import captions as _captions  # noqa: E402
+from mediahub.video.caption_render import (  # noqa: E402
+    ass_for_track,
+    is_karaoke,
+    karaoke_ass_document,
+)
+from mediahub.visual.subtitle_burn import ass_document  # noqa: E402
+
+
+def test_is_karaoke_flag():
+    assert is_karaoke({"style": "karaoke", "cues": []})
+    assert not is_karaoke({"cues": []})
+    assert not is_karaoke(None)
+
+
+def test_static_dispatch_is_byte_identical_to_shared_renderer():
+    # The static path must not diverge from subtitle_burn — the reel engine
+    # shares it, so any drift would change reel output.
+    t = {"color": "#FFFFFF", "scrim": "#0A2540", "cues": [{"from": 0, "dur": 30, "text": "New PB"}]}
+    assert ass_for_track(t, width=1080, height=1920, fps=30) == ass_document(
+        t, width=1080, height=1920, fps=30
+    )
+
+
+def test_karaoke_document_emits_kf_per_word():
+    track = {
+        "color": "#FFFFFF",
+        "scrim": "#0A2540",
+        "accent": "#22D3EE",
+        "style": "karaoke",
+        "cues": [
+            {
+                "from": 0,
+                "dur": 60,
+                "text": "new club record",
+                "words": [
+                    {"from": 0, "dur": 20, "text": "new"},
+                    {"from": 20, "dur": 20, "text": "club"},
+                    {"from": 40, "dur": 20, "text": "record"},
+                ],
+            }
+        ],
+    }
+    doc = karaoke_ass_document(track, width=1080, height=1920, fps=30)
+    assert doc.count("\\kf") == 3
+    assert "new" in doc and "record" in doc
+    assert "[V4+ Styles]" in doc and "Dialogue:" in doc
+
+
+def test_karaoke_falls_back_to_still_line_without_words():
+    track = {"style": "karaoke", "cues": [{"from": 0, "dur": 30, "text": "no words"}]}
+    doc = karaoke_ass_document(track, width=1080, height=1920, fps=30)
+    assert "no words" in doc and "\\kf" not in doc
+
+
+@dataclass
+class _Word:
+    text: str
+    start_ms: int
+    end_ms: int
+
+
+class _FakeTranscript:
+    def __init__(self, words):
+        self._words = words
+        self.segments = []
+
+    def words(self):
+        return self._words
+
+
+def _patch_transcribe(monkeypatch, words):
+    import mediahub.visual.transcribe as tr
+
+    monkeypatch.setattr(tr, "transcribe_audio", lambda *a, **k: _FakeTranscript(words))
+
+
+def test_windowed_karaoke_track_builds_word_timed_cues(monkeypatch, tmp_path):
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"\x00" * 64)
+    _patch_transcribe(
+        monkeypatch,
+        [_Word("new", 0, 400), _Word("club", 400, 800), _Word("record", 800, 1200)],
+    )
+    track = _captions.windowed_karaoke_track(
+        src, in_ms=0, out_ms=2000, fps=30, ground="#0A2540", accent="#22D3EE"
+    )
+    assert track is not None and track["style"] == "karaoke" and track["accent"] == "#22D3EE"
+    cue = track["cues"][0]
+    assert cue["words"] and all("from" in w and "dur" in w and "text" in w for w in cue["words"])
+    assert " ".join(w["text"] for w in cue["words"]) == "new club record"
+
+
+def test_windowed_karaoke_falls_back_to_static_without_word_timing(monkeypatch, tmp_path):
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"\x00" * 64)
+    _patch_transcribe(monkeypatch, [])  # no word-level timing
+    called = {}
+
+    def fake_static(*a, **k):
+        called["yes"] = True
+        return {"color": "#fff", "scrim": "#000", "cues": [{"from": 0, "dur": 10, "text": "hi"}]}
+
+    monkeypatch.setattr(_captions, "windowed_caption_track", fake_static)
+    track = _captions.windowed_karaoke_track(src, in_ms=0, out_ms=2000)
+    assert called.get("yes") and track.get("style") != "karaoke"
