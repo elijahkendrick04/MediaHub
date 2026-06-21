@@ -244,6 +244,16 @@ class ClubProfile:
     # forbidden_phrases, preferred_swimmer_address.
     voice_profile: dict = field(default_factory=dict)
 
+    # ---- 1.12: multi-kit brand platform (all optional, backward-compatible) ----
+    # Each entry is a brand.kits.BrandKitRef dict — a named identity (primary
+    # club livery, sponsor co-branding kit, event sub-brand, team/section kit,
+    # personal kit). When this list is empty, brand.kits.list_kits() synthesises
+    # a single "primary" kit from the resolved get_brand_kit() so existing
+    # single-brand profiles render byte-identically. ``default_kit_id`` names
+    # the kit the pipeline applies by default ("" → the primary kit).
+    brand_kits: list[dict] = field(default_factory=list)
+    default_kit_id: str = ""
+
     def to_dict(self) -> dict:
         return asdict(self)
 

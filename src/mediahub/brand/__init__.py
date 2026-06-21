@@ -15,6 +15,15 @@ from .templates import CaptionTemplate, render_template
 from .store import load_brand, save_brand
 from .apply import apply_brand
 from .voice_imitation import analyse_examples, redact_pii
+from .kits import (
+    BrandKitRef,
+    SponsorPairingRules,
+    list_kits,
+    get_kit,
+    primary_kit,
+    resolve_kit_for,
+    brand_kit_from_ref,
+)
 
 __all__ = [
     "BrandKit",
@@ -27,4 +36,11 @@ __all__ = [
     "apply_brand",
     "analyse_examples",
     "redact_pii",
+    "BrandKitRef",
+    "SponsorPairingRules",
+    "list_kits",
+    "get_kit",
+    "primary_kit",
+    "resolve_kit_for",
+    "brand_kit_from_ref",
 ]
