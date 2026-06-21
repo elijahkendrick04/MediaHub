@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-20 · `98b7c15ad` · Merge pull request #929 — recover resolved-but-no-roster-time PB swimmers + reveal unmatched cause
+**Last updated:** 2026-06-21 · `313e4a340` · Move athlete spotlight into the meet-recap review flow; tidy review surface (#931)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1217,6 +1217,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-20 | `23346101b` | Make Athlete Spotlight live only inside the meet-recap flow |
+| 2026-06-20 | `e3e7058b0` | Move athlete spotlight into the meet-recap review flow; tidy review surface |
 | 2026-06-20 | `816e57b9f` | feat(pb): recover resolved-but-no-roster-time swimmers + reveal the real gap |
 | 2026-06-20 | `a3ba1c8cf` | style(pb): ruff-format lookup.py (collapse comprehension to one line) |
 | 2026-06-20 | `500f3e15a` | feat(pb): name the unmatched swimmers (with a reason) in the resolution summary |
@@ -1227,6 +1229,4 @@ list and the auto table below, not here.
 | 2026-06-20 | `5d97fbbd3` | style(1.10): ruff-format the build-2 element routes in web.py |
 | 2026-06-20 | `6232a0244` | feat(1.10): element embedding search + Elements browse tab (build 2/4) |
 | 2026-06-20 | `69700a46a` | feat(1.10): brand-token element library + renderer injection (build 1/4) |
-| 2026-06-20 | `5cbdb2c08` | docs(env): register MEDIAHUB_LOG_LEVEL in env inventory + .env.example |
-| 2026-06-20 | `96602bca7` | feat(obs): send app INFO logs to stdout so PB matching is diagnosable on Render |
 <!-- /ROADMAP:ACTIVITY -->
