@@ -11386,13 +11386,13 @@ def _layout(
        we make?", so it lives as the strategic entry point on the Create page
        (and stays on the g→p keyboard shortcut). #}
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
-    {# Templates and the design studio stay off the top bar: the template gallery
-       is reached from Settings (a tile in the settings grid) and the studio is a
-       full Create tile (the live design editor). Keeping both off the top bar
-       leaves the signed-in chrome focused on the core workflow. #}
+    {# Templates, the design studio and the video studio stay off the top bar:
+       the template gallery is reached from Settings (a tile in the settings
+       grid) and both studios are full Create tiles (the live design editor and
+       the footage→reel video studio). Keeping them off the top bar leaves the
+       signed-in chrome focused on the core workflow. #}
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('elements_page') }}" class="{{ 'active' if active=='elements' else '' }}">Elements</a>
-    {% if video_enabled %}<a href="{{ url_for('video_studio_page') }}" class="{{ 'active' if active=='video' else '' }}">Video</a>{% endif %}
     <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">My Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     {# Spacer — pushes the utility / account cluster to the right edge (it used
@@ -13526,7 +13526,6 @@ def _layout(
         chapter_nav_html=chapter_nav_html,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
-        video_enabled=bool(_v8_ok),
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
@@ -26206,6 +26205,39 @@ function mhPlanGenerate(btn) {{
             '<span class="mh-template-cta">Open studio</span>'
             "</a>"
         )
+
+        # Video studio — the footage→reel path, relocated here from the top bar
+        # so every "what can I make?" surface lives on Create (it sits beside the
+        # design studio tile above). A first-class Create tile: upload or record a
+        # clip and Clip-Maker finds the moment, crops it upright, captions the
+        # spoken words and brands it, with human approval before export. Gated on
+        # the V8 media engine (_v8_ok) — the same flag that used to gate the
+        # top-bar link — so it only shows where the studio actually works.
+        if _v8_ok:
+            _video_svg = (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<polygon points="23 7 16 12 23 17 23 7"/>'
+                '<rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>'
+            )
+            tiles_html += (
+                f'<a href="{_h(url_for("video_studio_page"))}" class="mh-template mh-glow-border">'
+                f'<div class="mh-template-icon">{_video_svg}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                '<h3 style="margin:0">Video studio</h3>'
+                '<span class="tag live">Ready</span>'
+                "</div>"
+                "<p>Turn race footage into a branded reel &mdash; upload or record a "
+                "clip and MediaHub finds the moment, crops it upright, captions the "
+                "spoken words and brands it. You approve before anything is exported.</p>"
+                '<div class="mh-template-formats">'
+                '<span class="mh-template-fmt">Footage &rarr; reel</span>'
+                '<span class="mh-template-fmt">Story</span>'
+                '<span class="mh-template-fmt">Captions</span>'
+                "</div>"
+                '<span class="mh-template-cta">Open video studio</span>'
+                "</a>"
+            )
 
         # Coming-soon surfaces relocated here from the old Club-data tab —
         # presented as Create tiles so the whole "what can I make?" catalogue
