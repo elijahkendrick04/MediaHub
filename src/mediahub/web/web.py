@@ -33272,7 +33272,16 @@ what you're doing, what they should do.</p>
             '<input type="file" name="palette_file" accept=".ase,.json,application/json" required />'
             '<button class="btn secondary" type="submit">Import palette file</button>'
             '<span style="font-size:12px;color:var(--ink-muted)">Adobe .ase or Color JSON</span>'
-            "</form></details>"
+            "</form>"
+            # Kit-edit -> re-render sweep (diff preview + approval-gated apply).
+            f'<div class="mh-resweep" data-kit="{_h(kit.kit_id)}" '
+            f'data-preview="{url_for("api_brand_kit_resweep_preview", kit_id=kit.kit_id)}" '
+            f'data-apply="{url_for("api_brand_kit_resweep_apply", kit_id=kit.kit_id)}" '
+            'style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+            '<button type="button" class="btn secondary mh-resweep-preview">Preview re-render impact</button>'
+            '<button type="button" class="btn mh-resweep-apply" style="display:none">Apply &amp; re-queue</button>'
+            '<span class="mh-resweep-out" style="font-size:12px;color:var(--ink-muted)"></span>'
+            "</div></details>"
         )
         return (
             '<div class="mh-panel" style="padding:18px;margin-bottom:14px">'
@@ -33392,6 +33401,22 @@ what you're doing, what they should do.</p>
             f"{_brand_identity_html(prof)}"
             '<p style="margin-top:24px"><a class="btn secondary" '
             f'href="{url_for("organisation_setup")}">Edit organisation &amp; brand DNA</a></p>'
+            # Re-render sweep driver: preview the diff, then apply (re-queues for review).
+            "<script>(function(){"
+            "document.querySelectorAll('.mh-resweep').forEach(function(box){"
+            "var prev=box.querySelector('.mh-resweep-preview'),"
+            "ap=box.querySelector('.mh-resweep-apply'),out=box.querySelector('.mh-resweep-out');"
+            "prev.addEventListener('click',function(){out.textContent='Checking…';"
+            "fetch(box.dataset.preview,{method:'POST'}).then(function(r){return r.json();})"
+            ".then(function(d){var n=d.n_affected||0;"
+            "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
+            "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
+            "ap.addEventListener('click',function(){out.textContent='Re-rendering…';"
+            "ap.disabled=true;fetch(box.dataset.apply,{method:'POST'}).then(function(r){return r.json();})"
+            ".then(function(d){out.textContent='Re-rendered '+(d.n_rendered||0)+' card(s)'"
+            "+((d.remaining)?(', '+d.remaining+' left — apply again'):'')+' — re-queued for review.';"
+            "ap.disabled=false;}).catch(function(){out.textContent='Apply failed.';ap.disabled=false;});});"
+            "});})();</script>"
         )
         return _layout("Brand platform", body, active="settings")
 
@@ -33546,6 +33571,76 @@ what you're doing, what they should do.</p>
         save_profile(prof)
         n = len(kit.palette)
         return _brand_redirect(msg=f"Imported {n} colour(s) into “{kit.name}”.")
+
+    # ---- 1.12 — kit-edit -> re-render sweep over persisted briefs ----
+
+    @app.route("/api/brand/kits/<kit_id>/resweep/preview", methods=["POST", "GET"])
+    def api_brand_kit_resweep_preview(kit_id):
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand import kits as _kits, resweep as _resweep
+
+        prof = _active_profile()
+        kit = _kits.get_kit(prof, kit_id)
+        if kit is None:
+            return jsonify({"error": "kit_not_found"}), 404
+        preview = _resweep.preview_kit_change(prof, kit, runs_dir=RUNS_DIR)
+        return jsonify(preview.to_dict())
+
+    @app.route("/api/brand/kits/<kit_id>/resweep/apply", methods=["POST"])
+    def api_brand_kit_resweep_apply(kit_id):
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand import kits as _kits, resweep as _resweep
+        from mediahub.brand.kits import brand_kit_from_ref
+
+        prof = _active_profile()
+        kit = _kits.get_kit(prof, kit_id)
+        if kit is None:
+            return jsonify({"error": "kit_not_found"}), 404
+        brand_kit_new = brand_kit_from_ref(prof, kit)
+        ws = _get_wf_store()
+
+        def _render_card(run_id: str, card_id: str, brief_dict: dict) -> bool:
+            # Approval-first: never re-render (or de-approve) a rejected card.
+            try:
+                if ws is not None:
+                    cur = ws.load(run_id).get(card_id)
+                    if cur is not None and cur.status == CardStatus.REJECTED:
+                        return False
+            except Exception:
+                pass
+            from mediahub.content_pack_visual.integration import (
+                persist_visual,
+                visuals_dir_for_run,
+            )
+            from mediahub.creative_brief.generator import CreativeBrief
+            from mediahub.graphic_renderer.render import render_brief
+
+            brief = CreativeBrief.from_dict(brief_dict)
+            if brief is None:
+                return False
+            out = visuals_dir_for_run(run_id) / brief.id
+            result = render_brief(brief, output_dir=out, brand_kit=brand_kit_new)
+            persist_visual(result.visual, run_id=run_id, brief=brief)
+            # Flag the re-rendered card for human re-review — a kit change must
+            # never silently alter already-approved content.
+            if ws is not None:
+                ws.set_status(run_id, card_id, CardStatus.EDITED)
+            return True
+
+        # Cap the synchronous work so one apply can't tie up a worker for minutes.
+        try:
+            limit = int(request.args.get("limit", "20"))
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 50))
+        summary = _resweep.apply_kit_change(
+            prof, kit, runs_dir=RUNS_DIR, render_card=_render_card, limit=limit
+        )
+        return jsonify(summary.to_dict())
 
     # ---- 1.12 — Brand Check + Brand Assist, per card ----
 
