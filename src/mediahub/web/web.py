@@ -14378,9 +14378,7 @@ def _home_io_headline_html() -> str:
         '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
         '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
         "From a results sheet "
-        + _inline_thumb(
-            "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
-        )
+        + _inline_thumb("results-sheet.svg", "results", "Event 14, 100m freestyle finishing times")
         + " to a story "
         + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
         + ", a feed graphic "
@@ -14438,7 +14436,7 @@ def _home_engine_bento_html() -> str:
 
 
 def _home_audience_html() -> str:
-    """"Made for" — three audience cards (club committees, coaches, university
+    """ "Made for" — three audience cards (club committees, coaches, university
     teams). The "who it's for" reassurance block; product story, shown on the
     landing page and Help."""
     return (
@@ -14475,7 +14473,7 @@ def _home_audience_html() -> str:
 
 
 def _home_promise_html() -> str:
-    """"Human in the loop, by design" — the lane-yellow trust panel. Makes it
+    """ "Human in the loop, by design" — the lane-yellow trust panel. Makes it
     explicit that the AI generates but the operator keeps approval, and that the
     engine never invents results or auto-posts."""
     return (
@@ -14593,12 +14591,11 @@ def _home_faq_html() -> str:
 # --------------------------------------------------------------------------- #
 # Signed-in home — the content-creation workspace.
 #
-# These build the lean dashboard a pinned, ready organisation sees instead of
-# the marketing landing page: a quick-action grid to the working surfaces, and
-# the org's own recent runs to pick back up. Both reuse the Create-page tile
-# language (`.mh-template`) so the signed-in chrome stays one coherent system,
-# and both are read-only — the recent-runs query degrades to an empty-state
-# nudge on any DB failure rather than 500-ing the home page.
+# This builds the lean dashboard a pinned, ready organisation sees instead of
+# the marketing landing page: a quick-action grid to the working surfaces it
+# actually uses (including "All activity", which is where this org's own runs
+# live — org-scoped — rather than on the home). It reuses the Create-page tile
+# language (`.mh-template`) so the signed-in chrome stays one coherent system.
 # --------------------------------------------------------------------------- #
 def _home_signed_in_quick_actions_html() -> str:
     """Quick-action grid: jump straight to the surfaces a returning club uses."""
@@ -14655,8 +14652,7 @@ def _home_signed_in_quick_actions_html() -> str:
                 '<polyline points="21 15 16 10 5 21"/>'
             ),
             "Media library",
-            "Your athlete and team photography, ready to drop into cards, "
-            "spotlights and reels.",
+            "Your athlete and team photography, ready to drop into cards, " "spotlights and reels.",
             "Open library",
         )
         + _tile(
@@ -14695,79 +14691,6 @@ def _home_signed_in_quick_actions_html() -> str:
         '<span class="label">Your workspace</span></div>'
         + _reveal_lines(["What would you like", 'to <em class="editorial">make</em>?'])
         + f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
-        + "</section>"
-    )
-
-
-def _home_signed_in_recent_html(profile_id: str) -> str:
-    """The org's own latest runs (newest 6) as review-linked tiles, or an
-    empty-state nudge when there are none yet (or the runs DB is unreachable)."""
-    rows = []
-    try:
-        conn = _db()
-        try:
-            rows = conn.execute(
-                "SELECT id, created_at, status, meet_name, our_swims, "
-                "COALESCE(n_achievements, 0) AS n_ach, file_name "
-                "FROM runs WHERE profile_id = ? "
-                "ORDER BY created_at DESC LIMIT 6",
-                (profile_id,),
-            ).fetchall()
-        finally:
-            conn.close()
-    except Exception as e:
-        log.warning("home: recent-runs query failed: %s", e)
-        rows = []
-
-    if rows:
-        badge_for = {"done": "good", "running": "info", "queued": "info", "error": "bad"}
-        tiles = ""
-        for r in rows:
-            title = r["meet_name"] or r["file_name"] or r["id"]
-            started = (r["created_at"] or "")[:19]
-            started_iso = (started.replace(" ", "T") + "Z") if started else ""
-            n_ach = int(r["n_ach"] or 0)
-            n_match = int(r["our_swims"] or 0)
-            sub = (
-                f'{n_ach} moment{"" if n_ach == 1 else "s"} detected '
-                f"&middot; {n_match} matched"
-            )
-            time_html = (
-                f' &middot; <time class="mh-rel" datetime="{_h(started_iso)}">'
-                f"{_h(started)}</time>"
-                if started
-                else ""
-            )
-            tiles += (
-                f'<a href="{url_for("review", run_id=r["id"])}" '
-                'class="mh-template mh-glow-border">'
-                '<div style="display:flex;align-items:center;gap:10px;'
-                'flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h3 style="margin:0">{_h(title)}</h3>'
-                f'<span class="tag {badge_for.get(r["status"], "")}">{_h(r["status"])}</span>'
-                "</div>"
-                f"<p>{sub}{time_html}</p>"
-                '<span class="mh-template-cta">Open review</span>'
-                "</a>"
-            )
-        inner = f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
-    else:
-        inner = (
-            '<p class="mh-reveal" style="color:var(--ink-dim);max-width:60ch">'
-            "No runs yet for this organisation. Upload a results file or "
-            "describe a moment, and your recent work will collect here — each "
-            "with a one-click link back into the review.</p>"
-            '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
-            f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
-            "Create your first piece &rarr;</a>"
-            "</div>"
-        )
-    return (
-        '<section class="mh-section">'
-        '<div class="mh-section-eyebrow-strip mh-reveal">'
-        '<span class="label">Recent activity</span></div>'
-        + _reveal_lines(["Pick up where you", '<em class="editorial">left off</em>.'])
-        + inner
         + "</section>"
     )
 
@@ -15617,10 +15540,11 @@ def create_app() -> Flask:
         # A returning club doesn't need "what the engine does" pitched back at
         # it every visit; it needs to get to work. So the pinned-org home is a
         # lean dashboard: the "Ready to file" hero, a quick-action grid to the
-        # surfaces they actually use, and their own recent runs to pick back
-        # up. The product-story explainer (how it works / what it does /
-        # promise / FAQ) moved to the in-app Help page, reached from the
-        # account menu. Signed-OUT visitors still get the full landing page.
+        # surfaces they actually use (their runs live on the org-scoped
+        # /activity page, reached from the "All activity" tile), then the
+        # create-focused final CTA. The product-story explainer (how it works /
+        # what it does / promise / FAQ) moved to the in-app Help page, reached
+        # from the account menu. Signed-OUT visitors still get the full landing.
         # ================================================================ #
         if prof and prof.is_ready():
             return _layout(
@@ -15629,7 +15553,6 @@ def create_app() -> Flask:
                 + hero_html
                 + "</div>"
                 + _home_signed_in_quick_actions_html()
-                + _home_signed_in_recent_html(prof.profile_id)
                 + final_cta_html,
                 active="home",
             )
@@ -15698,9 +15621,7 @@ def create_app() -> Flask:
             '<section class="mh-section mh-reveal" id="mh-see-it-work">'
             '<div class="mh-section-eyebrow-strip mh-reveal">'
             '<span class="label">See it work</span></div>'
-            + _reveal_lines(
-                ["One result in.", 'A post you <em class="editorial">approve</em>.']
-            )
+            + _reveal_lines(["One result in.", 'A post you <em class="editorial">approve</em>.'])
             + _hero_product_demo()
             + "</section>"
         )

@@ -1,17 +1,19 @@
 """Signed-in home rebuild + the Help page.
 
 When a club is signed in (a ready organisation is pinned), the home page is now
-a content-creation *workspace* — the "Ready to file" hero, a quick-action grid
-and the org's own recent runs — instead of the marketing landing page. The
-product-story explainer it used to carry (how it works / what it does / who it's
-for / our promise / FAQ) moved to a dedicated **Help** page, reached from the
-account-menu dropdown in the top bar.
+a content-creation *workspace* — the "Ready to file" hero and a quick-action
+grid — instead of the marketing landing page. The product-story explainer it
+used to carry (how it works / what it does / who it's for / our promise / FAQ)
+moved to a dedicated **Help** page, reached from the account-menu dropdown in
+the top bar. Runs stay on the org-scoped /activity page (a deliberate
+multi-tenant decision guarded by tests/test_activity_scoping.py), reached from
+the workspace's "All activity" tile — they are NOT re-surfaced on the home.
 
 These tests pin down:
   * the /help route renders the full explainer,
   * the account menu links to it,
-  * the signed-in home is the workspace (quick actions + recent activity) and no
-    longer the pitch, with a graceful empty state and a real recent-runs list,
+  * the signed-in home is the workspace (quick actions) and no longer the pitch,
+    with runs kept on /activity rather than on the home,
   * the signed-OUT landing page still carries the whole explainer (regression).
 """
 
@@ -52,9 +54,6 @@ def app(tmp_path, monkeypatch):
             brand_capture_status="ok",
         )
     )
-    # Hand the reloaded module back so a test can seed runs through the same
-    # _db() the app uses.
-    application._wm = wm  # type: ignore[attr-defined]
     return application
 
 
@@ -66,41 +65,6 @@ def _get(application, path: str, *, pinned: bool = False) -> str:
         resp = c.get(path)
         assert resp.status_code == 200, f"GET {path} -> {resp.status_code}"
         return resp.get_data(as_text=True)
-
-
-def _seed_run(application, **cols) -> None:
-    """Insert one run row for the test org straight into the runs table."""
-    wm = application._wm  # type: ignore[attr-defined]
-    row = {
-        "id": "run-1",
-        "created_at": "2026-06-20 09:00:00",
-        "status": "done",
-        "profile_id": _TEST_ORG,
-        "meet_name": "County Champs 2026",
-        "our_swims": 18,
-        "n_achievements": 5,
-        "file_name": "county.pdf",
-    }
-    row.update(cols)
-    conn = wm._db()
-    try:
-        conn.execute(
-            "INSERT INTO runs (id, created_at, status, profile_id, meet_name, "
-            "our_swims, n_achievements, file_name) VALUES (?,?,?,?,?,?,?,?)",
-            (
-                row["id"],
-                row["created_at"],
-                row["status"],
-                row["profile_id"],
-                row["meet_name"],
-                row["our_swims"],
-                row["n_achievements"],
-                row["file_name"],
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 # =========================================================================== #
@@ -167,9 +131,15 @@ class TestSignedInHome:
         body = _get(app, "/", pinned=True)
         assert "Test Org" in body, "pinned hero variant did not run"
         assert "Your workspace" in body
-        assert "Recent activity" in body
         # Quick-action tiles to the working surfaces.
-        for label in ("Create new content", "My Season", "Media library", "Brand &amp; profile"):
+        for label in (
+            "Create new content",
+            "My Season",
+            "Media library",
+            "Brand &amp; profile",
+            "All activity",
+            "Help &amp; how it works",
+        ):
             assert label in body, f"missing quick-action tile: {label!r}"
 
     def test_omits_the_marketing_explainer(self, app):
@@ -186,23 +156,16 @@ class TestSignedInHome:
         assert "mh-final-cta-headline" in body
         assert "Next weekend" in body and "in a sitting." in body
 
-    def test_empty_recent_state_nudges_to_create(self, app):
+    def test_runs_stay_on_activity_not_on_the_home(self, app):
+        # Deliberate multi-tenant decision (tests/test_activity_scoping.py):
+        # runs live on the org-scoped /activity page, reached from the "All
+        # activity" tile — never re-surfaced as a list on the home.
         body = _get(app, "/", pinned=True)
-        assert "No runs yet for this organisation" in body
-        assert "Create your first piece" in body
-
-    def test_recent_runs_listed_when_present(self, app):
-        _seed_run(app)
-        body = _get(app, "/", pinned=True)
-        assert "County Champs 2026" in body
-        assert "Open review" in body
-        # The factual sub-line is drawn from the run row.
-        assert "5 moments detected" in body
-        assert "18 matched" in body
-        # And it links into that run's review.
-        assert 'href="/review/run-1"' in body
-        # The empty-state nudge is gone now there is real activity.
-        assert "No runs yet for this organisation" not in body
+        assert "Recent activity" not in body
+        # No per-run review links are surfaced as a list on the home.
+        assert 'href="/review/' not in body
+        # …but the route to them is one click away.
+        assert '<a href="/activity"' in body
 
 
 # =========================================================================== #
