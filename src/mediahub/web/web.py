@@ -26832,6 +26832,120 @@ function mhAnDigest(btn) {{
 """
         return _layout("Performance", body, active="create")
 
+    # ---- 1.14 — sponsor A/B ad-variant export sets (prepare, never spend) ---
+
+    def _pack_sponsor(rec: dict, prof) -> str:
+        """The sponsor to tag an ad set with: the draft's own sponsor_name, else
+        the org profile's. Only a label — never fabricated."""
+        fd = rec.get("form_data") or {}
+        return (
+            str(fd.get("sponsor_name") or "").strip()
+            or str(getattr(prof, "sponsor_name", "") or "").strip()
+        )
+
+    @app.route("/plan/ad-variants/<pack_id>")
+    def plan_ad_variants_page(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.ad_export import all_ad_platforms, ad_platform, build_variant_set
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+        prof = _active_profile()
+        sponsor = _pack_sponsor(rec, prof)
+
+        spec = ad_platform(request.args.get("platform", "")) or all_ad_platforms()[0]
+        vset = build_variant_set(rec.get("cards") or [], sponsor, spec.slug)
+
+        tabs = "".join(
+            f'<a class="mh-cp-tab{" active" if p.slug == spec.slug else ""}" '
+            f'href="{url_for("plan_ad_variants_page", pack_id=pack_id, platform=p.slug)}">{_h(p.name)}</a>'
+            for p in all_ad_platforms()
+        )
+        sizes_html = "".join(
+            f"<li><strong>{_h(s.name)}</strong> &mdash; {int(s.width)}&times;{int(s.height)} "
+            f'<span class="dim">({_h(s.aspect_label())})</span></li>'
+            for s in spec.sizes
+        )
+        variants_html = ""
+        for v in vset.variants:
+            tags = (
+                '<p class="dim" style="font-size:11.5px;margin:4px 0 0">'
+                + " ".join(f"#{_h(h)}" for h in v.hashtags)
+                + "</p>"
+                if v.hashtags
+                else ""
+            )
+            variants_html += (
+                '<div class="mh-av-variant"><span class="mh-av-label">'
+                f'{_h(v.label)}</span><div style="flex:1"><p style="margin:0">{_h(v.caption)}</p>'
+                f"{tags}</div></div>"
+            )
+        if not variants_html:
+            variants_html = (
+                '<p class="dim">This draft has no copy to turn into ad variants yet. '
+                f'<a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">'
+                "Add or regenerate cards</a> first.</p>"
+            )
+
+        sponsor_line = (
+            f"tagged for <strong>{_h(sponsor)}</strong>"
+            if sponsor
+            else '<span style="color:var(--warn)">no sponsor set on this draft or your profile</span>'
+        )
+        export_url = url_for("api_plan_ad_variants_export", pack_id=pack_id, platform=spec.slug)
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Sponsor ad set</span>
+  <h1>A/B creative, <em class="editorial">ready to run.</em></h1>
+  <p class="lede">Turn this sponsor draft&rsquo;s angles into an A/B ad set ({sponsor_line}), sized for the
+  platform&rsquo;s ad manager. <strong>MediaHub prepares the creative; it never buys or places ads</strong> &mdash;
+  you upload these by hand where a human controls targeting and spend.
+  <a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">Back to the draft &rarr;</a></p>
+</section>
+
+<div class="mh-cp-bar"><div class="mh-cp-tabs">{tabs}</div>
+  <a class="btn" href="{export_url}">Export manifest (.txt)</a></div>
+<p class="dim" style="font-size:11.5px;margin:0 0 14px">{_h(spec.source)}</p>
+
+<div class="mh-av-grid">
+  <div class="card"><h2 style="margin-top:0">Sizes to prepare</h2>
+    <ul class="mh-av-sizes">{sizes_html}</ul></div>
+  <div class="card"><h2 style="margin-top:0">Variants ({len(vset.variants)})</h2>
+    {variants_html}</div>
+</div>
+"""
+        return _layout("Sponsor ad set", body, active="create")
+
+    @app.route("/api/plan/ad-variants/<pack_id>/export")
+    def api_plan_ad_variants_export(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.ad_export import build_variant_set, manifest_text
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+        sponsor = _pack_sponsor(rec, _active_profile())
+        vset = build_variant_set(
+            rec.get("cards") or [], sponsor, str(request.args.get("platform") or "meta")
+        )
+        if vset is None:
+            return jsonify({"error": "Unknown ad platform."}), 400
+        text = manifest_text(vset)
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f"ad-set-{vset.platform.slug}-{pack_id}")
+        return app.response_class(
+            text,
+            mimetype="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{safe}.txt"'},
+        )
+
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
         methods=["GET"],
@@ -29565,6 +29679,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<a class="btn secondary" href="{url_for("plan_preview_page", pack_id=pack_id)}" '
             f'title="See this draft the way each platform shows it — crop, safe zone, caption fold">'
             f"Preview per channel</a>"
+            f'<a class="btn secondary" href="{url_for("plan_ad_variants_page", pack_id=pack_id)}" '
+            f'title="Turn these angles into a sponsor A/B ad set, sized for ad managers (prepared, never placed)">'
+            f"Prepare ad set</a>"
             f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"
