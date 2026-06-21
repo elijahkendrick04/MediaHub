@@ -3812,9 +3812,9 @@ var _venueResults = {};
 function mhThumbRetry(img) {
   var n = (parseInt(img.getAttribute('data-try') || '0', 10)) + 1;
   img.setAttribute('data-try', n);
-  if (n <= 5) {
+  if (n <= 9) {
     var base = img.getAttribute('data-src') || img.src;
-    setTimeout(function(){ img.src = base + (base.indexOf('?') < 0 ? '?' : '&') + '_r=' + n; }, 700 * n);
+    setTimeout(function(){ img.src = base + (base.indexOf('?') < 0 ? '?' : '&') + '_r=' + n; }, Math.min(3500, 900 * n));
   } else {
     img.onerror = null; img.style.visibility = 'hidden';
   }
