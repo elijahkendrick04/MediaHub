@@ -1,19 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" role="img" aria-label="Pool lane rope">
-  <!-- central cord -->
-  <line x1="4" y1="20" x2="116" y2="20" stroke="__OUTLINE__" stroke-width="2"/>
-  <!-- alternating discs threaded on the rope -->
+  <defs>
+    <linearGradient id="float__UID__" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="__ON_GROUND__" stop-opacity="0.30"/>
+      <stop offset="0.5" stop-color="__ON_GROUND__" stop-opacity="0"/>
+      <stop offset="1" stop-color="__GROUND__" stop-opacity="0.24"/>
+    </linearGradient>
+  </defs>
+  <!-- tensioned cable through the floats -->
+  <line x1="2" y1="20" x2="118" y2="20" stroke="__OUTLINE__" stroke-width="2.4"/>
+  <!-- six alternating barrel floats, evenly threaded -->
   <g>
-    <circle cx="14" cy="20" r="9" fill="__ACCENT__"/>
-    <circle cx="32" cy="20" r="9" fill="__ON_GROUND__"/>
-    <circle cx="50" cy="20" r="9" fill="__ACCENT__"/>
-    <circle cx="68" cy="20" r="9" fill="__ON_GROUND__"/>
-    <circle cx="86" cy="20" r="9" fill="__ACCENT__"/>
-    <circle cx="104" cy="20" r="9" fill="__ON_GROUND__"/>
+    <rect x="4"  y="8" width="17" height="24" rx="7" fill="__ACCENT__"/>
+    <rect x="23" y="8" width="17" height="24" rx="7" fill="__ON_GROUND__"/>
+    <rect x="42" y="8" width="17" height="24" rx="7" fill="__ACCENT__"/>
+    <rect x="61" y="8" width="17" height="24" rx="7" fill="__ON_GROUND__"/>
+    <rect x="80" y="8" width="17" height="24" rx="7" fill="__ACCENT__"/>
+    <rect x="99" y="8" width="17" height="24" rx="7" fill="__ON_GROUND__"/>
   </g>
-  <!-- fluted discs: a thin ring suggests the floats -->
-  <g fill="none" stroke="__GROUND__" stroke-width="1.4" opacity="0.5">
-    <circle cx="14" cy="20" r="5"/><circle cx="32" cy="20" r="5"/>
-    <circle cx="50" cy="20" r="5"/><circle cx="68" cy="20" r="5"/>
-    <circle cx="86" cy="20" r="5"/><circle cx="104" cy="20" r="5"/>
+  <!-- centre flute groove per float for a barrel feel -->
+  <g stroke="__GROUND__" stroke-width="1.3" opacity="0.4">
+    <line x1="12.5" y1="11" x2="12.5" y2="29"/><line x1="31.5" y1="11" x2="31.5" y2="29"/>
+    <line x1="50.5" y1="11" x2="50.5" y2="29"/><line x1="69.5" y1="11" x2="69.5" y2="29"/>
+    <line x1="88.5" y1="11" x2="88.5" y2="29"/><line x1="107.5" y1="11" x2="107.5" y2="29"/>
+  </g>
+  <!-- shared sheen + shade reads as rounded barrels -->
+  <g>
+    <rect x="4" y="8" width="17" height="24" rx="7" fill="url(#float__UID__)"/>
+    <rect x="23" y="8" width="17" height="24" rx="7" fill="url(#float__UID__)"/>
+    <rect x="42" y="8" width="17" height="24" rx="7" fill="url(#float__UID__)"/>
+    <rect x="61" y="8" width="17" height="24" rx="7" fill="url(#float__UID__)"/>
+    <rect x="80" y="8" width="17" height="24" rx="7" fill="url(#float__UID__)"/>
+    <rect x="99" y="8" width="17" height="24" rx="7" fill="url(#float__UID__)"/>
   </g>
 </svg>

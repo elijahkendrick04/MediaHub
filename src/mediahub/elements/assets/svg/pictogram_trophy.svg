@@ -1,15 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Trophy">
+  <defs>
+    <linearGradient id="cup__UID__" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="__ON_GROUND__" stop-opacity="0.34"/>
+      <stop offset="0.45" stop-color="__ON_GROUND__" stop-opacity="0"/>
+      <stop offset="1" stop-color="__GROUND__" stop-opacity="0.20"/>
+    </linearGradient>
+  </defs>
   <!-- handles -->
-  <path d="M30 22 C12 22 12 48 32 50" fill="none" stroke="__ACCENT__" stroke-width="5"/>
-  <path d="M70 22 C88 22 88 48 68 50" fill="none" stroke="__ACCENT__" stroke-width="5"/>
-  <!-- cup -->
-  <path d="M28 16 H72 V34 C72 52 60 62 50 62 C40 62 28 52 28 34 Z" fill="__ACCENT__"/>
-  <!-- inner sheen -->
-  <path d="M36 22 H64 V33 C64 46 57 54 50 54 C43 54 36 46 36 33 Z" fill="__ON_GROUND__" opacity="0.18"/>
-  <!-- star on the cup -->
-  <path d="M50 28 l3 7 7.5 .6 -5.7 4.9 1.8 7.3 -6.6 -4 -6.6 4 1.8 -7.3 -5.7 -4.9 7.5 -.6 Z" fill="__GROUND__"/>
-  <!-- stem + base -->
-  <rect x="46" y="62" width="8" height="12" fill="__SECONDARY__"/>
-  <rect x="34" y="74" width="32" height="7" rx="2" fill="__SECONDARY__"/>
-  <rect x="30" y="81" width="40" height="8" rx="2" fill="__ACCENT__"/>
+  <path d="M29 21 C11 21 11 46 31 49" fill="none" stroke="__ACCENT__" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M71 21 C89 21 89 46 69 49" fill="none" stroke="__ACCENT__" stroke-width="5.5" stroke-linecap="round"/>
+  <!-- cup bowl -->
+  <path d="M27 16 H73 V32 C73 51 62 61 50 61 C38 61 27 51 27 32 Z" fill="__ACCENT__"/>
+  <path d="M27 16 H73 V32 C73 51 62 61 50 61 C38 61 27 51 27 32 Z" fill="url(#cup__UID__)"/>
+  <!-- rim highlight -->
+  <rect x="27" y="16" width="46" height="3.4" rx="1.7" fill="__ON_GROUND__" opacity="0.4"/>
+  <!-- star -->
+  <path d="M50 27 l3.1 7 7.6 .6 -5.8 5 1.8 7.4 -6.7 -4 -6.7 4 1.8 -7.4 -5.8 -5 7.6 -.6 Z" fill="__GROUND__"/>
+  <!-- stem + stepped base -->
+  <rect x="45.5" y="61" width="9" height="11" fill="__SECONDARY__"/>
+  <rect x="35" y="72" width="30" height="6.5" rx="2" fill="__SECONDARY__"/>
+  <rect x="29" y="78.5" width="42" height="8.5" rx="2.5" fill="__ACCENT__"/>
+  <rect x="29" y="78.5" width="42" height="3" rx="1.5" fill="__ON_GROUND__" opacity="0.3"/>
 </svg>

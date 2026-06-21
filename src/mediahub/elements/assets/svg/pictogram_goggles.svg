@@ -1,13 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 70" role="img" aria-label="Swim goggles">
-  <!-- strap -->
-  <path d="M22 35 C8 30 8 40 18 44" fill="none" stroke="__OUTLINE__" stroke-width="5" stroke-linecap="round"/>
-  <path d="M98 35 C112 30 112 40 102 44" fill="none" stroke="__OUTLINE__" stroke-width="5" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="lens__UID__" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="__ON_SURFACE__" stop-opacity="0.30"/>
+      <stop offset="0.55" stop-color="__ON_SURFACE__" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- head strap sweeping behind -->
+  <path d="M24 30 C6 24 6 46 20 50" fill="none" stroke="__OUTLINE__" stroke-width="6" stroke-linecap="round"/>
+  <path d="M96 30 C114 24 114 46 100 50" fill="none" stroke="__OUTLINE__" stroke-width="6" stroke-linecap="round"/>
   <!-- left lens -->
-  <ellipse cx="40" cy="38" rx="22" ry="18" fill="__SURFACE__" stroke="__ACCENT__" stroke-width="5"/>
-  <ellipse cx="34" cy="32" rx="7" ry="5" fill="__ON_SURFACE__" opacity="0.35"/>
+  <ellipse cx="40" cy="38" rx="23" ry="19" fill="__SURFACE__"/>
+  <ellipse cx="40" cy="38" rx="23" ry="19" fill="url(#lens__UID__)"/>
+  <ellipse cx="40" cy="38" rx="23" ry="19" fill="none" stroke="__ACCENT__" stroke-width="5"/>
+  <ellipse cx="33" cy="31" rx="7" ry="4.5" fill="__ON_SURFACE__" opacity="0.4"/>
   <!-- right lens -->
-  <ellipse cx="80" cy="38" rx="22" ry="18" fill="__SURFACE__" stroke="__ACCENT__" stroke-width="5"/>
-  <ellipse cx="74" cy="32" rx="7" ry="5" fill="__ON_SURFACE__" opacity="0.35"/>
+  <ellipse cx="80" cy="38" rx="23" ry="19" fill="__SURFACE__"/>
+  <ellipse cx="80" cy="38" rx="23" ry="19" fill="url(#lens__UID__)"/>
+  <ellipse cx="80" cy="38" rx="23" ry="19" fill="none" stroke="__ACCENT__" stroke-width="5"/>
+  <ellipse cx="73" cy="31" rx="7" ry="4.5" fill="__ON_SURFACE__" opacity="0.4"/>
   <!-- nose bridge -->
-  <path d="M60 44 q0 -8 -3 -10 M60 44 q0 -8 3 -10" fill="none" stroke="__ACCENT__" stroke-width="4" stroke-linecap="round"/>
+  <path d="M60 47 q-4 -7 -3 -11 M60 47 q4 -7 3 -11" fill="none" stroke="__ACCENT__" stroke-width="4.5" stroke-linecap="round"/>
 </svg>
