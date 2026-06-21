@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `0a167fe97` · build(deps): bump the python-deps group across 1 directory with 13 updates (#889)
+**Last updated:** 2026-06-21 · `56f77b1ca` · a11y: render /settings tiles as h2 under the hero h1 (supersedes #883) (#968)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1214,6 +1214,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `df7e3f1c8` | a11y: render /settings tiles as h2 (not h3) under the hero h1 |
 | 2026-06-21 | `ab1a5ea23` | ci: re-trigger checks (docs-only push didn't fire CI) |
 | 2026-06-21 | `c5bb6131b` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_RATE |
 | 2026-06-21 | `51619a1ad` | Globally rate-limit stock-thumb fetches (stop the retry storm) |
@@ -1221,5 +1222,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `98a6502e5` | test(1.13): real-render + native-xlsx regression tests; grid accessibility |
 | 2026-06-21 | `32476350a` | Make signed-in home a content workspace; move explainer to a Help page |
 | 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
-| 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
 <!-- /ROADMAP:ACTIVITY -->
