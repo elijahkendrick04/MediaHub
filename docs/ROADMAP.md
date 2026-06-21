@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `26741a9d7` · Harden data hub (1.13): real-render + native-XLSX tests; grid accessibility (#960)
+**Last updated:** 2026-06-21 · `0a167fe97` · build(deps): bump the python-deps group across 1 directory with 13 updates (#889)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1222,5 +1222,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `32476350a` | Make signed-in home a content workspace; move explainer to a Help page |
 | 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
 | 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
-| 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
 <!-- /ROADMAP:ACTIVITY -->
