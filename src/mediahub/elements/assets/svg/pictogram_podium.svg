@@ -1,18 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Winners podium">
   <!-- 2nd place (left) -->
-  <rect x="7" y="55" width="27" height="37" rx="3" fill="__SURFACE__"/>
-  <rect x="7" y="55" width="27" height="4" rx="2" fill="__ON_GROUND__" opacity="0.14"/>
-  <text x="20.5" y="80" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="17" fill="__ON_SURFACE__">2</text>
-  <!-- 1st place (centre, tallest) -->
-  <rect x="36.5" y="38" width="27" height="54" rx="3" fill="__ACCENT__"/>
-  <rect x="36.5" y="38" width="27" height="4" rx="2" fill="__ON_GROUND__" opacity="0.28"/>
-  <text x="50" y="70" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="22" fill="__GROUND__">1</text>
+  <polygon points="8,58 32,58 37,53 13,53" fill="__SURFACE__"/>
+  <polygon points="8,58 32,58 37,53 13,53" fill="__ON_GROUND__" opacity="0.16"/>
+  <polygon points="32,58 37,53 37,87 32,92" fill="__SURFACE__"/>
+  <polygon points="32,58 37,53 37,87 32,92" fill="__GROUND__" opacity="0.30"/>
+  <rect x="8" y="58" width="24" height="34" fill="__SURFACE__"/>
+  <text x="20" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="16" fill="__ON_SURFACE__">2</text>
   <!-- 3rd place (right) -->
-  <rect x="66" y="64" width="27" height="28" rx="3" fill="__SECONDARY__"/>
-  <rect x="66" y="64" width="27" height="4" rx="2" fill="__ON_GROUND__" opacity="0.16"/>
-  <text x="79.5" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="15" fill="__ON_GROUND__">3</text>
-  <!-- a star crowning the winner -->
-  <path d="M50 25 l2.4 5.3 5.8 .5 -4.4 3.8 1.4 5.7 -5.2 -3.1 -5.2 3.1 1.4 -5.7 -4.4 -3.8 5.8 -.5 Z" fill="__ACCENT__"/>
+  <polygon points="66,66 90,66 95,61 71,61" fill="__SECONDARY__"/>
+  <polygon points="66,66 90,66 95,61 71,61" fill="__ON_GROUND__" opacity="0.16"/>
+  <polygon points="90,66 95,61 95,87 90,92" fill="__SECONDARY__"/>
+  <polygon points="90,66 95,61 95,87 90,92" fill="__GROUND__" opacity="0.30"/>
+  <rect x="66" y="66" width="24" height="26" fill="__SECONDARY__"/>
+  <text x="78" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="14" fill="__ON_GROUND__">3</text>
+  <!-- star crowning the winner -->
+  <path d="M49 24 l2.6 5.6 6.2 .5 -4.7 4 1.5 6 -5.6 -3.3 -5.6 3.3 1.5 -6 -4.7 -4 6.2 -.5 Z" fill="__ACCENT__"/>
+  <!-- 1st place (centre, tallest) drawn last so it reads in front -->
+  <polygon points="37,40 61,40 66,35 42,35" fill="__ACCENT__"/>
+  <polygon points="37,40 61,40 66,35 42,35" fill="__ON_GROUND__" opacity="0.26"/>
+  <polygon points="61,40 66,35 66,87 61,92" fill="__ACCENT__"/>
+  <polygon points="61,40 66,35 66,87 61,92" fill="__GROUND__" opacity="0.30"/>
+  <rect x="37" y="40" width="24" height="52" fill="__ACCENT__"/>
+  <rect x="37" y="40" width="24" height="3" fill="__ON_GROUND__" opacity="0.22"/>
+  <text x="49" y="71" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="22" fill="__GROUND__">1</text>
   <!-- floor line -->
   <line x1="4" y1="92" x2="96" y2="92" stroke="__OUTLINE__" stroke-width="2.5" stroke-linecap="round"/>
 </svg>
