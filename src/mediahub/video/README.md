@@ -74,6 +74,11 @@ spoken words on screen → brand it → a human says yes → download.**
 - **`matting.py`** — *optional* "remove the background from the video" (no green
   screen). It's off unless an operator turns it on, and it's honest that it's slow
   and only for short clips.
+- **`broll.py`** — *optional* "make up a brand-new clip to cut away to" (a
+  text-to-video model). Because that **invents footage that was never filmed**,
+  it's off unless an operator turns it on, only ever runs when a person
+  deliberately opts in, and **always** stamps the clip as "AI-generated" — the
+  same rule as the avatars below.
 - **`avatars.py`** — *optional* AI talking-head presenters. MediaHub's rule is
   **no fake people unless you explicitly ask**, so this is off by default, only
   ever runs when a person deliberately opts in, and **always** stamps the video as

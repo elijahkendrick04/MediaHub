@@ -83,6 +83,19 @@ def resolve_music(
         return None
 
 
+def snap_to_beats(length_ms: int, beat_ms: float, *, min_beats: int = 2) -> int:
+    """Round a clip length to a whole number of musical beats. Pure + deterministic.
+
+    A reel feels tighter when its cuts land on the beat: a 1.7s window at 120 BPM
+    (500ms/beat) snaps to 4 beats = 2.0s. ``min_beats`` keeps a beat from being
+    too short to read. ``beat_ms <= 0`` (no/unknown tempo) is a no-op.
+    """
+    if beat_ms <= 0 or length_ms <= 0:
+        return length_ms
+    beats = max(min_beats, round(length_ms / beat_ms))
+    return round(beats * beat_ms)
+
+
 def build_reel_edl(
     sources: list[str],
     beats: list[_director.ClipBeat],
@@ -96,6 +109,7 @@ def build_reel_edl(
     audio_plan: Optional[AudioPlan] = None,
     transition_kind: str = DEFAULT_TRANSITION,
     transition_ms: int = DEFAULT_TRANSITION_MS,
+    beat_ms: float = 0.0,
     fps: int = 30,
 ) -> EDL:
     """Assemble a reel EDL from chosen beats + per-beat crops + a caption track.
@@ -103,8 +117,9 @@ def build_reel_edl(
     Pure and deterministic. Each beat becomes one clip on the target canvas (the
     first joins with a hard cut, the rest with the chosen transition); the
     director's hook rides as an opening title; the lead beat's captions and the
-    named look + audio plan ride on top. No FFmpeg, no transcription here — those
-    happen in :func:`make_reel` and are passed in.
+    named look + audio plan ride on top. When ``beat_ms`` is given each clip's
+    length is snapped to a whole number of musical beats so the cuts land on the
+    beat. No FFmpeg, no transcription here — those happen in :func:`make_reel`.
     """
     colours = colours or BrandColours()
     plan = plan or ReelPlan()
@@ -120,11 +135,12 @@ def build_reel_edl(
             continue
         crop = crops[i] if i < len(crops) and crops[i] else None
         trans = Transition("cut") if not clips else Transition(transition_kind, transition_ms)
+        out_ms = m.start_ms + snap_to_beats(m.end_ms - m.start_ms, beat_ms)
         clips.append(
             Clip(
                 source=src,
                 in_ms=m.start_ms,
-                out_ms=m.end_ms,
+                out_ms=out_ms,
                 crop=tuple(crop) if crop else None,  # type: ignore[arg-type]
                 transition_in=trans,
             )
@@ -174,6 +190,7 @@ def make_reel(
     caption_style: str = "karaoke",
     with_reframe: bool = True,
     with_music: bool = True,
+    beat_sync: bool = True,
     enhance_audio: bool = True,
     loudness: str = "social",
     brief_context: str = "",
@@ -289,6 +306,18 @@ def make_reel(
         duck=True,
     )
 
+    # 6) Beat-sync: when there's a music bed, snap the cuts to its tempo.
+    beat_ms = 0.0
+    if music_path and beat_sync:
+        try:
+            from mediahub.visual.audio_mux import track_bpm
+
+            bpm = track_bpm(music_path)
+            if bpm and bpm > 0:
+                beat_ms = 60000.0 / bpm
+        except Exception:
+            beat_ms = 0.0
+
     edl = build_reel_edl(
         sources,
         beats,
@@ -299,6 +328,7 @@ def make_reel(
         plan=plan,
         colours=colours,
         audio_plan=audio_plan,
+        beat_ms=beat_ms,
         fps=fps,
     )
 
@@ -312,6 +342,7 @@ def make_reel(
         "reframed": reframed,
         "captions": captions_note,
         "music": Path(music_path).name if music_path else "",
+        "beat_synced": round(60000.0 / beat_ms, 1) if beat_ms else False,
         "timeline_ms": edl.total_timeline_ms(),
     }
     return ReelResult(edl=edl, plan=plan, moments_by_clip=moments_by_clip, manifest=manifest)

@@ -144,6 +144,24 @@ def test_validate_rejects_unknown_look():
         validate(EDL(clips=[Clip(source="a.mp4", out_ms=3000)], look="cyberpunk"))
 
 
+# --- smooth slow-mo (minterpolate) ----------------------------------------
+
+
+def test_smooth_off_is_byte_identical():
+    e = EDL(clips=[Clip(source="a.mp4", out_ms=3000)])
+    assert "smooth" not in e.to_dict()["clips"][0]
+    assert "minterpolate" not in compile_filtergraph(e).filter_complex
+
+
+def test_smooth_on_inserts_minterpolate_and_roundtrips():
+    e = EDL(clips=[Clip(source="a.mp4", out_ms=3000, speed=0.5, smooth=True)])
+    assert e.to_dict()["clips"][0]["smooth"] is True
+    assert EDL.from_dict(e.to_dict()).clips[0].smooth is True
+    fc = compile_filtergraph(e).filter_complex
+    assert "minterpolate=fps=30:mi_mode=mci" in fc
+    assert "setpts=(PTS-STARTPTS)/0.5" in fc  # the slow-down retime is still there
+
+
 # --- enhance arg builders -------------------------------------------------
 
 

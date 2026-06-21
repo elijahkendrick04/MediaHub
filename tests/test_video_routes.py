@@ -329,6 +329,48 @@ def test_enhance_foreign_profile_404(app):
         assert c.post(f"/api/video/projects/{proj.id}/enhance", json={"look": "vivid"}).status_code == 404
 
 
+def test_caption_edit_route_corrects_text_and_reopens_approval(app):
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    track = {"color": "#FFF", "scrim": "#000", "cues": [{"from": 0, "dur": 30, "text": "Maria"}]}
+    proj = store.save(
+        VideoProject(
+            id="",
+            profile_id="alpha",
+            status="approved",
+            edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)], captions=track),
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(
+            f"/api/video/projects/{proj.id}/caption",
+            json={"op": "edit", "index": 0, "text": "Mariah"},
+        )
+        assert r.status_code == 200
+        assert r.get_json()["cues"][0]["text"] == "Mariah"
+        # the correction reopened approval (rule 6)
+        assert store.get(proj.id).status == "draft"
+
+
+def test_caption_edit_route_no_captions_is_400(app):
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    proj = store.save(
+        VideoProject(id="", profile_id="alpha", edl=EDL(clips=[Clip(source="a.mp4", out_ms=3000)]))
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.post(f"/api/video/projects/{proj.id}/caption", json={"op": "edit", "index": 0, "text": "x"})
+        assert r.status_code == 400
+
+
 def test_enhance_stabilize_honest_error_without_vidstab(app, monkeypatch):
     application, _ = app
     from mediahub.video import enhance as _enh

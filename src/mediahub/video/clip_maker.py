@@ -29,7 +29,7 @@ from typing import Callable, Optional
 from mediahub.video import captions as _captions
 from mediahub.video import moments as _moments
 from mediahub.video import reframe as _reframe
-from mediahub.video.edl import EDL, Clip, TextOverlay, Transition
+from mediahub.video.edl import MAX_SPEED, MIN_SPEED, EDL, Clip, TextOverlay, Transition
 from mediahub.video.moments import Moment
 from mediahub.video.probe import ClipProbe
 
@@ -86,6 +86,7 @@ def build_clip_edl(
     transition_ms: int = 400,
     look: str = "none",
     audio_plan=None,
+    slow_mo: float = 1.0,
     fps: int = 30,
 ) -> EDL:
     """Assemble an EDL from chosen moments + per-moment crops + a caption track.
@@ -94,11 +95,14 @@ def build_clip_edl(
     :func:`clip_maker` and are passed in. Each moment becomes one clip on the
     target canvas; the first joins with a hard cut, the rest with the chosen
     transition. The caption track, an optional brand title, the named colour
-    ``look`` and the ``audio_plan`` all ride on top.
+    ``look``, the ``audio_plan`` and an optional ``slow_mo`` (< 1.0 ⇒ motion-
+    interpolated slow motion) all ride on top.
     """
     colours = colours or BrandColours()
     width, height = canvas_for(format_name)
     crops = crops or []
+    speed = max(MIN_SPEED, min(MAX_SPEED, float(slow_mo) or 1.0))
+    smooth = speed < 0.999  # interpolate frames only when actually slowing down
 
     clips: list[Clip] = []
     for i, m in enumerate(chosen):
@@ -111,6 +115,8 @@ def build_clip_edl(
                 out_ms=m.end_ms,
                 crop=tuple(crop) if crop else None,  # type: ignore[arg-type]
                 transition_in=trans,
+                speed=speed,
+                smooth=smooth,
             )
         )
     if not clips:
@@ -166,6 +172,7 @@ def clip_maker(
     music_platform: str = "instagram",
     loudness: str = "social",
     remove_silence: bool = False,
+    slow_mo: float = 1.0,
     fps: int = 30,
     # Injection seams (default to the real, FFmpeg-backed engine pieces):
     probe_fn: Optional[Callable] = None,
@@ -229,9 +236,13 @@ def clip_maker(
 
     # Captions — single-clip only (one verbatim transcript window). A montage or
     # a silence-tightened clip has many windows, so captions are skipped honestly.
+    # A slow-mo replay also skips them: retiming the clip would desync burned cues.
     caption_track: Optional[dict] = None
     captions_note = "off"
-    if with_captions and chosen:
+    slowed = float(slow_mo) < 0.999
+    if slowed and with_captions and chosen:
+        captions_note = "skipped-slowmo"
+    elif with_captions and chosen:
         if len(chosen) == 1:
             default_cap = (
                 _captions.windowed_karaoke_track
@@ -276,6 +287,7 @@ def clip_maker(
         transition_ms=transition_ms,
         look=look,
         audio_plan=audio_plan,
+        slow_mo=slow_mo,
         fps=fps,
     )
 
@@ -289,6 +301,7 @@ def clip_maker(
         "reframed": reframed,
         "captions": captions_note,
         "look": look or "none",
+        "slow_mo": float(slow_mo),
         "silence": silence_note,
         "audio": audio_plan.to_dict() if (audio_plan and not audio_plan.is_empty()) else None,
         "timeline_ms": edl.total_timeline_ms(),

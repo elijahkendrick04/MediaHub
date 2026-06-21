@@ -51,8 +51,9 @@ provider slot (GEN, opt-in+disclosed) · ⏸ deferred.
 | **Deterministic upscale** | `scale=…:flags=lanczos` | ✅ `enhance.py` |
 | Captions / subtitles (timing + render) | ASR → ASS burn (`subtitle_burn`) | ✅ `captions.py` |
 | **Karaoke / word-highlight captions** | ASS `\kf` sweep over word stamps | ✅ `caption_render.py` + `captions.windowed_karaoke_track` |
-| Beat-synced cutting | onset/tempo (`track_bpm` exists) → snap beats | 🟦 (reuse `audio_mux.track_bpm`) |
-| Frame interpolation (smooth slow-mo) | `minterpolate=mi_mode=mci` | 🟦 per-clip flag |
+| **Beat-synced cutting** | `audio_mux.track_bpm` → snap clip lengths to the beat grid | ✅ `reel_builder.snap_to_beats` |
+| **Frame-interpolated slow-mo** | `minterpolate=mi_mode=mci` via a per-clip `smooth` flag | ✅ `edl.Clip.smooth` + `clip_maker(slow_mo=…)` |
+| **Caption editing (text/timing)** | deterministic cue transforms over the burned track | ✅ `captions.py` + `POST …/caption` route |
 | Filler-word removal | ASR transcript + lexicon match at stamps | 🟦 (needs ASR) |
 | Multicam sync | audio cross-correlation (GCC-PHAT) | ⏸ (not a club-footage need yet) |
 
@@ -74,7 +75,7 @@ provider slot (GEN, opt-in+disclosed) · ⏸ deferred.
 |---|---|---|
 | Talking avatars / presenters | HeyGen, Synthesia, D-ID, Hedra | 🔒 `avatars.py` (off by default, disclosure forced) |
 | Background removal / matting | rembg/BiRefNet (server), Replicate, PhotoRoom | 🔒 `matting.py` (provider slot) |
-| Text-to-video / image-to-video b-roll | Veo 3.1, Sora 2, Kling 3.0, Runway, Pika, Luma | 🔒 planned slot (disclosed) |
+| Text-to-video / image-to-video b-roll | Veo 3.1, Sora 2, Kling 3.0, Runway, Pika, Luma | 🔒 `broll.py` (off by default, opt-in + disclosure forced) |
 | Lip-sync / dubbing / translation | sync.so, ElevenLabs, Rask, HeyGen Translate | 🔒 planned slot (disclosed) |
 | Object removal / inpainting | Runway Aleph, ProPainter, DiffuEraser, Resolve | 🔒 planned slot (disclosed) |
 | Eye-contact correction (pixel warp) | NVIDIA Broadcast, Descript | 🔒 planned slot (disclosed) |
@@ -118,22 +119,22 @@ human approves before export.
 
 ## Roadmap — the remaining builds (high value, fits the engine first)
 
-1. **Beat-synced reel cutting** — snap beat onsets (`audio_mux.track_bpm`) to the
-   reel's cut points; fold into `reel_builder`. (DET)
+Done since the first build: animated captions, **beat-synced cutting**,
+**frame-interpolated slow-mo**, the **caption-edit route**, and the **generative
+b-roll seam** (`broll.py`). Still open:
+
+1. **Caption-edit UI** — the route exists; surface it (inline cue text/timing
+   editing) as part of the timeline editor below. (DET)
 2. **Filler-word + smarter silence** — lexicon trim over the ASR transcript,
    caption-preserving tighten. (DET over ASR)
-3. **Frame-interpolated slow-mo** — a per-clip `smooth` flag → `minterpolate`. (DET)
-4. **Caption-edit route + UI** — wire `captions.py`'s edit transforms
-   (`edit_cue_text`/`retime_cue`/`delete_cue`/`shift_track`) to a footage route
-   so the words/timing are correctable after the fact (the README's promise). (DET)
-5. **A visual timeline editor** — manual trim/reorder/per-clip speed + transition
+3. **A visual timeline editor** — manual trim/reorder/per-clip speed + transition
    + per-clip grade in the UI (today the product is auto-clip / auto-reel; the EDL
-   already supports all of this, but only via a raw EDL POST). (DET)
-6. **Director depth** — per-beat durations/weights, multiple captioned beats,
+   already supports all of this, but only via a raw EDL POST). The biggest UX gap. (DET)
+4. **Director depth** — per-beat durations/weights, multiple captioned beats,
    cross-clip virality ranking. (AIJ)
-7. **Gated GEN slots** — text-to-video b-roll, lip-sync/dubbing, object removal,
-   eye-contact — each an off-by-default, disclosed provider slot mirroring
-   `avatars.py`/`matting.py`, behind explicit opt-in + human approval.
+5. **The remaining GEN seams** — lip-sync/dubbing, object removal, eye-contact —
+   each an off-by-default, disclosed provider slot mirroring `broll.py` /
+   `avatars.py` / `matting.py`, behind explicit opt-in + human approval.
 
 Sources for the landscape survey are the 2026 competitor research under
 `docs/research/` and the per-cluster web survey captured during this build

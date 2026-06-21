@@ -320,6 +320,7 @@ class Clip:
     crop: Optional[tuple[int, int, int, int]] = None
     transition_in: Transition = field(default_factory=Transition)
     adjust: ColorAdjust = field(default_factory=ColorAdjust)  # per-clip colour/clarity grade
+    smooth: bool = False  # motion-interpolate (smooth slow-mo via minterpolate)
 
     @property
     def source_span_ms(self) -> int:
@@ -333,7 +334,7 @@ class Clip:
         return round(span / self.speed) if span and self.speed > 0 else 0
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "source": self.source,
             "in_ms": int(self.in_ms),
             "out_ms": int(self.out_ms),
@@ -345,6 +346,10 @@ class Clip:
             # cache-keys) exactly as before this feature existed.
             "adjust": self.adjust.to_dict() if not self.adjust.is_identity() else None,
         }
+        # Omit smooth when off so an un-interpolated clip stays byte-identical.
+        if self.smooth:
+            d["smooth"] = True
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Clip":
@@ -358,6 +363,7 @@ class Clip:
             crop=tuple(int(v) for v in crop) if crop else None,  # type: ignore[arg-type]
             transition_in=Transition.from_dict(d.get("transition_in")),
             adjust=ColorAdjust.from_dict(d.get("adjust")),
+            smooth=bool(d.get("smooth", False)),
         )
 
 
@@ -565,6 +571,11 @@ def video_clip_chain(
         parts.append("setpts=PTS-STARTPTS")
     else:
         parts.append(f"setpts=(PTS-STARTPTS)/{clip.speed:g}")
+    # Motion-interpolate for smooth slow-mo: synthesise the in-between frames a
+    # slowed clip would otherwise stutter through (deterministic block-motion
+    # estimation, the same maths Premiere/Resolve "Optical Flow" use).
+    if clip.smooth:
+        parts.append(f"minterpolate=fps={fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1")
     if clip.crop:
         x, y, w, h = clip.crop
         parts.append(f"crop={w}:{h}:{x}:{y}")
@@ -667,6 +678,7 @@ def compile_filtergraph(
                 crop=c.crop,
                 transition_in=c.transition_in,
                 adjust=c.adjust,
+                smooth=c.smooth,
             )
         )
 

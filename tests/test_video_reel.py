@@ -127,6 +127,40 @@ def test_make_reel_music_resolution_injectable():
     assert res.edl.audio.music == "/library/triumph.mp3"
 
 
+def test_snap_to_beats():
+    from mediahub.video.reel_builder import snap_to_beats
+
+    assert snap_to_beats(1800, 500) == 2000  # 3.6 beats → 4 beats (round to nearest)
+    assert snap_to_beats(1700, 500) == 1500  # 3.4 beats → 3 beats
+    assert snap_to_beats(2000, 0) == 2000  # no tempo → no-op
+    assert snap_to_beats(100, 500, min_beats=2) == 1000  # floored to 2 beats
+
+
+def test_build_reel_edl_beat_snaps_clip_lengths():
+    mbc = [[Moment(0, 1800, 0.9, "energy", "x")]]
+    edl = build_reel_edl(["a.mp4"], [ClipBeat(0, 0)], mbc, beat_ms=500.0)
+    assert edl.clips[0].out_ms == 2000  # 1.8s snapped to 4 beats = 2.0s
+
+
+def test_make_reel_beat_syncs_to_music_bpm(monkeypatch):
+    import mediahub.visual.audio_mux as am
+
+    monkeypatch.setattr(am, "track_bpm", lambda p: 120.0)  # 120 BPM → 500ms/beat
+    res = make_reel(
+        ["a.mp4"],
+        with_captions=False,
+        with_reframe=False,
+        with_music=True,
+        beat_sync=True,
+        probe_fn=_fake_probe,
+        detect_fn=lambda *a, **k: [Moment(0, 1800, 0.9, "energy", "x")],
+        plan_fn=lambda *a, **k: ReelPlan(order=[ClipBeat(0, 0)], music_mood="x", source="ai"),
+        music_fn=lambda *a, **k: "/lib/track.mp3",
+    )
+    assert res.edl.clips[0].out_ms == 2000  # snapped to the beat grid
+    assert res.manifest["beat_synced"] == 120.0
+
+
 def test_resolve_music_honest_none_when_library_empty(monkeypatch):
     from mediahub.video import reel_builder
 

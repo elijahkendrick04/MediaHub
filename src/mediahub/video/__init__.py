@@ -15,6 +15,7 @@ The pieces, smallest to largest:
 * :mod:`.reframe`     — saliency-tracked aspect reframe (16:9 ↔ 9:16 ↔ 1:1).
 * :mod:`.enhance`     — deterministic enhancement passes (stabilise, looks, upscale).
 * :mod:`.captions`    — the editable styled caption layer over the ASR seam.
+* :mod:`.caption_render` — burn captions (static or animated/karaoke word-sweep).
 * :mod:`.audio_post`  — soundtrack pass: clean voice + ducked music + loudness.
 * :mod:`.render`      — render an EDL to MP4, cache-keyed, server-side, honest.
 * :mod:`.clip_maker`  — Clip-Maker-for-sport: footage → branded cut (one clip).
@@ -22,6 +23,7 @@ The pieces, smallest to largest:
 * :mod:`.reel_builder`— assemble a branded reel from many clips (the centrepiece).
 * :mod:`.matting`     — video background removal, behind a provider slot (flagged).
 * :mod:`.avatars`     — opt-in, disclosed AI avatars, behind a provider slot (flagged).
+* :mod:`.broll`       — opt-in, disclosed generative b-roll, behind a provider slot (flagged).
 * :mod:`.ingest`      — bring footage into the media library (consent-aware).
 * :mod:`.projects`    — per-profile persistence for saved timelines + approval state.
 

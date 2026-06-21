@@ -9805,6 +9805,7 @@ _VIDEO_STUDIO_HTML = """
       <label class="vstudio-check"><input type="checkbox" id="vs-captions" checked> Captions (spoken words on screen)</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-animated"> Animated captions (word-by-word)</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-reframe" checked> Reframe to fit (keep the subject)</label>
+      <label class="vstudio-check"><input type="checkbox" id="vs-slowmo"> Slow-mo replay (smooth half-speed)</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-enhance-audio"> Clean &amp; level the audio</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-music"> Add a music bed</label>
       <label class="vstudio-check"><input type="checkbox" id="vs-silence"> Remove silences (tighten talking clips)</label>
@@ -9983,6 +9984,7 @@ _VIDEO_STUDIO_HTML = """
       animated_captions: $('vs-animated').checked,
       with_reframe: $('vs-reframe').checked,
       look: $('vs-look').value,
+      slow_mo: $('vs-slowmo').checked,
       enhance_audio: $('vs-enhance-audio').checked,
       with_music: $('vs-music').checked,
       remove_silence: $('vs-silence').checked
@@ -44562,6 +44564,7 @@ voice, and queues them for one-click approval.</p>
         remove_silence = bool(payload.get("remove_silence", False))
         music_mood = (payload.get("music_mood") or "uplifting").strip().lower()[:24]
         caption_style = "karaoke" if payload.get("animated_captions") else "static"
+        slow_mo = 0.5 if payload.get("slow_mo") else 1.0
 
         from mediahub.video.clip_maker import clip_maker
         from mediahub.video.probe import ProbeUnavailable
@@ -44782,6 +44785,56 @@ voice, and queues them for one-click approval.</p>
             proj.status = "draft"  # an edit reopens approval (rule 6)
             store.save(proj)
         return jsonify({"ok": True, "project": proj.to_dict()})
+
+    @app.route("/api/video/projects/<project_id>/caption", methods=["POST"])
+    def api_video_project_caption(project_id: str):
+        """Correct the burned caption track (text / timing) on a project.
+
+        The ASR transcript is verbatim but not perfect — a name misheard, a cue a
+        beat late. These deterministic edits (from ``video.captions``) let a human
+        fix the words/timing; like any edit it reopens approval (rule 6).
+        """
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        edl = proj.edl
+        track = edl.captions
+        if not track or not track.get("cues"):
+            return jsonify(
+                {"error": "no_captions", "message": "This clip has no captions to edit."}
+            ), 400
+        payload = request.get_json(silent=True) or {}
+        op = (payload.get("op") or "").strip().lower()
+        from mediahub.video import captions as _cap
+
+        try:
+            if op == "edit":
+                track = _cap.edit_cue_text(
+                    track, int(payload.get("index")), str(payload.get("text", ""))[:300]
+                )
+            elif op == "delete":
+                track = _cap.delete_cue(track, int(payload.get("index")))
+            elif op == "retime":
+                track = _cap.retime_cue(
+                    track,
+                    int(payload.get("index")),
+                    from_frame=int(payload.get("from_frame", 0)),
+                    dur_frames=int(payload.get("dur_frames", 1)),
+                )
+            elif op == "shift":
+                track = _cap.shift_track(track, int(payload.get("delta_frames", 0)))
+            else:
+                return jsonify(
+                    {"error": "bad_op", "message": "op must be edit|delete|retime|shift"}
+                ), 400
+        except (TypeError, ValueError) as e:
+            return jsonify({"error": "bad_params", "message": str(e)}), 400
+        edl.captions = track
+        proj.edl = edl
+        proj.status = "draft"  # an edit reopens approval (rule 6)
+        store.save(proj)
+        return jsonify({"ok": True, "cues": track.get("cues", [])})
 
     @app.route("/api/video/projects")
     def api_video_projects_list():
