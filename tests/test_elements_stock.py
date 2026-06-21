@@ -12,6 +12,14 @@ from mediahub.elements import stock
 from mediahub.elements.stock import Licence, StockRightsLedger, StockRightsRecord
 
 
+@pytest.fixture(autouse=True)
+def _isolate_thumb_cache(tmp_path, monkeypatch):
+    """fetch_thumb caches under DATA_DIR/stock_thumb_cache — pin DATA_DIR to a
+    unique tmp dir per test so cached bytes never leak across tests or into the
+    repo. (Web-route tests' app_env sets the same DATA_DIR afterwards.)"""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+
 # --------------------------------------------------------------------------- #
 # licence parsing
 # --------------------------------------------------------------------------- #
@@ -206,6 +214,9 @@ class _FakeThumbResp:
         for i in range(0, len(self._body), n):
             yield self._body[i : i + n]
 
+    def close(self):  # called on the retry path before backoff
+        pass
+
 
 def _allow_ssrf(monkeypatch, allowed=True):
     monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: allowed)
@@ -278,6 +289,46 @@ def test_fetch_thumb_revalidates_host_on_redirect(monkeypatch):
     data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/x.jpg")
     assert data is None and ctype == ""
     assert calls["n"] == 1  # stopped at the redirect target's host check
+
+
+def test_fetch_thumb_serves_from_disk_cache(monkeypatch):
+    """Second view of the same URL is served from the on-disk cache — no refetch.
+
+    This is what keeps a busy gallery from re-hammering the source (and getting
+    rate-limited) on every page load."""
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(body=b"CACHED"))
+    u = "https://upload.wikimedia.org/cacheme.jpg"
+    assert stock.fetch_thumb(u) == (b"CACHED", "image/jpeg")
+    # A second call must hit the cache, never the network.
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("should serve from cache"))
+    assert stock.fetch_thumb(u) == (b"CACHED", "image/jpeg")
+
+
+def test_fetch_thumb_retries_then_succeeds_on_429(monkeypatch):
+    """A transient 429 (rate limit) is ridden out with a backoff retry."""
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr("time.sleep", lambda *a, **k: None)  # no real backoff in tests
+    seq = [_FakeThumbResp(status=429), _FakeThumbResp(status=429), _FakeThumbResp(body=b"OK")]
+    calls = {"n": 0}
+
+    def _get(*a, **k):
+        i = min(calls["n"], len(seq) - 1)
+        calls["n"] += 1
+        return seq[i]
+
+    monkeypatch.setattr("requests.get", _get)
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/retry.jpg")
+    assert data == b"OK" and ctype == "image/jpeg"
+    assert calls["n"] == 3  # two 429s, then the 200
+
+
+def test_fetch_thumb_gives_up_after_persistent_429(monkeypatch):
+    """Persistent 429 exhausts retries and degrades to a clean (None, '')."""
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr("time.sleep", lambda *a, **k: None)
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(status=429))
+    assert stock.fetch_thumb("https://upload.wikimedia.org/always429.jpg") == (None, "")
 
 
 # --------------------------------------------------------------------------- #
