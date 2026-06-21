@@ -11484,6 +11484,8 @@ def _layout(
            aria-label="Account and organisation">
         <a href="{{ url_for('settings_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">Settings</a>
+        <a href="{{ url_for('help_page') }}" role="menuitem"
+           class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">Switch organisation</a>
         <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">Sign out</a>
@@ -14343,6 +14345,433 @@ _CHARTS_PAGE_JS = """
 """
 
 
+# --------------------------------------------------------------------------- #
+# Shared product-story sections (the "how it works / what it does" explainer).
+#
+# These were once built inline in the home() route and shown to everyone. They
+# are product story, not session state, so they render byte-identically wherever
+# they are used. As of the signed-in home rebuild they serve two surfaces:
+#   * the signed-OUT landing page (home()) — the marketing/explainer body, and
+#   * the in-app Help page (help_page()) — the same explainer, reached from the
+#     account menu, so a signed-in club can look up "how does this work?" without
+#     the homepage having to carry the sales pitch.
+# The signed-IN home no longer renders them (it is a content-creation workspace),
+# which is why they live at module scope and are called from both routes.
+# --------------------------------------------------------------------------- #
+def _home_io_headline_html() -> str:
+    """UI 1.3 — inline-media display headline: a results sheet → story, feed and
+    reel, each output inlined as a real first-party sample SVG (no external
+    fetch). One upload, four posting-ready formats, every fact from the file."""
+
+    def _inline_thumb(filename: str, kind: str, alt: str) -> str:
+        src = url_for("static", filename="samples/" + filename)
+        return (
+            f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
+            f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
+            f'src="{src}" width="144" height="200" '
+            f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+            "</span>"
+        )
+
+    return (
+        '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
+        '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
+        '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
+        "From a results sheet "
+        + _inline_thumb(
+            "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
+        )
+        + " to a story "
+        + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
+        + ", a feed graphic "
+        + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
+        + " and a reel "
+        + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
+        + "."
+        "</h2>"
+        '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
+        "Every name, time and place comes straight from the file you "
+        "uploaded. Nothing is invented, and nothing posts without you.</p>"
+        "</section>"
+    )
+
+
+def _home_engine_bento_html() -> str:
+    """UI 1.2 — the "what the engine does" bento: real, deterministic sample
+    outputs (story card, reel poster, feed graphic, the detected-&-ranked
+    intelligence read-out, the brand-kit application and the moment taxonomy),
+    rendered as first-party inline SVG that consume the live brand tokens."""
+    return (
+        '<section class="mh-section" id="mh-ch-engine">'
+        '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
+        + _reveal_lines(
+            [
+                "A results sheet in.",
+                'A <em class="editorial">weekend</em> of content out.',
+            ]
+        )
+        + '<div class="mh-bento mh-reveal-group">'
+        + '<div class="mh-bento-tile feature is-story">'
+        + _sample_graphics.story_card_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-reel">'
+        + _sample_graphics.reel_poster_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-feed">'
+        + _sample_graphics.feed_graphic_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile wide is-rank">'
+        + _sample_graphics.detected_ranked_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-brand">'
+        + _sample_graphics.brand_kit_svg()
+        + "</div>"
+        + '<div class="mh-bento-tile is-moments">'
+        + _sample_graphics.moments_svg()
+        + "</div>"
+        + "</div>"
+        + '<p class="mh-bento-caption">Real sample output — every name, '
+        "time and place comes from the file you upload, set in your club’s "
+        "palette and type. Nothing is invented.</p>"
+        "</section>"
+    )
+
+
+def _home_audience_html() -> str:
+    """"Made for" — three audience cards (club committees, coaches, university
+    teams). The "who it's for" reassurance block; product story, shown on the
+    landing page and Help."""
+    return (
+        '<section class="mh-section" id="mh-ch-audience">'
+        '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
+        + _reveal_lines(
+            [
+                "Built for the people who",
+                'already <em class="editorial">post the results</em>.',
+            ]
+        )
+        + '<div class="mh-audience-row mh-reveal-group">'
+        '<div class="mh-audience" data-mh-tilt>'
+        '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
+        '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
+        '<h3 class="mh-audience-title">Club committees</h3>'
+        '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
+        "</div>"
+        '<div class="mh-audience" data-mh-tilt>'
+        '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></svg></span>'
+        '<span class="mh-audience-role">Coach · Performance · Selection</span>'
+        '<h3 class="mh-audience-title">Coaches</h3>'
+        '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
+        "</div>"
+        '<div class="mh-audience" data-mh-tilt>'
+        '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
+        '<span class="mh-audience-role">Society · University · Team</span>'
+        '<h3 class="mh-audience-title">University teams</h3>'
+        '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures, all in your colours, with the right tone for an Instagram feed.</p>'
+        "</div>"
+        "</div>"
+        "</section>"
+    )
+
+
+def _home_promise_html() -> str:
+    """"Human in the loop, by design" — the lane-yellow trust panel. Makes it
+    explicit that the AI generates but the operator keeps approval, and that the
+    engine never invents results or auto-posts."""
+    return (
+        '<section class="mh-section" id="mh-ch-promise">'
+        '<div class="mh-promise">'
+        + _reveal_lines(
+            ["Human in the loop,", "<em>by design</em>."],
+            cls="mh-promise-title",
+        )
+        + '<p class="mh-promise-lede mh-reveal">'
+        "MediaHub is an intelligence layer, not an auto-poster. Every "
+        "piece of content stops at a review queue you control."
+        "</p>"
+        '<ul class="mh-promise-list mh-reveal-group">'
+        '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
+        '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        "<div><b>Source-grounded captions</b><span>Every claim links back to the parsed result. No invented times, no invented places.</span></div></li>"
+        '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
+        '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        "<div><b>We don't auto-post</b><span>MediaHub never posts to your social channels. You approve, then export or download and post it yourself.</span></div></li>"
+        '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
+        '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        "<div><b>We don't sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>"
+        "</ul>"
+        "</div>"
+        "</section>"
+    )
+
+
+def _home_faq_html() -> str:
+    """UI 1.22 — FAQ accordion. Native <details>/<summary>, no JavaScript, so
+    every row is keyboard- and screen-reader-operable. Answers are static,
+    trusted product copy routed through _h() so the pattern stays escape-safe."""
+    faq_items = [
+        (
+            "Does anything post to our socials automatically?",
+            "No. MediaHub is an intelligence layer, not an auto-poster. "
+            "Every caption, graphic and reel stops at a review queue you "
+            "control. Nothing leaves this deployment without an explicit "
+            "approval click.",
+        ),
+        (
+            "Will it ever invent a time or a result?",
+            "Never. Every claim on a card is grounded in the result line "
+            "you uploaded. If the file does not contain a time, the caption "
+            "does not claim one; ambiguous rows are flagged for your review "
+            "rather than guessed.",
+        ),
+        (
+            "What files can we upload?",
+            "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
+            "exported result files (HY3, SDIF, SportSystems), plus entry "
+            "lists and heat sheets. The engine parses the file into "
+            "structured results before it writes a single word.",
+        ),
+        (
+            "How does it learn our club brand?",
+            "It reads your club website, social profiles and brand "
+            "guidelines once, then locks your palette, fonts, logo and tone "
+            "onto every card. Set up once, reuse forever, and your data is "
+            "never used to re-train a shared model.",
+        ),
+        (
+            "What can it produce from one upload?",
+            "Posting-ready story cards, feed graphics, athlete spotlights, "
+            "meet recaps and branded motion reels. Every name, time and "
+            "place is sized for the formats your club actually posts.",
+        ),
+        (
+            "Which sports does it work for?",
+            "Swimming is the first wedge, but the engine is sport-agnostic "
+            "by design: athletics, rugby, netball, rowing and more run "
+            "through the same ingest, detect, rank, brand and generate "
+            "pipeline.",
+        ),
+        (
+            "Is our athlete data kept private?",
+            "Yes. Athlete and result data stays on the deployment you "
+            "control and is never sold; content featuring minors never "
+            "auto-publishes. You can audit exactly what is stored on the "
+            "privacy page.",
+        ),
+    ]
+    faq_rows = "".join(
+        (
+            '<details class="mh-faq-item">'
+            '<summary class="mh-faq-q">'
+            f'<span class="mh-faq-q-text">{_h(q)}</span>'
+            '<span class="mh-faq-icon" aria-hidden="true"></span>'
+            "</summary>"
+            '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
+            f"<p>{_h(a)}</p>"
+            "</div></div>"
+            "</details>"
+        )
+        for q, a in faq_items
+    )
+    return (
+        '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
+        '<div class="mh-section-eyebrow-strip mh-reveal">'
+        '<span class="label">Common questions</span></div>'
+        + _reveal_lines(
+            ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
+            cls="mh-faq-title",
+            el_id="mh-faq-h",
+        )
+        + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
+        + "</section>"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Signed-in home — the content-creation workspace.
+#
+# These build the lean dashboard a pinned, ready organisation sees instead of
+# the marketing landing page: a quick-action grid to the working surfaces, and
+# the org's own recent runs to pick back up. Both reuse the Create-page tile
+# language (`.mh-template`) so the signed-in chrome stays one coherent system,
+# and both are read-only — the recent-runs query degrades to an empty-state
+# nudge on any DB failure rather than 500-ing the home page.
+# --------------------------------------------------------------------------- #
+def _home_signed_in_quick_actions_html() -> str:
+    """Quick-action grid: jump straight to the surfaces a returning club uses."""
+
+    def _icon(paths: str) -> str:
+        return (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
+            f'aria-hidden="true">{paths}</svg>'
+        )
+
+    def _tile(endpoint: str, icon: str, title: str, desc: str, cta: str) -> str:
+        return (
+            f'<a href="{url_for(endpoint)}" class="mh-template mh-glow-border">'
+            f'<div class="mh-template-icon">{icon}</div>'
+            '<div style="display:flex;align-items:center;gap:10px;'
+            'flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+            f'<h3 style="margin:0">{_h(title)}</h3></div>'
+            f"<p>{_h(desc)}</p>"
+            f'<span class="mh-template-cta">{_h(cta)}</span>'
+            "</a>"
+        )
+
+    tiles = (
+        _tile(
+            "make_page",
+            _icon(
+                '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+                '<polyline points="14 2 14 8 20 8"/>'
+                '<line x1="12" y1="18" x2="12" y2="12"/>'
+                '<line x1="9" y1="15" x2="15" y2="15"/>'
+            ),
+            "Create new content",
+            "Upload a results file, paste a brief, or describe a moment — the "
+            "engine drafts the captions, graphics and reels.",
+            "Start creating",
+        )
+        + _tile(
+            "season_timeline_page",
+            _icon(
+                '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>'
+                '<polyline points="17 6 23 6 23 12"/>'
+            ),
+            "My Season",
+            "Every meet you've processed on one timeline, with the moments "
+            "detected and the recap ready to make.",
+            "Open timeline",
+        )
+        + _tile(
+            "media_library_page",
+            _icon(
+                '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'
+                '<circle cx="8.5" cy="8.5" r="1.5"/>'
+                '<polyline points="21 15 16 10 5 21"/>'
+            ),
+            "Media library",
+            "Your athlete and team photography, ready to drop into cards, "
+            "spotlights and reels.",
+            "Open library",
+        )
+        + _tile(
+            "organisation_page",
+            _icon(
+                '<circle cx="12" cy="8" r="7"/>'
+                '<polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>'
+            ),
+            "Brand & profile",
+            "Tune the palette, logo, fonts and voice every card is locked to.",
+            "Edit profile",
+        )
+        + _tile(
+            "activity_page",
+            _icon('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
+            "All activity",
+            "Every run for this organisation, with status, matched swims and a "
+            "link back into each review.",
+            "View activity",
+        )
+        + _tile(
+            "help_page",
+            _icon(
+                '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>'
+                '<path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'
+            ),
+            "Help & how it works",
+            "The pipeline, the formats and the questions clubs ask first — the "
+            "product tour, any time you need it.",
+            "Open help",
+        )
+    )
+    return (
+        '<section class="mh-section">'
+        '<div class="mh-section-eyebrow-strip mh-reveal">'
+        '<span class="label">Your workspace</span></div>'
+        + _reveal_lines(["What would you like", 'to <em class="editorial">make</em>?'])
+        + f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+        + "</section>"
+    )
+
+
+def _home_signed_in_recent_html(profile_id: str) -> str:
+    """The org's own latest runs (newest 6) as review-linked tiles, or an
+    empty-state nudge when there are none yet (or the runs DB is unreachable)."""
+    rows = []
+    try:
+        conn = _db()
+        try:
+            rows = conn.execute(
+                "SELECT id, created_at, status, meet_name, our_swims, "
+                "COALESCE(n_achievements, 0) AS n_ach, file_name "
+                "FROM runs WHERE profile_id = ? "
+                "ORDER BY created_at DESC LIMIT 6",
+                (profile_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("home: recent-runs query failed: %s", e)
+        rows = []
+
+    if rows:
+        badge_for = {"done": "good", "running": "info", "queued": "info", "error": "bad"}
+        tiles = ""
+        for r in rows:
+            title = r["meet_name"] or r["file_name"] or r["id"]
+            started = (r["created_at"] or "")[:19]
+            started_iso = (started.replace(" ", "T") + "Z") if started else ""
+            n_ach = int(r["n_ach"] or 0)
+            n_match = int(r["our_swims"] or 0)
+            sub = (
+                f'{n_ach} moment{"" if n_ach == 1 else "s"} detected '
+                f"&middot; {n_match} matched"
+            )
+            time_html = (
+                f' &middot; <time class="mh-rel" datetime="{_h(started_iso)}">'
+                f"{_h(started)}</time>"
+                if started
+                else ""
+            )
+            tiles += (
+                f'<a href="{url_for("review", run_id=r["id"])}" '
+                'class="mh-template mh-glow-border">'
+                '<div style="display:flex;align-items:center;gap:10px;'
+                'flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(title)}</h3>'
+                f'<span class="tag {badge_for.get(r["status"], "")}">{_h(r["status"])}</span>'
+                "</div>"
+                f"<p>{sub}{time_html}</p>"
+                '<span class="mh-template-cta">Open review</span>'
+                "</a>"
+            )
+        inner = f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
+    else:
+        inner = (
+            '<p class="mh-reveal" style="color:var(--ink-dim);max-width:60ch">'
+            "No runs yet for this organisation. Upload a results file or "
+            "describe a moment, and your recent work will collect here — each "
+            "with a one-click link back into the review.</p>"
+            '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
+            f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
+            "Create your first piece &rarr;</a>"
+            "</div>"
+        )
+    return (
+        '<section class="mh-section">'
+        '<div class="mh-section-eyebrow-strip mh-reveal">'
+        '<span class="label">Recent activity</span></div>'
+        + _reveal_lines(["Pick up where you", '<em class="editorial">left off</em>.'])
+        + inner
+        + "</section>"
+    )
+
+
 def create_app() -> Flask:
     # Fail-fast env validation (security/secrets-and-config): production
     # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
@@ -15136,164 +15565,11 @@ def create_app() -> Flask:
             f"{word_cycle_js}"
         )
 
-        # --- UI 1.3 — Inline media thumbnails in a display headline. ---
-        # Samara-style: a large statement sentence with four *real* sample
-        # outputs inlined — the results sheet a club uploads, then the story
-        # card, feed graphic and reel the engine returns. The thumbnails are
-        # first-party SVGs served from /static/samples (no external fetch);
-        # they mirror the same facts/formats as the larger sample row below,
-        # so the band reads as a one-line proof of the whole pipeline.
-        def _inline_thumb(filename: str, kind: str, alt: str) -> str:
-            src = url_for("static", filename="samples/" + filename)
-            return (
-                f'<span class="mh-inline-thumb-wrap mh-inline-thumb-wrap--{kind}">'
-                f'<img class="mh-inline-thumb mh-inline-thumb--{kind}" '
-                f'src="{src}" width="144" height="200" '
-                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
-                "</span>"
-            )
-
-        pipeline_html = (
-            '<section class="mh-pipeline" aria-labelledby="mh-pipeline-h">'
-            '<div class="mh-section-eyebrow-strip"><span class="label">Input &rarr; output</span></div>'
-            '<h2 id="mh-pipeline-h" class="mh-pipeline-headline">'
-            "From a results sheet "
-            + _inline_thumb(
-                "results-sheet.svg", "results", "Event 14, 100m freestyle finishing times"
-            )
-            + " to a story "
-            + _inline_thumb("story-card.svg", "story", "Tom Davies, personal best, 52.41")
-            + ", a feed graphic "
-            + _inline_thumb("feed-graphic.svg", "feed", "Top three, county finals podium")
-            + " and a reel "
-            + _inline_thumb("reel.svg", "reel", "Match-day highlights, 15-second cut")
-            + "."
-            "</h2>"
-            '<p class="mh-pipeline-sub">One upload, four posting-ready formats. '
-            "Every name, time and place comes straight from the file you "
-            "uploaded. Nothing is invented, and nothing posts without you.</p>"
-            "</section>"
-        )
-
-        # --- Engine showcase (UI 1.2, rebuilt) — the "what the engine does"
-        # section now *shows* what MediaHub produces instead of describing it.
-        # Each tile frames a real, deterministic sample output rendered by
-        # web/sample_graphics.py: a story card, a meet reel, a feed graphic,
-        # the detected-&-ranked intelligence read-out, the brand-kit
-        # application and the moment taxonomy. They are first-party inline
-        # SVG (no external fetch) that consume the live brand tokens and
-        # self-hosted fonts, so they mirror the real Playwright/Remotion
-        # output a first-time visitor would get from their own meet file.
-        # The grid + tilt + reveal infrastructure (Umbrel-style bento, U.16
-        # tilt) carries over; the heading reuses the U.5 scroll-reveal helper.
-        bento_html = (
-            '<section class="mh-section" id="mh-ch-engine">'
-            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">What the engine does</span></div>'
-            + _reveal_lines(
-                [
-                    "A results sheet in.",
-                    'A <em class="editorial">weekend</em> of content out.',
-                ]
-            )
-            + '<div class="mh-bento mh-reveal-group">'
-            # Story card — the 2×2 showpiece (Tom Davies / 52.41 carries
-            # through from the looping product demo for one coherent story).
-            + '<div class="mh-bento-tile feature is-story">'
-            + _sample_graphics.story_card_svg()
-            + "</div>"
-            # Meet reel poster frame.
-            + '<div class="mh-bento-tile is-reel">'
-            + _sample_graphics.reel_poster_svg()
-            + "</div>"
-            # Feed graphic — top-three finals podium.
-            + '<div class="mh-bento-tile is-feed">'
-            + _sample_graphics.feed_graphic_svg()
-            + "</div>"
-            # Detected & ranked — the intelligence read-out (wide).
-            + '<div class="mh-bento-tile wide is-rank">'
-            + _sample_graphics.detected_ranked_svg()
-            + "</div>"
-            # Your brand, applied.
-            + '<div class="mh-bento-tile is-brand">'
-            + _sample_graphics.brand_kit_svg()
-            + "</div>"
-            # Moments we detect — the taxonomy.
-            + '<div class="mh-bento-tile is-moments">'
-            + _sample_graphics.moments_svg()
-            + "</div>"
-            + "</div>"
-            + '<p class="mh-bento-caption">Real sample output — every name, '
-            "time and place comes from the file you upload, set in your club’s "
-            "palette and type. Nothing is invented.</p>"
-            "</section>"
-        )
-
-        # --- Made for — three audience cards. Shown to everyone since the
-        # product story doesn't change between fresh visitors and pinned
-        # tenants; this is the "who it's for" reassurance block.
-        audience_html = (
-            '<section class="mh-section" id="mh-ch-audience">'
-            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Made for</span></div>'
-            + _reveal_lines(
-                [
-                    "Built for the people who",
-                    'already <em class="editorial">post the results</em>.',
-                ]
-            )
-            + '<div class="mh-audience-row mh-reveal-group">'
-            '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
-            '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
-            '<h3 class="mh-audience-title">Club committees</h3>'
-            '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
-            "</div>"
-            '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="12" y2="9"/><circle cx="12" cy="14" r="8"/></svg></span>'
-            '<span class="mh-audience-role">Coach · Performance · Selection</span>'
-            '<h3 class="mh-audience-title">Coaches</h3>'
-            '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts, surfaced before you finish your coffee.</p>'
-            "</div>"
-            '<div class="mh-audience" data-mh-tilt>'
-            '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
-            '<span class="mh-audience-role">Society · University · Team</span>'
-            '<h3 class="mh-audience-title">University teams</h3>'
-            '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures, all in your colours, with the right tone for an Instagram feed.</p>'
-            "</div>"
-            "</div>"
-            "</section>"
-        )
-
-        # --- Promise / what we don't do. Lane-yellow left-stripe trust
-        # panel. Particularly important because the AI is doing the
-        # generation; the panel makes it explicit that you keep approval.
-        promise_html = (
-            '<section class="mh-section" id="mh-ch-promise">'
-            '<div class="mh-promise">'
-            + _reveal_lines(
-                ["Human in the loop,", "<em>by design</em>."],
-                cls="mh-promise-title",
-            )
-            + '<p class="mh-promise-lede mh-reveal">'
-            "MediaHub is an intelligence layer, not an auto-poster. Every "
-            "piece of content stops at a review queue you control."
-            "</p>"
-            '<ul class="mh-promise-list mh-reveal-group">'
-            '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
-            '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            "<div><b>Source-grounded captions</b><span>Every claim links back to the parsed result. No invented times, no invented places.</span></div></li>"
-            '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
-            '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't auto-post</b><span>MediaHub never posts to your social channels. You approve, then export or download and post it yourself.</span></div></li>"
-            '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
-            '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>"
-            "</ul>"
-            "</div>"
-            "</section>"
-        )
+        # The product-story explainer sections (input→output headline, the
+        # "what the engine does" bento, the "made for" audience cards, the
+        # human-in-the-loop promise and the FAQ) are built by the module-level
+        # `_home_*` helpers above. The signed-OUT landing page assembles them
+        # below; the signed-IN home omits them (they live on the Help page).
 
         # --- Final CTA strip before the footer. Two variants based on
         # whether the user has a pinned org. Picks up the masthead lane-
@@ -15335,17 +15611,35 @@ def create_app() -> Flask:
                 "</section>"
             )
 
-        # U.8 — animated how-it-works pipeline diagram. Placed explicitly in
-        # the return below (hero -> diagram -> "see it work" demo -> inline-
-        # thumbnail headline), so the diagram is the hero's first visual.
-        # `pipeline_html` here is just the UI 1.3 inline-thumbnail headline
-        # built above.
+        # ================================================================ #
+        # Signed-in home — a content-creation workspace, not a sales page.
+        #
+        # A returning club doesn't need "what the engine does" pitched back at
+        # it every visit; it needs to get to work. So the pinned-org home is a
+        # lean dashboard: the "Ready to file" hero, a quick-action grid to the
+        # surfaces they actually use, and their own recent runs to pick back
+        # up. The product-story explainer (how it works / what it does /
+        # promise / FAQ) moved to the in-app Help page, reached from the
+        # account menu. Signed-OUT visitors still get the full landing page.
+        # ================================================================ #
+        if prof and prof.is_ready():
+            return _layout(
+                "Home",
+                '<div class="mh-fx mh-spotlight">'
+                + hero_html
+                + "</div>"
+                + _home_signed_in_quick_actions_html()
+                + _home_signed_in_recent_html(prof.profile_id)
+                + final_cta_html,
+                active="home",
+            )
 
+        # --- Signed-out landing page — the full product-story explainer. ---
         # UI 1.29 — sticky chaptered scroll-spy nav. Each (anchor-id, label)
-        # maps to a section id set above; _layout renders the sticky side rail
-        # and the IntersectionObserver scroll-spy wires the active state. The
-        # rail only appears on wide desktop viewports (where there is gutter
-        # room) and degrades to a plain in-page anchor list without JS.
+        # maps to a section id below; _layout renders the sticky side rail and
+        # the IntersectionObserver scroll-spy wires the active state. The rail
+        # only appears on wide desktop viewports (where there is gutter room)
+        # and degrades to a plain in-page anchor list without JS.
         home_chapters = [
             ("mh-ch-overview", "Overview"),
             ("mh-ch-how", "How it works"),
@@ -15354,93 +15648,6 @@ def create_app() -> Flask:
             ("mh-ch-promise", "Our promise"),
             ("mh-ch-start", "Get started"),
         ]
-
-        # --- UI 1.22 — FAQ accordion (Limitless / status-page inspired). ---
-        # Expandable Q&A that answers the objections a club raises before it
-        # trusts the engine. Built from native <details>/<summary> — NO
-        # JavaScript — so every row is keyboard- and screen-reader-operable
-        # even with JS disabled; the open/close motion is a pure CSS
-        # grid-template-rows transition with a +/- marker (reduced-motion
-        # gated in the stylesheet). Answers are static, trusted product copy,
-        # but routed through _h() so the pattern stays escape-safe. Sits after
-        # the "what we don't do" promise panel and before the final CTA.
-        faq_items = [
-            (
-                "Does anything post to our socials automatically?",
-                "No. MediaHub is an intelligence layer, not an auto-poster. "
-                "Every caption, graphic and reel stops at a review queue you "
-                "control. Nothing leaves this deployment without an explicit "
-                "approval click.",
-            ),
-            (
-                "Will it ever invent a time or a result?",
-                "Never. Every claim on a card is grounded in the result line "
-                "you uploaded. If the file does not contain a time, the caption "
-                "does not claim one; ambiguous rows are flagged for your review "
-                "rather than guessed.",
-            ),
-            (
-                "What files can we upload?",
-                "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
-                "exported result files (HY3, SDIF, SportSystems), plus entry "
-                "lists and heat sheets. The engine parses the file into "
-                "structured results before it writes a single word.",
-            ),
-            (
-                "How does it learn our club brand?",
-                "It reads your club website, social profiles and brand "
-                "guidelines once, then locks your palette, fonts, logo and tone "
-                "onto every card. Set up once, reuse forever, and your data is "
-                "never used to re-train a shared model.",
-            ),
-            (
-                "What can it produce from one upload?",
-                "Posting-ready story cards, feed graphics, athlete spotlights, "
-                "meet recaps and branded motion reels. Every name, time and "
-                "place is sized for the formats your club actually posts.",
-            ),
-            (
-                "Which sports does it work for?",
-                "Swimming is the first wedge, but the engine is sport-agnostic "
-                "by design: athletics, rugby, netball, rowing and more run "
-                "through the same ingest, detect, rank, brand and generate "
-                "pipeline.",
-            ),
-            (
-                "Is our athlete data kept private?",
-                "Yes. Athlete and result data stays on the deployment you "
-                "control and is never sold; content featuring minors never "
-                "auto-publishes. You can audit exactly what is stored on the "
-                "privacy page.",
-            ),
-        ]
-        faq_rows = "".join(
-            (
-                '<details class="mh-faq-item">'
-                '<summary class="mh-faq-q">'
-                f'<span class="mh-faq-q-text">{_h(q)}</span>'
-                '<span class="mh-faq-icon" aria-hidden="true"></span>'
-                "</summary>"
-                '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
-                f"<p>{_h(a)}</p>"
-                "</div></div>"
-                "</details>"
-            )
-            for q, a in faq_items
-        )
-        faq_html = (
-            '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
-            '<div class="mh-section-eyebrow-strip mh-reveal">'
-            '<span class="label">Common questions</span></div>'
-            + _reveal_lines(
-                ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
-                cls="mh-faq-title",
-                el_id="mh-faq-h",
-            )
-            + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
-            + "</section>"
-        )
-
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -15448,14 +15655,90 @@ def create_app() -> Flask:
             + "</div>"
             + _pipeline_diagram_section_html()
             + demo_section_html
-            + pipeline_html
-            + bento_html
-            + audience_html
-            + promise_html
-            + faq_html
+            + _home_io_headline_html()
+            + _home_engine_bento_html()
+            + _home_audience_html()
+            + _home_promise_html()
+            + _home_faq_html()
             + final_cta_html,
             active="home",
             chapters=home_chapters,
+        )
+
+    # ---- HELP — the product-story explainer (how it works / what it does /
+    # who it's for / promise / FAQ), moved off the signed-in home into a
+    # dedicated page reached from the account menu. The signed-in home is now a
+    # content-creation workspace, so this is where a returning club looks up
+    # "how does this actually work?". Public: a signed-out visitor sees the same
+    # explainer the landing page carries, so there's nothing to gate.
+    @app.route("/help")
+    def help_page():
+        intro = (
+            "Everything MediaHub does from a single upload — what goes in, what "
+            "comes out, and the questions clubs ask first. It's all one click "
+            "from Create whenever you need it."
+        )
+        header_html = (
+            '<section class="mh-hero" data-lane="">'
+            '<span class="mh-hero-eyebrow">Help &amp; how it works</span>'
+            '<h1>How MediaHub <em class="editorial">works</em>.</h1>'
+            f'<p class="lede">{_h(intro)}</p>'
+            '<div class="mh-hero-actions">'
+            f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
+            "Create new content &rarr;</a>"
+            f'<a class="mh-cta-secondary" href="{url_for("status_page")}">'
+            "System status</a>"
+            "</div>"
+            "</section>"
+        )
+
+        # The looping "see it work" product demo, wrapped exactly as the landing
+        # page wraps it (its non-chapter id keeps it out of any scroll-spy rail).
+        demo_section_html = (
+            '<section class="mh-section mh-reveal" id="mh-see-it-work">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">See it work</span></div>'
+            + _reveal_lines(
+                ["One result in.", 'A post you <em class="editorial">approve</em>.']
+            )
+            + _hero_product_demo()
+            + "</section>"
+        )
+
+        # Closing "still stuck?" strip — points at the operator-facing surfaces
+        # that answer the rest (live status, the privacy data inventory, roadmap).
+        closing_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">Still stuck?</span></div>'
+            + _reveal_lines(["Can't find the", '<em class="editorial">answer</em>?'])
+            + '<p class="mh-reveal" style="color:var(--ink-dim);max-width:62ch">'
+            "Check the live system status, audit exactly what's stored about your "
+            "club on the privacy page, or see what's shipping next on the roadmap."
+            "</p>"
+            '<div class="mh-hero-actions" style="margin-top:var(--sp-4)">'
+            f'<a class="btn" href="{url_for("status_page")}">System status</a>'
+            f'<a class="btn secondary" href="{url_for("privacy_page")}">'
+            "Privacy &amp; data</a>"
+            f'<a class="btn secondary" href="{url_for("research_page")}">Roadmap</a>'
+            "</div>"
+            "</section>"
+        )
+
+        return _layout(
+            "Help",
+            '<div class="mh-fx mh-spotlight">'
+            + header_html
+            + "</div>"
+            + _pipeline_diagram_section_html()
+            + demo_section_html
+            + _home_io_headline_html()
+            + _home_engine_bento_html()
+            + _home_audience_html()
+            + _home_promise_html()
+            + _home_faq_html()
+            + closing_html,
+            active="help",
         )
 
     # ---- MOBILE PARITY &mdash; operator diagnostic: is the phone as good as PC? ----
