@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `b136d3990` · Merge pull request #942 from elijahkendrick04/claude/amazing-meitner-bwq8of
+**Last updated:** 2026-06-21 · `1e845bc69` · Redraw element library into a premium, dimensional pictogram set (#940)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,7 +1215,10 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `9d0ddd757` | Fix trailing whitespace on swimmers; make podium dimensional |
 | 2026-06-21 | `e8252702d` | Route venue-backdrop picker thumbnails through the stock-thumb proxy |
+| 2026-06-21 | `fe6cdcff7` | Rebuild swimmer pictograms as tapered, jointed silhouettes |
+| 2026-06-21 | `794cbe463` | Redraw element library into a premium, dimensional pictogram set |
 | 2026-06-21 | `a5ec89a2d` | Make stock photo thumbnails render under the app CSP |
 | 2026-06-21 | `d43029fa0` | docs(1.12): mark Brand platform depth shipped in the parity map |
 | 2026-06-21 | `4f8e1c26e` | brand(1.12): theme-token hygiene + folder READMEs |
@@ -1224,7 +1227,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `15f986ab0` | brand(1.12): build 3 — brand-platform web surface + palette-file import |
 | 2026-06-21 | `0e839f0f9` | brand(1.12): build 2 — deterministic Brand Check + AI Brand Assist |
 | 2026-06-21 | `3fb49a05a` | brand(1.12): build 1 — multi-kit data model + back-compat resolver |
-| 2026-06-21 | `3777659bb` | charts(1.11): ruff-format the web.py additions (pre-commit hygiene) |
-| 2026-06-21 | `7980c0787` | charts(1.11): refresh the folder README for the I1–I5 uplift |
-| 2026-06-21 | `659c040ed` | charts(1.11): I5 — grounded, postable chart captions (graphic + words) |
 <!-- /ROADMAP:ACTIVITY -->
