@@ -120,6 +120,18 @@ def _home(application, *, pinned: bool = False) -> str:
         return resp.get_data(as_text=True)
 
 
+def _help(application, *, pinned: bool = False) -> str:
+    """The Help page — where the product-story explainer (incl. the FAQ) now
+    lives after the signed-in home became a content-creation workspace."""
+    with application.test_client() as c:
+        if pinned:
+            with c.session_transaction() as s:
+                s["active_profile_id"] = "test-org"
+        resp = c.get("/help")
+        assert resp.status_code == 200, f"GET /help -> {resp.status_code}"
+        return resp.get_data(as_text=True)
+
+
 def _theme_css(application) -> str:
     """Fetch the stylesheet *as served* — proves the rules ship, not just that
     they sit in the source file."""
@@ -180,13 +192,20 @@ class TestFaqOnPage:
         assert 'aria-labelledby="mh-faq-h"' in body
         assert 'id="mh-faq-h"' in body
 
-    def test_section_present_when_pinned(self, app):
-        # The FAQ is product story, not session state — it must show for a
-        # returning, pinned organisation too.
-        body = _home(app, pinned=True)
-        assert "Test Org" in body, "pinned hero variant did not run"
+    def test_section_present_on_help_page(self, app):
+        # The FAQ is product-story explainer. It moved off the signed-in home
+        # (now a content-creation workspace) onto the Help page, reached from
+        # the account menu — it must still render there in full.
+        body = _help(app, pinned=True)
         assert '<section class="mh-section mh-faq"' in body
         assert _faq_section(body).count('<details class="mh-faq-item">') == 7
+
+    def test_section_absent_from_signed_in_home(self, app):
+        # A returning, pinned organisation gets the workspace home, not the
+        # pitch: the FAQ (and the rest of the explainer) is no longer there.
+        body = _home(app, pinned=True)
+        assert "Test Org" in body, "pinned hero variant did not run"
+        assert '<section class="mh-section mh-faq"' not in body
 
     def test_eyebrow_and_editorial_headline(self, app):
         sec = _faq_section(_home(app))
