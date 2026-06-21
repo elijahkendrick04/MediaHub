@@ -48,6 +48,8 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | **Asking a question** about your own results ("when did Ella last PB?") | `src/mediahub/club_qa/` |
 | **Photo / name permission** per athlete (consent) | `src/mediahub/safeguarding/` |
 | The **club records** book | `src/mediahub/club_records/` |
+| Your data as **browsable tables** (athletes, results, records) | `src/mediahub/data_hub/` |
+| **Making lots at once** ("a certificate for every PB swimmer") — still reviewed | `src/mediahub/bulk/` |
 | **Qualifying times** ("made Counties!") | `src/mediahub/standards/` + `data/standards/` |
 | Watching a **live meet** during a gala | `src/mediahub/results_fetch/live_watch.py` |
 | Watching the **server's own logs** for trouble (and safe auto-fixes) | `src/mediahub/log_sentinel/` |

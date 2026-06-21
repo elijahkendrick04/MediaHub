@@ -209,6 +209,18 @@ except ImportError:
     _load_voice_profile = None
     _save_voice_profile = None
 
+# 1.13: Data hub + bulk generation. Optional feature surface; routes self-disable
+# (honest "feature unavailable") if the packages can't import.
+try:
+    from mediahub import bulk as _data_hub_bulk
+    from mediahub import data_hub as _data_hub
+
+    _data_hub_ok = True
+except ImportError:
+    _data_hub_ok = False
+    _data_hub = None
+    _data_hub_bulk = None
+
 # V9: "Why this card?" explainer.
 # _build_card_explanation requires an AI provider and surfaces an honest
 # "AI unavailable: configure a provider" message when none is configured —
@@ -24739,6 +24751,18 @@ Relay team broke club record"></textarea>
             "from the meets MediaHub has processed, with the meets it used cited.</p>"
             f'<a class="btn secondary" href="{url_for("club_qa_console")}">Open Ask the data</a>'
             "</div>"
+            + (
+                '<div class="card">'
+                '<h3 style="margin-top:0">Data hub</h3>'
+                '<p class="dim" style="font-size:13px">Browse your athletes, results and '
+                "records as tables, import a spreadsheet, add calculated columns, and "
+                "bulk-make content (e.g. a certificate for every PB swimmer) &mdash; each "
+                "one queued for your review.</p>"
+                f'<a class="btn secondary" href="{url_for("data_hub_page")}">Open the data hub</a>'
+                "</div>"
+                if _data_hub_ok
+                else ""
+            )
         )
 
     def _render_settings_account_section() -> str:
@@ -45351,6 +45375,396 @@ voice, and queues them for one-click approval.</p>
         # This route stays only as a redirect so old links/bookmarks resolve.
         return redirect(url_for("settings_section", section="clubdata"))
 
+    # ---- 1.13: Data hub + bulk generation --------------------------------
+
+    _DH_IMPORT_EXTS = {".csv", ".xlsx", ".tsv"}
+    _DH_MAX_UPLOAD = 12 * 1024 * 1024  # 12 MB — plenty for a club spreadsheet
+
+    def _dh_unavailable_page():
+        return _layout(
+            "Data hub",
+            '<div class="card"><h2>Data hub unavailable</h2>'
+            '<p class="dim">This feature isn\'t enabled on this deployment.</p></div>',
+            active="settings",
+        )
+
+    def _dh_resolve(pid, table_id):
+        """Resolve a table_id to (DataTable | None). Canonical first, then org."""
+        from mediahub.data_hub import store as _dh_store
+        from mediahub.data_hub import tables as _dh_tables
+
+        canon = _dh_tables.get_canonical_table(pid, table_id, runs_dir=RUNS_DIR)
+        if canon is not None:
+            return canon
+        return _dh_store.get_org_table(pid, table_id)
+
+    @app.route("/data-hub")
+    def data_hub_page():
+        if not _data_hub_ok:
+            return _dh_unavailable_page()
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Data hub", _PW_NO_ORG, active="settings")
+        from mediahub.bulk import store as _bulk_store
+        from mediahub.data_hub import store as _dh_store
+        from mediahub.data_hub import tables as _dh_tables
+        from mediahub.web import data_hub_ui as _ui
+
+        canonical = _dh_tables.list_canonical_tables(pid, runs_dir=RUNS_DIR)
+        org_tables = _dh_store.list_org_tables(pid)
+        meets = _dh_tables.meets_table(pid, runs_dir=RUNS_DIR)
+        runs = [
+            {"run_id": meets.cell(i, "run_id").display, "meet": meets.cell(i, "meet").display}
+            for i in range(meets.row_count)
+        ]
+        jobs = _bulk_store.list_jobs(pid)
+        msg = ""
+        if request.args.get("msg"):
+            msg = f'<div class="card" style="border-color:var(--mh-success)"><p>{_h(request.args.get("msg"))}</p></div>'
+        if request.args.get("err"):
+            msg = f'<div class="card" style="border-color:var(--mh-error)"><p>{_h(request.args.get("err"))}</p></div>'
+        body = msg + _ui.render_index(
+            canonical=canonical,
+            org_tables=org_tables,
+            runs=runs,
+            jobs=jobs,
+            connectors=[],
+        )
+        return _layout("Data hub", body, active="settings")
+
+    @app.route("/data-hub/table/<table_id>")
+    def data_hub_table(table_id):
+        if not _data_hub_ok:
+            return _dh_unavailable_page()
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Data hub", _PW_NO_ORG, active="settings")
+        from mediahub.web import data_hub_ui as _ui
+
+        table = _dh_resolve(pid, table_id)
+        if table is None:
+            return _layout(
+                "Data hub",
+                '<div class="card"><h2>Table not found</h2>'
+                f'<p class="dim"><a href="{url_for("data_hub_page")}">Back to the data hub</a></p></div>',
+                active="settings",
+            ), 404
+        sort = (request.args.get("sort") or "").strip()
+        direction = "desc" if request.args.get("dir") == "desc" else "asc"
+        query = (request.args.get("q") or "").strip()
+        grid = _ui.render_grid(table, sort=sort, direction=direction, query=query)
+        toolbar = _ui.render_toolbar(table, query=query)
+
+        extras = ""
+        if table.editable:  # org tables: add-calculated-column + delete
+            extras = _dh_org_table_controls(table)
+        back = f'<p style="margin:12px 0"><a class="btn secondary" href="{url_for("data_hub_page")}">&larr; Data hub</a></p>'
+        body = f'{back}<h1 style="margin:.2em 0">{_h(table.title)}</h1>{toolbar}{grid}{extras}'
+        return _layout(f"Data hub — {table.title}", body, active="settings")
+
+    def _dh_org_table_controls(table) -> str:
+        from mediahub.data_hub import derive as _derive
+
+        col_opts = "".join(
+            f'<option value="{_h(c.key)}">{_h(c.title)}</option>' for c in table.columns
+        )
+        deriv_opts = "".join(
+            f'<option value="{_h(d["id"])}">{_h(d["title"])} — {_h(d["description"])}</option>'
+            for d in _derive.list_derivations()
+        )
+        derive_url = url_for("api_data_hub_derive", table_id=table.table_id)
+        delete_url = url_for("api_data_hub_delete", table_id=table.table_id)
+        return (
+            '<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Add a calculated column</h3>'
+            '<p class="dim" style="font-size:13px">A formula computed from other columns. The maths is '
+            "exact; the AI can only suggest a formula for you to confirm.</p>"
+            f'<form method="post" action="{derive_url}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+            f'<input name="output_title" placeholder="New column name" required style="padding:6px">'
+            f'<select name="derivation_id" style="padding:6px">{deriv_opts}</select>'
+            f'<select name="col1" style="padding:6px"><option value="">Column…</option>{col_opts}</select>'
+            f'<select name="col2" style="padding:6px"><option value="">2nd column (if needed)…</option>{col_opts}</select>'
+            '<button class="btn" type="submit">Add column</button></form></div>'
+            '<div class="card" style="margin-top:12px;border-color:var(--mh-error)">'
+            f'<form method="post" action="{delete_url}" onsubmit="return confirm(\'Delete this table?\')">'
+            '<button class="btn secondary" type="submit">Delete this table</button></form></div>'
+        )
+
+    @app.route("/api/data-hub/tables")
+    def api_data_hub_tables():
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        from mediahub.data_hub import store as _dh_store
+        from mediahub.data_hub import tables as _dh_tables
+
+        return jsonify(
+            {
+                "canonical": _dh_tables.list_canonical_tables(pid, runs_dir=RUNS_DIR),
+                "org": _dh_store.list_org_tables(pid),
+            }
+        )
+
+    @app.route("/api/data-hub/import", methods=["POST"])
+    def api_data_hub_import():
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _phase_w_org()
+        if not pid:
+            return redirect(url_for("data_hub_page", err="Sign in and pick an organisation first."))
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return redirect(url_for("data_hub_page", err="No file chosen."))
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in _DH_IMPORT_EXTS:
+            return redirect(url_for("data_hub_page", err="Upload a .csv or .xlsx file."))
+        data = f.read(_DH_MAX_UPLOAD + 1)
+        if len(data) > _DH_MAX_UPLOAD:
+            return redirect(url_for("data_hub_page", err="That file is too large (max 12 MB)."))
+        if not data:
+            return redirect(url_for("data_hub_page", err="That file was empty."))
+        from mediahub.data_hub import store as _dh_store
+        from mediahub.data_hub.portability import import_bytes
+
+        result = import_bytes(data, f.filename)
+        if result.table is None:
+            reason = result.warnings[0].message if result.warnings else "Could not read that file."
+            return redirect(url_for("data_hub_page", err=reason))
+        tid = _dh_store.create_table(pid, result.table.title, result.table.columns)
+        for row in result.table.rows:
+            _dh_store.upsert_row(pid, tid, row)
+        return redirect(url_for("data_hub_table", table_id=tid))
+
+    @app.route("/data-hub/export/<table_id>")
+    def data_hub_export(table_id):
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        table = _dh_resolve(pid, table_id)
+        if table is None:
+            return jsonify({"error": "Table not found."}), 404
+        fmt = (request.args.get("fmt") or "csv").lower()
+        from mediahub.data_hub.portability import export_csv, export_xlsx
+
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", table.title or "table").strip("_") or "table"
+        if fmt == "xlsx":
+            try:
+                payload = export_xlsx(table)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 503
+            return Response(
+                payload,
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{safe_name}.xlsx"'},
+            )
+        return Response(
+            export_csv(table),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'},
+        )
+
+    @app.route("/api/data-hub/table/<table_id>/derive", methods=["POST"])
+    def api_data_hub_derive(table_id):
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        from mediahub.data_hub import derive as _derive
+        from mediahub.data_hub import store as _dh_store
+
+        table = _dh_store.get_org_table(pid, table_id)
+        if table is None:
+            return jsonify({"error": "Editable table not found."}), 404
+
+        is_json = (request.content_type or "").lower().startswith("application/json")
+        body = request.get_json(silent=True) or {} if is_json else {}
+        derivation_id = (
+            body.get("derivation_id") or request.form.get("derivation_id") or ""
+        ).strip()
+        output_title = (body.get("output_title") or request.form.get("output_title") or "").strip()
+        deriv = _derive.get_derivation(derivation_id)
+        if deriv is None:
+            return jsonify({"error": f"Unknown derivation: {derivation_id}"}), 400
+
+        if is_json and isinstance(body.get("params"), dict):
+            params = body["params"]
+        else:  # map the generic form fields onto the derivation's declared params
+            col1 = (request.form.get("col1") or "").strip()
+            col2 = (request.form.get("col2") or "").strip()
+            params = {}
+            specials = {
+                "sep": request.form.get("sep", " "),
+                "ref_year": request.form.get("ref_year", ""),
+            }
+            ordered = [p for p in deriv.params if p not in ("sep", "ref_year")]
+            for i, p in enumerate(ordered):
+                if p == "columns":
+                    params[p] = [c for c in (col1, col2) if c]
+                else:
+                    params[p] = col1 if i == 0 else col2
+            if "ref_year" in deriv.params and specials["ref_year"]:
+                params["ref_year"] = specials["ref_year"]
+            if "sep" in deriv.params:
+                params["sep"] = specials["sep"]
+
+        output_key = re.sub(r"[^a-z0-9]+", "_", output_title.lower()).strip("_") or "calc"
+        try:
+            _derive.apply_derivation(
+                table, output_key, output_title or output_key, derivation_id, params
+            )
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 400
+        _dh_store.set_columns(pid, table_id, table.columns)
+        row_ids = _dh_store.row_ids_for(table)
+        for rid, row in zip(row_ids, table.rows):
+            _dh_store.set_cell(pid, table_id, rid, output_key, row[output_key])
+        if is_json:
+            return jsonify({"ok": True, "column": output_key})
+        return redirect(url_for("data_hub_table", table_id=table_id))
+
+    @app.route("/api/data-hub/suggest-derivation", methods=["POST"])
+    def api_data_hub_suggest():
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        body = request.get_json(silent=True) or {}
+        table_id = (body.get("table_id") or "").strip()
+        prompt = (body.get("prompt") or "").strip()
+        table = _dh_resolve(pid, table_id)
+        if table is None:
+            return jsonify({"error": "Table not found."}), 404
+        from mediahub.ai_core import ProviderError, ProviderNotConfigured
+        from mediahub.data_hub import derive as _derive
+
+        try:
+            suggestion = _derive.suggest_derivation(table, prompt)
+        except (ProviderNotConfigured, ProviderError) as exc:
+            return jsonify({"error": f"AI unavailable: {exc}"}), 503
+        return jsonify({"ok": suggestion.ok, "suggestion": suggestion.to_dict()})
+
+    @app.route("/api/data-hub/scaffold", methods=["POST"])
+    def api_data_hub_scaffold():
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        body = request.get_json(silent=True) or {}
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            return jsonify({"error": "Describe the table you want."}), 400
+        from mediahub.ai_core import ProviderError, ProviderNotConfigured
+        from mediahub.data_hub import scaffold as _scaffold
+
+        try:
+            res = _scaffold.scaffold_table(prompt)
+        except (ProviderNotConfigured, ProviderError) as exc:
+            return jsonify({"error": f"AI unavailable: {exc}"}), 503
+        return jsonify({"ok": res.ok, "scaffold": res.to_dict()})
+
+    @app.route("/api/data-hub/create-table", methods=["POST"])
+    def api_data_hub_create_table():
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        body = request.get_json(silent=True) or {}
+        title = (body.get("title") or "New table").strip()
+        from mediahub.data_hub import store as _dh_store
+        from mediahub.data_hub.models import DataColumn
+
+        cols = []
+        for c in body.get("columns", []):
+            if isinstance(c, dict) and c.get("title"):
+                cols.append(
+                    DataColumn.from_dict(c)
+                    if c.get("key")
+                    else DataColumn(
+                        key=re.sub(r"[^a-z0-9]+", "_", str(c["title"]).lower()).strip("_") or "col",
+                        title=str(c["title"]),
+                        type=str(c.get("type", "text")),
+                        editable=True,
+                    )
+                )
+        if not cols:
+            return jsonify({"error": "Provide at least one column."}), 400
+        tid = _dh_store.create_table(pid, title, cols)
+        return jsonify(
+            {"ok": True, "table_id": tid, "url": url_for("data_hub_table", table_id=tid)}
+        )
+
+    @app.route("/api/data-hub/table/<table_id>/delete", methods=["POST"])
+    def api_data_hub_delete(table_id):
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        from mediahub.data_hub import store as _dh_store
+
+        ok = _dh_store.delete_table(pid, table_id)
+        if (request.content_type or "").lower().startswith("application/json"):
+            return jsonify({"ok": ok})
+        return redirect(
+            url_for("data_hub_page", msg="Table deleted." if ok else "Nothing to delete.")
+        )
+
+    @app.route("/api/data-hub/bulk", methods=["POST"])
+    def api_data_hub_bulk():
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _phase_w_org()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        is_json = (request.content_type or "").lower().startswith("application/json")
+        body = request.get_json(silent=True) or {} if is_json else {}
+        run_id = (body.get("run_id") or request.form.get("run_id") or "").strip()
+        format_slug = (
+            body.get("format_slug") or request.form.get("format_slug") or "certificate"
+        ).strip()
+        pb_only = bool(body.get("pb_only")) if is_json else (request.form.get("pb_only") == "1")
+        row_query = {"pb_only": True} if pb_only else None
+        from mediahub.bulk import bulk_generate
+
+        try:
+            # Queue every matching card for review (render happens at approval/export).
+            job = bulk_generate(
+                pid, run_id, format_slug, row_query=row_query, runs_dir=RUNS_DIR, render=False
+            )
+        except (ValueError, PermissionError) as exc:
+            if is_json:
+                return jsonify({"error": str(exc)}), 400
+            return redirect(url_for("data_hub_page", err=str(exc)))
+        if is_json:
+            return jsonify({"ok": True, "job": job.to_dict()})
+        return redirect(
+            url_for(
+                "data_hub_page",
+                msg=f"Queued {job.n_queued} card(s) for review from {format_slug}.",
+            )
+        )
+
+    @app.route("/api/data-hub/bulk/<job_id>")
+    def api_data_hub_bulk_status(job_id):
+        if not _data_hub_ok:
+            return jsonify({"error": "Data hub unavailable."}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "Not signed in."}), 403
+        from mediahub.bulk import load_job
+
+        job = load_job(pid, job_id)
+        if job is None:
+            return jsonify({"error": "Job not found."}), 404
+        return jsonify(job.to_dict())
+
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
     @app.route("/athletes")
@@ -46372,6 +46786,16 @@ voice, and queues them for one-click approval.</p>
                     schedule_kind="daily",
                     schedule_expr="04:20",
                 )
+        # 1.13: register the bulk-generation + connector-refresh task types so
+        # large jobs / scheduled syncs can run on the in-process scheduler.
+        if _data_hub_ok:
+            try:
+                _data_hub_bulk.register_task()
+                from mediahub.data_hub.connectors import register_refresh_task
+
+                register_refresh_task()
+            except Exception:
+                pass
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)
