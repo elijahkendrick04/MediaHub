@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `ca54b5c3c` · Merge pull request #950 from elijahkendrick04/claude/epic-thompson-uef3z7
+**Last updated:** 2026-06-21 · `71bcf67d8` · Planner calendar/board + previews + analytics (roadmap 1.14) (#962)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
 - **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
 - **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
 - **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
@@ -1214,13 +1213,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
 | 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
+| 2026-06-21 | `643f25c7a` | Planning board (Kanban / whiteboard) (roadmap 1.14, build 3/4) |
+| 2026-06-21 | `4cf5e4a73` | Per-channel previews + safe zones + grid (roadmap 1.14, build 2/4) |
 | 2026-06-21 | `df7e3f1c8` | a11y: render /settings tiles as h2 (not h3) under the hero h1 |
+| 2026-06-21 | `014a40dff` | docs: refresh ENV_INVENTORY for the 1.14 calendar env usage |
 | 2026-06-21 | `ab1a5ea23` | ci: re-trigger checks (docs-only push didn't fire CI) |
+| 2026-06-21 | `b9a8e8174` | style: ruff-format the 1.14 calendar files |
 | 2026-06-21 | `c5bb6131b` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_RATE |
-| 2026-06-21 | `51619a1ad` | Globally rate-limit stock-thumb fetches (stop the retry storm) |
-| 2026-06-21 | `7f0106b0e` | Keep runs on /activity (not the signed-in home); fix ruff formatting |
-| 2026-06-21 | `98a6502e5` | test(1.13): real-render + native-xlsx regression tests; grid accessibility |
-| 2026-06-21 | `32476350a` | Make signed-in home a content workspace; move explainer to a Help page |
-| 2026-06-21 | `95e3d9988` | Redraw swimmers as articulated figures so each stroke is identifiable |
 <!-- /ROADMAP:ACTIVITY -->
