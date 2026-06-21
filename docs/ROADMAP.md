@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `9ac12b086` · Bot fix: exempt org logo routes from the org-setup gate (#859)
+**Last updated:** 2026-06-21 · `26741a9d7` · Harden data hub (1.13): real-render + native-XLSX tests; grid accessibility (#960)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1218,10 +1218,9 @@ list and the auto table below, not here.
 | 2026-06-21 | `c5bb6131b` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_RATE |
 | 2026-06-21 | `51619a1ad` | Globally rate-limit stock-thumb fetches (stop the retry storm) |
 | 2026-06-21 | `7f0106b0e` | Keep runs on /activity (not the signed-in home); fix ruff formatting |
+| 2026-06-21 | `98a6502e5` | test(1.13): real-render + native-xlsx regression tests; grid accessibility |
 | 2026-06-21 | `32476350a` | Make signed-in home a content workspace; move explainer to a Help page |
 | 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
 | 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
 | 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
-| 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
-| 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
 <!-- /ROADMAP:ACTIVITY -->
