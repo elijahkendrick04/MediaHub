@@ -16391,7 +16391,7 @@ def create_app() -> Flask:
                 '<span class="mh-tl-head-rule" aria-hidden="true"></span>'
                 "</div>"
             )
-            for (r, dt, swims, moments) in bucket["rows"]:
+            for r, dt, swims, moments in bucket["rows"]:
                 if dt:
                     day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
                     iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -16541,7 +16541,7 @@ def create_app() -> Flask:
         )
 
         range_html = (
-            f"<span>{range_str}</span><span class=\"sep\">&middot;</span>" if range_str else ""
+            f'<span>{range_str}</span><span class="sep">&middot;</span>' if range_str else ""
         )
         hero = (
             f'<section class="mh-hero" data-lane="{n_meets}" '
