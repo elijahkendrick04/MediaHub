@@ -44865,12 +44865,23 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"results": [], "query": ""})
         try:
             results = _v8_search_venue(q, limit=8)
-            return jsonify(
-                {
-                    "query": q,
-                    "results": [r.to_dict() if hasattr(r, "to_dict") else r for r in results],
-                }
-            )
+            # Venue thumbnails are cross-origin (Wikimedia/Openverse); the app CSP
+            # pins ``img-src 'self'``, so the picker can't load them directly —
+            # they'd show as broken tiles. Route each preview through the
+            # first-party stock-thumb proxy (the same allow-listed, SSRF-safe path
+            # the stock browser uses). ``direct_url`` is left raw: the import
+            # downloads it server-side, where the CSP doesn't apply.
+            from urllib.parse import quote as _quote
+
+            thumb_proxy = url_for("api_stock_thumb")
+            out = []
+            for r in results:
+                d = r.to_dict() if hasattr(r, "to_dict") else dict(r)
+                tu = str(d.get("thumb_url") or "")
+                if tu.startswith(("http://", "https://")):
+                    d["thumb_url"] = f"{thumb_proxy}?u={_quote(tu, safe='')}"
+                out.append(d)
+            return jsonify({"query": q, "results": out})
         except Exception as e:
             return jsonify({"error": str(e), "results": []}), 500
 

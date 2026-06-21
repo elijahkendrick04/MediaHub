@@ -90,6 +90,37 @@ class TestVenueSearchRoute:
         assert body["query"] == "Ponds Forge"
         assert seen["q"] == "Ponds Forge"
 
+    def test_thumb_url_routed_through_proxy_direct_url_raw(self, app, env, monkeypatch):
+        """Cross-origin previews go through the first-party proxy (CSP img-src
+        'self') while direct_url stays raw for the server-side import."""
+        from urllib.parse import parse_qs, urlparse
+
+        run_id = _seed_run(env)
+
+        def fake_search(q, limit=8):
+            return [
+                {
+                    "title": "Pool",
+                    "thumb_url": "https://upload.wikimedia.org/x/thumb.jpg",
+                    "direct_url": "https://upload.wikimedia.org/x/full.jpg",
+                    "licence": "CC BY-SA 4.0",
+                    "attribution": "Snapper",
+                }
+            ]
+
+        import mediahub.web.web as w
+
+        monkeypatch.setattr(w, "_v8_search_venue", fake_search, raising=False)
+        with app.test_client() as client:
+            _with_org(client)
+            body = client.get(f"/api/runs/{run_id}/venue-search?q=pool").get_json()
+        r = body["results"][0]
+        parsed = urlparse(r["thumb_url"])
+        assert parsed.path == "/api/stock/thumb"
+        assert parse_qs(parsed.query)["u"][0] == "https://upload.wikimedia.org/x/thumb.jpg"
+        # The import still downloads the raw full-res URL server-side.
+        assert r["direct_url"] == "https://upload.wikimedia.org/x/full.jpg"
+
 
 class TestVenueImportRoute:
     def test_rejects_non_http_url(self, app, env):
