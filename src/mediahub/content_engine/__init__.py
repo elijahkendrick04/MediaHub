@@ -22,6 +22,13 @@ The planner recommends; humans approve; generation drafts. A human always
 approves before any content leaves the system.
 """
 
+from .board import (
+    COLUMNS as BOARD_COLUMNS,
+    IdeaCard,
+    add_card,
+    board_by_column,
+    load_board,
+)
 from .calendar import (
     CalendarEntry,
     CalendarModel,
@@ -43,9 +50,14 @@ from .planner import (
 from .signals import Signal, gather_all_signals
 
 __all__ = [
+    "BOARD_COLUMNS",
     "CalendarEntry",
     "CalendarModel",
     "ContentPlan",
+    "IdeaCard",
+    "add_card",
+    "board_by_column",
+    "load_board",
     "KeyDate",
     "PlanItem",
     "Signal",

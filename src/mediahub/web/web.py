@@ -25890,6 +25890,7 @@ function mhPlanGenerate(btn) {{
     <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
     <a class="btn" href="{today_url}">Today</a>
     <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
+    <a class="btn" href="{url_for("plan_board_page")}" title="The committee idea board">Board</a>
   </div>
   <div class="mh-cal-legend">{legend}</div>
 </div>
@@ -26181,6 +26182,210 @@ document.addEventListener('click', function (e) {{
 {grid_html}
 """
         return _layout("Grid preview", body, active="create")
+
+    # ---- 1.14 — the planning board (Kanban / whiteboard) -------------------
+
+    @app.route("/api/plan/board", methods=["GET"])
+    def api_plan_board():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import board_by_column, load_board
+
+        cols = board_by_column(load_board(pid))
+        return jsonify(
+            {
+                "ok": True,
+                "board": {c: [card.to_dict() for card in cards] for c, cards in cols.items()},
+            }
+        )
+
+    @app.route("/api/plan/board/add", methods=["POST"])
+    def api_plan_board_add():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import add_card
+
+        body = request.get_json(silent=True) or {}
+        card = add_card(pid, str(body.get("title") or ""), str(body.get("note") or ""))
+        if card is None:
+            return jsonify({"error": "Give the idea a title (the board may also be full)."}), 400
+        return jsonify({"ok": True, "card": card.to_dict()})
+
+    @app.route("/api/plan/board/move", methods=["POST"])
+    def api_plan_board_move():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import move_card
+
+        body = request.get_json(silent=True) or {}
+        card = move_card(pid, str(body.get("card_id") or ""), str(body.get("column") or ""))
+        if card is None:
+            return jsonify({"error": "Unknown card or column."}), 400
+        return jsonify({"ok": True, "card": card.to_dict()})
+
+    @app.route("/api/plan/board/delete", methods=["POST"])
+    def api_plan_board_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.board import delete_card
+
+        body = request.get_json(silent=True) or {}
+        ok = delete_card(pid, str(body.get("card_id") or ""))
+        return jsonify({"ok": bool(ok)})
+
+    @app.route("/api/plan/board/promote", methods=["POST"])
+    def api_plan_board_promote():
+        """Promote an idea card into a real free-text draft and advance it to
+        'drafted'. The draft is seeded from the idea text verbatim (no AI — works
+        with no provider) as a starting point the club then edits / regenerates."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.club_platform.stub_pack_store import save_pack
+        from mediahub.content_engine.board import link_pack, load_board
+
+        body = request.get_json(silent=True) or {}
+        card_id = str(body.get("card_id") or "")
+        card = next((c for c in load_board(pid) if c.id == card_id), None)
+        if card is None:
+            return jsonify({"error": "Unknown card."}), 400
+        if card.pack_id:
+            return jsonify({"ok": True, "pack_id": card.pack_id, "already": True})
+        seed = (card.note or card.title).strip()
+        pack = save_pack(
+            "free_text",
+            {"free_text": seed},
+            [{"platform": "Draft", "caption": seed, "hashtags": [], "confidence": 0.5}],
+            profile_id=pid,
+        )
+        updated = link_pack(pid, card_id, pack["pack_id"], column="drafted")
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack["pack_id"],
+                "card": updated.to_dict() if updated else None,
+            }
+        )
+
+    @app.route("/plan/board")
+    def plan_board_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.content_engine.board import (
+            COLUMN_LABELS,
+            COLUMNS,
+            board_by_column,
+            load_board,
+        )
+
+        cols = board_by_column(load_board(pid))
+
+        def _card_html(card) -> str:
+            note = f'<p class="mh-bd-note">{_h(card.note)}</p>' if card.note else ""
+            if card.pack_id:
+                actions = (
+                    f'<a class="mh-bd-act" href="{url_for("stub_pack_view", pack_id=card.pack_id)}">Open draft &rarr;</a>'
+                    f'<a class="mh-bd-act" href="{url_for("plan_preview_page", pack_id=card.pack_id)}">Preview</a>'
+                )
+            elif card.column == "idea":
+                actions = (
+                    f'<button type="button" class="mh-bd-act" onclick="mhBoardPromote(this)" '
+                    f'data-card="{_h(card.id)}" title="Turn this idea into a free-text draft">Promote to draft</button>'
+                )
+            else:
+                actions = ""
+            return (
+                f'<div class="mh-bd-card" draggable="true" data-card="{_h(card.id)}">'
+                f'<div class="mh-bd-card-head"><strong>{_h(card.title)}</strong>'
+                f'<button type="button" class="mh-bd-del" onclick="mhBoardDelete(this)" '
+                f'data-card="{_h(card.id)}" title="Delete">&times;</button></div>'
+                f"{note}"
+                f'<div class="mh-bd-actions">{actions}</div></div>'
+            )
+
+        columns_html = ""
+        for col in COLUMNS:
+            cards = cols.get(col, [])
+            cards_html = "".join(_card_html(c) for c in cards)
+            add_form = (
+                '<div class="mh-bd-add">'
+                f'<input type="text" class="mh-bd-add-title" placeholder="New idea…" '
+                f"onkeydown=\"if(event.key==='Enter')mhBoardAdd(this)\"/>"
+                "</div>"
+                if col == "idea"
+                else ""
+            )
+            columns_html += (
+                f'<section class="mh-bd-col" data-col="{_h(col)}" '
+                f'ondragover="mhBoardOver(event)" ondragleave="mhBoardLeave(event)" ondrop="mhBoardDrop(event)">'
+                f'<h2 class="mh-bd-col-h">{_h(COLUMN_LABELS[col])}'
+                f'<span class="mh-bd-count">{len(cards)}</span></h2>'
+                f"{add_form}"
+                f'<div class="mh-bd-cards">{cards_html}</div>'
+                "</section>"
+            )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Board</span>
+  <h1>The committee <em class="editorial">whiteboard.</em></h1>
+  <p class="lede">Throw ideas on the board, drag them as they progress, and turn a good one into a
+  draft with one click &mdash; it flows straight into the previews and the calendar. Nothing posts from here.
+  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+</section>
+
+<span class="dim" id="mh-bd-status" style="font-size:12.5px;display:block;min-height:18px;margin:0 2px 8px"></span>
+<div class="mh-bd-board">{columns_html}</div>
+
+<script>
+var MH_BD = {{
+  add: {json.dumps(url_for("api_plan_board_add"))},
+  move: {json.dumps(url_for("api_plan_board_move"))},
+  del: {json.dumps(url_for("api_plan_board_delete"))},
+  promote: {json.dumps(url_for("api_plan_board_promote"))}
+}};
+function mhBoardStatus(m, warn) {{
+  var s = document.getElementById('mh-bd-status');
+  if (s) {{ s.textContent = m || ''; s.style.color = warn ? 'var(--bad)' : 'var(--ink-muted)'; }}
+}}
+function mhBoardPost(url, payload, ok) {{
+  fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}})
+    .then(function(r){{return r.json();}}).then(function(j){{
+      if (j.ok === false || j.error) {{ mhBoardStatus(j.error || 'Could not update.', true); return; }}
+      ok ? ok(j) : window.location.reload();
+    }}).catch(function(){{ mhBoardStatus('Could not update.', true); }});
+}}
+function mhBoardAdd(inp) {{
+  var t = inp.value.trim(); if (!t) return;
+  mhBoardPost(MH_BD.add, {{title: t}});
+}}
+function mhBoardDelete(btn) {{ mhBoardPost(MH_BD.del, {{card_id: btn.dataset.card}}); }}
+function mhBoardPromote(btn) {{
+  btn.disabled = true; mhBoardStatus('Creating a draft from this idea…');
+  mhBoardPost(MH_BD.promote, {{card_id: btn.dataset.card}});
+}}
+document.addEventListener('dragstart', function(e) {{
+  var card = e.target.closest ? e.target.closest('.mh-bd-card') : null;
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.card);
+  e.dataTransfer.effectAllowed = 'move';
+}});
+function mhBoardOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-bd-drop'); }}
+function mhBoardLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-bd-drop'); }}
+function mhBoardDrop(e) {{
+  e.preventDefault();
+  var col = e.currentTarget; if (col) col.classList.remove('mh-bd-drop');
+  var id = e.dataTransfer.getData('text/plain');
+  if (id && col) mhBoardPost(MH_BD.move, {{card_id: id, column: col.dataset.col}});
+}}
+</script>
+"""
+        return _layout("Plan board", body, active="create")
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",

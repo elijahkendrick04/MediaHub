@@ -24,6 +24,12 @@ MediaHub's strategy brain and its single caption writer.
   posts for you; you still post by hand on the day). Page: **Plan → Open
   calendar**. It is a read model over the same stores the planner reads, so the
   calendar and the ranked plan can never disagree.
+- **The board** (`board.py`) is the committee whiteboard: a per-org Kanban of
+  free-form idea cards in four columns (idea → drafted → approved → scheduled).
+  Drag a card as it progresses, and **promote** a good idea into a real
+  free-text draft with one click (seeded from the idea text verbatim — no AI, so
+  it works with no provider) which then flows into the previews and the
+  calendar. Page: **Plan → Board**.
 - **The writer** (`engine.py`, `director.py`) makes all the captions. It first
   *plans* the set of posts (which angle, which platform), then *writes* each
   caption. Every content type goes through here, so there isn't a separate

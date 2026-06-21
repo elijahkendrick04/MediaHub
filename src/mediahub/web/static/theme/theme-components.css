@@ -5090,3 +5090,99 @@ kbd {
 @media (max-width: 520px) {
   .mh-cp-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Planning board / Kanban whiteboard (roadmap 1.14) ─────────────────────
+   Committee brainstorm board: idea cards drag across idea→drafted→approved→
+   scheduled; an idea promotes into a real draft. Dark-first, editorial. */
+.mh-bd-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.mh-bd-col {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px 10px 14px;
+  min-height: 120px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.mh-bd-col.mh-bd-drop {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--panel));
+}
+.mh-bd-col-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.mh-bd-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  background: var(--bg);
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+.mh-bd-add { margin-bottom: 10px; }
+.mh-bd-add-title {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 7px 9px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.mh-bd-add-title:focus { border-color: var(--accent); outline: none; }
+.mh-bd-cards { display: flex; flex-direction: column; gap: 8px; }
+.mh-bd-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  cursor: grab;
+}
+.mh-bd-card:active { cursor: grabbing; }
+.mh-bd-card-head { display: flex; align-items: flex-start; gap: 6px; }
+.mh-bd-card-head strong { flex: 1; font-size: 13px; line-height: 1.3; }
+.mh-bd-del {
+  background: none;
+  border: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.mh-bd-del:hover { color: var(--bad); }
+.mh-bd-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-muted);
+}
+.mh-bd-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.mh-bd-act {
+  font-size: 11.5px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+.mh-bd-act:hover { text-decoration: underline; }
+@media (max-width: 760px) {
+  .mh-bd-board { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 460px) {
+  .mh-bd-board { grid-template-columns: 1fr; }
+}
