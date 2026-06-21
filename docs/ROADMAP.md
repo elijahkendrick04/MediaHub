@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `3f21fa1a9` · Brand platform depth (roadmap 1.12) (#937)
+**Last updated:** 2026-06-21 · `cb1e8cafc` · Merge pull request #939 from elijahkendrick04/claude/amazing-meitner-bwq8of
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `a5ec89a2d` | Make stock photo thumbnails render under the app CSP |
 | 2026-06-21 | `d43029fa0` | docs(1.12): mark Brand platform depth shipped in the parity map |
 | 2026-06-21 | `4f8e1c26e` | brand(1.12): theme-token hygiene + folder READMEs |
 | 2026-06-21 | `fa3cdcc4c` | brand(1.12): build 5 — kit-edit -> re-render sweep with diff preview |
@@ -1226,5 +1227,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `7980c0787` | charts(1.11): refresh the folder README for the I1–I5 uplift |
 | 2026-06-21 | `659c040ed` | charts(1.11): I5 — grounded, postable chart captions (graphic + words) |
 | 2026-06-21 | `ac33bb058` | charts(1.11): I4 — visual-regression lock for the renderer |
-| 2026-06-21 | `0f7a00dc4` | charts(1.11): I3 — richer deterministic chart coverage |
 <!-- /ROADMAP:ACTIVITY -->
