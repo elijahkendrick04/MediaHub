@@ -22,9 +22,16 @@ The planner recommends; humans approve; generation drafts. A human always
 approves before any content leaves the system.
 """
 
+from .calendar import (
+    CalendarEntry,
+    CalendarModel,
+    build_calendar,
+    month_matrix,
+)
 from .director import plan_content_directions
 from .engine import generate_caption, generate_content, load_brand_context
 from .inputs import load_planner_inputs, save_planner_inputs
+from .key_dates import KeyDate, key_dates_in_range, load_key_date_pack
 from .nl_inputs import interpret_planner_inputs
 from .planner import (
     ContentPlan,
@@ -36,17 +43,24 @@ from .planner import (
 from .signals import Signal, gather_all_signals
 
 __all__ = [
+    "CalendarEntry",
+    "CalendarModel",
     "ContentPlan",
+    "KeyDate",
     "PlanItem",
     "Signal",
+    "build_calendar",
     "build_content_plan",
     "gather_all_signals",
     "generate_caption",
     "generate_content",
     "interpret_planner_inputs",
+    "key_dates_in_range",
     "load_brand_context",
+    "load_key_date_pack",
     "load_latest_plan",
     "load_planner_inputs",
+    "month_matrix",
     "plan_content_directions",
     "save_plan",
     "save_planner_inputs",

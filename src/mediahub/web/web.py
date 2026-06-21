@@ -25421,6 +25421,7 @@ Relay team broke club record"></textarea>
   {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
+  <a class="btn" href="{url_for("plan_calendar_page")}" title="See planned drafts, key dates and what you've posted on a calendar">Open calendar &rarr;</a>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
 </div>
 
@@ -25642,6 +25643,327 @@ function mhPlanGenerate(btn) {{
 </script>
 """
         return _layout("Content plan", body, active="create")
+
+    # ---- 1.14 — the Plan calendar (drag-reschedule + key dates) ------------
+
+    def _org_calendar_sport(prof, fallback: str = "swimming") -> str:
+        """Resolve the sport whose key-date pack the calendar shows, from the
+        organisation type (same mapping the Plan page uses)."""
+        from mediahub.sport_profiles import list_sport_profiles
+
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        try:
+            avail = {p.sport for p in list_sport_profiles()}
+        except Exception:
+            avail = {"swimming"}
+        s = _ORG_TYPE_TO_SPORT.get(getattr(prof, "org_type", "") or "")
+        return s if s in avail else fallback
+
+    def _parse_month_param(raw: str):
+        """``YYYY-MM`` → (year, month), clamped to a sane range; today on miss."""
+        from mediahub.content_engine.calendar import today_utc
+
+        t = today_utc()
+        s = (raw or "").strip()
+        if len(s) == 7 and s[4] == "-":
+            try:
+                y, m = int(s[:4]), int(s[5:7])
+                if 1 <= m <= 12 and 1970 <= y <= 2200:
+                    return y, m
+            except ValueError:
+                pass
+        return t.year, t.month
+
+    @app.route("/api/plan/calendar", methods=["GET"])
+    def api_plan_calendar():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.calendar import build_calendar, grid_bounds
+
+        year, month = _parse_month_param(request.args.get("m", ""))
+        sport = _org_calendar_sport(_active_profile())
+        start, end = grid_bounds(year, month)
+        model = build_calendar(pid, sport, start=start, end=end)
+        out = model.to_dict()
+        out["year"], out["month"] = year, month
+        return jsonify({"ok": True, "org_id": pid, "calendar": out})
+
+    @app.route("/api/plan/calendar/schedule", methods=["POST"])
+    def api_plan_calendar_schedule():
+        """Set / move / clear the day a draft is planned to post (1.14).
+
+        Planning only — nothing is published. Re-evaluates the soft blackout
+        gate and returns a ``warning`` when the chosen day is a blackout; the
+        human decides whether to keep it (we never hard-block their own plan).
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        pack_id = str(body.get("pack_id") or "").strip()
+        # Empty / null date clears the schedule (back to the side rail).
+        new_date = body.get("date")
+        new_date = "" if new_date in (None, "") else str(new_date).strip()
+        channel = body.get("channel")
+        channel = None if channel is None else str(channel).strip()
+
+        from mediahub.club_platform.stub_pack_store import load_pack, set_planned_date
+
+        rec = load_pack(pack_id)
+        if rec is None:
+            return jsonify({"error": "Draft not found."}), 404
+        # Tenant isolation: only the owning org may reschedule its draft.
+        if (rec.get("profile_id") or "") != pid:
+            return jsonify({"error": "Draft not found."}), 404
+
+        updated = set_planned_date(pack_id, new_date, channel=channel)
+        if updated is None:
+            return jsonify({"error": "Invalid date (expected YYYY-MM-DD)."}), 400
+
+        warning = ""
+        planned = updated.get("planned_date")
+        if planned:
+            from mediahub.content_engine.inputs import load_planner_inputs
+
+            blackouts = set(load_planner_inputs(pid).get("blackout_dates") or [])
+            if planned in blackouts:
+                warning = (
+                    f"Heads up — {planned} is a blackout date you set. "
+                    "The draft is planned there anyway; move it if that wasn't intended."
+                )
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack_id,
+                "planned_date": planned,
+                "planned_channel": updated.get("planned_channel") or "",
+                "warning": warning,
+            }
+        )
+
+    @app.route("/plan/calendar")
+    def plan_calendar_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from datetime import date as _date
+
+        from mediahub.content_engine.calendar import (
+            build_calendar,
+            grid_bounds,
+            month_matrix,
+            today_utc,
+        )
+
+        prof = _active_profile()
+        sport = _org_calendar_sport(prof)
+        year, month = _parse_month_param(request.args.get("m", ""))
+        start, end = grid_bounds(year, month)
+        model = build_calendar(pid, sport, start=start, end=end)
+        by_date = model.entries_by_date()
+        weeks = month_matrix(year, month)
+        today = today_utc()
+
+        month_name = _date(year, month, 1).strftime("%B %Y")
+        prev_y, prev_m = (year - 1, 12) if month == 1 else (year, month - 1)
+        next_y, next_m = (year + 1, 1) if month == 12 else (year, month + 1)
+        prev_url = url_for("plan_calendar_page", m=f"{prev_y:04d}-{prev_m:02d}")
+        next_url = url_for("plan_calendar_page", m=f"{next_y:04d}-{next_m:02d}")
+        today_url = url_for("plan_calendar_page", m=f"{today.year:04d}-{today.month:02d}")
+
+        # Per-kind chip styling — colour-coded, escaped, deterministic.
+        _kind_style = {
+            "blackout": ("var(--bad)", "rgba(255,107,107,.12)"),
+            "key_date": ("var(--medal)", "rgba(244,213,141,.12)"),
+            "event": ("var(--lane)", "rgba(212,255,58,.12)"),
+            "anniversary": ("var(--ink-dim)", "rgba(182,178,166,.10)"),
+            "posted": ("var(--good)", "rgba(94,227,154,.12)"),
+        }
+
+        def _entry_chip(e) -> str:
+            if e.kind == "planned_draft":
+                ch = e.meta.get("channel") or ""
+                ch_html = (
+                    f'<span style="opacity:.7"> · {_h(ch)}</span>' if ch else ""
+                )
+                warn = (
+                    '<span title="On a blackout date you set" '
+                    'style="color:var(--bad);font-weight:700"> ⚠</span>'
+                    if e.meta.get("on_blackout")
+                    else ""
+                )
+                draft_url = url_for("stub_pack_view", pack_id=e.ref)
+                return (
+                    f'<div class="mh-cal-draft" draggable="true" data-pack="{_h(e.ref)}" '
+                    f'data-href="{_h(draft_url)}" '
+                    f'title="{_h(e.title)} — drag to a day to move, or to the side rail to unschedule">'
+                    f'<span class="mh-cal-draft-dot"></span>'
+                    f'<span class="mh-cal-draft-t">{_h(e.title)}{ch_html}{warn}</span></div>'
+                )
+            fg, bg = _kind_style.get(e.kind, ("var(--ink-dim)", "rgba(182,178,166,.10)"))
+            note = e.meta.get("note") or e.meta.get("venue") or ""
+            title_attr = f"{e.title}" + (f" — {note}" if note else "")
+            return (
+                f'<div class="mh-cal-chip" style="color:{fg};background:{bg}" '
+                f'title="{_h(title_attr)}">{_h(e.title)}</div>'
+            )
+
+        cells = ""
+        for week in weeks:
+            for day in week:
+                iso = day.isoformat()
+                in_month = day.month == month
+                is_today = day == today
+                chips = "".join(_entry_chip(e) for e in by_date.get(iso, []))
+                classes = "mh-cal-cell"
+                if not in_month:
+                    classes += " mh-cal-spill"
+                if is_today:
+                    classes += " mh-cal-today"
+                cells += (
+                    f'<div class="{classes}" data-date="{iso}" '
+                    f'ondragover="mhCalOver(event)" ondragleave="mhCalLeave(event)" '
+                    f'ondrop="mhCalDrop(event)">'
+                    f'<div class="mh-cal-daynum">{day.day}</div>'
+                    f'<div class="mh-cal-stack">{chips}</div></div>'
+                )
+
+        dow_head = "".join(
+            f'<div class="mh-cal-dow">{d}</div>'
+            for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        )
+
+        # Side rail — unscheduled drafts to drag onto a day.
+        def _rail_card(d: dict) -> str:
+            return (
+                f'<div class="mh-cal-draft mh-cal-rail-card" draggable="true" '
+                f'data-pack="{_h(d["pack_id"])}" '
+                f'data-href="{_h(url_for("stub_pack_view", pack_id=d["pack_id"]))}" '
+                f'title="Drag onto a day to plan when to post it">'
+                f'<span class="mh-cal-draft-dot"></span>'
+                f'<span class="mh-cal-draft-t">{_h(d["title"])}'
+                f'<span style="opacity:.6"> · {int(d["n_cards"])} card'
+                f'{"s" if int(d["n_cards"]) != 1 else ""}</span></span></div>'
+            )
+
+        rail = "".join(_rail_card(d) for d in model.unscheduled_drafts)
+        if not rail:
+            rail = (
+                '<p class="dim" style="font-size:12px;margin:6px 2px">No unscheduled drafts. '
+                f'<a href="{url_for("make_page")}" style="text-decoration:underline">Make content</a>, '
+                "then drag it onto a day to plan when to post.</p>"
+            )
+
+        legend = "".join(
+            f'<span class="mh-cal-leg"><span class="mh-cal-leg-sw" style="background:{c}"></span>{lbl}</span>'
+            for lbl, c in (
+                ("Key date", "var(--medal)"),
+                ("Event", "var(--lane)"),
+                ("Planned draft", "var(--accent)"),
+                ("Posted", "var(--good)"),
+                ("Blackout", "var(--bad)"),
+                ("Anniversary", "var(--ink-dim)"),
+            )
+        )
+
+        counts = model.counts()
+        notes_html = "".join(
+            f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>'
+            for n in model.notes
+        )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Calendar</span>
+  <h1>Your content<br><em class="editorial">on a calendar.</em></h1>
+  <p class="lede">Planned drafts, key dates, your events and what you&rsquo;ve already posted, all in one month view.
+  Drag a draft onto a day to plan when to post it &mdash; nothing publishes from here, it&rsquo;s your plan to post by hand.
+  <a href="{url_for("plan_page")}" style="text-decoration:underline">Back to the ranked plan &rarr;</a></p>
+</section>
+
+<div class="mh-cal-bar">
+  <div class="mh-cal-nav">
+    <a class="btn" href="{prev_url}" aria-label="Previous month">&larr;</a>
+    <strong class="mh-cal-month">{_h(month_name)}</strong>
+    <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
+    <a class="btn" href="{today_url}">Today</a>
+  </div>
+  <div class="mh-cal-legend">{legend}</div>
+</div>
+
+<span class="dim" id="mh-cal-status" style="font-size:12.5px;display:block;min-height:18px;margin:2px 2px 8px"></span>
+
+<div class="mh-cal-wrap">
+  <div class="mh-cal-grid-wrap">
+    <div class="mh-cal-dows">{dow_head}</div>
+    <div class="mh-cal-grid">{cells}</div>
+    <p class="dim" style="font-size:12px;margin-top:10px">
+      Showing {int(counts.get("planned_draft", 0))} planned ·
+      {int(counts.get("key_date", 0))} key date{"s" if counts.get("key_date", 0) != 1 else ""} ·
+      {int(counts.get("event", 0))} event{"s" if counts.get("event", 0) != 1 else ""} ·
+      {int(counts.get("posted", 0))} posted in this month.
+    </p>
+    {f'<ul style="margin:6px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
+  </div>
+  <aside class="mh-cal-rail" ondragover="mhCalOver(event)" ondragleave="mhCalLeave(event)" ondrop="mhCalUnschedule(event)">
+    <h2 style="margin:0 0 2px 0;font-size:15px">Unscheduled drafts</h2>
+    <p class="dim" style="font-size:11.5px;margin:0 0 8px 0">Drag onto a day to plan it. Drag a planned draft back here to unschedule.</p>
+    {rail}
+  </aside>
+</div>
+
+<script>
+var MH_CAL_SCHEDULE_URL = {json.dumps(url_for("api_plan_calendar_schedule"))};
+function mhCalOver(e) {{ e.preventDefault(); var c = e.currentTarget; if (c) c.classList.add('mh-cal-drop'); }}
+function mhCalLeave(e) {{ var c = e.currentTarget; if (c) c.classList.remove('mh-cal-drop'); }}
+function mhCalStatus(msg, warn) {{
+  var s = document.getElementById('mh-cal-status');
+  if (!s) return; s.textContent = msg || ''; s.style.color = warn ? 'var(--warn)' : 'var(--ink-muted)';
+}}
+function mhCalSchedule(packId, date) {{
+  if (!packId) return;
+  mhCalStatus(date ? 'Scheduling…' : 'Unscheduling…', false);
+  fetch(MH_CAL_SCHEDULE_URL, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ pack_id: packId, date: date || '' }})
+  }}).then(function (r) {{ return r.json(); }}).then(function (j) {{
+    if (!j.ok) {{ mhCalStatus(j.error || 'Could not update.', true); return; }}
+    if (j.warning) {{ mhCalStatus(j.warning, true); setTimeout(function(){{ window.location.reload(); }}, 1200); }}
+    else {{ window.location.reload(); }}
+  }}).catch(function () {{ mhCalStatus('Could not update.', true); }});
+}}
+document.addEventListener('dragstart', function (e) {{
+  var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
+  if (!card) return;
+  e.dataTransfer.setData('text/plain', card.dataset.pack || '');
+  e.dataTransfer.effectAllowed = 'move';
+}});
+function mhCalDrop(e) {{
+  e.preventDefault();
+  var cell = e.currentTarget; if (cell) cell.classList.remove('mh-cal-drop');
+  var packId = e.dataTransfer.getData('text/plain');
+  var date = cell ? cell.dataset.date : '';
+  if (packId && date) mhCalSchedule(packId, date);
+}}
+function mhCalUnschedule(e) {{
+  e.preventDefault();
+  var rail = e.currentTarget; if (rail) rail.classList.remove('mh-cal-drop');
+  var packId = e.dataTransfer.getData('text/plain');
+  if (packId) mhCalSchedule(packId, '');
+}}
+// A plain click on a draft chip opens the draft (drag still works).
+document.addEventListener('click', function (e) {{
+  var card = e.target.closest ? e.target.closest('.mh-cal-draft') : null;
+  if (card && card.dataset.href) window.location.href = card.dataset.href;
+}});
+</script>
+"""
+        return _layout("Plan calendar", body, active="create")
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",

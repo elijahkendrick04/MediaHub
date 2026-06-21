@@ -70,12 +70,42 @@ honest `notes`. Plans persist per org under
 `DATA_DIR/content_plans/<org>/<plan_id>.json` with a `latest.json` pointer
 (ownership-checked on load).
 
+## 3a. The calendar (roadmap 1.14)
+
+The ranked plan answers *what* to post; the **calendar** answers *when*. The
+**Plan → Open calendar** page (`/plan/calendar`) lays a month out as a grid and
+fuses six date sources, all org-scoped and read-only:
+
+| On the grid | From |
+|---|---|
+| **Planned drafts** (draggable) | draft packs carrying a `planned_date` (`stub_pack_store`) |
+| **Key dates** | curated, provenance-stamped packs per sport (`content_engine.key_dates` ← `data/key_dates/<sport>.yaml`) |
+| **Events** · **Blackouts** | operator direct inputs (`content_engine.inputs`) |
+| **Anniversaries** | the club's own past meet dates × the month |
+| **Posted** | `workflow` card states with a `posted_at` in the month |
+
+Code: `content_engine/calendar.py` (`build_calendar` → `CalendarModel`, pure +
+deterministic + URL-free) and `content_engine/key_dates.py`
+(`load_key_date_pack` / `key_dates_in_range`; every key date resolves to an
+**exact** date — a `fixed` month/day or an `nth_weekday` rule — nothing is
+approximated onto the calendar). Routes: `/plan/calendar` (month page),
+`/api/plan/calendar` (JSON), `/api/plan/calendar/schedule` (the drag mutation).
+
+**Scheduling is planning, not publishing.** A draft's `planned_date` is the day
+the club intends to post it *by hand*; MediaHub never places content on a social
+account (standing rule). Dragging a draft re-evaluates the **soft blackout
+gate** — a planned draft landing on a blackout date is flagged with a warning,
+never hard-blocked: it's the club's own plan, so the human decides. Curated key
+packs never invent a club's fixtures — precise meet dates and deadlines stay
+operator-entered. Tests: `tests/test_planner_calendar.py`.
+
 ## 4. Boundaries
 
 - **Planner ≠ publisher.** The plan only recommends; nothing publishes from it.
   Approved content is exported or downloaded for manual posting. The plan shows
   each type's default review disposition (`draft_only` / `approval_required`)
-  for context only.
+  for context only. The calendar's "schedule" is the same: a planning date the
+  club posts by, not a machine-publish trigger.
 - **Planner ≠ detector.** "Is this a PB?" and card ranking inside a run stay
   with the deterministic recognition engine; the planner reads its outputs
   (achievement counts, queue states) and never overrides them.

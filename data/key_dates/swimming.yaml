@@ -1,0 +1,63 @@
+# MediaHub key-date pack — Swimming
+#
+# Curated, provenance-stamped annual hooks a UK swimming club can build content
+# around. These are the always-on calendar markers that surface on the Plan
+# calendar (roadmap 1.14); the club's own precise fixtures, meet dates and
+# deadlines are entered by the operator on the Plan page (content_engine.inputs)
+# and are NOT invented here.
+#
+# This is shipped, read-only config — the same category as data/sport_profiles/.
+# Loaded by mediahub.content_engine.key_dates.load_key_date_pack("swimming").
+#
+# Each entry resolves to an EXACT date deterministically:
+#   rule.type: fixed         → month + day
+#   rule.type: nth_weekday   → month + weekday (0=Mon … 6=Sun) + n (negative = from end)
+# kind: awareness | observance | sport | governance | season
+# Every entry carries a `source` so its date is auditable. Only dates we can
+# state with confidence ship here — honesty over volume.
+
+sport: swimming
+display_name: Swimming
+
+key_dates:
+  - name: New Year — new season
+    kind: season
+    rule: { type: fixed, month: 1, day: 1 }
+    note: "Turn-of-the-year reset — set the club's goals for the season ahead."
+    source: "Calendar (fixed 1 January)."
+
+  - name: International Women's Day
+    kind: observance
+    rule: { type: fixed, month: 3, day: 8 }
+    note: "Spotlight the club's female swimmers, coaches and committee."
+    source: "United Nations international day (un.org) — fixed 8 March."
+
+  - name: World Water Day
+    kind: awareness
+    rule: { type: fixed, month: 3, day: 22 }
+    note: "UN world day on water — a natural hook for a swimming club's voice."
+    source: "United Nations observances (un.org) — fixed 22 March."
+
+  - name: International Day of Sport for Development and Peace
+    kind: sport
+    rule: { type: fixed, month: 4, day: 6 }
+    note: "Celebrate what the club gives its community beyond the results."
+    source: "United Nations international day (un.org) — fixed 6 April."
+
+  - name: World Oceans Day
+    kind: awareness
+    rule: { type: fixed, month: 6, day: 8 }
+    note: "Open-water and environment angle for clubs with a sea/lake programme."
+    source: "United Nations World Oceans Day (un.org) — fixed 8 June."
+
+  - name: Olympic Day
+    kind: sport
+    rule: { type: fixed, month: 6, day: 23 }
+    note: "Aspirational hook — link the club's swimmers to the Olympic movement."
+    source: "International Olympic Committee Olympic Day (olympics.com) — fixed 23 June."
+
+  - name: World Drowning Prevention Day
+    kind: awareness
+    rule: { type: fixed, month: 7, day: 25 }
+    note: "Water-safety message — squarely on-mission for a swimming club."
+    source: "UN General Assembly / WHO World Drowning Prevention Day — fixed 25 July."
