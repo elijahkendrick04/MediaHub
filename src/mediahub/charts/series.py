@@ -303,6 +303,89 @@ def progression_chart(
     )
 
 
+def entries_by_stroke_chart(run_data: dict) -> Optional[ChartSpec]:
+    """Bar: how the meet's swims spread across the strokes — where the racing was."""
+    meet = run_data.get("canonical_meet") or {}
+    counts: dict[str, int] = {}
+    for r in meet.get("results") or []:
+        name = _STROKE_NAMES.get(str(r.get("stroke") or "").upper())
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if len(counts) < 2:  # one stroke isn't a distribution worth charting
+        return None
+    order = ["Free", "Back", "Breast", "Fly", "IM", "Medley"]
+    pts = tuple(
+        DataPoint(label=k, value=float(counts[k]), display=str(counts[k]), source_ref=f"stroke:{k}")
+        for k in order
+        if k in counts
+    )
+    return ChartSpec(
+        kind="bar",
+        title="Entries by stroke",
+        subtitle=str(meet.get("name") or ""),
+        series=(Series(name="Swims", points=pts, role="accent"),),
+        y_axis=Axis(title="Swims", value_format="integer"),
+        x_axis=Axis(kind="category"),
+        source_note=_SOURCE,
+        chart_id="entries_by_stroke",
+    )
+
+
+def gender_split_chart(run_data: dict) -> Optional[ChartSpec]:
+    """Donut: the meet's entries split by gender — the club's spread of competitors."""
+    meet = run_data.get("canonical_meet") or {}
+    counts = {"Boys": 0, "Girls": 0, "Mixed": 0}
+    code = {"M": "Boys", "F": "Girls", "X": "Mixed"}
+    for r in meet.get("results") or []:
+        bucket = code.get(str(r.get("gender") or "").upper())
+        if bucket:
+            counts[bucket] += 1
+    pts = tuple(
+        DataPoint(label=k, value=float(v), display=str(v), source_ref=f"gender:{k}")
+        for k, v in counts.items()
+        if v > 0
+    )
+    if len(pts) < 2:  # a single gender isn't a split
+        return None
+    return ChartSpec(
+        kind="donut",
+        title="Entries by gender",
+        subtitle=str(meet.get("name") or ""),
+        series=(Series(points=pts),),
+        y_axis=Axis(value_format="integer"),
+        source_note=_SOURCE,
+        chart_id="gender_split",
+    )
+
+
+def finals_by_swimmer_chart(agg: MeetAggregates, *, top: int = 10) -> Optional[ChartSpec]:
+    """Bar: finals reached by swimmer — the story of a finals meet."""
+    if not agg.finals_by_swimmer:
+        return None
+    rows = sorted(agg.finals_by_swimmer.items(), key=lambda kv: (-kv[1], kv[0]))[:top]
+    lead = rows[0][1] if rows else 0
+    pts = tuple(
+        DataPoint(
+            label=name,
+            value=float(n),
+            display=str(n),
+            source_ref=f"finals:{name}",
+            emphasis=(n == lead and lead > 0),
+        )
+        for name, n in rows
+    )
+    return ChartSpec(
+        kind="bar",
+        title="Finals reached",
+        subtitle=_meet_sub(agg),
+        series=(Series(name="Finals", points=pts, role="accent"),),
+        y_axis=Axis(title="Finals", value_format="integer"),
+        x_axis=Axis(kind="category"),
+        source_note=_SOURCE,
+        chart_id="finals_by_swimmer",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # candidate assembler
 # --------------------------------------------------------------------------- #
@@ -340,6 +423,17 @@ def build_chart_candidates(run_data: dict, *, records=None) -> list[ChartCandida
         _drop_headline(agg),
     )
     add(split_ladder_chart(run_data), "Per-50 splits for a standout swim or relay", "splits")
+    add(
+        finals_by_swimmer_chart(agg),
+        "Finals reached, by swimmer",
+        f"{agg.n_finals} finals",
+    )
+    add(
+        entries_by_stroke_chart(run_data),
+        "How the meet's swims spread across the strokes",
+        "by stroke",
+    )
+    add(gender_split_chart(run_data), "The meet's entries split by gender", "by gender")
     if records:
         add(
             club_record_board_chart(records),
@@ -448,4 +542,7 @@ __all__ = [
     "club_record_board_chart",
     "split_ladder_chart",
     "progression_chart",
+    "entries_by_stroke_chart",
+    "gender_split_chart",
+    "finals_by_swimmer_chart",
 ]

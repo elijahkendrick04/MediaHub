@@ -47,6 +47,7 @@ class MeetAggregates:
     medals_by_swimmer: dict[str, dict[str, int]] = field(
         default_factory=dict
     )  # name → {gold,silver,bronze}
+    finals_by_swimmer: dict[str, int] = field(default_factory=dict)  # name → finals reached
     biggest_drop: Optional[dict] = None  # {swimmer, event, seconds, pct, source_ref}
     most_pbs: Optional[tuple[str, int]] = None
     # fact name → list of source refs (provenance for every headline number)
@@ -131,6 +132,9 @@ def compute_aggregates(run_data: dict) -> MeetAggregates:
 
         if _any_in(atype, _FINAL_TYPES):
             agg.n_finals += 1
+            if name:
+                agg.finals_by_swimmer[name] = agg.finals_by_swimmer.get(name, 0) + 1
+            agg.sources.setdefault("finals", []).append(str(ref))
 
         if atype == "club_record":
             agg.n_club_records += 1
