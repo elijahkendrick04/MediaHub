@@ -284,7 +284,10 @@ def run_bulk(
 
     ws = WorkflowStore(_runs_dir(runs_dir))
     states = ws.load(job.run_id)
-    by_card = {_card_id_for(ra): ra for ra in (run_data.get("recognition_report", {}) or {}).get("ranked_achievements", [])}
+    by_card = {
+        _card_id_for(ra): ra
+        for ra in (run_data.get("recognition_report", {}) or {}).get("ranked_achievements", [])
+    }
 
     gen = generator or format_generator(job.format_slug)
     out_dir = _runs_dir(runs_dir) / job.run_id / "bulk" / job.job_id
@@ -302,7 +305,9 @@ def run_bulk(
 
         # Queue for review (idempotent: only create a state when none exists).
         if existing is None:
-            ws.set_status(job.run_id, item.card_id, CardStatus.QUEUE, notes=f"bulk:{job.format_slug}")
+            ws.set_status(
+                job.run_id, item.card_id, CardStatus.QUEUE, notes=f"bulk:{job.format_slug}"
+            )
 
         item.status = ITEM_QUEUED
         if render and gen is not None:
@@ -328,7 +333,9 @@ def run_bulk(
 
     job.status = JOB_DONE
     rendered_note = f"{n_rendered} artifact(s) rendered" if render else "queued for review"
-    job.message = f"{job.n_queued} queued, {job.n_failed} failed, {job.n_skipped} skipped — {rendered_note}."
+    job.message = (
+        f"{job.n_queued} queued, {job.n_failed} failed, {job.n_skipped} skipped — {rendered_note}."
+    )
     return job
 
 
@@ -349,7 +356,13 @@ def bulk_generate(
 ) -> BulkJob:
     """Plan + run a bulk job. The one-call entry point used by the route."""
     job = plan_bulk(
-        profile_id, run_id, format_slug, row_query=row_query, title=title, cap=cap, runs_dir=runs_dir
+        profile_id,
+        run_id,
+        format_slug,
+        row_query=row_query,
+        title=title,
+        cap=cap,
+        runs_dir=runs_dir,
     )
     if save:
         _store.save_job(job, jobs_dir=jobs_dir)

@@ -239,9 +239,7 @@ def records_table(profile_id: str, *, db_path: Optional[Path] = None) -> DataTab
                 "course": DataCell(rec.course, rec.course, provenance=prov),
                 "gender": DataCell(rec.gender, rec.gender, provenance=prov),
                 "age_group": DataCell(rec.age_group, rec.age_group, provenance=prov),
-                "time": DataCell(
-                    rec.time_cs, rec.time_str, provenance=prov, confidence="high"
-                ),
+                "time": DataCell(rec.time_cs, rec.time_str, provenance=prov, confidence="high"),
                 "holder": DataCell(rec.holder, rec.holder, provenance=prov),
                 "set_date": DataCell(rec.set_date or "", rec.set_date or "", provenance=prov),
                 "source": DataCell(rec.source or "", rec.source or "", provenance=prov),

@@ -99,7 +99,11 @@ def _raw(cells: dict, key: str) -> str:
 
 def _num(cells: dict, key: str) -> Optional[float]:
     c = cells.get(key)
-    if isinstance(c, DataCell) and isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
+    if (
+        isinstance(c, DataCell)
+        and isinstance(c.value, (int, float))
+        and not isinstance(c.value, bool)
+    ):
         return float(c.value)
     txt = _raw(cells, key).replace(",", "").strip()
     try:
@@ -235,14 +239,88 @@ def table_cell(row: dict, key: str) -> DataCell:
     return DataCell.from_dict(c)
 
 
-register(Derivation("full_name", "Full name", "Join a first-name and last-name column.", "text", "row", ("first", "last"), _full_name))
-register(Derivation("initials", "Initials", "Turn a name into initials (e.g. M.P.).", "text", "row", ("name",), _initials))
-register(Derivation("age_from_birth_year", "Age", "Work out an age from a birth year.", "int", "row", ("birth_year",), _age_from_birth_year))
-register(Derivation("age_group_band", "Age group", "Put an age into a 2-year band (11-12, 13-14, …).", "text", "row", ("age",), _age_group_band))
-register(Derivation("sum", "Sum", "Add several number columns together.", "number", "row", ("columns",), _sum))
-register(Derivation("difference", "Difference", "Subtract one number column from another (a − b).", "number", "row", ("a", "b"), _difference))
-register(Derivation("concat", "Joined text", "Join several columns into one text column.", "text", "row", ("columns",), _concat))
-register(Derivation("season_best", "Season best", "Each group's best value (e.g. a swimmer's fastest time).", "time", "table", ("group", "value"), _season_best))
+register(
+    Derivation(
+        "full_name",
+        "Full name",
+        "Join a first-name and last-name column.",
+        "text",
+        "row",
+        ("first", "last"),
+        _full_name,
+    )
+)
+register(
+    Derivation(
+        "initials",
+        "Initials",
+        "Turn a name into initials (e.g. M.P.).",
+        "text",
+        "row",
+        ("name",),
+        _initials,
+    )
+)
+register(
+    Derivation(
+        "age_from_birth_year",
+        "Age",
+        "Work out an age from a birth year.",
+        "int",
+        "row",
+        ("birth_year",),
+        _age_from_birth_year,
+    )
+)
+register(
+    Derivation(
+        "age_group_band",
+        "Age group",
+        "Put an age into a 2-year band (11-12, 13-14, …).",
+        "text",
+        "row",
+        ("age",),
+        _age_group_band,
+    )
+)
+register(
+    Derivation(
+        "sum", "Sum", "Add several number columns together.", "number", "row", ("columns",), _sum
+    )
+)
+register(
+    Derivation(
+        "difference",
+        "Difference",
+        "Subtract one number column from another (a − b).",
+        "number",
+        "row",
+        ("a", "b"),
+        _difference,
+    )
+)
+register(
+    Derivation(
+        "concat",
+        "Joined text",
+        "Join several columns into one text column.",
+        "text",
+        "row",
+        ("columns",),
+        _concat,
+    )
+)
+register(
+    Derivation(
+        "season_best",
+        "Season best",
+        "Each group's best value (e.g. a swimmer's fastest time).",
+        "time",
+        "table",
+        ("group", "value"),
+        _season_best,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -333,14 +411,12 @@ def suggest_derivation(table: DataTable, prompt: str) -> DerivationSuggestion:
     system = (
         "You map a club's plain-English request to ONE registered, deterministic "
         "derivation. You never compute values yourself. Reply with a single JSON "
-        "object: {\"derivation_id\": str, \"output_title\": str, \"params\": object, "
-        "\"rationale\": str}. params must reference column keys that exist. If no "
-        "derivation fits, reply {\"derivation_id\": \"\", \"reason\": str}."
+        'object: {"derivation_id": str, "output_title": str, "params": object, '
+        '"rationale": str}. params must reference column keys that exist. If no '
+        'derivation fits, reply {"derivation_id": "", "reason": str}.'
     )
     user = (
-        f"Table columns:\n{cols_desc}\n\n"
-        f"Available derivations:\n{derivs_desc}\n\n"
-        f"Request: {prompt}"
+        f"Table columns:\n{cols_desc}\n\nAvailable derivations:\n{derivs_desc}\n\nRequest: {prompt}"
     )
     reply = ask(system, user, max_tokens=400)
     obj = parse_json_object(reply)

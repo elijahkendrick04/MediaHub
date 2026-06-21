@@ -142,7 +142,9 @@ def _read_xlsx_rows(data: bytes) -> list[list[str]]:
     try:
         import openpyxl
     except ImportError as exc:  # honest error — never a silent empty import
-        raise ValueError("Reading .xlsx needs the openpyxl library, which isn't available.") from exc
+        raise ValueError(
+            "Reading .xlsx needs the openpyxl library, which isn't available."
+        ) from exc
     try:
         wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception as exc:  # noqa: BLE001 — surface the real reason to the user
@@ -227,7 +229,9 @@ def import_bytes(
                 src_to_col[src_i] = ci
         if not src_to_col:
             warnings.append(
-                DataWarning(0, "None of the columns matched this table's columns.", severity="error")
+                DataWarning(
+                    0, "None of the columns matched this table's columns.", severity="error"
+                )
             )
             return ImportResult(None, warnings)
     else:
@@ -261,9 +265,7 @@ def import_bytes(
             note = ""
             if flagged:
                 note = f"'{raw}' isn't a valid {col.type} value."
-                warnings.append(
-                    DataWarning(ri, f"{note} (column '{col.title}')", cell=raw)
-                )
+                warnings.append(DataWarning(ri, f"{note} (column '{col.title}')", cell=raw))
             cells[col.key] = DataCell(
                 value=(raw if flagged else value),
                 display=display,
@@ -275,9 +277,7 @@ def import_bytes(
         out_rows.append(cells)
 
     if not out_rows:
-        warnings.append(
-            DataWarning(0, "No data rows found under the header.", severity="error")
-        )
+        warnings.append(DataWarning(0, "No data rows found under the header.", severity="error"))
         return ImportResult(None, warnings)
 
     table = DataTable(
@@ -337,7 +337,9 @@ def export_xlsx(table: DataTable) -> bytes:
     try:
         import openpyxl
     except ImportError as exc:
-        raise ValueError("Writing .xlsx needs the openpyxl library, which isn't available.") from exc
+        raise ValueError(
+            "Writing .xlsx needs the openpyxl library, which isn't available."
+        ) from exc
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = (table.title or "Sheet")[:31]

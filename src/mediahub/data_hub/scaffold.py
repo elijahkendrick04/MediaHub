@@ -60,7 +60,7 @@ def scaffold_table(prompt: str, *, max_columns: int = 12) -> ScaffoldResult:
         "You design the COLUMNS of a simple club data table from a request. "
         "You never invent rows or data. Reply with a single JSON object: "
         '{"title": str, "columns": [{"title": str, "type": one of '
-        f"{list(COLUMN_TYPES)}, \"description\": str}}], \"rationale\": str}}. "
+        f'{list(COLUMN_TYPES)}, "description": str}}], "rationale": str}}. '
         f"Use at most {max_columns} columns. 'time' means a swim time."
     )
     reply = ask(system, f"Request: {prompt}", max_tokens=500)

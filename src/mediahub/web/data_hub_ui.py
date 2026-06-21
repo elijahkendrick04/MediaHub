@@ -47,7 +47,9 @@ def _prov_badge(cell: DataCell, *, first: bool) -> str:
     return f'<span class="dh-prov {_h(cls)}" title="{_h(Provenance.label(cls))}">{_h(Provenance.label(cls))}</span>'
 
 
-def _sort_link(table_id: str, key: str, title: str, *, sort: str, direction: str, query: str) -> str:
+def _sort_link(
+    table_id: str, key: str, title: str, *, sort: str, direction: str, query: str
+) -> str:
     next_dir = "desc" if (sort == key and direction == "asc") else "asc"
     arrow = ""
     if sort == key:
@@ -85,7 +87,9 @@ def render_grid(
             cell = cell if isinstance(cell, DataCell) else DataCell.from_dict(cell)
             frozen = " dh-frozen" if col.frozen else ""
             flag = " dh-flag" if cell.flagged else ""
-            mark = '<span class="dh-mark" title="Needs review">&#9888;</span>' if cell.flagged else ""
+            mark = (
+                '<span class="dh-mark" title="Needs review">&#9888;</span>' if cell.flagged else ""
+            )
             title_attr = f' title="{_h(cell.note)}"' if cell.note else ""
             badge = _prov_badge(cell, first=(i == 0))
             tds.append(
@@ -119,7 +123,7 @@ def render_toolbar(table: DataTable, *, query: str = "") -> str:
     )
     meta = (
         f'<span class="dh-meta">{table.row_count} rows · {len(table.columns)} columns'
-        f'{" · " + str(table.flagged_count) + " flagged" if table.flagged_count else ""}</span>'
+        f"{' · ' + str(table.flagged_count) + ' flagged' if table.flagged_count else ''}</span>"
     )
     return f'<div class="dh-toolbar">{filter_form}{exports}{meta}</div>'
 
@@ -145,11 +149,13 @@ def render_index(
             f'<a class="card" href="{href}" style="display:block;text-decoration:none">'
             f'<h3 style="margin:0 0 4px">{_h(t["title"])}</h3>'
             f'<p class="dim" style="margin:0;font-size:12px">{t["n_rows"]} rows · '
-            f'{t["n_columns"]} columns{flagged}</p></a>'
+            f"{t['n_columns']} columns{flagged}</p></a>"
         )
 
     canon_html = "".join(_table_card(t) for t in canonical) or '<p class="dim">No data yet.</p>'
-    org_html = "".join(_table_card(t) for t in org_tables) or '<p class="dim">No club tables yet.</p>'
+    org_html = (
+        "".join(_table_card(t) for t in org_tables) or '<p class="dim">No club tables yet.</p>'
+    )
 
     # Bulk launcher: pick a recent run, make a certificate for every PB swimmer.
     run_opts = "".join(
@@ -204,10 +210,10 @@ def render_index(
 
     return (
         '<section class="mh-hero"><span class="mh-hero-eyebrow">Data hub</span>'
-        "<h1 style=\"margin:.2em 0\">Your club&rsquo;s data, as tables</h1>"
+        '<h1 style="margin:.2em 0">Your club&rsquo;s data, as tables</h1>'
         '<p class="lede">Browse what MediaHub knows, keep your own tables, and make '
         "content in bulk &mdash; every value shows where it came from.</p></section>"
-        '<h2>From your meets</h2>'
+        "<h2>From your meets</h2>"
         '<div class="mh-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">'
         f"{canon_html}</div>"
         '<h2 style="margin-top:24px">Your tables</h2>'

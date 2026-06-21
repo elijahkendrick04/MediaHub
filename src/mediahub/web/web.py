@@ -45551,7 +45551,9 @@ voice, and queues them for one-click approval.</p>
 
         is_json = (request.content_type or "").lower().startswith("application/json")
         body = request.get_json(silent=True) or {} if is_json else {}
-        derivation_id = (body.get("derivation_id") or request.form.get("derivation_id") or "").strip()
+        derivation_id = (
+            body.get("derivation_id") or request.form.get("derivation_id") or ""
+        ).strip()
         output_title = (body.get("output_title") or request.form.get("output_title") or "").strip()
         deriv = _derive.get_derivation(derivation_id)
         if deriv is None:
@@ -45563,7 +45565,10 @@ voice, and queues them for one-click approval.</p>
             col1 = (request.form.get("col1") or "").strip()
             col2 = (request.form.get("col2") or "").strip()
             params = {}
-            specials = {"sep": request.form.get("sep", " "), "ref_year": request.form.get("ref_year", "")}
+            specials = {
+                "sep": request.form.get("sep", " "),
+                "ref_year": request.form.get("ref_year", ""),
+            }
             ordered = [p for p in deriv.params if p not in ("sep", "ref_year")]
             for i, p in enumerate(ordered):
                 if p == "columns":
@@ -45577,7 +45582,9 @@ voice, and queues them for one-click approval.</p>
 
         output_key = re.sub(r"[^a-z0-9]+", "_", output_title.lower()).strip("_") or "calc"
         try:
-            _derive.apply_derivation(table, output_key, output_title or output_key, derivation_id, params)
+            _derive.apply_derivation(
+                table, output_key, output_title or output_key, derivation_id, params
+            )
         except KeyError as exc:
             return jsonify({"error": str(exc)}), 400
         _dh_store.set_columns(pid, table_id, table.columns)
@@ -45645,16 +45652,22 @@ voice, and queues them for one-click approval.</p>
         cols = []
         for c in body.get("columns", []):
             if isinstance(c, dict) and c.get("title"):
-                cols.append(DataColumn.from_dict(c) if c.get("key") else DataColumn(
-                    key=re.sub(r"[^a-z0-9]+", "_", str(c["title"]).lower()).strip("_") or "col",
-                    title=str(c["title"]),
-                    type=str(c.get("type", "text")),
-                    editable=True,
-                ))
+                cols.append(
+                    DataColumn.from_dict(c)
+                    if c.get("key")
+                    else DataColumn(
+                        key=re.sub(r"[^a-z0-9]+", "_", str(c["title"]).lower()).strip("_") or "col",
+                        title=str(c["title"]),
+                        type=str(c.get("type", "text")),
+                        editable=True,
+                    )
+                )
         if not cols:
             return jsonify({"error": "Provide at least one column."}), 400
         tid = _dh_store.create_table(pid, title, cols)
-        return jsonify({"ok": True, "table_id": tid, "url": url_for("data_hub_table", table_id=tid)})
+        return jsonify(
+            {"ok": True, "table_id": tid, "url": url_for("data_hub_table", table_id=tid)}
+        )
 
     @app.route("/api/data-hub/table/<table_id>/delete", methods=["POST"])
     def api_data_hub_delete(table_id):
@@ -45668,7 +45681,9 @@ voice, and queues them for one-click approval.</p>
         ok = _dh_store.delete_table(pid, table_id)
         if (request.content_type or "").lower().startswith("application/json"):
             return jsonify({"ok": ok})
-        return redirect(url_for("data_hub_page", msg="Table deleted." if ok else "Nothing to delete."))
+        return redirect(
+            url_for("data_hub_page", msg="Table deleted." if ok else "Nothing to delete.")
+        )
 
     @app.route("/api/data-hub/bulk", methods=["POST"])
     def api_data_hub_bulk():
@@ -45680,7 +45695,9 @@ voice, and queues them for one-click approval.</p>
         is_json = (request.content_type or "").lower().startswith("application/json")
         body = request.get_json(silent=True) or {} if is_json else {}
         run_id = (body.get("run_id") or request.form.get("run_id") or "").strip()
-        format_slug = (body.get("format_slug") or request.form.get("format_slug") or "certificate").strip()
+        format_slug = (
+            body.get("format_slug") or request.form.get("format_slug") or "certificate"
+        ).strip()
         pb_only = bool(body.get("pb_only")) if is_json else (request.form.get("pb_only") == "1")
         row_query = {"pb_only": True} if pb_only else None
         from mediahub.bulk import bulk_generate

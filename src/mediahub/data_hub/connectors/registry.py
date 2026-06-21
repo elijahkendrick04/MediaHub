@@ -136,9 +136,7 @@ def _refresh_handler(params: dict) -> None:
     if not profile_id or not connector_id or not table_id:
         return
     try:
-        sync_connector(
-            profile_id, connector_id, params=conn_params, table_id=table_id
-        )
+        sync_connector(profile_id, connector_id, params=conn_params, table_id=table_id)
     except Exception:  # noqa: BLE001 — a failed refresh must not crash the scheduler
         pass
 

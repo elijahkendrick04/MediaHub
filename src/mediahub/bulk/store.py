@@ -29,14 +29,10 @@ def save_job(job: BulkJob, *, jobs_dir: Optional[Path] = None) -> None:
     base = _jobs_dir(jobs_dir)
     base.mkdir(parents=True, exist_ok=True)
     job.touch()
-    (base / f"{job.job_id}.json").write_text(
-        json.dumps(job.to_dict(), indent=2), encoding="utf-8"
-    )
+    (base / f"{job.job_id}.json").write_text(json.dumps(job.to_dict(), indent=2), encoding="utf-8")
 
 
-def load_job(
-    profile_id: str, job_id: str, *, jobs_dir: Optional[Path] = None
-) -> Optional[BulkJob]:
+def load_job(profile_id: str, job_id: str, *, jobs_dir: Optional[Path] = None) -> Optional[BulkJob]:
     path = _jobs_dir(jobs_dir) / f"{job_id}.json"
     if not path.exists():
         return None
