@@ -25889,6 +25889,7 @@ function mhPlanGenerate(btn) {{
     <strong class="mh-cal-month">{_h(month_name)}</strong>
     <a class="btn" href="{next_url}" aria-label="Next month">&rarr;</a>
     <a class="btn" href="{today_url}">Today</a>
+    <a class="btn" href="{url_for("plan_grid_page")}" title="See the planned feed as a grid">Grid preview</a>
   </div>
   <div class="mh-cal-legend">{legend}</div>
 </div>
@@ -25961,6 +25962,225 @@ document.addEventListener('click', function (e) {{
 </script>
 """
         return _layout("Plan calendar", body, active="create")
+
+    # ---- 1.14 — per-channel previews + safe zones + IG grid ----------------
+
+    def _safe_zone_overlay(fmt: dict) -> str:
+        """Dashed 'keep key content here' box inset by the platform safe zone,
+        plus shaded chrome bands. Empty for full-bleed feed formats."""
+        sz = fmt.get("safe_zone") or {}
+        t, r, b, left = (
+            float(sz.get("top", 0)),
+            float(sz.get("right", 0)),
+            float(sz.get("bottom", 0)),
+            float(sz.get("left", 0)),
+        )
+        if not (t or r or b or left):
+            return ""
+        return (
+            f'<div class="mh-cp-safe" style="top:{t * 100:.1f}%;right:{r * 100:.1f}%;'
+            f'bottom:{b * 100:.1f}%;left:{left * 100:.1f}%"><span>safe area</span></div>'
+            '<div class="mh-cp-chrome mh-cp-chrome-top" '
+            f'style="height:{t * 100:.1f}%"></div>'
+            '<div class="mh-cp-chrome mh-cp-chrome-bottom" '
+            f'style="height:{b * 100:.1f}%"></div>'
+        )
+
+    def _channel_frame_html(card: dict, pv: dict) -> str:
+        fmt = pv["format"]
+        w, h = int(fmt["width"]), int(fmt["height"])
+        cap = pv["caption"]
+        shown = _h(cap["shown"])
+        more = ""
+        if cap["truncated"]:
+            more = (
+                ' <span class="mh-cp-more">… more</span>'
+                f'<span class="mh-cp-hidden">{_h(cap["hidden"])}</span>'
+            )
+        over = (
+            f'<span class="mh-cp-bad">over the {int(pv["caption_limit"])}-char limit</span>'
+            if cap["over_limit"]
+            else ""
+        )
+        tags = pv["hashtags"]
+        tag_txt = f'{int(tags["count"])} hashtag{"s" if tags["count"] != 1 else ""}'
+        if tags["limit"] is not None:
+            tag_cls = "mh-cp-good" if tags["within"] else "mh-cp-bad"
+            tag_txt += f' <span class="{tag_cls}">/ {int(tags["limit"])} max</span>'
+        media_label = _h(str(card.get("platform") or pv["platform_name"]))
+        return (
+            '<figure class="mh-cp-card">'
+            f'<div class="mh-cp-frame" style="aspect-ratio:{w}/{h}">'
+            f'<div class="mh-cp-media"><span class="mh-cp-media-label">{media_label}</span></div>'
+            f"{_safe_zone_overlay(fmt)}"
+            f'<span class="mh-cp-ratio">{_h(fmt["aspect"])} · {w}×{h}</span>'
+            "</div>"
+            '<figcaption class="mh-cp-cap">'
+            f'<p class="mh-cp-cap-text">{shown}{more}</p>'
+            f'<p class="mh-cp-meta">{int(cap["length"])} / {int(pv["caption_limit"])} chars {over} · {tag_txt}</p>'
+            "</figcaption></figure>"
+        )
+
+    @app.route("/api/channel-preview", methods=["POST"])
+    def api_channel_preview():
+        """Compute a single card's per-platform preview (caption fold, hashtag
+        cap, safe zone) for live editor previews. Pure text/geometry rules —
+        no stored data read — but org-gated for consistency."""
+        if not _active_profile_id():
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.channel_preview import preview_card
+
+        body = request.get_json(silent=True) or {}
+        card = {
+            "caption": str(body.get("caption") or ""),
+            "hashtags": body.get("hashtags") or [],
+            "platform": body.get("platform_label") or "",
+        }
+        pv = preview_card(
+            card, str(body.get("platform") or "instagram"), format_name=body.get("format")
+        )
+        if pv is None:
+            return jsonify({"error": "Unknown platform."}), 400
+        return jsonify({"ok": True, "preview": pv})
+
+    @app.route("/plan/preview/<pack_id>")
+    def plan_preview_page(pack_id):
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.channel_preview import all_platforms, platform as _platform, preview_card
+        from mediahub.club_platform.stub_pack_store import load_pack
+
+        rec = load_pack(pack_id)
+        if rec is None or (rec.get("profile_id") or "") != pid:
+            abort(404)
+
+        spec = _platform(request.args.get("platform", "")) or all_platforms()[0]
+        fmt_name = request.args.get("format", "") or spec.default_format
+        if fmt_name not in spec.format_names():
+            fmt_name = spec.default_format
+
+        # Platform tabs (links) + format tabs (links).
+        plat_tabs = "".join(
+            f'<a class="mh-cp-tab{" active" if p.slug == spec.slug else ""}" '
+            f'href="{url_for("plan_preview_page", pack_id=pack_id, platform=p.slug)}">{_h(p.name)}</a>'
+            for p in all_platforms()
+        )
+        fmt_tabs = "".join(
+            f'<a class="mh-cp-fmt{" active" if fn == fmt_name else ""}" '
+            f'href="{url_for("plan_preview_page", pack_id=pack_id, platform=spec.slug, format=fn)}">{_h(fn)}</a>'
+            for fn in spec.format_names()
+        )
+
+        cards = rec.get("cards") or []
+        frames = ""
+        for card in cards:
+            pv = preview_card(card, spec.slug, format_name=fmt_name)
+            if pv is not None:
+                frames += _channel_frame_html(card, pv)
+        if not frames:
+            frames = '<p class="dim">This draft has no cards to preview yet.</p>'
+
+        title = _h(rec.get("title") or "Draft")
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Channel preview</span>
+  <h1>How it looks <em class="editorial">before you post.</em></h1>
+  <p class="lede">&ldquo;{title}&rdquo; the way each platform shows it &mdash; the crop, the
+  <strong>safe zone</strong> the app&rsquo;s own buttons cover, and where the caption folds behind
+  &ldquo;more&rdquo;. Nothing posts from here; copy it across by hand when you&rsquo;re happy.
+  <a href="{url_for("stub_pack_view", pack_id=pack_id)}" style="text-decoration:underline">Back to the draft &rarr;</a></p>
+</section>
+
+<div class="mh-cp-bar">
+  <div class="mh-cp-tabs">{plat_tabs}</div>
+  <div class="mh-cp-fmts">{fmt_tabs}</div>
+</div>
+<p class="dim" style="font-size:11.5px;margin:0 0 14px">{_h(spec.source)}</p>
+
+<div class="mh-cp-grid">{frames}</div>
+<script>
+document.addEventListener('click', function (e) {{
+  var more = e.target.closest ? e.target.closest('.mh-cp-more') : null;
+  if (!more) return;
+  var hidden = more.nextElementSibling;
+  if (hidden && hidden.classList.contains('mh-cp-hidden')) {{
+    hidden.classList.toggle('show');
+    more.style.display = hidden.classList.contains('show') ? 'none' : '';
+  }}
+}});
+</script>
+"""
+        return _layout("Channel preview", body, active="create")
+
+    @app.route("/plan/grid")
+    def plan_grid_page():
+        """Instagram-style grid preview of the planned feed — drafts the club has
+        scheduled (newest planned first), then unscheduled drafts."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.channel_preview import instagram_grid
+        from mediahub.club_platform.stub_pack_store import list_packs, load_pack
+
+        # Build feed cells from this org's drafts (planned ones first, by date).
+        planned: list[dict] = []
+        unplanned: list[dict] = []
+        for meta in list_packs(limit=60):
+            rec = load_pack(meta.get("pack_id", ""))
+            if rec is None or (rec.get("profile_id") or "") != pid:
+                continue
+            cell = {
+                "pack_id": rec.get("pack_id", ""),
+                "title": rec.get("title") or "Draft",
+                "planned_date": rec.get("planned_date") or "",
+                "stub_type": rec.get("stub_type") or "",
+            }
+            (planned if cell["planned_date"] else unplanned).append(cell)
+        planned.sort(key=lambda c: c["planned_date"], reverse=True)
+        cells = planned + unplanned
+
+        def _cell_html(c: dict) -> str:
+            if c.get("placeholder"):
+                return '<div class="mh-grid-cell mh-grid-empty"></div>'
+            badge = (
+                f'<span class="mh-grid-when">{_h(c["planned_date"])}</span>'
+                if c.get("planned_date")
+                else '<span class="mh-grid-when mh-grid-unplanned">unscheduled</span>'
+            )
+            return (
+                f'<a class="mh-grid-cell" href="{url_for("plan_preview_page", pack_id=c["pack_id"])}" '
+                f'title="{_h(c["title"])}">'
+                f'<span class="mh-grid-type">{_h(str(c["stub_type"]).replace("_", " "))}</span>'
+                f'<span class="mh-grid-title">{_h(c["title"])}</span>{badge}</a>'
+            )
+
+        if cells:
+            rows = instagram_grid(cells, columns=3)
+            grid_html = (
+                '<div class="mh-grid">'
+                + "".join(_cell_html(c) for row in rows for c in row)
+                + "</div>"
+            )
+        else:
+            grid_html = (
+                '<div class="card" style="text-align:center;padding:40px 24px">'
+                '<h2 style="margin:0 0 6px">No posts to preview yet</h2>'
+                f'<p class="dim">Make a draft, then it shows here as a feed tile. '
+                f'<a href="{url_for("make_page")}" style="text-decoration:underline">Create &rarr;</a></p></div>'
+            )
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-3);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Plan · Grid preview</span>
+  <h1>Your feed, <em class="editorial">as a grid.</em></h1>
+  <p class="lede">A quick Instagram-style look at how your planned drafts sit together &mdash;
+  scheduled posts first, newest at the top. Tap a tile to preview it per channel.
+  <a href="{url_for("plan_calendar_page")}" style="text-decoration:underline">Open the calendar &rarr;</a></p>
+</section>
+{grid_html}
+"""
+        return _layout("Grid preview", body, active="create")
 
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/download",
@@ -28692,6 +28912,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
             f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
+            f'<a class="btn secondary" href="{url_for("plan_preview_page", pack_id=pack_id)}" '
+            f'title="See this draft the way each platform shows it — crop, safe zone, caption fold">'
+            f"Preview per channel</a>"
             f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f"</div>"

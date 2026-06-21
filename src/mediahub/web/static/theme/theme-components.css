@@ -4918,3 +4918,175 @@ kbd {
   .mh-cal-rail { position: static; }
   .mh-cal-cell { min-height: 74px; }
 }
+
+/* ── Channel previews + safe zones + grid (roadmap 1.14) ───────────────────
+   Show a card the way each platform will before the club posts by hand: the
+   crop/aspect, the safe zone the app chrome covers, where the caption folds. */
+.mh-cp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.mh-cp-tabs, .mh-cp-fmts { display: flex; gap: 6px; flex-wrap: wrap; }
+.mh-cp-tab, .mh-cp-fmt {
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  color: var(--ink-dim);
+  text-decoration: none;
+  background: var(--panel);
+}
+.mh-cp-fmt { font-size: 11.5px; padding: 3px 9px; text-transform: capitalize; }
+.mh-cp-tab.active, .mh-cp-fmt.active {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 12%, var(--panel));
+}
+.mh-cp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 18px;
+}
+.mh-cp-card { margin: 0; }
+.mh-cp-frame {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.mh-cp-media {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg,
+      color-mix(in oklab, var(--accent) 16%, var(--panel)),
+      color-mix(in oklab, var(--medal) 12%, var(--bg)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mh-cp-media-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  opacity: 0.7;
+}
+.mh-cp-safe {
+  position: absolute;
+  border: 1.5px dashed color-mix(in oklab, var(--accent) 70%, white);
+  border-radius: 6px;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.mh-cp-safe span {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--accent) 70%, white);
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+  padding: 1px 5px;
+  border-radius: 0 0 5px 5px;
+}
+.mh-cp-chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: repeating-linear-gradient(45deg,
+    color-mix(in oklab, var(--bad) 22%, transparent) 0 6px,
+    transparent 6px 12px);
+  pointer-events: none;
+}
+.mh-cp-chrome-top { top: 0; }
+.mh-cp-chrome-bottom { bottom: 0; }
+.mh-cp-ratio {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--bg) 66%, transparent);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.mh-cp-cap { margin-top: 10px; }
+.mh-cp-cap-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.mh-cp-more { color: var(--ink-muted); cursor: pointer; font-weight: 600; }
+.mh-cp-hidden { display: none; color: var(--ink); }
+.mh-cp-hidden.show { display: inline; }
+.mh-cp-meta {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.mh-cp-good { color: var(--good); }
+.mh-cp-bad { color: var(--bad); font-weight: 600; }
+
+/* Instagram-style grid preview */
+.mh-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  max-width: 560px;
+}
+.mh-grid-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--ink);
+  overflow: hidden;
+  transition: border-color 0.12s ease;
+}
+.mh-grid-cell:hover { border-color: var(--accent); }
+.mh-grid-empty { background: color-mix(in oklab, var(--panel) 50%, transparent); border-style: dashed; }
+.mh-grid-type {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lane);
+}
+.mh-grid-title {
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  flex: 1;
+}
+.mh-grid-when {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.mh-grid-unplanned { color: var(--ink-muted); }
+@media (max-width: 520px) {
+  .mh-cp-grid { grid-template-columns: 1fr; }
+}
