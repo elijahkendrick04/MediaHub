@@ -5243,3 +5243,39 @@ span.mh-an-down { background: var(--warn); }
   padding: 5px 0;
   border-bottom: 1px solid var(--border);
 }
+
+/* ── Sponsor ad-variant export sets (roadmap 1.14) ─────────────────────────
+   A/B creative for a sponsor, sized to ad-platform specs. Prepared, never
+   placed — no spend automation. Reuses the .mh-cp-tab platform tabs. */
+.mh-av-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 16px;
+  align-items: start;
+}
+.mh-av-sizes { margin: 0; padding-left: 18px; }
+.mh-av-sizes li { margin: 4px 0; font-size: 13px; }
+.mh-av-variant {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mh-av-variant:last-child { border-bottom: none; }
+.mh-av-label {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--accent) 16%, var(--panel));
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+@media (max-width: 700px) {
+  .mh-av-grid { grid-template-columns: 1fr; }
+}
