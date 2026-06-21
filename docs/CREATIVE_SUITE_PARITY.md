@@ -926,6 +926,15 @@ source products as accessibility guardrails.
 
 ## 1.12 — Brand platform depth
 
+**Status: shipped (2026-06-21).** Multi-kit model (`brand/kits.py`:
+primary/sponsor/event/section/personal kits with token locks + sponsor pairing
+rules), deterministic Brand Check + AI Brand Assist (`brand/check.py`), brand
+home + multi-kit management + Adobe `.ase`/Color-JSON palette import
+(`brand/palette_file.py`), governance enforced at approval (token locks +
+group-approver rules — `workflow/governance.py`, `workflow/approvals.py`), and
+the kit-edit → re-render sweep with diff preview (`brand/resweep.py`). The
+coverage table below maps each Canva/Adobe feature to where it now lives.
+
 **What Canva/Adobe have.** Multiple brand kits (up to 100), Brand Kit Builder
 (auto-extract from website/PDF), brand templates, Brand Controls (restrict
 colours/fonts; require approval), a Brand Kit homepage (logos, templates,
