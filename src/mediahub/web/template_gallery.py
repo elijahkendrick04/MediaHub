@@ -770,7 +770,7 @@ def _card(entry: dict, *, active: str) -> str:
         when_html = (
             '<p class="mh-arch-when">'
             '<span class="mh-arch-when-label">Best for</span> '
-            f"{_e(entry['when'])}</p>"
+            f'{_e(entry["when"])}</p>'
         )
     return (
         f'<article class="{cls}" data-category="{_e(entry["category"])}">'
@@ -779,7 +779,7 @@ def _card(entry: dict, *, active: str) -> str:
         '<div class="mh-arch-head">'
         f'<h3 class="mh-arch-title">{_e(entry["title"])}</h3>'
         f'<span class="mh-arch-tag" data-cat="{_e(entry["category"])}">'
-        f"{_e(entry['category_label'])}</span>"
+        f'{_e(entry["category_label"])}</span>'
         "</div>"
         f'<code class="mh-arch-slug">{_e(entry["name"])}</code>'
         f'<p class="mh-arch-summary">{_e(entry["summary"])}</p>'
@@ -852,7 +852,9 @@ def render_gallery_body(
     cards = "".join(_card(e, active=active) for e in entries)
     grid = f'<div class="mh-arch-grid" id="mh-arch-grid">{cards}</div>'
 
-    empty = '<p class="mh-arch-empty" id="mh-arch-empty" hidden>No templates in this category.</p>'
+    empty = (
+        '<p class="mh-arch-empty" id="mh-arch-empty" hidden>' "No templates in this category.</p>"
+    )
 
     cta = (
         '<div class="mh-arch-cta">'

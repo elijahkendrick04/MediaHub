@@ -200,7 +200,8 @@ def build_trust_report(*, meet, profile, cards, pb_snapshots, standards_meta) ->
         n_hold = sum(1 for c in rep.cards if c.safe_to_post == SAFE_HOLD)
         rep.overall_confidence = "high" if n_post >= n_review + n_hold else "medium"
         rep.overall_summary = (
-            f"{n_post} ready to post, {n_review} need a quick review, {n_hold} should be held back."
+            f"{n_post} ready to post, {n_review} need a quick review, "
+            f"{n_hold} should be held back."
         )
     else:
         rep.overall_confidence = "low"

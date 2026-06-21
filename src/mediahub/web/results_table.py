@@ -233,7 +233,7 @@ def build_rows(meet: dict, history: dict[str, list[dict]], run_id: str) -> list[
                 and h.get("time_cs") is not None
                 and h.get("run_id") != run_id
             ),
-            key=lambda h: h.get("swim_date") or "",
+            key=lambda h: (h.get("swim_date") or ""),
         )
         prior_best = min((int(h["time_cs"]) for h in prior), default=None)
         prior_last = int(prior[-1]["time_cs"]) if prior else None

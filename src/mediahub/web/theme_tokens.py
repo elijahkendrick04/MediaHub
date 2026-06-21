@@ -93,7 +93,7 @@ def _load(filename: str) -> str:
     path = STATIC_THEME_DIR / filename
     if not path.is_file():
         raise FileNotFoundError(
-            f"Theme CSS file missing: {path}. Expected file in src/mediahub/web/static/theme/."
+            f"Theme CSS file missing: {path}. " f"Expected file in src/mediahub/web/static/theme/."
         )
     return path.read_text(encoding="utf-8")
 
