@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `bc3aa6d96` · Merge pull request #954 from elijahkendrick04/claude/amazing-meitner-bwq8of
+**Last updated:** 2026-06-21 · `5c9fc9c23` · Data hub + bulk personalisation (roadmap 1.13) (#949)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.13** · Phase 1 (Product) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
 - **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
 - **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
 - **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
@@ -1216,14 +1215,14 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
+| 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
 | 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
+| 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
+| 2026-06-21 | `791c7b0bc` | feat(data_hub): web grid UI, JSON API + connector framework (1.13 build 3) |
+| 2026-06-21 | `a00b5a9bf` | feat(data_hub,bulk): derived columns + AI scaffold + review-queued bulk generation (1.13 build 2) |
+| 2026-06-21 | `b43501de8` | feat(data_hub): canonical table views + editable org tables + CSV/XLSX round-trip (1.13 build 1) |
 | 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
 | 2026-06-21 | `2e1886d0e` | Make stock-thumb proxy rate-limit-robust (cache + bounded concurrency + retry) |
 | 2026-06-21 | `98b6ea4fd` | Apply ruff-format to the season view changes |
 | 2026-06-21 | `e72028415` | Redesign the My Season timeline view |
-| 2026-06-21 | `9d0ddd757` | Fix trailing whitespace on swimmers; make podium dimensional |
-| 2026-06-21 | `e8252702d` | Route venue-backdrop picker thumbnails through the stock-thumb proxy |
-| 2026-06-21 | `fe6cdcff7` | Rebuild swimmer pictograms as tapered, jointed silhouettes |
-| 2026-06-21 | `794cbe463` | Redraw element library into a premium, dimensional pictogram set |
-| 2026-06-21 | `a5ec89a2d` | Make stock photo thumbnails render under the app CSP |
 <!-- /ROADMAP:ACTIVITY -->
