@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `e567a9bfe` · Bot fix: home hero primary CTA is 'Sign up' for new users (#894)
+**Last updated:** 2026-06-21 · `9ac12b086` · Bot fix: exempt org logo routes from the org-setup gate (#859)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1224,5 +1224,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
 | 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
 | 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
-| 2026-06-21 | `791c7b0bc` | feat(data_hub): web grid UI, JSON API + connector framework (1.13 build 3) |
 <!-- /ROADMAP:ACTIVITY -->
