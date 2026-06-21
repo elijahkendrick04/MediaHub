@@ -24,6 +24,9 @@ The pieces, smallest to largest:
 * :mod:`.matting`     — video background removal, behind a provider slot (flagged).
 * :mod:`.avatars`     — opt-in, disclosed AI avatars, behind a provider slot (flagged).
 * :mod:`.broll`       — opt-in, disclosed generative b-roll, behind a provider slot (flagged).
+* :mod:`.dub`         — opt-in, disclosed lip-sync / dubbing, behind a provider slot (flagged).
+* :mod:`.object_removal` — opt-in, disclosed object removal / inpainting (flagged).
+* :mod:`.eye_contact` — opt-in eye-contact (gaze) correction — a pixel edit (flagged).
 * :mod:`.ingest`      — bring footage into the media library (consent-aware).
 * :mod:`.projects`    — per-profile persistence for saved timelines + approval state.
 

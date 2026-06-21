@@ -344,6 +344,30 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "enables it, Swim England MUST move to legal.SUBPROCESSORS (and the club "
         "DPA) before any data flows."
     ),
+    "SYNC_API_KEY": (
+        "the opt-in, disclosed lip-sync/dubbing seam (roadmap 1.6, video/dub.py). "
+        "The sync.so network integration is NOT wired in this build — dub_clip() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to sync.so and it is not yet an active Art. 28 "
+        "sub-processor. When wired and an org enables it, sync.so MUST move to "
+        "legal.SUBPROCESSORS (and the club DPA) before any data flows."
+    ),
+    "ELEVENLABS_API_KEY": (
+        "the opt-in, disclosed dubbing seam (roadmap 1.6, video/dub.py). The "
+        "ElevenLabs Dubbing integration is NOT wired in this build — dub_clip() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to ElevenLabs and it is not yet an active Art. 28 "
+        "sub-processor. When wired and an org enables it, ElevenLabs MUST move to "
+        "legal.SUBPROCESSORS (and the club DPA) before any data flows."
+    ),
+    "RASK_API_KEY": (
+        "the opt-in, disclosed lip-sync/dubbing seam (roadmap 1.6, video/dub.py). "
+        "The Rask AI network integration is NOT wired in this build — dub_clip() "
+        "honest-errors and the key is read only to report availability — so no Club "
+        "Data is transmitted to Rask and it is not yet an active Art. 28 "
+        "sub-processor. When wired and an org enables it, Rask MUST move to "
+        "legal.SUBPROCESSORS (and the club DPA) before any data flows."
+    ),
 }
 
 
