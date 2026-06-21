@@ -57,6 +57,10 @@ _ARG_FILL = {
     # it with a junk token is exactly the guarantee to pin.
     "token": "no-such-wall-token",
     "pack_id": "PACK_ID",  # replaced with the real seeded pack id at runtime
+    # 1.11: the charts SVG route carries a chart id. A foreign org must be refused
+    # by _can_access_run before any chart (which embeds athlete names) is rendered,
+    # so sweeping it with a junk id pins that guarantee.
+    "chart_id": "no-such-chart",
 }
 
 _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
