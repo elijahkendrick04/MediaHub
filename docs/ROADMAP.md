@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `b44031c97` · Merge pull request #952 from elijahkendrick04/claude/amazing-meitner-bwq8of
+**Last updated:** 2026-06-21 · `bc3aa6d96` · Merge pull request #954 from elijahkendrick04/claude/amazing-meitner-bwq8of
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
 | 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
 | 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
 | 2026-06-21 | `2e1886d0e` | Make stock-thumb proxy rate-limit-robust (cache + bounded concurrency + retry) |
@@ -1225,5 +1226,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `fe6cdcff7` | Rebuild swimmer pictograms as tapered, jointed silhouettes |
 | 2026-06-21 | `794cbe463` | Redraw element library into a premium, dimensional pictogram set |
 | 2026-06-21 | `a5ec89a2d` | Make stock photo thumbnails render under the app CSP |
-| 2026-06-21 | `d43029fa0` | docs(1.12): mark Brand platform depth shipped in the parity map |
 <!-- /ROADMAP:ACTIVITY -->
