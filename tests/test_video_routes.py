@@ -266,9 +266,12 @@ def test_studio_page_has_timeline_editor(app):
         assert b"Edit timeline" in body  # per-project editor entry point
         assert b"vstudio-modal" in body and b"vs-ed-clips" in body  # the editor sheet
         assert b"vs-ed-grade" in body and b"gradeSlider" in body  # per-clip grade sliders
-        # the editor's GET/POST URL template must be resolved (no leftover placeholder)
-        assert b"__PROJECT_TMPL__" not in body
+        assert b"vs-ed-grip" in body and b"reorderFrom" in body  # drag-to-reorder
+        assert b"vs-ed-wave" in body and b"prefetchWaveforms" in body  # waveform scrubber
+        # both editor URL templates must be resolved (no leftover placeholder)
+        assert b"__PROJECT_TMPL__" not in body and b"__PROJECT_WAVEFORM_TMPL__" not in body
         assert b"/api/video/projects/__PID__" in body  # client-side id-substitution template
+        assert b"/clip/__CIDX__/waveform" in body  # waveform URL template
 
 
 def test_timeline_editor_save_path_persists_and_reopens_approval(app):
@@ -363,6 +366,118 @@ def test_timeline_editor_identity_grade_stays_omitted(app):
         r = c.post(f"/api/video/projects/{proj.id}", json={"edl": new_edl})
         assert r.status_code == 200
         assert r.get_json()["project"]["edl"]["clips"][0]["adjust"] is None  # omitted
+
+
+def test_studio_look_options_is_valid_js_string(app):
+    """Regression: the look-picker HTML is injected into a JS string (var LOOK_OPTIONS).
+
+    Its <option> attributes are double-quoted, so the value MUST be JSON-encoded or
+    the literal quotes terminate the string and the whole studio IIFE fails to
+    parse — silently breaking upload, projects, and the entire timeline editor.
+    """
+    import json
+    import re
+
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        body = c.get("/video").get_data(as_text=True)
+        m = re.search(r'var LOOK_OPTIONS = ("(?:[^"\\]|\\.)*");', body)
+        assert m, "LOOK_OPTIONS assignment not found / not a JS string literal"
+        val = json.loads(m.group(1))  # must be a valid JS/JSON string literal
+        # the FULL options HTML must survive the encoding (a broken/truncated
+        # string would lose the closing tags) — proves the quotes were escaped.
+        assert val.count("<option") >= 2 and "</option>" in val
+
+
+def test_studio_modal_respects_hidden_attribute(app):
+    """Regression: .vstudio-modal sets display:flex, which overrode the `hidden`
+    attribute — the editor overlay then covered the page and ate every click."""
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        body = c.get("/video").get_data(as_text=True)
+        assert ".vstudio-modal[hidden]{display:none}" in body
+
+
+def _project_with_real_source(tmp_path, profile="alpha"):
+    """A project whose single clip points at a real (dummy) file on disk."""
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    src = tmp_path / "footage_src.mp4"
+    src.write_bytes(b"\x00" * 256)  # presence only; extraction is mocked
+    proj = EDL(clips=[Clip(source=str(src), in_ms=0, out_ms=3000)])
+    return get_store().save(VideoProject(id="", profile_id=profile, edl=proj))
+
+
+def test_clip_waveform_returns_peaks(app, monkeypatch):
+    """The scrubber route returns normalised peaks for a clip's source."""
+    application, tmp_path = app
+    import mediahub.video.waveform as wf
+
+    monkeypatch.setattr(wf, "extract_peaks", lambda *a, **k: [0.0, 0.5, 1.0, 0.25])
+    proj = _project_with_real_source(tmp_path)
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        r = c.get(f"/api/video/projects/{proj.id}/clip/0/waveform?buckets=120")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["ok"] and body["peaks"] == [0.0, 0.5, 1.0, 0.25]
+        assert body["buckets"] == 120 and "duration_ms" in body  # echoed clamped request
+
+
+def test_clip_waveform_bad_index_404(app, monkeypatch):
+    application, tmp_path = app
+    import mediahub.video.waveform as wf
+
+    monkeypatch.setattr(wf, "extract_peaks", lambda *a, **k: [0.0])
+    proj = _project_with_real_source(tmp_path)
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        assert c.get(f"/api/video/projects/{proj.id}/clip/9/waveform").status_code == 404
+
+
+def test_clip_waveform_missing_source_410(app):
+    """A clip whose source vanished from disk honest-errors, never a fake shape."""
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip
+    from mediahub.video.projects import VideoProject, get_store
+
+    proj = get_store().save(
+        VideoProject(
+            id="", profile_id="alpha", edl=EDL(clips=[Clip(source="/gone/x.mp4", out_ms=3000)])
+        )
+    )
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        assert c.get(f"/api/video/projects/{proj.id}/clip/0/waveform").status_code == 410
+
+
+def test_clip_waveform_foreign_profile_404(app, monkeypatch):
+    """A waveform for another profile's project is invisible (no IDOR)."""
+    application, tmp_path = app
+    import mediahub.video.waveform as wf
+
+    monkeypatch.setattr(wf, "extract_peaks", lambda *a, **k: [0.1])
+    proj = _project_with_real_source(tmp_path, profile="alpha")
+    with application.test_client() as c:
+        _pin(c, "beta")
+        assert c.get(f"/api/video/projects/{proj.id}/clip/0/waveform").status_code == 404
+
+
+def test_clip_waveform_engine_unavailable_503(app, monkeypatch):
+    application, tmp_path = app
+    import mediahub.video.waveform as wf
+
+    def boom(*a, **k):
+        raise wf.WaveformUnavailable("no ffmpeg")
+
+    monkeypatch.setattr(wf, "extract_peaks", boom)
+    proj = _project_with_real_source(tmp_path)
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        assert c.get(f"/api/video/projects/{proj.id}/clip/0/waveform").status_code == 503
 
 
 def test_reel_requires_asset_ids(app):
@@ -538,3 +653,21 @@ def test_full_flow_upload_clipmaker_render_approve_export(app):
         exp = c.get(f"/api/video/projects/{pid}/file?download=1")
         assert exp.status_code == 200
         assert exp.headers["Content-Type"].startswith("video/mp4")
+
+
+@pytest.mark.skipif(not _ffmpeg_exe(), reason="FFmpeg not available")
+def test_clip_waveform_live_real_ffmpeg(app):
+    """End-to-end: a real clip's waveform decodes to normalised peaks over the route."""
+    application, tmp_path = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        asset_id = _upload_real_clip(c, tmp_path).get_json()["asset"]["id"]
+        cm = c.post("/api/video/clip-maker", json={"asset_id": asset_id, "format": "story"})
+        pid = cm.get_json()["project_id"]
+        r = c.get(f"/api/video/projects/{pid}/clip/0/waveform?buckets=64")
+        assert r.status_code == 200, r.get_data(as_text=True)
+        body = r.get_json()
+        assert body["ok"] and len(body["peaks"]) == 64
+        assert all(0.0 <= p <= 1.0 for p in body["peaks"])  # normalised
+        assert max(body["peaks"]) > 0.5  # the 440Hz sine is plainly audible
+        assert body["duration_ms"] > 0

@@ -9914,6 +9914,7 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-enh{align-items:center}
   .vstudio-enh select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:5px 7px;font-size:12px}
   .vstudio-modal{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:90;padding:20px}
+  .vstudio-modal[hidden]{display:none}
   .vstudio-sheet{background:var(--panel,#0f0f12);border:1px solid var(--border,#26262c);border-radius:12px;width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column}
   .vstudio-sheet-head,.vstudio-sheet-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border,#26262c)}
   .vstudio-sheet-foot{border-bottom:0;border-top:1px solid var(--border,#26262c)}
@@ -9930,6 +9931,12 @@ _VIDEO_STUDIO_HTML = """
   .vs-ed-g .vs-ed-glab{min-width:62px;letter-spacing:.02em}
   .vs-ed-g input[type=range]{width:96px;accent-color:var(--accent,#22d3ee);padding:0}
   .vs-ed-g .vs-ed-gval{min-width:30px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-dim,#b8b8c0)}
+  .vs-ed-grip{cursor:grab;color:var(--ink-muted,#9a9aa3);font-size:13px;user-select:none;padding:0 2px}
+  .vs-ed-grip:active{cursor:grabbing}
+  .vs-ed-clip.vs-ed-dragging{opacity:.5;border-color:var(--accent,#22d3ee)}
+  .vs-ed-wave{flex-basis:100%;height:46px;margin-top:6px;border-radius:5px;background:#08080a;border:1px solid var(--border,#26262c);overflow:hidden}
+  .vs-ed-wave-cv{display:block;width:100%;height:46px;cursor:ew-resize;touch-action:none}
+  .vs-ed-wave-off{display:none}
 </style>
 
 <script>
@@ -9945,16 +9952,22 @@ _VIDEO_STUDIO_HTML = """
   var REEL_URL = "__REEL_URL__";
   var ENHANCE_TMPL = "__PROJECT_ENHANCE_TMPL__";
   var PROJECT_TMPL = "__PROJECT_TMPL__";
-  var LOOK_OPTIONS = "__LOOK_OPTIONS__";
+  var WAVEFORM_TMPL = "__PROJECT_WAVEFORM_TMPL__";
+  var LOOK_OPTIONS = __LOOK_OPTIONS_JS__;
   var TRANSITIONS = ['cut','fade','dissolve','wipeleft','wiperight','slideup','slidedown','smoothleft','circleopen'];
   var selectedId = null;
   var reelSet = {};
   var editorPid = null, editorEdl = null;
   var mediaRecorder = null, recChunks = [];
+  var wfCache = {};      // clip source -> {peaks, duration_ms} (reorder-safe by source)
+  var wfFailed = {};     // clip source -> true when its waveform couldn't be measured
+  var wfDrag = null;     // active waveform trim drag {i, edge}
+  var reorderFrom = null; // index being drag-reordered
 
   function $(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':String(s)); return d.innerHTML; }
   function url(tmpl, id){ return tmpl.replace('__PID__', encodeURIComponent(id)); }
+  function waveUrl(pid, idx){ return WAVEFORM_TMPL.replace('__PID__', encodeURIComponent(pid)).replace('__CIDX__', idx); }
   function fmtDur(ms){ if(!ms) return ''; var s=Math.round(ms/1000); return s+'s'; }
 
   function jpost(u, body){
@@ -10157,12 +10170,98 @@ _VIDEO_STUDIO_HTML = """
     fetch(url(PROJECT_TMPL, id), {headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
       if(!j.ok || !j.project){ alert('Could not load this clip.'); return; }
       editorEdl = j.project.edl || {clips:[]};
+      wfCache = {}; wfFailed = {};
       $('vs-ed-name').textContent = j.project.name || '';
       $('vs-ed-look').value = editorEdl.look || 'none';
       $('vs-ed-status').textContent = '';
       renderEditorRows();
+      prefetchWaveforms();
       $('vs-editor').hidden = false;
     });
+  }
+  // Fetch each clip's audio waveform ONCE at open, while the client order still
+  // matches the server's (the route is keyed by clip index). Cache by source so
+  // the strips stay correct after a client-side reorder without re-fetching.
+  function prefetchWaveforms(){
+    var clips = (editorEdl && editorEdl.clips) || [];
+    clips.forEach(function(c, i){
+      var src = c.source || ('idx'+i);
+      if(wfCache[src]) { drawWaveFor(i); return; }
+      fetch(waveUrl(editorPid, i), {headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if(j && j.ok){ wfCache[src] = {peaks: j.peaks||[], duration_ms: j.duration_ms||0}; drawWaveFor(i); }
+          else { wfFailed[src] = true; markWaveOff(i); }
+        }).catch(function(){ wfFailed[src] = true; markWaveOff(i); });
+    });
+  }
+  function markWaveOff(i){
+    var w = $('vs-ed-clips').querySelector('.vs-ed-wave[data-i="'+i+'"]');
+    if(w) w.classList.add('vs-ed-wave-off');
+  }
+  function waveEls(i){
+    var w = $('vs-ed-clips').querySelector('.vs-ed-wave[data-i="'+i+'"]');
+    return w ? {wrap:w, cv:w.querySelector('canvas')} : null;
+  }
+  function drawWaveFor(i){
+    var els = waveEls(i); var c = editorEdl.clips[i]; if(!els || !els.cv || !c) return;
+    var src = c.source || ('idx'+i);
+    if(wfFailed[src]){ markWaveOff(i); return; }  // measurement failed → keep it hidden
+    var d = wfCache[src];
+    if(!d){ return; }  // not loaded yet (prefetch fills it in)
+    els.wrap.classList.remove('vs-ed-wave-off');
+    els.wrap.setAttribute('data-dur', d.duration_ms||0);
+    paintWave(els.cv, d.peaks||[], d.duration_ms||0, c.in_ms||0, c.out_ms||0);
+  }
+  // Redraw only the trim window for clip i from the live in/out inputs (cheap;
+  // used while the number fields or the scrubber change).
+  function drawWaveWindow(i){
+    var els = waveEls(i), c = editorEdl.clips[i]; if(!els || !els.cv || !c) return;
+    var d = wfCache[c.source || ('idx'+i)]; if(!d) return;
+    var row = $('vs-ed-clips').querySelector('.vs-ed-clip[data-i="'+i+'"]'); if(!row) return;
+    var inV = parseInt(row.querySelector('.vs-ed-in').value,10)||0;
+    var outV = parseInt(row.querySelector('.vs-ed-out').value,10)||0;
+    paintWave(els.cv, d.peaks||[], d.duration_ms||0, inV, outV);
+  }
+  function paintWave(cv, peaks, durMs, inMs, outMs){
+    var ctx = cv.getContext && cv.getContext('2d'); if(!ctx) return;
+    var W = cv.width, H = cv.height, mid = H/2;
+    ctx.clearRect(0,0,W,H);
+    var n = peaks.length, bw = n ? W/n : W;
+    ctx.fillStyle = '#5b5b66';
+    for(var i=0;i<n;i++){
+      var h = Math.max(1, peaks[i]*(H-4));
+      ctx.fillRect(i*bw, mid-h/2, Math.max(1, bw-0.4), h);
+    }
+    if(durMs > 0){
+      var x0 = Math.max(0, Math.min(W, (inMs/durMs)*W));
+      var x1 = Math.max(0, Math.min(W, (outMs/durMs)*W));
+      ctx.fillStyle = 'rgba(34,211,238,.16)';
+      ctx.fillRect(x0, 0, Math.max(1, x1-x0), H);
+      ctx.fillStyle = 'rgba(34,211,238,.95)';
+      ctx.fillRect(x0, 0, 1.5, H);
+      ctx.fillRect(x1-1.5, 0, 1.5, H);
+    }
+  }
+  function waveTime(cv, clientX){
+    var r = cv.getBoundingClientRect();
+    var dur = parseInt(cv.closest('.vs-ed-wave').getAttribute('data-dur'),10)||0;
+    var x = Math.max(0, Math.min(r.width, clientX - r.left));
+    return (dur>0 && r.width>0) ? Math.round((x/r.width)*dur) : 0;
+  }
+  function setTrimEdge(i, t, edge){
+    var row = $('vs-ed-clips').querySelector('.vs-ed-clip[data-i="'+i+'"]'); if(!row) return;
+    var inEl = row.querySelector('.vs-ed-in'), outEl = row.querySelector('.vs-ed-out');
+    var inV = parseInt(inEl.value,10)||0, outV = parseInt(outEl.value,10)||0;
+    if(edge === 'in'){ inEl.value = Math.max(0, Math.min(t, outV-50)); }
+    else { outEl.value = Math.max(inV+50, t); }
+    drawWaveWindow(i);
+  }
+  function nearestEdge(i, t){
+    var row = $('vs-ed-clips').querySelector('.vs-ed-clip[data-i="'+i+'"]'); if(!row) return 'out';
+    var inV = parseInt(row.querySelector('.vs-ed-in').value,10)||0;
+    var outV = parseInt(row.querySelector('.vs-ed-out').value,10)||0;
+    return Math.abs(t-inV) <= Math.abs(t-outV) ? 'in' : 'out';
   }
   function gradeSlider(key, label, mn, mx, st, val){
     return '<label class="vs-ed-g"><span class="vs-ed-glab">'+label+'</span>'
@@ -10177,6 +10276,7 @@ _VIDEO_STUDIO_HTML = """
       var gb = (a.brightness!=null?a.brightness:0), gc = (a.contrast!=null?a.contrast:1);
       var gs = (a.saturation!=null?a.saturation:1), gw = (a.warmth!=null?a.warmth:0);
       return '<div class="vs-ed-clip" data-i="'+i+'">'
+        + '<span class="vs-ed-grip" draggable="true" data-i="'+i+'" title="Drag to reorder">&#x2630;</span>'
         + '<span class="vs-ed-num">'+(i+1)+'</span>'
         + 'in <input type="number" class="vs-ed-in" min="0" step="100" value="'+(c.in_ms||0)+'">'
         + 'out <input type="number" class="vs-ed-out" min="0" step="100" value="'+(c.out_ms||0)+'">'
@@ -10187,6 +10287,8 @@ _VIDEO_STUDIO_HTML = """
         + '<button class="btn ghost vs-ed-up" data-i="'+i+'" title="move up">&uarr;</button>'
         + '<button class="btn ghost vs-ed-down" data-i="'+i+'" title="move down">&darr;</button>'
         + '<button class="btn ghost vs-ed-del" data-i="'+i+'" title="remove">&times;</button>'
+        + '<div class="vs-ed-wave" data-i="'+i+'" data-dur="0" title="Audio waveform — click or drag an edge to trim">'
+        +   '<canvas class="vs-ed-wave-cv" width="600" height="46"></canvas></div>'
         + '<div class="vs-ed-grade" title="Per-clip colour grade (deterministic; an untouched grade renders identically)">'
         +   gradeSlider('bri', 'Brightness', -0.5, 0.5, 0.02, gb)
         +   gradeSlider('con', 'Contrast', 0.5, 1.8, 0.02, gc)
@@ -10195,6 +10297,7 @@ _VIDEO_STUDIO_HTML = """
         + '</div>'
         + '</div>';
     }).join('') || '<p class="muted">No clips.</p>';
+    for(var k=0;k<clips.length;k++){ drawWaveFor(k); }
     var cues = (editorEdl.captions && editorEdl.captions.cues) || [];
     $('vs-ed-caps').innerHTML = cues.length
       ? cues.map(function(q,i){ return '<div class="vs-ed-cue" data-i="'+i+'"><input type="text" class="vs-ed-cuetext" value="'+esc(q.text||'')+'"></div>'; }).join('')
@@ -10247,11 +10350,54 @@ _VIDEO_STUDIO_HTML = """
     else if(b.classList.contains('vs-ed-del')) removeClip(i);
   });
   $('vs-ed-clips').addEventListener('input', function(e){
-    var inp = e.target;
-    if(inp && inp.tagName === 'INPUT' && inp.type === 'range'){
+    var inp = e.target; if(!inp || inp.tagName !== 'INPUT') return;
+    if(inp.type === 'range'){
       var out = inp.parentNode.querySelector('.vs-ed-gval');
       if(out) out.textContent = (parseFloat(inp.value)||0).toFixed(2);
+    } else if(inp.classList.contains('vs-ed-in') || inp.classList.contains('vs-ed-out')){
+      // Typing a trim value live-updates that clip's waveform window.
+      var row = inp.closest('.vs-ed-clip'); if(row) drawWaveWindow(parseInt(row.getAttribute('data-i'),10));
     }
+  });
+  // Waveform scrubber: click or drag an edge of the strip to trim in/out.
+  $('vs-ed-clips').addEventListener('pointerdown', function(e){
+    var cv = e.target.closest && e.target.closest('canvas.vs-ed-wave-cv'); if(!cv) return;
+    var wrap = cv.closest('.vs-ed-wave'); var i = parseInt(wrap.getAttribute('data-i'),10);
+    if(isNaN(i) || (parseInt(wrap.getAttribute('data-dur'),10)||0) <= 0) return;
+    var t = waveTime(cv, e.clientX); var edge = nearestEdge(i, t);
+    wfDrag = {i:i, edge:edge}; setTrimEdge(i, t, edge); e.preventDefault();
+  });
+  document.addEventListener('pointermove', function(e){
+    if(!wfDrag) return;
+    var row = $('vs-ed-clips').querySelector('.vs-ed-clip[data-i="'+wfDrag.i+'"]'); if(!row) return;
+    var cv = row.querySelector('canvas.vs-ed-wave-cv'); if(!cv) return;
+    setTrimEdge(wfDrag.i, waveTime(cv, e.clientX), wfDrag.edge);
+  });
+  document.addEventListener('pointerup', function(){ wfDrag = null; });
+  // Drag-to-reorder: grab a row's grip and drop it on another row.
+  $('vs-ed-clips').addEventListener('dragstart', function(e){
+    var g = e.target.closest && e.target.closest('.vs-ed-grip'); if(!g) return;
+    reorderFrom = parseInt(g.getAttribute('data-i'),10);
+    e.dataTransfer.effectAllowed = 'move';
+    try{ e.dataTransfer.setData('text/plain', String(reorderFrom)); }catch(_e){}
+    var row = g.closest('.vs-ed-clip'); if(row) row.classList.add('vs-ed-dragging');
+  });
+  $('vs-ed-clips').addEventListener('dragover', function(e){
+    if(reorderFrom == null) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  });
+  $('vs-ed-clips').addEventListener('drop', function(e){
+    if(reorderFrom == null) return; e.preventDefault();
+    var row = e.target.closest('.vs-ed-clip'); var from = reorderFrom; reorderFrom = null;
+    if(!row){ renderEditorRows(); return; }
+    var to = parseInt(row.getAttribute('data-i'),10);
+    if(isNaN(to) || to === from){ renderEditorRows(); return; }
+    syncEditorFromDom();
+    var cl = editorEdl.clips; var moved = cl.splice(from,1)[0]; cl.splice(to,0,moved);
+    renderEditorRows();
+  });
+  $('vs-ed-clips').addEventListener('dragend', function(){
+    reorderFrom = null;
+    var d = $('vs-ed-clips').querySelector('.vs-ed-dragging'); if(d) d.classList.remove('vs-ed-dragging');
   });
   $('vs-ed-close').addEventListener('click', function(){ $('vs-editor').hidden = true; });
   $('vs-ed-save').addEventListener('click', function(){
@@ -44825,8 +44971,17 @@ voice, and queues them for one-click approval.</p>
             )
             .replace("__PROJECT_TMPL__", url_for("api_video_project", project_id="__PID__"))
             .replace(
+                "__PROJECT_WAVEFORM_TMPL__",
+                url_for("api_video_project", project_id="__PID__") + "/clip/__CIDX__/waveform",
+            )
+            .replace(
                 "__PROJECT_FILE_TMPL__", url_for("api_video_project_file", project_id="__PID__")
             )
+            # The two <select> tags take the raw HTML; the JS var must be a valid
+            # JS string literal — JSON-encode it so the double-quoted option attrs
+            # don't terminate the string (otherwise the whole studio IIFE fails to
+            # parse). Replace the JS placeholder first (it is the more specific key).
+            .replace("__LOOK_OPTIONS_JS__", json.dumps(look_options))
             .replace("__LOOK_OPTIONS__", look_options)
             .replace("__ENGINE_NOTE__", engine_note)
         )
@@ -45263,6 +45418,52 @@ voice, and queues them for one-click approval.</p>
             proj.status = "draft"  # an edit reopens approval (rule 6)
         store.save(proj)
         return jsonify({"ok": True, "project": proj.to_dict()})
+
+    @app.route("/api/video/projects/<project_id>/clip/<int:clip_index>/waveform")
+    def api_video_clip_waveform(project_id: str, clip_index: int):
+        """Audio-waveform peaks for one clip's *source*, for the editor's scrubber.
+
+        A deterministic measurement (FFmpeg decode → peak buckets), honest-erroring
+        when FFmpeg is absent. Keyed by project + clip index so no disk path is ever
+        taken from the client; access is gated by project ownership.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _video_project_store()
+        proj = store.get(project_id)
+        if not _video_can_access_project(proj):
+            return jsonify({"error": "not_found"}), 404
+        clips = proj.edl.clips if (proj and proj.edl) else []
+        if not (0 <= clip_index < len(clips)):
+            return jsonify({"error": "clip_not_found"}), 404
+        source = clips[clip_index].source
+        if not source or not Path(source).exists():
+            return jsonify({"error": "source_missing_on_disk"}), 410
+        try:
+            buckets = max(16, min(2000, int(request.args.get("buckets", 240))))
+        except (TypeError, ValueError):
+            buckets = 240
+
+        from mediahub.video.waveform import WaveformUnavailable, extract_peaks
+
+        try:
+            peaks = extract_peaks(source, buckets=buckets)
+        except WaveformUnavailable as e:
+            return jsonify({"error": "engine_unavailable", "message": str(e)[:200]}), 503
+        except Exception as e:  # honest surface; never a fabricated waveform
+            log.warning("waveform failed: %s", e)
+            return jsonify({"error": "waveform_failed"}), 500
+
+        # Source duration lets the client map a peak index → time and place the
+        # current [in, out] trim window on the strip.
+        dur = 0
+        try:
+            from mediahub.video.probe import probe_clip
+
+            dur = probe_clip(source).duration_ms
+        except Exception:
+            dur = 0
+        return jsonify({"ok": True, "peaks": peaks, "buckets": buckets, "duration_ms": dur})
 
     @app.route("/api/video/projects/<project_id>/render", methods=["POST"])
     def api_video_project_render(project_id: str):
