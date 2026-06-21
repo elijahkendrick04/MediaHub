@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `cb1e8cafc` · Merge pull request #939 from elijahkendrick04/claude/amazing-meitner-bwq8of
+**Last updated:** 2026-06-21 · `6f57fa40a` · Merge pull request #956 from elijahkendrick04/claude/amazing-carson-kl0nm3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.13** · Phase 1 (Product) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
 - **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
 - **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
 - **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
@@ -1215,16 +1214,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-21 | `a5ec89a2d` | Make stock photo thumbnails render under the app CSP |
-| 2026-06-21 | `d43029fa0` | docs(1.12): mark Brand platform depth shipped in the parity map |
-| 2026-06-21 | `4f8e1c26e` | brand(1.12): theme-token hygiene + folder READMEs |
-| 2026-06-21 | `fa3cdcc4c` | brand(1.12): build 5 — kit-edit -> re-render sweep with diff preview |
-| 2026-06-21 | `88a494254` | brand(1.12): build 4 — governance: token locks + group-approver rules |
-| 2026-06-21 | `15f986ab0` | brand(1.12): build 3 — brand-platform web surface + palette-file import |
-| 2026-06-21 | `0e839f0f9` | brand(1.12): build 2 — deterministic Brand Check + AI Brand Assist |
-| 2026-06-21 | `3fb49a05a` | brand(1.12): build 1 — multi-kit data model + back-compat resolver |
-| 2026-06-21 | `3777659bb` | charts(1.11): ruff-format the web.py additions (pre-commit hygiene) |
-| 2026-06-21 | `7980c0787` | charts(1.11): refresh the folder README for the I1–I5 uplift |
-| 2026-06-21 | `659c040ed` | charts(1.11): I5 — grounded, postable chart captions (graphic + words) |
-| 2026-06-21 | `ac33bb058` | charts(1.11): I4 — visual-regression lock for the renderer |
+| 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
+| 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
+| 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
+| 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
+| 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
+| 2026-06-21 | `791c7b0bc` | feat(data_hub): web grid UI, JSON API + connector framework (1.13 build 3) |
+| 2026-06-21 | `a00b5a9bf` | feat(data_hub,bulk): derived columns + AI scaffold + review-queued bulk generation (1.13 build 2) |
+| 2026-06-21 | `b43501de8` | feat(data_hub): canonical table views + editable org tables + CSV/XLSX round-trip (1.13 build 1) |
+| 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
+| 2026-06-21 | `2e1886d0e` | Make stock-thumb proxy rate-limit-robust (cache + bounded concurrency + retry) |
 <!-- /ROADMAP:ACTIVITY -->

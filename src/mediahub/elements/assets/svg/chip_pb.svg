@@ -1,7 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" role="img" aria-label="Personal best chip">
-  <rect x="2" y="6" width="116" height="36" rx="18" fill="__ACCENT__"/>
-  <circle cx="24" cy="24" r="11" fill="__GROUND__"/>
-  <path d="M19 24 l4 4 7 -8" fill="none" stroke="__ACCENT__" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="44" y="31" font-family="Arial, sans-serif" font-weight="800" font-size="20" letter-spacing="2" fill="__GROUND__">PB</text>
-  <text x="74" y="30" font-family="Arial, sans-serif" font-weight="600" font-size="12" letter-spacing="1.5" fill="__GROUND__" opacity="0.85">BEST</text>
+  <defs>
+    <linearGradient id="pb__UID__" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="__ON_GROUND__" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="__ON_GROUND__" stop-opacity="0"/>
+      <stop offset="1" stop-color="__GROUND__" stop-opacity="0.14"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="5" width="116" height="38" rx="19" fill="__ACCENT__"/>
+  <rect x="2" y="5" width="116" height="38" rx="19" fill="url(#pb__UID__)"/>
+  <!-- achieved check token -->
+  <circle cx="25" cy="24" r="12" fill="__GROUND__"/>
+  <path d="M19.5 24 l4 4 7.5 -8.5" fill="none" stroke="__ACCENT__" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- PB lockup -->
+  <text x="45" y="31" font-family="Arial, sans-serif" font-weight="800" font-size="20" letter-spacing="1.5" fill="__GROUND__">PB</text>
+  <line x1="73" y1="16" x2="73" y2="32" stroke="__GROUND__" stroke-width="1.4" opacity="0.32"/>
+  <text x="80" y="30" font-family="Arial, sans-serif" font-weight="700" font-size="11" letter-spacing="1.5" fill="__GROUND__" opacity="0.85">BEST</text>
 </svg>

@@ -29,6 +29,33 @@ log = logging.getLogger(__name__)
 WIKI_API = "https://commons.wikimedia.org/w/api.php"
 OPENVERSE_API = "https://api.openverse.org/v1/images/"
 
+# Wikimedia's User-Agent policy throttles (and can block) generic/empty agents
+# hard — worst from a datacenter IP, which is exactly the hosted deployment. A
+# descriptive, contactable agent is treated far more leniently, so both the
+# search API and the image CDN answer instead of 429-ing us onto the fallback
+# source. Keep this in sync with the stock-thumb proxy's agent.
+_UA = "MediaHub/1.0 (+https://github.com/elijahkendrick04/mediahub) venue-search"
+_RETRY_STATUSES = (429, 503)
+_MAX_RETRIES = 2
+
+
+def _get_with_retry(url: str, *, params: dict, timeout: int):
+    """GET with a short jittered backoff retry on 429/503, so a transient rate
+    limit (common on a shared datacenter IP) doesn't immediately drop the search
+    to the fallback source. Network errors propagate to the caller (which falls
+    back); the final 429/503 response is returned for the caller to handle."""
+    import random as _random
+    import time as _time
+
+    resp = None
+    for attempt in range(_MAX_RETRIES + 1):
+        resp = requests.get(url, params=params, headers={"User-Agent": _UA}, timeout=timeout)
+        if resp.status_code not in _RETRY_STATUSES:
+            return resp
+        if attempt < _MAX_RETRIES:
+            _time.sleep(min(2.0, 0.5 * (attempt + 1)) + _random.uniform(0.0, 0.3))
+    return resp
+
 
 @dataclass
 class VenueImageResult:
@@ -92,30 +119,25 @@ def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImag
         "srnamespace": 6,  # File namespace
         "srlimit": str(limit * 2),
     }
-    r = requests.get(
-        WIKI_API,
-        params=params,
-        headers={"User-Agent": "MediaHub/0.8 (venue_search)"},
-        timeout=timeout,
-    )
+    r = _get_with_retry(WIKI_API, params=params, timeout=timeout)
     r.raise_for_status()
     data = r.json()
     titles = [hit["title"] for hit in data.get("query", {}).get("search", [])]
     if not titles:
         return []
 
-    # Step 2: fetch image info + license for each
+    # Step 2: fetch image info + license for each. 480px is ample for the grid
+    # tile / picker preview (the import downloads direct_url at full res) and is
+    # lighter + faster to fetch — less data to push past a rate limit.
     info_params = {
         "action": "query",
         "format": "json",
         "titles": "|".join(titles[: limit * 2]),
         "prop": "imageinfo",
         "iiprop": "url|size|extmetadata|user",
-        "iiurlwidth": "800",
+        "iiurlwidth": "480",
     }
-    r2 = requests.get(
-        WIKI_API, params=info_params, headers={"User-Agent": "MediaHub/0.8"}, timeout=timeout
-    )
+    r2 = _get_with_retry(WIKI_API, params=info_params, timeout=timeout)
     r2.raise_for_status()
     pages = r2.json().get("query", {}).get("pages", {}) or {}
 
@@ -184,16 +206,14 @@ def _search_openverse(query: str, *, limit: int, timeout: int) -> list[VenueImag
     if limit <= 0:
         return []
     params = {"q": query, "page_size": str(min(limit, 20))}
-    r = requests.get(
-        OPENVERSE_API, params=params, headers={"User-Agent": "MediaHub/0.8"}, timeout=timeout
-    )
+    r = _get_with_retry(OPENVERSE_API, params=params, timeout=timeout)
     r.raise_for_status()
     data = r.json()
     out: list[VenueImageResult] = []
     for item in data.get("results", []):
         try:
             licence = (item.get("license") or "") + (
-                f" {item.get('license_version','')}" if item.get("license_version") else ""
+                f" {item.get('license_version', '')}" if item.get("license_version") else ""
             )
             attribution = item.get("creator")
             licence_lower = (licence or "").lower()

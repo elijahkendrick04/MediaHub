@@ -1,25 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" role="img" aria-label="First place rosette">
   <defs>
-    <radialGradient id="rosette__UID__" cx="0.4" cy="0.35" r="0.8">
-      <stop offset="0" stop-color="__ON_GROUND__" stop-opacity="0.28"/>
-      <stop offset="0.5" stop-color="__ON_GROUND__" stop-opacity="0.04"/>
-      <stop offset="1" stop-color="__ON_GROUND__" stop-opacity="0"/>
+    <radialGradient id="rosette__UID__" cx="0.38" cy="0.32" r="0.85">
+      <stop offset="0" stop-color="__ON_GROUND__" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="__ON_GROUND__" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="__GROUND__" stop-opacity="0.20"/>
     </radialGradient>
   </defs>
-  <!-- ribbon tails -->
-  <path d="M38 78 L30 116 L46 104 L50 116 L54 104 L70 116 L62 78 Z" fill="__SECONDARY__"/>
-  <!-- pleated rosette -->
-  <g fill="__ACCENT__">
-    <circle cx="50" cy="44" r="38"/>
-  </g>
-  <g fill="__GROUND__" opacity="0.12">
-    <circle cx="50" cy="44" r="38"/>
-  </g>
-  <circle cx="50" cy="44" r="38" fill="__ACCENT__"/>
-  <circle cx="50" cy="44" r="38" fill="url(#rosette__UID__)"/>
-  <!-- scalloped edge -->
-  <circle cx="50" cy="44" r="38" fill="none" stroke="__GROUND__" stroke-width="2" stroke-dasharray="3 5" opacity="0.5"/>
+  <!-- pleated ribbon tails -->
+  <path d="M37 80 L28 117 L45 105 L50 117 L55 105 L72 117 L63 80 Z" fill="__SECONDARY__"/>
+  <path d="M50 84 L46 110 L50 104 L54 110 Z" fill="__GROUND__" opacity="0.18"/>
+  <!-- scalloped rosette edge (beaded ring) -->
+  <circle cx="50" cy="44" r="39" fill="none" stroke="__ACCENT__" stroke-width="10" stroke-dasharray="0.5 13.1" stroke-linecap="round"/>
+  <!-- rosette disc -->
+  <circle cx="50" cy="44" r="37" fill="__ACCENT__"/>
+  <circle cx="50" cy="44" r="37" fill="url(#rosette__UID__)"/>
+  <!-- pleat ring -->
+  <circle cx="50" cy="44" r="30" fill="none" stroke="__GROUND__" stroke-width="1.4" opacity="0.18"/>
   <!-- centre disc -->
-  <circle cx="50" cy="44" r="24" fill="__GROUND__"/>
-  <text x="50" y="53" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="24" fill="__ACCENT__">1ST</text>
+  <circle cx="50" cy="44" r="23" fill="__GROUND__"/>
+  <circle cx="50" cy="44" r="23" fill="none" stroke="__ACCENT__" stroke-width="2"/>
+  <text x="50" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="22" fill="__ACCENT__">1ST</text>
 </svg>

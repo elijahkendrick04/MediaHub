@@ -36,6 +36,15 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_brand_kit_resweep_preview` | `GET,POST` | `/api/brand/kits/<kit_id>/resweep/preview` |
 | `api_club_qa_submit` | `POST` | `/api/club-qa` |
 | `api_club_qa_status` | `GET` | `/api/club-qa/<job_id>` |
+| `api_data_hub_bulk` | `POST` | `/api/data-hub/bulk` |
+| `api_data_hub_bulk_status` | `GET` | `/api/data-hub/bulk/<job_id>` |
+| `api_data_hub_create_table` | `POST` | `/api/data-hub/create-table` |
+| `api_data_hub_import` | `POST` | `/api/data-hub/import` |
+| `api_data_hub_scaffold` | `POST` | `/api/data-hub/scaffold` |
+| `api_data_hub_suggest` | `POST` | `/api/data-hub/suggest-derivation` |
+| `api_data_hub_delete` | `POST` | `/api/data-hub/table/<table_id>/delete` |
+| `api_data_hub_derive` | `POST` | `/api/data-hub/table/<table_id>/derive` |
+| `api_data_hub_tables` | `GET` | `/api/data-hub/tables` |
 | `api_stub_pack_assistant` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/assistant` |
 | `api_stub_pack_assistant_suggestions` | `GET` | `/api/drafts/<pack_id>/card/<int:card_idx>/assistant/suggestions` |
 | `api_stub_pack_caption` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/caption` |
@@ -173,6 +182,9 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `complaints_form` | `GET` | `/complaints` |
 | `complaints_submit` | `POST` | `/complaints` |
 | `cookies_page` | `GET` | `/cookies` |
+| `data_hub_page` | `GET` | `/data-hub` |
+| `data_hub_export` | `GET` | `/data-hub/export/<table_id>` |
+| `data_hub_table` | `GET` | `/data-hub/table/<table_id>` |
 | `developer_login` | `GET` | `/developer` |
 | `developer_login_post` | `POST` | `/developer` |
 | `api_docs_page` | `GET` | `/developer/api` |
