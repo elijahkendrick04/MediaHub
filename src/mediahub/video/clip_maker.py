@@ -199,9 +199,7 @@ def clip_maker(
         # Tighten the whole clip: keep the speech, cut the dead air. This is a
         # distinct mode from highlight detection (Descript "Remove Gaps").
         keeps = _silence_keeps(source, duration_ms, silence_fn)
-        chosen = [
-            Moment(s, e, 1.0, "speech", f"kept {s // 1000}-{e // 1000}s") for (s, e) in keeps
-        ]
+        chosen = [Moment(s, e, 1.0, "speech", f"kept {s // 1000}-{e // 1000}s") for (s, e) in keeps]
         silence_note = f"removed {_silence_removed(keeps, duration_ms) // 1000}s of dead air"
     else:
         detect = detect_fn or _moments.detect_moments

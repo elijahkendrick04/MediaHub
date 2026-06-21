@@ -217,9 +217,8 @@ def _write_manifest(cached: Path, edl: EDL, *, duration_ms: int) -> None:
             for c in edl.clips
         ],
         "reframed": reframed,
-        "graded": bool(edl.look and edl.look != "none") or any(
-            not c.adjust.is_identity() for c in edl.clips
-        ),
+        "graded": bool(edl.look and edl.look != "none")
+        or any(not c.adjust.is_identity() for c in edl.clips),
         "look": edl.look,
         "audio_plan": edl.audio.to_dict() if (edl.audio and not edl.audio.is_empty()) else None,
         "overlays": [o.to_dict() for o in edl.overlays],

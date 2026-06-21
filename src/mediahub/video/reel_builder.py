@@ -137,7 +137,9 @@ def build_reel_edl(
     overlays: list[TextOverlay] = []
     if plan.hook.strip():
         overlays.append(
-            TextOverlay(text=plan.hook.strip(), start_ms=0, duration_ms=2400, position="lower-third")
+            TextOverlay(
+                text=plan.hook.strip(), start_ms=0, duration_ms=2400, position="lower-third"
+            )
         )
 
     track = caption_track
@@ -206,7 +208,9 @@ def make_reel(
     for src in sources:
         p = probe(src)
         probes.append(p)
-        ms = list(detect(src, duration_ms=p.duration_ms, target_len_ms=4500, max_moments=per_clip_moments))
+        ms = list(
+            detect(src, duration_ms=p.duration_ms, target_len_ms=4500, max_moments=per_clip_moments)
+        )
         moments_by_clip.append(ms)
         clips_meta.append(
             {
@@ -234,7 +238,13 @@ def make_reel(
             continue
         dw, dh = p.display_size
         if with_reframe and _reframe.needs_reframe(dw, dh, width, height):
-            crop = rf(sources[beat.asset_index], in_ms=m.start_ms, out_ms=m.end_ms, dst_w=width, dst_h=height)
+            crop = rf(
+                sources[beat.asset_index],
+                in_ms=m.start_ms,
+                out_ms=m.end_ms,
+                dst_w=width,
+                dst_h=height,
+            )
             reframed = reframed or bool(crop)
         crops.append(crop)
 
@@ -264,7 +274,9 @@ def make_reel(
     music_path: Optional[str] = None
     if with_music:
         resolver = music_fn or resolve_music
-        music_path = resolver(plan.music_mood, platform=music_platform, content_key=":".join(sources))
+        music_path = resolver(
+            plan.music_mood, platform=music_platform, content_key=":".join(sources)
+        )
 
     audio_plan = AudioPlan(
         music=music_path or "",

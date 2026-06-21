@@ -51,7 +51,10 @@ _SIL_END_RE = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
 
 
 def silencedetect_args(
-    path: Path | str, *, threshold_db: float = DEFAULT_THRESHOLD_DB, min_silence_ms: int = DEFAULT_MIN_SILENCE_MS
+    path: Path | str,
+    *,
+    threshold_db: float = DEFAULT_THRESHOLD_DB,
+    min_silence_ms: int = DEFAULT_MIN_SILENCE_MS,
 ) -> list[str]:
     """FFmpeg args that print silence_start/end markers for a clip (pure builder)."""
     d = max(0.05, min_silence_ms / 1000.0)
@@ -200,9 +203,7 @@ def plan_jump_cuts(
     if duration_ms <= 0:
         return []
     sil = detect_silences(path, threshold_db=threshold_db, min_silence_ms=min_silence_ms)
-    keeps = plan_keep_segments(
-        sil, duration_ms, pad_ms=pad_ms, min_keep_ms=min_keep_ms
-    )
+    keeps = plan_keep_segments(sil, duration_ms, pad_ms=pad_ms, min_keep_ms=min_keep_ms)
     return keeps or [(0, duration_ms)]
 
 

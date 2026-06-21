@@ -162,7 +162,9 @@ def _clips_payload(clips_meta: list[dict]) -> list[dict]:
                     "kind": str(m.get("kind", "")),
                     "score": round(_moment_score(m), 3),
                     "label": str(m.get("label", "")),
-                    "seconds": round(max(0, int(m.get("end_ms", 0)) - int(m.get("start_ms", 0))) / 1000, 1),
+                    "seconds": round(
+                        max(0, int(m.get("end_ms", 0)) - int(m.get("start_ms", 0))) / 1000, 1
+                    ),
                 }
             )
         payload.append(
@@ -230,7 +232,9 @@ def plan_reel(
     look = str(data.get("look", "")).strip().lower()
     if look not in LOOKS:
         look = DEFAULT_LOOK
-    mood = re.sub(r"[^a-z ]", "", str(data.get("music_mood", "")).strip().lower())[:24] or DEFAULT_MOOD
+    mood = (
+        re.sub(r"[^a-z ]", "", str(data.get("music_mood", "")).strip().lower())[:24] or DEFAULT_MOOD
+    )
     return ReelPlan(
         order=beats,
         look=look,

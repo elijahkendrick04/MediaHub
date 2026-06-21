@@ -81,7 +81,9 @@ DEFAULT_ACCURACY = 15  # 1 .. 15 — detection accuracy (15 = most accurate)
 DEFAULT_SMOOTHING = 10  # ± frames averaged for the smoothed camera path
 
 
-def vidstabdetect_args(src: Path | str, trf: Path | str, *, shakiness: int, accuracy: int) -> list[str]:
+def vidstabdetect_args(
+    src: Path | str, trf: Path | str, *, shakiness: int, accuracy: int
+) -> list[str]:
     """Pass-1 args: analyse camera motion into a transforms file (pure builder)."""
     sh = max(1, min(10, int(shakiness)))
     ac = max(1, min(15, int(accuracy)))
@@ -172,7 +174,11 @@ def stabilize_source(
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="mh_stab_") as td:
         trf = Path(td) / "transforms.trf"
-        _run(exe, vidstabdetect_args(src, trf, shakiness=DEFAULT_SHAKINESS, accuracy=DEFAULT_ACCURACY), timeout=timeout)
+        _run(
+            exe,
+            vidstabdetect_args(src, trf, shakiness=DEFAULT_SHAKINESS, accuracy=DEFAULT_ACCURACY),
+            timeout=timeout,
+        )
         _run(exe, vidstabtransform_args(src, trf, out, smoothing=smoothing), timeout=timeout)
     if not out.exists() or out.stat().st_size < 1024:
         raise VideoEnhanceUnavailable("stabilisation produced no output")
