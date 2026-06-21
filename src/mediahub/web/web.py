@@ -23406,6 +23406,7 @@ Relay team broke club record"></textarea>
         "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         "dev": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
         "typography": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+        "brand": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="8" cy="12" r="2.5"/><circle cx="13.5" cy="17.5" r="2.5"/><path d="M16 7.5 19 9M16 16.5 19 15M9.5 10.5 12 8M9.5 13.5 12 16"/></svg>',
     }
 
     def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
@@ -23422,6 +23423,13 @@ Relay team broke club record"></textarea>
                 "Logos, palette, tone and the brand the engine applies to every card.",
                 "org",
                 url_for("organisation_setup"),
+            ),
+            (
+                "Brand platform",
+                "Multiple kits (sponsor / event / team co-brands), token locks, "
+                "brand check and palette import — one home for your identity.",
+                "brand",
+                url_for("brand_home_page"),
             ),
             (
                 "Templates",
@@ -33047,6 +33055,427 @@ what you're doing, what they should do.</p>
         if _session_owns_profile(pid):
             return True
         return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
+
+    # ---- 1.12 — Brand platform: multi-kit home, governance, palette import ----
+
+    def _brand_can_admin(pid: str) -> bool:
+        """May the current actor edit this org's brand kits?
+
+        Same model as editing the org itself: an owner of a bound workspace,
+        or any session that can use an unbound (pilot) workspace.
+        """
+        if not pid:
+            return False
+        if _session_owns_profile(pid):
+            return True
+        return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
+
+    def _brand_swatch_row(palette: dict) -> str:
+        from mediahub.brand.palette import ALL_SLOTS
+
+        chips = ""
+        for slot in ALL_SLOTS:
+            hexv = (palette or {}).get(slot)
+            if not hexv:
+                continue
+            chips += (
+                f'<span title="{_h(slot)}: {_h(hexv)}" style="display:inline-flex;'
+                "align-items:center;gap:6px;margin:0 10px 8px 0;font-size:12px;"
+                'color:var(--ink-muted)">'
+                f'<span style="width:22px;height:22px;border-radius:6px;border:1px solid '
+                f'rgba(255,255,255,0.14);background:{_h(hexv)}"></span>{_h(slot)}</span>'
+            )
+        return chips or '<span style="color:var(--ink-muted);font-size:12px">No palette set</span>'
+
+    def _brand_kit_card_html(prof, kit, default_id: str) -> str:
+        from mediahub.brand.kits import LOCKABLE_TOKENS
+
+        is_default = kit.kit_id == default_id
+        role_label = kit.role.replace("_", " ").title()
+        default_badge = (
+            '<span class="pill" style="background:rgba(34,197,94,0.10);'
+            'border-color:rgba(34,197,94,0.30);color:var(--ok,#22c55e)">Default</span>'
+            if is_default
+            else ""
+        )
+        locks_txt = ", ".join(kit.locks) if kit.locks else "none"
+        # Set-default + delete actions (delete hidden for the primary kit).
+        actions = ""
+        if not is_default:
+            actions += (
+                f'<form method="post" action="{url_for("api_brand_kit_set_default", kit_id=kit.kit_id)}" '
+                'style="display:inline">'
+                '<button class="btn secondary" type="submit">Make default</button></form> '
+            )
+        if kit.role != "primary":
+            actions += (
+                f'<form method="post" action="{url_for("api_brand_kit_delete", kit_id=kit.kit_id)}" '
+                'style="display:inline" onsubmit="return confirm(\'Delete this kit?\')">'
+                '<button class="btn secondary" type="submit">Delete</button></form>'
+            )
+        # Edit form: name, role, palette slots, font pairing, tone, locks.
+        lock_checks = ""
+        for tok in LOCKABLE_TOKENS:
+            checked = "checked" if tok in (kit.locks or []) else ""
+            lock_checks += (
+                f'<label style="margin-right:14px;font-size:12px;color:var(--ink-muted)">'
+                f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {tok}</label>'
+            )
+        pal = kit.palette or {}
+        edit_form = (
+            f'<details style="margin-top:10px"><summary style="cursor:pointer;'
+            'color:var(--accent);font-size:13px">Edit kit</summary>'
+            f'<form method="post" action="{url_for("api_brand_kit_update", kit_id=kit.kit_id)}" '
+            'style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'
+            f'<input class="mh-input" name="name" value="{_h(kit.name)}" placeholder="Kit name" required />'
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            + "".join(
+                f'<input class="mh-input" name="{slot}" value="{_h(pal.get(slot, ""))}" '
+                f'placeholder="{slot} #hex" style="max-width:160px" />'
+                for slot in ("primary", "secondary", "accent", "fourth")
+            )
+            + "</div>"
+            f'<input class="mh-input" name="font_pairing" value="{_h(kit.font_pairing)}" '
+            'placeholder="font pairing id (optional)" style="max-width:260px" />'
+            f'<input class="mh-input" name="tone" value="{_h(kit.tone)}" '
+            'placeholder="tone override (optional)" style="max-width:260px" />'
+            f'<div>{lock_checks}</div>'
+            '<div><button class="btn" type="submit">Save kit</button></div>'
+            "</form>"
+            # Palette-file import (Adobe .ase / Color JSON).
+            f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
+            'enctype="multipart/form-data" style="margin-top:12px;display:flex;gap:8px;'
+            'align-items:center;flex-wrap:wrap">'
+            '<input type="file" name="palette_file" accept=".ase,.json,application/json" required />'
+            '<button class="btn secondary" type="submit">Import palette file</button>'
+            '<span style="font-size:12px;color:var(--ink-muted)">Adobe .ase or Color JSON</span>'
+            "</form></details>"
+        )
+        return (
+            '<div class="mh-panel" style="padding:18px;margin-bottom:14px">'
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">'
+            f'<h3 style="margin:0">{_h(kit.name)}</h3>'
+            f'<span class="pill">{_h(role_label)}</span>{default_badge}</div>'
+            f'<div style="margin:10px 0">{_brand_swatch_row(kit.palette)}</div>'
+            f'<p style="font-size:12px;color:var(--ink-muted);margin:4px 0">'
+            f'Locked: {_h(locks_txt)}'
+            + (f' · Font: {_h(kit.font_pairing)}' if kit.font_pairing else "")
+            + (f' · Tone: {_h(kit.tone)}' if kit.tone else "")
+            + "</p>"
+            f'<div style="margin-top:10px">{actions}</div>'
+            f"{edit_form}</div>"
+        )
+
+    def _brand_identity_html(prof) -> str:
+        """The non-kit brand assets: tone, voice, guidelines, do/don't, logos."""
+        bits = ['<h2 style="margin-top:28px">Brand identity</h2>']
+        # Tone + voice summary
+        tone = (prof.tone or prof.caption_tone or "warm-club").replace("-", " ")
+        bits.append(
+            f'<p><strong>Tone:</strong> {_h(tone)}</p>'
+        )
+        if (prof.brand_voice_summary or "").strip():
+            bits.append(f'<p><strong>Voice:</strong> {_h(prof.brand_voice_summary)}</p>')
+        # Guidelines mandatory rules
+        rules = prof.brand_guidelines_mandatory_rules or []
+        if rules:
+            items = "".join(f"<li>{_h(r)}</li>" for r in rules[:12])
+            bits.append(
+                f'<p><strong>Non-negotiable guideline rules:</strong></p><ul>{items}</ul>'
+            )
+        # Phrases to use / avoid
+        use = prof.brand_phrases_to_use or []
+        avoid = prof.brand_phrases_to_avoid or []
+        if use or avoid:
+            bits.append('<div style="display:flex;gap:24px;flex-wrap:wrap">')
+            if use:
+                bits.append(
+                    "<div><strong>Say</strong><ul>"
+                    + "".join(f"<li>{_h(p)}</li>" for p in use[:8])
+                    + "</ul></div>"
+                )
+            if avoid:
+                bits.append(
+                    "<div><strong>Avoid</strong><ul>"
+                    + "".join(f"<li>{_h(p)}</li>" for p in avoid[:8])
+                    + "</ul></div>"
+                )
+            bits.append("</div>")
+        # Logos with AI descriptions
+        logos = prof.brand_logos or []
+        if logos:
+            cards = ""
+            for lg in logos[:8]:
+                if not isinstance(lg, dict):
+                    continue
+                label = lg.get("label") or lg.get("original_filename") or "logo"
+                desc = lg.get("ai_description") or ""
+                cards += (
+                    '<div class="mh-panel" style="padding:12px">'
+                    f'<strong style="font-size:13px">{_h(label)}</strong>'
+                    f'<p style="font-size:12px;color:var(--ink-muted);margin:6px 0 0">{_h(desc)}</p>'
+                    "</div>"
+                )
+            if cards:
+                bits.append('<p><strong>Logos</strong></p>')
+                bits.append(
+                    f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">{cards}</div>'
+                )
+        return "".join(bits)
+
+    def _render_brand_home(prof) -> str:
+        from mediahub.brand import kits as _kits
+
+        default_id = _kits.default_kit_id(prof)
+        all_kits = _kits.list_kits(prof)
+        notice = (request.args.get("msg") or "").strip()
+        err = (request.args.get("err") or "").strip()
+        banner = ""
+        if notice:
+            banner += f'<div class="mh-notice" style="margin-bottom:14px">{_h(notice)}</div>'
+        if err:
+            banner += (
+                '<div class="mh-notice" style="margin-bottom:14px;border-color:var(--danger,#ef4444);'
+                f'color:var(--danger,#ef4444)">{_h(err)}</div>'
+            )
+        kit_cards = "".join(_brand_kit_card_html(prof, k, default_id) for k in all_kits)
+        create_form = (
+            '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">'
+            "+ New kit</summary>"
+            f'<form method="post" action="{url_for("api_brand_kit_create")}" '
+            'style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:520px">'
+            '<input class="mh-input" name="name" placeholder="Kit name (e.g. Acme co-brand, Gala 2026)" required />'
+            '<select class="mh-input" name="role">'
+            '<option value="sponsor">Sponsor co-brand</option>'
+            '<option value="event">Event sub-brand</option>'
+            '<option value="section">Team / section</option>'
+            '<option value="personal">Personal</option>'
+            "</select>"
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            + "".join(
+                f'<input class="mh-input" name="{slot}" placeholder="{slot} #hex" style="max-width:160px" />'
+                for slot in ("primary", "secondary", "accent")
+            )
+            + "</div>"
+            '<div><button class="btn" type="submit">Create kit</button></div>'
+            "</form></details>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-4);margin-bottom:var(--sp-4)">'
+            '<span class="mh-hero-eyebrow">Brand platform</span>'
+            f'<h1>{_h(prof.display_name)} — <em class="editorial">brand</em></h1>'
+            '<p class="lede">Every kit, palette, lock and guideline the engine applies to your '
+            "content — primary livery, sponsor co-brands, event and team sub-brands.</p>"
+            "</section>"
+            f"{banner}"
+            '<h2>Brand kits</h2>'
+            f"{kit_cards}{create_form}"
+            f"{_brand_identity_html(prof)}"
+            '<p style="margin-top:24px"><a class="btn secondary" '
+            f'href="{url_for("organisation_setup")}">Edit organisation &amp; brand DNA</a></p>'
+        )
+        return _layout("Brand platform", body, active="settings")
+
+    @app.route("/brand")
+    def brand_home_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        return _render_brand_home(prof)
+
+    def _brand_redirect(msg: str = "", err: str = ""):
+        from urllib.parse import urlencode
+
+        q = {}
+        if msg:
+            q["msg"] = msg
+        if err:
+            q["err"] = err
+        url = url_for("brand_home_page")
+        if q:
+            url += "?" + urlencode(q)
+        return redirect(url)
+
+    def _form_palette() -> dict:
+        out = {}
+        for slot in ("primary", "secondary", "accent", "fourth"):
+            v = (request.form.get(slot) or "").strip()
+            if v:
+                out[slot] = v
+        return out
+
+    @app.route("/api/brand/kits", methods=["POST"])
+    def api_brand_kit_create():
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand.kits import BrandKitRef, new_kit_id, upsert_kit, normalise_kit
+
+        prof = _active_profile()
+        raw = {
+            "kit_id": new_kit_id(),
+            "name": (request.form.get("name") or "").strip(),
+            "role": (request.form.get("role") or "sponsor").strip().lower(),
+            "palette": _form_palette(),
+        }
+        kit = normalise_kit(raw)
+        if kit is None:
+            return _brand_redirect(err="A kit needs a name.")
+        upsert_kit(prof, kit)
+        save_profile(prof)
+        return _brand_redirect(msg=f"Created kit “{kit.name}”.")
+
+    @app.route("/api/brand/kits/<kit_id>", methods=["POST"])
+    def api_brand_kit_update(kit_id):
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand.kits import get_kit, upsert_kit, normalise_kit, LOCKABLE_TOKENS
+
+        prof = _active_profile()
+        existing = get_kit(prof, kit_id)
+        if existing is None:
+            return _brand_redirect(err="Kit not found.")
+        locks = [t for t in request.form.getlist("lock") if t in LOCKABLE_TOKENS]
+        raw = existing.to_dict()
+        raw.update(
+            {
+                "name": (request.form.get("name") or existing.name).strip(),
+                "palette": _form_palette() or existing.palette,
+                "font_pairing": (request.form.get("font_pairing") or "").strip(),
+                "tone": (request.form.get("tone") or "").strip(),
+                "locks": locks,
+            }
+        )
+        kit = normalise_kit(raw)
+        if kit is None:
+            return _brand_redirect(err="A kit needs a name.")
+        upsert_kit(prof, kit)
+        save_profile(prof)
+        return _brand_redirect(msg=f"Saved kit “{kit.name}”.")
+
+    @app.route("/api/brand/kits/<kit_id>/delete", methods=["POST"])
+    def api_brand_kit_delete(kit_id):
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand.kits import delete_kit
+
+        prof = _active_profile()
+        ok = delete_kit(prof, kit_id)
+        if ok:
+            save_profile(prof)
+            return _brand_redirect(msg="Kit deleted.")
+        return _brand_redirect(err="That kit can't be deleted (the primary kit always stays).")
+
+    @app.route("/api/brand/kits/<kit_id>/default", methods=["POST"])
+    def api_brand_kit_set_default(kit_id):
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand.kits import set_default_kit
+
+        prof = _active_profile()
+        if set_default_kit(prof, kit_id):
+            save_profile(prof)
+            return _brand_redirect(msg="Default kit updated.")
+        return _brand_redirect(err="Unknown kit.")
+
+    @app.route("/api/brand/kits/<kit_id>/palette/import", methods=["POST"])
+    def api_brand_kit_palette_import(kit_id):
+        pid = _active_profile_id()
+        if not pid or not _brand_can_admin(pid):
+            abort(404)
+        from mediahub.brand.kits import get_kit, upsert_kit, normalise_kit
+        from mediahub.brand.palette_file import (
+            PaletteFileError,
+            colours_to_kit_palette,
+            parse_palette_file,
+        )
+
+        prof = _active_profile()
+        existing = get_kit(prof, kit_id)
+        if existing is None:
+            return _brand_redirect(err="Kit not found.")
+        f = request.files.get("palette_file")
+        if f is None or not f.filename:
+            return _brand_redirect(err="Choose a .ase or Color JSON file to import.")
+        data = f.read()
+        # Cap the upload so a hostile file can't exhaust memory (palettes are tiny).
+        if len(data) > 2 * 1024 * 1024:
+            return _brand_redirect(err="Palette file too large (max 2 MB).")
+        try:
+            colours = parse_palette_file(data, f.filename)
+        except PaletteFileError as e:
+            return _brand_redirect(err=f"Could not read that palette file: {e}")
+        raw = existing.to_dict()
+        raw["palette"] = colours_to_kit_palette(colours)
+        kit = normalise_kit(raw)
+        upsert_kit(prof, kit)
+        save_profile(prof)
+        n = len(kit.palette)
+        return _brand_redirect(msg=f"Imported {n} colour(s) into “{kit.name}”.")
+
+    # ---- 1.12 — Brand Check + Brand Assist, per card ----
+
+    def _brand_check_context(run_id: str, card_id: str):
+        """Resolve (brief, kit, brand_kit) for a card, or an error response."""
+        run_data = _load_run(run_id)
+        if run_data is None:
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, (jsonify({"error": "forbidden"}), 403)
+        brief_dict = _latest_brief_for_card(run_id, card_id)
+        if not brief_dict:
+            return None, (jsonify({"error": "no_brief"}), 404)
+        from mediahub.brand import kits as _kits
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        profile_id = run_data.get("profile_id", "")
+        prof = load_profile(profile_id) if profile_id else _active_profile()
+        if prof is None:
+            return None, (jsonify({"error": "no_profile"}), 404)
+        brief = CreativeBrief.from_dict(brief_dict)
+        kit = _kits.resolve_kit_for(prof)
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        return (brief, kit, brand_kit, prof), None
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/brand-check", methods=["GET"])
+    def api_card_brand_check(run_id, card_id):
+        from mediahub.brand.check import check_brief
+
+        ctx, err = _brand_check_context(run_id, card_id)
+        if err is not None:
+            return err
+        brief, kit, brand_kit, _prof = ctx
+        report = check_brief(brief, kit, brand_kit=brand_kit)
+        return jsonify(report.to_dict())
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/brand-check/advise", methods=["POST"])
+    def api_card_brand_advise(run_id, card_id):
+        from mediahub.brand.check import advise, check_brief
+
+        ctx, err = _brand_check_context(run_id, card_id)
+        if err is not None:
+            return err
+        brief, kit, brand_kit, _prof = ctx
+        report = check_brief(brief, kit, brand_kit=brand_kit)
+        res = advise(report, brief, kit, brand_kit=brand_kit)
+        return jsonify(res.to_dict())
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/brand-check/autofix", methods=["POST"])
+    def api_card_brand_autofix(run_id, card_id):
+        from mediahub.brand.check import autofix
+
+        ctx, err = _brand_check_context(run_id, card_id)
+        if err is not None:
+            return err
+        brief, kit, brand_kit, _prof = ctx
+        res = autofix(brief, kit, brand_kit=brand_kit)
+        return jsonify(res.to_dict())
 
     @app.route("/organisation/export")
     def organisation_export():
