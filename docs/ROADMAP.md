@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `5c9fc9c23` · Data hub + bulk personalisation (roadmap 1.13) (#949)
+**Last updated:** 2026-06-21 · `6f57fa40a` · Merge pull request #956 from elijahkendrick04/claude/amazing-carson-kl0nm3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1214,6 +1214,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `edd94d720` | Move Video from the top bar into Create as a tile |
 | 2026-06-21 | `3641684c2` | Harden free stock/venue search against datacenter rate limits |
 | 2026-06-21 | `1b12a0c5a` | fix(1.13): satisfy CI guards — env inventory, DPA register, theme tokens |
 | 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
@@ -1223,6 +1224,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `b43501de8` | feat(data_hub): canonical table views + editable org tables + CSV/XLSX round-trip (1.13 build 1) |
 | 2026-06-21 | `05ea30b94` | Regenerate ENV_INVENTORY for MEDIAHUB_STOCK_THUMB_CONCURRENCY |
 | 2026-06-21 | `2e1886d0e` | Make stock-thumb proxy rate-limit-robust (cache + bounded concurrency + retry) |
-| 2026-06-21 | `98b6ea4fd` | Apply ruff-format to the season view changes |
-| 2026-06-21 | `e72028415` | Redesign the My Season timeline view |
 <!-- /ROADMAP:ACTIVITY -->
