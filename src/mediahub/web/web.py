@@ -9860,6 +9860,28 @@ _VIDEO_STUDIO_HTML = """
   </div>
 </section>
 
+<div id="vs-editor" class="vstudio-modal" hidden>
+  <div class="vstudio-sheet" role="dialog" aria-label="Edit timeline">
+    <div class="vstudio-sheet-head">
+      <strong>Edit timeline &middot; <span id="vs-ed-name"></span></strong>
+      <button class="btn ghost" id="vs-ed-close" type="button">Close</button>
+    </div>
+    <div class="vstudio-sheet-body">
+      <label class="vs-ed-global">Look
+        <select id="vs-ed-look">__LOOK_OPTIONS__</select>
+      </label>
+      <h3 class="vstudio-h">Clips</h3>
+      <div id="vs-ed-clips"></div>
+      <h3 class="vstudio-h" style="margin-top:14px">Captions</h3>
+      <div id="vs-ed-caps"></div>
+    </div>
+    <div class="vstudio-sheet-foot">
+      <span id="vs-ed-status" class="muted" aria-live="polite"></span>
+      <button class="btn primary" id="vs-ed-save" type="button">Save timeline</button>
+    </div>
+  </div>
+</div>
+
 <style>
   .vstudio-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-5);margin-top:var(--sp-4)}
   @media (max-width:860px){.vstudio-grid{grid-template-columns:1fr}}
@@ -9891,6 +9913,18 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-reel-row input[type=text]{flex:1 1 220px;background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:8px 10px;font-size:14px}
   .vstudio-enh{align-items:center}
   .vstudio-enh select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:5px 7px;font-size:12px}
+  .vstudio-modal{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:90;padding:20px}
+  .vstudio-sheet{background:var(--panel,#0f0f12);border:1px solid var(--border,#26262c);border-radius:12px;width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column}
+  .vstudio-sheet-head,.vstudio-sheet-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border,#26262c)}
+  .vstudio-sheet-foot{border-bottom:0;border-top:1px solid var(--border,#26262c)}
+  .vstudio-sheet-body{overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+  .vs-ed-global{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:13px;color:var(--ink-dim,#b8b8c0)}
+  .vs-ed-clip{display:flex;align-items:center;gap:7px;flex-wrap:wrap;border:1px solid var(--border,#26262c);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--ink-dim,#b8b8c0)}
+  .vs-ed-clip .vs-ed-num{font-weight:700;color:var(--ink,#f0f0f2);min-width:18px}
+  .vs-ed-clip input[type=number]{width:74px}
+  .vs-ed-clip input,.vs-ed-clip select,.vs-ed-cue input{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:5px;color:var(--ink,#f0f0f2);padding:4px 6px;font-size:12px}
+  .vs-ed-cue{margin:4px 0}
+  .vs-ed-cue input{width:100%}
 </style>
 
 <script>
@@ -9905,9 +9939,12 @@ _VIDEO_STUDIO_HTML = """
   var FILE_TMPL = "__PROJECT_FILE_TMPL__";
   var REEL_URL = "__REEL_URL__";
   var ENHANCE_TMPL = "__PROJECT_ENHANCE_TMPL__";
+  var PROJECT_TMPL = "__PROJECT_TMPL__";
   var LOOK_OPTIONS = "__LOOK_OPTIONS__";
+  var TRANSITIONS = ['cut','fade','dissolve','wipeleft','wiperight','slideup','slidedown','smoothleft','circleopen'];
   var selectedId = null;
   var reelSet = {};
+  var editorPid = null, editorEdl = null;
   var mediaRecorder = null, recChunks = [];
 
   function $(id){ return document.getElementById(id); }
@@ -10069,9 +10106,10 @@ _VIDEO_STUDIO_HTML = """
           + '<span class="vstudio-badge '+esc(p.status)+'">'+esc(p.status)+'</span> '
           + '<span class="muted" style="font-size:12px">'+esc(p.format)+' &middot; '+p.clips+' clip(s) &middot; '+fmtDur(p.duration_ms)+'</span>'
           + enhanceRow
-          + '<div class="row">'+renderBtn+approveBtn+exportBtn+'</div>'
+          + '<div class="row"><button class="btn ghost vs-edit" data-id="'+esc(p.id)+'">Edit timeline</button>'+renderBtn+approveBtn+exportBtn+'</div>'
           + '<span class="muted vs-enh-status" data-id="'+esc(p.id)+'" style="font-size:12px"></span></div>';
       }).join('');
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-edit'), function(b){ b.addEventListener('click', function(){ openEditor(b.getAttribute('data-id')); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-render'), function(b){ b.addEventListener('click', function(){ renderProject(b.getAttribute('data-id'), b); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-approve'), function(b){ b.addEventListener('click', function(){ approveProject(b.getAttribute('data-id')); }); });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-apply'), function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-id'); var sel=wrap.querySelector('.vs-look-sel[data-id="'+id+'"]'); enhanceProject(id, {look: sel?sel.value:'none'}, b); }); });
@@ -10099,6 +10137,95 @@ _VIDEO_STUDIO_HTML = """
   function approveProject(id){
     jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
   }
+
+  // ---- timeline editor (manual trim / speed / look / transition / captions) ----
+  function transOpts(sel){
+    return TRANSITIONS.map(function(t){ return '<option value="'+t+'"'+(t===sel?' selected':'')+'>'+t+'</option>'; }).join('');
+  }
+  function openEditor(id){
+    editorPid = id;
+    fetch(url(PROJECT_TMPL, id), {headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
+      if(!j.ok || !j.project){ alert('Could not load this clip.'); return; }
+      editorEdl = j.project.edl || {clips:[]};
+      $('vs-ed-name').textContent = j.project.name || '';
+      $('vs-ed-look').value = editorEdl.look || 'none';
+      $('vs-ed-status').textContent = '';
+      renderEditorRows();
+      $('vs-editor').hidden = false;
+    });
+  }
+  function renderEditorRows(){
+    var clips = editorEdl.clips || [];
+    $('vs-ed-clips').innerHTML = clips.map(function(c,i){
+      var tr = (c.transition_in && c.transition_in.kind) || 'cut';
+      return '<div class="vs-ed-clip" data-i="'+i+'">'
+        + '<span class="vs-ed-num">'+(i+1)+'</span>'
+        + 'in <input type="number" class="vs-ed-in" min="0" step="100" value="'+(c.in_ms||0)+'">'
+        + 'out <input type="number" class="vs-ed-out" min="0" step="100" value="'+(c.out_ms||0)+'">'
+        + 'speed <input type="number" class="vs-ed-speed" min="0.25" max="4" step="0.05" value="'+(c.speed||1)+'">'
+        + '<label><input type="checkbox" class="vs-ed-smooth"'+(c.smooth?' checked':'')+'>smooth</label>'
+        + '<label><input type="checkbox" class="vs-ed-mute"'+(c.mute?' checked':'')+'>mute</label>'
+        + (i>0 ? 'join <select class="vs-ed-trans">'+transOpts(tr)+'</select>' : '')
+        + '<button class="btn ghost vs-ed-up" data-i="'+i+'" title="move up">&uarr;</button>'
+        + '<button class="btn ghost vs-ed-down" data-i="'+i+'" title="move down">&darr;</button>'
+        + '<button class="btn ghost vs-ed-del" data-i="'+i+'" title="remove">&times;</button>'
+        + '</div>';
+    }).join('') || '<p class="muted">No clips.</p>';
+    var cues = (editorEdl.captions && editorEdl.captions.cues) || [];
+    $('vs-ed-caps').innerHTML = cues.length
+      ? cues.map(function(q,i){ return '<div class="vs-ed-cue" data-i="'+i+'"><input type="text" class="vs-ed-cuetext" value="'+esc(q.text||'')+'"></div>'; }).join('')
+      : '<p class="muted">No captions on this clip.</p>';
+  }
+  function syncEditorFromDom(){
+    editorEdl.look = $('vs-ed-look').value;
+    Array.prototype.forEach.call($('vs-ed-clips').querySelectorAll('.vs-ed-clip'), function(row){
+      var i = parseInt(row.getAttribute('data-i'),10), c = editorEdl.clips[i]; if(!c) return;
+      c.in_ms = parseInt(row.querySelector('.vs-ed-in').value,10)||0;
+      c.out_ms = parseInt(row.querySelector('.vs-ed-out').value,10)||0;
+      c.speed = parseFloat(row.querySelector('.vs-ed-speed').value)||1;
+      c.smooth = row.querySelector('.vs-ed-smooth').checked;
+      c.mute = row.querySelector('.vs-ed-mute').checked;
+      var ts = row.querySelector('.vs-ed-trans');
+      if(ts){ c.transition_in = c.transition_in || {}; c.transition_in.kind = ts.value; }
+    });
+    if(editorEdl.captions && editorEdl.captions.cues){
+      Array.prototype.forEach.call($('vs-ed-caps').querySelectorAll('.vs-ed-cue'), function(row){
+        var i = parseInt(row.getAttribute('data-i'),10);
+        if(editorEdl.captions.cues[i]) editorEdl.captions.cues[i].text = row.querySelector('.vs-ed-cuetext').value;
+      });
+    }
+  }
+  function moveClip(i, dir){
+    syncEditorFromDom();
+    var j = i + dir; var cl = editorEdl.clips;
+    if(j<0 || j>=cl.length) return;
+    var tmp = cl[i]; cl[i] = cl[j]; cl[j] = tmp;
+    renderEditorRows();
+  }
+  function removeClip(i){
+    syncEditorFromDom();
+    editorEdl.clips.splice(i,1);
+    renderEditorRows();
+  }
+  $('vs-ed-clips').addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    var i = parseInt(b.getAttribute('data-i'),10);
+    if(b.classList.contains('vs-ed-up')) moveClip(i,-1);
+    else if(b.classList.contains('vs-ed-down')) moveClip(i,1);
+    else if(b.classList.contains('vs-ed-del')) removeClip(i);
+  });
+  $('vs-ed-close').addEventListener('click', function(){ $('vs-editor').hidden = true; });
+  $('vs-ed-save').addEventListener('click', function(){
+    syncEditorFromDom();
+    if(!editorEdl.clips || !editorEdl.clips.length){ $('vs-ed-status').textContent = 'A timeline needs at least one clip.'; return; }
+    // The first clip can never carry a transition (the validator enforces this).
+    editorEdl.clips[0].transition_in = {kind:'cut', duration_ms:0};
+    $('vs-ed-status').textContent = 'Saving...';
+    jpost(url(PROJECT_TMPL, editorPid), {edl: editorEdl}).then(function(j){
+      if(j.ok){ $('vs-ed-status').textContent = 'Saved — re-render to see it.'; $('vs-editor').hidden = true; loadProjects(); }
+      else { $('vs-ed-status').textContent = 'Failed: '+(j.message||j.error||'invalid timeline'); }
+    });
+  });
 
   loadFootage();
   loadProjects();
@@ -44657,6 +44784,7 @@ voice, and queues them for one-click approval.</p>
                 "__PROJECT_ENHANCE_TMPL__",
                 url_for("api_video_project_enhance", project_id="__PID__"),
             )
+            .replace("__PROJECT_TMPL__", url_for("api_video_project", project_id="__PID__"))
             .replace(
                 "__PROJECT_FILE_TMPL__", url_for("api_video_project_file", project_id="__PID__")
             )

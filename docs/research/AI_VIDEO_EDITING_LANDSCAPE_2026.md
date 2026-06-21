@@ -76,9 +76,9 @@ provider slot (GEN, opt-in+disclosed) · ⏸ deferred.
 | Talking avatars / presenters | HeyGen, Synthesia, D-ID, Hedra | 🔒 `avatars.py` (off by default, disclosure forced) |
 | Background removal / matting | rembg/BiRefNet (server), Replicate, PhotoRoom | 🔒 `matting.py` (provider slot) |
 | Text-to-video / image-to-video b-roll | Veo 3.1, Sora 2, Kling 3.0, Runway, Pika, Luma | 🔒 `broll.py` (off by default, opt-in + disclosure forced) |
-| Lip-sync / dubbing / translation | sync.so, ElevenLabs, Rask, HeyGen Translate | 🔒 planned slot (disclosed) |
-| Object removal / inpainting | Runway Aleph, ProPainter, DiffuEraser, Resolve | 🔒 planned slot (disclosed) |
-| Eye-contact correction (pixel warp) | NVIDIA Broadcast, Descript | 🔒 planned slot (disclosed) |
+| Lip-sync / dubbing / translation | sync.so, ElevenLabs, Rask, HeyGen Translate | 🔒 `dub.py` (off by default, opt-in + disclosure forced) |
+| Object removal / inpainting | Runway Aleph, ProPainter, DiffuEraser, Resolve | 🔒 `object_removal.py` (opt-in + disclosure forced) |
+| Eye-contact correction (pixel warp) | NVIDIA Broadcast, Descript | 🔒 `eye_contact.py` (opt-in; a pixel edit — `synthetic=False`) |
 | Relighting | IC-Light, SwitchLight/Beeble | ⏸ |
 | ML super-resolution ("invent detail") | Real-ESRGAN, Topaz, Resolve Super Scale | 🔒 (distinct from the DET lanczos resize) |
 | "Enhance speech" (re-synthesis) | Adobe Podcast, Descript Studio Sound | ⏸ (can hallucinate phonemes — gated) |
@@ -119,22 +119,21 @@ human approves before export.
 
 ## Roadmap — the remaining builds (high value, fits the engine first)
 
-Done since the first build: animated captions, **beat-synced cutting**,
-**frame-interpolated slow-mo**, the **caption-edit route**, and the **generative
-b-roll seam** (`broll.py`). Still open:
+Done across the builds: animated captions, **beat-synced cutting**,
+**frame-interpolated slow-mo**, filler-word removal, the **caption-edit route**,
+the **visual timeline editor** (manual trim/reorder/speed/smooth/mute/look/
+transition + inline caption-text editing, saving the EDL), and **all the gated
+generative seams** — b-roll (`broll.py`), lip-sync/dubbing (`dub.py`),
+object-removal/inpainting (`object_removal.py`), and eye-contact (`eye_contact.py`).
+Still open:
 
-1. **Caption-edit UI** — the route exists; surface it (inline cue text/timing
-   editing) as part of the timeline editor below. (DET)
-2. **Filler-word + smarter silence** — lexicon trim over the ASR transcript,
-   caption-preserving tighten. (DET over ASR)
-3. **A visual timeline editor** — manual trim/reorder/per-clip speed + transition
-   + per-clip grade in the UI (today the product is auto-clip / auto-reel; the EDL
-   already supports all of this, but only via a raw EDL POST). The biggest UX gap. (DET)
-4. **Director depth** — per-beat durations/weights, multiple captioned beats,
+1. **Director depth** — per-beat durations/weights, multiple captioned beats,
    cross-clip virality ranking. (AIJ)
-5. **The remaining GEN seams** — lip-sync/dubbing, object removal, eye-contact —
-   each an off-by-default, disclosed provider slot mirroring `broll.py` /
-   `avatars.py` / `matting.py`, behind explicit opt-in + human approval.
+2. **Wiring the generative seams' networks** — the provider adapters are scaffolded
+   and honest-error today; building each network integration is gated on the
+   provider moving into `legal.SUBPROCESSORS` (and the club DPA) first. (GEN)
+3. **Timeline-editor polish** — drag-to-reorder, a waveform/thumbnail scrubber,
+   and per-clip grade sliders (the EDL already carries `ColorAdjust`). (DET)
 
 Sources for the landscape survey are the 2026 competitor research under
 `docs/research/` and the per-cluster web survey captured during this build

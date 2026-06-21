@@ -258,6 +258,50 @@ def test_studio_page_has_ai_editing_controls(app):
         assert b"Remove silences" in body  # the tighten option
 
 
+def test_studio_page_has_timeline_editor(app):
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        body = c.get("/video").data
+        assert b"Edit timeline" in body  # per-project editor entry point
+        assert b"vstudio-modal" in body and b"vs-ed-clips" in body  # the editor sheet
+        # the editor's GET/POST URL template must be resolved (no leftover placeholder)
+        assert b"__PROJECT_TMPL__" not in body
+        assert b"/api/video/projects/__PID__" in body  # client-side id-substitution template
+
+
+def test_timeline_editor_save_path_persists_and_reopens_approval(app):
+    """The editor saves by POSTing the edited EDL — reorder + trim must persist."""
+    application, _ = app
+    from mediahub.video.edl import EDL, Clip, Transition
+    from mediahub.video.projects import VideoProject, get_store
+
+    store = get_store()
+    edl = EDL(
+        clips=[
+            Clip(source="a.mp4", in_ms=0, out_ms=3000),
+            Clip(source="b.mp4", in_ms=0, out_ms=3000, transition_in=Transition("dissolve", 300)),
+        ]
+    )
+    proj = store.save(VideoProject(id="", profile_id="alpha", status="approved", edl=edl))
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        # GET returns the full EDL the editor loads.
+        got = c.get(f"/api/video/projects/{proj.id}").get_json()
+        assert got["ok"] and len(got["project"]["edl"]["clips"]) == 2
+        # Editor reorders (b first) + trims, forcing the new lead clip to a cut.
+        new_edl = got["project"]["edl"]
+        new_edl["clips"] = [new_edl["clips"][1], new_edl["clips"][0]]
+        new_edl["clips"][0]["transition_in"] = {"kind": "cut", "duration_ms": 0}
+        new_edl["clips"][0]["out_ms"] = 2000
+        r = c.post(f"/api/video/projects/{proj.id}", json={"edl": new_edl})
+        assert r.status_code == 200
+        saved = r.get_json()["project"]
+        assert saved["edl"]["clips"][0]["source"] == "b.mp4"  # reorder persisted
+        assert saved["edl"]["clips"][0]["out_ms"] == 2000  # trim persisted
+        assert saved["status"] == "draft"  # editing reopens approval (rule 6)
+
+
 def test_reel_requires_asset_ids(app):
     application, _ = app
     with application.test_client() as c:
