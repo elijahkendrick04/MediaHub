@@ -133,6 +133,10 @@ _club_platform_ok = all(
     )
 )
 
+# Roadmap 1.11 — Charts & insights. Pure-Python SVG (no Playwright/Node needed),
+# so the surface is available whenever the package imports.
+_charts_ok = _importlib_util.find_spec("mediahub.charts") is not None
+
 _brand_ok = all(
     _importlib_util.find_spec(_m) is not None
     for _m in (
@@ -14236,6 +14240,60 @@ def _hero_product_demo() -> str:
 # ---------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------
+
+
+# Roadmap 1.11 — the Charts & insights page JS. AI-supplied text is rendered via
+# textContent only (never innerHTML), so a takeaway or headline can't inject markup.
+_CHARTS_PAGE_JS = """
+<script>
+(function(){
+  function out(){ return document.getElementById('mh-ai-out'); }
+  function show(node){ var o=out(); o.innerHTML=''; o.style.display='block'; o.appendChild(node); }
+  function msg(text){ var d=document.createElement('div'); d.className='card'; d.textContent=text; return d; }
+  function busy(btn,on,label){ btn.disabled=on; if(on){ btn.dataset._t=btn.textContent; btn.textContent=label; } else { btn.textContent=btn.dataset._t||btn.textContent; } }
+  function highlight(id){ document.querySelectorAll('.mh-chartpack-tile').forEach(function(t){ var on=t.getAttribute('data-chart-id')===id; t.style.outline=on?'2px solid var(--accent)':''; t.style.outlineOffset='2px'; }); }
+
+  var recBtn=document.getElementById('mh-rec-btn');
+  if(recBtn) recBtn.addEventListener('click', function(){
+    busy(recBtn,true,'Thinking…');
+    fetch('__REC_URL__',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+      busy(recBtn,false);
+      if(j.available===false){ show(msg(j.message||'AI is not configured on this deployment.')); return; }
+      var rec=j.recommendation;
+      if(!rec){ show(msg(j.message||'No recommendation available.')); return; }
+      var card=document.createElement('div'); card.className='card';
+      var h=document.createElement('div'); h.style.fontWeight='700'; h.textContent='Lead with: '+(rec.title||''); card.appendChild(h);
+      if(rec.headline){ var hl=document.createElement('div'); hl.style.marginTop='4px'; hl.textContent=rec.headline; card.appendChild(hl); }
+      if(rec.reason){ var rs=document.createElement('div'); rs.className='muted'; rs.style.marginTop='6px'; rs.style.fontSize='13px'; rs.textContent=rec.reason; card.appendChild(rs); }
+      show(card); highlight(rec.chart_id);
+      var tile=document.querySelector('.mh-chartpack-tile[data-chart-id="'+rec.chart_id+'"]');
+      if(tile) tile.scrollIntoView({behavior:'smooth',block:'center'});
+    }).catch(function(){ busy(recBtn,false); show(msg('Could not reach the recommender. Try again.')); });
+  });
+
+  var insBtn=document.getElementById('mh-ins-btn');
+  if(insBtn) insBtn.addEventListener('click', function(){
+    busy(insBtn,true,'Writing…');
+    fetch('__INS_URL__',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+      busy(insBtn,false);
+      if(j.available===false){ show(msg(j.message||'AI is not configured on this deployment.')); return; }
+      var ins=j.insights||{}; var items=ins.takeaways||[];
+      if(!items.length){ show(msg(ins.summary||'No takeaways generated.')); return; }
+      var card=document.createElement('div'); card.className='card';
+      if(ins.summary){ var s=document.createElement('div'); s.style.fontWeight='700'; s.style.marginBottom='8px'; s.textContent=ins.summary; card.appendChild(s); }
+      var ul=document.createElement('ul'); ul.style.margin='0'; ul.style.paddingLeft='18px';
+      items.forEach(function(t){
+        var li=document.createElement('li'); li.style.marginBottom='6px'; li.textContent=t.text||'';
+        var n=(t.sources||[]).length;
+        if(n){ var sp=document.createElement('span'); sp.className='muted'; sp.style.fontSize='11px'; sp.style.marginLeft='6px'; sp.textContent='('+n+' source'+(n===1?'':'s')+')'; li.appendChild(sp); }
+        ul.appendChild(li);
+      });
+      card.appendChild(ul); show(card);
+    }).catch(function(){ busy(insBtn,false); show(msg('Could not reach the writer. Try again.')); });
+  });
+})();
+</script>
+"""
 
 
 def create_app() -> Flask:
@@ -35499,6 +35557,7 @@ function mhSetupMode(mode) {{
             "CARD_ID", ""
         )
         _reel_url = url_for("api_run_reel", run_id=run_id)
+        _charts_url = url_for("run_charts_page", run_id=run_id) if _charts_ok else ""
         _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
@@ -35571,6 +35630,15 @@ function mhSetupMode(mode) {{
   </div>
 </div>
 <div id="reel-panel" class="no-print" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
+{(
+    '<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;'
+    'align-items:center;flex-wrap:wrap;gap:10px">'
+    '<div><div style="font-size:13px;font-weight:700">Charts &amp; insights</div>'
+    '<div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Brand-styled stat graphics from this '
+    "meet's results — PBs, medals, drops, splits — with AI-picked highlights and grounded takeaways.</div></div>"
+    f'<a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_charts_url)}">Open charts &amp; insights &rarr;</a>'
+    '</div>'
+) if _charts_url else ''}
 
 <div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -42686,6 +42754,243 @@ voice, and queues them for one-click approval.</p>
             as_attachment=False,
             download_name=f"meet_reel_{run_id}.mp4",
         )
+
+    # ---- Roadmap 1.11 — Charts & insights --------------------------------
+    # Brand-styled, deterministic stat graphics from a run's own data, plus the
+    # two grounded AI surfaces (recommend / insights). SVG is pure-Python so these
+    # need no Playwright/Node; the human reviews and exports — nothing is published.
+    _CHART_FORMATS: dict[str, tuple[int, int]] = {
+        "square": (1080, 1080),
+        "portrait": (1080, 1350),
+        "story": (1080, 1920),
+        "landscape": (1920, 1080),
+        "wide": (1200, 675),
+    }
+
+    def _charts_run_context(run_id: str):
+        """Load a run + resolve its brand kit for the charts surface.
+
+        Returns ``(ctx, None)`` or ``(None, (response, status))`` so callers stay
+        behaviourally identical (mirrors ``_assemble_reel_inputs``).
+        """
+        run_data = _load_run(run_id)
+        if run_data is None:
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        raw_pid = run_data.get("profile_id") or run_data.get("club_filter") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", str(raw_pid).lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        try:
+            brand_kit = _resolve_run_brand_kit(profile_id, run_id) if _v8_ok else None
+        except Exception:
+            brand_kit = None
+        return {"run_data": run_data, "brand_kit": brand_kit, "profile_id": profile_id}, None
+
+    def _charts_candidates_for(run_id: str):
+        """``(ctx, candidates, None)`` or ``(None, None, error)``."""
+        from mediahub import charts as _charts
+
+        ctx, err = _charts_run_context(run_id)
+        if err is not None:
+            return None, None, err
+        records = None
+        try:
+            from mediahub.club_records import list_records
+
+            records = list_records(ctx["profile_id"]) if ctx["profile_id"] else None
+        except Exception:
+            records = None
+        cands = _charts.build_chart_candidates(ctx["run_data"], records=records)
+        return ctx, cands, None
+
+    @app.route("/api/runs/<run_id>/charts", methods=["GET"])
+    def api_run_charts(run_id: str):
+        """JSON list of the charts this run can support (each with an SVG URL)."""
+        if not _charts_ok:
+            return jsonify({"error": "charts_unavailable"}), 503
+        ctx, cands, err = _charts_candidates_for(run_id)
+        if err is not None:
+            return err
+        return jsonify(
+            {
+                "charts": [
+                    {
+                        "chart_id": c.chart_id,
+                        "title": c.title,
+                        "kind": c.kind,
+                        "summary": c.summary,
+                        "headline_stat": c.headline_stat,
+                        "n_points": c.n_points,
+                        "svg_url": url_for("api_run_chart_svg", run_id=run_id, chart_id=c.chart_id),
+                    }
+                    for c in (cands or [])
+                ]
+            }
+        )
+
+    @app.route("/api/runs/<run_id>/chart/<chart_id>", methods=["GET"])
+    def api_run_chart_svg(run_id: str, chart_id: str):
+        """Render one candidate chart as brand-styled SVG (deterministic)."""
+        if not _charts_ok:
+            return jsonify({"error": "charts_unavailable"}), 503
+        from dataclasses import replace as _dc_replace
+
+        from mediahub.charts.render import render_chart_svg
+
+        ctx, cands, err = _charts_candidates_for(run_id)
+        if err is not None:
+            return err
+        match = next((c for c in (cands or []) if c.chart_id == chart_id), None)
+        if match is None:
+            return jsonify({"error": "chart_not_found"}), 404
+        spec = match.spec
+        fmt = (request.args.get("format") or "").strip().lower()
+        if fmt in _CHART_FORMATS:
+            w, h = _CHART_FORMATS[fmt]
+            spec = _dc_replace(spec, width=w, height=h)
+        try:
+            svg = render_chart_svg(spec, brand_kit=ctx["brand_kit"])
+        except Exception as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+        resp = Response(svg, mimetype="image/svg+xml; charset=utf-8")
+        if request.args.get("download"):
+            resp.headers["Content-Disposition"] = f'attachment; filename="{chart_id}.svg"'
+        return resp
+
+    @app.route("/api/runs/<run_id>/charts/recommend", methods=["POST"])
+    def api_run_charts_recommend(run_id: str):
+        """AI picks the chart that leads the story. Honest 200 when no AI is set."""
+        if not _charts_ok:
+            return jsonify({"error": "charts_unavailable"}), 503
+        from mediahub import charts as _charts
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        ctx, cands, err = _charts_candidates_for(run_id)
+        if err is not None:
+            return err
+        if not cands:
+            return jsonify(
+                {
+                    "available": True,
+                    "recommendation": None,
+                    "message": "No charts for this run yet.",
+                }
+            )
+        agg = _charts.compute_aggregates(ctx["run_data"])
+        try:
+            rec = _charts.recommend_chart(cands, agg)
+        except ClaudeUnavailableError as e:
+            return jsonify({"available": False, "error": "no_ai", "message": str(e)})
+        return jsonify({"available": True, "recommendation": rec})
+
+    @app.route("/api/runs/<run_id>/charts/insights", methods=["POST"])
+    def api_run_charts_insights(run_id: str):
+        """AI takeaways grounded in the run's facts. Honest 200 when no AI is set."""
+        if not _charts_ok:
+            return jsonify({"error": "charts_unavailable"}), 503
+        from mediahub import charts as _charts
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        ctx, err = _charts_run_context(run_id)
+        if err is not None:
+            return err
+        agg = _charts.compute_aggregates(ctx["run_data"])
+        tone = (request.args.get("tone") or "editorial").strip().lower()
+        try:
+            ins = _charts.generate_insights(agg, tone=tone)
+        except ClaudeUnavailableError as e:
+            return jsonify({"available": False, "error": "no_ai", "message": str(e)})
+        return jsonify({"available": True, "insights": ins})
+
+    @app.route("/runs/<run_id>/charts", methods=["GET"])
+    def run_charts_page(run_id: str):
+        """The Charts & insights surface: a gallery of brand-styled stat graphics
+        from this meet, with AI-picked highlights and grounded takeaways."""
+        if not _charts_ok:
+            return _recovery_page(
+                "Charts unavailable",
+                "The charts engine isn't enabled on this deployment.",
+                primary_cta=("Back to home", url_for("home")),
+            )
+        ctx, cands, err = _charts_candidates_for(run_id)
+        if err is not None:
+            # err is (json_response, status); show a friendly recovery page instead.
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk, or it belongs to another organisation.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+        meet_name = (
+            (ctx["run_data"].get("meet") or {}).get("name")
+            or ctx["run_data"].get("meet_name")
+            or "Meet"
+        )
+        _pack_url = url_for("content_pack", run_id=run_id)
+
+        if not cands:
+            body = (
+                f'<section class="mh-hero" style="padding:var(--sp-7) 0"><h1>Charts &amp; insights</h1>'
+                f'<p class="muted">{_h(meet_name)}</p>'
+                '<div class="card" style="margin-top:16px"><p>No charts yet — this run has no detected '
+                "PBs, medals or splits to plot. Process a meet with standout results to see stat graphics here.</p>"
+                f'<p><a class="btn secondary" href="{_h(_pack_url)}">&larr; Back to content builder</a></p></div></section>'
+            )
+            return _layout("Charts & insights", body, active="home")
+
+        # Server-rendered gallery — each card embeds its deterministic SVG by URL.
+        # Pure f-strings only: a raw-HTML literal + a markupsafe Markup (what _h
+        # returns) would escape the *HTML*, so we interpolate values, never concat.
+        tiles = []
+        for c in cands:
+            svg_url = url_for("api_run_chart_svg", run_id=run_id, chart_id=c.chart_id)
+            dl_url = svg_url + "?download=1"
+            tiles.append(
+                f'<div class="card mh-chartpack-tile" data-chart-id="{_h(c.chart_id)}" '
+                'style="padding:14px;display:flex;flex-direction:column;gap:10px">'
+                '<div style="aspect-ratio:1/1;background:var(--panel);border-radius:10px;overflow:hidden">'
+                f'<img loading="lazy" src="{_h(svg_url)}" alt="{_h(c.title)}" '
+                'style="width:100%;height:100%;object-fit:contain"></div>'
+                f'<div><div style="font-weight:700">{_h(c.title)}</div>'
+                f'<div class="muted" style="font-size:12px;margin-top:2px">{_h(c.summary)}</div></div>'
+                '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:auto">'
+                f'<span class="tag">{_h(c.headline_stat)}</span>'
+                f'<a class="btn secondary" style="font-size:12px;padding:5px 12px;margin-left:auto" '
+                f'href="{_h(dl_url)}">Download SVG</a></div></div>'
+            )
+        gallery = (
+            '<div class="mh-chartpack-grid" style="display:grid;'
+            'grid-template-columns:repeat(auto-fill,minmax(280px,1fr));'
+            f'gap:16px;margin-top:16px">{"".join(tiles)}</div>'
+        )
+
+        rec_url = url_for("api_run_charts_recommend", run_id=run_id)
+        ins_url = url_for("api_run_charts_insights", run_id=run_id)
+        head = (
+            '<section class="mh-hero" style="padding:var(--sp-7) 0 var(--sp-4)">'
+            '<h1>Charts &amp; insights</h1>'
+            f'<p class="muted">{_h(meet_name)} &middot; {len(cands)} chart{"" if len(cands)==1 else "s"} '
+            'from your own results, in your brand colours.</p>'
+            f'<p style="margin-top:8px"><a class="muted" href="{_h(_pack_url)}" '
+            'style="text-decoration:none">&larr; Back to content builder</a></p></section>'
+        )
+        ai_panel = (
+            '<div class="card no-print" style="display:flex;flex-direction:column;gap:12px">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
+            '<div><div style="font-weight:700">AI highlights</div>'
+            '<div class="muted" style="font-size:12px;margin-top:2px">Which chart leads the story, and the '
+            "takeaways — grounded in the numbers above, never invented.</div></div>"
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+            '<button id="mh-rec-btn" class="btn" style="font-size:12px;padding:6px 14px">Recommend a chart</button>'
+            '<button id="mh-ins-btn" class="btn secondary" style="font-size:12px;padding:6px 14px">Write takeaways</button>'
+            "</div></div>"
+            '<div id="mh-ai-out" style="display:none"></div></div>'
+        )
+        js = _CHARTS_PAGE_JS.replace("__REC_URL__", rec_url).replace("__INS_URL__", ins_url)
+        body = head + ai_panel + gallery + js
+        return _layout("Charts & insights", body, active="home")
 
     @app.route("/api/runs/<run_id>/reel-job", methods=["POST"])
     def api_run_reel_job(run_id: str):

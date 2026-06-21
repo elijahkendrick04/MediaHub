@@ -786,6 +786,17 @@ routes. **Deferred to 1.2 (generative imagery):** the AI *shape generator*, the
 
 ## 1.11 — Charts, infographics & data storytelling
 
+> ✅ **Shipped** (`src/mediahub/charts/`). The deterministic engine (typed chart
+> specs → brand-styled SVG: bar/hbar/line/progression/pie/donut/scatter/table/
+> medal-table/split-ladder), the data plumbing (`aggregates.py` + `series.py` over
+> canonical results / detector output / `club_records`, `csv_input.py` for uploads),
+> the two grounded AI surfaces (`recommend.py` picks the lead chart, `insights.py`
+> phrases pre-computed facts with a fabricated-number guard + source links), and the
+> data-driven diagram formats (`diagrams.py`: committee org chart, season timeline,
+> athlete journey, training flow) are all in. Surfaced on the content builder at
+> `/runs/<id>/charts`. Scroll-story export + interactive widgets remain forward to
+> 1.15/1.16 (static-first, as specified).
+
 **What Canva/Adobe have.** 20+ chart types editable via data table, CSV
 import, interactive charts (Flourish: treemaps, packed circles, maps), Magic
 Charts (data→chart with recommendations, real-time sync), Magic Insights (AI
