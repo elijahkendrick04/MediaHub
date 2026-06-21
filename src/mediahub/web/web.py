@@ -8491,7 +8491,7 @@ body[data-page="home"] .mh-hero-eyebrow::after { color: var(--medal); }
 }
 .mh-template:hover .mh-template-icon { border-color: var(--lane); }
 .mh-template-icon svg { width: 20px; height: 20px; }
-.mh-template h3 {
+.mh-template h3, .mh-template h2 {
   font-family: var(--font-display);
   font-size: 18px; font-weight: 800; color: var(--ink);
   letter-spacing: 0.01em; margin: 0 0 var(--sp-1);
@@ -23911,7 +23911,7 @@ Relay team broke club record"></textarea>
                 f'<a href="{href}" class="mh-template mh-glow-border">'
                 f'<div class="mh-template-icon">{icon}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
-                f'<h3 style="margin:0">{_h(title)}</h3>'
+                f'<h2 style="margin:0">{_h(title)}</h2>'
                 "</div>"
                 f"<p>{_h(desc)}</p>"
                 '<span class="mh-template-cta">Open</span>'
