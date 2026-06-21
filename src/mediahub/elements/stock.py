@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urljoin, urlparse
 
 from mediahub.audio.library import Licence  # shared rights vocabulary (1.8 ↔ 1.10)
 
@@ -384,6 +385,106 @@ def _strip_html(text: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# first-party thumbnail proxy (CSP img-src 'self')
+# --------------------------------------------------------------------------- #
+# The stock browser surfaces thumbnails whose URLs are cross-origin (Wikimedia /
+# Openverse / flag-gated paid CDNs). The app CSP pins ``img-src 'self'``, so the
+# browser blocks those <img> loads and the grid shows blank tiles. Rather than
+# loosen the CSP for the whole app (the same reason brand logos are mirrored
+# first-party — see ``brand.logos.mirror_external_logo``), we stream the bytes
+# through our own origin. To keep this from being an open image relay it is
+# pinned to the known stock CDNs *and* SSRF-checked (a public host can't 302 the
+# fetch onto an internal address), size-capped, and image/video-only.
+_PROXY_HOST_SUFFIXES = (
+    "wikimedia.org",  # upload.wikimedia.org, commons.wikimedia.org
+    "wikipedia.org",
+    "openverse.org",  # api.openverse.org thumbnails
+    "pexels.com",  # images.pexels.com
+    "pixabay.com",  # pixabay.com, cdn.pixabay.com
+)
+_THUMB_MAX_BYTES = 12 * 1024 * 1024  # a thumbnail/poster is far smaller
+_THUMB_TIMEOUT = 12  # seconds
+_THUMB_MAX_HOPS = 3
+_THUMB_UA = "MediaHub/1.0 (stock thumbnail proxy)"
+_THUMB_OK_CT_PREFIXES = ("image/", "video/")
+
+
+def is_proxy_host(host: str) -> bool:
+    """True if ``host`` is one of the allow-listed stock CDNs we will proxy."""
+    h = (host or "").lower().strip().rstrip(".")
+    return any(h == s or h.endswith("." + s) for s in _PROXY_HOST_SUFFIXES)
+
+
+def fetch_thumb(url: str, *, timeout: int = _THUMB_TIMEOUT) -> tuple[Optional[bytes], str]:
+    """Fetch a stock thumbnail's bytes for first-party serving under the CSP.
+
+    Host-allow-listed to the known stock CDNs, SSRF-checked on every redirect
+    hop, size-capped, and image/video-only. Returns ``(data, content_type)`` —
+    or ``(None, "")`` on any refusal/failure. Never raises.
+    """
+    url = (url or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return None, ""
+    try:
+        import requests
+
+        from mediahub.web_research.safe_fetch import is_url_safe
+    except Exception:  # pragma: no cover - both are core deps
+        return None, ""
+
+    current = url
+    for _ in range(_THUMB_MAX_HOPS):
+        host = urlparse(current).hostname or ""
+        # Allow-list first (cheap), then SSRF-resolve the host (re-checked every
+        # hop so a redirect can't smuggle the fetch onto a private address).
+        if not is_proxy_host(host) or not is_url_safe(current):
+            log.debug("stock thumb proxy refused host: %s", host)
+            return None, ""
+        try:
+            r = requests.get(
+                current,
+                headers={"User-Agent": _THUMB_UA, "Accept": "image/*,video/*;q=0.8,*/*;q=0.5"},
+                timeout=timeout,
+                allow_redirects=False,
+                stream=True,
+            )
+        except Exception as e:  # pragma: no cover - network
+            log.debug("stock thumb proxy fetch failed for %s: %s", current, e)
+            return None, ""
+        if r.status_code in (301, 302, 303, 307, 308):
+            nxt = r.headers.get("Location", "")
+            if not nxt:
+                return None, ""
+            current = urljoin(current, nxt)
+            continue
+        if r.status_code != 200:
+            return None, ""
+        ctype = (r.headers.get("Content-Type", "") or "").split(";")[0].strip().lower()
+        if not any(ctype.startswith(p) for p in _THUMB_OK_CT_PREFIXES):
+            log.debug("stock thumb proxy refused non-media content (%r)", ctype)
+            return None, ""
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            for chunk in r.iter_content(64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > _THUMB_MAX_BYTES:
+                    log.debug("stock thumb proxy exceeded %d-byte cap", _THUMB_MAX_BYTES)
+                    return None, ""
+                chunks.append(chunk)
+        except Exception as e:  # pragma: no cover - network
+            log.debug("stock thumb proxy read failed for %s: %s", current, e)
+            return None, ""
+        data = b"".join(chunks)
+        if not data:
+            return None, ""
+        return data, ctype
+    return None, ""  # too many redirects
+
+
+# --------------------------------------------------------------------------- #
 # rights ledger (shared Licence vocabulary, persisted, auditable)
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -557,6 +658,8 @@ __all__ = [
     "parse_licence",
     "search",
     "available_sources",
+    "fetch_thumb",
+    "is_proxy_host",
     "StockRightsRecord",
     "StockRightsLedger",
     "get_ledger",

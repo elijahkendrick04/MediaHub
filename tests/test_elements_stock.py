@@ -34,7 +34,9 @@ def test_parse_licence_commercial_gate(raw, commercial):
 
 
 def test_parse_licence_spdx_and_fields():
-    lic = stock.parse_licence("CC BY-SA 4.0", url="http://x", attribution="Jane", source="wikimedia")
+    lic = stock.parse_licence(
+        "CC BY-SA 4.0", url="http://x", attribution="Jane", source="wikimedia"
+    )
     assert lic.spdx == "CC-BY-SA-4.0"
     assert lic.url == "http://x"
     assert lic.attribution == "Jane"
@@ -108,9 +110,7 @@ def test_search_photos_maps_and_filters(monkeypatch):
 
 
 def test_search_commercial_only_off_keeps_all(monkeypatch):
-    _patch_venue(
-        monkeypatch, lambda q, limit=8, timeout=8: [_fake_venue_result("CC BY-NC 4.0")]
-    )
+    _patch_venue(monkeypatch, lambda q, limit=8, timeout=8: [_fake_venue_result("CC BY-NC 4.0")])
     results = stock.search("x", kind="photo", commercial_only=False)
     assert len(results) == 1
 
@@ -169,6 +169,115 @@ def test_search_video_parses_wikimedia(monkeypatch):
     assert v.direct_url.endswith(".webm")
     assert v.licence.commercial_ok is True
     assert v.licence.attribution == "Vidder"  # HTML stripped
+
+
+# --------------------------------------------------------------------------- #
+# first-party thumbnail proxy (CSP img-src 'self')
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "host,ok",
+    [
+        ("upload.wikimedia.org", True),
+        ("commons.wikimedia.org", True),
+        ("api.openverse.org", True),
+        ("images.pexels.com", True),
+        ("cdn.pixabay.com", True),
+        ("pixabay.com", True),
+        ("WIKIMEDIA.ORG", True),  # case-insensitive
+        ("evil.com", False),
+        ("wikimedia.org.evil.com", False),  # suffix-smuggle attempt
+        ("notwikimedia.org", False),
+        ("", False),
+    ],
+)
+def test_is_proxy_host_allowlist(host, ok):
+    assert stock.is_proxy_host(host) is ok
+
+
+class _FakeThumbResp:
+    def __init__(self, *, status=200, ctype="image/jpeg", body=b"\xff\xd8\xffjpg", location=None):
+        self.status_code = status
+        self.headers = {"Content-Type": ctype}
+        if location:
+            self.headers["Location"] = location
+        self._body = body
+
+    def iter_content(self, n):
+        for i in range(0, len(self._body), n):
+            yield self._body[i : i + n]
+
+
+def _allow_ssrf(monkeypatch, allowed=True):
+    monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: allowed)
+
+
+def test_fetch_thumb_happy_path(monkeypatch):
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(body=b"PNGDATA"))
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/x.jpg")
+    assert data == b"PNGDATA"
+    assert ctype == "image/jpeg"
+
+
+def test_fetch_thumb_allows_video_content(monkeypatch):
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr(
+        "requests.get", lambda *a, **k: _FakeThumbResp(ctype="video/webm", body=b"WEBM")
+    )
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/x.webm")
+    assert data == b"WEBM" and ctype == "video/webm"
+
+
+def test_fetch_thumb_rejects_offlist_host(monkeypatch):
+    # Off-list host must be refused BEFORE any network call.
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("must not fetch off-list host"))
+    data, ctype = stock.fetch_thumb("https://evil.com/x.jpg")
+    assert data is None and ctype == ""
+
+
+def test_fetch_thumb_rejects_ssrf_host(monkeypatch):
+    _allow_ssrf(monkeypatch, allowed=False)  # host resolves to a private IP
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("must not fetch SSRF host"))
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/x.jpg")
+    assert data is None and ctype == ""
+
+
+def test_fetch_thumb_rejects_non_media_content(monkeypatch):
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr(
+        "requests.get", lambda *a, **k: _FakeThumbResp(ctype="text/html", body=b"<html>")
+    )
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/x.jpg")
+    assert data is None and ctype == ""
+
+
+def test_fetch_thumb_rejects_bad_scheme():
+    assert stock.fetch_thumb("ftp://upload.wikimedia.org/x.jpg") == (None, "")
+    assert stock.fetch_thumb("") == (None, "")
+
+
+def test_fetch_thumb_size_capped(monkeypatch):
+    _allow_ssrf(monkeypatch)
+    monkeypatch.setattr(stock, "_THUMB_MAX_BYTES", 8)
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(body=b"x" * 64))
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/big.jpg")
+    assert data is None and ctype == ""
+
+
+def test_fetch_thumb_revalidates_host_on_redirect(monkeypatch):
+    # A 302 from an allow-listed host onto an off-list host must be refused at
+    # the next hop (the redirect can't smuggle the fetch off the allowlist).
+    _allow_ssrf(monkeypatch)
+    calls = {"n": 0}
+
+    def _get(url, *a, **k):
+        calls["n"] += 1
+        return _FakeThumbResp(status=302, location="https://evil.com/x.jpg")
+
+    monkeypatch.setattr("requests.get", _get)
+    data, ctype = stock.fetch_thumb("https://upload.wikimedia.org/x.jpg")
+    assert data is None and ctype == ""
+    assert calls["n"] == 1  # stopped at the redirect target's host check
 
 
 # --------------------------------------------------------------------------- #
@@ -288,6 +397,30 @@ def test_stock_page_renders(app_env):
     assert resp.status_code == 200
     assert b"Stock library" in resp.data
     assert b"sb-grid" in resp.data
+    # Tiles must load through the first-party proxy (CSP img-src 'self'), not the
+    # raw cross-origin CDN URL, and no longer embed a heavy cross-origin <video>.
+    assert b"/api/stock/thumb" in resp.data
+    assert b"proxyUrl" in resp.data
+    assert b"<video" not in resp.data
+
+
+def test_stock_thumb_route_proxies(app_env, monkeypatch):
+    app, _wm, _ = app_env
+    monkeypatch.setattr(stock, "fetch_thumb", lambda u: (b"IMG-BYTES", "image/png"))
+    with app.test_client() as c:
+        resp = c.get("/api/stock/thumb?u=https://upload.wikimedia.org/x.jpg")
+    assert resp.status_code == 200
+    assert resp.data == b"IMG-BYTES"
+    assert resp.headers["Content-Type"].startswith("image/png")
+    assert "max-age" in resp.headers.get("Cache-Control", "")
+
+
+def test_stock_thumb_route_404_on_refusal(app_env, monkeypatch):
+    app, _wm, _ = app_env
+    monkeypatch.setattr(stock, "fetch_thumb", lambda u: (None, ""))
+    with app.test_client() as c:
+        resp = c.get("/api/stock/thumb?u=https://evil.com/x.jpg")
+    assert resp.status_code == 404
 
 
 def test_import_stock_creates_asset_and_rights(app_env, monkeypatch):
