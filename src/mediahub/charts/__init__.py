@@ -21,10 +21,13 @@ Public surface:
   - ``aggregates`` — the deterministic fact base over a processed run (build 2)
   - ``series``     — build ChartSpecs from real run data (build 2)
   - ``csv_input``  — turn an uploaded table into a ChartSpec, flagging bad rows (build 2)
+  - ``recommend``  — AI picks which chart leads the story, honest-erroring (build 3)
+  - ``insights``   — AI takeaways grounded in the facts, source-linked (build 3)
 """
 
 from .aggregates import MeetAggregates, compute_aggregates
 from .csv_input import CsvImport, parse_csv_to_spec
+from .insights import generate_insights
 from .models import (
     CHART_KINDS,
     Axis,
@@ -34,6 +37,7 @@ from .models import (
     format_time_cs,
     format_value,
 )
+from .recommend import recommend_chart
 from .render import render_chart_svg
 from .series import ChartCandidate, build_chart_candidates
 
@@ -52,4 +56,6 @@ __all__ = [
     "build_chart_candidates",
     "CsvImport",
     "parse_csv_to_spec",
+    "recommend_chart",
+    "generate_insights",
 ]
