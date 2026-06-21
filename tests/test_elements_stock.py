@@ -18,7 +18,9 @@ def _isolate_thumb_cache(tmp_path, monkeypatch):
     unique tmp dir per test so cached bytes never leak across tests or into the
     repo. (Web-route tests' app_env sets the same DATA_DIR afterwards.)"""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEDIAHUB_STOCK_THUMB_RATE", "0")  # disable the rate gate in tests
     stock._THUMB_WARMING.clear()  # the in-flight-warm dedupe set is module-global
+    stock._THUMB_RATE_NEXT = 0.0  # reset the global rate-gate clock between tests
 
 
 # --------------------------------------------------------------------------- #
@@ -330,6 +332,29 @@ def test_fetch_thumb_gives_up_after_persistent_429(monkeypatch):
     monkeypatch.setattr("time.sleep", lambda *a, **k: None)
     monkeypatch.setattr("requests.get", lambda *a, **k: _FakeThumbResp(status=429))
     assert stock.fetch_thumb("https://upload.wikimedia.org/always429.jpg") == (None, "")
+
+
+def test_thumb_rate_gate_spaces_requests(monkeypatch):
+    """The global rate gate holds outbound requests to MEDIAHUB_STOCK_THUMB_RATE
+    per second, so a storm of retries can't trip the source's rate limit."""
+    monkeypatch.setenv("MEDIAHUB_STOCK_THUMB_RATE", "2")  # 2/sec → 0.5s interval
+    stock._THUMB_RATE_NEXT = 0.0
+    sleeps = []
+    monkeypatch.setattr(stock.time, "monotonic", lambda: 100.0)  # frozen clock
+    monkeypatch.setattr(stock.time, "sleep", lambda s: sleeps.append(s))
+    stock._thumb_rate_gate()  # first request: no wait
+    stock._thumb_rate_gate()  # second: must wait one interval
+    stock._thumb_rate_gate()  # third: two intervals out
+    assert sleeps == pytest.approx([0.5, 1.0], abs=0.01)
+
+
+def test_thumb_rate_gate_disabled_when_zero(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_STOCK_THUMB_RATE", "0")
+    slept = []
+    monkeypatch.setattr(stock.time, "sleep", lambda s: slept.append(s))
+    stock._thumb_rate_gate()
+    stock._thumb_rate_gate()
+    assert slept == []
 
 
 # --------------------------------------------------------------------------- #

@@ -338,17 +338,18 @@ def render_stock_body(
     d.innerHTML = thumb + '<div class="sb-meta"><div class="sb-lic">' + lic + '</div>' +
       '<div class="sb-attr">' + attr + '</div>' +
       '<button type="button" class="sb-add">Add to library</button></div>';
-    // The proxy serves cache-only (a miss 404s while it warms in the background),
-    // so retry a few times with backoff — the warmed tile then loads. The &_r=
-    // cache-buster forces a fresh request each try; after a few, show a
-    // placeholder. (dead CDN links / refused hosts also land here.)
+    // The proxy serves cache-only (a miss 404s while it warms in the background).
+    // The warmer fills the cache at a deliberately polite rate (to stay under the
+    // source's limit), so retry over a generous window with the &_r= cache-buster
+    // until the tile lands; only then fall back to a placeholder. (dead CDN links
+    // / refused hosts also end up here.)
     var imgEl = d.querySelector('.sb-img');
     if (imgEl && posterSrc) {{
       var tries = 0;
       imgEl.addEventListener('error', function() {{
         tries++;
-        if (tries <= 5) {{
-          setTimeout(function(){{ imgEl.src = posterSrc + '&_r=' + tries; }}, 700 * tries);
+        if (tries <= 9) {{
+          setTimeout(function(){{ imgEl.src = posterSrc + '&_r=' + tries; }}, Math.min(3500, 900 * tries));
         }} else {{
           var box = imgEl.parentNode; if (box) box.innerHTML = '<div class="sb-noimg">No preview</div>';
         }}
