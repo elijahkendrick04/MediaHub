@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `18726a486` · Merge pull request #961 from elijahkendrick04/claude/amazing-meitner-bwq8of
+**Last updated:** 2026-06-21 · `e567a9bfe` · Bot fix: home hero primary CTA is 'Sign up' for new users (#894)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1225,5 +1225,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `1ba818c63` | Serve stock thumbnails cache-only + background warm (prevent worker starvation) |
 | 2026-06-21 | `281ddb66f` | style(data_hub,bulk): apply ruff-format (pre-commit hygiene) |
 | 2026-06-21 | `791c7b0bc` | feat(data_hub): web grid UI, JSON API + connector framework (1.13 build 3) |
-| 2026-06-21 | `a00b5a9bf` | feat(data_hub,bulk): derived columns + AI scaffold + review-queued bulk generation (1.13 build 2) |
 <!-- /ROADMAP:ACTIVITY -->
