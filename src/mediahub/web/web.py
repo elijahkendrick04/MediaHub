@@ -16325,91 +16325,206 @@ def create_app() -> Flask:
             except Exception:
                 return None
 
+        # Inline stat-chip glyphs — a lane/water mark for matched swims and a
+        # star for detected moments (echoing the medal motif used elsewhere).
+        icon_swims = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            '<path d="M2 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/>'
+            '<path d="M2 9c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/></svg>'
+        )
+        icon_moment = (
+            '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+            '<path d="M12 2.6l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.9 6.6 19.1l1.2-6'
+            '-4.5-4.2 6.1-.7z"/></svg>'
+        )
+
+        # Pass 1 — group runs by calendar month (newest-first order preserved),
+        # tally per-month + season totals, note the span, and remember the one
+        # standout meet (most moments) so the timeline can celebrate it.
         n_meets = len(rows)
         total_swims = 0
         total_moments = 0
-        cur_month = None
-        items_html = ""
+        first_dt = None
+        last_dt = None
+        peak_run_id = None
+        peak_moments = 0
+        months: list = []
+        month_pos: dict = {}
         for r in rows:
             dt = _parse(r["created_at"])
             month_label = dt.strftime("%B %Y") if dt else "Undated"
-            if month_label != cur_month:
-                cur_month = month_label
-                items_html += (
-                    '<div class="mh-timeline__head">'
-                    f'<span class="mh-tl-month">{_h(month_label)}</span></div>'
-                )
-
-            if dt:
-                day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
-                iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-                full_title = dt.strftime("%A %d %B %Y, %H:%M UTC")
-            else:
-                day_html, iso_attr, full_title = "&mdash;", "", "Date unknown"
-
-            status = r["status"] or ""
-            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
-                status, ""
-            )
             swims = int(r["our_swims"] or 0)
             moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
             total_swims += swims
             total_moments += moments
-            title = r["meet_name"] or r["file_name"] or r["id"]
-            review_href = url_for("review", run_id=r["id"])
+            if dt is not None:
+                if first_dt is None or dt < first_dt:
+                    first_dt = dt
+                if last_dt is None or dt > last_dt:
+                    last_dt = dt
+            if moments > peak_moments:
+                peak_moments = moments
+                peak_run_id = r["id"]
+            if month_label not in month_pos:
+                month_pos[month_label] = len(months)
+                months.append({"label": month_label, "rows": [], "swims": 0, "moments": 0})
+            bucket = months[month_pos[month_label]]
+            bucket["rows"].append((r, dt, swims, moments))
+            bucket["swims"] += swims
+            bucket["moments"] += moments
 
-            stat_bits = [f"{swims:,} {'swim' if swims == 1 else 'swims'} matched"]
-            if moments:
-                stat_bits.append(f"{moments:,} {'moment' if moments == 1 else 'moments'} detected")
-            stats_html = '<span class="sep">&middot;</span>'.join(
-                f"<span>{_h(b)}</span>" for b in stat_bits
-            )
-
-            item = (
-                '<div class="mh-timeline__item">'
-                '<article class="card mh-tl-card">'
-                '<div class="mh-tl-top">'
-                f'<time class="mh-tl-date" datetime="{_h(iso_attr)}" title="{_h(full_title)}">{day_html}</time>'
-                f'<span class="tag {badge}">{_h(status)}</span>'
-                "</div>"
-                f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
-                f'<div class="strap mh-tl-stats">{stats_html}</div>'
-            )
-            if status == "error" and r["error"]:
-                err = str(r["error"])
-                err = err[:400] + ("…" if len(err) > 400 else "")
-                item += (
-                    '<details style="margin-top:8px">'
-                    '<summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--bad)">'
-                    "Why did this run fail?</summary>"
-                    '<pre style="margin:8px 0 0;padding:10px 12px;background:rgba(0,0,0,0.25);'
-                    'border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-word">'
-                    f"{_h(err)}</pre></details>"
+        # Pass 2 — render each month as a labelled section of meet cards.
+        items_html = ""
+        for bucket in months:
+            meets_n = len(bucket["rows"])
+            meta_bits = [f"{meets_n} {'meet' if meets_n == 1 else 'meets'}"]
+            if bucket["moments"]:
+                meta_bits.append(
+                    f"{bucket['moments']:,} {'moment' if bucket['moments'] == 1 else 'moments'}"
                 )
-            item += "</article></div>"
-            items_html += item
+            month_meta = " &middot; ".join(_h(b) for b in meta_bits)
+            items_html += (
+                '<div class="mh-timeline__head">'
+                f'<span class="mh-tl-month">{_h(bucket["label"])}</span>'
+                f'<span class="mh-tl-month-meta">{month_meta}</span>'
+                '<span class="mh-tl-head-rule" aria-hidden="true"></span>'
+                "</div>"
+            )
+            for (r, dt, swims, moments) in bucket["rows"]:
+                if dt:
+                    day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
+                    iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    full_title = dt.strftime("%A %d %B %Y, %H:%M UTC")
+                else:
+                    day_html, iso_attr, full_title = "&mdash;", "", "Date unknown"
+
+                status = r["status"] or ""
+                badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                    status, ""
+                )
+                title = r["meet_name"] or r["file_name"] or r["id"]
+                review_href = url_for("review", run_id=r["id"])
+                is_peak = peak_run_id is not None and r["id"] == peak_run_id and peak_moments > 0
+
+                # Stat chips. The "<n> swims matched" / "<n> moments detected"
+                # phrasing is kept verbatim (screen readers + tests read it as
+                # one string); the chip only lends the figure visual weight.
+                chips = (
+                    '<span class="mh-tl-chip">'
+                    f"{icon_swims}{swims:,} {'swim' if swims == 1 else 'swims'} matched"
+                    "</span>"
+                )
+                if moments:
+                    chips += (
+                        '<span class="mh-tl-chip mh-tl-chip--moments">'
+                        f"{icon_moment}{moments:,} {'moment' if moments == 1 else 'moments'} detected"
+                        "</span>"
+                    )
+
+                flag = (
+                    f'<span class="mh-tl-flag">{icon_moment}Season highlight</span>'
+                    if is_peak
+                    else ""
+                )
+                card_cls = "card mh-tl-card" + (" is-peak" if is_peak else "")
+                peak_attr = ' data-peak="1"' if is_peak else ""
+
+                item = (
+                    f'<div class="mh-timeline__item"{peak_attr}>'
+                    f'<article class="{card_cls}">'
+                    '<div class="mh-tl-top">'
+                    '<div class="mh-tl-meta">'
+                    f'<time class="mh-tl-date" datetime="{_h(iso_attr)}" '
+                    f'title="{_h(full_title)}">{day_html}</time>'
+                    f"{flag}"
+                    "</div>"
+                    f'<span class="tag {badge}">{_h(status)}</span>'
+                    "</div>"
+                    f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
+                    f'<div class="mh-tl-stats">{chips}</div>'
+                )
+                if status == "error" and r["error"]:
+                    err = str(r["error"])
+                    err = err[:400] + ("…" if len(err) > 400 else "")
+                    item += (
+                        '<details class="mh-tl-err">'
+                        "<summary>Why did this run fail?</summary>"
+                        f"<pre>{_h(err)}</pre></details>"
+                    )
+                item += "</article></div>"
+                items_html += item
+
+        # Season span — oldest → newest meet, for the hero meta line.
+        range_str = ""
+        if first_dt and last_dt:
+            if first_dt.year == last_dt.year and first_dt.month == last_dt.month:
+                range_str = first_dt.strftime("%B %Y")
+            elif first_dt.year == last_dt.year:
+                range_str = f"{first_dt.strftime('%b')} &ndash; {last_dt.strftime('%b %Y')}"
+            else:
+                range_str = f"{first_dt.strftime('%b %Y')} &ndash; {last_dt.strftime('%b %Y')}"
 
         # Page-scoped presentation. Kept inline (not in the shared kit CSS) so
-        # the feature is self-contained and parallel-safe; tokens keep it on
-        # brand. The rail-offset centres the 2px beam on the 9px timeline node
-        # dots (dots sit 5px in from the timeline's left edge -> centre ~9px).
+        # the feature is self-contained and parallel-safe; design tokens keep it
+        # on brand. The rail offset centres the 2px beam on the timeline node
+        # dots; the peak meet gets a medal-tinted dot and card treatment.
         season_css = (
             "<style>"
-            ".mh-season-tl{max-width:760px}"
+            ".mh-season-tl{max-width:780px}"
             ".mh-season-tl .mh-tracing-beam__rail{left:8px}"
-            ".mh-season-tl .mh-timeline__head{margin:var(--sp-5) 0 var(--sp-3)}"
+            ".mh-season-tl .mh-timeline__head{display:flex;align-items:baseline;"
+            "flex-wrap:wrap;gap:var(--sp-2) var(--sp-3);margin:var(--sp-6) 0 var(--sp-4)}"
             ".mh-season-tl .mh-timeline__head:first-child{margin-top:0}"
             ".mh-season-tl .mh-tl-month{font-family:var(--font-mono);font-size:var(--fs-sm);"
-            "font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)}"
-            ".mh-season-tl .mh-tl-card{padding:var(--sp-4) var(--sp-5)}"
-            ".mh-season-tl .mh-tl-top{display:flex;align-items:center;justify-content:space-between;"
-            "gap:var(--sp-3);margin-bottom:6px}"
+            "font-weight:600;letter-spacing:.14em;text-transform:uppercase;"
+            "color:var(--ink-muted);white-space:nowrap}"
+            ".mh-season-tl .mh-tl-month-meta{font-family:var(--font-mono);font-size:10.5px;"
+            "letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);white-space:nowrap}"
+            ".mh-season-tl .mh-tl-head-rule{flex:1 1 auto;min-width:24px;height:1px;"
+            "background:linear-gradient(90deg,var(--hairline),transparent)}"
+            ".mh-season-tl .mh-tl-card{padding:var(--sp-4) var(--sp-5);"
+            "transition:border-color var(--transition),transform var(--transition),"
+            "box-shadow var(--transition)}"
+            ".mh-season-tl .mh-tl-card:hover{border-color:var(--rule);transform:translateY(-1px)}"
+            ".mh-season-tl .mh-tl-top{display:flex;align-items:center;"
+            "justify-content:space-between;gap:var(--sp-3);margin-bottom:10px}"
+            ".mh-season-tl .mh-tl-meta{display:inline-flex;align-items:center;gap:10px;min-width:0}"
             ".mh-season-tl .mh-tl-date{font-family:var(--font-mono);font-size:var(--fs-sm);"
             "color:var(--ink-muted);letter-spacing:.04em;white-space:nowrap}"
-            ".mh-season-tl .mh-tl-title{margin:0 0 8px;font-size:var(--fs-lg);line-height:1.2}"
+            ".mh-season-tl .mh-tl-title{margin:0 0 12px;font-size:var(--fs-lg);line-height:1.2}"
             ".mh-season-tl .mh-tl-title a{color:var(--ink);text-decoration:none}"
             ".mh-season-tl .mh-tl-title a:hover{color:var(--mh-primary)}"
-            ".mh-season-tl .mh-tl-stats{font-size:var(--fs-sm)}"
+            ".mh-season-tl .mh-tl-stats{display:flex;flex-wrap:wrap;gap:8px}"
+            ".mh-season-tl .mh-tl-chip{display:inline-flex;align-items:center;gap:7px;"
+            "padding:5px 11px 5px 9px;border-radius:999px;font-family:var(--font-mono);"
+            "font-size:11px;font-weight:500;letter-spacing:.04em;color:var(--ink-dim);"
+            "background:rgba(245,242,232,0.04);border:1px solid var(--hairline)}"
+            ".mh-season-tl .mh-tl-chip svg{width:14px;height:14px;flex:0 0 auto;opacity:.85}"
+            ".mh-season-tl .mh-tl-chip--moments{color:var(--medal);"
+            "background:color-mix(in oklab,var(--medal) 10%,transparent);"
+            "border-color:color-mix(in oklab,var(--medal) 32%,transparent)}"
+            ".mh-season-tl .mh-tl-chip--moments svg{opacity:1}"
+            ".mh-season-tl .mh-tl-card.is-peak{"
+            "border-color:color-mix(in oklab,var(--medal) 38%,var(--hairline));"
+            "background:linear-gradient(180deg,color-mix(in oklab,var(--medal) 7%,transparent),"
+            "transparent 60%),var(--surface);"
+            "box-shadow:0 0 0 1px color-mix(in oklab,var(--medal) 14%,transparent),"
+            "0 18px 40px -28px var(--medal-glow)}"
+            ".mh-season-tl .mh-tl-flag{display:inline-flex;align-items:center;gap:6px;"
+            "font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.16em;"
+            "text-transform:uppercase;color:var(--medal)}"
+            ".mh-season-tl .mh-tl-flag svg{width:12px;height:12px}"
+            ".mh-season-tl .mh-timeline__item[data-peak]::before{background:var(--medal);"
+            "width:11px;height:11px;left:calc(-1 * var(--sp-7) + 4px);"
+            "box-shadow:0 0 0 4px color-mix(in oklab,var(--medal) 20%,transparent),"
+            "0 0 14px var(--medal-glow)}"
+            ".mh-season-tl .mh-tl-err{margin-top:12px}"
+            ".mh-season-tl .mh-tl-err summary{cursor:pointer;font-size:var(--fs-sm);"
+            "color:var(--bad);font-family:var(--font-mono);letter-spacing:.04em}"
+            ".mh-season-tl .mh-tl-err pre{margin:8px 0 0;padding:10px 12px;"
+            "background:rgba(0,0,0,0.25);border-radius:6px;font-size:12px;"
+            "white-space:pre-wrap;word-break:break-word}"
             "</style>"
         )
 
@@ -16425,11 +16540,18 @@ def create_app() -> Flask:
             "</div>"
         )
 
+        range_html = (
+            f"<span>{range_str}</span><span class=\"sep\">&middot;</span>" if range_str else ""
+        )
         hero = (
-            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            f'<section class="mh-hero" data-lane="{n_meets}" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             f"{eyebrow}"
             f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            '<p class="lede">Every meet you&rsquo;ve processed, traced in order &mdash; '
+            "the swims matched to your club and the moments worth celebrating.</p>"
             '<div class="strap" style="margin-top:var(--sp-3)">'
+            f"{range_html}"
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
             f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
