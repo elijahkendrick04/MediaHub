@@ -26,9 +26,12 @@ on it are always checked so they're easy to read.
 | `fonts.py` | Puts the club's lettering *inside* the picture so it looks right anywhere — and never loads fonts from Google (a privacy rule). |
 | `README.md` | This file. |
 
-Coming in later builds: `aggregates.py` + `series.py` (turn real meet data into
-chart shapes), `csv_input.py` (a spreadsheet upload), `recommend.py` + `insights.py`
-(the two small AI jobs), and `diagrams.py` (org charts, season timelines).
+The rest of the box: `aggregates.py` + `series.py` turn real meet data into chart
+shapes; `csv_input.py` imports a spreadsheet (and flags any cell that isn't a
+number instead of guessing); `recommend.py` + `insights.py` are the two small AI
+jobs; and `diagrams.py` draws the picture *shapes* that aren't really charts — a
+**committee org chart**, a **season timeline**, an **athlete's journey**, and a
+**training flow** — from the club's roster and fixtures, in the same brand colours.
 
 ## The kinds of chart it can draw
 

@@ -23,10 +23,19 @@ Public surface:
   - ``csv_input``  — turn an uploaded table into a ChartSpec, flagging bad rows (build 2)
   - ``recommend``  — AI picks which chart leads the story, honest-erroring (build 3)
   - ``insights``   — AI takeaways grounded in the facts, source-linked (build 3)
+  - ``diagrams``   — data-driven org charts / timelines / journeys / flows (build 4)
 """
 
 from .aggregates import MeetAggregates, compute_aggregates
 from .csv_input import CsvImport, parse_csv_to_spec
+from .diagrams import (
+    DiagramSpec,
+    athlete_journey,
+    org_chart_from_roster,
+    render_diagram_svg,
+    season_timeline_from_meets,
+    training_flow,
+)
 from .insights import generate_insights
 from .models import (
     CHART_KINDS,
@@ -58,4 +67,10 @@ __all__ = [
     "parse_csv_to_spec",
     "recommend_chart",
     "generate_insights",
+    "DiagramSpec",
+    "render_diagram_svg",
+    "org_chart_from_roster",
+    "season_timeline_from_meets",
+    "athlete_journey",
+    "training_flow",
 ]
