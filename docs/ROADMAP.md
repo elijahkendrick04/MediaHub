@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `f56973a0f` · Merge pull request #977 from elijahkendrick04/autotest/fix-5e8e0084c4ad
+**Last updated:** 2026-06-22 · `888527a3b` · Video upload: raise the footage body cap so real clips actually upload (#982)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1213,6 +1213,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `30161cbf7` | video upload: raise the footage body cap so real clips actually upload |
 | 2026-06-22 | `7bd2ea176` | fix: Accepted upload file formats are never specified — a volunte |
 | 2026-06-22 | `bac42844e` | fix: 'brand kit' is unexplained jargon — a club volunteer won't k |
 | 2026-06-21 | `b11ff26e8` | Mobile: stop calendar toolbar and segmented filters overflowing the phone viewport |
@@ -1221,6 +1222,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `f36e05c43` | ci(unit-suite): a cancelled (superseded) run is not a failure |
 | 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
 | 2026-06-21 | `2eab60c3b` | video suite: timeline editor — per-clip colour-grade sliders |
-| 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
-| 2026-06-21 | `e3e517eb3` | video suite: director depth — per-beat weights, cross-clip virality, multi-beat captions |
 <!-- /ROADMAP:ACTIVITY -->
