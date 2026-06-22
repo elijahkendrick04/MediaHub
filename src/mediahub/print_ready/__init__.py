@@ -33,7 +33,7 @@ and every unavailable backend honest-errors rather than faking output.
 
 from __future__ import annotations
 
-from . import products
+from . import products, proof
 from .products import (
     FAMILIES,
     PRINT_METHODS,
@@ -45,9 +45,19 @@ from .products import (
     product_for,
     products_in_family,
 )
+from .proof import (
+    ArtworkProfile,
+    PreflightReport,
+    Violation,
+    profile_from_design,
+    profile_from_image,
+    run_preflight,
+    run_preflight_product,
+)
 
 __all__ = [
     "products",
+    "proof",
     # products
     "FAMILIES",
     "PRINT_METHODS",
@@ -58,4 +68,12 @@ __all__ = [
     "products_in_family",
     "families",
     "grouped",
+    # proof
+    "ArtworkProfile",
+    "PreflightReport",
+    "Violation",
+    "run_preflight",
+    "run_preflight_product",
+    "profile_from_image",
+    "profile_from_design",
 ]
