@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `b79238fc9` · Merge pull request #1003: QA-008 — clean stale HY-TEK banner meet titles at render time
+**Last updated:** 2026-06-23 · `2c2ed2285` · Merge pull request #1004: Fix media library empty-state error (QA-009)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1207,6 +1207,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `aea5c7bd3` | Fix media library false "store wasn't readable" error on an empty store (QA-009) |
 | 2026-06-22 | `94928f692` | Drop the unused Optional import in fulfilment.py (ruff hygiene hook) |
 | 2026-06-22 | `cf96bebe6` | Mark roadmap 1.20 done — print & merch pipeline |
 | 2026-06-22 | `96ec12e42` | Re-clean stale HY-TEK banner meet titles at render time (QA-008) |
@@ -1218,5 +1219,4 @@ list and the auto table below, not here.
 | 2026-06-22 | `70229376b` | Mark roadmap 1.19 done — export & conversion engine |
 | 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
 | 2026-06-22 | `1d9efb75d` | Apply pinned ruff-format (v0.8.4) to the 1.19 source files (CI hygiene) |
-| 2026-06-22 | `3387f98c7` | Check run access before params on the export ZIP route; record 1.19 as shipped |
 <!-- /ROADMAP:ACTIVITY -->
