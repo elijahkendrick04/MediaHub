@@ -119,6 +119,7 @@ from . import recap_progress as _recap_progress
 from . import sample_graphics as _sample_graphics
 from . import legal as _legal
 from . import tenancy as _tenancy
+from ..collab import permissions as _perms
 
 # V7 / brand feature flags. These packages are only ever imported lazily at
 # the call sites that use them (see e.g. build_spotlight_pack, BrandKit), so
@@ -15813,6 +15814,30 @@ def create_app() -> Flask:
             return True
         email = _auth.current_user_email()
         return bool(email and _tenancy.MembershipStore().is_active_owner(email, pid))
+
+    def _active_role(pid: Optional[str] = None) -> str:
+        """The current actor's collaboration role in an org (1.18).
+
+        Mirrors the access model: the operator and any session on an *unbound*
+        (open/pilot) workspace get the full ``owner`` seat — exactly the
+        all-powers behaviour those sessions have today. On a bound workspace the
+        actor's actual membership role is returned; a non-member falls to
+        ``viewer`` (defensive — the access gate already blocks them).
+        """
+        if pid is None:
+            pid = _active_profile_id()
+        if not pid:
+            return _tenancy.ROLE_VIEWER
+        if _auth.is_dev_operator():
+            return _tenancy.ROLE_OWNER
+        store = _tenancy.MembershipStore()
+        if not store.is_bound(pid):
+            return _tenancy.ROLE_OWNER
+        email = _auth.current_user_email()
+        m = store.get(email, pid) if email else None
+        if m and m.status == _tenancy.STATUS_ACTIVE:
+            return m.role
+        return _tenancy.ROLE_VIEWER
 
     def _bind_creator_if_signed_in(pid: str) -> None:
         """A NEW org created by a signed-in regular user is born bound to its
@@ -35194,6 +35219,29 @@ what you're doing, what they should do.</p>
             try:
                 if action == "add":
                     role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
+                    # Don't let the upsert demote the last active owner to a
+                    # non-owner seat — that would leave the workspace with no
+                    # admin (the same invariant ``remove`` protects).
+                    if role != _tenancy.ROLE_OWNER:
+                        cur = store.get(target, pid)
+                        if (
+                            cur
+                            and cur.status == _tenancy.STATUS_ACTIVE
+                            and cur.role == _tenancy.ROLE_OWNER
+                        ):
+                            norm_target = _tenancy.normalize_email(target)
+                            others = [
+                                x
+                                for x in store.list_for_profile(pid)
+                                if x.role == _tenancy.ROLE_OWNER
+                                and x.status == _tenancy.STATUS_ACTIVE
+                                and x.email != norm_target
+                            ]
+                            if not others:
+                                raise _tenancy.TenancyError(
+                                    "Make another member an owner before changing "
+                                    "the last owner's role."
+                                )
                     has_account = _user_store().get(target) is not None
                     inviter = user_email or _auth._dev_operator_email()
                     m = store.add(
@@ -35234,8 +35282,30 @@ what you're doing, what they should do.</p>
         prof = _active_profile()
         org_name = _h(prof.display_name if prof else pid)
 
+        def _role_cell_html(m):
+            """The role column: a label, plus an inline change-role picker for
+            admins (re-uses the upsert ``add`` action). The last active owner
+            can't be demoted here — the route guards it server-side too."""
+            label = _h(_perms.role_label(m.role))
+            if not can_admin or m.status == _tenancy.STATUS_REMOVED:
+                return label
+            opts = "".join(
+                f'<option value="{r}"{" selected" if r == m.role else ""}>'
+                f"{_h(_perms.role_label(r))}</option>"
+                for r in _perms.assignable_roles()
+            )
+            return (
+                f'<form method="post" action="{url_for("organisation_members_page")}" '
+                'style="display:flex;gap:6px;align-items:center;margin:0">'
+                '<input type="hidden" name="action" value="add"/>'
+                f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
+                f'<select name="role" style="padding:3px 6px;font-size:12px">{opts}</select>'
+                '<button type="submit" class="btn secondary" '
+                'style="padding:3px 9px;font-size:11px">Update</button></form>'
+            )
+
         def _row_html(m):
-            role_badge = "Owner" if m.role == _tenancy.ROLE_OWNER else "Member"
+            role_badge = _role_cell_html(m)
             status_badge = {
                 _tenancy.STATUS_ACTIVE: '<span class="pill">Active</span>',
                 _tenancy.STATUS_INVITED: (
@@ -35298,9 +35368,12 @@ what you're doing, what they should do.</p>
                 'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
                 "<div><label>Role</label><br/>"
                 '<select name="role" style="padding:8px 10px">'
-                '<option value="member">Member</option>'
-                '<option value="owner">Owner</option>'
-                "</select></div>"
+                + "".join(
+                    f'<option value="{r}"{" selected" if r == _tenancy.ROLE_MEMBER else ""}>'
+                    f"{_h(_perms.role_label(r))} — {_h(_perms.role_description(r))}</option>"
+                    for r in _perms.assignable_roles()
+                )
+                + "</select></div>"
                 '<button type="submit" class="btn">Add member</button>'
                 "</form>"
                 '<p class="dim" style="font-size:12px;margin:10px 0 0">'
@@ -35397,6 +35470,45 @@ what you're doing, what they should do.</p>
 
         return prof, _kits.resolve_kit_for(prof)
 
+    def _card_content_type(run_id: str, card_id: str, run_data=None) -> str:
+        """Best-effort content-type key for per-type approver rules (1.18).
+
+        Returns ``"safeguarding"`` for a card featuring a young athlete (or any
+        athlete under an active consent regime) — the sensitive case the roadmap
+        names — else an explicit card content-type slug when the card carries one
+        (the stub-pack / club_platform flow), else ``""`` (→ the base rule).
+        Never raises; an unknown card simply inherits the base rule.
+        """
+        try:
+            run_data = run_data if run_data is not None else (_load_run(run_id) or {})
+            from mediahub.compliance.gate import card_athlete, find_card_in_run
+
+            card = find_card_in_run(run_data, card_id)
+            if not card:
+                return ""
+            name, age = card_athlete(card)
+            if name:
+                if isinstance(age, int) and 0 < age < 18:
+                    return "safeguarding"
+                try:
+                    from mediahub.safeguarding.consent import regime_active
+
+                    if regime_active(run_data.get("profile_id", "")):
+                        return "safeguarding"
+                except Exception:
+                    pass
+            ct = str(card.get("content_type") or card.get("post_type") or "").strip()
+            if ct:
+                try:
+                    from mediahub.club_platform.post_types import canonical_slug
+
+                    return canonical_slug(ct) or ""
+                except Exception:
+                    return ct.lower()
+        except Exception:
+            pass
+        return ""
+
     def _brand_lock_block_reason(run_id: str, card_id: str):
         """A locked-token brand violation that blocks approval, or None.
 
@@ -35466,19 +35578,70 @@ what you're doing, what they should do.</p>
                 for m in store.list_for_profile(pid)
                 if m.role == _tenancy.ROLE_OWNER and m.status == _tenancy.STATUS_ACTIVE
             ]
-            satisfied, still_needed, reason = _gov.evaluate(
-                kit.approver_rule, approver_emails=approvers, owner_emails=owner_emails
+            # 1.18 per-type rule: a sensitive card (safeguarding / sponsor) can
+            # demand a stricter sign-off than the base rule; ordinary cards
+            # inherit the base.
+            content_type = _card_content_type(run_id, card_id)
+            satisfied, still_needed, reason = _gov.evaluate_for_type(
+                kit.approver_rule,
+                content_type,
+                approver_emails=approvers,
+                owner_emails=owner_emails,
             )
             if satisfied:
-                return False, {"approvals": approvers}
+                return False, {"approvals": approvers, "content_type": content_type}
             return True, {
                 "pending_approval": True,
                 "approvals": approvers,
                 "approvals_needed": still_needed,
                 "reason": reason,
+                "content_type": content_type,
             }
         except Exception:
             return False, {}
+
+    def _run_role(run_id: str, run_data=None) -> str:
+        """The actor's collaboration role *in the run's owning org* (1.18).
+
+        Run-scoped on purpose: a sign-off/edit is judged against who owns the
+        run, not whatever org is pinned in the session. Ownerless/legacy runs
+        and unbound (pilot) orgs resolve to the owner seat — the same permissive
+        behaviour the run-access gate already grants those sessions, so nothing
+        changes for pilots or pre-1.18 workspaces.
+        """
+        owner_pid = _run_owner_id(run_id, run_data)
+        if not owner_pid:
+            return _tenancy.ROLE_OWNER
+        return _active_role(owner_pid)
+
+    def _run_actor_can(capability: str, run_id: str, run_data=None) -> bool:
+        return _perms.can(_run_role(run_id, run_data), capability)
+
+    def _role_denied_json(capability: str, run_id: str, run_data=None):
+        """A 403 JSON refusal when the actor's role in the run's owning org
+        lacks ``capability``, else ``None`` (1.18). Default-safe: the operator,
+        ownerless/legacy runs, and any unbound/pilot org resolve to the owner
+        seat, so this never fires for them — it only bites a narrowed seat
+        (Viewer/Reviewer/Editor/…) on a members-only workspace, matching the
+        anti-enumeration JSON shape the consent/brand gates already use."""
+        role = _run_role(run_id, run_data)
+        if _perms.can(role, capability):
+            return None
+        verb = {
+            _perms.CAP_EDIT: "edit content",
+            _perms.CAP_APPROVE: "approve or reject content",
+            _perms.CAP_COMMENT: "comment",
+            _perms.CAP_MANAGE: "manage this workspace",
+        }.get(capability, capability)
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "reason": f"Your role ({_perms.role_label(role)}) can't {verb}.",
+                }
+            ),
+            403,
+        )
 
     def _brand_swatch_row(palette: dict) -> str:
         from mediahub.brand.palette import ALL_SLOTS
@@ -35531,6 +35694,35 @@ what you're doing, what they should do.</p>
                 f'<label style="margin-right:14px;font-size:12px;color:var(--ink-muted)">'
                 f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {tok}</label>'
             )
+        # 1.18 per-content-type approver overrides: a stricter rule for the
+        # sensitive types the roadmap names. Empty inputs → no override (the
+        # type inherits the base rule above).
+        _by_type = (kit.approver_rule or {}).get("by_type", {}) or {}
+
+        def _per_type_row(type_key: str, label: str) -> str:
+            sub = _by_type.get(type_key, {}) or {}
+            n = int(sub.get("min_approvers", 0) or 0)
+            owner_checked = "checked" if sub.get("require_owner") else ""
+            return (
+                '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+                f'<span style="font-size:12px;color:var(--ink-muted);min-width:130px">{label}</span>'
+                f'<label style="font-size:12px;color:var(--ink-muted)">Min approvers '
+                f'<input class="mh-input" type="number" min="0" max="10" '
+                f'name="min_approvers__{type_key}" value="{n}" style="max-width:72px" '
+                'placeholder="—" /></label>'
+                f'<label style="font-size:12px;color:var(--ink-muted)">'
+                f'<input type="checkbox" name="require_owner__{type_key}" value="1" '
+                f"{owner_checked}/> require an owner</label>"
+                "</div>"
+            )
+
+        per_type_html = (
+            '<div style="font-size:12px;color:var(--ink-muted);margin-top:6px">'
+            "Stricter approval for sensitive cards "
+            "(leave min approvers at 0 to inherit the rule above):</div>"
+            + _per_type_row("safeguarding", "Young / consent-flagged")
+            + _per_type_row("sponsor_activation", "Sponsor activation")
+        )
         pal = kit.palette or {}
         edit_form = (
             f'<details style="margin-top:10px"><summary style="cursor:pointer;'
@@ -35560,7 +35752,8 @@ what you're doing, what they should do.</p>
             f'<input type="checkbox" name="require_owner" value="1" '
             f"{'checked' if (kit.approver_rule or {}).get('require_owner') else ''}/> require an owner</label>"
             "</div>"
-            '<div><button class="btn" type="submit">Save kit</button></div>'
+            + per_type_html
+            + '<div><button class="btn" type="submit">Save kit</button></div>'
             "</form>"
             # Palette-file import (Adobe .ase / Color JSON).
             f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
@@ -35783,10 +35976,19 @@ what you're doing, what they should do.</p>
         locks = [t for t in request.form.getlist("lock") if t in LOCKABLE_TOKENS]
         from mediahub.workflow.governance import normalise_approver_rule
 
+        # 1.18 per-type overrides: one row per named sensitive type; a row with
+        # min_approvers 0/blank is dropped by normalise (inherits the base).
+        by_type_raw: dict = {}
+        for type_key in ("safeguarding", "sponsor_activation"):
+            by_type_raw[type_key] = {
+                "min_approvers": request.form.get(f"min_approvers__{type_key}", "0"),
+                "require_owner": bool(request.form.get(f"require_owner__{type_key}")),
+            }
         approver_rule = normalise_approver_rule(
             {
                 "min_approvers": request.form.get("min_approvers", "1"),
                 "require_owner": bool(request.form.get("require_owner")),
+                "by_type": by_type_raw,
             }
         )
         raw = existing.to_dict()
@@ -38717,6 +38919,12 @@ function mhSetupMode(mode) {{
                 status = CardStatus(status_str)
             except (ValueError, NameError):
                 return jsonify({"error": f"invalid status: {status_str}"}), 400
+            # 1.18 role gate: changing a card's status is a sign-off action —
+            # only seats with the approve capability (Owner/Member/Approver) may
+            # do it. A Viewer/Reviewer/Editor is refused before any state moves.
+            denied = _role_denied_json(_perms.CAP_APPROVE, run_id)
+            if denied:
+                return denied
             # Consent gate: a card featuring an opted-out or no-consent
             # athlete can never be APPROVED (or marked POSTED). One shared
             # decision function — same rule as pack build + publish gate.
@@ -38770,6 +38978,10 @@ function mhSetupMode(mode) {{
             return jsonify({"ok": True, "status": status_str, "summary": summary})
 
         if action == "set_edits":
+            # 1.18 role gate: editing captions/overrides needs the edit seat.
+            denied = _role_denied_json(_perms.CAP_EDIT, run_id)
+            if denied:
+                return denied
             edits = payload.get("edits", {})
             ws.set_edits(run_id, card_id, edits)
             _phase_w_after_status_change(
@@ -38835,6 +39047,19 @@ function mhSetupMode(mode) {{
                     400,
                 )
             _flash_toast("Select at least one card first.", "info")
+            return redirect(url_for("review", run_id=run_id))
+
+        # 1.18 role gate: a bulk status change is the same sign-off action as
+        # the single-card route — refuse a seat without the approve capability
+        # before any card moves (operator / unbound pilot resolve to owner).
+        if not _run_actor_can(_perms.CAP_APPROVE, run_id, run_data):
+            reason = (
+                f"Your role ({_perms.role_label(_run_role(run_id, run_data))}) "
+                "can't approve or reject content."
+            )
+            if wants_json:
+                return jsonify({"error": "forbidden", "reason": reason}), 403
+            _flash_toast(reason, "error")
             return redirect(url_for("review", run_id=run_id))
 
         need_consent = status in (CardStatus.APPROVED, CardStatus.POSTED)
