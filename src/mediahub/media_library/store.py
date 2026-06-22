@@ -9,11 +9,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sqlite3
 import threading
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import BinaryIO, Optional
 
 from .models import MediaAsset
 
@@ -221,13 +222,33 @@ class MediaLibraryStore:
         self, src_bytes: bytes, original_filename: str, profile_id: Optional[str] = None
     ) -> Path:
         """Save raw bytes under uploads/media_library/<profile>/<id>_<name>."""
+        target = self._new_blob_path(original_filename, profile_id)
+        target.write_bytes(src_bytes)
+        return target
+
+    def store_blob_stream(
+        self, fileobj: BinaryIO, original_filename: str, profile_id: Optional[str] = None
+    ) -> Path:
+        """Stream a file-like object to the blob path without buffering it in memory.
+
+        ``shutil.copyfileobj`` copies in fixed-size chunks, so peak memory is the
+        copy buffer, not the whole file — the difference between holding a 500 MB
+        clip in RAM and not. Used by the footage-upload path, where the uploaded
+        part is already a temp file on disk (Werkzeug spools large parts), so this
+        is a bounded disk→disk copy.
+        """
+        target = self._new_blob_path(original_filename, profile_id)
+        with open(target, "wb") as dst:
+            shutil.copyfileobj(fileobj, dst)
+        return target
+
+    def _new_blob_path(self, original_filename: str, profile_id: Optional[str]) -> Path:
+        """Build a unique blob path under uploads/media_library/<profile>/."""
         suffix = Path(original_filename).suffix or ".bin"
         target_dir = self.uploads_dir / (profile_id or "_shared")
         target_dir.mkdir(parents=True, exist_ok=True)
         unique = f"{uuid.uuid4().hex[:10]}_{Path(original_filename).stem}{suffix}"
-        target = target_dir / unique
-        target.write_bytes(src_bytes)
-        return target
+        return target_dir / unique
 
     # ------------------------------------------------------------------
     # Internals

@@ -20,6 +20,21 @@ def _tmp_store():
     return MediaLibraryStore(db_path=tmp / "media.db", uploads_dir=tmp / "uploads")
 
 
+def test_store_blob_stream_writes_same_as_bytes():
+    """store_blob_stream streams a file-like to disk with the same result as the
+    bytes path — but without buffering the whole payload in memory."""
+    import io
+
+    store = _tmp_store()
+    payload = b"\x00\x00\x00\x18ftypmp42" + b"x" * 4096
+    by_bytes = store.store_blob(payload, "a.mp4", "club_a")
+    by_stream = store.store_blob_stream(io.BytesIO(payload), "b.mp4", "club_a")
+    assert by_bytes.read_bytes() == payload
+    assert by_stream.read_bytes() == payload
+    # both land under the profile's uploads dir, with unique names
+    assert by_stream.parent == by_bytes.parent and by_stream.name != by_bytes.name
+
+
 def test_save_get_list_round_trip():
     store = _tmp_store()
     a = MediaAsset(
