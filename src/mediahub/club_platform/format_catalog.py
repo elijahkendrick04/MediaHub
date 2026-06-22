@@ -146,6 +146,8 @@ CATEGORIES: tuple[str, ...] = (
     "wallpaper",
     "collage",
     "profile",
+    "print",
+    "merch",
     "custom",
 )
 
@@ -208,6 +210,50 @@ class FormatSpec:
         """True when this format carries physical print intent (bleed or dpi)."""
         return self.bleed_mm > 0 or self.dpi > 0
 
+    # -- Physical dimensions (the "print profile" half) --------------------
+    # Pixels are the renderer's native unit; physical size is pixels ÷ dpi.
+    # All four return 0.0 for a screen-native format (``dpi == 0``) — there is
+    # no honest physical size without a target resolution.
+
+    @property
+    def width_mm(self) -> float:
+        """Trim width in millimetres at the format's target dpi (0 if screen-native)."""
+        return round(self.width / self.dpi * 25.4, 2) if self.dpi > 0 else 0.0
+
+    @property
+    def height_mm(self) -> float:
+        """Trim height in millimetres at the format's target dpi (0 if screen-native)."""
+        return round(self.height / self.dpi * 25.4, 2) if self.dpi > 0 else 0.0
+
+    @property
+    def width_in(self) -> float:
+        """Trim width in inches at the format's target dpi (0 if screen-native)."""
+        return round(self.width / self.dpi, 3) if self.dpi > 0 else 0.0
+
+    @property
+    def height_in(self) -> float:
+        """Trim height in inches at the format's target dpi (0 if screen-native)."""
+        return round(self.height / self.dpi, 3) if self.dpi > 0 else 0.0
+
+    @property
+    def physical_label(self) -> str:
+        """Human print size, e.g. ``"210 × 297 mm"`` — empty when screen-native."""
+        if self.dpi <= 0:
+            return ""
+        return f"{self.width_mm:g} × {self.height_mm:g} mm"
+
+    def effective_dpi(self, source_px: int, *, axis: str = "width") -> float:
+        """Effective dpi if ``source_px`` artwork fills this format's physical axis.
+
+        The honest resolution check for preflight: a 1000 px image placed on an
+        A3 (420 mm ≈ 16.5 in) edge is only ~60 dpi, however large the canvas
+        *spec* is. Returns 0.0 for a screen-native format (no physical size).
+        """
+        inches = self.height_in if axis == "height" else self.width_in
+        if inches <= 0 or source_px <= 0:
+            return 0.0
+        return round(source_px / inches, 1)
+
     def to_dict(self) -> dict:
         return {
             "slug": self.slug,
@@ -227,6 +273,9 @@ class FormatSpec:
             },
             "bleed_mm": self.bleed_mm,
             "dpi": self.dpi,
+            "width_mm": self.width_mm,
+            "height_mm": self.height_mm,
+            "physical_label": self.physical_label,
             "caption_style": self.caption_style,
             "requires_post_types": list(self.requires_post_types),
             "sports": list(self.sports),
@@ -579,6 +628,147 @@ _CATALOG: tuple[FormatSpec, ...] = (
         512,
         description="Square/circle club or athlete avatar with an optional brand ring.",
         caption_style="none",
+    ),
+    # --- Print products (1.20; physical trim sizes, bleed + target dpi) ----
+    # Paper goods a club hands a high-street or online printer. Pixel sizes are
+    # the trim box at the target dpi; the print_ready package adds the bleed +
+    # crop marks + CMYK/PDF-X on export. All universal (any design prints).
+    FormatSpec(
+        "business_card",
+        "Business card",
+        "print",
+        1004,
+        650,
+        archetypes=("index_card", "horizon_band", "stat_stack_sidebar"),
+        description="UK/EU standard 85 × 55 mm business / committee contact card.",
+        bleed_mm=3.0,
+        dpi=300,
+        caption_style="formal",
+    ),
+    FormatSpec(
+        "postcard_a6",
+        "Postcard (A6)",
+        "print",
+        1240,
+        1748,
+        archetypes=("minimal_type_poster", "magazine_cover", "editorial_numbers_grid"),
+        description="A6 105 × 148 mm postcard / save-the-date / thank-you card.",
+        bleed_mm=3.0,
+        dpi=300,
+        caption_style="poster",
+    ),
+    FormatSpec(
+        "print_flyer_a5",
+        "Flyer (A5, print)",
+        "print",
+        1748,
+        2480,
+        archetypes=("minimal_type_poster", "magazine_cover", "split_diagonal_hero"),
+        description="A5 148 × 210 mm handout flyer at full 300 dpi print resolution.",
+        bleed_mm=3.0,
+        dpi=300,
+        caption_style="poster",
+    ),
+    FormatSpec(
+        "print_poster_a3",
+        "Poster (A3, print)",
+        "print",
+        1754,
+        2480,
+        archetypes=("magazine_cover", "minimal_type_poster", "split_diagonal_hero"),
+        description="A3 297 × 420 mm noticeboard poster, print-ready at 150 dpi.",
+        bleed_mm=3.0,
+        dpi=150,
+        caption_style="poster",
+    ),
+    FormatSpec(
+        "print_poster_a2",
+        "Poster (A2, print)",
+        "print",
+        2480,
+        3508,
+        archetypes=("magazine_cover", "minimal_type_poster", "full_height_portrait_split"),
+        description="A2 420 × 594 mm large gala / open-day poster at 150 dpi.",
+        bleed_mm=3.0,
+        dpi=150,
+        caption_style="poster",
+    ),
+    FormatSpec(
+        "sticker_square",
+        "Sticker (square)",
+        "print",
+        886,
+        886,
+        archetypes=("spotlight_disc", "cornerstone_numeral", "index_card"),
+        description="75 × 75 mm die-cut square sticker / badge.",
+        bleed_mm=3.0,
+        dpi=300,
+        caption_style="none",
+    ),
+    FormatSpec(
+        "roll_up_banner",
+        "Roll-up banner",
+        "print",
+        3346,
+        7874,
+        archetypes=("mega_surname_bleed", "full_height_portrait_split", "minimal_type_poster"),
+        description="850 × 2000 mm pull-up exhibition banner (large-format, 100 dpi).",
+        bleed_mm=5.0,
+        dpi=100,
+        safe_top=394,
+        safe_bottom=787,
+        caption_style="banner",
+    ),
+    # --- Merch (1.20; the print AREA on a product — apparel/drinkware/bags) -
+    # The canvas is the printable region, sized in mm at the method's dpi (DTG
+    # and sublimation resolve less fine detail than litho, so apparel sits at
+    # 200 dpi). The product, placement geometry and mockup live in
+    # print_ready/products.py; front+back are separate canvases tied into one
+    # product there. Merch art bleeds only where the method wraps (mugs).
+    FormatSpec(
+        "tee_front",
+        "T-shirt front",
+        "merch",
+        2205,
+        2756,
+        archetypes=("mega_surname_bleed", "minimal_type_poster", "big_number_dominant"),
+        description="DTG front print area, 280 × 350 mm at 200 dpi.",
+        dpi=200,
+        caption_style="poster",
+    ),
+    FormatSpec(
+        "tee_back",
+        "T-shirt back",
+        "merch",
+        2205,
+        2756,
+        archetypes=("mega_surname_bleed", "minimal_type_poster", "vertical_stat_tower"),
+        description="DTG back print area, 280 × 350 mm at 200 dpi.",
+        dpi=200,
+        caption_style="poster",
+    ),
+    FormatSpec(
+        "mug_wrap",
+        "Mug wrap",
+        "merch",
+        2362,
+        1004,
+        archetypes=("ticker_strip", "horizon_band", "stat_stack_sidebar"),
+        description="Sublimation mug wrap, 200 × 85 mm at 300 dpi (wraps, so it bleeds).",
+        bleed_mm=3.0,
+        dpi=300,
+        caption_style="none",
+    ),
+    FormatSpec(
+        "tote_bag",
+        "Tote bag",
+        "merch",
+        2756,
+        3150,
+        archetypes=("mega_surname_bleed", "minimal_type_poster", "centered_medal_spotlight"),
+        description="Tote bag print area, 350 × 400 mm at 200 dpi.",
+        dpi=200,
+        caption_style="poster",
     ),
 )
 

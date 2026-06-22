@@ -37,7 +37,7 @@ class MockupTemplate:
     description: str
     width: int
     height: int
-    kind: str  # "poster" | "frame" | "phone" | "flatlay"
+    kind: str  # poster | frame | phone | flatlay | tee | mug | tote
     # Artwork target box as fractions of the canvas (x, y, w, h).
     box: tuple[float, float, float, float]
 
@@ -78,6 +78,34 @@ MOCKUP_TEMPLATES: dict[str, MockupTemplate] = {
         1080,
         "flatlay",
         (0.16, 0.16, 0.68, 0.68),
+    ),
+    # --- Merch product scenes (roadmap 1.20 print/merch previews) ----------
+    "tee": MockupTemplate(
+        "tee",
+        "T-shirt",
+        "The design on a club t-shirt — how the merch reads on apparel.",
+        1080,
+        1080,
+        "tee",
+        (0.36, 0.34, 0.28, 0.30),
+    ),
+    "mug": MockupTemplate(
+        "mug",
+        "Mug",
+        "The artwork wrapped on a ceramic mug — a fundraising-stall preview.",
+        1080,
+        1080,
+        "mug",
+        (0.27, 0.37, 0.37, 0.30),
+    ),
+    "tote": MockupTemplate(
+        "tote",
+        "Tote bag",
+        "The design printed on a cotton tote — the single-print accessory preview.",
+        1080,
+        1080,
+        "tote",
+        (0.30, 0.33, 0.40, 0.44),
     ),
 }
 
@@ -173,6 +201,9 @@ def _backdrop(tpl: MockupTemplate, accent: Optional[str]) -> Image.Image:
         bottom = _mix((210, 214, 220), ac, 0.22)
     elif tpl.kind == "frame":
         top, bottom = (238, 238, 240), (222, 222, 226)
+    elif tpl.kind in ("tee", "mug", "tote"):  # neutral studio backdrop for merch
+        top = _mix((242, 241, 238), ac, 0.05)
+        bottom = _mix((221, 220, 216), ac, 0.10)
     else:  # flatlay
         top = _mix((236, 234, 230), ac, 0.06)
         bottom = _mix((216, 213, 208), ac, 0.12)
@@ -241,11 +272,114 @@ def _place_flatlay(canvas: Image.Image, art: Image.Image, box, accent) -> None:
     canvas.alpha_composite(rotated, (rx, ry))
 
 
+def _garment_tone(accent: Optional[str]) -> tuple[int, int, int]:
+    """A brand-tinted heather tone for the garment/product body (deterministic)."""
+    return _mix((66, 70, 78), _hex_to_rgb(accent, (66, 70, 78)), 0.20)
+
+
+def _place_tee(canvas: Image.Image, art: Image.Image, box, accent) -> None:
+    """A simple t-shirt silhouette with the artwork on the chest."""
+    w, h = canvas.size
+    dr = ImageDraw.Draw(canvas)
+    garment = _garment_tone(accent)
+    cx = w // 2
+    bw, bh = int(w * 0.46), int(h * 0.54)
+    bx, by = cx - bw // 2, int(h * 0.27)
+    # sleeves (drawn first so the body overlaps them)
+    sl = int(w * 0.14)
+    dr.polygon(
+        [(bx, by), (bx - sl, by + int(bh * 0.22)), (bx + int(bw * 0.10), by + int(bh * 0.30))],
+        fill=garment,
+    )
+    dr.polygon(
+        [
+            (bx + bw, by),
+            (bx + bw + sl, by + int(bh * 0.22)),
+            (bx + bw - int(bw * 0.10), by + int(bh * 0.30)),
+        ],
+        fill=garment,
+    )
+    dr.rounded_rectangle([bx, by, bx + bw, by + bh], radius=int(bw * 0.07), fill=garment)
+    # collar — a darker rib with a backdrop-toned neckline notch
+    rib = _mix(garment, (0, 0, 0), 0.18)
+    neck = canvas.getpixel((6, 6))[:3]
+    dr.ellipse(
+        [cx - int(w * 0.085), by - int(h * 0.012), cx + int(w * 0.085), by + int(h * 0.052)],
+        fill=rib,
+    )
+    dr.ellipse(
+        [cx - int(w * 0.066), by - int(h * 0.03), cx + int(w * 0.066), by + int(h * 0.03)],
+        fill=neck,
+    )
+    x, y, bw2, bh2 = box
+    tile = _fit_contain(art, bw2, bh2)
+    _soft_shadow(canvas, (x, y, tile.width, tile.height), blur=10, alpha=55, radius=6, dy=6)
+    canvas.alpha_composite(tile, (x + (bw2 - tile.width) // 2, y + (bh2 - tile.height) // 2))
+
+
+def _place_mug(canvas: Image.Image, art: Image.Image, box, accent) -> None:
+    """A ceramic mug with a handle and the artwork wrapped on the front."""
+    w, h = canvas.size
+    dr = ImageDraw.Draw(canvas)
+    body = _garment_tone(accent)
+    bx, by = int(w * 0.24), int(h * 0.30)
+    bw, bh = int(w * 0.44), int(h * 0.42)
+    # handle (ring) on the right
+    hx = bx + bw - int(bw * 0.04)
+    dr.ellipse(
+        [hx, by + int(bh * 0.18), hx + int(bw * 0.34), by + int(bh * 0.74)],
+        outline=body,
+        width=int(bw * 0.10),
+    )
+    dr.rounded_rectangle([bx, by, bx + bw, by + bh], radius=int(bw * 0.12), fill=body)
+    # subtle rim highlight
+    dr.ellipse(
+        [bx + int(bw * 0.06), by - int(bh * 0.03), bx + bw - int(bw * 0.06), by + int(bh * 0.07)],
+        fill=_mix(body, (255, 255, 255), 0.18),
+    )
+    x, y, bw2, bh2 = box
+    tile = _fit_contain(art, bw2, bh2)
+    canvas.alpha_composite(tile, (x + (bw2 - tile.width) // 2, y + (bh2 - tile.height) // 2))
+
+
+def _place_tote(canvas: Image.Image, art: Image.Image, box, accent) -> None:
+    """A cotton tote bag with two handles and a single front print."""
+    w, h = canvas.size
+    dr = ImageDraw.Draw(canvas)
+    fabric = _mix((226, 222, 212), _hex_to_rgb(accent, (226, 222, 212)), 0.10)
+    bx, by = int(w * 0.26), int(h * 0.30)
+    bw, bh = int(w * 0.48), int(h * 0.50)
+    # handles (two arcs rising from the top edge)
+    hw = int(bw * 0.10)
+    dr.arc(
+        [bx + int(bw * 0.10), by - int(bh * 0.30), bx + int(bw * 0.42), by + int(bh * 0.10)],
+        180,
+        360,
+        fill=fabric,
+        width=hw,
+    )
+    dr.arc(
+        [bx + int(bw * 0.58), by - int(bh * 0.30), bx + int(bw * 0.90), by + int(bh * 0.10)],
+        180,
+        360,
+        fill=fabric,
+        width=hw,
+    )
+    _soft_shadow(canvas, (bx, by, bw, bh), blur=24, alpha=70, radius=10, dy=14)
+    dr.rounded_rectangle([bx, by, bx + bw, by + bh], radius=int(bw * 0.04), fill=fabric)
+    x, y, bw2, bh2 = box
+    tile = _fit_contain(art, bw2, bh2)
+    canvas.alpha_composite(tile, (x + (bw2 - tile.width) // 2, y + (bh2 - tile.height) // 2))
+
+
 _PLACERS = {
     "poster": _place_poster,
     "frame": _place_frame,
     "phone": _place_phone,
     "flatlay": _place_flatlay,
+    "tee": _place_tee,
+    "mug": _place_mug,
+    "tote": _place_tote,
 }
 
 
