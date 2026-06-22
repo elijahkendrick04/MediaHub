@@ -57,6 +57,10 @@ _ARG_FILL = {
     # refused by _can_access_run before any chart (which embeds athlete names)
     # is ever rendered, so sweeping it with a junk id pins that guarantee.
     "chart_id": "no-such-chart",
+    # 1.16: the microsite draft-preview card route carries a site id. A junk id
+    # is right — a foreign account is refused (the site load returns nothing, and
+    # the run is _can_access_run-guarded) before any card image is served.
+    "site_id": "no-such-site",
 }
 _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
 
