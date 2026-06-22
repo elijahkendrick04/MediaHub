@@ -9,8 +9,10 @@ one volunteer drafts, a coach checks names, the chair approves.
 Exposes (built incrementally across the 1.18 sub-builds):
   permissions  — role → capability matrix (the single source of truth for
                  what each workspace seat can do)
+  threads      — anchored comments, tasks & reactions store
+  mentions     — @mention parsing + resolution against workspace members
 """
 
-from . import permissions
+from . import mentions, permissions, threads
 
-__all__ = ["permissions"]
+__all__ = ["permissions", "threads", "mentions"]

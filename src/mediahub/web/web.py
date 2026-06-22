@@ -4807,6 +4807,162 @@ function copilotMic(btn, cardId) {
   rec.onerror=function(){ btn.textContent=orig; btn.disabled=false; };
   try { rec.start(); } catch(e) { btn.textContent=orig; btn.disabled=false; }
 }
+
+/* ---- Comments, @mentions & tasks (roadmap 1.18) ---- */
+function _cmTxt(s){ return window.safeText ? safeText(s) : (s||''); }
+function _cmShortName(email){ if(!email) return 'Someone'; var i=email.indexOf('@'); return i>0?email.slice(0,i):email; }
+function _cmAgo(ts){ try{ var d=Math.max(0,(Date.now()/1000)-ts); if(d<60)return'just now'; if(d<3600)return Math.floor(d/60)+'m ago'; if(d<86400)return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago'; }catch(e){ return ''; } }
+
+function commentsToggle(btn, cardId) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  if (panel.dataset.built === '1') { commentsLoad(cardId); return; }
+  panel.dataset.built = '1';
+  panel.innerHTML =
+    '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Comments &amp; tasks &mdash; @mention a teammate; a task must be resolved before approval</div>' +
+    '<div class="cm-list" style="max-height:280px;overflow:auto;margin-bottom:8px"></div>' +
+    '<div style="display:flex;gap:5px;align-items:flex-start;flex-wrap:wrap">' +
+      '<textarea class="cm-input" rows="2" placeholder="Add a comment&hellip; use @name to mention" aria-label="Add a comment" style="flex:1;min-width:180px;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"></textarea>' +
+    '</div>' +
+    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">' +
+      '<label style="font-size:11px;color:var(--ink-muted)"><input type="checkbox" class="cm-is-task"/> as task</label>' +
+      '<input class="cm-assignee" type="text" placeholder="assignee email (optional)" aria-label="Task assignee" style="display:none;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;min-width:160px"/>' +
+      '<span class="cm-reply-tag" style="display:none;font-size:11px;color:var(--lane)"></span>' +
+      '<button class="btn cm-send" style="font-size:11px;padding:4px 12px;background:var(--lane);color:var(--lane-ink);border:none" onclick=' + _attrEsc('commentsSend(this, ' + JSON.stringify(cardId) + ')') + '>Post</button>' +
+    '</div>' +
+    '<div class="cm-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>';
+  panel.querySelector('.cm-is-task').addEventListener('change', function(){
+    panel.querySelector('.cm-assignee').style.display = this.checked ? '' : 'none';
+  });
+  commentsLoad(cardId);
+}
+
+function commentsLoad(cardId) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var realCard = panel.dataset.realCard || '';
+  var url = panel.dataset.commentsUrl + '?card_id=' + encodeURIComponent(realCard);
+  fetch(url).then(function(r){return r.json();}).then(function(j){
+    if (!j.ok) return;
+    panel.dataset.me = j.me || '';
+    commentsRender(panel, cardId, j.comments||[]);
+    var badge = document.querySelector('.comments-count[data-card="' + cardId + '"]');
+    if (badge) { var n=(j.comments||[]).length; var t=j.open_tasks||0; badge.textContent = n? (' '+n+(t?(' · '+t+'☑'):'')) : ''; }
+  }).catch(function(){});
+}
+
+function commentsRender(panel, cardId, comments) {
+  var list = panel.querySelector('.cm-list');
+  list.textContent='';
+  if (!comments.length) { var e=document.createElement('div'); e.style.cssText='font-size:12px;color:var(--ink-muted)'; e.textContent='No comments yet.'; list.appendChild(e); return; }
+  var me = panel.dataset.me || '';
+  // group replies under roots by thread_id
+  var roots = comments.filter(function(c){ return !c.parent_id; });
+  var repliesByThread = {};
+  comments.forEach(function(c){ if (c.parent_id){ (repliesByThread[c.thread_id]=repliesByThread[c.thread_id]||[]).push(c); } });
+  roots.forEach(function(c){
+    list.appendChild(commentsRow(panel, cardId, c, me, false));
+    (repliesByThread[c.thread_id]||[]).forEach(function(r){ list.appendChild(commentsRow(panel, cardId, r, me, true)); });
+  });
+}
+
+function commentsRow(panel, cardId, c, me, isReply) {
+  var row = document.createElement('div');
+  row.style.cssText = 'margin-bottom:8px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02)' + (isReply?';margin-left:18px':'') + (c.resolved?';opacity:0.6':'');
+  var isTask = c.kind === 'task';
+  var head = document.createElement('div');
+  head.style.cssText='font-size:11px;color:var(--ink-muted);margin-bottom:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+  var tag = isTask ? ('<span style="color:var(--medal);font-weight:600">☑ TASK'+(c.assignee_email?(' → '+_cmTxt(_cmShortName(c.assignee_email))):'')+(c.resolved?' · done':'')+'</span> ') : '';
+  head.innerHTML = tag + '<strong style="color:var(--ink)">' + _cmTxt(_cmShortName(c.author_email)) + '</strong> <span>' + _cmAgo(c.created_at) + '</span>';
+  row.appendChild(head);
+  var body = document.createElement('div'); body.style.cssText='font-size:12px;color:var(--ink);white-space:pre-wrap'; body.textContent = c.body; row.appendChild(body);
+  // reactions
+  var rx = document.createElement('div'); rx.style.cssText='margin-top:5px;display:flex;gap:5px;flex-wrap:wrap;align-items:center';
+  var reactions = c.reactions||{};
+  Object.keys(reactions).forEach(function(em){
+    var b=document.createElement('button'); b.className='btn secondary'; b.style.cssText='font-size:11px;padding:1px 7px';
+    b.textContent = em + ' ' + reactions[em].length;
+    b.onclick=function(){ commentsReact(cardId, c.id, em); };
+    rx.appendChild(b);
+  });
+  ['👍','✅','🎉'].forEach(function(em){
+    var b=document.createElement('button'); b.className='btn secondary'; b.style.cssText='font-size:11px;padding:1px 6px;opacity:0.7';
+    b.textContent=em; b.title='React'; b.onclick=function(){ commentsReact(cardId, c.id, em); };
+    rx.appendChild(b);
+  });
+  row.appendChild(rx);
+  // actions
+  var act = document.createElement('div'); act.style.cssText='margin-top:5px;display:flex;gap:8px;flex-wrap:wrap';
+  if (!isReply) {
+    var reply=document.createElement('a'); reply.href='#'; reply.style.cssText='font-size:11px;color:var(--lane)'; reply.textContent='Reply';
+    reply.onclick=function(ev){ ev.preventDefault(); commentsSetReply(cardId, c.id, _cmShortName(c.author_email)); }; act.appendChild(reply);
+  }
+  if (isTask) {
+    var done=document.createElement('a'); done.href='#'; done.style.cssText='font-size:11px;color:var(--medal)';
+    done.textContent = c.resolved ? 'Reopen task' : 'Mark done';
+    done.onclick=function(ev){ ev.preventDefault(); commentsMutate(cardId, c.id, c.resolved?'reopen':'complete'); }; act.appendChild(done);
+  } else if (!isReply) {
+    var res=document.createElement('a'); res.href='#'; res.style.cssText='font-size:11px;color:var(--ink-muted)';
+    res.textContent = c.resolved ? 'Reopen' : 'Resolve';
+    res.onclick=function(ev){ ev.preventDefault(); commentsMutate(cardId, c.id, c.resolved?'reopen':'resolve'); }; act.appendChild(res);
+  }
+  if ((c.author_email||'') === (me||'') || !me) {
+    var del=document.createElement('a'); del.href='#'; del.style.cssText='font-size:11px;color:var(--bad,#e66)'; del.textContent='Delete';
+    del.onclick=function(ev){ ev.preventDefault(); if(confirm('Delete this comment?')) commentsMutate(cardId, c.id, 'delete'); }; act.appendChild(del);
+  }
+  row.appendChild(act);
+  return row;
+}
+
+function commentsSetReply(cardId, parentId, who) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.dataset.replyTo = parentId;
+  var tag = panel.querySelector('.cm-reply-tag');
+  tag.style.display=''; tag.textContent='Replying to ' + who + ' ✕';
+  tag.style.cursor='pointer'; tag.onclick=function(){ panel.dataset.replyTo=''; tag.style.display='none'; };
+  panel.querySelector('.cm-input').focus();
+}
+
+function commentsSend(btn, cardId) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var input = panel.querySelector('.cm-input');
+  var body = (input.value||'').trim();
+  if (!body) return;
+  var status = panel.querySelector('.cm-status');
+  var isTask = panel.querySelector('.cm-is-task').checked;
+  var payload = { card_id: panel.dataset.realCard || '', body: body, kind: isTask?'task':'comment' };
+  if (isTask) payload.assignee = (panel.querySelector('.cm-assignee').value||'').trim();
+  if (panel.dataset.replyTo) payload.parent_id = panel.dataset.replyTo;
+  btn.disabled=true; status.textContent='Posting…';
+  fetch(panel.dataset.commentsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      btn.disabled=false;
+      if (!res.ok || res.j.error) { status.textContent = res.j.reason || res.j.detail || res.j.error || 'Could not post'; return; }
+      status.textContent=''; input.value=''; panel.querySelector('.cm-is-task').checked=false;
+      panel.querySelector('.cm-assignee').style.display='none'; panel.querySelector('.cm-assignee').value='';
+      panel.dataset.replyTo=''; var tg=panel.querySelector('.cm-reply-tag'); if(tg) tg.style.display='none';
+      commentsLoad(cardId);
+    }).catch(function(){ btn.disabled=false; status.textContent='Network error'; });
+}
+
+function commentsMutate(cardId, commentId, action) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action: action})})
+    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+}
+
+function commentsReact(cardId, commentId, emoji) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'react', emoji: emoji})})
+    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+}
 </script>
 """
 
@@ -4842,6 +4998,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _assistant_suggest_url = url_for(
         "api_assistant_suggestions", run_id=run_id, card_id=card_id_raw
     )
+    _comments_url = url_for("api_collab_comments", run_id=run_id)
 
     _STD_TONES = [
         (
@@ -4930,6 +5087,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#128172; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -4952,6 +5110,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="comments-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-comments-url="{_h(_comments_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
 
@@ -24191,10 +24350,15 @@ Relay team broke club record"></textarea>
             limit = 20
         from mediahub.notify import inbox as _inbox
 
-        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        # 1.18: scope to what this member may see — org-wide rows plus mentions /
+        # tasks addressed to them. Signed-out-but-pinned (pilot) sees org-wide.
+        me = _auth.current_user_email()
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only, user_email=me)
         for it in items:
             it["link"] = _notification_link(it)
-        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+        return jsonify(
+            {"ok": True, "unread": _inbox.unread_count(pid, user_email=me), "items": items}
+        )
 
     @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
     def api_notifications_read(notif_id: str):
@@ -24204,8 +24368,11 @@ Relay team broke club record"></textarea>
             return jsonify({"error": "No organisation active."}), 403
         from mediahub.notify import inbox as _inbox
 
+        me = _auth.current_user_email()
         changed = _inbox.mark_read(pid, notif_id)
-        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+        return jsonify(
+            {"ok": True, "changed": changed, "unread": _inbox.unread_count(pid, user_email=me)}
+        )
 
     @app.route("/api/notifications/read-all", methods=["POST"])
     def api_notifications_read_all():
@@ -24215,7 +24382,8 @@ Relay team broke club record"></textarea>
             return jsonify({"error": "No organisation active."}), 403
         from mediahub.notify import inbox as _inbox
 
-        n = _inbox.mark_all_read(pid)
+        me = _auth.current_user_email()
+        n = _inbox.mark_all_read(pid, user_email=me)
         return jsonify({"ok": True, "marked": n, "unread": 0})
 
     # ---- /healthz/usage ------------------------------------------------
@@ -35542,6 +35710,23 @@ what you're doing, what they should do.</p>
         except Exception:
             return None
 
+    def _open_tasks_block_reason(run_id: str, card_id: str):
+        """An unresolved review task on this card blocks approval (1.18), or
+        ``None``. Default-safe: any error → None, so a check failure never wedges
+        a human approving their own content."""
+        try:
+            from mediahub.collab import threads as _threads
+
+            n = _threads.open_task_count(run_id, card_id)
+            if n > 0:
+                return (
+                    f"{n} open review task{'s' if n != 1 else ''} on this card "
+                    "must be resolved before it can be approved."
+                )
+        except Exception:
+            return None
+        return None
+
     def _group_approval_block(run_id: str, card_id: str):
         """Record the current user's approval vote and evaluate the kit's
         group-approver rule. Returns (blocked, info_dict).
@@ -38947,6 +39132,13 @@ function mhSetupMode(mode) {{
                 if brand_reason:
                     log.info("brand-lock gate blocked approval run=%s card=%s", run_id, card_id)
                     return jsonify({"error": "brand_locked", "reason": brand_reason}), 403
+            # 1.18 task gate: an open review task ("check lane-4 name") holds the
+            # card until it's resolved. Reject/requeue stay allowed.
+            if status == CardStatus.APPROVED:
+                task_reason = _open_tasks_block_reason(run_id, card_id)
+                if task_reason:
+                    log.info("task gate blocked approval run=%s card=%s", run_id, card_id)
+                    return jsonify({"error": "tasks_open", "reason": task_reason}), 403
             # 1.12 group-approver rule: record this vote; hold the card in QUEUE
             # until the kit's rule is met. Default-safe (no rule / pilot org /
             # operator → no effect).
@@ -39088,6 +39280,16 @@ function mhSetupMode(mode) {{
                 if brand_reason:
                     results.append(
                         {"id": cid, "ok": False, "error": "brand_locked", "reason": brand_reason}
+                    )
+                    n_blocked += 1
+                    continue
+            # 1.18 task gate — an open review task holds the card, same as the
+            # single-card path, so bulk-approve can't skip an unresolved task.
+            if status == CardStatus.APPROVED:
+                task_reason = _open_tasks_block_reason(run_id, cid)
+                if task_reason:
+                    results.append(
+                        {"id": cid, "ok": False, "error": "tasks_open", "reason": task_reason}
                     )
                     n_blocked += 1
                     continue
@@ -46787,6 +46989,203 @@ voice, and queues them for one-click approval.</p>
             if updated is None:
                 return jsonify({"error": "comment_not_found"}), 404
             return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
+
+    # =====================================================================
+    # Collaboration: anchored comments, tasks & reactions (roadmap 1.18)
+    # ---------------------------------------------------------------------
+    # Threaded comments anchored to a run / card / element, @mentions that
+    # notify, emoji reactions, and tasks that block the card's approval. Same
+    # access model as the reel comments above (run must exist + _can_access_run),
+    # plus a role gate: posting/mutating needs the comment capability, reading
+    # only needs view. Plain JSON POSTs (CSRF-exempt by content-type).
+    # =====================================================================
+
+    def _collab_run_ctx(run_id: str):
+        """Resolve+access-gate a run for the collab routes.
+
+        Returns ``(ctx, None)`` where ctx carries the run, its owning org, the
+        member roster (for @mention resolution) and the current user — or
+        ``(None, (response, status))`` to short-circuit.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        owner_pid = _run_owner_id(run_id, run_data) or _active_profile_id() or ""
+        members: list[tuple[str, str]] = []
+        if owner_pid:
+            try:
+                members = [
+                    (m.email, "")
+                    for m in _tenancy.MembershipStore().list_for_profile(owner_pid)
+                    if m.status == _tenancy.STATUS_ACTIVE
+                ]
+            except Exception:
+                members = []
+        ctx = {
+            "run_data": run_data,
+            "owner_pid": owner_pid,
+            "members": members,
+            "me": _auth.current_user_email() or "",
+        }
+        return ctx, None
+
+    def _collab_comment_payload(c, reactions: dict) -> dict:
+        d = c.to_dict()
+        d["reactions"] = reactions.get(c.id, {})
+        return d
+
+    def _collab_notify_mentions(ctx, run_id: str, comment) -> None:
+        """Fire inbox notifications for @mentions and a task assignment (1.18).
+
+        Best-effort and never raises — a notification must never break posting a
+        comment. Mentions are addressed per-user; the author never notifies
+        themselves.
+        """
+        try:
+            from mediahub.notify import inbox as _inbox
+
+            owner_pid = ctx.get("owner_pid") or ""
+            if not owner_pid:
+                return
+            link = url_for("review", run_id=run_id)
+            by = comment.author_name or comment.author_email or "Someone"
+            where = "a comment" + (f" on {comment.card_id}" if comment.card_id else "")
+            for email in comment.mentions or []:
+                if email and email != (comment.author_email or ""):
+                    _inbox.record_mention(
+                        owner_pid, email, by, where, run_id=run_id, click_url=link
+                    )
+            if comment.kind == "task" and comment.assignee_email:
+                if comment.assignee_email != (comment.author_email or ""):
+                    _inbox.record_task_assigned(
+                        owner_pid,
+                        comment.assignee_email,
+                        by,
+                        comment.body,
+                        run_id=run_id,
+                        click_url=link,
+                    )
+        except Exception:
+            pass
+
+    @app.route("/api/runs/<run_id>/comments", methods=["GET", "POST"])
+    def api_collab_comments(run_id: str):
+        """List (GET) or add (POST) anchored review comments / tasks.
+
+        GET  ?card_id=<id>&resolved=0|1 -> {ok, comments:[…], open_tasks}
+        POST {card_id?, body, kind?, anchor?, parent_id?, assignee?} -> {ok, comment}
+        """
+        ctx, err = _collab_run_ctx(run_id)
+        if err is not None:
+            return err
+        from mediahub.collab import mentions as _mentions
+        from mediahub.collab import threads as _threads
+
+        if request.method == "GET":
+            card_id = request.args.get("card_id")
+            include_resolved = (request.args.get("resolved") or "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            rows = _threads.list_for_card(run_id, card_id, include_resolved=include_resolved)
+            reactions = _threads.reactions_for([c.id for c in rows])
+            return jsonify(
+                {
+                    "ok": True,
+                    "comments": [_collab_comment_payload(c, reactions) for c in rows],
+                    "open_tasks": _threads.open_task_count(run_id, card_id),
+                    "me": ctx["me"],
+                }
+            )
+
+        denied = _role_denied_json(_perms.CAP_COMMENT, run_id, ctx["run_data"])
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        body = payload.get("body")
+        kind = (payload.get("kind") or "comment").strip().lower()
+        assignee = (payload.get("assignee") or "").strip().lower()
+        mention_emails = _mentions.resolve_mentions(str(body or ""), ctx["members"])
+        try:
+            comment = _threads.add_comment(
+                run_id,
+                payload.get("card_id"),
+                body,
+                author_email=ctx["me"],
+                author_name=ctx["me"],
+                anchor=payload.get("anchor"),
+                parent_id=payload.get("parent_id"),
+                kind=kind,
+                assignee_email=assignee,
+                mentions=mention_emails,
+            )
+        except _threads.ThreadError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        _collab_notify_mentions(ctx, run_id, comment)
+        reactions = _threads.reactions_for([comment.id])
+        return jsonify({"ok": True, "comment": _collab_comment_payload(comment, reactions)}), 201
+
+    @app.route("/api/runs/<run_id>/comments/<comment_id>", methods=["POST"])
+    def api_collab_comment_mutate(run_id: str, comment_id: str):
+        """Mutate one comment/task: resolve | reopen | complete | edit | delete | react.
+
+        Body JSON ``{action, body?, emoji?}``. Delete is author-or-manager;
+        everything else needs the comment capability. ``complete``/``resolve``
+        tick a task done; ``reopen`` un-ticks it.
+        """
+        ctx, err = _collab_run_ctx(run_id)
+        if err is not None:
+            return err
+        from mediahub.collab import threads as _threads
+
+        denied = _role_denied_json(_perms.CAP_COMMENT, run_id, ctx["run_data"])
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        action = (payload.get("action") or "").strip().lower()
+        me = ctx["me"]
+
+        if action == "delete":
+            existing = _threads.get_comment(comment_id)
+            if existing is None or existing.run_id != run_id:
+                return jsonify({"error": "comment_not_found"}), 404
+            is_manager = _run_actor_can(
+                _perms.CAP_APPROVE, run_id, ctx["run_data"]
+            ) or _run_actor_can(_perms.CAP_MANAGE, run_id, ctx["run_data"])
+            if not is_manager and (existing.author_email or "") != (me or ""):
+                return jsonify(
+                    {"error": "forbidden", "reason": "Only the author can delete this."}
+                ), 403
+            removed = _threads.delete_comment(comment_id, run_id=run_id)
+            return jsonify({"ok": True, "deleted": comment_id, "removed": removed})
+
+        if action in {"resolve", "reopen", "complete"}:
+            updated = _threads.set_resolved(comment_id, action != "reopen", run_id=run_id)
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        if action == "edit":
+            try:
+                updated = _threads.edit_body(
+                    comment_id, payload.get("body"), run_id=run_id, author_email=me or None
+                )
+            except _threads.ThreadError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        if action == "react":
+            try:
+                on = _threads.toggle_reaction(comment_id, payload.get("emoji"), me)
+            except _threads.ThreadError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            reactions = _threads.reactions_for([comment_id])
+            return jsonify({"ok": True, "on": on, "reactions": reactions.get(comment_id, {})})
 
         return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
 

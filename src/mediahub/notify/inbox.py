@@ -44,7 +44,17 @@ KIND_PACK_READY = "pack_ready"
 KIND_RENDER_COMPLETE = "render_complete"
 KIND_ERROR = "error"
 KIND_INFO = "info"
-_KINDS = {KIND_PACK_READY, KIND_RENDER_COMPLETE, KIND_ERROR, KIND_INFO}
+# 1.18 collaboration events.
+KIND_MENTION = "mention"
+KIND_TASK = "task"
+_KINDS = {
+    KIND_PACK_READY,
+    KIND_RENDER_COMPLETE,
+    KIND_ERROR,
+    KIND_INFO,
+    KIND_MENTION,
+    KIND_TASK,
+}
 
 LEVEL_INFO = "info"
 LEVEL_SUCCESS = "success"
@@ -91,6 +101,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     body        TEXT NOT NULL DEFAULT '',
     run_id      TEXT,
     click_url   TEXT,
+    user_email  TEXT,
     created_at  TEXT NOT NULL,
     read_at     TEXT
 );
@@ -99,6 +110,24 @@ CREATE INDEX IF NOT EXISTS idx_notifications_org_created
 CREATE INDEX IF NOT EXISTS idx_notifications_org_unread
     ON notifications(org_id, read_at);
 """
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Idempotently add columns introduced after the table first shipped.
+
+    ``CREATE TABLE IF NOT EXISTS`` never alters an existing table, so a data.db
+    created before 1.18 keeps the old shape; add ``user_email`` (the per-user
+    mention/task target — NULL means org-wide, the pre-1.18 behaviour) when it
+    is missing.
+    """
+    try:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(notifications)").fetchall()}
+        if "user_email" not in cols:
+            conn.execute("ALTER TABLE notifications ADD COLUMN user_email TEXT")
+            conn.commit()
+    except sqlite3.Error as exc:
+        log.warning("notify.inbox: column migration failed: %s", exc)
+
 
 # Paths whose schema we've already ensured this process — so the idempotent
 # bootstrap runs once per distinct data.db (incl. once per fresh test DATA_DIR)
@@ -123,6 +152,7 @@ def _connect() -> sqlite3.Connection:
         try:
             conn.executescript(_SCHEMA)
             conn.commit()
+            _ensure_columns(conn)
             _initialized.add(key)
         except sqlite3.Error as exc:
             log.warning("notify.inbox: schema bootstrap failed: %s", exc)
@@ -147,6 +177,7 @@ def record(
     level: str = LEVEL_INFO,
     run_id: Optional[str] = None,
     click_url: Optional[str] = None,
+    user_email: Optional[str] = None,
     ts: Optional[str] = None,
 ) -> Optional[str]:
     """Append one notification to ``org_id``'s inbox. Returns its id, or
@@ -155,6 +186,9 @@ def record(
     Never raises — a notification must never break the run that triggered it.
     ``kind`` and ``level`` are normalised to the known vocabulary (unknown
     values fall back to ``info``); ``title`` / ``body`` are trimmed and capped.
+    ``user_email`` addresses the notification to a single member (1.18 mentions
+    / task assignment); ``None`` (the default) means org-wide — visible to every
+    member, the pre-1.18 behaviour.
     """
     org_id = (org_id or "").strip()
     title = (title or "").strip()
@@ -172,6 +206,7 @@ def record(
     body = (body or "").strip()[:_BODY_MAX]
     run_id = (run_id or "").strip() or None
     click_url = (click_url or "").strip() or None
+    user_email = (user_email or "").strip().lower() or None
     nid = "ntf_" + uuid.uuid4().hex
     created = (ts or "").strip() or _now()
 
@@ -180,9 +215,10 @@ def record(
         try:
             conn.execute(
                 "INSERT INTO notifications "
-                "(id, org_id, kind, level, title, body, run_id, click_url, created_at, read_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-                (nid, org_id, kind, level, title, body, run_id, click_url, created),
+                "(id, org_id, kind, level, title, body, run_id, click_url, user_email, "
+                "created_at, read_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                (nid, org_id, kind, level, title, body, run_id, click_url, user_email, created),
             )
             conn.commit()
         finally:
@@ -267,9 +303,70 @@ def record_error(
     )
 
 
+def record_mention(
+    org_id: str,
+    user_email: str,
+    by_name: str,
+    context: str,
+    *,
+    run_id: Optional[str] = None,
+    click_url: Optional[str] = None,
+) -> Optional[str]:
+    """``user_email`` was @mentioned in a review thread (1.18). Addressed to that
+    one member, so it surfaces in their bell, not the whole org's."""
+    who = (by_name or "Someone").strip() or "Someone"
+    where = (context or "a review comment").strip() or "a review comment"
+    return record(
+        org_id,
+        KIND_MENTION,
+        f"{who} mentioned you",
+        f"in {where}",
+        level=LEVEL_INFO,
+        run_id=run_id,
+        click_url=click_url,
+        user_email=user_email,
+    )
+
+
+def record_task_assigned(
+    org_id: str,
+    user_email: str,
+    by_name: str,
+    task_text: str,
+    *,
+    run_id: Optional[str] = None,
+    click_url: Optional[str] = None,
+) -> Optional[str]:
+    """A review task was assigned to ``user_email`` (1.18). Addressed to that
+    member; an open task blocks the card's approval until it's resolved."""
+    who = (by_name or "Someone").strip() or "Someone"
+    body = (task_text or "").strip()
+    return record(
+        org_id,
+        KIND_TASK,
+        f"{who} assigned you a task",
+        body or "You have a new review task.",
+        level=LEVEL_WARNING,
+        run_id=run_id,
+        click_url=click_url,
+        user_email=user_email,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------
+
+
+def _user_clause(user_email: Optional[str], params: list) -> str:
+    """SQL fragment scoping rows to what ``user_email`` may see: org-wide
+    (``user_email IS NULL``) plus anything addressed to them. ``None`` (no user
+    given) imposes no filter — every org row, the pre-1.18 / operator view."""
+    ue = (user_email or "").strip().lower()
+    if not ue:
+        return ""
+    params.append(ue)
+    return " AND (user_email IS NULL OR user_email = ?)"
 
 
 def list_for(
@@ -277,8 +374,12 @@ def list_for(
     *,
     limit: int = _LIST_LIMIT_DEFAULT,
     unread_only: bool = False,
+    user_email: Optional[str] = None,
 ) -> list[dict]:
-    """Newest-first notifications for ``org_id`` (capped at ``_LIST_LIMIT_MAX``)."""
+    """Newest-first notifications for ``org_id`` (capped at ``_LIST_LIMIT_MAX``).
+
+    With ``user_email`` set, returns org-wide rows plus those addressed to that
+    member — so one member never sees another's personal mentions."""
     org_id = (org_id or "").strip()
     if not org_id:
         return []
@@ -293,6 +394,7 @@ def list_for(
         "FROM notifications WHERE org_id = ?"
     )
     params: list = [org_id]
+    sql += _user_clause(user_email, params)
     if unread_only:
         sql += " AND read_at IS NULL"
     sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
@@ -326,18 +428,21 @@ def list_for(
     return out
 
 
-def unread_count(org_id: str) -> int:
-    """How many unread notifications ``org_id`` has (0 on any error)."""
+def unread_count(org_id: str, *, user_email: Optional[str] = None) -> int:
+    """How many unread notifications ``org_id`` has (0 on any error).
+
+    Scoped to what ``user_email`` may see when given (org-wide + their own)."""
     org_id = (org_id or "").strip()
     if not org_id:
         return 0
     try:
         conn = _connect()
         try:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM notifications WHERE org_id = ? AND read_at IS NULL",
-                (org_id,),
-            ).fetchone()
+            params: list = [org_id]
+            sql = "SELECT COUNT(*) AS n FROM notifications WHERE org_id = ?"
+            sql += _user_clause(user_email, params)
+            sql += " AND read_at IS NULL"
+            row = conn.execute(sql, params).fetchone()
             return int(row["n"]) if row else 0
         finally:
             conn.close()
@@ -376,18 +481,22 @@ def mark_read(org_id: str, notif_id: str) -> bool:
         return False
 
 
-def mark_all_read(org_id: str) -> int:
-    """Mark every unread notification for ``org_id`` read; returns the count."""
+def mark_all_read(org_id: str, *, user_email: Optional[str] = None) -> int:
+    """Mark every unread notification for ``org_id`` read; returns the count.
+
+    Scoped to what ``user_email`` may see when given, so "mark all read" in one
+    member's bell never clears another member's personal mentions."""
     org_id = (org_id or "").strip()
     if not org_id:
         return 0
     try:
         conn = _connect()
         try:
-            cur = conn.execute(
-                "UPDATE notifications SET read_at = ? WHERE org_id = ? AND read_at IS NULL",
-                (_now(), org_id),
-            )
+            params: list = [_now(), org_id]
+            sql = "UPDATE notifications SET read_at = ? WHERE org_id = ?"
+            sql += _user_clause(user_email, params)
+            sql += " AND read_at IS NULL"
+            cur = conn.execute(sql, params)
             conn.commit()
             return int(cur.rowcount)
         finally:
@@ -445,6 +554,8 @@ __all__ = [
     "record_pack_ready",
     "record_render_complete",
     "record_error",
+    "record_mention",
+    "record_task_assigned",
     "list_for",
     "unread_count",
     "mark_read",
@@ -454,6 +565,8 @@ __all__ = [
     "KIND_RENDER_COMPLETE",
     "KIND_ERROR",
     "KIND_INFO",
+    "KIND_MENTION",
+    "KIND_TASK",
     "LEVEL_INFO",
     "LEVEL_SUCCESS",
     "LEVEL_WARNING",
