@@ -73,6 +73,7 @@ src/mediahub/discovered/
 src/mediahub/club_profiles/
 src/mediahub/motion_cache/
 src/mediahub/render_cache/
+src/mediahub/export_cache/
 src/mediahub/runs_v4/
 src/mediahub/turn_into_packs/
 # Phase W runtime writes (same no-DATA_DIR fallback)
@@ -118,3 +119,8 @@ src/mediahub/users.jsonl
 
 # Runtime logs (MCP server logs, per-run audit JSON) — never source-tracked.
 logs/
+
+# Export engine's content-addressed cache (export_engine/cache.py). Lives under
+# DATA_DIR normally; a standalone run with no DATA_DIR override falls back to
+# the repo root — this guards it from ever being committed.
+/export_cache/
