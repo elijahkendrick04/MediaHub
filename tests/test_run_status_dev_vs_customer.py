@@ -24,6 +24,7 @@ def app_client(tmp_path, monkeypatch):
     (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
 
     import mediahub.web.web as web
+
     importlib.reload(web)
     app = web.create_app()
     app.config["TESTING"] = True
@@ -84,6 +85,29 @@ def test_status_endpoint_exposes_percent_and_phase(app_client):
     # A PB-stage log maps to the friendly phase, never a raw step string.
     assert j.get("phase") == "Researching personal bests"
     assert "PB lookup error" not in (j.get("phase") or "")
+
+
+def test_progress_page_clamps_percent_and_steps_monotonically(app_client):
+    """QA-005: status polls round-robin across the 2 gunicorn workers, and the
+    worker that isn't running the pipeline serves the throttled (lagging) DB
+    progress log — so a single poll's percent / step count can read LOWER than
+    an earlier one. The page is the one consistent observer across polls, so it
+    must hold a high-water mark: the bar and the step count never go backwards.
+
+    Pin the monotonic clamp in the page's poll JS (a raw ``j.percent`` /
+    ``j.log.length`` straight onto the bar is exactly the regression).
+    """
+    web, client = app_client
+    run_id = _seed_running(web, "run-mono")
+    html = client.get(f"/runs/{run_id}").get_data(as_text=True)
+
+    # A percent high-water mark, declared AND applied (not just present once).
+    assert html.count("maxPct") >= 2, "progress percent has no monotonic high-water clamp"
+    # …and the step count / raw log is held to the longest log seen, so it can't
+    # drop when a lagging cross-worker poll returns fewer lines.
+    assert "bestLog" in html and html.count("maxSteps") >= 2, (
+        "step count has no monotonic high-water clamp"
+    )
 
 
 # --- Post-run processing log: PB-lookup / store errors are surfaced to the

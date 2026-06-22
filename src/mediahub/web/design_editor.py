@@ -781,6 +781,11 @@ _STUDIO_CSS = """
 .mh-studio-overlay { position:absolute; inset:0; display:flex; flex-direction:column; gap:14px;
   align-items:center; justify-content:center; background:rgba(6,7,12,0.62);
   backdrop-filter:blur(2px); color:var(--ink-dim); font-size:0.88rem; }
+/* The overlay is toggled by its `hidden` attribute (showOverlay/hideOverlay).
+   The `display:flex` above is an author rule that otherwise overrides the UA
+   `[hidden]{display:none}`, so hideOverlay() could never actually hide it — the
+   "Rendering…" layer stayed stuck over the card forever. Restore the hide. */
+.mh-studio-overlay[hidden] { display:none; }
 .mh-studio-overlay[data-error] { color:var(--bad); }
 .mh-studio-spinner { width:30px; height:30px; border-radius:50%;
   border:3px solid var(--border); border-top-color:var(--accent); animation:mh-studio-spin 0.8s linear infinite; }
