@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `f56973a0f` · Merge pull request #977 from elijahkendrick04/autotest/fix-5e8e0084c4ad
+**Last updated:** 2026-06-22 · `0589870fc` · Merge pull request #985: Document engine (roadmap 1.15)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
 - **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated · ❌ **NOT STARTED**
 - **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
 - **1.18** · Phase 1 (Product) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens · ❌ **NOT STARTED**
@@ -1213,14 +1212,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `58fb26298` | documents: keep inline-hex budget (theme-tokens guard) at baseline |
+| 2026-06-22 | `747d85a66` | fix(deploy): wrap the remaining fail-loud build fetches with a retry helper |
+| 2026-06-22 | `dd06bf0f3` | documents: apply ruff format/lint to satisfy the pre-commit hygiene hook |
+| 2026-06-22 | `ac2bde303` | documents: build 5 — web surface, nav & docs (roadmap 1.15) |
+| 2026-06-22 | `8598cbcf6` | fix(deploy): retry transient CDN/TLS failures when fetching the Piper voice |
+| 2026-06-22 | `30161cbf7` | video upload: raise the footage body cap so real clips actually upload |
+| 2026-06-22 | `75739cb0c` | documents: build 4 — deck mode & presenter surface engine (roadmap 1.15) |
+| 2026-06-22 | `6e94d0407` | documents: build 3 — exports, imports & PDF utilities (roadmap 1.15) |
+| 2026-06-22 | `732cd7e7a` | documents: build 2 — club formats + grounded AI drafting (roadmap 1.15) |
+| 2026-06-22 | `f0238a632` | documents: build 1 — core document engine (roadmap 1.15) |
 | 2026-06-22 | `7bd2ea176` | fix: Accepted upload file formats are never specified — a volunte |
 | 2026-06-22 | `bac42844e` | fix: 'brand kit' is unexplained jargon — a club volunteer won't k |
-| 2026-06-21 | `b11ff26e8` | Mobile: stop calendar toolbar and segmented filters overflowing the phone viewport |
-| 2026-06-21 | `e90907c9a` | video editor: drag-to-reorder + audio-waveform scrubber, and fix two studio-breaking bugs |
-| 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
-| 2026-06-21 | `f36e05c43` | ci(unit-suite): a cancelled (superseded) run is not a failure |
-| 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
-| 2026-06-21 | `2eab60c3b` | video suite: timeline editor — per-clip colour-grade sliders |
-| 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
-| 2026-06-21 | `e3e517eb3` | video suite: director depth — per-beat weights, cross-clip virality, multi-beat captions |
 <!-- /ROADMAP:ACTIVITY -->

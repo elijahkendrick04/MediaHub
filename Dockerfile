@@ -42,6 +42,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Small POSIX retry wrapper used to make the network-dependent, fail-loud build
+# steps below survive a single transient blip (dropped TLS handshake, CDN 5xx, a
+# flaky mirror) instead of failing the whole build — the shell analog of the
+# Python retry in scripts/fetch_piper_voice.py. It stays loud-fail: after the
+# retries are spent the step still errors. Copied early (and committed
+# executable) so the rembg/Playwright steps — which run before the main scripts
+# COPY — can already use it.
+COPY scripts/retry.sh /usr/local/bin/retry
+
 # Install Python deps first (better layer caching).
 COPY requirements.txt /app/requirements.txt
 # The trailing pair is the W.10 OCR fallback (optional everywhere else — see
@@ -65,7 +74,7 @@ RUN python -c "import sqlite3, sqlite_vec; db=sqlite3.connect(':memory:'); db.en
 # if it were a cutout). Failing the build here is the right loud
 # signal; quiet runtime failures are not.
 ENV U2NET_HOME=/opt/u2net
-RUN python -c "from rembg import new_session; new_session('u2net')" \
+RUN retry python -c "from rembg import new_session; new_session('u2net')" \
  && test -f /opt/u2net/u2net.onnx
 
 # Install Playwright + Chromium for graphic_renderer's HTML→PNG step.
@@ -81,7 +90,7 @@ RUN python -c "from rembg import new_session; new_session('u2net')" \
 #      downloads. Drifting major versions broke runtime discovery in
 #      May 2026; the pin (>=1.56,<1.58) keeps build + runtime aligned.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN playwright install --with-deps chromium
+RUN retry playwright install --with-deps chromium
 
 # Copy app code.
 COPY src/ /app/src/
@@ -115,7 +124,7 @@ RUN python /app/scripts/fetch_piper_voice.py /opt/piper_voices \
  && test -f /opt/piper_voices/en_GB-alba-medium.onnx
 
 # Install Remotion node modules so /api/.../motion + /reel render MP4s.
-RUN cd /app/src/mediahub/remotion && npm install --no-audit --no-fund
+RUN cd /app/src/mediahub/remotion && retry npm install --no-audit --no-fund
 
 # --- Optional in-container SearXNG metasearch (Capability 3) -----------------
 # Stock, UNMODIFIED SearXNG installed into an ISOLATED virtualenv so its pinned
@@ -139,9 +148,9 @@ ENV SEARXNG_VENV=/opt/searxng-venv \
     SEARXNG_SETTINGS_PATH=/app/deploy/searxng/settings.yml
 RUN python -m venv "$SEARXNG_VENV" \
  && ( "$SEARXNG_VENV/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel \
-   && "$SEARXNG_VENV/bin/pip" install --no-cache-dir \
+   && retry "$SEARXNG_VENV/bin/pip" install --no-cache-dir \
         -r "https://raw.githubusercontent.com/searxng/searxng/${SEARXNG_REF}/requirements.txt" \
-   && "$SEARXNG_VENV/bin/pip" install --no-cache-dir --no-build-isolation \
+   && retry "$SEARXNG_VENV/bin/pip" install --no-cache-dir --no-build-isolation \
         "git+https://github.com/searxng/searxng.git@${SEARXNG_REF}" \
    && "$SEARXNG_VENV/bin/python" -c "import searx; print('searxng OK')" ) \
  || echo "WARN: in-container SearXNG install failed; MediaHub will use DuckDuckGo."

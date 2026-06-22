@@ -28,6 +28,10 @@ dependencies = [
   "requests>=2.34.2",
   "pdfplumber>=0.11.10",
   "pypdf>=6.13.3",
+  # Document engine (roadmap 1.15): deterministic PPTX/DOCX round-trip for the
+  # programme / report / deck formats (take-it-elsewhere editing). Pure-Python.
+  "python-pptx>=1.0.2",
+  "python-docx>=1.2.0",
   "beautifulsoup4>=4.15.0",
   "lxml>=6.1.1",
   # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx): read .xlsx

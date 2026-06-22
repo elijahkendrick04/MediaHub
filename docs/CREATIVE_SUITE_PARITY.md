@@ -1004,6 +1004,15 @@ evidence-grounded pipeline).
 
 ## 1.15 — Documents, decks & the PDF suite
 
+> **Status: ✅ shipped.** Built as the `documents/` package — `DocumentSpec →
+> Section → Block` model, brand-tokened paged HTML → PDF (tagged/accessible) +
+> PNG previews, the four data-grounded club formats (`meet_programme` /
+> `season_report` / `sponsor_proposal` / `agm_deck`) with honest AI outline→draft,
+> PPTX/DOCX export + PPTX/DOCX/PDF import (bounded fidelity), PDF utilities
+> (merge / organise / images↔PDF), deck→MP4, and the deck presenter surface
+> (speaker notes, timer, autoplay/kiosk, phone-as-remote, live-reload). Web
+> surface at **Create → Documents** (`/documents`, `/present/<id>`, `/remote`).
+
 **What Canva/Adobe have.** Collaborative docs with embedded charts and
 "Scrollables", presentations (presenter view/notes, remote control, Canva
 Live audience Q&A/polls, Magic Shortcuts, autoplay, offline presenting,
