@@ -17525,7 +17525,7 @@ def create_app() -> Flask:
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
-  <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3, PDF, CSV or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
 
@@ -17552,8 +17552,8 @@ def create_app() -> Flask:
       </svg>
       <div class="mh-dropzone-headline">Drop your results file</div>
       <div class="mh-dropzone-sub">or click to browse</div>
-      <input id="upload-file" type="file" name="file" accept=".hy3,.zip,.pdf" required />
-      <div class="mh-dropzone-fineprint">Hytek .hy3 / .zip · Sportsystems PDF</div>
+      <input id="upload-file" type="file" name="file" accept=".hy3,.hyv,.sd3,.sdif,.cl2,.zip,.pdf,.htm,.html,.csv,.txt" required />
+      <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · HTML</div>
       <div class="mh-dropzone-preview" aria-live="polite"></div>
     </label>
     <div id="mh-parse-preview" class="mh-parse-preview" role="status" aria-live="polite">
@@ -17613,9 +17613,16 @@ def create_app() -> Flask:
   }}
   function inferFormat(name) {{
     var n = (name || '').toLowerCase();
-    if (n.endsWith('.hy3')) return {{kind: 'good', label: 'Hytek Meet Manager (.hy3)', note: 'looks good'}};
-    if (n.endsWith('.zip')) return {{kind: 'good', label: 'Hytek .zip export',          note: 'we\\u2019ll unpack and read it'}};
-    if (n.endsWith('.pdf')) return {{kind: 'good', label: 'PDF results file',           note: 'we\\u2019ll run the OCR / table extractor'}};
+    if (n.endsWith('.hy3'))  return {{kind: 'good', label: 'Hytek Meet Manager (.hy3)',  note: 'looks good'}};
+    if (n.endsWith('.hyv'))  return {{kind: 'good', label: 'Hytek Meet Manager (.hyv)',  note: 'looks good'}};
+    if (n.endsWith('.zip'))  return {{kind: 'good', label: 'Hytek .zip export',          note: 'we\\u2019ll unpack and read it'}};
+    if (n.endsWith('.sd3'))  return {{kind: 'good', label: 'SDIF results file (.sd3)',   note: 'looks good'}};
+    if (n.endsWith('.sdif')) return {{kind: 'good', label: 'SDIF results file (.sdif)',  note: 'looks good'}};
+    if (n.endsWith('.cl2'))  return {{kind: 'good', label: 'CL2 results file',           note: 'looks good'}};
+    if (n.endsWith('.pdf'))  return {{kind: 'good', label: 'PDF results file',           note: 'we\\u2019ll run the OCR / table extractor'}};
+    if (n.endsWith('.csv'))  return {{kind: 'good', label: 'CSV results file',           note: 'we\\u2019ll read every row'}};
+    if (n.endsWith('.htm') || n.endsWith('.html')) return {{kind: 'good', label: 'HTML results page', note: 'we\\u2019ll extract the result tables'}};
+    if (n.endsWith('.txt'))  return {{kind: 'good', label: 'Text results file',          note: 'we\\u2019ll try every adapter'}};
     return {{kind: 'warn', label: 'Unknown extension', note: 'we\\u2019ll try every adapter; results may be partial'}};
   }}
   function refresh() {{
