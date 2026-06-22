@@ -26,6 +26,8 @@ faking a file.
 
 from __future__ import annotations
 
+from . import quick_actions
+from .bulk import BulkExportResult, BulkExportSpec, BulkItem, run_bulk_export
 from .engine import (
     CONVERSIONS,
     ExportError,
@@ -75,4 +77,10 @@ __all__ = [
     "source_category",
     "target_formats_for",
     "engine_status",
+    # quick actions + bulk
+    "quick_actions",
+    "BulkItem",
+    "BulkExportSpec",
+    "BulkExportResult",
+    "run_bulk_export",
 ]

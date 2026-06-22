@@ -38,6 +38,11 @@ spoken words on screen → brand it → a human says yes → download.**
 - **`reframe.py`** — **crops** a wide video to an upright shape without chopping
   the swimmer out, by reusing the same "where's the subject" maths the still
   graphics use.
+- **`ops.py`** — the **one-clip quick edits**: trim, crop, resize, change speed,
+  mute, **reverse**, and join compatible clips end-to-end. The video twin of
+  `audio/ops.py` — fixed FFmpeg maths, the same clip always edits the same way.
+  This is what the "quick actions" toolbox calls; the full multi-clip timeline
+  is still `edl.py` + `render.py`'s job.
 - **`enhance.py`** — the enhancement steps that need their own pass over the file:
   **stabilising** shaky footage (the standard two-pass vidstab) and a clean
   high-quality **resize**. Deterministic; honest if the tools aren't there. The

@@ -26,6 +26,8 @@ of handing back a broken or empty file.
 | `images.py` | Converts a **picture** to another picture type (e.g. PNG → JPG), resizing and flattening the background when needed. |
 | `transcode.py` | Converts **video**: make a GIF or WebM from a clip, or turn a GIF back into a playable MP4. The one new tool this build adds. |
 | `engine.py` | The **front desk**: you ask "turn this file into that type", it picks the right tool, remembers the answer, and hands the file back. |
+| `quick_actions.py` | The **toolbox**: one-click convert / resize / crop a photo, trim / crop / resize / speed / mute / reverse / merge a clip, video→GIF (and back), and photos→PDF — without making a whole post. |
+| `bulk.py` | **Export everything at once**: turn a whole pack of items into every format you ask for and bundle it into one ZIP, with a manifest that honestly lists anything it couldn't make. |
 | `cache.py` | Remembers finished conversions so asking for the exact same one again is instant. |
 | `README.md` | This file. |
 
