@@ -83,6 +83,18 @@ def test_eyebrow_title_and_lede(section):
     assert "Nothing leaves without your approval." in section
 
 
+def test_brand_kit_lede_explains_what_it_means(section):
+    """'brand kit' in the lede must be followed by a plain-English parenthetical
+    so a club volunteer understands what to provide.  Without it the term is
+    unexplained jargon — this test is the regression pin for that UX gap."""
+    # The parenthetical must mention at least one of: logo, colours/colors, fonts.
+    assert re.search(r"brand kit\s*\([^)]*(?:logo|colour|color|font)[^)]*\)", section, re.I), (
+        "The lede must explain 'brand kit' with a parenthetical such as "
+        "'brand kit (logo, colours and fonts)' so club volunteers understand "
+        "what to provide."
+    )
+
+
 def test_whole_section_is_well_formed_xml(section):
     # A single <section> root that parses cleanly catches any unclosed tag,
     # stray entity, or attribute-quoting slip in the hand-built markup.

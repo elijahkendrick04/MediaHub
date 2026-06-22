@@ -75,9 +75,10 @@ _ENGINE_SUB = "detect · rank · brand · generate"
 # aria-hidden decorative duplicates of this single description).
 _A11Y_SUMMARY = (
     "How MediaHub works: it reads the sources you already have — your club "
-    "site, social profiles and brand kit. The engine detects the moments that "
-    "matter, ranks them, applies your branding and generates the content. It "
-    "writes posting-ready captions, graphics and reels for your approval."
+    "site, social profiles and brand kit (your logo, colours and fonts). "
+    "The engine detects the moments that matter, ranks them, applies your "
+    "branding and generates the content. It writes posting-ready captions, "
+    "graphics and reels for your approval."
 )
 
 
@@ -314,9 +315,10 @@ def pipeline_diagram_section_html() -> str:
         '<h2 class="mh-section-title" id="mh-pl-title">'
         'Reads what your club already has. <em class="editorial">Writes</em> what you need.</h2>'
         '<p class="mh-pl-lede">MediaHub reads the sources you already have: your '
-        "club site, social profiles and brand kit. It works out what matters, ranks "
-        "it, then writes captions, builds graphics and renders reels. In your "
-        "colours, in your voice. Nothing leaves without your approval.</p>"
+        "club site, social profiles and brand kit (your logo, colours and fonts). "
+        "It works out what matters, ranks it, then writes captions, builds graphics "
+        "and renders reels. In your colours, in your voice. Nothing leaves without "
+        "your approval.</p>"
         '<div class="mh-pl-stage">'
         f'<p class="mh-visually-hidden">{_A11Y_SUMMARY}</p>'
         f"{_svg_horizontal()}{_svg_vertical()}"
