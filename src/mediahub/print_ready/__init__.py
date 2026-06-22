@@ -33,8 +33,9 @@ and every unavailable backend honest-errors rather than faking output.
 
 from __future__ import annotations
 
-from . import engine, pdfx, products, proof
+from . import engine, fulfilment, pdfx, products, proof
 from .engine import PrintRequest, PrintResult, prepare_print
+from .fulfilment import FulfilmentOrder, FulfilmentUnavailable, current_provider, fulfilment_enabled
 from .pdfx import PdfXUnavailable, export_pdfx, pdfx_available
 from .products import (
     FAMILIES,
@@ -62,6 +63,7 @@ __all__ = [
     "proof",
     "pdfx",
     "engine",
+    "fulfilment",
     # products
     "FAMILIES",
     "PRINT_METHODS",
@@ -88,4 +90,9 @@ __all__ = [
     "PrintRequest",
     "PrintResult",
     "prepare_print",
+    # fulfilment (optional, flag-gated slot)
+    "FulfilmentOrder",
+    "FulfilmentUnavailable",
+    "current_provider",
+    "fulfilment_enabled",
 ]

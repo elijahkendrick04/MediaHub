@@ -46060,6 +46060,387 @@ voice, and queues them for one-click approval.</p>
             "user_message": "Reformatting this design failed. Try again, or pick another format.",
         }
 
+    # ===================================================================
+    # Roadmap 1.20 — Print & merch pipeline (print-ready export + proofing)
+    # ===================================================================
+    # Reuses the format transformer (magic-resize a card to a print canvas),
+    # the graphic_renderer, the deterministic auto-proofer (print_ready.proof)
+    # and the print-ready export engine (print_ready.engine). Tenant-isolated
+    # exactly like reformat; honest-errors where Chromium/Ghostscript are absent.
+
+    def _brand_palette(brand_kit) -> dict:
+        """A design palette (inks + paper) for the proofer, read defensively off
+        whatever brand-kit shape is passed (different surfaces carry different
+        attribute names; missing values are simply omitted)."""
+
+        def _hex(*names):
+            for n in names:
+                v = getattr(brand_kit, n, None)
+                if isinstance(v, str) and v.strip().startswith("#"):
+                    return v.strip()
+            return None
+
+        return {
+            "primary": _hex("primary_colour", "primary", "brand_primary"),
+            "secondary": _hex("secondary_colour", "secondary", "brand_secondary"),
+            "accent": _hex("accent_colour", "accent", "brand_accent"),
+            "background": "#FFFFFF",
+        }
+
+    def _print_resolve(run_id: str):
+        """Resolve + access-gate a run for the print routes.
+
+        Returns ``(run_data, profile_id, None)`` on success, else
+        ``(None, None, (response, status))`` to short-circuit.
+        """
+        run_data = _run_data_any(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, None, (jsonify({"error": "run_not_found"}), 404)
+        profile_id = _assistant_profile_id(run_id, run_data)
+        if not _session_can_access_profile(profile_id):
+            return None, None, (jsonify({"error": "forbidden"}), 403)
+        return run_data, profile_id, None
+
+    def _print_product_placement(product_slug, placement_slug):
+        """Resolve a ``(product, placement, spec)`` triple, or ``None``."""
+        from mediahub.print_ready import products as _pp
+
+        product = _pp.product_for(product_slug or "")
+        if product is None:
+            return None
+        placement = product.placement(placement_slug or "") or product.primary_placement
+        return product, placement, placement.format
+
+    def _print_card_png(run_id, run_data, card_id, spec, profile_id, brand_kit):
+        """Re-lay card_id's approved design at ``spec`` and render a print PNG.
+
+        Returns the PNG ``Path``, or ``None`` when the card has no design yet.
+        Mirrors the reformat render path (deterministic transform + the existing
+        graphic_renderer), cached under ``runs/<id>/print_art/<key>/``.
+        """
+        import hashlib as _hl
+
+        from mediahub.creative_brief.generator import CreativeBrief
+        from mediahub.graphic_renderer.render import render_brief
+        from mediahub.turn_into import transform_design
+
+        bdict = _latest_brief_for_card(run_id, card_id)
+        if not bdict:
+            return None
+        src = CreativeBrief.from_dict(bdict)
+        if src is None:
+            return None
+        tr = transform_design(source_brief=src, target_format=spec, brand_kit=brand_kit)
+        new_brief = tr.brief
+        key = _hl.sha256(
+            f"print|{card_id}|{spec.slug}|{spec.width}x{spec.height}|"
+            f"{new_brief.layout_template}".encode("utf-8")
+        ).hexdigest()[:20]
+        out_dir = RUNS_DIR / run_id / "print_art" / key
+        cache_png = out_dir / f"{spec.render_name}.png"
+        if cache_png.exists():
+            return cache_png
+        media_assets: list = []
+        try:
+            if _v8_get_media_store is not None:
+                media_assets = [
+                    a.to_dict() if hasattr(a, "to_dict") else a
+                    for a in _v8_get_media_store().list(profile_id=profile_id)
+                ]
+        except Exception:
+            media_assets = []
+        athlete_path = None
+        hero_id = (new_brief.sourced_asset_ids or [None])[0]
+        if hero_id:
+            for a in media_assets:
+                ad = a if isinstance(a, dict) else {}
+                if str(ad.get("id")) == str(hero_id):
+                    athlete_path = ad.get("path") or ad.get("file_path")
+                    break
+        logo_path = None
+        bk_logo = getattr(brand_kit, "logo_path", None)
+        if bk_logo:
+            try:
+                if Path(bk_logo).exists():
+                    logo_path = str(bk_logo)
+            except Exception:
+                logo_path = None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        skip_cutout = getattr(new_brief, "photo_treatment", "") == "no-photo" or not athlete_path
+        with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
+            res = render_brief(
+                new_brief,
+                output_dir=out_dir,
+                size=spec.size,
+                format_name=spec.render_name,
+                athlete_path=(None if skip_cutout else athlete_path),
+                logo_path=logo_path,
+                brand_kit=brand_kit,
+                image_format="png",
+            )
+        return Path(res.visual.file_path)
+
+    @app.route("/api/print/products")
+    def api_print_products():
+        """The print/merch product catalogue + the deployment's print capability."""
+        from mediahub.graphic_renderer.print_export import ghostscript_available
+        from mediahub.print_ready import fulfilment as _ff
+        from mediahub.print_ready import pdfx as _pdfx
+        from mediahub.print_ready import products as _pp
+
+        return jsonify(
+            {
+                "families": _pp.grouped(),
+                "capabilities": {
+                    "cmyk": ghostscript_available(),
+                    "pdfx": _pdfx.pdfx_available(),
+                    "colour_modes": ["rgb", "cmyk", "pdfx"],
+                },
+                "fulfilment": _ff.status(),
+            }
+        )
+
+    @app.route("/api/print/fulfilment")
+    def api_print_fulfilment():
+        """Honest status of the optional, flag-gated fulfilment slot."""
+        from mediahub.print_ready import fulfilment as _ff
+
+        return jsonify(_ff.status())
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/preflight", methods=["POST", "GET"])
+    def api_card_preflight(run_id: str, card_id: str):
+        """Deterministically proof a card's design for a print product.
+
+        Proofs the brand palette at the product's print canvas (no render needed),
+        returning the explained pre-flight report — resolution, text size, bleed,
+        contrast on paper, CMYK gamut and ink coverage.
+        """
+        run_data, profile_id, err = _print_resolve(run_id)
+        if err:
+            return err
+        trip = _print_product_placement(request.args.get("product"), request.args.get("placement"))
+        if trip is None:
+            return jsonify({"error": "unknown_product"}), 400
+        product, placement, spec = trip
+        from mediahub.print_ready import proof as _proof
+
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        prof = _proof.profile_from_design(
+            _brand_palette(brand_kit), width_px=spec.width, height_px=spec.height, full_bleed=True
+        )
+        report = _proof.run_preflight(prof, product, placement)
+        return jsonify(report.to_dict())
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/print", methods=["POST"])
+    def api_card_print(run_id: str, card_id: str):
+        """Render a print-ready PDF (bleed + marks + colour mode) for a product.
+
+        ``?product=&placement=&colour=rgb|cmyk|pdfx&marks=1&force=0`` — a blocking
+        pre-flight error returns 422 with the report unless ``force=1``.
+        """
+        from flask import send_file
+
+        run_data, profile_id, err = _print_resolve(run_id)
+        if err:
+            return err
+        trip = _print_product_placement(request.args.get("product"), request.args.get("placement"))
+        if trip is None:
+            return jsonify({"error": "unknown_product"}), 400
+        product, placement, spec = trip
+        colour = (request.args.get("colour") or "rgb").strip().lower()
+        if colour not in ("rgb", "cmyk", "pdfx"):
+            return jsonify({"error": "bad_colour_mode"}), 400
+        force = (request.args.get("force") or "").strip().lower() in _TRUTHY
+        marks = (request.args.get("marks") or "1").strip().lower() in _TRUTHY
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        try:
+            png = _print_card_png(run_id, run_data, card_id, spec, profile_id, brand_kit)
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception as e:
+            return jsonify(_reformat_error_payload(e)), 500
+        if png is None:
+            return jsonify(
+                {
+                    "error": "no_design",
+                    "user_message": "Create a graphic for this card first, then print it.",
+                }
+            ), 409
+        from mediahub.print_ready.engine import PrintRequest, prepare_print
+
+        palette = _brand_palette(brand_kit)
+        req = PrintRequest(
+            artwork=Path(png).read_bytes(),
+            product_slug=product.slug,
+            placement_slug=placement.slug,
+            colour_mode=colour,
+            crop_marks=marks,
+            force=force,
+            design=palette,
+            full_bleed=True,
+        )
+        out_dir = RUNS_DIR / run_id / "print_out"
+        try:
+            res = prepare_print(req, out_dir=out_dir, brand=palette)
+        except Exception as e:
+            return jsonify(_reformat_error_payload(e)), 500
+        if res.blocked:
+            return jsonify(
+                {
+                    "error": "preflight_blocked",
+                    "preflight": res.preflight.to_dict(),
+                    "user_message": "Fix the blocking issue(s), or export with force=1.",
+                }
+            ), 422
+        return send_file(
+            str(res.pdf_path),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"{product.slug}-{card_id}-{colour}.pdf",
+        )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/merch-mockup", methods=["POST", "GET"])
+    def api_card_merch_mockup(run_id: str, card_id: str):
+        """A deterministic product-mockup preview (tee / mug / tote / poster) PNG."""
+        from flask import Response
+
+        run_data, profile_id, err = _print_resolve(run_id)
+        if err:
+            return err
+        trip = _print_product_placement(request.args.get("product"), request.args.get("placement"))
+        if trip is None:
+            return jsonify({"error": "unknown_product"}), 400
+        product, placement, spec = trip
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        try:
+            png = _print_card_png(run_id, run_data, card_id, spec, profile_id, brand_kit)
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception as e:
+            return jsonify(_reformat_error_payload(e)), 500
+        if png is None:
+            return jsonify({"error": "no_design"}), 409
+        from mediahub.mockups.compose import MockupError, compose_mockup
+
+        accent = _brand_palette(brand_kit).get("accent")
+        try:
+            out = compose_mockup(
+                Path(png).read_bytes(), product.mockup_template or "flatlay", accent=accent
+            )
+        except MockupError as e:
+            return jsonify({"error": "mockup_failed", "user_message": str(e)}), 400
+        return Response(out, mimetype="image/png")
+
+    @app.route("/print")
+    def print_center_page():
+        """A plain-English reference of the print/merch products + capabilities."""
+        from mediahub.graphic_renderer.print_export import ghostscript_available
+        from mediahub.print_ready import fulfilment as _ff
+        from mediahub.print_ready import pdfx as _pdfx
+        from mediahub.print_ready import products as _pp
+
+        sections = []
+        for grp in _pp.grouped():
+            chips = "".join(
+                f'<span class="mh-chip" title="{_h(p["description"])}">{_h(p["title"])}</span>'
+                for p in grp["products"]
+            )
+            sections.append(
+                f'<section class="panel" style="margin-bottom:var(--sp-4)">'
+                f'<h2 style="text-transform:capitalize">{_h(grp["label"])}</h2>'
+                f'<div class="mh-chip-row">{chips}</div></section>'
+            )
+        ff = _ff.status()
+        caps = (
+            f'<p class="muted">CMYK conversion (Ghostscript): '
+            f'<strong>{"ready" if ghostscript_available() else "not installed"}</strong> · '
+            f'PDF/X-3: <strong>{"ready" if _pdfx.pdfx_available() else "needs an ICC profile"}'
+            f"</strong> · Fulfilment: <strong>{_h(ff['message'])}</strong></p>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">'
+            '<span class="mh-hero-eyebrow">Print &amp; merch</span>'
+            '<h1>Print-ready, <em class="editorial">no surprises</em>.</h1>'
+            '<p class="lede">Turn any approved design into a file a high-street or online '
+            "printer will accept — posters, flyers, certificates, banners, and fundraising "
+            "merch. MediaHub checks resolution, bleed, text size, contrast and ink before you "
+            "ever send it, and explains anything to fix. Open a meet's print tool to proof and "
+            "export a card.</p>"
+            f"{caps}</section>" + "".join(sections)
+        )
+        return _layout("Print & merch", body)
+
+    @app.route("/print/<run_id>")
+    def print_run_tool_page(run_id: str):
+        """The per-meet print tool: pick a card + product, proof, export, preview."""
+        run_data = _run_data_any(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "Print", '<div class="empty">That meet isn\'t available to print.</div>'
+            ), 404
+        from mediahub.print_ready import products as _pp
+
+        rr = run_data.get("recognition_report") or {}
+        card_opts = []
+        for ra in (rr.get("ranked_achievements") or [])[:60]:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if not cid:
+                continue
+            label = ach.get("swimmer_name") or ach.get("headline") or cid
+            card_opts.append(f'<option value="{_h(str(cid))}">{_h(str(label))}</option>')
+        cards_html = "".join(card_opts) or '<option value="">(no cards yet)</option>'
+        prod_html = "".join(
+            f'<optgroup label="{_h(g["label"])}">'
+            + "".join(
+                "".join(
+                    f'<option value="{_h(p["slug"])}::{_h(pl["slug"])}">'
+                    f"{_h(p['title'])}"
+                    + (f" — {_h(pl['label'])}" if p["double_sided"] else "")
+                    + "</option>"
+                    for pl in p["placements"]
+                )
+                for p in g["products"]
+            )
+            + "</optgroup>"
+            for g in _pp.grouped()
+        )
+        meet = (run_data or {}).get("meet") or {}
+        title = _h(meet.get("name") or run_id)
+        pf_url = url_for("api_card_preflight", run_id=run_id, card_id="__CARD__")
+        print_url = url_for("api_card_print", run_id=run_id, card_id="__CARD__")
+        mock_url = url_for("api_card_merch_mockup", run_id=run_id, card_id="__CARD__")
+        body = (
+            f'<section class="panel" data-print-tool data-preflight-url="{_h(pf_url)}" '
+            f'data-print-url="{_h(print_url)}" data-mockup-url="{_h(mock_url)}">'
+            f'<h1 style="margin-top:0">Print &amp; merch — {title}</h1>'
+            '<p class="muted">Pick a card and a product, run the pre-flight check, then '
+            "download a print-ready PDF or preview the merch. A blocking issue is explained "
+            "and held back until you fix it (or choose to export anyway).</p>"
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:var(--sp-3) 0">'
+            f'<label class="mh-field">Card <select id="pr-card">{cards_html}</select></label>'
+            f'<label class="mh-field">Product <select id="pr-product">{prod_html}</select></label>'
+            '<label class="mh-field">Colour <select id="pr-colour">'
+            '<option value="rgb">RGB (print-ready)</option>'
+            '<option value="cmyk">CMYK (Ghostscript)</option>'
+            '<option value="pdfx">PDF/X-3</option></select></label>'
+            "</div>"
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+            '<button class="btn" id="pr-preflight">Run pre-flight</button>'
+            '<button class="btn primary" id="pr-download">Download print-ready PDF</button>'
+            '<button class="btn secondary" id="pr-mockup">Preview mockup</button>'
+            '<label class="mh-check"><input type="checkbox" id="pr-force"> '
+            "export despite warnings</label>"
+            "</div>"
+            '<div id="pr-report" style="margin-top:var(--sp-4)" role="status" '
+            'aria-live="polite"></div>'
+            '<div id="pr-preview" style="margin-top:var(--sp-3)"></div>'
+            "</section>"
+            '<script src="' + url_for("static", filename="js/print_center.js") + '"></script>'
+        )
+        return _layout("Print & merch", body)
+
     def _run_data_any(run_id: str):
         """Load a run from either the flat or nested layout (or None)."""
         rd = _load_run(run_id)
