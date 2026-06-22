@@ -282,6 +282,59 @@ def test_british_paren_yob_format_parses_with_correct_event_pairing():
     assert free_times == {"15:10.79", "15:13.55"}  # 1500m times, not 400m splits
 
 
+def test_hytek_license_banner_is_not_the_meet_name():
+    """HY-TEK MEET MANAGER stamps a licensee/software/timestamp/page banner on
+    the first line of every results page. That banner must NOT become the meet
+    title (it was leaking "… HY-TEK's MEET MANAGER 8.0 … Page 1" into the
+    headline) — the real meet name on the next line is used instead, with its
+    trailing date range stripped."""
+    txt = (
+        "Sussex County ASA- LC Champ - Organization License HY-TEK's MEET MANAGER 8.0 - 6:29 PM 15/02/2026 Page 1\n"
+        "Sussex County Long Course Championships 26 - 14/02/2026 to 01/03/2026\n"
+        "\n"
+        "Event 202 Female 13 Year Olds 200 LC Meter Freestyle\n"
+        "1 Raleigh, Birdy 13 City of Brighton & Hove 2:24.51 2:19.80\n"
+    )
+    res = interpret_document(txt.encode(), hint="txt")
+    assert res.meet_name == "Sussex County Long Course Championships 26"
+    # None of the software/license/page boilerplate survives in the title.
+    for boilerplate in ("HY-TEK", "MEET MANAGER", "Organization License", "Page 1", "6:29 PM"):
+        assert boilerplate not in (res.meet_name or "")
+
+
+def test_hytek_banner_only_header_strips_boilerplate_to_recover_name():
+    """If the licensee banner is the only title-bearing line, the boilerplate is
+    stripped to recover the licensee/meet prefix rather than surfacing the raw
+    "… HY-TEK's MEET MANAGER … Page 1" string as the title."""
+    txt = (
+        "City of Cardiff Open Meet - Organization License HY-TEK's MEET MANAGER 8.0 - 9:01 AM 03/05/2026 Page 1\n"
+        "\n"
+        "Event 1 Female 50 LC Meter Freestyle\n"
+        "1 Jones, Amy 14 Cardiff 28.40\n"
+    )
+    res = interpret_document(txt.encode(), hint="txt")
+    assert res.meet_name == "City of Cardiff Open Meet"
+    assert "HY-TEK" not in (res.meet_name or "")
+    assert "Page" not in (res.meet_name or "")
+
+
+def test_no_time_seed_does_not_create_phantom_clubs():
+    """"NT" is the No-Time SEED value, not club text. The team-name parser must
+    not absorb it into the club, or the picker fills with phantom "<Club> NT"
+    clubs (City of Brighton & Hove NT, Beacon SC NT, …)."""
+    txt = (
+        "Event 202 Female 13 Year Olds 200 LC Meter Freestyle\n"
+        "1 Raleigh, Birdy 13 City of Brighton & Hove NT 2:24.51\n"
+        "2 Carden, Izzy 13 Beacon SC NT 2:28.90\n"
+        "3 Patel, Mia 13 Atlantis SC NT 2:31.10\n"
+    )
+    res = interpret_document(txt.encode(), hint="txt")
+    clubs = {s.club for e in res.events for s in e.swims if s.club}
+    assert clubs == {"City of Brighton & Hove", "Beacon SC", "Atlantis SC"}, clubs
+    # No phantom "<Club> NT" club anywhere.
+    assert not any(c.upper().endswith(" NT") for c in clubs), clubs
+
+
 def test_implausible_time_for_event_is_flagged_not_trusted():
     """A time physically impossible for the event's distance (a wrong event/time
     pairing) is flagged for review and de-confidenced — never shown as fact —

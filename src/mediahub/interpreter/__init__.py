@@ -48,6 +48,55 @@ _OCR_MAX_LOW_CONF_FLAGS = 20
 # Regex for meet-level metadata — structural only, no domain vocab
 _DATE_RE = re.compile(r"\b(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{4}[\-/]\d{2}[\-/]\d{2})\b")
 
+# Meet-management software / licensing / page banners that tools (HY-TEK MEET
+# MANAGER, Team Manager, SwimTopia/Splash) stamp across the top of every
+# results page. This licensee / software / timestamp / page line is NOT the
+# meet title — picking it leaks "… HY-TEK's MEET MANAGER 8.0 … Page 1" into the
+# headline. Detection is structural (vendor + report-furniture words), not swim
+# vocabulary, so it stays on the deterministic side of the engine boundary.
+_SOFTWARE_BANNER_RE = re.compile(
+    r"hy-?tek|meet\s+manager|team\s+manager|splash\s+meet|swimtopia"
+    r"|organi[sz]ation\s+licen[sc]e|\bpage\s+\d+\b",
+    re.IGNORECASE,
+)
+
+# A trailing date range printed after the real meet name on the HY-TEK title
+# line, e.g. "… Championships 26 - 14/02/2026 to 01/03/2026". The dates are
+# captured separately, so they are stripped from the name itself.
+_MEET_DATE_TAIL_RE = re.compile(
+    r"\s*[-–—]\s*\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}"
+    r"(?:\s+to\s+\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})?\s*$",
+    re.IGNORECASE,
+)
+
+# Structural cues that a line is event/result content, not the meet title:
+# an "Event N" header marker, or a race-time token (mm:ss.cc / ss.cc) that only
+# appears in a result row. Both are report furniture, not swim vocabulary, so
+# they keep the title picker from grabbing an event header or a swimmer's row.
+_EVENT_HEADER_HINT_RE = re.compile(r"^\s*event\s+\d+\b", re.IGNORECASE)
+_RACE_TIME_TOKEN_RE = re.compile(r"\b\d{1,3}:\d{2}\.\d{2}\b|(?<!\d)\d{1,2}\.\d{2}(?!\d)")
+
+
+def _looks_like_software_banner(line: str) -> bool:
+    """True if *line* is a meet-software / license / page banner, not a title."""
+    return bool(_SOFTWARE_BANNER_RE.search(line))
+
+
+def _clean_meet_name(line: str) -> str:
+    """Strip software/license/page/timestamp boilerplate and a trailing date
+    range from a candidate meet-name line.
+
+    HY-TEK prints the licensee, software banner, timestamp and page number on
+    the same baseline as (or instead of) the title; everything from the first
+    banner marker on is boilerplate. The real name is whatever precedes it.
+    """
+    s = line.strip()
+    m = _SOFTWARE_BANNER_RE.search(s)
+    if m:
+        s = s[: m.start()]
+    s = _MEET_DATE_TAIL_RE.sub("", s)
+    return s.strip(" -–—\t·|").strip()
+
 
 def _get_singletons(
     ontology_root: Optional[pathlib.Path] = None,
@@ -80,15 +129,49 @@ def _extract_meet_metadata(
     course_default: Optional[str] = None
     governing_body_hint: Optional[str] = None
 
-    # First non-trivial line is often the meet name
-    for ln in lines[:5]:
-        if len(ln) >= 6 and re.search(r"[A-Za-z]", ln):
-            meet_name = ln
-            break
+    def _is_title_candidate(ln: str) -> bool:
+        """A line that could be the meet title: has letters, and is not a
+        software/license/page banner, an event header, or a result row."""
+        if not re.search(r"[A-Za-z]", ln):
+            return False
+        if _looks_like_software_banner(ln):
+            return False
+        if _EVENT_HEADER_HINT_RE.search(ln) or _RACE_TIME_TOKEN_RE.search(ln):
+            return False
+        return True
 
-    # Venue: second meaningful line
-    for ln in lines[1:8]:
-        if len(ln) >= 4 and ln != meet_name and re.search(r"[A-Za-z]", ln):
+    # Meet name: the first header line that is a plausible title — not a
+    # software/license/page banner (meet-management tools stamp the
+    # licensee/software/timestamp/page across every results page), and not an
+    # event header or a swimmer's result row.
+    meet_name_idx: Optional[int] = None
+    for i, ln in enumerate(lines[:6]):
+        if len(ln) < 6 or not _is_title_candidate(ln):
+            continue
+        cleaned = _clean_meet_name(ln)
+        if len(cleaned) >= 4:
+            meet_name = cleaned
+            meet_name_idx = i
+            break
+    if meet_name is None:
+        # Degenerate header: the meet name only survives merged into the licensee
+        # banner. Recover its prefix by stripping the software/timestamp/page
+        # boilerplate rather than surfacing the raw "… HY-TEK's MEET MANAGER …
+        # Page 1" line (or an event header) as the title.
+        for i, ln in enumerate(lines[:6]):
+            if not _looks_like_software_banner(ln):
+                continue
+            cleaned = _clean_meet_name(ln)
+            if len(cleaned) >= 4:
+                meet_name = cleaned
+                meet_name_idx = i
+                break
+
+    # Venue: the next plausible (non-banner, non-event, non-result) line after
+    # the meet-name line.
+    venue_start = (meet_name_idx + 1) if meet_name_idx is not None else 1
+    for ln in lines[venue_start : venue_start + 7]:
+        if len(ln) >= 4 and ln != meet_name and _is_title_candidate(ln):
             venue = ln
             break
 
