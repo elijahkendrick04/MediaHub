@@ -458,6 +458,40 @@
   }
 }
 
+/* Shiny-text — one bright band sweeps once *through* the glyphs as the heading
+   reveals, then settles back to the inherited colour. The "catch the light"
+   accent the kit was missing: gradient-text (above) is a static two-tone fill
+   and glare is a card-level cursor sheen, but neither runs a highlight along
+   the letterforms themselves. Reserved for a SINGULAR earned moment (a
+   spotlighted athlete's name) — never a grid, so it stays hierarchy, not noise.
+
+   Adaptive by design: the gradient base is `currentColor`, so the rest state is
+   exactly the inherited colour with no recolour — only a lighter band differs.
+   It rides the shared `.is-in` reveal (ui-kit observe), so with no JS / before
+   init the text is simply itself, and reduced motion stills the sweep. */
+.mh-shiny-text { --mh-shine-hi: color-mix(in oklab, currentColor 26%, #fff); }
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .mh-shiny-text {
+    background-image: linear-gradient(100deg,
+      currentColor 0 40%, var(--mh-shine-hi) 50%, currentColor 60% 100%);
+    background-size: 300% 100%;
+    background-position: 0% 0;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text;
+            background-clip: text;
+    /* Blink/WebKit: paint the gradient as the fill while `color` (hence the
+       currentColor stops above) stays the real base colour. Firefox lacks
+       -webkit-text-fill-color, keeps the opaque base colour and shows clean
+       static text — an honest, legible degradation, never a broken sheen. */
+    -webkit-text-fill-color: transparent;
+  }
+  .mh-shiny-text.is-in { animation: mh-shine 1150ms var(--ease-out) both; }
+}
+@keyframes mh-shine {
+  from { background-position: 0% 0; }
+  to   { background-position: 100% 0; }
+}
+
 /* =====================================================================
    6. SCROLL REVEAL — uses MediaHub's existing Phase-10 system.
    Add `.mh-reveal` (or `.mh-reveal-group`); the inline bindReveals()
@@ -1052,6 +1086,8 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
   .mh-flip-words > .mh-fw { transition: none; }
   .mh-highlight { transition: none; background-size: 100% 42%; }
+  /* Shiny-text: no sweep — rest at position 0% is pure inherited colour. */
+  .mh-shiny-text.is-in { animation: none; }
   /* Tooltip: keep the reveal (opacity only), drop the chip-lift + parallax
      tilt + spring so nothing moves. JS already skips the tilt under reduce. */
   .mh-tooltip__avatar,

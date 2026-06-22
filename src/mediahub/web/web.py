@@ -11694,7 +11694,7 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 {_ai_banner_html}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">{_h(cfg["eyebrow"])}</span>
-  <h1>{_h(swimmer)}</h1>
+  <h1><span class="mh-shiny-text">{_h(swimmer)}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">{strap_html}</div>
 </section>
 
