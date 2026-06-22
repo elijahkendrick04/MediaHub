@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `365b5749b` · Merge pull request #1000: Print & merch pipeline (roadmap 1.20)
+**Last updated:** 2026-06-23 · `b79238fc9` · Merge pull request #1003: QA-008 — clean stale HY-TEK banner meet titles at render time
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1209,6 +1209,7 @@ list and the auto table below, not here.
 |---|---|---|
 | 2026-06-22 | `94928f692` | Drop the unused Optional import in fulfilment.py (ruff hygiene hook) |
 | 2026-06-22 | `cf96bebe6` | Mark roadmap 1.20 done — print & merch pipeline |
+| 2026-06-22 | `96ec12e42` | Re-clean stale HY-TEK banner meet titles at render time (QA-008) |
 | 2026-06-22 | `ed470fd5d` | Wire print/merch into the web app + merch mockups + fulfilment slot (1.20, build D) |
 | 2026-06-22 | `e91f5fe3b` | Add print-ready export: PDF/X + the orchestrator (roadmap 1.20, build C) |
 | 2026-06-22 | `b8b36c037` | Add the deterministic print auto-proofer (roadmap 1.20, build B) |
@@ -1218,5 +1219,4 @@ list and the auto table below, not here.
 | 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
 | 2026-06-22 | `1d9efb75d` | Apply pinned ruff-format (v0.8.4) to the 1.19 source files (CI hygiene) |
 | 2026-06-22 | `3387f98c7` | Check run access before params on the export ZIP route; record 1.19 as shipped |
-| 2026-06-22 | `1169c18b3` | Wire the export engine into the web app (roadmap 1.19, build C) |
 <!-- /ROADMAP:ACTIVITY -->
