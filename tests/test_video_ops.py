@@ -123,6 +123,26 @@ class TestRunnersLive:
         out = ops.concat([a, b], tmp_path / "joined.mp4")
         assert out.is_file() and out.stat().st_size > 0
 
+    def _make_silent_clip(self, path: Path, *, secs: float = 1.0) -> Path:
+        import subprocess
+
+        subprocess.run(
+            [
+                ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", f"testsrc=size=160x120:rate=15:duration={secs}",
+                str(path),
+            ],
+            check=True,
+        )
+        return path
+
+    def test_reverse_and_speed_on_silent_clip(self, tmp_path):
+        # Regression: a clip with no audio must reverse / change speed without
+        # mute=True (the -af chain would otherwise match no audio and fail).
+        clip = self._make_silent_clip(tmp_path / "silent.mp4")
+        assert ops.reverse(clip, tmp_path / "rev.mp4").is_file()
+        assert ops.change_speed(clip, tmp_path / "fast.mp4", factor=2.0).is_file()
+
 
 @pytest.mark.skipif(not _NO_FFMPEG, reason="FFmpeg present — honest-error path needs it absent")
 def test_runner_honest_errors_without_ffmpeg(tmp_path):

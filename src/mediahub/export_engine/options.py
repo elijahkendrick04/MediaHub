@@ -131,22 +131,6 @@ class ExportOptions:
         )
 
 
-def render_quality_profile(scale: float) -> str:
-    """Map an output ``scale`` onto the still renderer's quality profile name.
-
-    The renderer supersamples by device-pixel-ratio: ``fast`` = DPR 1, the
-    historic ``standard`` = DPR 2, ``high`` = DPR 3. We pick the profile from
-    the requested scale so a bigger export is also a sharper render, while a
-    scale of 1.0 keeps the long-standing ``standard`` default byte-for-byte.
-    """
-    s = _clamp_float(scale, SCALE_MIN, SCALE_MAX, 1.0)
-    if s <= 0.75:
-        return "fast"
-    if s >= 1.75:
-        return "high"
-    return "standard"
-
-
 __all__ = [
     "ExportOptions",
     "QUALITY_MIN",
@@ -154,5 +138,4 @@ __all__ = [
     "SCALE_MIN",
     "SCALE_MAX",
     "COLOUR_PROFILES",
-    "render_quality_profile",
 ]

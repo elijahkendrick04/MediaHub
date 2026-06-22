@@ -86,7 +86,7 @@ def gif_args(
         scale_filt = f",scale=trunc(iw*{s:.4f}):-1:flags=lanczos"
     else:
         scale_filt = ""
-    d = dither if dither in ("bayer", "sierra2_4a", "floyd_steinberg", "none") else "bayer"
+    d = dither if dither in ("bayer", "sierra2_4a", "floyd_steinberg") else "bayer"
     bayer = ":bayer_scale=5" if d == "bayer" else ""
     chain = (
         f"[0:v]fps={fps}{scale_filt},split[a][b];"
@@ -105,6 +105,8 @@ def gif_to_video_args(src: Path, out: Path, *, crf: int = 23, fmt: str = "mp4") 
     even = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
     if fmt == "webm":
         codec = ["-c:v", "libvpx-vp9", "-crf", str(int(crf)), "-b:v", "0", "-pix_fmt", "yuv420p"]
+        # -movflags is an MP4/MOV muxer option; the WebM muxer rejects it.
+        movflags: list[str] = []
     else:
         codec = [
             "-c:v",
@@ -116,16 +118,8 @@ def gif_to_video_args(src: Path, out: Path, *, crf: int = 23, fmt: str = "mp4") 
             "-pix_fmt",
             "yuv420p",
         ]
-    return [
-        "-i",
-        str(src),
-        "-movflags",
-        "faststart",
-        "-vf",
-        even,
-        *codec,
-        str(out),
-    ]
+        movflags = ["-movflags", "faststart"]
+    return ["-i", str(src), *movflags, "-vf", even, *codec, str(out)]
 
 
 def webm_args(
@@ -141,11 +135,11 @@ def webm_args(
     Constant-quality VP9 (``-b:v 0`` + CRF). ``transparent`` keeps an alpha
     channel (``yuva420p``) for overlay use; otherwise ``yuv420p``.
     """
-    vf = _even_scale(scale)
+    # VP9 + yuv420p needs even dimensions; snap them even even at scale 1.0
+    # (an odd-sized source would otherwise fail), mirroring mp4_args.
+    vf = _even_scale(scale) or "scale=trunc(iw/2)*2:trunc(ih/2)*2"
     pix = "yuva420p" if transparent else "yuv420p"
-    args = ["-i", str(src)]
-    if vf:
-        args += ["-vf", vf]
+    args = ["-i", str(src), "-vf", vf]
     args += [
         "-c:v",
         "libvpx-vp9",

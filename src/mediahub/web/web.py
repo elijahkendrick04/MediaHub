@@ -47424,6 +47424,10 @@ voice, and queues them for one-click approval.</p>
         job_id = (body.get("job") or "").strip()
         if not re.fullmatch(r"[0-9a-f]{32}", job_id):
             return jsonify({"error": "bad_job"}), 400
+        # Don't mint a link for an export that doesn't exist (failed/never ran),
+        # so a recipient never gets a dead 404 link.
+        if not (RUNS_DIR / run_id / "exports" / f"bulk_{job_id}.zip").is_file():
+            return jsonify({"error": "export_not_found"}), 404
         try:
             from mediahub.collab import share_tokens as _st
 

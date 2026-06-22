@@ -10,7 +10,6 @@ from mediahub.export_engine.options import (
     SCALE_MAX,
     SCALE_MIN,
     ExportOptions,
-    render_quality_profile,
 )
 
 
@@ -93,19 +92,3 @@ class TestSerialisation:
         opaque = ExportOptions(transparent=False).cache_token()
         clear = ExportOptions(transparent=True).cache_token()
         assert opaque != clear
-
-
-class TestQualityProfileMapping:
-    def test_scale_one_keeps_standard(self):
-        # The historic default must not move — keeps existing renders byte-stable.
-        assert render_quality_profile(1.0) == "standard"
-
-    def test_small_scale_is_fast(self):
-        assert render_quality_profile(0.5) == "fast"
-
-    def test_large_scale_is_high(self):
-        assert render_quality_profile(2.0) == "high"
-
-    def test_clamped_input(self):
-        assert render_quality_profile(99) == "high"
-        assert render_quality_profile(-3) == "fast"

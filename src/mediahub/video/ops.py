@@ -141,6 +141,22 @@ def reverse_args(src: Path, out: Path, *, mute: bool = False) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _has_audio(src: Path) -> bool:
+    """Best-effort: does ``src`` carry an audio stream?
+
+    Used so the audio-filter ops (speed/reverse) auto-drop their ``-af`` chain
+    on a silent clip — applying ``-af`` to a file with no audio stream makes
+    FFmpeg exit non-zero. Returns ``True`` when undeterminable, preserving the
+    prior behaviour (FFmpeg then errors honestly if there really is no audio).
+    """
+    try:
+        from mediahub.video.probe import probe_clip
+
+        return bool(probe_clip(Path(src)).has_audio)
+    except Exception:
+        return True
+
+
 def _run(args: list[str], *, timeout: int = 600) -> None:
     exe = ffmpeg_exe()
     if not exe:
@@ -178,6 +194,9 @@ def resize(
 
 def change_speed(src: Path, out: Path, *, factor: float, mute: bool = False) -> Path:
     Path(out).parent.mkdir(parents=True, exist_ok=True)
+    # A silent clip has no audio stream for atempo to match — drop it cleanly.
+    if not mute and not _has_audio(Path(src)):
+        mute = True
     _run(speed_args(Path(src), Path(out), factor=factor, mute=mute))
     return Path(out)
 
@@ -190,6 +209,9 @@ def mute(src: Path, out: Path) -> Path:
 
 def reverse(src: Path, out: Path, *, mute: bool = False) -> Path:
     Path(out).parent.mkdir(parents=True, exist_ok=True)
+    # A silent clip has no audio stream for areverse to match — drop it cleanly.
+    if not mute and not _has_audio(Path(src)):
+        mute = True
     _run(reverse_args(Path(src), Path(out), mute=mute))
     return Path(out)
 

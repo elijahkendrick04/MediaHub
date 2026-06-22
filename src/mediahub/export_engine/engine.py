@@ -104,7 +104,9 @@ def _dispatch(src: Path, key: str, scat: str, out: Path, opts: ExportOptions) ->
     # --- video → still/animated video ----------------------------------
     if scat == "video":
         if key == "gif":
-            _transcode.video_to_gif(src, out, scale=opts.scale)
+            # width=0 so the requested scale (GIF's only declared option) is
+            # honoured instead of the toolbox's default 480px width.
+            _transcode.video_to_gif(src, out, width=0, scale=opts.scale)
             return "video→gif"
         if key == "webm":
             _transcode.to_webm(

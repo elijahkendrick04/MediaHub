@@ -114,18 +114,30 @@ class TestMp4AndGifToVideoArgs:
         args = " ".join(gif_to_video_args(Path("a.gif"), Path("o.webm"), fmt="webm"))
         assert "libvpx-vp9" in args
 
+    def test_gif_to_webm_has_no_mp4_only_movflags(self):
+        # -movflags is an MP4/MOV muxer option; it must not ride the WebM path.
+        args = " ".join(gif_to_video_args(Path("a.gif"), Path("o.webm"), fmt="webm"))
+        assert "movflags" not in args
+        # ...but the MP4 path still gets faststart.
+        assert "movflags" in " ".join(gif_to_video_args(Path("a.gif"), Path("o.mp4")))
+
+    def test_webm_args_snaps_even_at_native_scale(self):
+        # Odd-sized sources must still get an even-dimension filter (VP9/yuv420p).
+        args = " ".join(webm_args(Path("a.mp4"), Path("o.webm"), scale=1.0))
+        assert "trunc(iw/2)*2" in args
+
 
 @pytest.mark.skipif(_NO_FFMPEG, reason="no FFmpeg binary available")
 class TestRunnersLive:
     """Exercised only where FFmpeg is installed."""
 
-    def _make_clip(self, path: Path, *, secs: float = 1.0) -> Path:
+    def _make_clip(self, path: Path, *, secs: float = 1.0, size: str = "160x120") -> Path:
         import subprocess
 
         subprocess.run(
             [
                 ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
-                "-f", "lavfi", "-i", f"testsrc=size=160x120:rate=15:duration={secs}",
+                "-f", "lavfi", "-i", f"testsrc=size={size}:rate=15:duration={secs}",
                 str(path),
             ],
             check=True,
@@ -142,6 +154,19 @@ class TestRunnersLive:
     def test_to_webm(self, tmp_path):
         clip = self._make_clip(tmp_path / "clip.mp4")
         webm = transcode.to_webm(clip, tmp_path / "out.webm", quality=60)
+        assert webm.is_file() and webm.stat().st_size > 0
+
+    def test_to_webm_odd_dimensions(self, tmp_path):
+        # Regression: an odd-sized source must still encode to WebM at scale 1.0.
+        clip = self._make_clip(tmp_path / "odd.mp4", size="161x121")
+        webm = transcode.to_webm(clip, tmp_path / "odd.webm", quality=50)
+        assert webm.is_file() and webm.stat().st_size > 0
+
+    def test_gif_to_webm_runs(self, tmp_path):
+        # Regression: GIF→WebM must not carry the MP4-only -movflags and fail.
+        clip = self._make_clip(tmp_path / "clip.mp4")
+        gif = transcode.video_to_gif(clip, tmp_path / "g.gif", fps=8, width=100)
+        webm = transcode.gif_to_video(gif, tmp_path / "g.webm", fmt="webm")
         assert webm.is_file() and webm.stat().st_size > 0
 
 

@@ -130,6 +130,42 @@ class TestConvertFile:
             convert_file(tmp_path / "ghost.png", "jpg")
 
 
+class TestVideoToGifScaleLive:
+    """Regression: convert_file video→GIF must honour the scale option, not
+    fall back to the toolbox's default 480px width."""
+
+    def _ffmpeg(self):
+        from mediahub.visual.reel_ffmpeg import ffmpeg_exe
+
+        return ffmpeg_exe()
+
+    def _clip(self, path: Path) -> Path:
+        import subprocess
+
+        subprocess.run(
+            [
+                self._ffmpeg(), "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15:duration=1",
+                str(path),
+            ],
+            check=True,
+        )
+        return path
+
+    def test_scale_changes_gif_width(self, tmp_path):
+        if not self._ffmpeg():
+            pytest.skip("no FFmpeg binary available")
+        from PIL import Image
+
+        clip = self._clip(tmp_path / "clip.mp4")
+        full = convert_file(clip, "gif", options=ExportOptions(scale=1.0), out=tmp_path / "full.gif")
+        half = convert_file(clip, "gif", options=ExportOptions(scale=0.5), out=tmp_path / "half.gif")
+        w_full = Image.open(full.path).width
+        w_half = Image.open(half.path).width
+        assert w_full == 320  # native, not the 480px default
+        assert w_half < w_full  # the scale option actually took effect
+
+
 class TestStatus:
     def test_engine_status_shape(self):
         st = engine_status()
