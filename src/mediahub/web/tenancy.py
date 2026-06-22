@@ -42,7 +42,19 @@ from .auth import normalize_email
 
 ROLE_OWNER = "owner"
 ROLE_MEMBER = "member"
-VALID_ROLES = frozenset({ROLE_OWNER, ROLE_MEMBER})
+# 1.18 — finer collaboration roles layered on the membership ledger. ``owner``
+# stays the workspace super-admin (member/role admin, delete, share-token issue,
+# approver-rule config); ``member`` is the legacy default and keeps today's
+# behaviour (edit + approve, but no org admin). The four below let an owner hand
+# out narrower seats — the capability each one grants lives in
+# ``collab.permissions`` (the single source of truth), never re-encoded here.
+ROLE_EDITOR = "editor"
+ROLE_APPROVER = "approver"
+ROLE_REVIEWER = "reviewer"
+ROLE_VIEWER = "viewer"
+VALID_ROLES = frozenset(
+    {ROLE_OWNER, ROLE_MEMBER, ROLE_EDITOR, ROLE_APPROVER, ROLE_REVIEWER, ROLE_VIEWER}
+)
 
 STATUS_ACTIVE = "active"
 STATUS_INVITED = "invited"

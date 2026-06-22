@@ -339,3 +339,26 @@ def wall_image_path(profile: ClubProfile, run_id: str, card_id: str) -> Optional
         return None  # a blocked athlete's card is unreachable, not just unlisted
     vis = _best_visual_for_cards(run_id, {str(card_id)}).get(str(card_id))
     return vis["png_path"] if vis else None
+
+
+def rendered_card_png(profile_id: str, run_id: str, card_id: str) -> Optional[str]:
+    """The best already-rendered PNG for a card, consent- and tenant-gated, for
+    a *deliberate scoped grant* like a 1.18 share link.
+
+    Unlike :func:`wall_image_path` this does NOT apply the wall's own gating
+    (enabled / excluded / approved-only) — a share link is an explicit,
+    expiring, revocable grant to one run, not the public wall — but it keeps the
+    two guards that always hold: the run must belong to ``profile_id`` (ADR-0003
+    isolation) and the athlete's consent must allow a public appearance
+    (safeguarding). Returns ``None`` when no PNG exists or either guard fails.
+    """
+    pid = (profile_id or "").strip()
+    run_data = _load_run_json(run_id) or {}
+    run_owner = run_data.get("profile_id") or ""
+    if run_owner and pid and run_owner != pid:
+        return None
+    ach = _achievements_by_card_id(run_data).get(str(card_id)) or {}
+    if _consent_block_reason(pid, str(ach.get("swimmer_name") or "").strip()):
+        return None
+    vis = _best_visual_for_cards(run_id, {str(card_id)}).get(str(card_id))
+    return vis["png_path"] if vis else None

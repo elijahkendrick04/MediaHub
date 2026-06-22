@@ -87,6 +87,7 @@ def run_turn(
     facts: Optional[dict] = None,
     profile_id: str = "",
     max_rounds: int = 4,
+    locked_elements=None,
 ) -> AssistantTurn:
     """Run one conversational edit turn against ``brief``.
 
@@ -94,6 +95,9 @@ def run_turn(
     new brief — the input is never mutated. Records the turn on ``session`` and
     saves it. Never raises for a provider problem: an unconfigured/erroring
     provider yields an honest reply with the design unchanged.
+
+    ``locked_elements`` (1.18) — element keys a reviewer has locked on this card;
+    the copilot's edits to those elements are refused at patch time.
     """
     user_message = (user_message or "").strip()
     session.add_message("user", user_message)
@@ -105,7 +109,9 @@ def run_turn(
     rejected_all: list[tuple] = []
 
     def on_propose(patch: SpecPatch) -> str:
-        res = apply_patch(design_ref["brief"], patch, brand_kit=brand_kit)
+        res = apply_patch(
+            design_ref["brief"], patch, brand_kit=brand_kit, locked_elements=locked_elements
+        )
         design_ref["brief"] = res.brief
         applied_all.extend(res.applied)
         rejected_all.extend(res.rejected)

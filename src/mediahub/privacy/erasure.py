@@ -133,6 +133,10 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         "motion_files": 0,
         "athlete_swims": 0,
         "review_comments": 0,
+        "collab_comments": 0,
+        "collab_locks": 0,
+        "collab_shares": 0,
+        "collab_collection_items": 0,
     }
     try:
         from mediahub.pb_discovery.cache import _discovered_root
@@ -174,6 +178,30 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         report["review_comments"] = delete_comments_for_run(run_id)
     except Exception as exc:
         log.warning("erasure: reel review-comments sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.collab.threads import delete_for_run as _delete_collab_for_run
+
+        report["collab_comments"] = _delete_collab_for_run(run_id)
+    except Exception as exc:
+        log.warning("erasure: collab comments sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.collab.locks import delete_for_run as _delete_locks_for_run
+
+        report["collab_locks"] = _delete_locks_for_run(run_id)
+    except Exception as exc:
+        log.warning("erasure: collab locks sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.collab.share_tokens import delete_for_run as _delete_shares_for_run
+
+        report["collab_shares"] = _delete_shares_for_run(run_id)
+    except Exception as exc:
+        log.warning("erasure: collab shares sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.collab.collections import delete_run_everywhere as _drop_run_from_collections
+
+        report["collab_collection_items"] = _drop_run_from_collections(run_id)
+    except Exception as exc:
+        log.warning("erasure: collab collections sweep failed for %s: %s", run_id, exc)
     return report
 
 

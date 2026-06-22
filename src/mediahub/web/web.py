@@ -119,6 +119,7 @@ from . import recap_progress as _recap_progress
 from . import sample_graphics as _sample_graphics
 from . import legal as _legal
 from . import tenancy as _tenancy
+from ..collab import permissions as _perms
 
 # V7 / brand feature flags. These packages are only ever imported lazily at
 # the call sites that use them (see e.g. build_spotlight_pack, BrandKit), so
@@ -4806,6 +4807,326 @@ function copilotMic(btn, cardId) {
   rec.onerror=function(){ btn.textContent=orig; btn.disabled=false; };
   try { rec.start(); } catch(e) { btn.textContent=orig; btn.disabled=false; }
 }
+
+/* ---- Comments, @mentions & tasks (roadmap 1.18) ---- */
+function _cmTxt(s){ return window.safeText ? safeText(s) : (s||''); }
+function _cmShortName(email){ if(!email) return 'Someone'; var i=email.indexOf('@'); return i>0?email.slice(0,i):email; }
+function _cmAgo(ts){ try{ var d=Math.max(0,(Date.now()/1000)-ts); if(d<60)return'just now'; if(d<3600)return Math.floor(d/60)+'m ago'; if(d<86400)return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago'; }catch(e){ return ''; } }
+
+function commentsToggle(btn, cardId) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  if (panel.dataset.built === '1') { commentsLoad(cardId); return; }
+  panel.dataset.built = '1';
+  panel.innerHTML =
+    '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Comments &amp; tasks &mdash; @mention a teammate; a task must be resolved before approval</div>' +
+    '<div class="cm-list" style="max-height:280px;overflow:auto;margin-bottom:8px"></div>' +
+    '<div style="display:flex;gap:5px;align-items:flex-start;flex-wrap:wrap">' +
+      '<textarea class="cm-input" rows="2" placeholder="Add a comment&hellip; use @name to mention" aria-label="Add a comment" style="flex:1;min-width:180px;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"></textarea>' +
+    '</div>' +
+    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">' +
+      '<label style="font-size:11px;color:var(--ink-muted)"><input type="checkbox" class="cm-is-task"/> as task</label>' +
+      '<input class="cm-assignee" type="text" placeholder="assignee email (optional)" aria-label="Task assignee" style="display:none;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;min-width:160px"/>' +
+      '<span class="cm-reply-tag" style="display:none;font-size:11px;color:var(--lane)"></span>' +
+      '<button class="btn cm-send" style="font-size:11px;padding:4px 12px;background:var(--lane);color:var(--lane-ink);border:none" onclick=' + _attrEsc('commentsSend(this, ' + JSON.stringify(cardId) + ')') + '>Post</button>' +
+    '</div>' +
+    '<div class="cm-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>';
+  panel.querySelector('.cm-is-task').addEventListener('change', function(){
+    panel.querySelector('.cm-assignee').style.display = this.checked ? '' : 'none';
+  });
+  commentsLoad(cardId);
+}
+
+function commentsLoad(cardId) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var realCard = panel.dataset.realCard || '';
+  var url = panel.dataset.commentsUrl + '?card_id=' + encodeURIComponent(realCard);
+  fetch(url).then(function(r){return r.json();}).then(function(j){
+    if (!j.ok) return;
+    panel.dataset.me = j.me || '';
+    commentsRender(panel, cardId, j.comments||[]);
+    var badge = document.querySelector('.comments-count[data-card="' + cardId + '"]');
+    if (badge) { var n=(j.comments||[]).length; var t=j.open_tasks||0; badge.textContent = n? (' '+n+(t?(' · '+t+'☑'):'')) : ''; }
+  }).catch(function(){});
+}
+
+function commentsRender(panel, cardId, comments) {
+  var list = panel.querySelector('.cm-list');
+  list.textContent='';
+  if (!comments.length) { var e=document.createElement('div'); e.style.cssText='font-size:12px;color:var(--ink-muted)'; e.textContent='No comments yet.'; list.appendChild(e); return; }
+  var me = panel.dataset.me || '';
+  // group replies under roots by thread_id
+  var roots = comments.filter(function(c){ return !c.parent_id; });
+  var repliesByThread = {};
+  comments.forEach(function(c){ if (c.parent_id){ (repliesByThread[c.thread_id]=repliesByThread[c.thread_id]||[]).push(c); } });
+  roots.forEach(function(c){
+    list.appendChild(commentsRow(panel, cardId, c, me, false));
+    (repliesByThread[c.thread_id]||[]).forEach(function(r){ list.appendChild(commentsRow(panel, cardId, r, me, true)); });
+  });
+}
+
+function commentsRow(panel, cardId, c, me, isReply) {
+  var row = document.createElement('div');
+  row.style.cssText = 'margin-bottom:8px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.02)' + (isReply?';margin-left:18px':'') + (c.resolved?';opacity:0.6':'');
+  var isTask = c.kind === 'task';
+  var head = document.createElement('div');
+  head.style.cssText='font-size:11px;color:var(--ink-muted);margin-bottom:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+  var tag = isTask ? ('<span style="color:var(--medal);font-weight:600">☑ TASK'+(c.assignee_email?(' → '+_cmTxt(_cmShortName(c.assignee_email))):'')+(c.resolved?' · done':'')+'</span> ') : '';
+  head.innerHTML = tag + '<strong style="color:var(--ink)">' + _cmTxt(_cmShortName(c.author_email)) + '</strong> <span>' + _cmAgo(c.created_at) + '</span>';
+  row.appendChild(head);
+  var body = document.createElement('div'); body.style.cssText='font-size:12px;color:var(--ink);white-space:pre-wrap'; body.textContent = c.body; row.appendChild(body);
+  // reactions
+  var rx = document.createElement('div'); rx.style.cssText='margin-top:5px;display:flex;gap:5px;flex-wrap:wrap;align-items:center';
+  var reactions = c.reactions||{};
+  Object.keys(reactions).forEach(function(em){
+    var b=document.createElement('button'); b.className='btn secondary'; b.style.cssText='font-size:11px;padding:1px 7px';
+    b.textContent = em + ' ' + reactions[em].length;
+    b.onclick=function(){ commentsReact(cardId, c.id, em); };
+    rx.appendChild(b);
+  });
+  ['👍','✅','🎉'].forEach(function(em){
+    var b=document.createElement('button'); b.className='btn secondary'; b.style.cssText='font-size:11px;padding:1px 6px;opacity:0.7';
+    b.textContent=em; b.title='React'; b.onclick=function(){ commentsReact(cardId, c.id, em); };
+    rx.appendChild(b);
+  });
+  row.appendChild(rx);
+  // actions
+  var act = document.createElement('div'); act.style.cssText='margin-top:5px;display:flex;gap:8px;flex-wrap:wrap';
+  if (!isReply) {
+    var reply=document.createElement('a'); reply.href='#'; reply.style.cssText='font-size:11px;color:var(--lane)'; reply.textContent='Reply';
+    reply.onclick=function(ev){ ev.preventDefault(); commentsSetReply(cardId, c.id, _cmShortName(c.author_email)); }; act.appendChild(reply);
+  }
+  if (isTask) {
+    var done=document.createElement('a'); done.href='#'; done.style.cssText='font-size:11px;color:var(--medal)';
+    done.textContent = c.resolved ? 'Reopen task' : 'Mark done';
+    done.onclick=function(ev){ ev.preventDefault(); commentsMutate(cardId, c.id, c.resolved?'reopen':'complete'); }; act.appendChild(done);
+  } else if (!isReply) {
+    var res=document.createElement('a'); res.href='#'; res.style.cssText='font-size:11px;color:var(--ink-muted)';
+    res.textContent = c.resolved ? 'Reopen' : 'Resolve';
+    res.onclick=function(ev){ ev.preventDefault(); commentsMutate(cardId, c.id, c.resolved?'reopen':'resolve'); }; act.appendChild(res);
+  }
+  if ((c.author_email||'') === (me||'') || !me) {
+    var del=document.createElement('a'); del.href='#'; del.style.cssText='font-size:11px;color:var(--bad)'; del.textContent='Delete';
+    del.onclick=function(ev){ ev.preventDefault(); if(confirm('Delete this comment?')) commentsMutate(cardId, c.id, 'delete'); }; act.appendChild(del);
+  }
+  row.appendChild(act);
+  return row;
+}
+
+function commentsSetReply(cardId, parentId, who) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.dataset.replyTo = parentId;
+  var tag = panel.querySelector('.cm-reply-tag');
+  tag.style.display=''; tag.textContent='Replying to ' + who + ' ✕';
+  tag.style.cursor='pointer'; tag.onclick=function(){ panel.dataset.replyTo=''; tag.style.display='none'; };
+  panel.querySelector('.cm-input').focus();
+}
+
+function commentsSend(btn, cardId) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var input = panel.querySelector('.cm-input');
+  var body = (input.value||'').trim();
+  if (!body) return;
+  var status = panel.querySelector('.cm-status');
+  var isTask = panel.querySelector('.cm-is-task').checked;
+  var payload = { card_id: panel.dataset.realCard || '', body: body, kind: isTask?'task':'comment' };
+  if (isTask) payload.assignee = (panel.querySelector('.cm-assignee').value||'').trim();
+  if (panel.dataset.replyTo) payload.parent_id = panel.dataset.replyTo;
+  btn.disabled=true; status.textContent='Posting…';
+  fetch(panel.dataset.commentsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+    .then(function(res){
+      btn.disabled=false;
+      if (!res.ok || res.j.error) { status.textContent = res.j.reason || res.j.detail || res.j.error || 'Could not post'; return; }
+      status.textContent=''; input.value=''; panel.querySelector('.cm-is-task').checked=false;
+      panel.querySelector('.cm-assignee').style.display='none'; panel.querySelector('.cm-assignee').value='';
+      panel.dataset.replyTo=''; var tg=panel.querySelector('.cm-reply-tag'); if(tg) tg.style.display='none';
+      commentsLoad(cardId);
+    }).catch(function(){ btn.disabled=false; status.textContent='Network error'; });
+}
+
+function commentsMutate(cardId, commentId, action) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action: action})})
+    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+}
+
+function commentsReact(cardId, commentId, emoji) {
+  var panel = document.querySelector('.comments-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'react', emoji: emoji})})
+    .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
+}
+
+/* ---- Version history: diff + restore (roadmap 1.18) ---- */
+function historyToggle(btn, cardId) {
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  panel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Version history</div><div class="hist-list" style="font-size:12px;color:var(--ink-muted)">Loading&hellip;</div><div class="hist-diff" style="margin-top:8px"></div>';
+  historyLoad(cardId);
+}
+
+function historyLoad(cardId) {
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.revisionsUrl).then(function(r){return r.json();}).then(function(j){
+    var list = panel.querySelector('.hist-list'); list.textContent='';
+    if (!j.ok || !(j.revisions||[]).length) { list.textContent='No saved versions yet — edit the design to start a history.'; return; }
+    var revs = j.revisions;
+    revs.forEach(function(rev, i){
+      var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);flex-wrap:wrap';
+      var num=document.createElement('span'); num.style.cssText='font-size:11px;color:var(--ink-muted);min-width:24px'; num.textContent='v'+(i+1);
+      var lab=document.createElement('span'); lab.style.cssText='flex:1;font-size:12px;color:var(--ink)'; lab.textContent = rev.label + (rev.is_current?'  (current)':'');
+      row.appendChild(num); row.appendChild(lab);
+      if (i>0) { var d=document.createElement('a'); d.href='#'; d.style.cssText='font-size:11px;color:var(--lane)'; d.textContent='Diff vs previous';
+        d.onclick=function(ev){ ev.preventDefault(); historyDiff(cardId, revs[i-1].brief_id, rev.brief_id); }; row.appendChild(d); }
+      if (!rev.is_current) { var rb=document.createElement('a'); rb.href='#'; rb.style.cssText='font-size:11px;color:var(--medal)'; rb.textContent='Restore';
+        rb.onclick=function(ev){ ev.preventDefault(); historyRestore(cardId, rev.brief_id); }; row.appendChild(rb); }
+      list.appendChild(row);
+    });
+  }).catch(function(){});
+}
+
+function historyDiff(cardId, a, b) {
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var base = panel.dataset.revisionsUrl + '/diff?a=' + encodeURIComponent(a) + '&b=' + encodeURIComponent(b);
+  fetch(base).then(function(r){return r.json();}).then(function(j){
+    var box = panel.querySelector('.hist-diff'); box.textContent='';
+    if (!j.ok) return;
+    if (!(j.diff||[]).length) { box.textContent='No design fields differ between these versions.'; box.style.cssText='font-size:12px;color:var(--ink-muted)'; return; }
+    var t=document.createElement('div'); t.style.cssText='font-size:11px';
+    j.diff.forEach(function(d){
+      var r=document.createElement('div'); r.style.cssText='margin-bottom:4px';
+      r.innerHTML = '<strong style="color:var(--ink)">'+_cmTxt(d.field)+'</strong>: <span style="color:var(--ink-muted);text-decoration:line-through">'+_cmTxt(d.before||'—')+'</span> &rarr; <span style="color:var(--lane)">'+_cmTxt(d.after||'—')+'</span>';
+      t.appendChild(r);
+    });
+    box.appendChild(t);
+  }).catch(function(){});
+}
+
+function historyRestore(cardId, briefId) {
+  if (!confirm('Restore this version? It becomes the current design (earlier versions are kept).')) return;
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.revisionsUrl + '/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({brief_id: briefId})})
+    .then(function(r){return r.json();}).then(function(j){
+      if (j.ok) { if (window.MH && MH.toast) MH.toast('Version restored — regenerate the graphic to see it.', 'success', 3500); historyLoad(cardId); }
+      else if (window.MH && MH.toast) MH.toast(j.reason || 'Could not restore', 'error', 3000);
+    }).catch(function(){});
+}
+
+/* ---- Element locks (roadmap 1.18) ---- */
+function locksToggle(btn, cardId) {
+  var panel = document.querySelector('.locks-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  panel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Locked elements &mdash; a locked element cannot be changed by an edit or the copilot</div><div class="locks-list" style="display:flex;gap:6px;flex-wrap:wrap">Loading&hellip;</div>';
+  locksLoad(cardId);
+}
+
+function locksLoad(cardId) {
+  var panel = document.querySelector('.locks-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.locksUrl).then(function(r){return r.json();}).then(function(j){
+    var list = panel.querySelector('.locks-list'); list.textContent='';
+    if (!j.ok) return;
+    var locked = {}; (j.locked||[]).forEach(function(e){ locked[e]=1; });
+    (j.lockable||[]).forEach(function(el){
+      var on = !!locked[el];
+      var b=document.createElement('button'); b.className='btn ' + (on?'':'secondary');
+      b.style.cssText='font-size:11px;padding:3px 9px' + (on?';background:var(--medal);color:var(--medal-ink);border:none':'');
+      b.textContent = (on?'🔒 ':'🔓 ') + el;
+      b.onclick=function(){ locksSet(cardId, el, !on); };
+      list.appendChild(b);
+    });
+  }).catch(function(){});
+}
+
+function locksSet(cardId, element, locked) {
+  var panel = document.querySelector('.locks-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.locksUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({element: element, locked: locked})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+      if (!res.ok) { if (window.MH && MH.toast) MH.toast(res.j.reason || 'Could not change lock', 'error', 3000); return; }
+      locksLoad(cardId);
+    }).catch(function(){});
+}
+
+/* ---- Share for review: expiring external links (roadmap 1.18) ---- */
+function shareToggle(btn, cardId) {
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  if (panel.dataset.built !== '1') {
+    panel.dataset.built = '1';
+    panel.innerHTML =
+      '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Share this card for review (no account needed)</div>' +
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+        '<select class="sh-perm" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"><option value="view">View only</option><option value="comment">Can comment</option></select>' +
+        '<label style="font-size:11px;color:var(--ink-muted)">expires in <input class="sh-ttl" type="number" min="1" max="90" value="7" style="width:56px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"/> days</label>' +
+        '<button class="btn sh-create" style="font-size:11px;padding:4px 12px;background:var(--lane);color:var(--lane-ink);border:none" onclick=' + _attrEsc('shareCreate(this, ' + JSON.stringify(cardId) + ')') + '>Create link</button>' +
+      '</div>' +
+      '<div class="sh-list" style="font-size:12px"></div>' +
+      '<div class="sh-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>';
+  }
+  shareLoad(cardId);
+}
+
+function shareLoad(cardId) {
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var realCard = panel.dataset.realCard || '';
+  fetch(panel.dataset.sharesUrl).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+    var list = panel.querySelector('.sh-list'); list.textContent='';
+    if (!res.ok) { list.textContent = res.j.reason || 'Only an owner can manage share links.'; return; }
+    var mine = (res.j.shares||[]).filter(function(s){ return s.card_id === realCard; });
+    if (!mine.length) { list.textContent = 'No active links for this card.'; return; }
+    mine.forEach(function(s){
+      var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);flex-wrap:wrap';
+      var inp=document.createElement('input'); inp.type='text'; inp.readOnly=true; inp.value=s.url;
+      inp.style.cssText='flex:1;min-width:160px;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit';
+      inp.onclick=function(){ inp.select(); };
+      var tag=document.createElement('span'); tag.style.cssText='font-size:11px;color:var(--ink-muted)'; tag.textContent = (s.perm==='comment'?'can comment':'view only');
+      var rev=document.createElement('a'); rev.href='#'; rev.style.cssText='font-size:11px;color:var(--bad)'; rev.textContent='Revoke';
+      rev.onclick=function(ev){ ev.preventDefault(); shareRevoke(cardId, s.token); };
+      row.appendChild(inp); row.appendChild(tag); row.appendChild(rev); list.appendChild(row);
+    });
+  }).catch(function(){});
+}
+
+function shareCreate(btn, cardId) {
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var perm = panel.querySelector('.sh-perm').value;
+  var ttl = parseInt(panel.querySelector('.sh-ttl').value, 10) || 7;
+  var status = panel.querySelector('.sh-status');
+  btn.disabled=true; status.textContent='Creating…';
+  fetch(panel.dataset.sharesUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({card_id: panel.dataset.realCard||'', perm: perm, ttl_days: ttl})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+      btn.disabled=false;
+      if (!res.ok) { status.textContent = res.j.reason || res.j.detail || 'Could not create link'; return; }
+      status.textContent=''; shareLoad(cardId);
+    }).catch(function(){ btn.disabled=false; status.textContent='Network error'; });
+}
+
+function shareRevoke(cardId, token) {
+  if (!confirm('Revoke this link? Anyone holding it loses access immediately.')) return;
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.sharesUrl + '/' + encodeURIComponent(token) + '/revoke', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){return r.json();}).then(function(){ shareLoad(cardId); }).catch(function(){});
+}
 </script>
 """
 
@@ -4841,6 +5162,10 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _assistant_suggest_url = url_for(
         "api_assistant_suggestions", run_id=run_id, card_id=card_id_raw
     )
+    _comments_url = url_for("api_collab_comments", run_id=run_id)
+    _revisions_url = url_for("api_card_revisions", run_id=run_id, card_id=card_id_raw)
+    _locks_url = url_for("api_card_locks", run_id=run_id, card_id=card_id_raw)
+    _shares_url = url_for("api_run_shares", run_id=run_id)
 
     _STD_TONES = [
         (
@@ -4929,6 +5254,10 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -4951,6 +5280,10 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="comments-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-comments-url="{_h(_comments_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="history-panel" data-card="{card_uuid}" data-revisions-url="{_h(_revisions_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="locks-panel" data-card="{card_uuid}" data-locks-url="{_h(_locks_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="share-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-shares-url="{_h(_shares_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
 
@@ -15814,6 +16147,30 @@ def create_app() -> Flask:
         email = _auth.current_user_email()
         return bool(email and _tenancy.MembershipStore().is_active_owner(email, pid))
 
+    def _active_role(pid: Optional[str] = None) -> str:
+        """The current actor's collaboration role in an org (1.18).
+
+        Mirrors the access model: the operator and any session on an *unbound*
+        (open/pilot) workspace get the full ``owner`` seat — exactly the
+        all-powers behaviour those sessions have today. On a bound workspace the
+        actor's actual membership role is returned; a non-member falls to
+        ``viewer`` (defensive — the access gate already blocks them).
+        """
+        if pid is None:
+            pid = _active_profile_id()
+        if not pid:
+            return _tenancy.ROLE_VIEWER
+        if _auth.is_dev_operator():
+            return _tenancy.ROLE_OWNER
+        store = _tenancy.MembershipStore()
+        if not store.is_bound(pid):
+            return _tenancy.ROLE_OWNER
+        email = _auth.current_user_email()
+        m = store.get(email, pid) if email else None
+        if m and m.status == _tenancy.STATUS_ACTIVE:
+            return m.role
+        return _tenancy.ROLE_VIEWER
+
     def _bind_creator_if_signed_in(pid: str) -> None:
         """A NEW org created by a signed-in regular user is born bound to its
         creator as owner. Operator and anonymous creations stay unbound (the
@@ -24166,10 +24523,15 @@ Relay team broke club record"></textarea>
             limit = 20
         from mediahub.notify import inbox as _inbox
 
-        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        # 1.18: scope to what this member may see — org-wide rows plus mentions /
+        # tasks addressed to them. Signed-out-but-pinned (pilot) sees org-wide.
+        me = _auth.current_user_email()
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only, user_email=me)
         for it in items:
             it["link"] = _notification_link(it)
-        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+        return jsonify(
+            {"ok": True, "unread": _inbox.unread_count(pid, user_email=me), "items": items}
+        )
 
     @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
     def api_notifications_read(notif_id: str):
@@ -24179,8 +24541,11 @@ Relay team broke club record"></textarea>
             return jsonify({"error": "No organisation active."}), 403
         from mediahub.notify import inbox as _inbox
 
+        me = _auth.current_user_email()
         changed = _inbox.mark_read(pid, notif_id)
-        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+        return jsonify(
+            {"ok": True, "changed": changed, "unread": _inbox.unread_count(pid, user_email=me)}
+        )
 
     @app.route("/api/notifications/read-all", methods=["POST"])
     def api_notifications_read_all():
@@ -24190,7 +24555,8 @@ Relay team broke club record"></textarea>
             return jsonify({"error": "No organisation active."}), 403
         from mediahub.notify import inbox as _inbox
 
-        n = _inbox.mark_all_read(pid)
+        me = _auth.current_user_email()
+        n = _inbox.mark_all_read(pid, user_email=me)
         return jsonify({"ok": True, "marked": n, "unread": 0})
 
     # ---- /healthz/usage ------------------------------------------------
@@ -35194,6 +35560,29 @@ what you're doing, what they should do.</p>
             try:
                 if action == "add":
                     role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
+                    # Don't let the upsert demote the last active owner to a
+                    # non-owner seat — that would leave the workspace with no
+                    # admin (the same invariant ``remove`` protects).
+                    if role != _tenancy.ROLE_OWNER:
+                        cur = store.get(target, pid)
+                        if (
+                            cur
+                            and cur.status == _tenancy.STATUS_ACTIVE
+                            and cur.role == _tenancy.ROLE_OWNER
+                        ):
+                            norm_target = _tenancy.normalize_email(target)
+                            others = [
+                                x
+                                for x in store.list_for_profile(pid)
+                                if x.role == _tenancy.ROLE_OWNER
+                                and x.status == _tenancy.STATUS_ACTIVE
+                                and x.email != norm_target
+                            ]
+                            if not others:
+                                raise _tenancy.TenancyError(
+                                    "Make another member an owner before changing "
+                                    "the last owner's role."
+                                )
                     has_account = _user_store().get(target) is not None
                     inviter = user_email or _auth._dev_operator_email()
                     m = store.add(
@@ -35234,8 +35623,30 @@ what you're doing, what they should do.</p>
         prof = _active_profile()
         org_name = _h(prof.display_name if prof else pid)
 
+        def _role_cell_html(m):
+            """The role column: a label, plus an inline change-role picker for
+            admins (re-uses the upsert ``add`` action). The last active owner
+            can't be demoted here — the route guards it server-side too."""
+            label = _h(_perms.role_label(m.role))
+            if not can_admin or m.status == _tenancy.STATUS_REMOVED:
+                return label
+            opts = "".join(
+                f'<option value="{r}"{" selected" if r == m.role else ""}>'
+                f"{_h(_perms.role_label(r))}</option>"
+                for r in _perms.assignable_roles()
+            )
+            return (
+                f'<form method="post" action="{url_for("organisation_members_page")}" '
+                'style="display:flex;gap:6px;align-items:center;margin:0">'
+                '<input type="hidden" name="action" value="add"/>'
+                f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
+                f'<select name="role" style="padding:3px 6px;font-size:12px">{opts}</select>'
+                '<button type="submit" class="btn secondary" '
+                'style="padding:3px 9px;font-size:11px">Update</button></form>'
+            )
+
         def _row_html(m):
-            role_badge = "Owner" if m.role == _tenancy.ROLE_OWNER else "Member"
+            role_badge = _role_cell_html(m)
             status_badge = {
                 _tenancy.STATUS_ACTIVE: '<span class="pill">Active</span>',
                 _tenancy.STATUS_INVITED: (
@@ -35298,9 +35709,12 @@ what you're doing, what they should do.</p>
                 'style="padding:8px 10px;min-width:min(260px,100%)"/></div>'
                 "<div><label>Role</label><br/>"
                 '<select name="role" style="padding:8px 10px">'
-                '<option value="member">Member</option>'
-                '<option value="owner">Owner</option>'
-                "</select></div>"
+                + "".join(
+                    f'<option value="{r}"{" selected" if r == _tenancy.ROLE_MEMBER else ""}>'
+                    f"{_h(_perms.role_label(r))} — {_h(_perms.role_description(r))}</option>"
+                    for r in _perms.assignable_roles()
+                )
+                + "</select></div>"
                 '<button type="submit" class="btn">Add member</button>'
                 "</form>"
                 '<p class="dim" style="font-size:12px;margin:10px 0 0">'
@@ -35397,6 +35811,45 @@ what you're doing, what they should do.</p>
 
         return prof, _kits.resolve_kit_for(prof)
 
+    def _card_content_type(run_id: str, card_id: str, run_data=None) -> str:
+        """Best-effort content-type key for per-type approver rules (1.18).
+
+        Returns ``"safeguarding"`` for a card featuring a young athlete (or any
+        athlete under an active consent regime) — the sensitive case the roadmap
+        names — else an explicit card content-type slug when the card carries one
+        (the stub-pack / club_platform flow), else ``""`` (→ the base rule).
+        Never raises; an unknown card simply inherits the base rule.
+        """
+        try:
+            run_data = run_data if run_data is not None else (_load_run(run_id) or {})
+            from mediahub.compliance.gate import card_athlete, find_card_in_run
+
+            card = find_card_in_run(run_data, card_id)
+            if not card:
+                return ""
+            name, age = card_athlete(card)
+            if name:
+                if isinstance(age, int) and 0 < age < 18:
+                    return "safeguarding"
+                try:
+                    from mediahub.safeguarding.consent import regime_active
+
+                    if regime_active(run_data.get("profile_id", "")):
+                        return "safeguarding"
+                except Exception:
+                    pass
+            ct = str(card.get("content_type") or card.get("post_type") or "").strip()
+            if ct:
+                try:
+                    from mediahub.club_platform.post_types import canonical_slug
+
+                    return canonical_slug(ct) or ""
+                except Exception:
+                    return ct.lower()
+        except Exception:
+            pass
+        return ""
+
     def _brand_lock_block_reason(run_id: str, card_id: str):
         """A locked-token brand violation that blocks approval, or None.
 
@@ -35429,6 +35882,23 @@ what you're doing, what they should do.</p>
             )
         except Exception:
             return None
+
+    def _open_tasks_block_reason(run_id: str, card_id: str):
+        """An unresolved review task on this card blocks approval (1.18), or
+        ``None``. Default-safe: any error → None, so a check failure never wedges
+        a human approving their own content."""
+        try:
+            from mediahub.collab import threads as _threads
+
+            n = _threads.open_task_count(run_id, card_id)
+            if n > 0:
+                return (
+                    f"{n} open review task{'s' if n != 1 else ''} on this card "
+                    "must be resolved before it can be approved."
+                )
+        except Exception:
+            return None
+        return None
 
     def _group_approval_block(run_id: str, card_id: str):
         """Record the current user's approval vote and evaluate the kit's
@@ -35466,19 +35936,70 @@ what you're doing, what they should do.</p>
                 for m in store.list_for_profile(pid)
                 if m.role == _tenancy.ROLE_OWNER and m.status == _tenancy.STATUS_ACTIVE
             ]
-            satisfied, still_needed, reason = _gov.evaluate(
-                kit.approver_rule, approver_emails=approvers, owner_emails=owner_emails
+            # 1.18 per-type rule: a sensitive card (safeguarding / sponsor) can
+            # demand a stricter sign-off than the base rule; ordinary cards
+            # inherit the base.
+            content_type = _card_content_type(run_id, card_id)
+            satisfied, still_needed, reason = _gov.evaluate_for_type(
+                kit.approver_rule,
+                content_type,
+                approver_emails=approvers,
+                owner_emails=owner_emails,
             )
             if satisfied:
-                return False, {"approvals": approvers}
+                return False, {"approvals": approvers, "content_type": content_type}
             return True, {
                 "pending_approval": True,
                 "approvals": approvers,
                 "approvals_needed": still_needed,
                 "reason": reason,
+                "content_type": content_type,
             }
         except Exception:
             return False, {}
+
+    def _run_role(run_id: str, run_data=None) -> str:
+        """The actor's collaboration role *in the run's owning org* (1.18).
+
+        Run-scoped on purpose: a sign-off/edit is judged against who owns the
+        run, not whatever org is pinned in the session. Ownerless/legacy runs
+        and unbound (pilot) orgs resolve to the owner seat — the same permissive
+        behaviour the run-access gate already grants those sessions, so nothing
+        changes for pilots or pre-1.18 workspaces.
+        """
+        owner_pid = _run_owner_id(run_id, run_data)
+        if not owner_pid:
+            return _tenancy.ROLE_OWNER
+        return _active_role(owner_pid)
+
+    def _run_actor_can(capability: str, run_id: str, run_data=None) -> bool:
+        return _perms.can(_run_role(run_id, run_data), capability)
+
+    def _role_denied_json(capability: str, run_id: str, run_data=None):
+        """A 403 JSON refusal when the actor's role in the run's owning org
+        lacks ``capability``, else ``None`` (1.18). Default-safe: the operator,
+        ownerless/legacy runs, and any unbound/pilot org resolve to the owner
+        seat, so this never fires for them — it only bites a narrowed seat
+        (Viewer/Reviewer/Editor/…) on a members-only workspace, matching the
+        anti-enumeration JSON shape the consent/brand gates already use."""
+        role = _run_role(run_id, run_data)
+        if _perms.can(role, capability):
+            return None
+        verb = {
+            _perms.CAP_EDIT: "edit content",
+            _perms.CAP_APPROVE: "approve or reject content",
+            _perms.CAP_COMMENT: "comment",
+            _perms.CAP_MANAGE: "manage this workspace",
+        }.get(capability, capability)
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "reason": f"Your role ({_perms.role_label(role)}) can't {verb}.",
+                }
+            ),
+            403,
+        )
 
     def _brand_swatch_row(palette: dict) -> str:
         from mediahub.brand.palette import ALL_SLOTS
@@ -35531,6 +36052,35 @@ what you're doing, what they should do.</p>
                 f'<label style="margin-right:14px;font-size:12px;color:var(--ink-muted)">'
                 f'<input type="checkbox" name="lock" value="{tok}" {checked}/> {tok}</label>'
             )
+        # 1.18 per-content-type approver overrides: a stricter rule for the
+        # sensitive types the roadmap names. Empty inputs → no override (the
+        # type inherits the base rule above).
+        _by_type = (kit.approver_rule or {}).get("by_type", {}) or {}
+
+        def _per_type_row(type_key: str, label: str) -> str:
+            sub = _by_type.get(type_key, {}) or {}
+            n = int(sub.get("min_approvers", 0) or 0)
+            owner_checked = "checked" if sub.get("require_owner") else ""
+            return (
+                '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+                f'<span style="font-size:12px;color:var(--ink-muted);min-width:130px">{label}</span>'
+                f'<label style="font-size:12px;color:var(--ink-muted)">Min approvers '
+                f'<input class="mh-input" type="number" min="0" max="10" '
+                f'name="min_approvers__{type_key}" value="{n}" style="max-width:72px" '
+                'placeholder="—" /></label>'
+                f'<label style="font-size:12px;color:var(--ink-muted)">'
+                f'<input type="checkbox" name="require_owner__{type_key}" value="1" '
+                f"{owner_checked}/> require an owner</label>"
+                "</div>"
+            )
+
+        per_type_html = (
+            '<div style="font-size:12px;color:var(--ink-muted);margin-top:6px">'
+            "Stricter approval for sensitive cards "
+            "(leave min approvers at 0 to inherit the rule above):</div>"
+            + _per_type_row("safeguarding", "Young / consent-flagged")
+            + _per_type_row("sponsor_activation", "Sponsor activation")
+        )
         pal = kit.palette or {}
         edit_form = (
             f'<details style="margin-top:10px"><summary style="cursor:pointer;'
@@ -35560,7 +36110,8 @@ what you're doing, what they should do.</p>
             f'<input type="checkbox" name="require_owner" value="1" '
             f"{'checked' if (kit.approver_rule or {}).get('require_owner') else ''}/> require an owner</label>"
             "</div>"
-            '<div><button class="btn" type="submit">Save kit</button></div>'
+            + per_type_html
+            + '<div><button class="btn" type="submit">Save kit</button></div>'
             "</form>"
             # Palette-file import (Adobe .ase / Color JSON).
             f'<form method="post" action="{url_for("api_brand_kit_palette_import", kit_id=kit.kit_id)}" '
@@ -35783,10 +36334,19 @@ what you're doing, what they should do.</p>
         locks = [t for t in request.form.getlist("lock") if t in LOCKABLE_TOKENS]
         from mediahub.workflow.governance import normalise_approver_rule
 
+        # 1.18 per-type overrides: one row per named sensitive type; a row with
+        # min_approvers 0/blank is dropped by normalise (inherits the base).
+        by_type_raw: dict = {}
+        for type_key in ("safeguarding", "sponsor_activation"):
+            by_type_raw[type_key] = {
+                "min_approvers": request.form.get(f"min_approvers__{type_key}", "0"),
+                "require_owner": bool(request.form.get(f"require_owner__{type_key}")),
+            }
         approver_rule = normalise_approver_rule(
             {
                 "min_approvers": request.form.get("min_approvers", "1"),
                 "require_owner": bool(request.form.get("require_owner")),
+                "by_type": by_type_raw,
             }
         )
         raw = existing.to_dict()
@@ -38717,6 +39277,12 @@ function mhSetupMode(mode) {{
                 status = CardStatus(status_str)
             except (ValueError, NameError):
                 return jsonify({"error": f"invalid status: {status_str}"}), 400
+            # 1.18 role gate: changing a card's status is a sign-off action —
+            # only seats with the approve capability (Owner/Member/Approver) may
+            # do it. A Viewer/Reviewer/Editor is refused before any state moves.
+            denied = _role_denied_json(_perms.CAP_APPROVE, run_id)
+            if denied:
+                return denied
             # Consent gate: a card featuring an opted-out or no-consent
             # athlete can never be APPROVED (or marked POSTED). One shared
             # decision function — same rule as pack build + publish gate.
@@ -38739,6 +39305,13 @@ function mhSetupMode(mode) {{
                 if brand_reason:
                     log.info("brand-lock gate blocked approval run=%s card=%s", run_id, card_id)
                     return jsonify({"error": "brand_locked", "reason": brand_reason}), 403
+            # 1.18 task gate: an open review task ("check lane-4 name") holds the
+            # card until it's resolved. Reject/requeue stay allowed.
+            if status == CardStatus.APPROVED:
+                task_reason = _open_tasks_block_reason(run_id, card_id)
+                if task_reason:
+                    log.info("task gate blocked approval run=%s card=%s", run_id, card_id)
+                    return jsonify({"error": "tasks_open", "reason": task_reason}), 403
             # 1.12 group-approver rule: record this vote; hold the card in QUEUE
             # until the kit's rule is met. Default-safe (no rule / pilot org /
             # operator → no effect).
@@ -38770,7 +39343,31 @@ function mhSetupMode(mode) {{
             return jsonify({"ok": True, "status": status_str, "summary": summary})
 
         if action == "set_edits":
+            # 1.18 role gate: editing captions/overrides needs the edit seat.
+            denied = _role_denied_json(_perms.CAP_EDIT, run_id)
+            if denied:
+                return denied
             edits = payload.get("edits", {})
+            # 1.18 element locks: an inspector override of a locked element is
+            # dropped, so "lock the sponsor strip" holds on this path too — not
+            # just against the copilot. Maps inspector keys → lock elements.
+            if isinstance(edits, dict) and edits:
+                try:
+                    from mediahub.collab import locks as _locks
+
+                    _locked = _locks.locked_elements(run_id, card_id)
+                    if _locked:
+                        _insp_element = {
+                            "insp.hideSponsor": "sponsor",
+                            "insp.noPhoto": "photo",
+                            "insp.focus": "photo",
+                            "insp.accent": "accent",
+                        }
+                        edits = {
+                            k: v for k, v in edits.items() if _insp_element.get(k) not in _locked
+                        }
+                except Exception:
+                    pass
             ws.set_edits(run_id, card_id, edits)
             _phase_w_after_status_change(
                 _run_owner_profile_id(run_id) or _active_profile_id() or "",
@@ -38837,6 +39434,19 @@ function mhSetupMode(mode) {{
             _flash_toast("Select at least one card first.", "info")
             return redirect(url_for("review", run_id=run_id))
 
+        # 1.18 role gate: a bulk status change is the same sign-off action as
+        # the single-card route — refuse a seat without the approve capability
+        # before any card moves (operator / unbound pilot resolve to owner).
+        if not _run_actor_can(_perms.CAP_APPROVE, run_id, run_data):
+            reason = (
+                f"Your role ({_perms.role_label(_run_role(run_id, run_data))}) "
+                "can't approve or reject content."
+            )
+            if wants_json:
+                return jsonify({"error": "forbidden", "reason": reason}), 403
+            _flash_toast(reason, "error")
+            return redirect(url_for("review", run_id=run_id))
+
         need_consent = status in (CardStatus.APPROVED, CardStatus.POSTED)
         if need_consent:
             from mediahub.compliance.gate import (
@@ -38863,6 +39473,16 @@ function mhSetupMode(mode) {{
                 if brand_reason:
                     results.append(
                         {"id": cid, "ok": False, "error": "brand_locked", "reason": brand_reason}
+                    )
+                    n_blocked += 1
+                    continue
+            # 1.18 task gate — an open review task holds the card, same as the
+            # single-card path, so bulk-approve can't skip an unresolved task.
+            if status == CardStatus.APPROVED:
+                task_reason = _open_tasks_block_reason(run_id, cid)
+                if task_reason:
+                    results.append(
+                        {"id": cid, "ok": False, "error": "tasks_open", "reason": task_reason}
                     )
                     n_blocked += 1
                     continue
@@ -45514,6 +46134,12 @@ voice, and queues them for one-click approval.</p>
         from mediahub.assistant import session as _asess
 
         sess = _asess.get_or_create(run_id, card_id, session_id, profile_id=profile_id)
+        try:
+            from mediahub.collab import locks as _locks
+
+            _locked = _locks.locked_elements(run_id, card_id)
+        except Exception:
+            _locked = set()
         turn = _acop.run_turn(
             session=sess,
             user_message=message,
@@ -45521,6 +46147,7 @@ voice, and queues them for one-click approval.</p>
             brand_kit=brand_kit,
             facts=_assistant_card_facts(run_data, card_id),
             profile_id=profile_id,
+            locked_elements=_locked,
         )
         # Persist the edited brief so the existing render / reformat surfaces
         # pick it up (they read the most-recent brief for the card).
@@ -46564,6 +47191,748 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": True, "comment": updated.to_dict()})
 
         return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
+
+    # =====================================================================
+    # Collaboration: anchored comments, tasks & reactions (roadmap 1.18)
+    # ---------------------------------------------------------------------
+    # Threaded comments anchored to a run / card / element, @mentions that
+    # notify, emoji reactions, and tasks that block the card's approval. Same
+    # access model as the reel comments above (run must exist + _can_access_run),
+    # plus a role gate: posting/mutating needs the comment capability, reading
+    # only needs view. Plain JSON POSTs (CSRF-exempt by content-type).
+    # =====================================================================
+
+    def _collab_run_ctx(run_id: str):
+        """Resolve+access-gate a run for the collab routes.
+
+        Returns ``(ctx, None)`` where ctx carries the run, its owning org, the
+        member roster (for @mention resolution) and the current user — or
+        ``(None, (response, status))`` to short-circuit.
+        """
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, _active_profile_id()):
+            return None, (jsonify({"error": "run_not_found"}), 404)
+        owner_pid = _run_owner_id(run_id, run_data) or _active_profile_id() or ""
+        members: list[tuple[str, str]] = []
+        if owner_pid:
+            try:
+                members = [
+                    (m.email, "")
+                    for m in _tenancy.MembershipStore().list_for_profile(owner_pid)
+                    if m.status == _tenancy.STATUS_ACTIVE
+                ]
+            except Exception:
+                members = []
+        ctx = {
+            "run_data": run_data,
+            "owner_pid": owner_pid,
+            "members": members,
+            "me": _auth.current_user_email() or "",
+        }
+        return ctx, None
+
+    def _collab_comment_payload(c, reactions: dict) -> dict:
+        d = c.to_dict()
+        d["reactions"] = reactions.get(c.id, {})
+        return d
+
+    def _assistant_thread_answer(run_id: str, card_id: str, message: str, run_data) -> str:
+        """The assistant's plain-text reply to an @assistant comment (1.18).
+
+        Explains or suggests in words, grounded only in the card's verified facts
+        (never invents times/names). Honest-errors when no provider is configured
+        — the MediaHub AI rule: a clear "not configured" beats a fabricated reply.
+        """
+        from mediahub.ai_core import ProviderError, ProviderNotConfigured, ask
+
+        facts: dict = {}
+        try:
+            if card_id:
+                facts = _assistant_card_facts(run_data or _load_run(run_id) or {}, card_id)
+        except Exception:
+            facts = {}
+        system = (
+            "You are MediaHub's review assistant. A club reviewer has tagged you in a "
+            "comment about a piece of content. Reply briefly and concretely (2-4 "
+            "sentences): explain a design choice or suggest an improvement in words. "
+            "Never invent facts (times, names, places) — use only what you are given."
+        )
+        user = f"Card facts: {facts}\n\nReviewer's comment: {message}\n\nYour reply:"
+        try:
+            out = (ask(system, user, max_tokens=300) or "").strip()
+            return out or "I don't have anything to add."
+        except ProviderNotConfigured:
+            return (
+                "The AI assistant isn't configured on this deployment, so I can't reply "
+                "automatically — a teammate can still help here."
+            )
+        except ProviderError as e:
+            return f"I couldn't reply just now (provider error: {str(e)[:120]})."
+        except Exception:
+            return "I couldn't reply just now."
+
+    def _assistant_thread_reply(ctx, run_id: str, parent) -> None:
+        """When @assistant is tagged in a comment, post the assistant's reply as a
+        thread reply (1.18). Best-effort: never breaks posting the human comment."""
+        try:
+            from mediahub.collab import mentions as _m
+            from mediahub.collab import threads as _th
+
+            if not _m.mentions_assistant(parent.body):
+                return
+            text = _assistant_thread_answer(
+                run_id, parent.card_id, parent.body, ctx.get("run_data")
+            )
+            _th.add_comment(
+                run_id,
+                parent.card_id,
+                text,
+                author_name="MediaHub Assistant",
+                author_email="assistant@mediahub.local",
+                parent_id=parent.thread_id,
+                kind="comment",
+            )
+        except Exception:
+            pass
+
+    def _collab_notify_mentions(ctx, run_id: str, comment) -> None:
+        """Fire inbox notifications for @mentions and a task assignment (1.18).
+
+        Best-effort and never raises — a notification must never break posting a
+        comment. Mentions are addressed per-user; the author never notifies
+        themselves.
+        """
+        try:
+            from mediahub.notify import inbox as _inbox
+
+            owner_pid = ctx.get("owner_pid") or ""
+            if not owner_pid:
+                return
+            link = url_for("review", run_id=run_id)
+            by = comment.author_name or comment.author_email or "Someone"
+            where = "a comment" + (f" on {comment.card_id}" if comment.card_id else "")
+            for email in comment.mentions or []:
+                if email and email != (comment.author_email or ""):
+                    _inbox.record_mention(
+                        owner_pid, email, by, where, run_id=run_id, click_url=link
+                    )
+            if comment.kind == "task" and comment.assignee_email:
+                if comment.assignee_email != (comment.author_email or ""):
+                    _inbox.record_task_assigned(
+                        owner_pid,
+                        comment.assignee_email,
+                        by,
+                        comment.body,
+                        run_id=run_id,
+                        click_url=link,
+                    )
+        except Exception:
+            pass
+
+    @app.route("/api/runs/<run_id>/comments", methods=["GET", "POST"])
+    def api_collab_comments(run_id: str):
+        """List (GET) or add (POST) anchored review comments / tasks.
+
+        GET  ?card_id=<id>&resolved=0|1 -> {ok, comments:[…], open_tasks}
+        POST {card_id?, body, kind?, anchor?, parent_id?, assignee?} -> {ok, comment}
+        """
+        ctx, err = _collab_run_ctx(run_id)
+        if err is not None:
+            return err
+        from mediahub.collab import mentions as _mentions
+        from mediahub.collab import threads as _threads
+
+        if request.method == "GET":
+            card_id = request.args.get("card_id")
+            include_resolved = (request.args.get("resolved") or "1").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+            }
+            rows = _threads.list_for_card(run_id, card_id, include_resolved=include_resolved)
+            reactions = _threads.reactions_for([c.id for c in rows])
+            return jsonify(
+                {
+                    "ok": True,
+                    "comments": [_collab_comment_payload(c, reactions) for c in rows],
+                    "open_tasks": _threads.open_task_count(run_id, card_id),
+                    "me": ctx["me"],
+                }
+            )
+
+        denied = _role_denied_json(_perms.CAP_COMMENT, run_id, ctx["run_data"])
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        body = payload.get("body")
+        kind = (payload.get("kind") or "comment").strip().lower()
+        assignee = (payload.get("assignee") or "").strip().lower()
+        mention_emails = _mentions.resolve_mentions(str(body or ""), ctx["members"])
+        try:
+            comment = _threads.add_comment(
+                run_id,
+                payload.get("card_id"),
+                body,
+                author_email=ctx["me"],
+                author_name=ctx["me"],
+                anchor=payload.get("anchor"),
+                parent_id=payload.get("parent_id"),
+                kind=kind,
+                assignee_email=assignee,
+                mentions=mention_emails,
+            )
+        except _threads.ThreadError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        _collab_notify_mentions(ctx, run_id, comment)
+        # 1.18: tag @assistant in a thread and it replies (honest-error if no AI).
+        _assistant_thread_reply(ctx, run_id, comment)
+        reactions = _threads.reactions_for([comment.id])
+        return jsonify({"ok": True, "comment": _collab_comment_payload(comment, reactions)}), 201
+
+    @app.route("/api/runs/<run_id>/comments/<comment_id>", methods=["POST"])
+    def api_collab_comment_mutate(run_id: str, comment_id: str):
+        """Mutate one comment/task: resolve | reopen | complete | edit | delete | react.
+
+        Body JSON ``{action, body?, emoji?}``. Delete is author-or-manager;
+        everything else needs the comment capability. ``complete``/``resolve``
+        tick a task done; ``reopen`` un-ticks it.
+        """
+        ctx, err = _collab_run_ctx(run_id)
+        if err is not None:
+            return err
+        from mediahub.collab import threads as _threads
+
+        denied = _role_denied_json(_perms.CAP_COMMENT, run_id, ctx["run_data"])
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        action = (payload.get("action") or "").strip().lower()
+        me = ctx["me"]
+
+        if action == "delete":
+            existing = _threads.get_comment(comment_id)
+            if existing is None or existing.run_id != run_id:
+                return jsonify({"error": "comment_not_found"}), 404
+            is_manager = _run_actor_can(
+                _perms.CAP_APPROVE, run_id, ctx["run_data"]
+            ) or _run_actor_can(_perms.CAP_MANAGE, run_id, ctx["run_data"])
+            if not is_manager and (existing.author_email or "") != (me or ""):
+                return jsonify(
+                    {"error": "forbidden", "reason": "Only the author can delete this."}
+                ), 403
+            removed = _threads.delete_comment(comment_id, run_id=run_id)
+            return jsonify({"ok": True, "deleted": comment_id, "removed": removed})
+
+        if action in {"resolve", "reopen", "complete"}:
+            updated = _threads.set_resolved(comment_id, action != "reopen", run_id=run_id)
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        if action == "edit":
+            try:
+                updated = _threads.edit_body(
+                    comment_id, payload.get("body"), run_id=run_id, author_email=me or None
+                )
+            except _threads.ThreadError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            if updated is None:
+                return jsonify({"error": "comment_not_found"}), 404
+            return jsonify({"ok": True, "comment": updated.to_dict()})
+
+        if action == "react":
+            try:
+                on = _threads.toggle_reaction(comment_id, payload.get("emoji"), me)
+            except _threads.ThreadError as e:
+                return jsonify({"error": "bad_request", "detail": str(e)}), 400
+            reactions = _threads.reactions_for([comment_id])
+            return jsonify({"ok": True, "on": on, "reactions": reactions.get(comment_id, {})})
+
+        return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
+
+    # =====================================================================
+    # Version history (diff + restore) & element locks (roadmap 1.18)
+    # ---------------------------------------------------------------------
+    # Every copilot edit / regenerate already persists a new CreativeBrief, so a
+    # card's design versions accumulate on disk — these routes let a reviewer
+    # see, compare and roll back, and lock individual elements so a later edit
+    # (even the copilot's) can't change them. Reads need view; restore/lock need
+    # the edit capability.
+    # =====================================================================
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/revisions", methods=["GET"])
+    def api_card_revisions(run_id: str, card_id: str):
+        """List a card's design versions, oldest→newest (latest = current)."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.collab import revisions as _rev
+
+        revs = _rev.list_revisions(run_id, card_id)
+        current = next((r["brief_id"] for r in revs if r["is_current"]), "")
+        return jsonify({"ok": True, "revisions": revs, "current_id": current})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/revisions/diff", methods=["GET"])
+    def api_card_revisions_diff(run_id: str, card_id: str):
+        """Field-level before/after between two of a card's design versions."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.collab import revisions as _rev
+
+        diff = _rev.diff_revisions(
+            run_id, card_id, request.args.get("a", ""), request.args.get("b", "")
+        )
+        if diff is None:
+            return jsonify({"error": "revision_not_found"}), 404
+        return jsonify({"ok": True, "diff": diff})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/revisions/restore", methods=["POST"])
+    def api_card_revisions_restore(run_id: str, card_id: str):
+        """Roll a card back to a prior version (re-issued as a fresh current)."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id, run_data)
+        if denied:
+            return denied
+        from mediahub.collab import revisions as _rev
+
+        payload = request.get_json(silent=True) or {}
+        restored = _rev.restore_revision(run_id, card_id, payload.get("brief_id", ""))
+        if restored is None:
+            return jsonify({"error": "revision_not_found"}), 404
+        return jsonify({"ok": True, "brief_id": restored.get("id", "")})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/locks", methods=["GET", "POST"])
+    def api_card_locks(run_id: str, card_id: str):
+        """List (GET) or set (POST) element locks on a card.
+
+        POST {element, locked} — locking an element refuses any later edit
+        (copilot patch or inspector toggle) that would change it.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.collab import locks as _locks
+
+        if request.method == "GET":
+            return jsonify(
+                {
+                    "ok": True,
+                    "locked": sorted(_locks.locked_elements(run_id, card_id)),
+                    "lockable": sorted(_locks.LOCKABLE_ELEMENTS),
+                }
+            )
+
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id, run_data)
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        try:
+            _locks.set_lock(
+                run_id,
+                card_id,
+                payload.get("element", ""),
+                bool(payload.get("locked")),
+                by=_auth.current_user_email() or "",
+            )
+        except _locks.LockError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify({"ok": True, "locked": sorted(_locks.locked_elements(run_id, card_id))})
+
+    # =====================================================================
+    # Share for review — expiring, scoped, revocable external links (1.18)
+    # ---------------------------------------------------------------------
+    # Owners mint a link that opens one run/card read-only (or with comment)
+    # for someone WITHOUT an account — a parent confirming a name. Isolation
+    # (ADR-0003) and consent (W.2) are enforced at resolve time; links expire
+    # and can be revoked from the review page.
+    # =====================================================================
+
+    @app.route("/api/runs/<run_id>/shares", methods=["GET", "POST"])
+    def api_run_shares(run_id: str):
+        """List (GET) or mint (POST) review-share links for a run. Owner-only —
+        a share exposes club data outside the workspace."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        denied = _role_denied_json(_perms.CAP_MANAGE, run_id, run_data)
+        if denied:
+            return denied
+        from mediahub.collab import share_tokens as _shares
+
+        if request.method == "GET":
+            rows = _shares.list_for_run(run_id)
+            return jsonify(
+                {
+                    "ok": True,
+                    "shares": [
+                        {**s.to_public_dict(), "url": url_for("share_review_page", token=s.token)}
+                        for s in rows
+                    ],
+                }
+            )
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            share = _shares.create_share(
+                run_id,
+                card_id=(payload.get("card_id") or "").strip(),
+                perm=(payload.get("perm") or "view"),
+                created_by=_auth.current_user_email() or "",
+                ttl_days=payload.get("ttl_days", _shares.DEFAULT_TTL_DAYS),
+            )
+        except _shares.ShareTokenError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "share": {
+                    **share.to_public_dict(),
+                    "url": url_for("share_review_page", token=share.token, _external=True),
+                },
+            }
+        ), 201
+
+    @app.route("/api/runs/<run_id>/shares/<token>/revoke", methods=["POST"])
+    def api_run_share_revoke(run_id: str, token: str):
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        denied = _role_denied_json(_perms.CAP_MANAGE, run_id, run_data)
+        if denied:
+            return denied
+        from mediahub.collab import share_tokens as _shares
+
+        ok = _shares.revoke(token, run_id=run_id)
+        return jsonify({"ok": True, "revoked": ok})
+
+    def _share_visible_cards(share) -> list[dict]:
+        """The cards a share exposes: consent- and tenant-gated, rendered only.
+
+        A card-scoped share shows just its card; a run-scoped share shows every
+        card of the run that has a rendered, consent-cleared image."""
+        from mediahub.web import public_wall as _pw
+
+        run_data = _load_run(share.run_id) or {}
+        owner = _run_owner_id(share.run_id, run_data) or run_data.get("profile_id", "")
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        wanted = []
+        if share.card_id:
+            wanted = [share.card_id]
+        else:
+            for ra in ranked:
+                ach = ra.get("achievement") or {}
+                cid = ach.get("swim_id") or ra.get("id")
+                if cid:
+                    wanted.append(str(cid))
+        out: list[dict] = []
+        ach_by_id = {}
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if cid:
+                ach_by_id[str(cid)] = ach
+        for cid in wanted:
+            png = _pw.rendered_card_png(owner, share.run_id, cid)
+            if not png:
+                continue  # unrendered or consent-blocked → never exposed
+            ach = ach_by_id.get(str(cid), {})
+            out.append(
+                {
+                    "card_id": cid,
+                    "headline": str(ach.get("headline") or ach.get("post_angle") or "").strip(),
+                    "event": str(ach.get("event") or "").strip(),
+                }
+            )
+        return out
+
+    @app.route("/share/<token>")
+    def share_review_page(token: str):
+        """Public, no-account review page for a scoped share link."""
+        from mediahub.collab import share_tokens as _shares
+        from mediahub.collab import threads as _threads
+
+        share = _shares.resolve(token)
+        if share is None:
+            return _layout(
+                "Link unavailable",
+                "<h1>This review link is no longer available</h1>"
+                '<p class="lede">It may have expired or been turned off by the club. '
+                "Ask them for a fresh link.</p>",
+                active="",
+            ), 404
+        run_data = _load_run(share.run_id) or {}
+        meet = _h((run_data.get("meet") or {}).get("name") or run_data.get("meet_name") or "Meet")
+        cards = _share_visible_cards(share)
+        can_comment = share.perm == _shares.PERM_COMMENT
+
+        blocks = ""
+        for c in cards:
+            cid = c["card_id"]
+            img = url_for("share_card_png", token=token, card_id=cid)
+            comments = _threads.list_for_card(share.run_id, cid, include_resolved=True)
+            cm_html = ""
+            for cm in comments:
+                who = _h(cm.author_name or cm.author_email or "Reviewer")
+                cm_html += (
+                    '<div style="padding:6px 0;border-top:1px solid var(--border);font-size:13px">'
+                    f"<strong>{who}</strong>: {_h(cm.body)}</div>"
+                )
+            form_html = ""
+            if can_comment:
+                form_html = (
+                    f'<form method="post" action="{url_for("share_add_comment", token=token)}" '
+                    'style="margin-top:8px;display:flex;flex-direction:column;gap:6px">'
+                    f'<input type="hidden" name="card_id" value="{_h(cid)}"/>'
+                    '<input type="text" name="name" placeholder="Your name (optional)" '
+                    'style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;'
+                    'background:rgba(255,255,255,0.04);color:inherit"/>'
+                    '<textarea name="body" required rows="2" placeholder="Add a comment — '
+                    'e.g. confirm the name is spelled right" '
+                    'style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;'
+                    'background:rgba(255,255,255,0.04);color:inherit"></textarea>'
+                    '<button type="submit" class="btn" style="align-self:flex-start">'
+                    "Send comment</button></form>"
+                )
+            blocks += (
+                '<div class="card" style="margin-bottom:18px;padding:16px">'
+                f'<img src="{img}" alt="{_h(c["headline"] or "Card")}" '
+                'style="max-width:100%;border-radius:8px;display:block;margin-bottom:10px"/>'
+                + (
+                    f'<div style="font-weight:700;margin-bottom:4px">{_h(c["headline"])}</div>'
+                    if c["headline"]
+                    else ""
+                )
+                + (
+                    f'<div style="font-size:13px;color:var(--ink-muted)">{_h(c["event"])}</div>'
+                    if c["event"]
+                    else ""
+                )
+                + (f'<div style="margin-top:10px">{cm_html}</div>' if cm_html else "")
+                + form_html
+                + "</div>"
+            )
+        if not blocks:
+            blocks = '<p class="lede">There are no cards to review on this link yet.</p>'
+        intro = (
+            f"<h1>{meet} — for review</h1>"
+            '<p class="lede">A club has shared this content for your review'
+            + (" — you can leave a comment below." if can_comment else " (view only).")
+            + "</p>"
+        )
+        return _layout(f"{meet} — review", intro + blocks, active="")
+
+    @app.route("/share/<token>/card/<card_id>.png")
+    def share_card_png(token: str, card_id: str):
+        from flask import send_file
+
+        from mediahub.collab import share_tokens as _shares
+        from mediahub.web import public_wall as _pw
+
+        share = _shares.resolve(token)
+        if share is None:
+            abort(404)
+        # A card-scoped share only serves its own card.
+        if share.card_id and str(card_id) != str(share.card_id):
+            abort(404)
+        run_data = _load_run(share.run_id) or {}
+        owner = _run_owner_id(share.run_id, run_data) or run_data.get("profile_id", "")
+        path = _pw.rendered_card_png(owner, share.run_id, card_id)
+        if not path:
+            abort(404)
+        resp = make_response(send_file(path, mimetype="image/png"))
+        resp.headers["Cache-Control"] = "private, max-age=300"
+        return resp
+
+    @app.route("/share/<token>/comment", methods=["POST"])
+    def share_add_comment(token: str):
+        from mediahub.collab import share_tokens as _shares
+        from mediahub.collab import threads as _threads
+
+        share = _shares.resolve(token)
+        if share is None or share.perm != _shares.PERM_COMMENT:
+            abort(404)
+        if _auth_rate_limited("share_comment"):
+            return _layout(
+                "Slow down",
+                "<h1>Too many comments</h1><p>Please wait a moment and try again.</p>",
+                active="",
+            ), 429
+        card_id = (request.form.get("card_id") or share.card_id or "").strip()
+        body = (request.form.get("body") or "").strip()
+        name = (request.form.get("name") or "").strip()[:120]
+        # Only allow commenting on a card the share actually exposes.
+        visible = {c["card_id"] for c in _share_visible_cards(share)}
+        if card_id not in visible:
+            abort(404)
+        try:
+            _threads.add_comment(
+                share.run_id,
+                card_id,
+                body,
+                author_name=name or "External reviewer",
+                kind="comment",
+            )
+        except _threads.ThreadError:
+            return redirect(url_for("share_review_page", token=token))
+        # Tell the club an external comment arrived (org-wide inbox).
+        try:
+            from mediahub.notify import inbox as _inbox
+
+            owner = _run_owner_id(share.run_id, run_data=_load_run(share.run_id)) or ""
+            if owner:
+                _inbox.record(
+                    owner,
+                    _inbox.KIND_INFO,
+                    "New review comment",
+                    f"{name or 'An external reviewer'} commented on a shared card.",
+                    run_id=share.run_id,
+                    click_url=url_for("review", run_id=share.run_id),
+                )
+        except Exception:
+            pass
+        return redirect(url_for("share_review_page", token=token))
+
+    # =====================================================================
+    # Collections (folders) & Team Context (roadmap 1.18)
+    # ---------------------------------------------------------------------
+    # Org-level folders over runs/packs, and the org context the AI reads
+    # (brand, standing preferences, recent content) surfaced to humans too.
+    # Org-scoped to the active workspace; create/edit need the edit capability.
+    # =====================================================================
+
+    @app.route("/api/collections", methods=["GET", "POST"])
+    def api_collections():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org"}), 403
+        from mediahub.collab import collections as _col
+
+        if request.method == "GET":
+            return jsonify({"ok": True, "collections": _col.list_collections(pid)})
+        if not _perms.can_edit(_active_role(pid)):
+            return jsonify(
+                {"error": "forbidden", "reason": "Your role can't edit collections."}
+            ), 403
+        payload = request.get_json(silent=True) or {}
+        try:
+            col = _col.create_collection(pid, payload.get("name", ""))
+        except _col.CollectionError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify({"ok": True, "collection": col}), 201
+
+    @app.route("/api/collections/<collection_id>", methods=["GET", "POST"])
+    def api_collection_detail(collection_id: str):
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org"}), 403
+        from mediahub.collab import collections as _col
+
+        if request.method == "GET":
+            items = _col.list_items(pid, collection_id)
+            if items is None:
+                return jsonify({"error": "not_found"}), 404
+            return jsonify({"ok": True, "items": items})
+
+        if not _perms.can_edit(_active_role(pid)):
+            return jsonify(
+                {"error": "forbidden", "reason": "Your role can't edit collections."}
+            ), 403
+        payload = request.get_json(silent=True) or {}
+        action = (payload.get("action") or "").strip().lower()
+        try:
+            if action == "rename":
+                ok = _col.rename_collection(pid, collection_id, payload.get("name", ""))
+            elif action == "delete":
+                ok = _col.delete_collection(pid, collection_id)
+            elif action == "add_item":
+                ok = _col.add_item(
+                    pid, collection_id, payload.get("item_type", ""), payload.get("item_id", "")
+                )
+            elif action == "remove_item":
+                ok = _col.remove_item(
+                    pid, collection_id, payload.get("item_type", ""), payload.get("item_id", "")
+                )
+            else:
+                return jsonify({"error": "unknown_action"}), 400
+        except _col.CollectionError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        if not ok:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"ok": True})
+
+    @app.route("/api/organisation/context", methods=["GET"])
+    def api_organisation_context():
+        """Team Context — the org context the AI reads, surfaced to humans."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "context": {"brand": {}, "preferences": [], "recent": []}})
+        from mediahub.collab import context as _ctx
+
+        return jsonify({"ok": True, "context": _ctx.team_context(pid)})
+
+    @app.route("/collections")
+    def collections_page():
+        """Manage org collections (folders over runs & packs)."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.collab import collections as _col
+
+        cols = _col.list_collections(pid)
+        can_edit = _perms.can_edit(_active_role(pid))
+        rows = ""
+        for c in cols:
+            rows += (
+                '<div class="card" style="padding:12px 16px;margin-bottom:10px;display:flex;'
+                'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+                f'<div><strong>{_h(c["name"])}</strong>'
+                f'<span style="color:var(--ink-muted);font-size:12px;margin-left:8px">'
+                f'{c["count"]} item{"s" if c["count"] != 1 else ""}</span></div>'
+                + (
+                    f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                    f"onclick=\"mhDeleteCollection('{c['id']}')\">Delete</button>"
+                    if can_edit
+                    else ""
+                )
+                + "</div>"
+            )
+        rows = rows or '<p class="lede">No collections yet — create one to group your meets.</p>'
+        create_html = ""
+        if can_edit:
+            create_html = (
+                '<div class="card" style="padding:14px 16px;margin-bottom:16px">'
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+                '<input id="mh-col-name" type="text" placeholder="New collection name" '
+                'style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--border);'
+                'border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"/>'
+                '<button class="btn" onclick="mhCreateCollection()">Create</button></div></div>'
+            )
+        body = (
+            "<h1>Collections</h1>"
+            '<p class="lede" style="margin-bottom:var(--sp-6)">Group your meets and packs '
+            "into folders — a season, a championship, a sponsor campaign.</p>"
+            + create_html
+            + f'<div id="mh-col-list">{rows}</div>'
+            + "<script>\n"
+            "function mhCreateCollection(){var n=document.getElementById('mh-col-name');"
+            "if(!n||!n.value.trim())return;"
+            "fetch('" + url_for("api_collections") + "',{method:'POST',"
+            "headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n.value.trim()})})"
+            ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
+            "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
+            ".catch(function(){});}\n"
+            "function mhDeleteCollection(id){if(!confirm('Delete this collection? The meets "
+            "themselves are kept.'))return;"
+            "fetch('" + url_for("api_collections") + "/'+encodeURIComponent(id),{method:'POST',"
+            "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
+            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});}\n"
+            "</script>"
+        )
+        return _layout("Collections", body, active="settings")
 
     # =====================================================================
     # Video suite (roadmap 1.6) — the footage path
