@@ -16,7 +16,6 @@ document from real data alone (headings + facts, no narrative) — also honest.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from .formats import build_document
 from .grounding import DocFacts

@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from .models import Block, DocumentSpec, Section
+from .models import Block, DocumentSpec
 
 # ---------------------------------------------------------------------------
 # Shared helpers

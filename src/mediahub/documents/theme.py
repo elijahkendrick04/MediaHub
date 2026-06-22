@@ -23,7 +23,7 @@ import re
 from functools import lru_cache
 from typing import Optional
 
-from .models import PAGE_GEOMETRIES, PageGeometry
+from .models import PageGeometry
 
 # ---------------------------------------------------------------------------
 # Brand role vars (delegated to the single source of truth)
@@ -104,9 +104,9 @@ def doc_tokens(role_vars: dict[str, str], *, kind: str = "document") -> dict[str
             "--doc-band": primary,
             "--doc-band-ink": on_primary,
             "--doc-soft": _mix(page, ink, 0.10),
-            "--doc-on-accent": _mix(primary, "#000000", 0.0)
-            if _contrast_ok(primary, accent)
-            else "#10151C",
+            # Text on an accent-filled slide: the brand ground if it reads on the
+            # accent (e.g. navy on gold), else a safe near-black.
+            "--doc-on-accent": primary if _contrast_ok(primary, accent) else "#10151C",
         }
 
     # Paper document — editorial print look.

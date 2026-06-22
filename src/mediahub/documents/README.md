@@ -21,7 +21,7 @@ computer worked out. The AI (added in a later build) is only allowed to *write t
 words around them*, and even then every number it writes is double-checked. If no AI
 is switched on, the engine says so honestly — it never makes up a report.
 
-## What's in here (build 1 — the core)
+## What's in here
 
 | File | What it does (in plain words) |
 |------|-------------------------------|
@@ -29,6 +29,15 @@ is switched on, the engine says so honestly — it never makes up a report.
 | `theme.py` | Paints the document in your brand colours (the same `--mh-*` roles the cards use) and uses MediaHub's own fonts — never Google's. |
 | `render.py` | The printer. Turns a document shape into a real web page, then into a **PDF**, or a **PNG** picture of one page. |
 | `cache.py` | Remembers a finished document so asking for the exact same one again is instant. |
+| `grounding.py` | Reads your real results into a fact sheet (numbers, tables, charts) — the only thing the document is allowed to state. |
+| `formats.py` | Builds the four real club documents (programme, season report, sponsor proposal, AGM deck) from that fact sheet. |
+| `draft.py` | Asks the AI to write *only the wording* around the facts (checked so it can't invent a number); says so honestly if no AI is set up. |
+| `export.py` | Saves a document as an editable **PowerPoint** or **Word** file (bounded fidelity). |
+| `import_doc.py` | Opens a **PDF / Word / PowerPoint** file back into editable blocks (bounded fidelity). |
+| `pdf_utils.py` | Everyday PDF tools: merge, reorder/rotate/delete pages, images→PDF, PDF→images. |
+| `deck_video.py` | Turns a deck into an **MP4** slideshow (one slide after another). |
+| `deck.py` + `presenter.py` | The **presenter** mode: speaker notes, a timer, autoplay, and your phone as a slide remote. |
+| `store.py` | Saves each club's documents on disk, kept separate per club. |
 | `README.md` | This file. |
 
 ## Two looks from one set of colours
@@ -47,9 +56,9 @@ is switched on, the engine says so honestly — it never makes up a report.
 - **Safe text:** every bit of text is escaped, so a caption or title can never sneak in code.
 - **No surprises:** the same document shape + the same colours give the **exact same PDF**.
 
-## What comes next (later builds)
+## Where to find it in the app
 
-The four real club formats + AI-drafted wording (build 2); exporting to PowerPoint / Word and
-turning a deck into a video, plus PDF tools like merge and reorder (build 3); the **presenter**
-mode with speaker notes, a timer and your phone as a remote (build 4); and the buttons in the
-app to make all of it (build 5).
+Open **Create → Documents**. Pick a meet to build a programme, or build a season report,
+sponsor proposal or AGM deck from your whole season; then preview, download (PDF / PowerPoint /
+Word), present the deck, or use the PDF tools. The web routes that wire all this up live in
+`web/web.py` (search for "Document engine").
