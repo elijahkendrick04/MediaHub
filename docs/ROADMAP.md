@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `7978601d4` · Merge pull request #994: Collaboration &amp; review (roadmap 1.18)
+**Last updated:** 2026-06-22 · `a7f32e0cb` · Merge pull request #998: Export &amp; conversion engine (roadmap 1.19)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.19** · Phase 1 (Product) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities · ❌ **NOT STARTED**
 - **1.20** · Phase 1 (Product) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
 - **1.21** · Phase 1 (Product) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
 - **1.22** · Phase 1 (Product) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
@@ -1209,16 +1208,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `70229376b` | Mark roadmap 1.19 done — export & conversion engine |
+| 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
+| 2026-06-22 | `1d9efb75d` | Apply pinned ruff-format (v0.8.4) to the 1.19 source files (CI hygiene) |
+| 2026-06-22 | `3387f98c7` | Check run access before params on the export ZIP route; record 1.19 as shipped |
+| 2026-06-22 | `1169c18b3` | Wire the export engine into the web app (roadmap 1.19, build C) |
+| 2026-06-22 | `b6cd78b03` | Add quick-actions toolbox + bulk export jobs (roadmap 1.19, build B) |
+| 2026-06-22 | `8e2bdd6a3` | Ignore the export_engine content cache (DATA_DIR fallback dirs) |
+| 2026-06-22 | `1383533fe` | Build the export_engine foundation (roadmap 1.19, build A) |
 | 2026-06-22 | `e4559f0f3` | Collections, Team Context & assistant-in-threads (roadmap 1.18, build 5/5) |
 | 2026-06-22 | `935151445` | Fix three HY-TEK interpreter parser bugs (QA sweep 2026-06-22) |
 | 2026-06-22 | `a9223368c` | Expiring share links + public review surface (roadmap 1.18, build 4/5) |
 | 2026-06-22 | `cb822cef9` | Version history (diff + restore) & element locks (roadmap 1.18, build 3/5) |
-| 2026-06-22 | `7db1f617c` | Comments, mentions & tasks (roadmap 1.18, build 2/5) |
-| 2026-06-22 | `410c78cb4` | Collaboration roles & per-type approvers (roadmap 1.18, build 1/5) |
-| 2026-06-22 | `dd86b186c` | 1.17: ruff-format the email_design package + newsletter web routes (hygiene) |
-| 2026-06-22 | `43f1298ea` | 1.17: extend run-route isolation invariants for the newsletter card route; keep hex budget |
-| 2026-06-22 | `0993383a2` | docs: mark roadmap 1.17 (email & newsletter composer) shipped |
-| 2026-06-22 | `2a3b37f5f` | Email & newsletter composer (1.17) build 3: web surface, exports, hosted view |
-| 2026-06-22 | `d4fbc911e` | Email & newsletter composer (1.17) build 2: auto-assembly + AI editorial |
-| 2026-06-22 | `0ac56ff7a` | Email & newsletter composer (1.17) build 1: email-safe rendering engine |
 <!-- /ROADMAP:ACTIVITY -->
