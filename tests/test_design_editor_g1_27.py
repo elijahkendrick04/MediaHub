@@ -168,7 +168,14 @@ def test_any_lever_combination_resolves_to_a_catalog_pack(ground, texture, accen
     # The renderer's catalog lookup must never silently drop the pack: every
     # resolved id is guaranteed to be in the catalog.
     p = DE.coerce_params(
-        {"pack": {"ground": ground, "texture": texture, "accent_geo": accent_geo, "density": density}}
+        {
+            "pack": {
+                "ground": ground,
+                "texture": texture,
+                "accent_geo": accent_geo,
+                "density": density,
+            }
+        }
     )
     assert SP.style_pack_from_id(p.pack_id) is not None
 
@@ -210,7 +217,14 @@ def test_coerce_text_is_capped_and_whitespace_collapsed():
 
 def test_coerce_roles_keeps_only_valid_token_roles():
     p = DE.coerce_params(
-        {"roles": {"ground": "secondary", "accent": "evil_role", "surface": "primary", "bogus": "x"}}
+        {
+            "roles": {
+                "ground": "secondary",
+                "accent": "evil_role",
+                "surface": "primary",
+                "bogus": "x",
+            }
+        }
     )
     assert p.role_assignment == {"ground": "secondary", "surface": "primary"}
 
@@ -239,14 +253,22 @@ def test_signature_is_stable_and_change_sensitive():
     assert a.signature() == b.signature()
     assert a.signature() != c.signature()
     # full vs preview are different cache entries
-    assert DE.coerce_params({"full": True}).signature() != DE.coerce_params({"full": False}).signature()
+    assert (
+        DE.coerce_params({"full": True}).signature()
+        != DE.coerce_params({"full": False}).signature()
+    )
 
 
 def test_build_brief_is_a_renderable_photoless_brief():
     p = DE.coerce_params(
         {
             "archetype": "mega_surname_bleed",
-            "pack": {"ground": "vignette", "texture": "dots", "accent_geo": "ring", "density": "standard"},
+            "pack": {
+                "ground": "vignette",
+                "texture": "dots",
+                "accent_geo": "ring",
+                "density": "standard",
+            },
             "palette": {"primary": "#0E5BFF", "secondary": "#101820", "accent": "#FFD24A"},
             "text": {"athlete_surname": "HUGHES", "result_value": "2:08.41"},
             "roles": {"ground": "secondary"},
@@ -294,7 +316,12 @@ def test_explain_flags_illegible_role_swap_via_the_compliance_gate():
     p = DE.coerce_params(
         {
             "palette": {"primary": "#101820", "secondary": "#101820", "accent": "#101820"},
-            "roles": {"ground": "accent", "surface": "accent", "headline": "accent", "accent": "accent"},
+            "roles": {
+                "ground": "accent",
+                "surface": "accent",
+                "headline": "accent",
+                "accent": "accent",
+            },
         }
     )
     e = DE.explain(p)
@@ -303,7 +330,14 @@ def test_explain_flags_illegible_role_swap_via_the_compliance_gate():
 
 def test_explain_flags_eased_pack():
     p = DE.coerce_params(
-        {"pack": {"ground": "vignette", "texture": "halftone", "accent_geo": "frame", "density": "bold"}}
+        {
+            "pack": {
+                "ground": "vignette",
+                "texture": "halftone",
+                "accent_geo": "frame",
+                "density": "bold",
+            }
+        }
     )
     e = DE.explain(p)
     assert p.pack_eased is True
@@ -384,6 +418,27 @@ def test_editor_body_embedded_json_cannot_break_out_of_script():
     assert DE._safe_json({"x": "</script><b>"}) == '{"x": "\\u003c/script>\\u003cb>"}'
 
 
+def test_studio_overlay_is_hidable_via_its_hidden_attribute():
+    """The "Rendering…" overlay is toggled by its ``hidden`` attribute, but a
+    bare ``.mh-studio-overlay { display:flex }`` author rule overrides the UA
+    ``[hidden]{display:none}`` — so ``hideOverlay()`` (which sets
+    ``overlay.hidden = true``) could never hide it and the layer stayed stuck
+    over the card ("Rendering…" never resolving to a clean preview).
+
+    The CSS must therefore carry an explicit ``.mh-studio-overlay[hidden]`` rule
+    that restores ``display:none`` so the overlay can actually be hidden.
+    """
+    import re
+
+    body = DE.render_editor_body(render_url="/r", gallery_url="/g", make_url="/m")
+    # The overlay is driven by the hidden attribute (not a class toggle)…
+    assert "data-studio-overlay" in body and "hidden>" in body
+    # …so an explicit [hidden] rule must collapse it to display:none.
+    assert re.search(r"\.mh-studio-overlay\[hidden\]\s*\{[^}]*display\s*:\s*none", body), (
+        "missing .mh-studio-overlay[hidden]{display:none} — overlay cannot be hidden"
+    )
+
+
 # =========================================================================== #
 # Tier 2 — routes, with the Playwright path stubbed
 # =========================================================================== #
@@ -440,9 +495,18 @@ def test_render_api_returns_png_and_explainability(client, stub_render):
     req = {
         "archetype": "big_number_dominant",
         "format": "feed_square",
-        "pack": {"ground": "spotlight", "texture": "grid", "accent_geo": "frame", "density": "standard"},
+        "pack": {
+            "ground": "spotlight",
+            "texture": "grid",
+            "accent_geo": "frame",
+            "density": "standard",
+        },
         "palette": {"primary": "#11332E", "secondary": "#0B1F1B", "accent": "#F2C14E"},
-        "text": {"athlete_surname": "OKAFOR", "result_value": "24.91", "achievement_label": "CLUB RECORD"},
+        "text": {
+            "athlete_surname": "OKAFOR",
+            "result_value": "24.91",
+            "achievement_label": "CLUB RECORD",
+        },
     }
     r = client.post("/api/studio/render", json=req)
     assert r.status_code == 200
@@ -463,7 +527,13 @@ def test_render_api_returns_png_and_explainability(client, stub_render):
 def test_render_api_coerces_garbage_and_still_renders(client, stub_render):
     r = client.post(
         "/api/studio/render",
-        json={"archetype": 12345, "format": "evil", "pack": "notadict", "palette": "x", "text": None},
+        json={
+            "archetype": 12345,
+            "format": "evil",
+            "pack": "notadict",
+            "palette": "x",
+            "text": None,
+        },
     )
     assert r.status_code == 200
     d = r.get_json()
@@ -482,7 +552,9 @@ def test_render_api_handles_empty_and_non_json_body(client, stub_render):
 def test_render_api_escapes_injection_in_text(client, stub_render):
     r = client.post(
         "/api/studio/render",
-        json={"text": {"athlete_surname": "<script>alert(1)</script>", "result_value": "<img src=x>"}},
+        json={
+            "text": {"athlete_surname": "<script>alert(1)</script>", "result_value": "<img src=x>"}
+        },
     )
     assert r.status_code == 200
     html = stub_render["html"]
@@ -553,9 +625,18 @@ def test_real_render_produces_a_valid_png(client):
     req = {
         "archetype": "big_number_dominant",
         "format": "feed_square",
-        "pack": {"ground": "vignette", "texture": "dots", "accent_geo": "corner_ticks", "density": "standard"},
+        "pack": {
+            "ground": "vignette",
+            "texture": "dots",
+            "accent_geo": "corner_ticks",
+            "density": "standard",
+        },
         "palette": {"primary": "#0E5BFF", "secondary": "#101820", "accent": "#FFD24A"},
-        "text": {"athlete_surname": "HUGHES", "result_value": "2:08.41", "achievement_label": "NEW PB"},
+        "text": {
+            "athlete_surname": "HUGHES",
+            "result_value": "2:08.41",
+            "achievement_label": "NEW PB",
+        },
     }
     r = client.post("/api/studio/render", json=req)
     assert r.status_code == 200
@@ -564,4 +645,69 @@ def test_real_render_produces_a_valid_png(client):
     raw = base64.b64decode(d["image"].split(",", 1)[1])
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"  # a genuine PNG
     assert len(raw) > 2000  # a real card, not a 1×1 placeholder
+
+
+@pytest.mark.skipif(not _have_playwright(), reason="Playwright/Chromium not available")
+@pytest.mark.parametrize(
+    "full, expected_size",
+    [(False, (540, 675)), (True, (1080, 1350))],
+)
+def test_studio_render_is_a_single_unmirrored_card(client, full, expected_size):
+    """The live preview (and the full-res download) must each be ONE clean,
+    correctly-oriented card — not the mirrored / vertically-doubled garble QA-004
+    reported. We render the real PNG and pin three content-independent invariants:
+
+      * exact target dimensions (preview = half native, download = native);
+      * the card is not vertically DOUBLED — its top and bottom halves differ
+        (a doubled render stacks two identical copies, so they'd match);
+      * the card carries real, asymmetric content — a non-trivial pixel spread
+        and a left/right asymmetry (a blank or mirror-symmetric blob would not).
+    """
+    import io
+    import statistics
+
+    from PIL import Image, ImageChops
+
+    req = {
+        "archetype": "big_number_dominant",
+        "format": "feed_portrait",
+        "palette": {"primary": "#101820", "secondary": "#0B1F1B", "accent": "#FFD24A"},
+        "text": {
+            "athlete_surname": "HUGHES",
+            "result_value": "2:08.41",
+            "achievement_label": "NEW PB",
+            "event_name": "200m Freestyle",
+            "club_full": "Manchester SC",
+            "meet_name": "Manchester Open",
+        },
+        "full": full,
+    }
+    r = client.post("/api/studio/render", json=req)
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["ok"] is True
+    im = Image.open(io.BytesIO(base64.b64decode(d["image"].split(",", 1)[1]))).convert("RGB")
+
+    # 1) Exactly one card at the target geometry (a double would be 2× tall, a
+    #    wrong-scale capture a different size).
+    assert im.size == expected_size
+
+    w, h = im.size
+
+    def _mean_diff(a, b):
+        data = ImageChops.difference(a, b).convert("L").get_flattened_data()
+        return sum(data) / (a.size[0] * a.size[1])
+
+    # 2) Not vertically doubled: the top and bottom halves are clearly different.
+    top = im.crop((0, 0, w, h // 2))
+    bottom = im.crop((0, h - h // 2, w, h))
+    assert _mean_diff(top, bottom) > 6.0, "top/bottom halves match — card looks vertically doubled"
+
+    # 3) Real, asymmetric content: a meaningful pixel spread (not blank) and a
+    #    left vs mirrored-right difference (a real composed card, not a symmetric
+    #    smear). Both collapse toward 0 for the blank/garbled failure mode.
+    assert statistics.pstdev(list(im.convert("L").get_flattened_data())) > 10.0
+    left = im.crop((0, 0, w // 2, h))
+    right = im.crop((w - w // 2, 0, w, h)).transpose(Image.FLIP_LEFT_RIGHT)
+    assert _mean_diff(left, right) > 3.0, "card is mirror-symmetric — not a real oriented card"
     assert d["render_ms"] >= 0

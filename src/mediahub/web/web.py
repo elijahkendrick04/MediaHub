@@ -14126,7 +14126,12 @@ def _layout(
         method: 'POST',
         credentials: 'same-origin',
         signal: ctrl.signal,
-        headers: {'Accept': 'application/json'},
+        // The JSON content-type is what keeps this same-origin write CSRF-exempt
+        // (see the app's _csrf_protect guard). Without it the POST carried no
+        // token and was silently rejected 403, so the palette was never
+        // persisted on finalise. Send an empty JSON body to match.
+        headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},
+        body: '{}',
       }).catch(function(){
         // Network error or timeout — still navigate. The next page
         // will lazily ensure the palette via BrandKit's cache.
@@ -19175,6 +19180,13 @@ def create_app() -> Flask:
   var HARD_CAP_MS = 480000;    // 8 min: slow down, keep going (big meets)
   var FAIL_GIVEUP = 8;         // consecutive transport failures before we quit
   var startedAt = Date.now(), fails = 0, stopped = false;
+  // QA-005: status polls round-robin across the 2 gunicorn workers. The worker
+  // that isn't running the pipeline has no in-memory log and falls back to the
+  // throttled DB progress_log, which lags — so a single poll's percent / step
+  // count can read LOWER than an earlier one and the bar appears to jump
+  // backwards. The client is the one consistent observer across polls, so hold
+  // a high-water mark for both: reported progress never decreases.
+  var maxPct = 0, maxSteps = 0, bestLog = [];
   var stage = document.getElementById('mh-current-stage');
   var stepEl = document.getElementById('mh-step-count');
   var logEl = document.getElementById('log');
@@ -19224,6 +19236,13 @@ def create_app() -> Flask:
     var log = (j && j.log) || [];
     var pct = (j && typeof j.percent === 'number') ? j.percent : null;
     var phase = (j && j.phase) || null;
+
+    // Clamp to the high-water mark so a lagging cross-worker poll can't rewind
+    // the bar or the step count (QA-005). Keep the longest log seen so the step
+    // count + raw log stay monotonic too.
+    if (log.length >= maxSteps) {{ maxSteps = log.length; bestLog = log; }}
+    log = bestLog;
+    if (pct != null) {{ if (pct < maxPct) {{ pct = maxPct; }} maxPct = pct; }}
 
     // Developer-only raw detail: the verbatim step log, the live step list and
     // the technical-log panel. These elements aren't rendered for customers, so
