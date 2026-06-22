@@ -15317,7 +15317,8 @@ def create_app() -> Flask:
     # Video footage is far larger than a meet export — a short phone clip easily
     # exceeds 50 MB. The footage-upload route gets a raised per-request cap, applied
     # in the CSRF guard below *before* the multipart body is parsed (parsing it is
-    # what enforces the limit). Operator-tunable via MEDIAHUB_VIDEO_UPLOAD_MB.
+    # what enforces the limit). The clip is streamed to disk, not read into RAM, so
+    # the cap bounds disk per upload. Operator-tunable via MEDIAHUB_VIDEO_UPLOAD_MB.
     try:
         _video_upload_max = max(
             50, min(1024, int(os.environ.get("MEDIAHUB_VIDEO_UPLOAD_MB", "512")))
@@ -46550,8 +46551,9 @@ voice, and queues them for one-click approval.</p>
         Footage gets a raised per-request body cap (``MEDIAHUB_VIDEO_UPLOAD_MB``,
         default 512 MB) — the app-wide 50 MB limit is for meet exports/images and
         is far too small for real video. The larger cap is applied in the CSRF
-        ``before_request`` guard before the multipart body is parsed. The bytes are
-        read into memory here, so the cap also bounds the peak memory per upload.
+        ``before_request`` guard before the multipart body is parsed. The clip is
+        streamed straight to disk (never read whole into memory), so the cap bounds
+        disk per upload, not RAM.
         """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
@@ -46561,19 +46563,19 @@ voice, and queues them for one-click approval.</p>
         profile_id = _active_profile_id()
         if not profile_id:
             return jsonify({"error": "no_active_profile"}), 400
-        from mediahub.video.ingest import ingest_footage, is_video_filename
+        from mediahub.video.ingest import ingest_footage_stream, is_video_filename
 
         filename = f.filename or "clip.webm"
         if not is_video_filename(filename):
             return jsonify(
                 {"error": "not_video", "message": "Only video files can be uploaded as footage."}
             ), 415
-        # The body is already ≤ the app's 50 MB cap here (the global 413 handler
-        # rejects anything larger before this route runs), so reading it is bounded.
-        data = f.read()
+        # Stream the upload straight to disk (Werkzeug already spooled the part to a
+        # temp file, so this is a bounded disk→disk copy) instead of reading the whole
+        # clip into memory — peak RAM stays at the copy buffer regardless of clip size.
         try:
-            asset = ingest_footage(
-                data, filename, profile_id=profile_id, uploaded_by=_active_profile_id()
+            asset = ingest_footage_stream(
+                f.stream, filename, profile_id=profile_id, uploaded_by=_active_profile_id()
             )
         except ValueError as e:
             return jsonify({"error": "bad_footage", "message": str(e)}), 400
