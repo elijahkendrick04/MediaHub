@@ -48,6 +48,16 @@ from .models import (
     table,
     text,
 )
+from .draft import default_outline, draft_prose, generate_document
+from .formats import (
+    FORMAT_BUILDERS,
+    build_agm_deck,
+    build_document,
+    build_meet_programme,
+    build_season_report,
+    build_sponsor_proposal,
+)
+from .grounding import DocFacts, facts_from_run, facts_from_runs
 from .render import render_document_html, render_document_pdf, render_section_png
 from .theme import document_style, resolve_role_vars
 
@@ -83,4 +93,19 @@ __all__ = [
     # theme
     "resolve_role_vars",
     "document_style",
+    # grounding (build 2)
+    "DocFacts",
+    "facts_from_run",
+    "facts_from_runs",
+    # formats (build 2)
+    "FORMAT_BUILDERS",
+    "build_document",
+    "build_meet_programme",
+    "build_season_report",
+    "build_sponsor_proposal",
+    "build_agm_deck",
+    # AI drafting (build 2)
+    "default_outline",
+    "draft_prose",
+    "generate_document",
 ]
