@@ -13,8 +13,16 @@ Exposes (built incrementally across the 1.18 sub-builds):
   mentions     — @mention parsing + resolution against workspace members
   revisions    — design-spec version history, diff & restore
   locks        — per-card element locks, enforced at edit time
+  share_tokens — expiring, scoped, revocable external review links
 """
 
-from . import locks, mentions, permissions, revisions, threads
+from . import locks, mentions, permissions, revisions, share_tokens, threads
 
-__all__ = ["permissions", "threads", "mentions", "revisions", "locks"]
+__all__ = [
+    "permissions",
+    "threads",
+    "mentions",
+    "revisions",
+    "locks",
+    "share_tokens",
+]

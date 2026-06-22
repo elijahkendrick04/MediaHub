@@ -5030,7 +5030,7 @@ function locksToggle(btn, cardId) {
   if (!panel) return;
   if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
   panel.style.display=''; panel.setAttribute('data-open','1');
-  panel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Locked elements &mdash; a locked element can\'t be changed by an edit or the copilot</div><div class="locks-list" style="display:flex;gap:6px;flex-wrap:wrap">Loading&hellip;</div>';
+  panel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Locked elements &mdash; a locked element cannot be changed by an edit or the copilot</div><div class="locks-list" style="display:flex;gap:6px;flex-wrap:wrap">Loading&hellip;</div>';
   locksLoad(cardId);
 }
 
@@ -5060,6 +5060,72 @@ function locksSet(cardId, element, locked) {
       if (!res.ok) { if (window.MH && MH.toast) MH.toast(res.j.reason || 'Could not change lock', 'error', 3000); return; }
       locksLoad(cardId);
     }).catch(function(){});
+}
+
+/* ---- Share for review: expiring external links (roadmap 1.18) ---- */
+function shareToggle(btn, cardId) {
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  if (panel.dataset.built !== '1') {
+    panel.dataset.built = '1';
+    panel.innerHTML =
+      '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Share this card for review (no account needed)</div>' +
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+        '<select class="sh-perm" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"><option value="view">View only</option><option value="comment">Can comment</option></select>' +
+        '<label style="font-size:11px;color:var(--ink-muted)">expires in <input class="sh-ttl" type="number" min="1" max="90" value="7" style="width:56px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"/> days</label>' +
+        '<button class="btn sh-create" style="font-size:11px;padding:4px 12px;background:var(--lane);color:var(--lane-ink);border:none" onclick=' + _attrEsc('shareCreate(this, ' + JSON.stringify(cardId) + ')') + '>Create link</button>' +
+      '</div>' +
+      '<div class="sh-list" style="font-size:12px"></div>' +
+      '<div class="sh-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>';
+  }
+  shareLoad(cardId);
+}
+
+function shareLoad(cardId) {
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var realCard = panel.dataset.realCard || '';
+  fetch(panel.dataset.sharesUrl).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+    var list = panel.querySelector('.sh-list'); list.textContent='';
+    if (!res.ok) { list.textContent = res.j.reason || 'Only an owner can manage share links.'; return; }
+    var mine = (res.j.shares||[]).filter(function(s){ return s.card_id === realCard; });
+    if (!mine.length) { list.textContent = 'No active links for this card.'; return; }
+    mine.forEach(function(s){
+      var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);flex-wrap:wrap';
+      var inp=document.createElement('input'); inp.type='text'; inp.readOnly=true; inp.value=s.url;
+      inp.style.cssText='flex:1;min-width:160px;font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit';
+      inp.onclick=function(){ inp.select(); };
+      var tag=document.createElement('span'); tag.style.cssText='font-size:11px;color:var(--ink-muted)'; tag.textContent = (s.perm==='comment'?'can comment':'view only');
+      var rev=document.createElement('a'); rev.href='#'; rev.style.cssText='font-size:11px;color:var(--bad)'; rev.textContent='Revoke';
+      rev.onclick=function(ev){ ev.preventDefault(); shareRevoke(cardId, s.token); };
+      row.appendChild(inp); row.appendChild(tag); row.appendChild(rev); list.appendChild(row);
+    });
+  }).catch(function(){});
+}
+
+function shareCreate(btn, cardId) {
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var perm = panel.querySelector('.sh-perm').value;
+  var ttl = parseInt(panel.querySelector('.sh-ttl').value, 10) || 7;
+  var status = panel.querySelector('.sh-status');
+  btn.disabled=true; status.textContent='Creating…';
+  fetch(panel.dataset.sharesUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({card_id: panel.dataset.realCard||'', perm: perm, ttl_days: ttl})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+      btn.disabled=false;
+      if (!res.ok) { status.textContent = res.j.reason || res.j.detail || 'Could not create link'; return; }
+      status.textContent=''; shareLoad(cardId);
+    }).catch(function(){ btn.disabled=false; status.textContent='Network error'; });
+}
+
+function shareRevoke(cardId, token) {
+  if (!confirm('Revoke this link? Anyone holding it loses access immediately.')) return;
+  var panel = document.querySelector('.share-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.sharesUrl + '/' + encodeURIComponent(token) + '/revoke', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){return r.json();}).then(function(){ shareLoad(cardId); }).catch(function(){});
 }
 </script>
 """
@@ -5099,6 +5165,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _comments_url = url_for("api_collab_comments", run_id=run_id)
     _revisions_url = url_for("api_card_revisions", run_id=run_id, card_id=card_id_raw)
     _locks_url = url_for("api_card_locks", run_id=run_id, card_id=card_id_raw)
+    _shares_url = url_for("api_run_shares", run_id=run_id)
 
     _STD_TONES = [
         (
@@ -5190,6 +5257,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -5215,6 +5283,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="comments-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-comments-url="{_h(_comments_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="history-panel" data-card="{card_uuid}" data-revisions-url="{_h(_revisions_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="locks-panel" data-card="{card_uuid}" data-locks-url="{_h(_locks_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="share-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-shares-url="{_h(_shares_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
 
@@ -47410,6 +47479,261 @@ voice, and queues them for one-click approval.</p>
         except _locks.LockError as e:
             return jsonify({"error": "bad_request", "detail": str(e)}), 400
         return jsonify({"ok": True, "locked": sorted(_locks.locked_elements(run_id, card_id))})
+
+    # =====================================================================
+    # Share for review — expiring, scoped, revocable external links (1.18)
+    # ---------------------------------------------------------------------
+    # Owners mint a link that opens one run/card read-only (or with comment)
+    # for someone WITHOUT an account — a parent confirming a name. Isolation
+    # (ADR-0003) and consent (W.2) are enforced at resolve time; links expire
+    # and can be revoked from the review page.
+    # =====================================================================
+
+    @app.route("/api/runs/<run_id>/shares", methods=["GET", "POST"])
+    def api_run_shares(run_id: str):
+        """List (GET) or mint (POST) review-share links for a run. Owner-only —
+        a share exposes club data outside the workspace."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        denied = _role_denied_json(_perms.CAP_MANAGE, run_id, run_data)
+        if denied:
+            return denied
+        from mediahub.collab import share_tokens as _shares
+
+        if request.method == "GET":
+            rows = _shares.list_for_run(run_id)
+            return jsonify(
+                {
+                    "ok": True,
+                    "shares": [
+                        {**s.to_public_dict(), "url": url_for("share_review_page", token=s.token)}
+                        for s in rows
+                    ],
+                }
+            )
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            share = _shares.create_share(
+                run_id,
+                card_id=(payload.get("card_id") or "").strip(),
+                perm=(payload.get("perm") or "view"),
+                created_by=_auth.current_user_email() or "",
+                ttl_days=payload.get("ttl_days", _shares.DEFAULT_TTL_DAYS),
+            )
+        except _shares.ShareTokenError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "share": {
+                    **share.to_public_dict(),
+                    "url": url_for("share_review_page", token=share.token, _external=True),
+                },
+            }
+        ), 201
+
+    @app.route("/api/runs/<run_id>/shares/<token>/revoke", methods=["POST"])
+    def api_run_share_revoke(run_id: str, token: str):
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        denied = _role_denied_json(_perms.CAP_MANAGE, run_id, run_data)
+        if denied:
+            return denied
+        from mediahub.collab import share_tokens as _shares
+
+        ok = _shares.revoke(token, run_id=run_id)
+        return jsonify({"ok": True, "revoked": ok})
+
+    def _share_visible_cards(share) -> list[dict]:
+        """The cards a share exposes: consent- and tenant-gated, rendered only.
+
+        A card-scoped share shows just its card; a run-scoped share shows every
+        card of the run that has a rendered, consent-cleared image."""
+        from mediahub.web import public_wall as _pw
+
+        run_data = _load_run(share.run_id) or {}
+        owner = _run_owner_id(share.run_id, run_data) or run_data.get("profile_id", "")
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        wanted = []
+        if share.card_id:
+            wanted = [share.card_id]
+        else:
+            for ra in ranked:
+                ach = ra.get("achievement") or {}
+                cid = ach.get("swim_id") or ra.get("id")
+                if cid:
+                    wanted.append(str(cid))
+        out: list[dict] = []
+        ach_by_id = {}
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if cid:
+                ach_by_id[str(cid)] = ach
+        for cid in wanted:
+            png = _pw.rendered_card_png(owner, share.run_id, cid)
+            if not png:
+                continue  # unrendered or consent-blocked → never exposed
+            ach = ach_by_id.get(str(cid), {})
+            out.append(
+                {
+                    "card_id": cid,
+                    "headline": str(ach.get("headline") or ach.get("post_angle") or "").strip(),
+                    "event": str(ach.get("event") or "").strip(),
+                }
+            )
+        return out
+
+    @app.route("/share/<token>")
+    def share_review_page(token: str):
+        """Public, no-account review page for a scoped share link."""
+        from mediahub.collab import share_tokens as _shares
+        from mediahub.collab import threads as _threads
+
+        share = _shares.resolve(token)
+        if share is None:
+            return _layout(
+                "Link unavailable",
+                "<h1>This review link is no longer available</h1>"
+                '<p class="lede">It may have expired or been turned off by the club. '
+                "Ask them for a fresh link.</p>",
+                active="",
+            ), 404
+        run_data = _load_run(share.run_id) or {}
+        meet = _h((run_data.get("meet") or {}).get("name") or run_data.get("meet_name") or "Meet")
+        cards = _share_visible_cards(share)
+        can_comment = share.perm == _shares.PERM_COMMENT
+
+        blocks = ""
+        for c in cards:
+            cid = c["card_id"]
+            img = url_for("share_card_png", token=token, card_id=cid)
+            comments = _threads.list_for_card(share.run_id, cid, include_resolved=True)
+            cm_html = ""
+            for cm in comments:
+                who = _h(cm.author_name or cm.author_email or "Reviewer")
+                cm_html += (
+                    '<div style="padding:6px 0;border-top:1px solid var(--border);font-size:13px">'
+                    f"<strong>{who}</strong>: {_h(cm.body)}</div>"
+                )
+            form_html = ""
+            if can_comment:
+                form_html = (
+                    f'<form method="post" action="{url_for("share_add_comment", token=token)}" '
+                    'style="margin-top:8px;display:flex;flex-direction:column;gap:6px">'
+                    f'<input type="hidden" name="card_id" value="{_h(cid)}"/>'
+                    '<input type="text" name="name" placeholder="Your name (optional)" '
+                    'style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;'
+                    'background:rgba(255,255,255,0.04);color:inherit"/>'
+                    '<textarea name="body" required rows="2" placeholder="Add a comment — '
+                    'e.g. confirm the name is spelled right" '
+                    'style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;'
+                    'background:rgba(255,255,255,0.04);color:inherit"></textarea>'
+                    '<button type="submit" class="btn" style="align-self:flex-start">'
+                    "Send comment</button></form>"
+                )
+            blocks += (
+                '<div class="card" style="margin-bottom:18px;padding:16px">'
+                f'<img src="{img}" alt="{_h(c["headline"] or "Card")}" '
+                'style="max-width:100%;border-radius:8px;display:block;margin-bottom:10px"/>'
+                + (
+                    f'<div style="font-weight:700;margin-bottom:4px">{_h(c["headline"])}</div>'
+                    if c["headline"]
+                    else ""
+                )
+                + (
+                    f'<div style="font-size:13px;color:var(--ink-muted)">{_h(c["event"])}</div>'
+                    if c["event"]
+                    else ""
+                )
+                + (f'<div style="margin-top:10px">{cm_html}</div>' if cm_html else "")
+                + form_html
+                + "</div>"
+            )
+        if not blocks:
+            blocks = '<p class="lede">There are no cards to review on this link yet.</p>'
+        intro = (
+            f"<h1>{meet} — for review</h1>"
+            '<p class="lede">A club has shared this content for your review'
+            + (" — you can leave a comment below." if can_comment else " (view only).")
+            + "</p>"
+        )
+        return _layout(f"{meet} — review", intro + blocks, active="")
+
+    @app.route("/share/<token>/card/<card_id>.png")
+    def share_card_png(token: str, card_id: str):
+        from flask import send_file
+
+        from mediahub.collab import share_tokens as _shares
+        from mediahub.web import public_wall as _pw
+
+        share = _shares.resolve(token)
+        if share is None:
+            abort(404)
+        # A card-scoped share only serves its own card.
+        if share.card_id and str(card_id) != str(share.card_id):
+            abort(404)
+        run_data = _load_run(share.run_id) or {}
+        owner = _run_owner_id(share.run_id, run_data) or run_data.get("profile_id", "")
+        path = _pw.rendered_card_png(owner, share.run_id, card_id)
+        if not path:
+            abort(404)
+        resp = make_response(send_file(path, mimetype="image/png"))
+        resp.headers["Cache-Control"] = "private, max-age=300"
+        return resp
+
+    @app.route("/share/<token>/comment", methods=["POST"])
+    def share_add_comment(token: str):
+        from mediahub.collab import share_tokens as _shares
+        from mediahub.collab import threads as _threads
+
+        share = _shares.resolve(token)
+        if share is None or share.perm != _shares.PERM_COMMENT:
+            abort(404)
+        if _auth_rate_limited("share_comment"):
+            return _layout(
+                "Slow down",
+                "<h1>Too many comments</h1><p>Please wait a moment and try again.</p>",
+                active="",
+            ), 429
+        card_id = (request.form.get("card_id") or share.card_id or "").strip()
+        body = (request.form.get("body") or "").strip()
+        name = (request.form.get("name") or "").strip()[:120]
+        # Only allow commenting on a card the share actually exposes.
+        visible = {c["card_id"] for c in _share_visible_cards(share)}
+        if card_id not in visible:
+            abort(404)
+        try:
+            _threads.add_comment(
+                share.run_id,
+                card_id,
+                body,
+                author_name=name or "External reviewer",
+                kind="comment",
+            )
+        except _threads.ThreadError:
+            return redirect(url_for("share_review_page", token=token))
+        # Tell the club an external comment arrived (org-wide inbox).
+        try:
+            from mediahub.notify import inbox as _inbox
+
+            owner = _run_owner_id(share.run_id, run_data=_load_run(share.run_id)) or ""
+            if owner:
+                _inbox.record(
+                    owner,
+                    _inbox.KIND_INFO,
+                    "New review comment",
+                    f"{name or 'An external reviewer'} commented on a shared card.",
+                    run_id=share.run_id,
+                    click_url=url_for("review", run_id=share.run_id),
+                )
+        except Exception:
+            pass
+        return redirect(url_for("share_review_page", token=token))
 
     # =====================================================================
     # Video suite (roadmap 1.6) — the footage path
