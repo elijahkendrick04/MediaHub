@@ -140,7 +140,9 @@ class PreflightReport:
             return "Ready for the printer — no issues found."
         bits = []
         if self.errors:
-            bits.append(f"{len(self.errors)} blocking issue" + ("s" if len(self.errors) != 1 else ""))
+            bits.append(
+                f"{len(self.errors)} blocking issue" + ("s" if len(self.errors) != 1 else "")
+            )
         if self.warnings:
             bits.append(f"{len(self.warnings)} warning" + ("s" if len(self.warnings) != 1 else ""))
         if not bits and self.infos:
