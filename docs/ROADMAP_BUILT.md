@@ -188,6 +188,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later *(completed 2026-06-22)*
 - ✅ **1.18** · Phase 1 (Product) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens *(completed 2026-06-22)*
 - ✅ **1.19** · Phase 1 (Product) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities *(completed 2026-06-22)*
+- ✅ **1.20** · Phase 1 (Product) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later *(completed 2026-06-22)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
