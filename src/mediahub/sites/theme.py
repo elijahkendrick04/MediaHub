@@ -186,6 +186,22 @@ p{margin:0 0 1rem}
 .qr-block{display:inline-block;text-align:center}
 .qr-block svg,.qr-block img{width:200px;height:200px;background:#fff;border-radius:12px;padding:10px}
 .qr-block .cap{display:block;color:var(--site-muted);font-size:.85rem;margin-top:.5rem}
+/* embedded forms (forms.render) */
+.site-form-wrap{max-width:560px}
+.site-form .form-row{margin:0 0 16px}
+.site-form label{display:block;font-weight:600;margin-bottom:6px}
+.site-form .req{color:var(--site-accent)}
+.site-form input,.site-form textarea,.site-form select{width:100%;padding:11px 13px;border-radius:10px;
+  border:1px solid var(--site-line);background:var(--site-bg);color:var(--site-ink);font:inherit}
+.site-form input:focus,.site-form textarea:focus,.site-form select:focus{outline:2px solid var(--site-accent);border-color:transparent}
+.site-form .form-check label{display:flex;gap:10px;align-items:flex-start;font-weight:500}
+.site-form .form-check input{width:auto;margin-top:3px}
+.site-form .form-help{display:block;color:var(--site-muted);font-size:.82rem;margin-top:4px}
+.site-form .form-err{display:block;color:#ff8b8b;font-size:.82rem;margin-top:4px;min-height:1px}
+.site-form .form-minor-note{color:var(--site-muted);font-size:.85rem;border-left:3px solid var(--site-accent);padding-left:10px}
+.site-form .form-status{margin-top:12px;font-weight:600;min-height:1px}
+.site-form .form-success{color:#7bd88f}
+.site-form .form-error{color:#ff8b8b}
 /* generic blocks reused from documents (table/list/kpi/quote) re-skinned */
 .doc-table{width:100%;border-collapse:collapse;margin:.4em 0 1em;font-size:.95em}
 .doc-table th{background:var(--site-brand);color:var(--site-brand-ink);text-align:left;padding:9px 12px}
