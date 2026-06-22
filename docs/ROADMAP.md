@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `32a591bf4` · Merge pull request #1001: Fix studio preview / run progress / org finalise UI bugs (QA sweep 2026-06
+**Last updated:** 2026-06-23 · `365b5749b` · Merge pull request #1000: Print & merch pipeline (roadmap 1.20)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.20** · Phase 1 (Product) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
 - **1.21** · Phase 1 (Product) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
 - **1.22** · Phase 1 (Product) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
 - **1.23** · Phase 1 (Product) — AI governance: per-org/per-feature quota ledger on `observability/`, generative moderation, provenance manifests on AI media, role-based feature permissions · ❌ **NOT STARTED**
@@ -1208,16 +1207,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `94928f692` | Drop the unused Optional import in fulfilment.py (ruff hygiene hook) |
+| 2026-06-22 | `cf96bebe6` | Mark roadmap 1.20 done — print & merch pipeline |
+| 2026-06-22 | `ed470fd5d` | Wire print/merch into the web app + merch mockups + fulfilment slot (1.20, build D) |
+| 2026-06-22 | `e91f5fe3b` | Add print-ready export: PDF/X + the orchestrator (roadmap 1.20, build C) |
+| 2026-06-22 | `b8b36c037` | Add the deterministic print auto-proofer (roadmap 1.20, build B) |
 | 2026-06-22 | `ef02899e1` | Fix three studio/run/finalise UI bugs (QA sweep 2026-06-22, batch 2) |
+| 2026-06-22 | `20b07c17c` | Build the print/merch product foundation (roadmap 1.20, build A) |
 | 2026-06-22 | `70229376b` | Mark roadmap 1.19 done — export & conversion engine |
 | 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
 | 2026-06-22 | `1d9efb75d` | Apply pinned ruff-format (v0.8.4) to the 1.19 source files (CI hygiene) |
 | 2026-06-22 | `3387f98c7` | Check run access before params on the export ZIP route; record 1.19 as shipped |
 | 2026-06-22 | `1169c18b3` | Wire the export engine into the web app (roadmap 1.19, build C) |
-| 2026-06-22 | `b6cd78b03` | Add quick-actions toolbox + bulk export jobs (roadmap 1.19, build B) |
-| 2026-06-22 | `8e2bdd6a3` | Ignore the export_engine content cache (DATA_DIR fallback dirs) |
-| 2026-06-22 | `1383533fe` | Build the export_engine foundation (roadmap 1.19, build A) |
-| 2026-06-22 | `e4559f0f3` | Collections, Team Context & assistant-in-threads (roadmap 1.18, build 5/5) |
-| 2026-06-22 | `935151445` | Fix three HY-TEK interpreter parser bugs (QA sweep 2026-06-22) |
-| 2026-06-22 | `a9223368c` | Expiring share links + public review surface (roadmap 1.18, build 4/5) |
 <!-- /ROADMAP:ACTIVITY -->
