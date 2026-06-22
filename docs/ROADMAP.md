@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `f68f77053` · Merge pull request #992: Email & newsletter composer (roadmap 1.17)
+**Last updated:** 2026-06-22 · `a4c96b137` · Merge pull request #995: Fix three HY-TEK interpreter parser bugs (QA sweep 2026-06-22)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1210,6 +1210,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `935151445` | Fix three HY-TEK interpreter parser bugs (QA sweep 2026-06-22) |
 | 2026-06-22 | `dd86b186c` | 1.17: ruff-format the email_design package + newsletter web routes (hygiene) |
 | 2026-06-22 | `43f1298ea` | 1.17: extend run-route isolation invariants for the newsletter card route; keep hex budget |
 | 2026-06-22 | `0993383a2` | docs: mark roadmap 1.17 (email & newsletter composer) shipped |
@@ -1221,5 +1222,4 @@ list and the auto table below, not here.
 | 2026-06-22 | `262856db9` | sites/web: build 4 — microsite web surface + ship (roadmap 1.16) |
 | 2026-06-22 | `248d82958` | sites: build 3 — widgets, brand-safe QR, SEO & insights (roadmap 1.16) |
 | 2026-06-22 | `85dfb2239` | forms: build 2 — public forms → data-hub rows (roadmap 1.16) |
-| 2026-06-22 | `996b7b0fc` | sites: build 1 — microsite core engine (roadmap 1.16) |
 <!-- /ROADMAP:ACTIVITY -->
