@@ -98,7 +98,9 @@ def video_crop(src: Path, out: Path, *, x: int, y: int, width: int, height: int)
     return vops.crop(Path(src), Path(out), x=x, y=y, width=width, height=height)
 
 
-def video_resize(src: Path, out: Path, *, width: int = 0, height: int = 0, keep_aspect: bool = True) -> Path:
+def video_resize(
+    src: Path, out: Path, *, width: int = 0, height: int = 0, keep_aspect: bool = True
+) -> Path:
     from mediahub.video import ops as vops
 
     return vops.resize(Path(src), Path(out), width=width, height=height, keep_aspect=keep_aspect)

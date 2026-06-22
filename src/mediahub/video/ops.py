@@ -30,11 +30,16 @@ from mediahub.visual.reel_ffmpeg import ffmpeg_exe
 
 # A consistent, web-friendly H.264 video encode tail for every re-encoding op.
 _VENC: list[str] = [
-    "-c:v", "libx264",
-    "-crf", "18",
-    "-preset", "veryfast",
-    "-pix_fmt", "yuv420p",
-    "-movflags", "faststart",
+    "-c:v",
+    "libx264",
+    "-crf",
+    "18",
+    "-preset",
+    "veryfast",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "faststart",
 ]
 
 
@@ -47,7 +52,9 @@ class VideoOpError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-def trim_args(src: Path, out: Path, *, start: float = 0.0, end: Optional[float] = None) -> list[str]:
+def trim_args(
+    src: Path, out: Path, *, start: float = 0.0, end: Optional[float] = None
+) -> list[str]:
     """FFmpeg args to cut ``[start, end)`` from ``src`` (frame-accurate re-encode)."""
     s = max(0.0, float(start))
     args = ["-ss", f"{s:.3f}", "-i", str(src)]
@@ -161,7 +168,9 @@ def crop(src: Path, out: Path, *, x: int, y: int, width: int, height: int) -> Pa
     return Path(out)
 
 
-def resize(src: Path, out: Path, *, width: int = 0, height: int = 0, keep_aspect: bool = True) -> Path:
+def resize(
+    src: Path, out: Path, *, width: int = 0, height: int = 0, keep_aspect: bool = True
+) -> Path:
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     _run(resize_args(Path(src), Path(out), width=width, height=height, keep_aspect=keep_aspect))
     return Path(out)

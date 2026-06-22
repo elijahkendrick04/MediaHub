@@ -107,7 +107,9 @@ def _dispatch(src: Path, key: str, scat: str, out: Path, opts: ExportOptions) ->
             _transcode.video_to_gif(src, out, scale=opts.scale)
             return "video→gif"
         if key == "webm":
-            _transcode.to_webm(src, out, quality=opts.quality, scale=opts.scale, transparent=opts.transparent)
+            _transcode.to_webm(
+                src, out, quality=opts.quality, scale=opts.scale, transparent=opts.transparent
+            )
             return "video→webm"
         if key == "mp4":
             _transcode.to_mp4(src, out, quality=opts.quality, scale=opts.scale)

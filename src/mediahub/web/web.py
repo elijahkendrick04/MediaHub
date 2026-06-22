@@ -47192,7 +47192,8 @@ voice, and queues them for one-click approval.</p>
             elif action == "resize" and cat == "image":
                 out = _out(src.suffix or ".png")
                 qa.resize_image(
-                    src, out,
+                    src,
+                    out,
                     width=int(body.get("width", 0) or 0),
                     height=int(body.get("height", 0) or 0),
                     scale=float(body.get("scale", 0) or 0),
@@ -47200,13 +47201,21 @@ voice, and queues them for one-click approval.</p>
             elif action == "crop" and cat == "image":
                 out = _out(src.suffix or ".png")
                 qa.crop_image(
-                    src, out,
-                    x=float(body.get("x", 0) or 0), y=float(body.get("y", 0) or 0),
-                    w=float(body.get("w", 1) or 1), h=float(body.get("h", 1) or 1),
+                    src,
+                    out,
+                    x=float(body.get("x", 0) or 0),
+                    y=float(body.get("y", 0) or 0),
+                    w=float(body.get("w", 1) or 1),
+                    h=float(body.get("h", 1) or 1),
                 )
             elif action == "to_gif" and cat == "video":
                 out = _out(".gif")
-                qa.video_to_gif(src, out, fps=int(body.get("fps", 12) or 12), width=int(body.get("width", 480) or 480))
+                qa.video_to_gif(
+                    src,
+                    out,
+                    fps=int(body.get("fps", 12) or 12),
+                    width=int(body.get("width", 480) or 480),
+                )
             elif action in ("to_mp4", "to_webm") and cat == "gif":
                 fmt = "mp4" if action == "to_mp4" else "webm"
                 out = _out(f".{fmt}")
@@ -47222,9 +47231,16 @@ voice, and queues them for one-click approval.</p>
                 qa.video_mute(src, out)
             elif action == "speed" and cat == "video":
                 out = _out(".mp4")
-                qa.video_speed(src, out, factor=float(body.get("factor", 1.0) or 1.0), mute=bool(body.get("mute", False)))
+                qa.video_speed(
+                    src,
+                    out,
+                    factor=float(body.get("factor", 1.0) or 1.0),
+                    mute=bool(body.get("mute", False)),
+                )
             else:
-                return jsonify({"error": "bad_action", "message": f"'{action}' not valid for a {cat} asset"}), 400
+                return jsonify(
+                    {"error": "bad_action", "message": f"'{action}' not valid for a {cat} asset"}
+                ), 400
         except (ee.ExportUnavailable,) as exc:
             return jsonify({"error": "engine_unavailable", "message": str(exc)}), 503
         except Exception as exc:  # noqa: BLE001 - any op failure is a clean 4xx/5xx
@@ -47266,7 +47282,12 @@ voice, and queues them for one-click approval.</p>
 
         items = _bulk_items_for_run(run_id)
         if not items:
-            return jsonify({"error": "no_visuals", "message": "No graphics have been rendered for this run yet."}), 404
+            return jsonify(
+                {
+                    "error": "no_visuals",
+                    "message": "No graphics have been rendered for this run yet.",
+                }
+            ), 404
 
         meet = (run_data or {}).get("meet") or {}
         label = meet.get("name") or run_id
@@ -47318,7 +47339,13 @@ voice, and queues them for one-click approval.</p>
 
         threading.Thread(target=_worker, name=f"bulkexp-{job_id[:8]}", daemon=True).start()
         return (
-            jsonify({"ok": True, "job_id": job_id, "poll_url": url_for("api_export_job_status", job_id=job_id)}),
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_export_job_status", job_id=job_id),
+                }
+            ),
             202,
         )
 
@@ -47332,7 +47359,9 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "job_not_found"}), 404
         status = job.get("status", "running")
         error = job.get("error") or None
-        if status == "running" and (time.time() - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S):
+        if status == "running" and (
+            time.time() - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S
+        ):
             status = "error"
             error = "job_lost: the export worker restarted mid-job — try again"
         return jsonify(
@@ -47404,7 +47433,9 @@ voice, and queues them for one-click approval.</p>
         except Exception as exc:  # noqa: BLE001
             return jsonify({"error": "share_failed", "message": str(exc)}), 500
         url = url_for("api_run_bulk_export_file", run_id=run_id, job=job_id, token=share.token)
-        return jsonify({"ok": True, "token": share.token, "url": url, "expires_at": share.expires_at})
+        return jsonify(
+            {"ok": True, "token": share.token, "url": url, "expires_at": share.expires_at}
+        )
 
     @app.route("/export")
     def export_center_page():
@@ -47435,7 +47466,7 @@ voice, and queues them for one-click approval.</p>
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Export &amp; convert</span>'
-            "<h1>Export <em class=\"editorial\">anything</em>, your way.</h1>"
+            '<h1>Export <em class="editorial">anything</em>, your way.</h1>'
             '<p class="lede">Every card, reel, document and photo can leave MediaHub in the '
             "format you need — with quality, size and transparency options. Open a meet's "
             "review page to bulk-export its content pack.</p>"
@@ -47456,7 +47487,9 @@ voice, and queues them for one-click approval.</p>
 
         meet = (run_data or {}).get("meet") or {}
         title = _h(meet.get("name") or run_id)
-        img_fmts = [f for f in ee.formats_for_category("image") if f.key in ("png", "jpg", "webp", "avif")]
+        img_fmts = [
+            f for f in ee.formats_for_category("image") if f.key in ("png", "jpg", "webp", "avif")
+        ]
         boxes = "".join(
             f'<label class="mh-check"><input type="checkbox" name="fmt" value="{f.key}"'
             f'{" checked" if f.key == "jpg" else ""}> {_h(f.label)}</label>'

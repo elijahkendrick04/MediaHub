@@ -169,12 +169,16 @@ def run_bulk_export(
             errors: list[dict] = []
             for fmt in formats:
                 ext = get_format(fmt).suffix
-                arc = f"{label}/{name}/{name}{ext}" if len(formats) == 1 else f"{label}/{name}/{fmt}{ext}"
+                arc = (
+                    f"{label}/{name}/{name}{ext}"
+                    if len(formats) == 1
+                    else f"{label}/{name}/{fmt}{ext}"
+                )
                 try:
                     res = convert_file(item.source, fmt, options=opts)
                     data = res.path.read_bytes()
                     zf.writestr(arc, data)
-                    files.append({"format": fmt, "path": arc[len(label) + 1:], "bytes": len(data)})
+                    files.append({"format": fmt, "path": arc[len(label) + 1 :], "bytes": len(data)})
                     file_count += 1
                     total_bytes += len(data)
                 except Exception as exc:  # noqa: BLE001 - record and continue

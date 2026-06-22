@@ -106,11 +106,23 @@ def gif_to_video_args(src: Path, out: Path, *, crf: int = 23, fmt: str = "mp4") 
     if fmt == "webm":
         codec = ["-c:v", "libvpx-vp9", "-crf", str(int(crf)), "-b:v", "0", "-pix_fmt", "yuv420p"]
     else:
-        codec = ["-c:v", "libx264", "-crf", str(int(crf)), "-preset", "medium", "-pix_fmt", "yuv420p"]
+        codec = [
+            "-c:v",
+            "libx264",
+            "-crf",
+            str(int(crf)),
+            "-preset",
+            "medium",
+            "-pix_fmt",
+            "yuv420p",
+        ]
     return [
-        "-i", str(src),
-        "-movflags", "faststart",
-        "-vf", even,
+        "-i",
+        str(src),
+        "-movflags",
+        "faststart",
+        "-vf",
+        even,
         *codec,
         str(out),
     ]
@@ -135,10 +147,14 @@ def webm_args(
     if vf:
         args += ["-vf", vf]
     args += [
-        "-c:v", "libvpx-vp9",
-        "-crf", str(int(crf)),
-        "-b:v", "0",
-        "-pix_fmt", pix,
+        "-c:v",
+        "libvpx-vp9",
+        "-crf",
+        str(int(crf)),
+        "-b:v",
+        "0",
+        "-pix_fmt",
+        pix,
     ]
     if transparent:
         args += ["-auto-alt-ref", "0"]
@@ -150,15 +166,24 @@ def mp4_args(src: Path, out: Path, *, crf: int = 23, scale: float = 1.0) -> list
     """FFmpeg args to (re-)transcode a video to a web-friendly H.264 MP4."""
     vf = _even_scale(scale) or "scale=trunc(iw/2)*2:trunc(ih/2)*2"
     return [
-        "-i", str(src),
-        "-vf", vf,
-        "-c:v", "libx264",
-        "-crf", str(int(crf)),
-        "-preset", "medium",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "faststart",
-        "-c:a", "aac",
-        "-b:a", "160k",
+        "-i",
+        str(src),
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-crf",
+        str(int(crf)),
+        "-preset",
+        "medium",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
         str(out),
     ]
 
@@ -198,7 +223,9 @@ def video_to_gif(
     Size is ``width`` px (height auto) when given, else ``scale`` × source.
     """
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    _run(gif_args(Path(src), Path(out), fps=fps, width=width, scale=scale, loop=loop, dither=dither))
+    _run(
+        gif_args(Path(src), Path(out), fps=fps, width=width, scale=scale, loop=loop, dither=dither)
+    )
     return Path(out)
 
 
@@ -206,7 +233,11 @@ def gif_to_video(src: Path, out: Path, *, fmt: str = "mp4", quality: int = 80) -
     """Turn a GIF into an MP4 (``fmt="mp4"``) or WebM (``fmt="webm"``)."""
     best, worst = (18, 28) if fmt != "webm" else (24, 40)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    _run(gif_to_video_args(Path(src), Path(out), crf=crf_for_quality(quality, best=best, worst=worst), fmt=fmt))
+    _run(
+        gif_to_video_args(
+            Path(src), Path(out), crf=crf_for_quality(quality, best=best, worst=worst), fmt=fmt
+        )
+    )
     return Path(out)
 
 
