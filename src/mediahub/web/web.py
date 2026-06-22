@@ -34,7 +34,9 @@ import mimetypes
 import os
 import queue
 import re
+import secrets
 import sqlite3
+import tempfile
 import threading
 import time
 import uuid
@@ -136,6 +138,11 @@ _club_platform_ok = all(
 # Roadmap 1.11 — Charts & insights. Pure-Python SVG (no Playwright/Node needed),
 # so the surface is available whenever the package imports.
 _charts_ok = _importlib_util.find_spec("mediahub.charts") is not None
+
+# Roadmap 1.15 — Document engine (programmes / reports / proposals / AGM decks,
+# presenter surface, PPTX/DOCX round-trip, PDF utilities). Spec-only check keeps
+# module import light; PDF/video rendering honest-errors at call time if absent.
+_documents_ok = _importlib_util.find_spec("mediahub.documents") is not None
 
 _brand_ok = all(
     _importlib_util.find_spec(_m) is not None
@@ -15064,7 +15071,7 @@ def _home_signed_in_quick_actions_html() -> str:
                 '<polyline points="21 15 16 10 5 21"/>'
             ),
             "Media library",
-            "Your athlete and team photography, ready to drop into cards, " "spotlights and reels.",
+            "Your athlete and team photography, ready to drop into cards, spotlights and reels.",
             "Open library",
         )
         + _tile(
@@ -15105,6 +15112,190 @@ def _home_signed_in_quick_actions_html() -> str:
         + f'<div class="mh-template-grid mh-reveal-group">{tiles}</div>'
         + "</section>"
     )
+
+
+# ---------------------------------------------------------------------------
+# Document engine (roadmap 1.15) — client templates. Plain (non-f) strings with
+# __TOKEN__ placeholders filled by .replace() at request time, so JS/CSS braces
+# stay literal and interpolated values are escaped at the call site.
+# ---------------------------------------------------------------------------
+
+_DOCUMENTS_HOME_JS = r"""
+<script>
+async function genDoc(fmt, scope, runId){
+  if(fmt==='meet_programme' && !runId){ alert('Pick a meet first.'); return; }
+  const withAi = confirm('Write the wording with AI?\n\nOK = AI draft · Cancel = build from data only');
+  const j = await _gen(fmt, scope, runId, withAi);
+  if(j.ok){ location.href=j.url; return; }
+  if(j.error==='no_ai'){
+    if(confirm('No AI provider is configured. Build it from your data (no AI wording)?')){
+      const j2 = await _gen(fmt, scope, runId, false);
+      if(j2.ok){ location.href=j2.url; return; }
+      alert(j2.message||j2.error||'Could not generate.');
+    }
+    return;
+  }
+  alert(j.message||j.error||'Could not generate.');
+}
+async function _gen(fmt, scope, runId, withAi){
+  const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({format:fmt, scope:scope, run_id:runId||'', with_ai:withAi})});
+  return r.json();
+}
+async function importDoc(){
+  const f=document.getElementById('imp-file').files[0];
+  if(!f){ alert('Choose a file.'); return; }
+  const fd=new FormData(); fd.append('file', f);
+  const r=await fetch('__IMPORT_URL__', {method:'POST', body:fd}); const j=await r.json();
+  if(j.ok){ location.href=j.url; } else { alert(j.detail||j.error||'Import failed.'); }
+}
+async function mergePdfs(){
+  const fs=document.getElementById('merge-files').files;
+  if(fs.length<2){ alert('Choose at least two PDFs.'); return; }
+  const fd=new FormData(); for(const f of fs) fd.append('files', f);
+  await _download('__MERGE_URL__', fd, 'merged.pdf');
+}
+async function imagesToPdf(){
+  const fs=document.getElementById('img-files').files;
+  if(!fs.length){ alert('Choose images.'); return; }
+  const fd=new FormData(); for(const f of fs) fd.append('files', f);
+  await _download('__IMG_URL__', fd, 'images.pdf');
+}
+async function _download(url, fd, name){
+  const r=await fetch(url,{method:'POST',body:fd});
+  if(!r.ok){ const j=await r.json().catch(()=>({})); alert(j.detail||j.error||'Failed.'); return; }
+  const blob=await r.blob(); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+}
+</script>
+"""
+
+_DOCUMENT_VIEW_JS = r"""
+<script>
+async function saveSpec(){
+  let spec; const msg=document.getElementById('save-msg');
+  try{ spec=JSON.parse(document.getElementById('spec-json').value); }
+  catch(e){ msg.textContent='Invalid JSON'; return; }
+  const r=await fetch('__SAVE_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:spec})});
+  const j=await r.json(); msg.textContent=j.ok?'Saved. Reloading…':('Error: '+(j.error||''));
+  if(j.ok) setTimeout(()=>location.reload(), 700);
+}
+async function delDoc(){
+  if(!confirm('Delete this document?')) return;
+  const r=await fetch('__DEL_URL__',{method:'POST'}); const j=await r.json();
+  if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
+}
+</script>
+"""
+
+_DOC_PRESENT_CONSOLE = r"""
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
+  <div>
+    <img id="slide" src="__SLIDE_URL__/0.png" style="width:100%;border-radius:8px;border:1px solid var(--panel);background:var(--panel)">
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="act('prev')">◀ Prev</button>
+      <button class="btn" onclick="act('next')">Next ▶</button>
+      <button class="btn secondary" onclick="act('blackout')">Blackout</button>
+      <button class="btn secondary" onclick="act('autoplay')">Autoplay</button>
+      <button class="btn secondary" onclick="act('timer_reset')">Reset timer</button>
+      <span id="pos" class="dim"></span>
+      <span id="timer" class="dim" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
+    </div>
+    <p class="dim" style="font-size:12px;margin-top:6px">Keys: ← / → move, B blackout.</p>
+  </div>
+  <div>
+    <div class="card"><strong>Phone remote</strong>
+      <p class="dim" style="font-size:13px;margin:6px 0">Open <b>__REMOTE_URL__</b> and enter:</p>
+      <div style="font-size:32px;letter-spacing:6px;font-weight:700;text-align:center">__CODE__</div>
+      <p style="font-size:12px;margin-top:10px"><a href="__AUDIENCE_URL__" target="_blank">Open audience view ↗</a></p>
+    </div>
+    <div class="card" style="margin-top:12px"><strong>Speaker notes</strong>
+      <div id="notes" style="margin-top:8px;white-space:pre-wrap;min-height:120px;font-size:15px"></div></div>
+    <div class="card" style="margin-top:12px"><strong>Up next</strong>
+      <div id="next-title" class="dim" style="margin-top:6px"></div>
+      <img id="next-slide" style="width:100%;border-radius:6px;margin-top:6px;opacity:.85;background:var(--panel)"></div>
+  </div>
+</div>
+<script>
+const TOTAL=__TOTAL__, BASE='__SLIDE_URL__', NOTES=__NOTES__, TITLES=__TITLES__;
+let cur=-1;
+async function act(a){ await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})}); poll(); }
+function fmtT(s){ const m=Math.floor(s/60), ss=s%60; return m+':'+String(ss).padStart(2,'0'); }
+async function poll(){
+  try{
+    const r=await fetch('__STATE_URL__'); const s=await r.json();
+    if(s.current!==cur){ cur=s.current; const v=s.spec_version||'';
+      document.getElementById('slide').src=BASE+'/'+cur+'.png?v='+v;
+      document.getElementById('notes').textContent=NOTES[cur]||'(no notes)';
+      document.getElementById('pos').textContent=(cur+1)+' / '+TOTAL;
+      const nx=(cur+1<TOTAL)?cur+1:cur;
+      document.getElementById('next-title').textContent=(cur+1<TOTAL)?TITLES[nx]:'End of deck';
+      document.getElementById('next-slide').src=BASE+'/'+nx+'.png?v='+v;
+    }
+    document.getElementById('timer').textContent='⏱ '+fmtT(s.timer_elapsed||0);
+  }catch(e){}
+}
+setInterval(poll, 1000); poll();
+document.addEventListener('keydown', function(e){
+  if(e.key==='ArrowRight'||e.key===' ') act('next');
+  else if(e.key==='ArrowLeft') act('prev');
+  else if(e.key.toLowerCase()==='b') act('blackout');
+});
+</script>
+"""
+
+_DOC_PRESENT_AUDIENCE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Presentation</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}
+#wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#slide{max-width:100%;max-height:100%}
+#black{position:fixed;inset:0;background:#000;display:none}
+#ended{position:fixed;inset:0;color:#888;font:24px system-ui,sans-serif;display:none;align-items:center;justify-content:center}
+</style></head><body>
+<div id="wrap"><img id="slide" src="__SLIDE_URL__/0.png"></div>
+<div id="black"></div><div id="ended">Presentation ended</div>
+<script>
+const TOTAL=__TOTAL__, BASE='__SLIDE_URL__';
+let cur=-1, ver='', autoplay=false, apTimer=null, apIdx=0;
+function show(i,v){ document.getElementById('slide').src=BASE+'/'+i+'.png?v='+(v||''); }
+function startAuto(){ if(apTimer) return; apTimer=setInterval(function(){ apIdx=(apIdx+1)%TOTAL; show(apIdx,ver); }, 6000); }
+function stopAuto(){ if(apTimer){ clearInterval(apTimer); apTimer=null; } }
+async function poll(){
+  try{
+    const r=await fetch('__STATE_URL__'); const s=await r.json();
+    if(s.ended){ document.getElementById('ended').style.display='flex'; document.getElementById('wrap').style.display='none'; return; }
+    document.getElementById('black').style.display=s.blackout?'block':'none';
+    const newVer=s.spec_version||ver;
+    if(autoplay!==!!s.autoplay){ autoplay=!!s.autoplay; if(autoplay){ apIdx=s.current||0; startAuto(); } else { stopAuto(); } }
+    if(!autoplay && (s.current!==cur || newVer!==ver)){ cur=s.current; show(cur,newVer); }
+    ver=newVer;
+  }catch(e){}
+}
+setInterval(poll,1000); poll();
+document.body.addEventListener('click', function(){ if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function(){}); });
+</script></body></html>"""
+
+_DOC_REMOTE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Slide remote</title>
+<style>html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:#0b1020;color:#fff}
+#g{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr 1fr auto;gap:10px;padding:14px}
+button{font-size:22px;border:0;border-radius:14px;background:#1b2440;color:#fff}
+button:active{background:#2b3a66}
+.row{display:flex;gap:10px}.row button{flex:1}
+#pos{font-weight:700}.hd{text-align:center;color:#9fb0d0;font-size:14px}
+</style></head><body>
+<div id="g">
+  <div class="hd">Remote · code <b>__CODE__</b> · <span id="pos">–</span></div>
+  <button onclick="act('prev')">◀ Previous</button>
+  <button onclick="act('next')">Next ▶</button>
+  <div class="row"><button onclick="act('blackout')">Blackout</button><button onclick="act('end')">End</button></div>
+</div>
+<script>
+async function act(a){ const r=await fetch('__ACTION_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})}); const j=await r.json(); if(j.state) setPos(j.state); }
+function setPos(s){ document.getElementById('pos').textContent=(s.current+1)+' / '+s.total+(s.blackout?' · black':''); }
+async function poll(){ try{ const r=await fetch('__STATE_URL__'); const s=await r.json(); if(!s.ended) setPos(s); }catch(e){} }
+setInterval(poll,1500); poll();
+</script></body></html>"""
 
 
 def create_app() -> Flask:
@@ -26631,7 +26822,7 @@ document.addEventListener('click', function (e) {{
             else ""
         )
         tags = pv["hashtags"]
-        tag_txt = f'{int(tags["count"])} hashtag{"s" if tags["count"] != 1 else ""}'
+        tag_txt = f"{int(tags['count'])} hashtag{'s' if tags['count'] != 1 else ''}"
         if tags["limit"] is not None:
             tag_cls = "mh-cp-good" if tags["within"] else "mh-cp-bad"
             tag_txt += f' <span class="{tag_cls}">/ {int(tags["limit"])} max</span>'
@@ -27110,7 +27301,7 @@ function mhBoardDrop(e) {{
                 trusted = tp.n >= MIN_SAMPLES
                 cls = "mh-an-up" if pct >= 0 else "mh-an-down"
                 bar_w = max(4, min(100, round(tp.index * 50)))
-                pct_txt = f'{"+" if pct >= 0 else ""}{pct}%'
+                pct_txt = f"{'+' if pct >= 0 else ''}{pct}%"
                 note = (
                     ""
                     if trusted
@@ -27964,6 +28155,36 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-fmt">Captions</span>'
                 "</div>"
                 '<span class="mh-template-cta">Open video studio</span>'
+                "</a>"
+            )
+
+        # Documents — the 1.15 document engine (programmes / reports / proposals
+        # / AGM decks + the PDF tools). A first-class Create tile beside the
+        # studios; gated on _documents_ok so it only shows where it works.
+        if _documents_ok:
+            _doc_svg = (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+                '<polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/>'
+                '<line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>'
+            )
+            tiles_html += (
+                f'<a href="{_h(url_for("documents_home"))}" class="mh-template mh-glow-border">'
+                f'<div class="mh-template-icon">{_doc_svg}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                '<h3 style="margin:0">Documents</h3>'
+                '<span class="tag live">Ready</span>'
+                "</div>"
+                "<p>Build a meet programme, season report, sponsor proposal or AGM "
+                "deck from your real results &mdash; then export to PDF, PowerPoint or "
+                "Word, or present the deck with speaker notes and a phone remote.</p>"
+                '<div class="mh-template-formats">'
+                '<span class="mh-template-fmt">PDF</span>'
+                '<span class="mh-template-fmt">PPTX / DOCX</span>'
+                '<span class="mh-template-fmt">Present</span>'
+                "</div>"
+                '<span class="mh-template-cta">Open documents</span>'
                 "</a>"
             )
 
@@ -48780,6 +49001,663 @@ voice, and queues them for one-click approval.</p>
         return jsonify(
             {"ok": True, "meet_name": meet_name, "entries_text": entries_text, "rows": n_rows}
         )
+
+    # =====================================================================
+    # Document engine (roadmap 1.15): meet programmes / season reports /
+    # sponsor proposals / AGM decks, PPTX·DOCX·PDF exports, PDF utilities,
+    # and the deck presenter surface (notes, timer, autoplay, phone remote).
+    # Thin routes — all logic lives in the `documents` package.
+    # =====================================================================
+    def _doc_brand_kit(pid):
+        if not pid:
+            return None
+        try:
+            return _v8_brand_kit_for(pid)
+        except Exception:
+            return None
+
+    def _doc_club_name(pid, brand_kit) -> str:
+        name = getattr(brand_kit, "display_name", "") or ""
+        if name:
+            return name
+        try:
+            prof = _active_profile()
+        except Exception:
+            prof = None
+        return getattr(prof, "display_name", "") or getattr(prof, "name", "") or ""
+
+    def _safe_filename(title: str, ext: str) -> str:
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(title or "document")).strip("-").lower()
+        return f"{slug or 'document'}.{ext}"
+
+    def _doc_recent_runs(pid, limit=60):
+        out = []
+        try:
+            conn = _db()
+            rows = conn.execute(
+                "SELECT id, meet_name, n_achievements FROM runs "
+                "WHERE profile_id = ? AND status = 'done' "
+                "ORDER BY created_at DESC LIMIT ?",
+                (pid, int(limit)),
+            ).fetchall()
+            for r in rows:
+                out.append((r["id"], r["meet_name"] or "Meet", r["n_achievements"] or 0))
+        except Exception:
+            pass
+        return out
+
+    def _doc_load_owned(doc_id):
+        """(pid, spec) for a document owned by the active org, else (pid, None)."""
+        pid = _active_profile_id()
+        if not pid:
+            return None, None
+        from mediahub.documents import store as _docstore
+
+        return pid, _docstore.load_document(pid, doc_id)
+
+    def _doc_facts_for(pid, brand_kit, *, scope, run_id):
+        from mediahub.documents.grounding import facts_from_run, facts_from_runs
+
+        club = _doc_club_name(pid, brand_kit)
+        if scope == "meet":
+            run_data = _load_run(run_id)
+            if run_data is None or not _can_access_run(run_id, run_data, pid):
+                return None
+            return facts_from_run(run_data, club_name=club, run_id=run_id)
+        # season scope — every processed run for the org
+        runs, ids = [], []
+        for rid, _name, _n in _doc_recent_runs(pid):
+            rd = _load_run(rid)
+            if rd is not None and _can_access_run(rid, rd, pid):
+                runs.append(rd)
+                ids.append(rid)
+        if not runs:
+            return None
+        return facts_from_runs(runs, club_name=club, period=time.strftime("%Y"), run_ids=ids)
+
+    @app.route("/documents")
+    def documents_home():
+        if not _documents_ok:
+            return _recovery_page(
+                "Documents unavailable",
+                "The document engine isn't enabled on this deployment.",
+                primary_cta=("Back to home", url_for("home")),
+            )
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Documents", _PW_NO_ORG, active="create")
+        from mediahub.documents import store as _docstore
+
+        docs = _docstore.list_documents(pid)
+        runs = _doc_recent_runs(pid)
+
+        run_opts = (
+            "".join(
+                f'<option value="{_h(rid)}">{_h(name)} ({n} cards)</option>'
+                for rid, name, n in runs
+            )
+            or '<option value="">No processed meets yet</option>'
+        )
+
+        saved = ""
+        if docs:
+            rows = []
+            for d in docs:
+                badge = "Deck" if d["kind"] == "deck" else d["doc_format"].replace("_", " ").title()
+                rows.append(
+                    '<a class="card" style="display:block;text-decoration:none" '
+                    f'href="{url_for("document_view", doc_id=d["doc_id"])}">'
+                    f"<strong>{_h(d['title'])}</strong>"
+                    f'<div class="dim" style="font-size:12px;margin-top:4px">{_h(badge)}</div></a>'
+                )
+            saved = (
+                '<h2 style="margin-top:28px">Your documents</h2>'
+                '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));'
+                f'gap:12px">{"".join(rows)}</div>'
+            )
+
+        body = (
+            '<section class="mh-hero"><h1>Documents</h1>'
+            '<p class="muted">Build a meet programme, season report, sponsor proposal or '
+            "AGM deck from your real results — then export, present or download it.</p></section>"
+            '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
+            # meet programme (meet scope)
+            '<div class="card"><h3 style="margin-top:0">Meet programme</h3>'
+            '<p class="dim" style="font-size:13px">A gala-night programme/recap from one meet.</p>'
+            f'<select id="prog-run" class="input">{run_opts}</select>'
+            '<button class="btn" style="margin-top:8px" '
+            "onclick=\"genDoc('meet_programme','meet',document.getElementById('prog-run').value)\">"
+            "Generate</button></div>"
+            # season report (season scope)
+            '<div class="card"><h3 style="margin-top:0">Season report</h3>'
+            '<p class="dim" style="font-size:13px">The committee report from your whole season.</p>'
+            "<button class=\"btn\" onclick=\"genDoc('season_report','season')\">Generate</button></div>"
+            # sponsor proposal
+            '<div class="card"><h3 style="margin-top:0">Sponsor proposal</h3>'
+            '<p class="dim" style="font-size:13px">A sponsorship pitch with your reach and packages.</p>'
+            "<button class=\"btn\" onclick=\"genDoc('sponsor_proposal','season')\">Generate</button></div>"
+            # AGM deck
+            '<div class="card"><h3 style="margin-top:0">AGM deck</h3>'
+            '<p class="dim" style="font-size:13px">The year in review, ready to present.</p>'
+            "<button class=\"btn\" onclick=\"genDoc('agm_deck','season')\">Generate</button></div>"
+            "</div>"
+            # tools row
+            '<h2 style="margin-top:28px">PDF tools</h2>'
+            '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
+            '<div class="card"><h3 style="margin-top:0">Import to edit</h3>'
+            '<p class="dim" style="font-size:13px">Open a PDF, Word or PowerPoint file as an editable document (bounded fidelity).</p>'
+            '<input type="file" id="imp-file" accept=".pdf,.docx,.pptx" class="input">'
+            '<button class="btn secondary" style="margin-top:8px" onclick="importDoc()">Import</button></div>'
+            '<div class="card"><h3 style="margin-top:0">Merge PDFs</h3>'
+            '<p class="dim" style="font-size:13px">Combine several PDFs into one, in order.</p>'
+            '<input type="file" id="merge-files" accept="application/pdf" multiple class="input">'
+            '<button class="btn secondary" style="margin-top:8px" onclick="mergePdfs()">Merge &amp; download</button></div>'
+            '<div class="card"><h3 style="margin-top:0">Images → PDF</h3>'
+            '<p class="dim" style="font-size:13px">Turn photos/screenshots into a single PDF.</p>'
+            '<input type="file" id="img-files" accept="image/*" multiple class="input">'
+            '<button class="btn secondary" style="margin-top:8px" onclick="imagesToPdf()">Build &amp; download</button></div>'
+            "</div>"
+            + saved
+            + _DOCUMENTS_HOME_JS.replace("__GEN_URL__", url_for("api_documents_generate"))
+            .replace("__IMPORT_URL__", url_for("api_documents_import"))
+            .replace("__MERGE_URL__", url_for("api_documents_tool_merge"))
+            .replace("__IMG_URL__", url_for("api_documents_tool_images_to_pdf"))
+        )
+        return _layout("Documents", body, active="create")
+
+    @app.route("/api/documents/generate", methods=["POST"])
+    def api_documents_generate():
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        body = request.get_json(silent=True) or {}
+        fmt = (body.get("format") or "").strip()
+        scope = (body.get("scope") or "season").strip()
+        run_id = (body.get("run_id") or "").strip()
+        with_ai = bool(body.get("with_ai", True))
+        tone = (body.get("tone") or "editorial").strip()
+        from mediahub.documents import store as _docstore
+        from mediahub.documents.draft import generate_document
+        from mediahub.documents.models import new_document
+
+        if fmt == "blank":
+            spec = new_document("Untitled document", "blank", brand_profile_id=pid)
+            _docstore.save_document(pid, spec)
+            return jsonify(
+                {
+                    "ok": True,
+                    "doc_id": spec.doc_id,
+                    "url": url_for("document_view", doc_id=spec.doc_id),
+                }
+            )
+
+        if fmt not in ("meet_programme", "season_report", "sponsor_proposal", "agm_deck"):
+            return jsonify({"ok": False, "error": "bad_format"}), 400
+        if fmt == "meet_programme":
+            scope = "meet"
+            if not run_id:
+                return jsonify({"ok": False, "error": "pick_a_meet"}), 400
+
+        brand_kit = _doc_brand_kit(pid)
+        facts = _doc_facts_for(pid, brand_kit, scope=scope, run_id=run_id)
+        if facts is None:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_data",
+                    "message": "No processed meets to build from yet.",
+                }
+            ), 200
+        try:
+            spec = generate_document(facts, fmt, brand_profile_id=pid, tone=tone, with_ai=with_ai)
+        except Exception as e:  # honest AI-unavailable signal — offer a data-only build
+            from mediahub.media_ai.llm import ClaudeUnavailableError
+
+            if isinstance(e, ClaudeUnavailableError):
+                return jsonify({"ok": False, "error": "no_ai", "message": str(e)}), 200
+            log.warning("document generation failed", exc_info=True)
+            return jsonify({"ok": False, "error": "generate_failed"}), 500
+        _docstore.save_document(pid, spec)
+        return jsonify(
+            {"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)}
+        )
+
+    @app.route("/documents/<doc_id>")
+    def document_view(doc_id: str):
+        if not _documents_ok:
+            return _recovery_page(
+                "Documents unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return _recovery_page(
+                "Document not found",
+                "It may have been deleted, or belongs to another organisation.",
+                primary_cta=("All documents", url_for("documents_home")),
+            )
+        is_deck = spec.is_deck
+        present_btns = ""
+        if is_deck:
+            present_btns = (
+                f'<a class="btn" href="{url_for("document_present", doc_id=doc_id)}">Present</a> '
+                f'<a class="btn secondary" href="{url_for("api_document_video", doc_id=doc_id)}">Download video (MP4)</a> '
+            )
+        spec_json = _h(json.dumps(spec.to_dict(), indent=2))
+        body = (
+            f'<section class="mh-hero"><h1>{_h(spec.title)}</h1>'
+            f'<p class="muted">{_h(spec.subtitle or spec.doc_format.replace("_", " ").title())}</p></section>'
+            '<div style="margin-bottom:14px">'
+            + present_btns
+            + f'<a class="btn secondary" href="{url_for("api_document_pdf", doc_id=doc_id)}?dl=1">Download PDF</a> '
+            f'<a class="btn secondary" href="{url_for("api_document_pptx", doc_id=doc_id)}">PowerPoint (.pptx)</a> '
+            f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
+            "</div>"
+            f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
+            'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
+            '<details style="margin-top:18px"><summary class="dim">Edit document (advanced — spec JSON)</summary>'
+            f'<textarea id="spec-json" class="input" style="width:100%;height:300px;font-family:monospace;font-size:12px">{spec_json}</textarea>'
+            '<button class="btn" style="margin-top:8px" onclick="saveSpec()">Save changes</button> '
+            '<button class="btn secondary" style="margin-top:8px" onclick="delDoc()">Delete document</button>'
+            '<span id="save-msg" class="dim" style="margin-left:10px"></span></details>'
+            + _DOCUMENT_VIEW_JS.replace("__SAVE_URL__", url_for("api_document_save", doc_id=doc_id))
+            .replace("__DEL_URL__", url_for("api_document_delete", doc_id=doc_id))
+            .replace("__HOME_URL__", url_for("documents_home"))
+        )
+        return _layout(spec.title, body, active="create")
+
+    @app.route("/api/documents/<doc_id>/pdf")
+    def api_document_pdf(doc_id: str):
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.documents.render import render_document_pdf
+
+        try:
+            path = render_document_pdf(spec, brand_kit=_doc_brand_kit(pid))
+        except Exception as e:
+            log.warning("document pdf render failed", exc_info=True)
+            return jsonify({"error": "render_failed", "detail": str(e)[:200]}), 503
+        dl = request.args.get("dl") == "1"
+        return send_file(
+            path,
+            mimetype="application/pdf",
+            as_attachment=dl,
+            download_name=_safe_filename(spec.title, "pdf"),
+        )
+
+    @app.route("/api/documents/<doc_id>/pptx")
+    def api_document_pptx(doc_id: str):
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.documents.export import document_pptx
+
+        out = Path(tempfile.gettempdir()) / f"{spec.doc_id}.pptx"
+        try:
+            document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
+        except Exception as e:
+            return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+        return send_file(
+            out,
+            as_attachment=True,
+            download_name=_safe_filename(spec.title, "pptx"),
+            mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+
+    @app.route("/api/documents/<doc_id>/docx")
+    def api_document_docx(doc_id: str):
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.documents.export import document_docx
+
+        out = Path(tempfile.gettempdir()) / f"{spec.doc_id}.docx"
+        try:
+            document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
+        except Exception as e:
+            return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+        return send_file(
+            out,
+            as_attachment=True,
+            download_name=_safe_filename(spec.title, "docx"),
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    @app.route("/api/documents/<doc_id>/video")
+    def api_document_video(doc_id: str):
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return jsonify({"error": "not_found"}), 404
+        if not spec.is_deck:
+            return jsonify({"error": "not_a_deck"}), 400
+        from mediahub.documents.deck_video import deck_to_mp4
+
+        try:
+            path = deck_to_mp4(spec, brand_kit=_doc_brand_kit(pid))
+        except Exception as e:
+            return jsonify({"error": "video_failed", "detail": str(e)[:200]}), 503
+        return send_file(
+            path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name=_safe_filename(spec.title, "mp4"),
+        )
+
+    @app.route("/api/documents/<doc_id>/save", methods=["POST"])
+    def api_document_save(doc_id: str):
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        body = request.get_json(silent=True) or {}
+        raw = body.get("spec")
+        if not isinstance(raw, dict):
+            return jsonify({"ok": False, "error": "bad_spec"}), 400
+        from mediahub.documents.models import DocumentSpec
+        from mediahub.documents import store as _docstore
+
+        raw["doc_id"] = doc_id  # never let an edit reassign identity
+        new_spec = DocumentSpec.from_dict(raw)
+        _docstore.save_document(pid, new_spec)
+        return jsonify({"ok": True})
+
+    @app.route("/api/documents/<doc_id>/delete", methods=["POST"])
+    def api_document_delete(doc_id: str):
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        from mediahub.documents import store as _docstore
+
+        return jsonify({"ok": _docstore.delete_document(pid, doc_id)})
+
+    @app.route("/api/documents/import", methods=["POST"])
+    def api_documents_import():
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"ok": False, "error": "no_file"}), 400
+        ext = Path(f.filename).suffix.lower().lstrip(".")
+        if ext not in ("pdf", "docx", "pptx"):
+            return jsonify({"ok": False, "error": "bad_type"}), 400
+        tmp = Path(tempfile.gettempdir()) / f"imp_{secrets.token_hex(6)}.{ext}"
+        f.save(str(tmp))
+        from mediahub.documents.import_doc import import_file
+        from mediahub.documents import store as _docstore
+
+        try:
+            spec = import_file(tmp)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "import_failed", "detail": str(e)[:200]}), 422
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        from dataclasses import replace as _dc_replace
+
+        spec = _dc_replace(spec, brand_profile_id=pid)
+        _docstore.save_document(pid, spec)
+        return jsonify(
+            {"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)}
+        )
+
+    @app.route("/api/documents/tools/merge", methods=["POST"])
+    def api_documents_tool_merge():
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        if not _active_profile_id():
+            return jsonify({"error": "not_signed_in"}), 403
+        files = request.files.getlist("files")
+        pdfs = [f for f in files if f and (f.filename or "").lower().endswith(".pdf")]
+        if len(pdfs) < 2:
+            return jsonify({"error": "need_two_pdfs"}), 400
+
+        from mediahub.documents.pdf_utils import merge_pdfs
+
+        paths = []
+        for f in pdfs:
+            p = Path(tempfile.gettempdir()) / f"mrg_{secrets.token_hex(5)}.pdf"
+            f.save(str(p))
+            paths.append(p)
+        out = Path(tempfile.gettempdir()) / f"merged_{secrets.token_hex(5)}.pdf"
+        try:
+            merge_pdfs(paths, out)
+        except Exception as e:
+            return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+        finally:
+            for p in paths:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        return send_file(
+            out, mimetype="application/pdf", as_attachment=True, download_name="merged.pdf"
+        )
+
+    @app.route("/api/documents/tools/images-to-pdf", methods=["POST"])
+    def api_documents_tool_images_to_pdf():
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        if not _active_profile_id():
+            return jsonify({"error": "not_signed_in"}), 403
+        files = request.files.getlist("files")
+        imgs = [f for f in files if f and f.filename]
+        if not imgs:
+            return jsonify({"error": "no_images"}), 400
+        from mediahub.documents.pdf_utils import images_to_pdf
+
+        paths = []
+        for f in imgs:
+            p = Path(tempfile.gettempdir()) / f"img_{secrets.token_hex(5)}{Path(f.filename).suffix}"
+            f.save(str(p))
+            paths.append(p)
+        out = Path(tempfile.gettempdir()) / f"images_{secrets.token_hex(5)}.pdf"
+        try:
+            images_to_pdf(paths, out)
+        except Exception as e:
+            return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+        finally:
+            for p in paths:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        return send_file(
+            out, mimetype="application/pdf", as_attachment=True, download_name="images.pdf"
+        )
+
+    # ---- Presenter surface (deck) -------------------------------------
+    @app.route("/documents/<doc_id>/present")
+    def document_present(doc_id: str):
+        if not _documents_ok:
+            return _recovery_page(
+                "Documents unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
+        pid, spec = _doc_load_owned(doc_id)
+        if spec is None:
+            return _recovery_page(
+                "Document not found",
+                "It may have been deleted.",
+                primary_cta=("All documents", url_for("documents_home")),
+            )
+        if not spec.is_deck:
+            return _recovery_page(
+                "Not a deck",
+                "Only AGM decks can be presented. Generate an AGM deck to present.",
+                primary_cta=("All documents", url_for("documents_home")),
+            )
+        from mediahub.documents import presenter as _pres
+        from mediahub.documents.deck import deck_view, spec_version
+
+        session = _pres.create_session(
+            doc_id, len(spec.sections), owner=pid, spec_version=spec_version(spec)
+        )
+        view = deck_view(spec)
+        # Script-safe JSON: neutralise </script> by escaping '<' (embedded as a JS
+        # literal, not HTML), so speaker notes can carry any text.
+        notes = json.dumps([s["notes"] for s in view["slides"]]).replace("<", "\\u003c")
+        titles = json.dumps([s["title"] for s in view["slides"]]).replace("<", "\\u003c")
+        remote_url = url_for("remote_landing", _external=True)
+        body = (
+            _DOC_PRESENT_CONSOLE.replace("__CODE__", _h(session.pairing_code))
+            .replace("__TOTAL__", str(len(spec.sections)))
+            .replace(
+                "__SLIDE_URL__",
+                url_for("api_present_slide", session_id=session.session_id, i=0).rsplit("/0", 1)[0],
+            )
+            .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
+            .replace("__ACTION_URL__", url_for("api_present_action", session_id=session.session_id))
+            .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
+            .replace("__REMOTE_URL__", _h(remote_url))
+            .replace("__NOTES__", notes)
+            .replace("__TITLES__", titles)
+        )
+        return _layout("Presenting — " + spec.title, body, active="create")
+
+    @app.route("/present/<session_id>")
+    def present_audience(session_id: str):
+        if not _documents_ok:
+            return _recovery_page(
+                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
+        from mediahub.documents import presenter as _pres
+
+        session = _pres.get_session(session_id)
+        if session is None or session.ended:
+            return _recovery_page(
+                "Presentation ended",
+                "This presentation has finished or expired.",
+                primary_cta=("Home", url_for("home")),
+            )
+        body = (
+            _DOC_PRESENT_AUDIENCE.replace("__TOTAL__", str(session.total_slides))
+            .replace(
+                "__SLIDE_URL__",
+                url_for("api_present_slide", session_id=session_id, i=0).rsplit("/0", 1)[0],
+            )
+            .replace("__STATE_URL__", url_for("api_present_state", session_id=session_id))
+        )
+        return Response(body, mimetype="text/html")
+
+    @app.route("/api/present/<session_id>/slide/<int:i>.png")
+    def api_present_slide(session_id: str, i: int):
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        from mediahub.documents import presenter as _pres
+        from mediahub.documents import store as _docstore
+        from mediahub.documents.render import render_section_png
+
+        session = _pres.get_session(session_id)
+        if session is None:
+            return jsonify({"error": "no_session"}), 404
+        spec = _docstore.load_document(session.owner, session.doc_id)
+        if spec is None:
+            return jsonify({"error": "no_doc"}), 404
+        try:
+            path = render_section_png(spec, i, brand_kit=_doc_brand_kit(session.owner))
+        except Exception as e:
+            return jsonify({"error": "render_failed", "detail": str(e)[:160]}), 503
+        return send_file(path, mimetype="image/png")
+
+    @app.route("/api/present/<session_id>/state")
+    def api_present_state(session_id: str):
+        if not _documents_ok:
+            return jsonify({"error": "unavailable"}), 503
+        from mediahub.documents import presenter as _pres
+
+        session = _pres.get_session(session_id)
+        if session is None:
+            return jsonify({"ended": True, "error": "no_session"}), 404
+        return jsonify(session.public_state())
+
+    @app.route("/api/present/<session_id>/action", methods=["POST"])
+    def api_present_action(session_id: str):
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        from mediahub.documents import presenter as _pres
+
+        session = _pres.get_session(session_id)
+        if session is None:
+            return jsonify({"ok": False, "error": "no_session"}), 404
+        # owner-gated: only the signed-in presenter who created it may drive here
+        if session.owner != (_active_profile_id() or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+        body = request.get_json(silent=True) or {}
+        updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
+        return jsonify({"ok": True, "state": updated.public_state() if updated else None})
+
+    @app.route("/remote")
+    def remote_landing():
+        if not _documents_ok:
+            return _recovery_page(
+                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
+        code = (request.args.get("code") or "").strip().upper()
+        if code:
+            return redirect(url_for("remote_control", code=code))
+        body = (
+            '<div class="card" style="max-width:380px;margin:40px auto;text-align:center">'
+            '<h2>Slide remote</h2><p class="dim">Enter the 6-character code shown on the presenter screen.</p>'
+            '<input id="code" class="input" maxlength="6" autocapitalize="characters" '
+            'style="text-transform:uppercase;font-size:24px;text-align:center;letter-spacing:4px" placeholder="ABC123">'
+            '<button class="btn" style="margin-top:12px;width:100%" '
+            "onclick=\"location.href='/remote/'+document.getElementById('code').value.toUpperCase()\">Connect</button></div>"
+        )
+        return _layout("Slide remote", body, active="create")
+
+    @app.route("/remote/<code>")
+    def remote_control(code: str):
+        if not _documents_ok:
+            return _recovery_page(
+                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
+        from mediahub.documents import presenter as _pres
+
+        session = _pres.get_by_pairing_code(code)
+        if session is None:
+            return _recovery_page(
+                "Code not found",
+                "That code is wrong or the presentation has ended.",
+                primary_cta=("Try again", url_for("remote_landing")),
+            )
+        body = (
+            _DOC_REMOTE.replace("__CODE__", _h(session.pairing_code))
+            .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
+            .replace("__ACTION_URL__", url_for("api_remote_action", code=session.pairing_code))
+        )
+        return Response(body, mimetype="text/html")
+
+    @app.route("/api/remote/<code>/action", methods=["POST"])
+    def api_remote_action(code: str):
+        if not _documents_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        from mediahub.documents import presenter as _pres
+
+        session = _pres.get_by_pairing_code(code)
+        if session is None:
+            return jsonify({"ok": False, "error": "no_session"}), 404
+        body = request.get_json(silent=True) or {}
+        updated = _pres.apply_action(
+            session.session_id, str(body.get("action", "")), body.get("value")
+        )
+        return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
     # Start the in-process scheduler once per worker. Idempotent and self-
     # guarded (no-ops under pytest and when MEDIAHUB_SCHEDULER=0). Safe under

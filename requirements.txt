@@ -9,6 +9,10 @@ pypdf>=6.13.3
 # broke pip-audit (ResolutionImpossible).
 pdfminer.six>=20260107
 pdfplumber>=0.11.10
+# Document engine (roadmap 1.15) — deterministic PPTX/DOCX round-trip so a
+# generated programme/report/deck can be taken elsewhere to edit. Pure-Python.
+python-pptx>=1.0.2
+python-docx>=1.2.0
 # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx). Leagues and meets
 # publish results as .xlsx; openpyxl reads them deterministically (read-only).
 openpyxl>=3.1.5

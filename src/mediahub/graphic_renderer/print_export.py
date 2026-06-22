@@ -260,6 +260,8 @@ def render_html_to_pdf(
     landscape: bool = False,
     width: str | None = None,
     height: str | None = None,
+    prefer_css_page_size: bool = False,
+    tagged: bool = False,
 ) -> Path:
     """Headless-Chromium print-to-PDF; returns the written path.
 
@@ -275,6 +277,16 @@ def render_html_to_pdf(
     print-production path uses them to emit the bleed-expanded media box
     (trim + bleed + crop-mark margin); when omitted the behaviour is the
     historic ``format="A4"`` page (back-compatible for the W.12 callers).
+
+    ``prefer_css_page_size=True`` lets a document's own ``@page { size: ... }``
+    rule drive the sheet geometry (and per-page breaks) — the multi-page
+    document engine (roadmap 1.15) uses it so A4 reports and 16:9 decks
+    paginate from CSS. It is ignored when ``width``/``height`` pin an explicit
+    media box; default ``False`` keeps every existing caller byte-identical.
+
+    ``tagged=True`` emits an accessible (tagged) PDF — the document's ``<h1..3>``
+    headings and image ``alt`` text become screen-reader structure (roadmap 1.15);
+    default ``False`` keeps existing callers byte-identical.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,12 +318,20 @@ def render_html_to_pdf(
                 "print_background": True,
                 "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"},
             }
+            if tagged:
+                # Accessible (tagged) PDF — carries the document's headings + image
+                # alt text as structure for screen readers (roadmap 1.15 a11y).
+                pdf_kwargs["tagged"] = True
             if width and height:
                 # Explicit media box (bleed-expanded print page) — pin the
                 # exact size deterministically, ignoring any @page rule.
                 pdf_kwargs.update(width=width, height=height)
             else:
                 pdf_kwargs.update(format=page_format, landscape=landscape)
+                if prefer_css_page_size:
+                    # Let the document's own @page size win over the format —
+                    # multi-page docs/decks paginate from their CSS geometry.
+                    pdf_kwargs["prefer_css_page_size"] = True
             page.pdf(**pdf_kwargs)
             browser.close()
     finally:
