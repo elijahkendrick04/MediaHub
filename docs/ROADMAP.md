@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `0589870fc` · Merge pull request #985: Document engine (roadmap 1.15)
+**Last updated:** 2026-06-22 · `b47c3c9fa` · Video upload: stream footage to disk instead of buffering it in memory (#988)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1212,6 +1212,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `04c3d2765` | video upload: stream footage to disk instead of buffering it in memory |
 | 2026-06-22 | `58fb26298` | documents: keep inline-hex budget (theme-tokens guard) at baseline |
 | 2026-06-22 | `747d85a66` | fix(deploy): wrap the remaining fail-loud build fetches with a retry helper |
 | 2026-06-22 | `dd06bf0f3` | documents: apply ruff format/lint to satisfy the pre-commit hygiene hook |
@@ -1222,6 +1223,4 @@ list and the auto table below, not here.
 | 2026-06-22 | `6e94d0407` | documents: build 3 — exports, imports & PDF utilities (roadmap 1.15) |
 | 2026-06-22 | `732cd7e7a` | documents: build 2 — club formats + grounded AI drafting (roadmap 1.15) |
 | 2026-06-22 | `f0238a632` | documents: build 1 — core document engine (roadmap 1.15) |
-| 2026-06-22 | `7bd2ea176` | fix: Accepted upload file formats are never specified — a volunte |
-| 2026-06-22 | `bac42844e` | fix: 'brand kit' is unexplained jargon — a club volunteer won't k |
 <!-- /ROADMAP:ACTIVITY -->
