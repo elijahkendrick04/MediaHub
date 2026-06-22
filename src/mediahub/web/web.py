@@ -15190,7 +15190,7 @@ async function delDoc(){
 _DOC_PRESENT_CONSOLE = r"""
 <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
   <div>
-    <img id="slide" src="__SLIDE_URL__/0.png" style="width:100%;border-radius:8px;border:1px solid var(--panel);background:#fff">
+    <img id="slide" src="__SLIDE_URL__/0.png" style="width:100%;border-radius:8px;border:1px solid var(--panel);background:var(--panel)">
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" onclick="act('prev')">◀ Prev</button>
       <button class="btn" onclick="act('next')">Next ▶</button>
@@ -15212,7 +15212,7 @@ _DOC_PRESENT_CONSOLE = r"""
       <div id="notes" style="margin-top:8px;white-space:pre-wrap;min-height:120px;font-size:15px"></div></div>
     <div class="card" style="margin-top:12px"><strong>Up next</strong>
       <div id="next-title" class="dim" style="margin-top:6px"></div>
-      <img id="next-slide" style="width:100%;border-radius:6px;margin-top:6px;opacity:.85;background:#fff"></div>
+      <img id="next-slide" style="width:100%;border-radius:6px;margin-top:6px;opacity:.85;background:var(--panel)"></div>
   </div>
 </div>
 <script>
@@ -49231,7 +49231,7 @@ voice, and queues them for one-click approval.</p>
             f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
             "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
-            'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:#fff"></iframe>'
+            'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:var(--panel)"></iframe>'
             '<details style="margin-top:18px"><summary class="dim">Edit document (advanced — spec JSON)</summary>'
             f'<textarea id="spec-json" class="input" style="width:100%;height:300px;font-family:monospace;font-size:12px">{spec_json}</textarea>'
             '<button class="btn" style="margin-top:8px" onclick="saveSpec()">Save changes</button> '
