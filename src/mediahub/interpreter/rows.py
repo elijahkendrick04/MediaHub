@@ -115,6 +115,17 @@ _CLUB_RACE_DATA = re.compile(
     r"|\b\d{1,4}\s*m\b"  # a distance token like '1350m' / '50 m'
 )
 
+# "NT" (No Time) is the seed-time placeholder for an unseeded entry. In a
+# "Name AaD Club Seed Finals" row the seed column sits immediately after the
+# club, so a club cell built from the tokens between the age and the finals
+# time absorbs it ("City of Brighton & Hove NT") — spawning a phantom
+# "<Club> NT" club in the picker; a seed cell mis-mapped to the club column can
+# also be a bare "NT". A standalone trailing No-Time marker is never part of a
+# club name. Anchoring on a preceding word boundary (string start or
+# whitespace) means a real name ending in those letters (… Kent, … Trent) is
+# never touched.
+_CLUB_SEED_NOTIME_SUFFIX = re.compile(r"(?:^|\s+)N\.?T\.?$", re.IGNORECASE)
+
 
 def _normalise_club(raw: str) -> tuple[str | None, float]:
     s = raw.strip()
@@ -125,6 +136,9 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
         return None, 0.0
     # Strip a leading year-of-birth token if one slipped into the club cell.
     cleaned = _CLUB_YOB_PREFIX.sub("", s).strip()
+    # Strip a trailing "NT" (No-Time seed marker) absorbed from the seed column,
+    # so an unseeded entry never spawns a phantom "<Club> NT" club.
+    cleaned = _CLUB_SEED_NOTIME_SUFFIX.sub("", cleaned).strip()
     # Para-classification suffix: a results "Class" column ("14" = S14/SM14) sits
     # between the club and the time and gets absorbed into the club cell
     # ("Co Cardiff 14"). Strip the trailing 1-2 digit class so a club's para

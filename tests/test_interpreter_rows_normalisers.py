@@ -289,3 +289,34 @@ class TestNormaliseClub:
     def test_collapsed_name_age_club_recovers_club(self, raw: str, expected: str) -> None:
         v, _ = _normalise_club(raw)
         assert v == expected
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # "NT" (No Time) is the seed-time placeholder. In a
+            # "Name AaD Club Seed Finals" row it sits right after the club and
+            # gets absorbed into the club cell — a trailing No-Time marker must
+            # be stripped so it never spawns a phantom "<Club> NT" club.
+            ("City of Brighton & Hove NT", "City of Brighton & Hove"),
+            ("Beacon SC NT", "Beacon SC"),
+            ("Atlantis SC NT", "Atlantis SC"),
+            ("Worthing SC N.T.", "Worthing SC"),
+            ("Brighton SC nt", "Brighton SC"),
+        ],
+    )
+    def test_no_time_seed_marker_is_stripped_from_club(self, raw: str, expected: str) -> None:
+        v, _ = _normalise_club(raw)
+        assert v == expected
+
+    @pytest.mark.parametrize("raw", ["City of Kent", "Trent SC", "Brent Dolphins", "Notts SC"])
+    def test_club_ending_in_nt_letters_is_untouched(self, raw: str) -> None:
+        # The No-Time strip needs a standalone trailing "NT" token; a real club
+        # whose name merely ends in those letters (Kent, Trent) must survive.
+        v, _ = _normalise_club(raw)
+        assert v == raw
+
+    def test_bare_no_time_marker_is_not_a_club(self) -> None:
+        # A seed cell mis-mapped to the club column that holds only "NT" must
+        # not surface as a club.
+        v, _ = _normalise_club("NT")
+        assert v is None

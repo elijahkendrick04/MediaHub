@@ -151,6 +151,124 @@ def test_distinct_swims_are_not_merged():
 
 
 # ---------------------------------------------------------------------------
+# QA-001: overlapping age-band reprints of the SAME event number
+# ---------------------------------------------------------------------------
+
+
+def _band_event(header, age_band, place, *, name="Birdy Raleigh", time="2:19.80"):
+    """One swim listed under an age-band sub-header of an event.
+
+    HY-TEK's "Results" reprints the same physical swim under several overlapping
+    age-band sub-headers that share ONE event number ("Event 202 Female 10-13"
+    then "Event 202 Female 13 Year Olds"). The age-band banner changes and the
+    place is relative to each printed band, but the event number, swimmer and
+    final time are the same swim.
+    """
+    swim = InterpretedSwim(
+        swimmer_name=name,
+        yob=2013,
+        club="City of Brighton & Hove",
+        place=place,
+        time=time,
+        reaction=None,
+        confidence=0.9,
+        raw_row=f"{place} {name} 13 City of Brighton & Hove {time}",
+    )
+    return InterpretedEvent(
+        gender="F",
+        distance_m=200,
+        stroke="Freestyle",
+        course="LC",
+        age_band=age_band,
+        swims=[swim],
+        confidence=0.9,
+        raw_header=header,
+    )
+
+
+def test_age_band_reprint_of_same_event_collapses_to_one_swim():
+    """The same swim re-listed under two overlapping age bands of one event
+    number must collapse to a single canonical result — even though the band
+    and the place WITHIN that band differ between the two printings.
+
+    Before the fix the de-dup key carried ``age_band`` (and ``place``), so the
+    "10-13" and "13 Year Olds" printings of Birdy Raleigh's 200 Free read as two
+    distinct swims, inflating the review queue and the PB count with phantom
+    duplicates.
+    """
+    meet = _meet(
+        [
+            # Place differs between the bands (3rd among 10-13, 1st among the
+            # 13-only subset) — the realistic HY-TEK reprint shape.
+            _band_event("Event 202  Female 10-13 200 LC Meter Freestyle", "10-13", 3),
+            _band_event(
+                "Event 202  Female 13 Year Olds 200 LC Meter Freestyle", "13 Year Olds", 1
+            ),
+        ]
+    )
+
+    canonical = interpreted_to_canonical(meet, source_filename="sussex.pdf")
+
+    raleigh = [r for r in canonical.results if "raleigh" in r.swimmer_key.lower()]
+    assert len(raleigh) == 1, f"age-band reprint not collapsed: {len(raleigh)} Raleigh results"
+    # The collapse is auditable, not silent.
+    assert any(w.code == "duplicate_results_collapsed" for w in canonical.warnings)
+
+
+def test_distinct_swimmers_in_overlapping_bands_are_kept():
+    """Collapsing the reprint must not over-merge: two *different* swimmers who
+    each appear under the overlapping bands stay as separate results."""
+    meet = _meet(
+        [
+            _band_event(
+                "Event 202  Female 10-13 200 LC Meter Freestyle",
+                "10-13",
+                1,
+                name="Birdy Raleigh",
+                time="2:19.80",
+            ),
+            _band_event(
+                "Event 202  Female 10-13 200 LC Meter Freestyle",
+                "10-13",
+                2,
+                name="Jane Smith",
+                time="2:25.10",
+            ),
+        ]
+    )
+
+    canonical = interpreted_to_canonical(meet, source_filename="sussex.pdf")
+
+    assert len(canonical.results) == 2
+    keys = {r.swimmer_key for r in canonical.results}
+    assert len(keys) == 2
+
+
+_AGE_BAND_REPRINT_PRINTOUT = b"""Sussex County ASA- LC Champ - Organization License HY-TEK's MEET MANAGER 8.0 - 6:29 PM 15/02/2026 Page 1
+Sussex County Long Course Championships 26 - 14/02/2026 to 01/03/2026
+
+Event 202  Female 10-13 200 LC Meter Freestyle
+Name                    Age  Team                 Seed Time   Finals Time
+3 Raleigh, Birdy          13  City of Brighton & Hove  2:24.51   2:19.80
+4 Smith, Jane             12  Brighton SC              2:30.00   2:25.10
+
+Event 202  Female 13 Year Olds 200 LC Meter Freestyle
+Name                    Age  Team                 Seed Time   Finals Time
+1 Raleigh, Birdy          13  City of Brighton & Hove  2:24.51   2:19.80
+"""
+
+
+def test_end_to_end_age_band_reprint_does_not_duplicate():
+    """Full parse of a HY-TEK age-band reprint yields one swim per swimmer —
+    Birdy Raleigh appears once, not twice, despite the two age-band printings."""
+    interpreted = interpret_document(_AGE_BAND_REPRINT_PRINTOUT, hint="text")
+    canonical = interpreted_to_canonical(interpreted, source_filename="sussex.pdf")
+
+    raleigh = [r for r in canonical.results if "raleigh" in r.swimmer_key.lower()]
+    assert len(raleigh) == 1, f"Raleigh appears {len(raleigh)}× after age-band reprint"
+
+
+# ---------------------------------------------------------------------------
 # End-to-end: the real interpreter on a page-broken HY-TEK printout
 # ---------------------------------------------------------------------------
 

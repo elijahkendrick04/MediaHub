@@ -177,6 +177,23 @@ def _slugify(value: str) -> str:
 _FINAL_LETTER_RE = re.compile(r"\b([ABC])\s+FINAL\b", re.IGNORECASE)
 _FINAL_OF_RE = re.compile(r"\bFINAL\s+OF\s+EVENT\b|\bFINAL\b", re.IGNORECASE)
 
+# Meet event number from a header line, e.g. "Event 202  Female 10-13 200 LC
+# Meter Freestyle" → "202". HY-TEK reprints the same physical swim under several
+# overlapping age-band sub-headers that all share ONE event number, so the
+# number anchors the de-dup identity to the event rather than the printed band.
+_EVENT_NUM_RE = re.compile(r"\bevent\s+(\d+)\b", re.IGNORECASE)
+
+
+def _event_number(raw_header: Optional[str]) -> str:
+    """Return the meet event number printed in an event header, or "".
+
+    Used as a de-dup anchor: two age-band sub-headers of the same event
+    ("Event 202 Female 10-13" / "Event 202 Female 13 Year Olds") share the
+    number, so the same swim listed under both collapses to one result.
+    """
+    m = _EVENT_NUM_RE.search(raw_header or "")
+    return m.group(1) if m else ""
+
 
 def _detect_final_round(raw_header: Optional[str]) -> tuple[str, int]:
     """Return ``(label, rank)`` for an event header.
@@ -232,24 +249,28 @@ def _coerce_distance(d) -> int:
 
 
 def _canonical_result_identity(r: RaceResult) -> tuple:
-    """Stable identity for a parsed swim — used to drop exact reprints.
+    """Stable identity for a parsed swim — used to drop reprints.
 
-    The key spans every field that distinguishes two genuinely different
-    swims, the round and the A/B-final label/rank among them, so a swimmer's
-    heat and final of the same event (which differ there) are never merged.
-    A row the source printed twice is identical across all of these and
-    collapses to one.
+    HY-TEK MEET MANAGER reprints the SAME physical swim two ways: an event
+    header repeated across a page break (identical rows), AND the same event
+    re-listed under overlapping age-band sub-headers ("Event 202 Female 10-13"
+    then "Event 202 Female 13 Year Olds") — where the only things that change
+    are the age-band banner and the place WITHIN that band. So the identity is
+    the physical swim: (event number + swimmer + final time), plus the
+    distance/stroke/course/gender that pin the event when no number is printed,
+    and the round / A-B-final label that genuinely separate a heat from a final
+    of the same event. It deliberately EXCLUDES age_band and place — the two
+    fields the age-band reprint mutates — so one swim is never queued twice.
     """
     extra = r.extra or {}
     return (
         r.swimmer_key,
+        extra.get("event_number", ""),
         r.distance,
         r.stroke,
         r.course,
         r.gender,
-        r.age_band,
         r.finals_time_cs,
-        r.place,
         r.round,
         r.status,
         r.swim_date,
@@ -324,6 +345,7 @@ def interpreted_to_canonical(
         ev_gender = _gender_code(event.gender)
         ev_age_band = event.age_band or ""
         ev_final_label, ev_final_rank = _detect_final_round(event.raw_header)
+        ev_event_number = _event_number(event.raw_header)
 
         for swim in event.swims or []:
             time_cs = _time_to_cs(swim.time)
@@ -401,6 +423,10 @@ def interpreted_to_canonical(
                     # posting. Empty label / rank 0 = heat or single timed final.
                     "final_label": ev_final_label,
                     "final_rank": ev_final_rank,
+                    # Meet event number ("202"), parsed from the header. Anchors
+                    # the de-dup identity so the same swim reprinted under
+                    # overlapping age-band sub-headers of one event collapses.
+                    "event_number": ev_event_number,
                 },
             )
             ident = _canonical_result_identity(result)
