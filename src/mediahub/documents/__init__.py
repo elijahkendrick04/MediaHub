@@ -48,6 +48,7 @@ from .models import (
     table,
     text,
 )
+from .deck import deck_view, spec_version
 from .deck_video import deck_to_mp4
 from .draft import default_outline, draft_prose, generate_document
 from .export import document_docx, document_pptx
@@ -131,4 +132,7 @@ __all__ = [
     "pdf_to_images",
     "pdf_page_count",
     "deck_to_mp4",
+    # deck presenter surface (build 4)
+    "deck_view",
+    "spec_version",
 ]
