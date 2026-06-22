@@ -150,6 +150,11 @@ _documents_ok = _importlib_util.find_spec("mediahub.documents") is not None
 _sites_ok = _importlib_util.find_spec("mediahub.sites") is not None
 _forms_ok = _importlib_util.find_spec("mediahub.forms") is not None
 
+# Roadmap 1.17 — Email & newsletter composer. Email-safe HTML auto-assembled from
+# the period's approved content; export-first (download / copy / hosted view),
+# no direct send (that waits on a provider adapter behind the publish gate).
+_email_design_ok = _importlib_util.find_spec("mediahub.email_design") is not None
+
 _brand_ok = all(
     _importlib_util.find_spec(_m) is not None
     for _m in (
@@ -15194,6 +15199,64 @@ async function delDoc(){
 </script>
 """
 
+_NEWSLETTERS_HOME_JS = r"""
+<script>
+async function genNl(fmt){
+  const range=document.getElementById('nl-range').value;
+  const withAi = confirm('Write the intro with AI in your club voice?\n\nOK = AI draft · Cancel = build from data only');
+  const j = await _genNl(fmt, range, withAi);
+  if(j.ok){ location.href=j.url; return; }
+  if(j.error==='no_ai'){
+    if(confirm('No AI provider is configured. Build it from your approved content (plain intro)?')){
+      const j2 = await _genNl(fmt, range, false);
+      if(j2.ok){ location.href=j2.url; return; }
+      alert(j2.message||j2.error||'Could not generate.');
+    }
+    return;
+  }
+  alert(j.message||j.error||'Could not generate.');
+}
+async function _genNl(fmt, range, withAi){
+  const r = await fetch('__GEN_URL__', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({format:fmt, range:range, with_ai:withAi})});
+  return r.json();
+}
+</script>
+"""
+
+_NEWSLETTER_VIEW_JS = r"""
+<script>
+async function nlCopyHtml(){
+  const msg=document.getElementById('nl-msg');
+  try{
+    const r=await fetch('__HTML_URL__'); const html=await r.text();
+    await navigator.clipboard.writeText(html);
+    msg.textContent='Email HTML copied — paste it into your list tool.';
+  }catch(e){ msg.textContent='Could not copy — use Download instead.'; }
+  setTimeout(()=>{msg.textContent='';}, 4000);
+}
+async function nlSave(){
+  let spec; const msg=document.getElementById('nl-msg');
+  try{ spec=JSON.parse(document.getElementById('nl-spec').value); }
+  catch(e){ msg.textContent='Invalid JSON'; return; }
+  const r=await fetch('__SAVE_URL__',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:spec})});
+  const j=await r.json(); msg.textContent=j.ok?'Saved. Reloading…':('Error: '+(j.error||''));
+  if(j.ok) setTimeout(()=>location.reload(), 700);
+}
+async function nlDelete(){
+  if(!confirm('Delete this newsletter?')) return;
+  // JSON content-type keeps the write CSRF-exempt (same-origin XHR), per the app guard.
+  const r=await fetch('__DEL_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
+  if(j.ok) location.href='__HOME_URL__'; else alert('Delete failed.');
+}
+async function nlPublish(pub){
+  const msg=document.getElementById('nl-msg'); msg.textContent=pub?'Publishing…':'Taking offline…';
+  const r=await fetch(pub?'__PUB_URL__':'__UNPUB_URL__',{method:'POST',headers:{'Content-Type':'application/json'}}); const j=await r.json();
+  if(j.ok){ setTimeout(()=>location.reload(), 500); } else { msg.textContent=j.error||'Failed.'; }
+}
+</script>
+"""
+
 _DOC_PRESENT_CONSOLE = r"""
 <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
   <div>
@@ -28243,6 +28306,36 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-fmt">QR</span>'
                 "</div>"
                 '<span class="mh-template-cta">Open sites</span>'
+                "</a>"
+            )
+
+        # Newsletters — the 1.17 email & newsletter composer. Email-safe branded
+        # HTML auto-assembled from the period's approved content; export-first
+        # (download / copy / hosted view). Gated on _email_design_ok.
+        if _email_design_ok:
+            _nl_svg = (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<rect x="3" y="5" width="18" height="14" rx="2"/>'
+                '<path d="m3 7 9 6 9-6"/></svg>'
+            )
+            tiles_html += (
+                f'<a href="{_h(url_for("newsletters_home"))}" class="mh-template mh-glow-border">'
+                f'<div class="mh-template-icon">{_nl_svg}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                '<h3 style="margin:0">Newsletters</h3>'
+                '<span class="tag live">Ready</span>'
+                "</div>"
+                "<p>Turn a month (or a meet) of approved content into a branded, "
+                "email-safe newsletter &mdash; results, spotlights, fixtures and your "
+                "sponsor, with an AI intro in your club voice &mdash; then download the "
+                "HTML for your list tool or publish a web version.</p>"
+                '<div class="mh-template-formats">'
+                '<span class="mh-template-fmt">Email HTML</span>'
+                '<span class="mh-template-fmt">Copy / download</span>'
+                '<span class="mh-template-fmt">Hosted view</span>'
+                "</div>"
+                '<span class="mh-template-cta">Open newsletters</span>'
                 "</a>"
             )
 
@@ -49838,6 +49931,466 @@ voice, and queues them for one-click approval.</p>
         if not runs:
             return None
         return facts_from_runs(runs, club_name=club, period=time.strftime("%Y"), run_ids=ids)
+
+    # ------------------------------------------------------------------ #
+    # Email & newsletter composer (roadmap 1.17)
+    # ------------------------------------------------------------------ #
+    # Email-safe branded HTML auto-assembled from the period's approved
+    # content. Export-first: download / copy the HTML for the club's own list
+    # tool, or publish a hosted web version. No direct send (a provider adapter
+    # behind the publish gate is a later, flagged build — roadmap-explicit).
+
+    _NL_RANGES = (
+        ("this_month", "This month"),
+        ("last_month", "Last month"),
+        ("last_30", "Last 30 days"),
+        ("this_season", "This season"),
+    )
+
+    def _nl_load_owned(newsletter_id):
+        """(pid, spec) for a newsletter owned by the active org, else (pid, None)."""
+        pid = _active_profile_id()
+        if not pid:
+            return None, None
+        from mediahub.email_design import store as _ns
+
+        return pid, _ns.load_newsletter(pid, newsletter_id)
+
+    def _nl_range(preset, body):
+        """Resolve a range preset (or a custom start/end) to (start, end) dates."""
+        from datetime import date as _date
+        from datetime import timedelta as _td
+
+        def _iso(v):
+            try:
+                return _date.fromisoformat(str(v)[:10])
+            except (TypeError, ValueError):
+                return None
+
+        today = _date.today()
+        if preset == "custom":
+            return (_iso(body.get("start")) or today.replace(day=1)), (
+                _iso(body.get("end")) or today
+            )
+        if preset == "last_month":
+            last_prev = today.replace(day=1) - _td(days=1)
+            return last_prev.replace(day=1), last_prev
+        if preset == "last_30":
+            return today - _td(days=30), today
+        if preset == "this_season":
+            yr = today.year if today.month >= 9 else today.year - 1
+            return _date(yr, 9, 1), today
+        return today.replace(day=1), today  # this_month (default)
+
+    def _nl_resolve_images(spec, resolver):
+        """Return a copy of ``spec`` with each card's image ``src`` filled from
+        its ``card_ref`` via ``resolver(run_id, card_id) -> url`` — so a card
+        image is only ever served behind the right access check, never baked in."""
+        from mediahub.email_design.models import NewsletterSpec
+
+        data = spec.to_dict()
+        for sec in data.get("sections", []):
+            for b in sec.get("blocks", []):
+                p = b.get("props", {})
+                if b.get("kind") == "card" and not p.get("src") and p.get("card_ref"):
+                    run_id, _, card_id = str(p["card_ref"]).partition("/")
+                    if run_id and card_id:
+                        url = resolver(run_id, card_id) or ""
+                        if url:
+                            p["src"] = url
+        return NewsletterSpec.from_dict(data)
+
+    @app.route("/newsletters")
+    def newsletters_home():
+        if not _email_design_ok:
+            return _recovery_page(
+                "Newsletters unavailable",
+                "The newsletter composer isn't enabled on this deployment.",
+                primary_cta=("Back to home", url_for("home")),
+            )
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Newsletters", _PW_NO_ORG, active="create")
+        from mediahub.email_design import store as _ns
+
+        items = _ns.list_newsletters(pid)
+        range_opts = "".join(
+            f'<option value="{_h(k)}">{_h(label)}</option>' for k, label in _NL_RANGES
+        )
+
+        saved = ""
+        if items:
+            rows = []
+            for it in items:
+                badge = it["newsletter_format"].replace("_", " ").title()
+                live = (
+                    ' &middot; <span class="tag live">Published</span>' if it["published"] else ""
+                )
+                rows.append(
+                    '<a class="card" style="display:block;text-decoration:none" '
+                    f'href="{url_for("newsletter_view", newsletter_id=it["newsletter_id"])}">'
+                    f"<strong>{_h(it['title'])}</strong>"
+                    f'<div class="dim" style="font-size:12px;margin-top:4px">{_h(badge)}{live}</div></a>'
+                )
+            saved = (
+                '<h2 style="margin-top:28px">Your newsletters</h2>'
+                '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));'
+                f'gap:12px">{"".join(rows)}</div>'
+            )
+
+        def _tile(fmt, name, desc):
+            return (
+                '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
+                '<p class="dim" style="font-size:13px">' + desc + "</p>"
+                '<button class="btn" style="margin-top:8px" onclick="genNl(\'' + fmt + "')\">"
+                "Generate</button></div>"
+            )
+
+        body = (
+            '<section class="mh-hero"><h1>Newsletters</h1>'
+            '<p class="muted">Turn your approved content into a branded, send-anywhere '
+            "newsletter — results, spotlights, fixtures and your sponsor, with an AI intro "
+            "in your club voice. Download the email HTML for your list tool, or publish a "
+            "hosted web version.</p></section>"
+            '<div class="card" style="margin-bottom:14px"><label class="dim" style="font-size:13px">'
+            "Period to cover</label><br>"
+            f'<select id="nl-range" class="input" style="max-width:260px">{range_opts}</select></div>'
+            '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
+            + _tile(
+                "monthly_roundup",
+                "Monthly roundup",
+                "A month of approved content: numbers, highlights, fixtures and your sponsor.",
+            )
+            + _tile(
+                "meet_digest",
+                "Meet digest",
+                "One meet: the standout swims, athletes to watch and what's next.",
+            )
+            + _tile(
+                "season_highlights",
+                "Season highlights",
+                "A season window: the headline numbers and the swims you'll remember.",
+            )
+            + _tile("blank", "Blank", "An empty newsletter you fill in yourself.")
+            + "</div>"
+            + saved
+            + _NEWSLETTERS_HOME_JS.replace("__GEN_URL__", url_for("api_newsletters_generate"))
+        )
+        return _layout("Newsletters", body, active="create")
+
+    @app.route("/api/newsletters/generate", methods=["POST"])
+    def api_newsletters_generate():
+        if not _email_design_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        body = request.get_json(silent=True) or {}
+        fmt = (body.get("format") or "monthly_roundup").strip()
+        if fmt not in ("monthly_roundup", "meet_digest", "season_highlights", "blank"):
+            return jsonify({"ok": False, "error": "bad_format"}), 400
+        preset = (body.get("range") or "this_month").strip()
+        with_ai = bool(body.get("with_ai", True))
+        start, end = _nl_range(preset, body)
+        prof = load_profile(pid)
+        tone = (getattr(prof, "tone", "") or "warm-club") if prof else "warm-club"
+        from mediahub.email_design import store as _ns
+        from mediahub.email_design.draft import generate_newsletter
+
+        try:
+            spec = generate_newsletter(
+                pid,
+                start=start,
+                end=end,
+                newsletter_format=fmt,
+                tone=tone,
+                with_ai=with_ai,
+                profile=prof,
+                runs_dir=RUNS_DIR,
+            )
+        except Exception as e:  # honest AI-unavailable signal — offer a data-only build
+            from mediahub.media_ai.llm import ClaudeUnavailableError
+
+            if isinstance(e, ClaudeUnavailableError):
+                return jsonify({"ok": False, "error": "no_ai", "message": str(e)}), 200
+            log.warning("newsletter generation failed", exc_info=True)
+            return jsonify({"ok": False, "error": "generate_failed"}), 500
+        _ns.save_newsletter(pid, spec)
+        return jsonify(
+            {
+                "ok": True,
+                "newsletter_id": spec.newsletter_id,
+                "url": url_for("newsletter_view", newsletter_id=spec.newsletter_id),
+            }
+        )
+
+    @app.route("/newsletters/<newsletter_id>")
+    def newsletter_view(newsletter_id: str):
+        if not _email_design_ok:
+            return _recovery_page(
+                "Newsletters unavailable",
+                "Not enabled here.",
+                primary_cta=("Home", url_for("home")),
+            )
+        pid, spec = _nl_load_owned(newsletter_id)
+        if spec is None:
+            return _recovery_page(
+                "Newsletter not found",
+                "It may have been deleted, or belongs to another organisation.",
+                primary_cta=("All newsletters", url_for("newsletters_home")),
+            )
+        from mediahub.email_design import store as _ns
+
+        rec = _ns.newsletter_record(pid, newsletter_id) or {}
+        html_url = url_for("api_newsletter_html", newsletter_id=newsletter_id)
+        text_url = url_for("api_newsletter_text", newsletter_id=newsletter_id)
+
+        # publish status block
+        if rec.get("published") and rec.get("public_token"):
+            hosted = url_for("newsletter_public", token=rec["public_token"], _external=True)
+            publish_html = (
+                '<div class="card" style="margin-bottom:14px">'
+                "<strong>Hosted web version is live.</strong> "
+                f'<a href="{_h(hosted)}" target="_blank">{_h(hosted)}</a>'
+                '<div style="margin-top:8px">'
+                '<button class="btn secondary" onclick="nlPublish(false)">Take offline</button> '
+                '<button class="btn secondary" onclick="nlPublish(true)">Re-publish latest</button>'
+                "</div></div>"
+            )
+        else:
+            publish_html = (
+                '<div class="card" style="margin-bottom:14px">'
+                "<strong>Publish a hosted web version</strong>"
+                '<p class="dim" style="font-size:13px;margin:4px 0 8px">A shareable '
+                "browser-readable page &mdash; and the link the card images need to show in "
+                "the downloaded email.</p>"
+                '<button class="btn" onclick="nlPublish(true)">Publish</button></div>'
+            )
+
+        spec_json = _h(json.dumps(spec.to_dict(), indent=2))
+        period = _h(spec.subtitle or spec.newsletter_format.replace("_", " ").title())
+        body = (
+            f'<section class="mh-hero"><h1>{_h(spec.title)}</h1>'
+            f'<p class="muted">{period}</p></section>'
+            + publish_html
+            + '<div style="margin-bottom:14px">'
+            f'<a class="btn" href="{html_url}?dl=1">Download email HTML</a> '
+            '<button class="btn secondary" onclick="nlCopyHtml()">Copy HTML</button> '
+            f'<a class="btn secondary" href="{text_url}?dl=1">Download plain text</a> '
+            '<button class="btn secondary" disabled title="Direct send is coming soon — '
+            'for now, download or copy the HTML into your own mailing-list tool." '
+            'style="opacity:.55;cursor:not-allowed">Send (coming soon)</button>'
+            '<span id="nl-msg" class="dim" style="margin-left:10px"></span>'
+            "</div>"
+            '<p class="dim" style="font-size:12px;margin:0 0 8px">Preview (renders like an '
+            "email client). Card images show here and on the hosted version.</p>"
+            f'<iframe src="{html_url}?preview=1" '
+            'style="width:100%;height:72vh;border:1px solid var(--panel);border-radius:8px;'
+            'background:var(--panel)"></iframe>'
+            '<details style="margin-top:18px"><summary class="dim">Edit newsletter (advanced — spec JSON)</summary>'
+            f'<textarea id="nl-spec" class="input" style="width:100%;height:300px;font-family:monospace;font-size:12px">{spec_json}</textarea>'
+            '<button class="btn" style="margin-top:8px" onclick="nlSave()">Save changes</button> '
+            '<button class="btn secondary" style="margin-top:8px" onclick="nlDelete()">Delete newsletter</button>'
+            "</details>"
+            + _NEWSLETTER_VIEW_JS.replace("__HTML_URL__", html_url)
+            .replace("__SAVE_URL__", url_for("api_newsletter_save", newsletter_id=newsletter_id))
+            .replace("__DEL_URL__", url_for("api_newsletter_delete", newsletter_id=newsletter_id))
+            .replace("__PUB_URL__", url_for("api_newsletter_publish", newsletter_id=newsletter_id))
+            .replace(
+                "__UNPUB_URL__", url_for("api_newsletter_unpublish", newsletter_id=newsletter_id)
+            )
+            .replace("__HOME_URL__", url_for("newsletters_home"))
+        )
+        return _layout(spec.title, body, active="create")
+
+    def _nl_render_html(pid, newsletter_id, spec, *, preview=False, published_token=""):
+        """Render a newsletter to email-safe HTML, resolving card images for the
+        right context (authenticated preview route / public token route)."""
+        from mediahub.email_design.render import render_email_html
+
+        prof = load_profile(pid)
+        if preview:
+            spec = _nl_resolve_images(
+                spec,
+                lambda r, c: url_for(
+                    "newsletter_preview_card", newsletter_id=newsletter_id, run_id=r, card_id=c
+                ),
+            )
+        elif published_token:
+            spec = _nl_resolve_images(
+                spec,
+                lambda r, c: url_for(
+                    "newsletter_public_card",
+                    token=published_token,
+                    run_id=r,
+                    card_id=c,
+                    _external=True,
+                ),
+            )
+        return render_email_html(spec, profile=prof)
+
+    @app.route("/api/newsletters/<newsletter_id>/html")
+    def api_newsletter_html(newsletter_id: str):
+        if not _email_design_ok:
+            return jsonify({"error": "unavailable"}), 503
+        pid, spec = _nl_load_owned(newsletter_id)
+        if spec is None:
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.email_design import store as _ns
+
+        preview = request.args.get("preview") == "1"
+        token = ""
+        if not preview:
+            rec = _ns.newsletter_record(pid, newsletter_id) or {}
+            if rec.get("published"):
+                token = rec.get("public_token", "")
+        html = _nl_render_html(pid, newsletter_id, spec, preview=preview, published_token=token)
+        resp = make_response(html)
+        resp.headers["Content-Type"] = "text/html; charset=utf-8"
+        if request.args.get("dl") == "1":
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{_safe_filename(spec.title, "html")}"'
+            )
+        return resp
+
+    @app.route("/api/newsletters/<newsletter_id>/text")
+    def api_newsletter_text(newsletter_id: str):
+        if not _email_design_ok:
+            return jsonify({"error": "unavailable"}), 503
+        pid, spec = _nl_load_owned(newsletter_id)
+        if spec is None:
+            return jsonify({"error": "not_found"}), 404
+        from mediahub.email_design.render import render_plaintext
+
+        text_out = render_plaintext(spec, profile=load_profile(pid))
+        resp = make_response(text_out)
+        resp.headers["Content-Type"] = "text/plain; charset=utf-8"
+        if request.args.get("dl") == "1":
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{_safe_filename(spec.title, "txt")}"'
+            )
+        return resp
+
+    @app.route("/api/newsletters/<newsletter_id>/save", methods=["POST"])
+    def api_newsletter_save(newsletter_id: str):
+        if not _email_design_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid, spec = _nl_load_owned(newsletter_id)
+        if spec is None:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        body = request.get_json(silent=True) or {}
+        raw = body.get("spec")
+        if not isinstance(raw, dict):
+            return jsonify({"ok": False, "error": "bad_spec"}), 400
+        from mediahub.email_design import store as _ns
+        from mediahub.email_design.models import NewsletterSpec
+
+        raw["newsletter_id"] = newsletter_id  # never let an edit reassign identity
+        _ns.save_newsletter(pid, NewsletterSpec.from_dict(raw))
+        return jsonify({"ok": True})
+
+    @app.route("/api/newsletters/<newsletter_id>/delete", methods=["POST"])
+    def api_newsletter_delete(newsletter_id: str):
+        if not _email_design_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        from mediahub.email_design import store as _ns
+
+        return jsonify({"ok": _ns.delete_newsletter(pid, newsletter_id)})
+
+    @app.route("/api/newsletters/<newsletter_id>/publish", methods=["POST"])
+    def api_newsletter_publish(newsletter_id: str):
+        if not _email_design_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        from mediahub.email_design import store as _ns
+
+        token = _ns.publish_newsletter(pid, newsletter_id)
+        if not token:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        return jsonify(
+            {"ok": True, "url": url_for("newsletter_public", token=token, _external=True)}
+        )
+
+    @app.route("/api/newsletters/<newsletter_id>/unpublish", methods=["POST"])
+    def api_newsletter_unpublish(newsletter_id: str):
+        if not _email_design_ok:
+            return jsonify({"ok": False, "error": "unavailable"}), 503
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": False, "error": "not_signed_in"}), 403
+        from mediahub.email_design import store as _ns
+
+        return jsonify({"ok": _ns.unpublish_newsletter(pid, newsletter_id)})
+
+    @app.route("/newsletters/<newsletter_id>/card/<run_id>/<card_id>.png")
+    def newsletter_preview_card(newsletter_id: str, run_id: str, card_id: str):
+        """Authenticated card image for the editor preview (owner-only, IDOR-guarded)."""
+        if not _email_design_ok:
+            abort(404)
+        pid, spec = _nl_load_owned(newsletter_id)
+        if spec is None:
+            abort(404)
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, pid):
+            abort(404)
+        from mediahub.web import public_wall as _pw
+
+        prof = load_profile(pid)
+        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
+        if not path:
+            abort(404)
+        resp = make_response(send_file(path, mimetype="image/png"))
+        resp.headers["Cache-Control"] = "private, max-age=300"
+        return resp
+
+    @app.route("/newsletter/<token>")
+    def newsletter_public(token: str):
+        """The hosted web version — the published snapshot, served to anyone with
+        the unguessable link (the human-approval publish gate decides who that is)."""
+        if not _email_design_ok:
+            abort(404)
+        from mediahub.email_design import store as _ns
+
+        ref = _ns.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, newsletter_id = ref
+        spec = _ns.load_published(pid, newsletter_id)
+        if spec is None:
+            abort(404)
+        html = _nl_render_html(pid, newsletter_id, spec, published_token=token)
+        resp = make_response(html)
+        resp.headers["Content-Type"] = "text/html; charset=utf-8"
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
+    @app.route("/newsletter/<token>/card/<run_id>/<card_id>.png")
+    def newsletter_public_card(token: str, run_id: str, card_id: str):
+        """Card image for a published newsletter (token-scoped, IDOR-guarded)."""
+        if not _email_design_ok:
+            abort(404)
+        from mediahub.email_design import store as _ns
+        from mediahub.web import public_wall as _pw
+
+        ref = _ns.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, _newsletter_id = ref
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, pid):
+            abort(404)
+        prof = load_profile(pid)
+        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
+        if not path:
+            abort(404)
+        resp = make_response(send_file(path, mimetype="image/png"))
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
 
     @app.route("/documents")
     def documents_home():
