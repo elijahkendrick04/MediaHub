@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `888527a3b` · Video upload: raise the footage body cap so real clips actually upload (#982)
+**Last updated:** 2026-06-22 · `4359ea742` · Merge pull request #984 from elijahkendrick04/claude/kind-pasteur-4zikwm
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1213,6 +1213,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `747d85a66` | fix(deploy): wrap the remaining fail-loud build fetches with a retry helper |
+| 2026-06-22 | `8598cbcf6` | fix(deploy): retry transient CDN/TLS failures when fetching the Piper voice |
 | 2026-06-22 | `30161cbf7` | video upload: raise the footage body cap so real clips actually upload |
 | 2026-06-22 | `7bd2ea176` | fix: Accepted upload file formats are never specified — a volunte |
 | 2026-06-22 | `bac42844e` | fix: 'brand kit' is unexplained jargon — a club volunteer won't k |
@@ -1221,5 +1223,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
 | 2026-06-21 | `f36e05c43` | ci(unit-suite): a cancelled (superseded) run is not a failure |
 | 2026-06-21 | `3c1c4c411` | First-party performance-analytics loop (roadmap 1.14, build 4/4) |
-| 2026-06-21 | `2eab60c3b` | video suite: timeline editor — per-clip colour-grade sliders |
 <!-- /ROADMAP:ACTIVITY -->
