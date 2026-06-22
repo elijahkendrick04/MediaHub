@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-21 · `77b4b3d2e` · Video suite: full AI editing layer + timeline editor (grade sliders / drag-reorder / waveform scrubb
+**Last updated:** 2026-06-22 · `bcdc7bd08` · Merge pull request #976 from elijahkendrick04/claude/mobile-website-responsive-a1p99e
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1213,6 +1213,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-21 | `b11ff26e8` | Mobile: stop calendar toolbar and segmented filters overflowing the phone viewport |
 | 2026-06-21 | `e90907c9a` | video editor: drag-to-reorder + audio-waveform scrubber, and fix two studio-breaking bugs |
 | 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
 | 2026-06-21 | `f36e05c43` | ci(unit-suite): a cancelled (superseded) run is not a failure |
