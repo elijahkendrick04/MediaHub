@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `a7f32e0cb` · Merge pull request #998: Export &amp; conversion engine (roadmap 1.19)
+**Last updated:** 2026-06-22 · `32a591bf4` · Merge pull request #1001: Fix studio preview / run progress / org finalise UI bugs (QA sweep 2026-06
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1208,6 +1208,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `ef02899e1` | Fix three studio/run/finalise UI bugs (QA sweep 2026-06-22, batch 2) |
 | 2026-06-22 | `70229376b` | Mark roadmap 1.19 done — export & conversion engine |
 | 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
 | 2026-06-22 | `1d9efb75d` | Apply pinned ruff-format (v0.8.4) to the 1.19 source files (CI hygiene) |
@@ -1219,5 +1220,4 @@ list and the auto table below, not here.
 | 2026-06-22 | `e4559f0f3` | Collections, Team Context & assistant-in-threads (roadmap 1.18, build 5/5) |
 | 2026-06-22 | `935151445` | Fix three HY-TEK interpreter parser bugs (QA sweep 2026-06-22) |
 | 2026-06-22 | `a9223368c` | Expiring share links + public review surface (roadmap 1.18, build 4/5) |
-| 2026-06-22 | `cb822cef9` | Version history (diff + restore) & element locks (roadmap 1.18, build 3/5) |
 <!-- /ROADMAP:ACTIVITY -->
