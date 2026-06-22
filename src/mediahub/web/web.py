@@ -144,6 +144,12 @@ _charts_ok = _importlib_util.find_spec("mediahub.charts") is not None
 # module import light; PDF/video rendering honest-errors at call time if absent.
 _documents_ok = _importlib_util.find_spec("mediahub.documents") is not None
 
+# Roadmap 1.16 — Club microsites + link-in-bio + forms + QR + vetted widgets.
+# Static-first render (no Playwright/Node needed for the page itself); the QR
+# layer honest-errors only where its backend (segno) is genuinely absent.
+_sites_ok = _importlib_util.find_spec("mediahub.sites") is not None
+_forms_ok = _importlib_util.find_spec("mediahub.forms") is not None
+
 _brand_ok = all(
     _importlib_util.find_spec(_m) is not None
     for _m in (
@@ -15426,16 +15432,27 @@ def create_app() -> Flask:
         _embeddable = (request.endpoint or "") == "public_wall_embed" or (
             request.path.startswith("/wall/") and request.path.endswith("/embed")
         )
+        # The 1.16 microsite editor frames its own draft-preview route in a
+        # same-origin iframe (device preview), so that route allows 'self'
+        # framing only — everything else still refuses framing (clickjacking).
+        _self_frame = (request.endpoint or "") in ("site_preview_home", "site_preview_page")
+        if _embeddable:
+            _frame_ancestors = "frame-ancestors *"
+        elif _self_frame:
+            _frame_ancestors = "frame-ancestors 'self'"
+        else:
+            _frame_ancestors = "frame-ancestors 'none'"
         h.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
             "font-src 'self'; connect-src 'self'; media-src 'self' blob:; "
-            "object-src 'none'; base-uri 'self'; form-action 'self'; "
-            + ("frame-ancestors *" if _embeddable else "frame-ancestors 'none'"),
+            "object-src 'none'; base-uri 'self'; form-action 'self'; " + _frame_ancestors,
         )
         h.setdefault("X-Content-Type-Options", "nosniff")
-        if not _embeddable:
+        if _self_frame:
+            h.setdefault("X-Frame-Options", "SAMEORIGIN")
+        elif not _embeddable:
             h.setdefault("X-Frame-Options", "DENY")
         h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
@@ -15669,6 +15686,16 @@ def create_app() -> Flask:
             "public_wall_json",
             "public_wall_rss",
             "public_wall_card_png",
+            # 1.16 — published club microsites: token-keyed public surfaces (the
+            # token is the access control; a per-site password may gate pages).
+            "site_public_home",
+            "site_public_page",
+            "site_card_png",
+            "site_form_submit",
+            "site_widget_vote",
+            "site_sitemap",
+            "site_robots",
+            "site_unlock",
         }
     )
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -28185,6 +28212,36 @@ function mhAnDigest(btn) {{
                 '<span class="mh-template-fmt">Present</span>'
                 "</div>"
                 '<span class="mh-template-cta">Open documents</span>'
+                "</a>"
+            )
+
+        # Sites — the 1.16 microsite engine (club home / link-in-bio / meet
+        # microsite / event page + forms, widgets, QR). A first-class Create
+        # tile; gated on _sites_ok so it only shows where it works.
+        if _sites_ok:
+            _site_svg = (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>'
+                '<circle cx="6.2" cy="6.5" r="0.6" fill="currentColor"/>'
+                '<circle cx="8.4" cy="6.5" r="0.6" fill="currentColor"/></svg>'
+            )
+            tiles_html += (
+                f'<a href="{_h(url_for("sites_home"))}" class="mh-template mh-glow-border">'
+                f'<div class="mh-template-icon">{_site_svg}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                '<h3 style="margin:0">Sites</h3>'
+                '<span class="tag live">Ready</span>'
+                "</div>"
+                "<p>Build a club home, a link-in-bio page, a meet microsite or an event "
+                "page from your data &mdash; with forms, countdowns, a medal tally and a "
+                "brand QR code &mdash; then publish it when you approve it.</p>"
+                '<div class="mh-template-formats">'
+                '<span class="mh-template-fmt">Microsite</span>'
+                '<span class="mh-template-fmt">Forms</span>'
+                '<span class="mh-template-fmt">QR</span>'
+                "</div>"
+                '<span class="mh-template-cta">Open sites</span>'
                 "</a>"
             )
 
@@ -48080,6 +48137,701 @@ voice, and queues them for one-click approval.</p>
         if job is None:
             return jsonify({"error": "Job not found."}), 404
         return jsonify(job.to_dict())
+
+    # ---- 1.16: Club microsites + link-in-bio + forms + QR + widgets -------
+    #
+    # Club pages generated from club data, hosted under an unguessable token
+    # URL, approval-gated (a site is a draft until the operator Publishes it,
+    # which freezes a snapshot). Mirrors the public-wall security model:
+    # constant-time token lookup, org-scoped, escaped output. Forms feed the
+    # 1.13 data hub; widgets/QR are the vetted interactive layer.
+
+    def _sites_unavailable_page():
+        return _layout(
+            "Sites",
+            '<div class="card"><h2>Sites unavailable</h2>'
+            '<p class="dim">This feature isn\'t enabled on this deployment.</p></div>',
+            active="create",
+        )
+
+    def _site_brand_kit(pid):
+        """The org's brand kit, or None (render falls back to a neutral brand)."""
+        try:
+            return _v8_brand_kit_for(pid)
+        except Exception:
+            return None
+
+    def _site_facts_for(pid, run_id=""):
+        """Build a SiteFacts from the org's profile + approved cards (+ a run)."""
+        from mediahub.sites.grounding import SiteFacts, site_facts_with_performance
+
+        prof = load_profile(pid)
+        bk = _site_brand_kit(pid)
+        name = (
+            getattr(bk, "display_name", "")
+            or getattr(prof, "display_name", "")
+            or getattr(prof, "name", "")
+            or "Our club"
+        )
+        facts = SiteFacts(
+            club_name=name,
+            tagline=getattr(prof, "tagline", "") or "",
+            location=getattr(prof, "location", "") or "",
+            contact_email=getattr(prof, "contact_email", "") or "",
+        )
+        try:
+            from mediahub.web import public_wall as _pw
+
+            for c in _pw.wall_cards(prof)[:9]:
+                facts.cards.append(
+                    {
+                        "src": f"card:{c['run_id']}/{c['card_id']}",
+                        "alt": c.get("alt_text", ""),
+                        "caption": c.get("title", ""),
+                    }
+                )
+        except Exception:
+            pass
+        if run_id:
+            try:
+                df = _doc_facts_for(pid, bk, scope="meet", run_id=run_id)
+                if df is not None:
+                    facts.event_name = getattr(df, "title", "") or facts.event_name
+                    facts.period = getattr(df, "period", "") or facts.period
+                    site_facts_with_performance(facts, df)
+            except Exception:
+                pass
+        return facts
+
+    def _site_render(pid, site_id, spec, page, *, token="", preview=False):
+        """Render one page of a site, wiring the public/preview resolvers."""
+        from mediahub.sites.render import render_page_html
+        from mediahub.sites.theme import resolve_role_vars
+
+        bk = _site_brand_kit(pid)
+        rv = resolve_role_vars(bk)
+
+        if preview:
+
+            def page_url(slug):
+                return (
+                    url_for("site_preview_page", site_id=site_id, slug=slug)
+                    if slug
+                    else url_for("site_preview_home", site_id=site_id)
+                )
+
+            def card_url(run_id, card_id):
+                return url_for(
+                    "site_preview_card_png", site_id=site_id, run_id=run_id, card_id=card_id
+                )
+
+            def form_action(_form_id):
+                return "#"
+
+            canonical = ""
+        else:
+
+            def page_url(slug):
+                return (
+                    url_for("site_public_page", token=token, slug=slug)
+                    if slug
+                    else url_for("site_public_home", token=token)
+                )
+
+            def card_url(run_id, card_id):
+                return url_for("site_card_png", token=token, run_id=run_id, card_id=card_id)
+
+            def form_action(form_id):
+                return url_for("site_form_submit", token=token, form_id=form_id)
+
+            canonical = (
+                url_for("site_public_home", token=token, _external=True)
+                if page.is_home
+                else url_for("site_public_page", token=token, slug=page.slug, _external=True)
+            )
+
+        def asset_url(src):
+            s = str(src or "")
+            if s.startswith("card:"):
+                run_id, _, card_id = s[5:].partition("/")
+                return card_url(run_id, card_id)
+            return s
+
+        def render_form(form_id, nonce):
+            from mediahub.forms import render as _fr
+            from mediahub.forms import store as _fs
+
+            form = _fs.load_form(pid, form_id)
+            if form is None:
+                return ""
+            return _fr.render_form_html(
+                form, action_url=form_action(form_id), nonce=nonce, interactive=not preview
+            )
+
+        def render_widget(props, nonce):
+            from mediahub.sites import widget_state as _ws
+            from mediahub.sites import widgets as _w
+
+            vote_url = ""
+            counts = None
+            if (props or {}).get("widget_type") == "poll" and not preview:
+                wid = str(props.get("widget_id") or "")
+                vote_url = url_for("site_widget_vote", token=token, widget_id=wid)
+                counts = _ws.vote_counts(pid, site_id, wid)
+            return _w.render_widget(
+                props, nonce=nonce, role_vars=rv, vote_url=vote_url, counts=counts
+            )
+
+        return render_page_html(
+            spec,
+            page,
+            brand_kit=bk,
+            role_vars=rv,
+            canonical=canonical,
+            page_url=page_url,
+            asset_url=asset_url,
+            render_form=render_form,
+            render_widget=render_widget,
+        )
+
+    def _site_has_form(spec, form_id) -> bool:
+        for p in spec.pages:
+            for s in p.sections:
+                for b in s.blocks:
+                    if b.kind == "form_embed" and str(b.props.get("form_id")) == str(form_id):
+                        return True
+        return False
+
+    def _site_find_poll(spec, widget_id):
+        for p in spec.pages:
+            for s in p.sections:
+                for b in s.blocks:
+                    if (
+                        b.kind == "widget_embed"
+                        and b.props.get("widget_type") == "poll"
+                        and str(b.props.get("widget_id")) == str(widget_id)
+                    ):
+                        return b
+        return None
+
+    # -- operator surface (signed-in) --------------------------------------
+
+    @app.route("/sites")
+    def sites_home():
+        if not _sites_ok:
+            return _sites_unavailable_page()
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Sites", _PW_NO_ORG, active="create")
+        from mediahub.forms import store as _fs
+        from mediahub.sites import store as _ss
+        from mediahub.web import sites_ui as _ui
+
+        sites = _ss.list_sites(pid)
+        forms = _fs.list_forms(pid) if _forms_ok else []
+        try:
+            runs = _doc_recent_runs(pid)
+        except Exception:
+            runs = []
+        flash = ""
+        if request.args.get("msg"):
+            flash = (
+                '<div class="card" style="border-color:var(--mh-success,#3a7)">'
+                f'<p>{_h(request.args.get("msg"))}</p></div>'
+            )
+        return _layout("Sites", flash + _ui.render_index(sites, forms, runs), active="create")
+
+    @app.route("/api/sites/generate", methods=["POST"])
+    def api_sites_generate():
+        if not _sites_ok:
+            return jsonify({"error": "Sites unavailable."}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sites_home"))
+        from mediahub.sites import store as _ss
+        from mediahub.sites.archetypes import build_site
+
+        body = request.get_json(silent=True) if request.is_json else None
+        archetype = (body or request.form).get("archetype") or "club_home"
+        run_id = (body or request.form).get("run_id") or ""
+        with_ai = bool((body or request.form).get("with_ai"))
+        facts = _site_facts_for(pid, run_id)
+        note = ""
+        prose = None
+        if with_ai:
+            try:
+                from mediahub.sites.draft import draft_copy
+
+                prose = draft_copy(facts, archetype)
+            except Exception:
+                note = "AI copy isn't configured, so the site was built from your data alone."
+        spec = build_site(archetype, facts, prose=prose)
+        _ss.save_site(pid, spec)
+        if request.is_json:
+            return jsonify({"ok": True, "site_id": spec.site_id})
+        return redirect(url_for("site_editor", site_id=spec.site_id, msg=note or None))
+
+    @app.route("/sites/<site_id>")
+    def site_editor(site_id):
+        if not _sites_ok:
+            return _sites_unavailable_page()
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Sites", _PW_NO_ORG, active="create")
+        from mediahub.forms import store as _fs
+        from mediahub.sites import insights as _ins
+        from mediahub.sites import store as _ss
+        from mediahub.web import sites_ui as _ui
+
+        spec = _ss.load_site(pid, site_id)
+        rec = _ss.site_record(pid, site_id)
+        if spec is None or rec is None:
+            return (
+                _layout(
+                    "Sites",
+                    '<div class="card"><h2>Site not found</h2>'
+                    f'<p><a href="{url_for("sites_home")}">Back to sites</a></p></div>',
+                    active="create",
+                ),
+                404,
+            )
+        forms = _fs.list_forms(pid) if _forms_ok else []
+        insights = _ins.view_counts(pid, site_id)
+        body = _ui.render_editor(
+            rec, spec, forms=forms, insights=insights, flash=request.args.get("msg", "")
+        )
+        return _layout(f"Sites — {spec.title}", body, active="create")
+
+    @app.route("/api/sites/<site_id>/save", methods=["POST"])
+    def api_site_save(site_id):
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+        from mediahub.sites.models import SiteSpec
+
+        if _ss.load_site(pid, site_id) is None:
+            abort(404)
+        raw = request.form.get("spec")
+        if raw is None and request.is_json:
+            jb = request.get_json(silent=True) or {}
+            raw = json.dumps(jb.get("spec") or jb)
+        try:
+            data = json.loads(raw or "{}")
+        except ValueError:
+            if request.is_json:
+                return jsonify({"ok": False, "error": "invalid_json"}), 400
+            return redirect(
+                url_for("site_editor", site_id=site_id, msg="That wasn't valid JSON — nothing saved.")
+            )
+        if not isinstance(data, dict):
+            data = {}
+        data["site_id"] = site_id  # the id is never editable from the body
+        _ss.save_site(pid, SiteSpec.from_dict(data))
+        if request.is_json:
+            return jsonify({"ok": True})
+        return redirect(url_for("site_editor", site_id=site_id, msg="Saved."))
+
+    @app.route("/api/sites/<site_id>/publish", methods=["POST"])
+    def api_site_publish(site_id):
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+
+        if _ss.load_site(pid, site_id) is None:
+            abort(404)
+        token = _ss.publish_site(pid, site_id)
+        if request.is_json:
+            url = url_for("site_public_home", token=token, _external=True) if token else ""
+            return jsonify({"ok": bool(token), "token": token, "url": url})
+        return redirect(url_for("site_editor", site_id=site_id, msg="Published."))
+
+    @app.route("/api/sites/<site_id>/unpublish", methods=["POST"])
+    def api_site_unpublish(site_id):
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+
+        if _ss.load_site(pid, site_id) is None:
+            abort(404)
+        _ss.unpublish_site(pid, site_id)
+        if request.is_json:
+            return jsonify({"ok": True})
+        return redirect(url_for("site_editor", site_id=site_id, msg="Taken offline."))
+
+    @app.route("/api/sites/<site_id>/delete", methods=["POST"])
+    def api_site_delete(site_id):
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+
+        _ss.delete_site(pid, site_id)
+        if request.is_json:
+            return jsonify({"ok": True})
+        return redirect(url_for("sites_home", msg="Site deleted."))
+
+    @app.route("/api/sites/<site_id>/password", methods=["POST"])
+    def api_site_password(site_id):
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import store as _ss
+
+        if _ss.load_site(pid, site_id) is None:
+            abort(404)
+        pw = (request.form.get("password") if not request.is_json else (request.get_json(silent=True) or {}).get("password")) or ""
+        _ss.set_site_password(pid, site_id, pw)
+        if request.is_json:
+            return jsonify({"ok": True})
+        return redirect(
+            url_for("site_editor", site_id=site_id, msg="Password updated." if pw else "Password cleared.")
+        )
+
+    @app.route("/sites/<site_id>/preview")
+    def site_preview_home(site_id):
+        return _site_preview(site_id, "")
+
+    @app.route("/sites/<site_id>/preview/<slug>")
+    def site_preview_page(site_id, slug):
+        return _site_preview(site_id, slug)
+
+    def _site_preview(site_id, slug):
+        if not _sites_ok:
+            abort(404)
+        pid = _active_profile_id()
+        if not pid:
+            abort(403)
+        from mediahub.sites import store as _ss
+
+        spec = _ss.load_site(pid, site_id)
+        if spec is None:
+            abort(404)
+        page = spec.page_by_slug(slug)
+        if page is None:
+            abort(404)
+        return make_response(_site_render(pid, site_id, spec, page, preview=True))
+
+    @app.route("/sites/<site_id>/card/<run_id>/<card_id>.png")
+    def site_preview_card_png(site_id, run_id, card_id):
+        from flask import send_file
+
+        from mediahub.sites import store as _ss
+        from mediahub.web import public_wall as _pw
+
+        pid = _active_profile_id()
+        if not pid:
+            abort(403)
+        if _ss.load_site(pid, site_id) is None:
+            abort(404)
+        # the run must belong to this org (IDOR guard — run-route isolation invariant)
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, pid):
+            abort(404)
+        prof = load_profile(pid)
+        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
+        if not path:
+            abort(404)
+        return send_file(path, mimetype="image/png")
+
+    @app.route("/sites/<site_id>/qr.<fmt>")
+    def api_site_qr(site_id, fmt):
+        if not _sites_ok:
+            abort(404)
+        pid = _active_profile_id()
+        if not pid:
+            abort(403)
+        from mediahub.sites import qr as _qr
+        from mediahub.sites import store as _ss
+        from mediahub.sites.theme import resolve_role_vars
+
+        rec = _ss.site_record(pid, site_id)
+        if rec is None:
+            abort(404)
+        if not rec.get("published") or not rec.get("public_token"):
+            return (
+                _layout(
+                    "Sites",
+                    '<div class="card"><p>Publish the site first to get its QR code.</p>'
+                    f'<p><a href="{url_for("site_editor", site_id=site_id)}">Back</a></p></div>',
+                    active="create",
+                ),
+                409,
+            )
+        url = url_for("site_public_home", token=rec["public_token"], _external=True)
+        rv = resolve_role_vars(_site_brand_kit(pid))
+        try:
+            payload, mime = _qr.export_qr(url, fmt, role_vars=rv)
+        except _qr.QRUnavailable:
+            abort(503)
+        resp = make_response(payload)
+        resp.headers["Content-Type"] = mime
+        ext = fmt if fmt in _qr.QR_FORMATS else "png"
+        resp.headers["Content-Disposition"] = f'inline; filename="site-qr.{ext}"'
+        return resp
+
+    @app.route("/api/sites/<site_id>/insights")
+    def api_site_insights(site_id):
+        if not _sites_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.sites import insights as _ins
+        from mediahub.sites import store as _ss
+
+        if _ss.site_record(pid, site_id) is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(_ins.view_counts(pid, site_id))
+
+    # -- forms (operator) --------------------------------------------------
+
+    @app.route("/api/forms", methods=["POST"])
+    def api_forms_create():
+        if not _forms_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sites_home"))
+        from mediahub.forms import store as _fs
+        from mediahub.forms.models import new_form, rsvp_fields, trial_signup_fields
+
+        title = (request.form.get("title") or "Form").strip()
+        template = request.form.get("template", "blank")
+        if template == "trial_signup":
+            form = new_form(title, trial_signup_fields(), collects_minor_data=True)
+        elif template == "rsvp":
+            form = new_form(title, rsvp_fields())
+        else:
+            form = new_form(title, [])
+        _fs.save_form(pid, form)
+        return redirect(url_for("sites_home", msg=f"Created form — embed id {form.form_id}"))
+
+    @app.route("/api/forms/<form_id>/save", methods=["POST"])
+    def api_form_save(form_id):
+        if not _forms_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "not signed in"}), 403
+        from mediahub.forms import store as _fs
+        from mediahub.forms.models import FormSpec
+
+        if _fs.load_form(pid, form_id) is None:
+            abort(404)
+        body = request.get_json(silent=True) or {}
+        body["form_id"] = form_id
+        _fs.save_form(pid, FormSpec.from_dict(body))
+        return jsonify({"ok": True})
+
+    @app.route("/api/forms/<form_id>/delete", methods=["POST"])
+    def api_form_delete(form_id):
+        if not _forms_ok:
+            return jsonify({"error": "unavailable"}), 404
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sites_home"))
+        from mediahub.forms import store as _fs
+
+        _fs.delete_form(pid, form_id)
+        return redirect(url_for("sites_home", msg="Form deleted."))
+
+    # -- public surface (no login; token is the access control) ------------
+
+    def _site_password_prompt(token, slug, error=""):
+        err = f'<p style="color:#e66">{_h(error)}</p>' if error else ""
+        body = (
+            '<div class="card" style="max-width:420px;margin:60px auto">'
+            "<h2>This page is protected</h2>"
+            f"{err}"
+            f'<form method="post" action="{url_for("site_unlock", token=token)}">'
+            f'<input type="hidden" name="next" value="{_h(slug)}">'
+            '<input name="site_password" type="password" placeholder="Password" required '
+            'style="width:100%;padding:10px;margin:8px 0">'
+            '<button class="btn" type="submit">Unlock</button></form></div>'
+        )
+        return _layout("Protected", body, active="")
+
+    def _serve_public_site(token, slug):
+        from mediahub.sites import insights as _ins
+        from mediahub.sites import store as _ss
+
+        ref = _ss.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, site_id = ref
+        spec = _ss.load_published(pid, site_id)
+        if spec is None:
+            abort(404)
+        page = spec.page_by_slug(slug)
+        if page is None:
+            abort(404)
+        if (
+            page.protected
+            and _ss.has_password(pid, site_id)
+            and token not in (session.get("site_unlocked") or [])
+        ):
+            return _site_password_prompt(token, page.slug)
+        _ins.record_view(pid, site_id, page.slug)
+        resp = make_response(_site_render(pid, site_id, spec, page, token=token, preview=False))
+        if page.protected:
+            resp.headers["Cache-Control"] = "private, no-store"
+        else:
+            resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
+    @app.route("/site/<token>")
+    def site_public_home(token):
+        return _serve_public_site(token, "")
+
+    @app.route("/site/<token>/<slug>")
+    def site_public_page(token, slug):
+        return _serve_public_site(token, slug)
+
+    @app.route("/site/<token>/unlock", methods=["POST"])
+    def site_unlock(token):
+        from mediahub.sites import store as _ss
+
+        ref = _ss.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, site_id = ref
+        pw = request.form.get("site_password", "")
+        nxt = request.form.get("next", "")
+        if _ss.check_site_password(pid, site_id, pw):
+            unlocked = list(session.get("site_unlocked") or [])
+            if token not in unlocked:
+                unlocked.append(token)
+                session["site_unlocked"] = unlocked
+            return redirect(
+                url_for("site_public_page", token=token, slug=nxt)
+                if nxt
+                else url_for("site_public_home", token=token)
+            )
+        return _site_password_prompt(token, nxt, error="Wrong password — try again.")
+
+    @app.route("/site/<token>/card/<run_id>/<card_id>.png")
+    def site_card_png(token, run_id, card_id):
+        from flask import send_file
+
+        from mediahub.sites import store as _ss
+        from mediahub.web import public_wall as _pw
+
+        ref = _ss.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, _site_id = ref
+        # the run must belong to the token's org (IDOR guard) before any image
+        run_data = _load_run(run_id)
+        if run_data is None or not _can_access_run(run_id, run_data, pid):
+            abort(404)
+        prof = load_profile(pid)
+        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
+        if not path:
+            abort(404)
+        resp = make_response(send_file(path, mimetype="image/png"))
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+
+    @app.route("/site/<token>/form/<form_id>", methods=["POST"])
+    def site_form_submit(token, form_id):
+        from mediahub.forms import store as _fs
+        from mediahub.forms import submit as _fsub
+        from mediahub.sites import store as _ss
+
+        ref = _ss.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, site_id = ref
+        spec = _ss.load_published(pid, site_id)
+        if spec is None or not _site_has_form(spec, form_id):
+            abort(404)  # only forms embedded in the published site accept submissions
+        if _auth_rate_limited("site_form"):
+            return (
+                jsonify(
+                    {"ok": False, "error": "rate", "message": "Too many submissions — please wait."}
+                ),
+                429,
+            )
+        form = _fs.load_form(pid, form_id)
+        if form is None:
+            abort(404)
+        data = request.get_json(silent=True) or {}
+        result = _fsub.record_submission(pid, form, data, source=f"site:{site_id}")
+        if (
+            result.get("ok")
+            and result.get("form") is not None
+            and result["form"].table_id != form.table_id
+        ):
+            _fs.save_form(pid, result["form"])  # persist the freshly-created response table id
+        if result.get("ok"):
+            return jsonify({"ok": True, "message": result.get("message", "Thanks!")})
+        return jsonify({"ok": False, "errors": result.get("errors", {})}), 400
+
+    @app.route("/site/<token>/widget/<widget_id>/vote", methods=["POST"])
+    def site_widget_vote(token, widget_id):
+        from mediahub.sites import store as _ss
+        from mediahub.sites import widget_state as _ws
+
+        ref = _ss.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, site_id = ref
+        spec = _ss.load_published(pid, site_id)
+        poll = _site_find_poll(spec, widget_id) if spec else None
+        if poll is None:
+            abort(404)
+        if _auth_rate_limited("site_vote"):
+            return jsonify({"ok": False, "error": "rate"}), 429
+        data = request.get_json(silent=True) or {}
+        option = str(data.get("option", "")).strip()
+        options = [str(o) for o in ((poll.props.get("config") or {}).get("options") or [])]
+        if option not in options:
+            return jsonify({"ok": False, "error": "bad_option"}), 400
+        counts = _ws.record_vote(pid, site_id, widget_id, option)
+        return jsonify({"ok": True, "counts": counts})
+
+    @app.route("/site/<token>/sitemap.xml")
+    def site_sitemap(token):
+        from mediahub.sites import seo as _seo
+        from mediahub.sites import store as _ss
+
+        ref = _ss.resolve_token(token)
+        if not ref:
+            abort(404)
+        pid, site_id = ref
+        spec = _ss.load_published(pid, site_id)
+        if spec is None:
+            abort(404)
+        base = url_for("site_public_home", token=token, _external=True)
+        resp = make_response(_seo.sitemap_xml(spec, base))
+        resp.headers["Content-Type"] = "application/xml"
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+
+    @app.route("/site/<token>/robots.txt")
+    def site_robots(token):
+        from mediahub.sites import seo as _seo
+        from mediahub.sites import store as _ss
+
+        if _ss.resolve_token(token) is None:
+            abort(404)
+        base = url_for("site_public_home", token=token, _external=True)
+        resp = make_response(_seo.robots_txt(base))
+        resp.headers["Content-Type"] = "text/plain"
+        return resp
 
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
