@@ -1403,6 +1403,18 @@ context the assistant already reads — surfaced to humans too.
 
 ## 1.19 — Export, conversion & delivery engine (quick actions)
 
+**Status — shipped 2026-06-22.** Built as the `export_engine/` package: a format
+catalogue + `ExportOptions` schema (quality/scale/transparency/screen-vs-print),
+deterministic Pillow image conversion, the net-new FFmpeg GIF/WebM transcode
+(the one renderer that lacked a home — SVG/print-PDF/PPTX/DOCX/WAV already
+shipped and are advertised through the same catalogue), a `convert_file`
+orchestrator with a content-addressed cache, the media-library quick-actions
+toolbox (`quick_actions.py` over `photo_ops`/`video.ops`/`pdf_utils`, incl. the
+new single-clip `video/ops.py` with **reverse**), and bulk export jobs
+(`bulk.py`). Web surface: `/api/export/formats`, the quick-action route, a
+background bulk-export job (kick → poll → ZIP) whose download link is unified
+with the 1.18 share tokens, and an Export Center (`/export`, `/export/<run_id>`).
+
 **What Canva/Adobe have.** Export to PNG/JPG/PDF (standard + print)/SVG/MP4/
 GIF/PPTX/DOCX/CSV/WAV, quality sliders, transparent PNG, single-image merge,
 bulk download, and a one-click "Quick Actions" toolbox (convert image/video/

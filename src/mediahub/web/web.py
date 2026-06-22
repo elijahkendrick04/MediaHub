@@ -47353,10 +47353,8 @@ voice, and queues them for one-click approval.</p>
     def api_run_bulk_export_file(run_id: str):
         """Serve a finished bulk-export ZIP. Access by session OR a 1.18 share
         token scoped to this run — the unified export download link."""
-        job_id = (request.args.get("job") or "").strip()
-        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
-            return jsonify({"error": "bad_job"}), 400
-
+        # Access first (never leak even a 'bad request' to a foreign org): a
+        # run-owning session, or a valid share token scoped to this run.
         ok = _can_access_run(run_id, _load_run(run_id), _active_profile_id())
         if not ok:
             token = (request.args.get("token") or "").strip()
@@ -47370,6 +47368,10 @@ voice, and queues them for one-click approval.</p>
                     ok = False
         if not ok:
             return jsonify({"error": "forbidden"}), 404
+
+        job_id = (request.args.get("job") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+            return jsonify({"error": "bad_job"}), 400
 
         path = RUNS_DIR / run_id / "exports" / f"bulk_{job_id}.zip"
         if not path.is_file():
