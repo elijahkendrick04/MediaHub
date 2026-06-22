@@ -36,6 +36,8 @@ from __future__ import annotations
 import os
 import ssl
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -59,10 +61,45 @@ _ctx.check_hostname = False
 _ctx.verify_mode = ssl.CERT_NONE
 
 
-def _get(url: str) -> bytes:
+def _get(url: str, *, attempts: int = 4, timeout: int = 120) -> bytes:
+    """Fetch ``url``, retrying transient network/TLS failures with backoff.
+
+    The voice files sit behind HuggingFace's CDN, which 302-redirects to a
+    storage host that intermittently drops the TLS connection mid-handshake
+    (``SSL: UNEXPECTED_EOF_WHILE_READING`` — the 2026-06-22 deploy died on
+    exactly this, with no retry). A single CDN blip must not fail the whole
+    Docker build, so retry a few times with exponential backoff. Once the
+    retries are spent we still raise: the fetch staying loud-fail is
+    deliberate, since a missing voice would otherwise degrade narration
+    silently at runtime.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=120, context=_ctx) as r:
-        return r.read()
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=_ctx) as r:
+                return r.read()
+        except urllib.error.HTTPError as exc:
+            # A 4xx is a definite answer (wrong path / gone) — don't burn
+            # retries (or build minutes) on it. Only 5xx is worth retrying.
+            if exc.code < 500:
+                raise
+            last = exc
+        except OSError as exc:
+            # URLError, ssl.SSLError, socket timeouts, connection resets — all
+            # transient transport faults that a retry can clear.
+            last = exc
+        if attempt < attempts:
+            backoff = 2 ** (attempt - 1)  # 1s, 2s, 4s, ...
+            print(
+                f"    fetch attempt {attempt}/{attempts} for {url} failed "
+                f"({last}); retrying in {backoff}s",
+                file=sys.stderr,
+            )
+            time.sleep(backoff)
+    raise RuntimeError(
+        f"failed to fetch {url} after {attempts} attempts: {last}"
+    ) from last
 
 
 def _target_dir(arg: str | None) -> Path:
