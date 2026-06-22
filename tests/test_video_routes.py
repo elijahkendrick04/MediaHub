@@ -151,6 +151,42 @@ def test_footage_upload_rejects_non_video(app):
         assert r.status_code == 415
 
 
+def test_footage_upload_cap_raised_above_global_50mb(app):
+    """Regression: real videos exceed the 50 MB global cap. A 51 MB payload would
+    413 under it, but the footage route raises the cap per-request so a normal
+    phone clip can actually upload (the reported bug). Other routes are untouched.
+    """
+    import io
+
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        big = io.BytesIO(b"\x00" * (51 * 1024 * 1024))  # just over the global cap
+        r = c.post(
+            "/api/video/footage",
+            data={"file": (big, "clip.mp4")},
+            content_type="multipart/form-data",
+        )
+        # Not 413 ⇒ the raised cap applied (the body was accepted, whatever ingest
+        # then makes of these bytes). Before the fix this was a hard 413.
+        assert r.status_code != 413, "footage upload still capped at the global 50 MB"
+        # The global cap is unchanged, so every other route stays at 50 MB.
+        assert application.config["MAX_CONTENT_LENGTH"] == 50 * 1024 * 1024
+
+
+def test_video_studio_exposes_upload_cap_to_js(app):
+    """The studio page must hand the configured cap to the client (no placeholder)."""
+    import re
+
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        body = c.get("/video").get_data(as_text=True)
+        m = re.search(r"var VIDEO_MAX_MB = (\d+);", body)
+        assert m and int(m.group(1)) >= 50
+        assert "__VIDEO_MAX_MB__" not in body
+
+
 def test_clip_maker_unknown_footage_404(app):
     application, _ = app
     with application.test_client() as c:
