@@ -41136,17 +41136,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 )
                 return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
-        # Fail-soft on the media store. A corrupted assets DB used to 500
-        # the whole page; now we keep the upload form visible and tell
-        # the user the listing wasn't loadable so they can keep working.
+        # Fail-soft on the media store, but tell two different stories apart.
+        # A store that simply isn't there yet — a fresh org, or a data volume
+        # with nothing uploaded — is an EMPTY library, not a fault: the asset
+        # DB is created lazily on first write, so "no file on disk" just means
+        # "no photos uploaded here yet" and must render the clean empty state.
+        # Only a store whose DB file IS on disk but won't read (corrupt /
+        # unreadable) earns the "check the data volume" recovery message.
         assets: list = []
         store_failed = False
+        store = None
         try:
             store = _v8_get_media_store()
             assets = store.list(profile_id=profile_id)
         except Exception as e:
-            log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
-            store_failed = True
+            db_path = None
+            try:
+                from mediahub.media_library.store import _DEFAULT_DB as _ml_default_db
+
+                db_path = Path(getattr(store, "db_path", None) or _ml_default_db)
+            except Exception:
+                db_path = None
+            if db_path is not None and db_path.exists():
+                # The DB file is on disk but the read failed → genuinely
+                # corrupt or unreadable. Surface the recovery message.
+                log.warning(
+                    "media-library: store.list(%s) failed on an existing store: %s",
+                    profile_id,
+                    e,
+                )
+                store_failed = True
+            else:
+                # No DB file yet → nothing has been uploaded on this
+                # deployment. Render the clean empty state, not an error.
+                log.info(
+                    "media-library: no store yet for %s; empty state (%s)",
+                    profile_id,
+                    e,
+                )
         rows_html = ""
         gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         for a in assets[:200]:
