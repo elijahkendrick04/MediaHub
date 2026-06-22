@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `3dc919a93` · Merge pull request #978 from elijahkendrick04/autotest/fix-efc862f5795a
+**Last updated:** 2026-06-22 · `f56973a0f` · Merge pull request #977 from elijahkendrick04/autotest/fix-5e8e0084c4ad
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1214,6 +1214,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-22 | `7bd2ea176` | fix: Accepted upload file formats are never specified — a volunte |
+| 2026-06-22 | `bac42844e` | fix: 'brand kit' is unexplained jargon — a club volunteer won't k |
 | 2026-06-21 | `b11ff26e8` | Mobile: stop calendar toolbar and segmented filters overflowing the phone viewport |
 | 2026-06-21 | `e90907c9a` | video editor: drag-to-reorder + audio-waveform scrubber, and fix two studio-breaking bugs |
 | 2026-06-21 | `008a00c41` | Sponsor A/B ad-variant export sets (roadmap 1.14 follow-up) |
@@ -1222,5 +1223,4 @@ list and the auto table below, not here.
 | 2026-06-21 | `2eab60c3b` | video suite: timeline editor — per-clip colour-grade sliders |
 | 2026-06-21 | `65db36f18` | Swimmers: hero-style solid silhouettes (best code-drawn effort) |
 | 2026-06-21 | `e3e517eb3` | video suite: director depth — per-beat weights, cross-clip virality, multi-beat captions |
-| 2026-06-21 | `643f25c7a` | Planning board (Kanban / whiteboard) (roadmap 1.14, build 3/4) |
 <!-- /ROADMAP:ACTIVITY -->
