@@ -48,7 +48,17 @@ from .models import (
     table,
     text,
 )
+from .deck_video import deck_to_mp4
 from .draft import default_outline, draft_prose, generate_document
+from .export import document_docx, document_pptx
+from .import_doc import import_docx, import_file, import_pdf, import_pptx
+from .pdf_utils import (
+    images_to_pdf,
+    merge_pdfs,
+    organise_pdf,
+    pdf_page_count,
+    pdf_to_images,
+)
 from .formats import (
     FORMAT_BUILDERS,
     build_agm_deck,
@@ -108,4 +118,17 @@ __all__ = [
     "default_outline",
     "draft_prose",
     "generate_document",
+    # exports / imports / pdf utilities / deck video (build 3)
+    "document_docx",
+    "document_pptx",
+    "import_file",
+    "import_docx",
+    "import_pptx",
+    "import_pdf",
+    "merge_pdfs",
+    "organise_pdf",
+    "images_to_pdf",
+    "pdf_to_images",
+    "pdf_page_count",
+    "deck_to_mp4",
 ]

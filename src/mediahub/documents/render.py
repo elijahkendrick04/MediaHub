@@ -316,17 +316,20 @@ def render_document_pdf(
     *,
     brand_kit: Any = None,
     role_vars: Optional[dict[str, str]] = None,
+    tagged: bool = True,
 ) -> Path:
     """Render ``spec`` to a multi-page PDF. Cached by content; returns the path.
 
-    Raises whatever the renderer raises when Playwright/Chromium is unavailable
-    (an honest infra error, not a broken file)."""
+    ``tagged`` (default on) emits an accessible PDF carrying the document's
+    headings + image alt text as screen-reader structure. Raises whatever the
+    renderer raises when Playwright/Chromium is unavailable (an honest infra
+    error, not a broken file)."""
     html = render_document_html(spec, brand_kit=brand_kit, role_vars=role_vars)
-    cached = cache.cached_path(".pdf", "doc-pdf", html)
+    cached = cache.cached_path(".pdf", "doc-pdf", "tagged" if tagged else "plain", html)
     if not (cached.exists() and cached.stat().st_size > 0):
         from mediahub.graphic_renderer.print_export import render_html_to_pdf
 
-        render_html_to_pdf(html, cached, prefer_css_page_size=True)
+        render_html_to_pdf(html, cached, prefer_css_page_size=True, tagged=tagged)
     if out_path is not None:
         out_path = Path(out_path)
         if out_path.resolve() != cached.resolve():
