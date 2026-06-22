@@ -38,11 +38,12 @@ does it will ask a human to approve first, like everything else here.)
 | `store.py` | Saves each club's newsletters on disk (kept separate per club), remembers which one is published, and looks up a published newsletter from its secret web address. |
 | `README.md` | This file. |
 
-Filled in by later builds: `grounding.py` (gathers the period's approved cards, the
-planner's fixtures and the sponsor), `assemble.py` (lays them out into a newsletter),
-`draft.py` (asks the AI to write *only the wording* in your club's voice — checked so it
-can't invent a number — and says so honestly if no AI is set up) and `formats.py` (the
-ready-made newsletter layouts).
+| `grounding.py` | Gathers the period's real, approved content — the approved cards across every meet in the date range, the headline numbers counted from them, the planner's upcoming fixtures and the active sponsor. Kept separate per club, so one club never sees another's content. |
+| `formats.py` | Lays those facts out into a ready-made newsletter — the four formats (meet digest, monthly roundup, season highlights, blank). No numbers are invented here; the cards and stat tiles carry the real values. |
+| `draft.py` | Asks the AI to write *only the wording* (the opening paragraph, the subject line, the inbox preview) in your club's voice — checked so it can't invent a number — and says so honestly if no AI is set up. You can also choose "no AI" and get a plain, true intro instead. |
+
+Filled in by the next build: the web routes, the composer screen, the download/copy
+exports and the hosted "view in your browser" page.
 
 ## The rules this folder follows
 

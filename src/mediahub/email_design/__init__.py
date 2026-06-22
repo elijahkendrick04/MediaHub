@@ -19,16 +19,29 @@ the club's existing list tool, a plaintext alternative, and a hosted web version
 Direct sending stays out of scope until a provider adapter lands behind the
 publish gate — we integrate with a club's list, we do not become a CRM.
 
-Build 1 (this slice) — the deterministic core:
+Build 1 — the deterministic core:
   - ``models`` — ``NewsletterSpec → Section → EmailBlock`` data model (+ formats)
   - ``theme``  — a club's brand → an email-safe flat hex palette
   - ``render`` — spec → email-safe HTML (+ a plaintext alternative)
   - ``store``  — multi-tenant persistence + the hosted-version publish/token index
 
-Later builds add the auto-assembly + grounded AI editorial (build 2) and the web
-surface: routes, the composer UI, exports and the hosted view (build 3).
+Build 2 — auto-assembly + grounded AI editorial:
+  - ``grounding`` — gather the period's approved cards, fixtures, sponsor & numbers
+  - ``formats``   — lay those facts out into each newsletter format (deterministic)
+  - ``draft``     — the AI editorial pass (intro/subject/preheader) + the
+                    ``generate_newsletter`` orchestrator
+
+Build 3 adds the web surface: routes, the composer UI, exports and the hosted view.
 """
 
+from .draft import draft_editorial, generate_newsletter
+from .formats import (
+    build_meet_digest,
+    build_monthly_roundup,
+    build_newsletter,
+    build_season_highlights,
+)
+from .grounding import NewsletterFacts, gather_facts
 from .models import (
     DEFAULT_FORMAT,
     EMAIL_BLOCK_KINDS,
@@ -86,4 +99,13 @@ __all__ = [
     # render
     "render_email_html",
     "render_plaintext",
+    # grounding + formats + draft (build 2)
+    "NewsletterFacts",
+    "gather_facts",
+    "build_newsletter",
+    "build_meet_digest",
+    "build_monthly_roundup",
+    "build_season_highlights",
+    "draft_editorial",
+    "generate_newsletter",
 ]
