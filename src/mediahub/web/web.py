@@ -48338,7 +48338,7 @@ voice, and queues them for one-click approval.</p>
         flash = ""
         if request.args.get("msg"):
             flash = (
-                '<div class="card" style="border-color:var(--mh-success,#3a7)">'
+                '<div class="card" style="border-color:var(--mh-success)">'
                 f"<p>{_h(request.args.get('msg'))}</p></div>"
             )
         return _layout("Sites", flash + _ui.render_index(sites, forms, runs), active="create")
@@ -48663,7 +48663,7 @@ voice, and queues them for one-click approval.</p>
     # -- public surface (no login; token is the access control) ------------
 
     def _site_password_prompt(token, slug, error=""):
-        err = f'<p style="color:#e66">{_h(error)}</p>' if error else ""
+        err = f'<p style="color:var(--mh-error)">{_h(error)}</p>' if error else ""
         body = (
             '<div class="card" style="max-width:420px;margin:60px auto">'
             "<h2>This page is protected</h2>"
