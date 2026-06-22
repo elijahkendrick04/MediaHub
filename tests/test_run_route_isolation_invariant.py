@@ -65,6 +65,10 @@ _ARG_FILL = {
     # is right — a foreign org is refused (the site load returns nothing, and the
     # run is _can_access_run-guarded) before any card image is served.
     "site_id": "no-such-site",
+    # 1.17: the newsletter editor-preview card route carries a newsletter id. A
+    # junk id is right — a foreign org is refused (the newsletter isn't theirs and
+    # the run is _can_access_run-guarded) before any card image is served.
+    "newsletter_id": "no-such-newsletter",
 }
 
 _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")

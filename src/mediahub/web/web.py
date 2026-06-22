@@ -50159,7 +50159,7 @@ voice, and queues them for one-click approval.</p>
             "email client). Card images show here and on the hosted version.</p>"
             f'<iframe src="{html_url}?preview=1" '
             'style="width:100%;height:72vh;border:1px solid var(--panel);border-radius:8px;'
-            'background:#f3f4f6"></iframe>'
+            'background:var(--panel)"></iframe>'
             '<details style="margin-top:18px"><summary class="dim">Edit newsletter (advanced — spec JSON)</summary>'
             f'<textarea id="nl-spec" class="input" style="width:100%;height:300px;font-family:monospace;font-size:12px">{spec_json}</textarea>'
             '<button class="btn" style="margin-top:8px" onclick="nlSave()">Save changes</button> '
