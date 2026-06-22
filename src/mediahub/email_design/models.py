@@ -185,9 +185,15 @@ def card(
     alt: str = "",
     href: str = "",
     cta: str = "",
+    card_ref: str = "",
 ) -> EmailBlock:
     """A content card — a result recap or athlete spotlight: optional image on
-    top, a title, body copy, and an optional call-to-action link."""
+    top, a title, body copy, and an optional call-to-action link.
+
+    ``card_ref`` (``"<run_id>/<card_id>"``) lets the web layer fill ``src`` with
+    the right *public* image URL at render time — an authenticated route in the
+    editor preview, the published token route in the hosted/exported email — so a
+    card image is only ever served behind a proper access check, never baked in."""
     return EmailBlock(
         "card",
         {
@@ -197,6 +203,7 @@ def card(
             "alt": str(alt),
             "href": str(href),
             "cta": str(cta),
+            "card_ref": str(card_ref),
         },
     )
 

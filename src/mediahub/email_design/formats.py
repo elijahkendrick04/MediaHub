@@ -47,11 +47,12 @@ def _recap_card(r: dict) -> m.EmailBlock:
         alt=r.get("title", ""),
         href=r.get("href", ""),
         cta="See the card" if r.get("href") else "",
+        card_ref=r.get("card_ref", ""),
     )
 
 
 def _spotlight_card(s: dict) -> m.EmailBlock:
-    return m.card(title=s.get("name", ""), body=s.get("body", ""))
+    return m.card(title=s.get("name", ""), body=s.get("body", ""), card_ref=s.get("card_ref", ""))
 
 
 def _stats_section(facts: NewsletterFacts) -> Optional[m.Section]:
