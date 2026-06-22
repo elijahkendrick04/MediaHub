@@ -48339,7 +48339,7 @@ voice, and queues them for one-click approval.</p>
         if request.args.get("msg"):
             flash = (
                 '<div class="card" style="border-color:var(--mh-success,#3a7)">'
-                f'<p>{_h(request.args.get("msg"))}</p></div>'
+                f"<p>{_h(request.args.get('msg'))}</p></div>"
             )
         return _layout("Sites", flash + _ui.render_index(sites, forms, runs), active="create")
 
@@ -48426,7 +48426,9 @@ voice, and queues them for one-click approval.</p>
             if request.is_json:
                 return jsonify({"ok": False, "error": "invalid_json"}), 400
             return redirect(
-                url_for("site_editor", site_id=site_id, msg="That wasn't valid JSON — nothing saved.")
+                url_for(
+                    "site_editor", site_id=site_id, msg="That wasn't valid JSON — nothing saved."
+                )
             )
         if not isinstance(data, dict):
             data = {}
@@ -48494,12 +48496,20 @@ voice, and queues them for one-click approval.</p>
 
         if _ss.load_site(pid, site_id) is None:
             abort(404)
-        pw = (request.form.get("password") if not request.is_json else (request.get_json(silent=True) or {}).get("password")) or ""
+        pw = (
+            request.form.get("password")
+            if not request.is_json
+            else (request.get_json(silent=True) or {}).get("password")
+        ) or ""
         _ss.set_site_password(pid, site_id, pw)
         if request.is_json:
             return jsonify({"ok": True})
         return redirect(
-            url_for("site_editor", site_id=site_id, msg="Password updated." if pw else "Password cleared.")
+            url_for(
+                "site_editor",
+                site_id=site_id,
+                msg="Password updated." if pw else "Password cleared.",
+            )
         )
 
     @app.route("/sites/<site_id>/preview")
