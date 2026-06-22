@@ -163,8 +163,11 @@ def build_meet_digest(
     hosted_url: str = "",
 ) -> m.NewsletterSpec:
     shell = _shell(
-        facts, title="Meet recap", newsletter_format="meet_digest",
-        brand_profile_id=brand_profile_id, prose=prose,
+        facts,
+        title="Meet recap",
+        newsletter_format="meet_digest",
+        brand_profile_id=brand_profile_id,
+        prose=prose,
     )
     sections = [
         m.Section(blocks=_intro_block(prose, facts)),
@@ -187,8 +190,11 @@ def build_monthly_roundup(
 ) -> m.NewsletterSpec:
     title = f"{facts.period} roundup" if facts.period else "Monthly roundup"
     shell = _shell(
-        facts, title=title, newsletter_format="monthly_roundup",
-        brand_profile_id=brand_profile_id, prose=prose,
+        facts,
+        title=title,
+        newsletter_format="monthly_roundup",
+        brand_profile_id=brand_profile_id,
+        prose=prose,
     )
     sections = [
         m.Section(blocks=_intro_block(prose, facts)),
@@ -209,8 +215,11 @@ def build_season_highlights(
     hosted_url: str = "",
 ) -> m.NewsletterSpec:
     shell = _shell(
-        facts, title="Season highlights", newsletter_format="season_highlights",
-        brand_profile_id=brand_profile_id, prose=prose,
+        facts,
+        title="Season highlights",
+        newsletter_format="season_highlights",
+        brand_profile_id=brand_profile_id,
+        prose=prose,
     )
     sections = [
         m.Section(blocks=_intro_block(prose, facts)),
@@ -232,8 +241,11 @@ def build_blank(
     hosted_url: str = "",
 ) -> m.NewsletterSpec:
     shell = _shell(
-        facts, title="Newsletter", newsletter_format="blank",
-        brand_profile_id=brand_profile_id, prose=prose,
+        facts,
+        title="Newsletter",
+        newsletter_format="blank",
+        brand_profile_id=brand_profile_id,
+        prose=prose,
     )
     sections = [m.Section(blocks=_intro_block(prose, facts) or [m.text("")])]
     return _assemble("Newsletter", "blank", shell, sections)

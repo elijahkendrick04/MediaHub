@@ -49969,7 +49969,9 @@ voice, and queues them for one-click approval.</p>
 
         today = _date.today()
         if preset == "custom":
-            return (_iso(body.get("start")) or today.replace(day=1)), (_iso(body.get("end")) or today)
+            return (_iso(body.get("start")) or today.replace(day=1)), (
+                _iso(body.get("end")) or today
+            )
         if preset == "last_month":
             last_prev = today.replace(day=1) - _td(days=1)
             return last_prev.replace(day=1), last_prev
@@ -50021,7 +50023,9 @@ voice, and queues them for one-click approval.</p>
             rows = []
             for it in items:
                 badge = it["newsletter_format"].replace("_", " ").title()
-                live = ' &middot; <span class="tag live">Published</span>' if it["published"] else ""
+                live = (
+                    ' &middot; <span class="tag live">Published</span>' if it["published"] else ""
+                )
                 rows.append(
                     '<a class="card" style="display:block;text-decoration:none" '
                     f'href="{url_for("newsletter_view", newsletter_id=it["newsletter_id"])}">'
@@ -50038,7 +50042,7 @@ voice, and queues them for one-click approval.</p>
             return (
                 '<div class="card"><h3 style="margin-top:0">' + name + "</h3>"
                 '<p class="dim" style="font-size:13px">' + desc + "</p>"
-                '<button class="btn" style="margin-top:8px" onclick="genNl(\'' + fmt + '\')">'
+                '<button class="btn" style="margin-top:8px" onclick="genNl(\'' + fmt + "')\">"
                 "Generate</button></div>"
             )
 
@@ -50052,9 +50056,21 @@ voice, and queues them for one-click approval.</p>
             "Period to cover</label><br>"
             f'<select id="nl-range" class="input" style="max-width:260px">{range_opts}</select></div>'
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
-            + _tile("monthly_roundup", "Monthly roundup", "A month of approved content: numbers, highlights, fixtures and your sponsor.")
-            + _tile("meet_digest", "Meet digest", "One meet: the standout swims, athletes to watch and what's next.")
-            + _tile("season_highlights", "Season highlights", "A season window: the headline numbers and the swims you'll remember.")
+            + _tile(
+                "monthly_roundup",
+                "Monthly roundup",
+                "A month of approved content: numbers, highlights, fixtures and your sponsor.",
+            )
+            + _tile(
+                "meet_digest",
+                "Meet digest",
+                "One meet: the standout swims, athletes to watch and what's next.",
+            )
+            + _tile(
+                "season_highlights",
+                "Season highlights",
+                "A season window: the headline numbers and the swims you'll remember.",
+            )
             + _tile("blank", "Blank", "An empty newsletter you fill in yourself.")
             + "</div>"
             + saved
@@ -50083,8 +50099,14 @@ voice, and queues them for one-click approval.</p>
 
         try:
             spec = generate_newsletter(
-                pid, start=start, end=end, newsletter_format=fmt, tone=tone,
-                with_ai=with_ai, profile=prof, runs_dir=RUNS_DIR,
+                pid,
+                start=start,
+                end=end,
+                newsletter_format=fmt,
+                tone=tone,
+                with_ai=with_ai,
+                profile=prof,
+                runs_dir=RUNS_DIR,
             )
         except Exception as e:  # honest AI-unavailable signal — offer a data-only build
             from mediahub.media_ai.llm import ClaudeUnavailableError
@@ -50095,15 +50117,20 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "generate_failed"}), 500
         _ns.save_newsletter(pid, spec)
         return jsonify(
-            {"ok": True, "newsletter_id": spec.newsletter_id,
-             "url": url_for("newsletter_view", newsletter_id=spec.newsletter_id)}
+            {
+                "ok": True,
+                "newsletter_id": spec.newsletter_id,
+                "url": url_for("newsletter_view", newsletter_id=spec.newsletter_id),
+            }
         )
 
     @app.route("/newsletters/<newsletter_id>")
     def newsletter_view(newsletter_id: str):
         if not _email_design_ok:
             return _recovery_page(
-                "Newsletters unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+                "Newsletters unavailable",
+                "Not enabled here.",
+                primary_cta=("Home", url_for("home")),
             )
         pid, spec = _nl_load_owned(newsletter_id)
         if spec is None:
@@ -50123,7 +50150,7 @@ voice, and queues them for one-click approval.</p>
             hosted = url_for("newsletter_public", token=rec["public_token"], _external=True)
             publish_html = (
                 '<div class="card" style="margin-bottom:14px">'
-                '<strong>Hosted web version is live.</strong> '
+                "<strong>Hosted web version is live.</strong> "
                 f'<a href="{_h(hosted)}" target="_blank">{_h(hosted)}</a>'
                 '<div style="margin-top:8px">'
                 '<button class="btn secondary" onclick="nlPublish(false)">Take offline</button> '
@@ -50169,7 +50196,9 @@ voice, and queues them for one-click approval.</p>
             .replace("__SAVE_URL__", url_for("api_newsletter_save", newsletter_id=newsletter_id))
             .replace("__DEL_URL__", url_for("api_newsletter_delete", newsletter_id=newsletter_id))
             .replace("__PUB_URL__", url_for("api_newsletter_publish", newsletter_id=newsletter_id))
-            .replace("__UNPUB_URL__", url_for("api_newsletter_unpublish", newsletter_id=newsletter_id))
+            .replace(
+                "__UNPUB_URL__", url_for("api_newsletter_unpublish", newsletter_id=newsletter_id)
+            )
             .replace("__HOME_URL__", url_for("newsletters_home"))
         )
         return _layout(spec.title, body, active="create")
@@ -50191,7 +50220,11 @@ voice, and queues them for one-click approval.</p>
             spec = _nl_resolve_images(
                 spec,
                 lambda r, c: url_for(
-                    "newsletter_public_card", token=published_token, run_id=r, card_id=c, _external=True
+                    "newsletter_public_card",
+                    token=published_token,
+                    run_id=r,
+                    card_id=c,
+                    _external=True,
                 ),
             )
         return render_email_html(spec, profile=prof)
@@ -50279,7 +50312,9 @@ voice, and queues them for one-click approval.</p>
         token = _ns.publish_newsletter(pid, newsletter_id)
         if not token:
             return jsonify({"ok": False, "error": "not_found"}), 404
-        return jsonify({"ok": True, "url": url_for("newsletter_public", token=token, _external=True)})
+        return jsonify(
+            {"ok": True, "url": url_for("newsletter_public", token=token, _external=True)}
+        )
 
     @app.route("/api/newsletters/<newsletter_id>/unpublish", methods=["POST"])
     def api_newsletter_unpublish(newsletter_id: str):

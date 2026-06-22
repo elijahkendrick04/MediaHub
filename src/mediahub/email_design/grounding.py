@@ -143,9 +143,7 @@ class NewsletterFacts:
             lines += [f"  - {r.get('title')}" for r in self.recaps[:6]]
         if self.fixtures:
             lines.append("Upcoming fixtures:")
-            lines += [
-                f"  - {f.get('date')} {f.get('name')}".strip() for f in self.fixtures[:5]
-            ]
+            lines += [f"  - {f.get('date')} {f.get('name')}".strip() for f in self.fixtures[:5]]
         return "\n".join(lines)
 
     def is_empty(self) -> bool:
@@ -410,7 +408,9 @@ def gather_facts(
     if n_medal:
         stats.append({"value": str(n_medal), "label": "Medals" if n_medal != 1 else "Medal"})
     if n_record:
-        stats.append({"value": str(n_record), "label": "Club records" if n_record != 1 else "Club record"})
+        stats.append(
+            {"value": str(n_record), "label": "Club records" if n_record != 1 else "Club record"}
+        )
     if swimmers:
         stats.append({"value": str(len(swimmers)), "label": "Swimmers"})
     stats = stats[:4]

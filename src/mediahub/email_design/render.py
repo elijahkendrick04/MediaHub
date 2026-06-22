@@ -110,9 +110,7 @@ def _b_list(p: dict, pal: dict, band: dict) -> str:
     if not items:
         return ""
     tag = "ol" if p.get("ordered") else "ul"
-    lis = "".join(
-        f'<li style="margin:0 0 6px 0">{_esc(i)}</li>' for i in items
-    )
+    lis = "".join(f'<li style="margin:0 0 6px 0">{_esc(i)}</li>' for i in items)
     return (
         f'<{tag} class="mh-ink" style="margin:0 0 16px 0;padding:0 0 0 22px;'
         f'font-family:{_FONT};font-size:15px;line-height:1.6;color:{band["ink"]}">{lis}</{tag}>'
@@ -184,9 +182,7 @@ def _b_card(p: dict, pal: dict, band: dict) -> str:
     cta = p.get("cta") or ""
     img_html = ""
     if src:
-        img_html = (
-            f'<tr><td style="padding:0">{_img_tag(src, alt, pal, radius=0)}</td></tr>'
-        )
+        img_html = f'<tr><td style="padding:0">{_img_tag(src, alt, pal, radius=0)}</td></tr>'
     title_html = ""
     if title:
         title_html = (
@@ -486,9 +482,7 @@ def _preheader(text: str) -> str:
     )
 
 
-def render_email_html(
-    spec: NewsletterSpec, *, profile: Any = None, brand_kit: Any = None
-) -> str:
+def render_email_html(spec: NewsletterSpec, *, profile: Any = None, brand_kit: Any = None) -> str:
     """Render ``spec`` to a complete, standalone, email-safe HTML document.
 
     ``profile`` / ``brand_kit`` supply the brand chrome (logo, palette). The

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Vocabularies
@@ -152,9 +152,7 @@ def text(body: str, *, align: str = "left") -> EmailBlock:
 
 
 def bullet_list(items: list[str], *, ordered: bool = False) -> EmailBlock:
-    return EmailBlock(
-        "list", {"items": [str(i) for i in (items or [])], "ordered": bool(ordered)}
-    )
+    return EmailBlock("list", {"items": [str(i) for i in (items or [])], "ordered": bool(ordered)})
 
 
 def button(label: str, href: str, *, align: str = "left") -> EmailBlock:
@@ -212,9 +210,7 @@ def stat_row(stats: list[dict[str, str]]) -> EmailBlock:
     clean = []
     for s in stats or []:
         if isinstance(s, dict) and (s.get("value") is not None):
-            clean.append(
-                {"value": str(s.get("value", "")), "label": str(s.get("label", ""))}
-            )
+            clean.append({"value": str(s.get("value", "")), "label": str(s.get("label", ""))})
     return EmailBlock("stat_row", {"stats": clean})
 
 

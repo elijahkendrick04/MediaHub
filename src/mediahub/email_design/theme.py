@@ -46,9 +46,7 @@ _BORDER = "#e5e7eb"  # hairline rules
 # email uses the device system stack. There is no webfont link or @import here,
 # so the self-hosted-fonts rule is honoured by *not loading a remote font at
 # all*.
-EMAIL_FONT_STACK = (
-    "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
-)
+EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -133,8 +131,16 @@ def _from_theme_store(profile: Any, slot: str) -> Optional[str]:
     return None
 
 
-def _resolve(profile: Any, brand_kit: Any, *, slot: str, theme_slot: str, legacy: str,
-            kit_attr: str, default: str) -> str:
+def _resolve(
+    profile: Any,
+    brand_kit: Any,
+    *,
+    slot: str,
+    theme_slot: str,
+    legacy: str,
+    kit_attr: str,
+    default: str,
+) -> str:
     """Run the full cascade for one brand colour slot."""
     # 1 + 2: manual / extracted palette slot
     v = _from_palette_slot(profile, slot)
@@ -169,12 +175,22 @@ def email_palette(profile: Any = None, brand_kit: Any = None) -> dict[str, str]:
     drop straight into an inline ``style=""``.
     """
     brand = _resolve(
-        profile, brand_kit, slot="primary", theme_slot="primary",
-        legacy="brand_primary", kit_attr="primary_colour", default=_DEFAULT_PRIMARY,
+        profile,
+        brand_kit,
+        slot="primary",
+        theme_slot="primary",
+        legacy="brand_primary",
+        kit_attr="primary_colour",
+        default=_DEFAULT_PRIMARY,
     )
     accent = _resolve(
-        profile, brand_kit, slot="secondary", theme_slot="secondary",
-        legacy="brand_secondary", kit_attr="secondary_colour", default=_DEFAULT_SECONDARY,
+        profile,
+        brand_kit,
+        slot="secondary",
+        theme_slot="secondary",
+        legacy="brand_secondary",
+        kit_attr="secondary_colour",
+        default=_DEFAULT_SECONDARY,
     )
     # Accent slot may also be carried explicitly; prefer a confirmed accent.
     explicit_accent = _from_palette_slot(profile, "accent")
