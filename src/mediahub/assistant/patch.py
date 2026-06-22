@@ -58,6 +58,20 @@ OP_KINDS: tuple[str, ...] = (
 _MAX_HEADLINE = 80
 _MAX_HOOK = 80
 
+# 1.18 — each op maps to the lockable element it would change, so a locked
+# element (collab.locks) refuses the matching op at patch time. Element keys
+# mirror collab.locks.LOCKABLE_ELEMENTS.
+_OP_ELEMENT: dict[str, str] = {
+    "set_headline": "headline",
+    "set_subhead": "subhead",
+    "set_hook": "hook",
+    "set_colour_role": "palette",
+    "set_archetype": "layout",
+    "set_accent_treatment": "accent",
+    "set_format": "format",
+    "clear_photo": "photo",
+}
+
 
 @dataclass(frozen=True)
 class PatchOp:
@@ -293,7 +307,9 @@ def _apply_one(
     return "unknown operation"  # pragma: no cover - parse already filters
 
 
-def apply_patch(brief: CreativeBrief, patch: SpecPatch, *, brand_kit=None) -> PatchResult:
+def apply_patch(
+    brief: CreativeBrief, patch: SpecPatch, *, brand_kit=None, locked_elements=None
+) -> PatchResult:
     """Apply ``patch`` to a copy of ``brief``; return the new brief + audit trail.
 
     The source brief is never mutated. Each op is validated against the closed
@@ -301,14 +317,24 @@ def apply_patch(brief: CreativeBrief, patch: SpecPatch, *, brand_kit=None) -> Pa
     legibility gate. Valid ops are applied in order; invalid ones are recorded
     in ``rejected`` with a human reason. The dedupe/audit signature is re-stamped
     so downstream callers see the edited design.
+
+    ``locked_elements`` (1.18) is the set of element keys a reviewer has locked
+    on this card (``collab.locks``); an op that would change a locked element is
+    refused before it touches the brief, recorded in ``rejected`` with a clear
+    reason — so a lock holds even against the copilot.
     """
     new = CreativeBrief.from_dict(brief.to_dict()) if isinstance(brief, CreativeBrief) else None
     if new is None:
         raise ValueError("apply_patch requires a CreativeBrief")
+    locks = {str(e).strip().lower() for e in (locked_elements or set())}
     archetypes = _live_archetypes()
     applied: list[PatchOp] = []
     rejected: list[tuple[PatchOp, str]] = []
     for op in patch.ops:
+        locked_el = _OP_ELEMENT.get(op.kind)
+        if locked_el and locked_el in locks:
+            rejected.append((op, f"the {locked_el} is locked on this card"))
+            continue
         reason = _apply_one(op, new, brand_kit=brand_kit, archetypes=archetypes)
         if reason is None:
             applied.append(op)

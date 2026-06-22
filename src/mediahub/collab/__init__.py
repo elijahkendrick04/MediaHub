@@ -11,8 +11,10 @@ Exposes (built incrementally across the 1.18 sub-builds):
                  what each workspace seat can do)
   threads      — anchored comments, tasks & reactions store
   mentions     — @mention parsing + resolution against workspace members
+  revisions    — design-spec version history, diff & restore
+  locks        — per-card element locks, enforced at edit time
 """
 
-from . import mentions, permissions, threads
+from . import locks, mentions, permissions, revisions, threads
 
-__all__ = ["permissions", "threads", "mentions"]
+__all__ = ["permissions", "threads", "mentions", "revisions", "locks"]

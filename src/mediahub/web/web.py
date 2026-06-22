@@ -4909,7 +4909,7 @@ function commentsRow(panel, cardId, c, me, isReply) {
     res.onclick=function(ev){ ev.preventDefault(); commentsMutate(cardId, c.id, c.resolved?'reopen':'resolve'); }; act.appendChild(res);
   }
   if ((c.author_email||'') === (me||'') || !me) {
-    var del=document.createElement('a'); del.href='#'; del.style.cssText='font-size:11px;color:var(--bad,#e66)'; del.textContent='Delete';
+    var del=document.createElement('a'); del.href='#'; del.style.cssText='font-size:11px;color:var(--bad)'; del.textContent='Delete';
     del.onclick=function(ev){ ev.preventDefault(); if(confirm('Delete this comment?')) commentsMutate(cardId, c.id, 'delete'); }; act.appendChild(del);
   }
   row.appendChild(act);
@@ -4963,6 +4963,104 @@ function commentsReact(cardId, commentId, emoji) {
   fetch(panel.dataset.commentsUrl + '/' + encodeURIComponent(commentId), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'react', emoji: emoji})})
     .then(function(r){return r.json();}).then(function(){ commentsLoad(cardId); }).catch(function(){});
 }
+
+/* ---- Version history: diff + restore (roadmap 1.18) ---- */
+function historyToggle(btn, cardId) {
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  panel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Version history</div><div class="hist-list" style="font-size:12px;color:var(--ink-muted)">Loading&hellip;</div><div class="hist-diff" style="margin-top:8px"></div>';
+  historyLoad(cardId);
+}
+
+function historyLoad(cardId) {
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.revisionsUrl).then(function(r){return r.json();}).then(function(j){
+    var list = panel.querySelector('.hist-list'); list.textContent='';
+    if (!j.ok || !(j.revisions||[]).length) { list.textContent='No saved versions yet — edit the design to start a history.'; return; }
+    var revs = j.revisions;
+    revs.forEach(function(rev, i){
+      var row=document.createElement('div'); row.style.cssText='display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);flex-wrap:wrap';
+      var num=document.createElement('span'); num.style.cssText='font-size:11px;color:var(--ink-muted);min-width:24px'; num.textContent='v'+(i+1);
+      var lab=document.createElement('span'); lab.style.cssText='flex:1;font-size:12px;color:var(--ink)'; lab.textContent = rev.label + (rev.is_current?'  (current)':'');
+      row.appendChild(num); row.appendChild(lab);
+      if (i>0) { var d=document.createElement('a'); d.href='#'; d.style.cssText='font-size:11px;color:var(--lane)'; d.textContent='Diff vs previous';
+        d.onclick=function(ev){ ev.preventDefault(); historyDiff(cardId, revs[i-1].brief_id, rev.brief_id); }; row.appendChild(d); }
+      if (!rev.is_current) { var rb=document.createElement('a'); rb.href='#'; rb.style.cssText='font-size:11px;color:var(--medal)'; rb.textContent='Restore';
+        rb.onclick=function(ev){ ev.preventDefault(); historyRestore(cardId, rev.brief_id); }; row.appendChild(rb); }
+      list.appendChild(row);
+    });
+  }).catch(function(){});
+}
+
+function historyDiff(cardId, a, b) {
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  var base = panel.dataset.revisionsUrl + '/diff?a=' + encodeURIComponent(a) + '&b=' + encodeURIComponent(b);
+  fetch(base).then(function(r){return r.json();}).then(function(j){
+    var box = panel.querySelector('.hist-diff'); box.textContent='';
+    if (!j.ok) return;
+    if (!(j.diff||[]).length) { box.textContent='No design fields differ between these versions.'; box.style.cssText='font-size:12px;color:var(--ink-muted)'; return; }
+    var t=document.createElement('div'); t.style.cssText='font-size:11px';
+    j.diff.forEach(function(d){
+      var r=document.createElement('div'); r.style.cssText='margin-bottom:4px';
+      r.innerHTML = '<strong style="color:var(--ink)">'+_cmTxt(d.field)+'</strong>: <span style="color:var(--ink-muted);text-decoration:line-through">'+_cmTxt(d.before||'—')+'</span> &rarr; <span style="color:var(--lane)">'+_cmTxt(d.after||'—')+'</span>';
+      t.appendChild(r);
+    });
+    box.appendChild(t);
+  }).catch(function(){});
+}
+
+function historyRestore(cardId, briefId) {
+  if (!confirm('Restore this version? It becomes the current design (earlier versions are kept).')) return;
+  var panel = document.querySelector('.history-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.revisionsUrl + '/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({brief_id: briefId})})
+    .then(function(r){return r.json();}).then(function(j){
+      if (j.ok) { if (window.MH && MH.toast) MH.toast('Version restored — regenerate the graphic to see it.', 'success', 3500); historyLoad(cardId); }
+      else if (window.MH && MH.toast) MH.toast(j.reason || 'Could not restore', 'error', 3000);
+    }).catch(function(){});
+}
+
+/* ---- Element locks (roadmap 1.18) ---- */
+function locksToggle(btn, cardId) {
+  var panel = document.querySelector('.locks-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.getAttribute('data-open') === '1') { panel.style.display='none'; panel.setAttribute('data-open','0'); return; }
+  panel.style.display=''; panel.setAttribute('data-open','1');
+  panel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Locked elements &mdash; a locked element can\'t be changed by an edit or the copilot</div><div class="locks-list" style="display:flex;gap:6px;flex-wrap:wrap">Loading&hellip;</div>';
+  locksLoad(cardId);
+}
+
+function locksLoad(cardId) {
+  var panel = document.querySelector('.locks-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.locksUrl).then(function(r){return r.json();}).then(function(j){
+    var list = panel.querySelector('.locks-list'); list.textContent='';
+    if (!j.ok) return;
+    var locked = {}; (j.locked||[]).forEach(function(e){ locked[e]=1; });
+    (j.lockable||[]).forEach(function(el){
+      var on = !!locked[el];
+      var b=document.createElement('button'); b.className='btn ' + (on?'':'secondary');
+      b.style.cssText='font-size:11px;padding:3px 9px' + (on?';background:var(--medal);color:var(--medal-ink);border:none':'');
+      b.textContent = (on?'🔒 ':'🔓 ') + el;
+      b.onclick=function(){ locksSet(cardId, el, !on); };
+      list.appendChild(b);
+    });
+  }).catch(function(){});
+}
+
+function locksSet(cardId, element, locked) {
+  var panel = document.querySelector('.locks-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  fetch(panel.dataset.locksUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({element: element, locked: locked})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});}).then(function(res){
+      if (!res.ok) { if (window.MH && MH.toast) MH.toast(res.j.reason || 'Could not change lock', 'error', 3000); return; }
+      locksLoad(cardId);
+    }).catch(function(){});
+}
 </script>
 """
 
@@ -4999,6 +5097,8 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         "api_assistant_suggestions", run_id=run_id, card_id=card_id_raw
     )
     _comments_url = url_for("api_collab_comments", run_id=run_id)
+    _revisions_url = url_for("api_card_revisions", run_id=run_id, card_id=card_id_raw)
+    _locks_url = url_for("api_card_locks", run_id=run_id, card_id=card_id_raw)
 
     _STD_TONES = [
         (
@@ -5087,7 +5187,9 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#128172; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
@@ -5111,6 +5213,8 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="comments-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-comments-url="{_h(_comments_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="history-panel" data-card="{card_uuid}" data-revisions-url="{_h(_revisions_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="locks-panel" data-card="{card_uuid}" data-locks-url="{_h(_locks_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f"</div>"
     )
 
@@ -39175,6 +39279,26 @@ function mhSetupMode(mode) {{
             if denied:
                 return denied
             edits = payload.get("edits", {})
+            # 1.18 element locks: an inspector override of a locked element is
+            # dropped, so "lock the sponsor strip" holds on this path too — not
+            # just against the copilot. Maps inspector keys → lock elements.
+            if isinstance(edits, dict) and edits:
+                try:
+                    from mediahub.collab import locks as _locks
+
+                    _locked = _locks.locked_elements(run_id, card_id)
+                    if _locked:
+                        _insp_element = {
+                            "insp.hideSponsor": "sponsor",
+                            "insp.noPhoto": "photo",
+                            "insp.focus": "photo",
+                            "insp.accent": "accent",
+                        }
+                        edits = {
+                            k: v for k, v in edits.items() if _insp_element.get(k) not in _locked
+                        }
+                except Exception:
+                    pass
             ws.set_edits(run_id, card_id, edits)
             _phase_w_after_status_change(
                 _run_owner_profile_id(run_id) or _active_profile_id() or "",
@@ -45941,6 +46065,12 @@ voice, and queues them for one-click approval.</p>
         from mediahub.assistant import session as _asess
 
         sess = _asess.get_or_create(run_id, card_id, session_id, profile_id=profile_id)
+        try:
+            from mediahub.collab import locks as _locks
+
+            _locked = _locks.locked_elements(run_id, card_id)
+        except Exception:
+            _locked = set()
         turn = _acop.run_turn(
             session=sess,
             user_message=message,
@@ -45948,6 +46078,7 @@ voice, and queues them for one-click approval.</p>
             brand_kit=brand_kit,
             facts=_assistant_card_facts(run_data, card_id),
             profile_id=profile_id,
+            locked_elements=_locked,
         )
         # Persist the edited brief so the existing render / reformat surfaces
         # pick it up (they read the most-recent brief for the card).
@@ -47188,6 +47319,97 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": True, "on": on, "reactions": reactions.get(comment_id, {})})
 
         return jsonify({"error": "unknown_action", "detail": action or "(none)"}), 400
+
+    # =====================================================================
+    # Version history (diff + restore) & element locks (roadmap 1.18)
+    # ---------------------------------------------------------------------
+    # Every copilot edit / regenerate already persists a new CreativeBrief, so a
+    # card's design versions accumulate on disk — these routes let a reviewer
+    # see, compare and roll back, and lock individual elements so a later edit
+    # (even the copilot's) can't change them. Reads need view; restore/lock need
+    # the edit capability.
+    # =====================================================================
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/revisions", methods=["GET"])
+    def api_card_revisions(run_id: str, card_id: str):
+        """List a card's design versions, oldest→newest (latest = current)."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.collab import revisions as _rev
+
+        revs = _rev.list_revisions(run_id, card_id)
+        current = next((r["brief_id"] for r in revs if r["is_current"]), "")
+        return jsonify({"ok": True, "revisions": revs, "current_id": current})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/revisions/diff", methods=["GET"])
+    def api_card_revisions_diff(run_id: str, card_id: str):
+        """Field-level before/after between two of a card's design versions."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.collab import revisions as _rev
+
+        diff = _rev.diff_revisions(
+            run_id, card_id, request.args.get("a", ""), request.args.get("b", "")
+        )
+        if diff is None:
+            return jsonify({"error": "revision_not_found"}), 404
+        return jsonify({"ok": True, "diff": diff})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/revisions/restore", methods=["POST"])
+    def api_card_revisions_restore(run_id: str, card_id: str):
+        """Roll a card back to a prior version (re-issued as a fresh current)."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id, run_data)
+        if denied:
+            return denied
+        from mediahub.collab import revisions as _rev
+
+        payload = request.get_json(silent=True) or {}
+        restored = _rev.restore_revision(run_id, card_id, payload.get("brief_id", ""))
+        if restored is None:
+            return jsonify({"error": "revision_not_found"}), 404
+        return jsonify({"ok": True, "brief_id": restored.get("id", "")})
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/locks", methods=["GET", "POST"])
+    def api_card_locks(run_id: str, card_id: str):
+        """List (GET) or set (POST) element locks on a card.
+
+        POST {element, locked} — locking an element refuses any later edit
+        (copilot patch or inspector toggle) that would change it.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.collab import locks as _locks
+
+        if request.method == "GET":
+            return jsonify(
+                {
+                    "ok": True,
+                    "locked": sorted(_locks.locked_elements(run_id, card_id)),
+                    "lockable": sorted(_locks.LOCKABLE_ELEMENTS),
+                }
+            )
+
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id, run_data)
+        if denied:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        try:
+            _locks.set_lock(
+                run_id,
+                card_id,
+                payload.get("element", ""),
+                bool(payload.get("locked")),
+                by=_auth.current_user_email() or "",
+            )
+        except _locks.LockError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify({"ok": True, "locked": sorted(_locks.locked_elements(run_id, card_id))})
 
     # =====================================================================
     # Video suite (roadmap 1.6) — the footage path
