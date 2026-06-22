@@ -11148,6 +11148,24 @@ def _clean_meet_label(text: str) -> str:
     return t
 
 
+def _clean_stored_meet_title(text: str) -> str:
+    """Clean a meet title read from PERSISTED run metadata before display.
+
+    Runs parsed before the QA-002 title fix stored the HY-TEK
+    licensee/software/page banner as the meet name (e.g. ``"Sussex County
+    ASA- LC Champ - Organization License HY-TEK's MEET MANAGER 8.0 - 6:29 PM
+    15/02/2026 Page 1"``). The parser is fixed forward-only, so we re-derive a
+    clean display name at render time with the *same* deterministic helper the
+    parser uses — fixing any stale stored title on the season timeline and the
+    Sites/Documents source pickers without a data migration. Returns ``""``
+    when nothing survives, so callers fall back to a sensible default (file
+    name / run id / "Meet"). No AI, no heuristic guessing — pure boilerplate
+    stripping, on the deterministic side of the engine boundary."""
+    from mediahub.interpreter import _clean_meet_name  # noqa: PLC0415
+
+    return _clean_meet_name(text or "")
+
+
 def _strip_source_suffix(text: str) -> str:
     """Strip the trailing source reference the recognition headline template
     appends (``… at entry_url: https://…`` / ``… at https://…``) plus any stray
@@ -17706,7 +17724,9 @@ def create_app() -> Flask:
                 badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
                     status, ""
                 )
-                title = r["meet_name"] or r["file_name"] or r["id"]
+                # Re-clean a stale HY-TEK banner title (pre-QA-002 runs) so the
+                # timeline shows the real meet name, not the licensee banner.
+                title = _clean_stored_meet_title(r["meet_name"]) or r["file_name"] or r["id"]
                 review_href = url_for("review", run_id=r["id"])
                 is_peak = peak_run_id is not None and r["id"] == peak_run_id and peak_moments > 0
 
@@ -51710,7 +51730,10 @@ voice, and queues them for one-click approval.</p>
                 (pid, int(limit)),
             ).fetchall()
             for r in rows:
-                out.append((r["id"], r["meet_name"] or "Meet", r["n_achievements"] or 0))
+                # Clean a stale HY-TEK banner title (pre-QA-002 runs) at render
+                # time so the Sites/Documents source pickers show the real name.
+                meet = _clean_stored_meet_title(r["meet_name"]) or "Meet"
+                out.append((r["id"], meet, r["n_achievements"] or 0))
         except Exception:
             pass
         return out
