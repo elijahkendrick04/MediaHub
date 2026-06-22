@@ -9954,6 +9954,7 @@ _VIDEO_STUDIO_HTML = """
   var PROJECT_TMPL = "__PROJECT_TMPL__";
   var WAVEFORM_TMPL = "__PROJECT_WAVEFORM_TMPL__";
   var LOOK_OPTIONS = __LOOK_OPTIONS_JS__;
+  var VIDEO_MAX_MB = __VIDEO_MAX_MB__;
   var TRANSITIONS = ['cut','fade','dissolve','wipeleft','wiperight','slideup','slidedown','smoothleft','circleopen'];
   var selectedId = null;
   var reelSet = {};
@@ -9978,10 +9979,10 @@ _VIDEO_STUDIO_HTML = """
   function uploadFile(file){
     if(!file) return;
     var status = $('vs-rec-status'); status.textContent = 'Uploading '+file.name+'...';
-    if(file.size > 50*1024*1024){ status.textContent = 'That clip is over 50 MB. Trim it shorter and try again.'; return; }
+    if(file.size > VIDEO_MAX_MB*1024*1024){ status.textContent = 'That clip is over '+VIDEO_MAX_MB+' MB. Trim it shorter and try again.'; return; }
     var fd = new FormData(); fd.append('file', file, file.name);
     fetch(FOOTAGE_URL, {method:'POST', headers:{'X-CSRF-Token':CSRF,'Accept':'application/json'}, body:fd})
-      .then(function(r){ if(r.status===413){ return {error:'too_large', message:'That clip is over 50 MB.'}; } return r.json(); })
+      .then(function(r){ if(r.status===413){ return {error:'too_large', message:'That clip is over '+VIDEO_MAX_MB+' MB.'}; } return r.json(); })
       .then(function(j){ status.textContent = j.ok ? 'Uploaded.' : ('Upload failed: '+(j.message||j.error||'error')); if(j.ok) loadFootage(); })
       .catch(function(){ status.textContent = 'Upload failed.'; });
   }
@@ -15121,7 +15122,18 @@ def create_app() -> Flask:
     mimetypes.add_type("font/woff2", ".woff2")
 
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB (meet exports, images, PDFs)
+    # Video footage is far larger than a meet export — a short phone clip easily
+    # exceeds 50 MB. The footage-upload route gets a raised per-request cap, applied
+    # in the CSRF guard below *before* the multipart body is parsed (parsing it is
+    # what enforces the limit). Operator-tunable via MEDIAHUB_VIDEO_UPLOAD_MB.
+    try:
+        _video_upload_max = max(
+            50, min(1024, int(os.environ.get("MEDIAHUB_VIDEO_UPLOAD_MB", "512")))
+        )
+    except (TypeError, ValueError):
+        _video_upload_max = 512
+    _video_upload_max *= 1024 * 1024
     # Let the browser hold static assets (self-hosted fonts, fonts.css, the UI
     # kit) instead of revalidating each with a conditional GET on every single
     # navigation. The one mutable asset, ui-kit.js, carries a content-hash `?v=`
@@ -15159,6 +15171,12 @@ def create_app() -> Flask:
     def _csrf_protect():
         if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
             return None
+        # Raise the body cap for footage uploads BEFORE the multipart form is read
+        # below (reading it is what enforces MAX_CONTENT_LENGTH). This is the first
+        # before_request, so the larger limit is in place before anything touches
+        # the body. endpoint is resolved by routing, which runs before this hook.
+        if request.endpoint == "api_video_footage_upload":
+            request.max_content_length = _video_upload_max
         if not _csrf_enforced() or request.path in _CSRF_EXEMPT_PATHS:
             return None
         ctype = (request.content_type or "").lower()
@@ -46299,6 +46317,7 @@ voice, and queues them for one-click approval.</p>
             # parse). Replace the JS placeholder first (it is the more specific key).
             .replace("__LOOK_OPTIONS_JS__", json.dumps(look_options))
             .replace("__LOOK_OPTIONS__", look_options)
+            .replace("__VIDEO_MAX_MB__", str(_video_upload_max // (1024 * 1024)))
             .replace("__ENGINE_NOTE__", engine_note)
         )
         return _layout("Video studio", body, active="video")
@@ -46307,11 +46326,11 @@ voice, and queues them for one-click approval.</p>
     def api_video_footage_upload():
         """Ingest an uploaded/recorded clip as a `footage` media asset.
 
-        Footage is bounded by the app-wide 50 MB upload cap (a clip over that is
-        rejected by the global 413 handler before this runs) — enough for the
-        short clips Clip-Maker turns into highlights. Lifting the cap for video
-        means reworking the shared CSRF/body-limit middleware, so it's a
-        deliberate follow-up, not bundled here.
+        Footage gets a raised per-request body cap (``MEDIAHUB_VIDEO_UPLOAD_MB``,
+        default 512 MB) — the app-wide 50 MB limit is for meet exports/images and
+        is far too small for real video. The larger cap is applied in the CSRF
+        ``before_request`` guard before the multipart body is parsed. The bytes are
+        read into memory here, so the cap also bounds the peak memory per upload.
         """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
@@ -47403,16 +47422,21 @@ voice, and queues them for one-click approval.</p>
 
     @app.errorhandler(413)
     def _payload_too_large(e):
+        # Report the cap that actually applied to THIS request — the footage route
+        # raises it per-request, so a hardcoded "50 MB" would mislead there.
+        limit = (getattr(request, "max_content_length", None) if request else None) or app.config[
+            "MAX_CONTENT_LENGTH"
+        ]
+        max_mb = max(1, int(limit) // (1024 * 1024))
         accepts = request.headers.get("Accept", "") if request else ""
         if "application/json" in accepts or request.path.startswith("/api/"):
-            return jsonify({"error": "file_too_large", "max_mb": 50}), 413
+            return jsonify({"error": "file_too_large", "max_mb": max_mb}), 413
         body = (
             '<section class="mh-hero" data-lane="413" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">413 / payload too large</span>'
             "<h1>File too big.</h1>"
             '<p class="lede">'
-            "The upload exceeded 50&nbsp;MB. Try compressing or trimming the file first "
-            "— most meet exports are well under 5&nbsp;MB."
+            f"The upload exceeded {max_mb}&nbsp;MB. Try compressing or trimming the file first."
             "</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("upload")}">Try a smaller file &rarr;</a>'
