@@ -185,6 +185,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **1.14** · Phase 1 (Product) — Planner calendar/board: drag-reschedule the plan, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner *(completed 2026-06-21)*
 - ✅ **1.15** · Phase 1 (Product) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities *(completed 2026-06-22)*
 - ✅ **1.16** · Phase 1 (Product) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and approval-gated *(completed 2026-06-22)*
+- ✅ **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later *(completed 2026-06-22)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)

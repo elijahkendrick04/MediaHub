@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-22 · `b939b921c` · Merge pull request #990: Club microsites, forms, QR &amp; widgets (roadmap 1.16)
+**Last updated:** 2026-06-22 · `f68f77053` · Merge pull request #992: Email & newsletter composer (roadmap 1.17)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.17** · Phase 1 (Product) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
 - **1.18** · Phase 1 (Product) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens · ❌ **NOT STARTED**
 - **1.19** · Phase 1 (Product) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities · ❌ **NOT STARTED**
 - **1.20** · Phase 1 (Product) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
@@ -1211,16 +1210,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-22 | `dd86b186c` | 1.17: ruff-format the email_design package + newsletter web routes (hygiene) |
+| 2026-06-22 | `43f1298ea` | 1.17: extend run-route isolation invariants for the newsletter card route; keep hex budget |
+| 2026-06-22 | `0993383a2` | docs: mark roadmap 1.17 (email & newsletter composer) shipped |
+| 2026-06-22 | `2a3b37f5f` | Email & newsletter composer (1.17) build 3: web surface, exports, hosted view |
+| 2026-06-22 | `d4fbc911e` | Email & newsletter composer (1.17) build 2: auto-assembly + AI editorial |
+| 2026-06-22 | `0ac56ff7a` | Email & newsletter composer (1.17) build 1: email-safe rendering engine |
 | 2026-06-22 | `d2ee13b5a` | sites/web: satisfy theme-hex budget + ownerless-run invariant (CI) |
 | 2026-06-22 | `708cd4413` | sites/web: apply ruff-format to the 1.16 route block (hygiene hook) |
 | 2026-06-22 | `262856db9` | sites/web: build 4 — microsite web surface + ship (roadmap 1.16) |
 | 2026-06-22 | `248d82958` | sites: build 3 — widgets, brand-safe QR, SEO & insights (roadmap 1.16) |
 | 2026-06-22 | `85dfb2239` | forms: build 2 — public forms → data-hub rows (roadmap 1.16) |
 | 2026-06-22 | `996b7b0fc` | sites: build 1 — microsite core engine (roadmap 1.16) |
-| 2026-06-22 | `04c3d2765` | video upload: stream footage to disk instead of buffering it in memory |
-| 2026-06-22 | `58fb26298` | documents: keep inline-hex budget (theme-tokens guard) at baseline |
-| 2026-06-22 | `747d85a66` | fix(deploy): wrap the remaining fail-loud build fetches with a retry helper |
-| 2026-06-22 | `dd06bf0f3` | documents: apply ruff format/lint to satisfy the pre-commit hygiene hook |
-| 2026-06-22 | `ac2bde303` | documents: build 5 — web surface, nav & docs (roadmap 1.15) |
-| 2026-06-22 | `8598cbcf6` | fix(deploy): retry transient CDN/TLS failures when fetching the Piper voice |
 <!-- /ROADMAP:ACTIVITY -->
