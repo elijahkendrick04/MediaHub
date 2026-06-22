@@ -16,7 +16,9 @@ def _deck():
         geometry="slide_16_9",
         sections=[
             Section(layout="cover", blocks=[m.heading("AGM 2026", 1)], notes="Welcome everyone."),
-            Section(blocks=[m.heading("The year", 2), m.bullet_list(["a", "b"])], notes="Talk numbers."),
+            Section(
+                blocks=[m.heading("The year", 2), m.bullet_list(["a", "b"])], notes="Talk numbers."
+            ),
             Section(layout="closing", blocks=[m.heading("Thanks", 1)]),
         ],
     )

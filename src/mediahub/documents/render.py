@@ -99,10 +99,7 @@ def _b_table(p: dict) -> str:
         body_rows.append(f"<tr>{cells}</tr>")
     cap = p.get("caption")
     caption = f"<caption>{_h(cap)}</caption>" if cap else ""
-    return (
-        f'<table class="doc-table">{caption}{thead}'
-        f'<tbody>{"".join(body_rows)}</tbody></table>'
-    )
+    return f'<table class="doc-table">{caption}{thead}<tbody>{"".join(body_rows)}</tbody></table>'
 
 
 def _b_chart(p: dict, ctx: dict) -> str:
@@ -239,10 +236,7 @@ def _deck_slide(section: Section, ctx: dict, *, index: int, total: int) -> str:
     bg = _bg_class(section)
     inner = _blocks_html(section.blocks, ctx)
     num = f'<span class="slide-num">{index + 1} / {total}</span>'
-    return (
-        f'<div class="doc-sheet{bg}">'
-        f'<div class="doc-pad{layout}">{inner}</div>{num}</div>'
-    )
+    return f'<div class="doc-sheet{bg}"><div class="doc-pad{layout}">{inner}</div>{num}</div>'
 
 
 def _doc_section(section: Section, ctx: dict) -> str:

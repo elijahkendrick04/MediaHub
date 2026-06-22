@@ -57,7 +57,9 @@ def test_section_validates_layout_and_background():
 
 
 def test_section_roundtrips():
-    s = Section(blocks=[m.heading("A"), m.text("b")], notes="say hi", layout="cover", break_before=True)
+    s = Section(
+        blocks=[m.heading("A"), m.text("b")], notes="say hi", layout="cover", break_before=True
+    )
     again = Section.from_dict(s.to_dict())
     assert again.notes == "say hi"
     assert again.layout == "cover"

@@ -41,7 +41,9 @@ def _report():
                     m.table(["Swimmer", "PBs"], [["Ada", 5], ["Bo", 4]], caption="Top PB makers"),
                 ],
             ),
-            Section(break_before=True, blocks=[m.heading("Thanks", 2), m.text("See you next term.")]),
+            Section(
+                break_before=True, blocks=[m.heading("Thanks", 2), m.text("See you next term.")]
+            ),
         ],
     )
 
@@ -54,7 +56,12 @@ def _deck():
         geometry="slide_16_9",
         sections=[
             Section(layout="cover", background="primary", blocks=[m.heading("AGM 2026", 1)]),
-            Section(blocks=[m.heading("The year", 2), m.bullet_list(["Grew to 120 members", "9 medals"])]),
+            Section(
+                blocks=[
+                    m.heading("The year", 2),
+                    m.bullet_list(["Grew to 120 members", "9 medals"]),
+                ]
+            ),
             Section(layout="closing", background="accent", blocks=[m.heading("Thank you", 1)]),
         ],
     )
@@ -76,7 +83,9 @@ def test_html_escapes_user_text_no_xss():
     spec = new_document("x", "blank")
     spec = DocumentSpec(
         title="<script>alert(1)</script>",
-        sections=[Section(blocks=[m.text('<img src=x onerror="alert(2)">'), m.heading("<b>h</b>")])],
+        sections=[
+            Section(blocks=[m.text('<img src=x onerror="alert(2)">'), m.heading("<b>h</b>")])
+        ],
     )
     html = render_document_html(spec, role_vars=_RV)
     assert "<script>alert(1)</script>" not in html

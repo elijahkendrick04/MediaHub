@@ -93,9 +93,22 @@ def _stitch(ffmpeg: str, pngs: list[Path], out: Path, seconds: float, fps: int) 
 
         out.parent.mkdir(parents=True, exist_ok=True)
         args = [
-            ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-vf", f"fps={fps},format=yuv420p,scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-c:v", "libx264", "-preset", "medium", "-movflags", "+faststart",
+            ffmpeg,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-vf",
+            f"fps={fps},format=yuv420p,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-movflags",
+            "+faststart",
             str(out),
         ]
         proc = subprocess.run(args, capture_output=True, text=True, timeout=600)

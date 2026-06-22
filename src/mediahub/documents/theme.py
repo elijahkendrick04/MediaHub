@@ -155,9 +155,7 @@ def font_face_css() -> str:
         from mediahub.graphic_renderer.render import LAYOUTS_DIR
 
         shared = (LAYOUTS_DIR / "_shared.css").read_text(encoding="utf-8")
-        rewritten = shared.replace(
-            "url(fonts/", f"url({(LAYOUTS_DIR / 'fonts').as_uri()}/"
-        )
+        rewritten = shared.replace("url(fonts/", f"url({(LAYOUTS_DIR / 'fonts').as_uri()}/")
         faces = re.findall(r"@font-face\s*\{[^}]*\}", rewritten, flags=re.DOTALL)
         return "\n".join(faces)
     except Exception:

@@ -53,8 +53,24 @@ def _seed_run(tmp_path, run_id="r1", profile_id="club-a"):
             "meet_date": "June 2026",
             "n_swims_analysed": 12,
             "ranked_achievements": [
-                {"achievement": {"type": "pb_confirmed", "swimmer_name": "Ada Lovelace", "swimmer_id": "s1", "event": "100m Free", "swim_id": "a1", "raw_facts": {"drop_seconds": 1.2}}},
-                {"achievement": {"type": "medal_gold", "swimmer_name": "Ada Lovelace", "swimmer_id": "s1", "swim_id": "a1"}},
+                {
+                    "achievement": {
+                        "type": "pb_confirmed",
+                        "swimmer_name": "Ada Lovelace",
+                        "swimmer_id": "s1",
+                        "event": "100m Free",
+                        "swim_id": "a1",
+                        "raw_facts": {"drop_seconds": 1.2},
+                    }
+                },
+                {
+                    "achievement": {
+                        "type": "medal_gold",
+                        "swimmer_name": "Ada Lovelace",
+                        "swimmer_id": "s1",
+                        "swim_id": "a1",
+                    }
+                },
             ],
         },
     }
@@ -75,7 +91,9 @@ def _save_deck(pid="club-a", title="AGM 2026"):
         brand_profile_id=pid,
         sections=[
             Section(layout="cover", blocks=[m.heading(title, 1)], notes="Welcome."),
-            Section(blocks=[m.heading("The year", 2), m.bullet_list(["120 members"])], notes="Numbers."),
+            Section(
+                blocks=[m.heading("The year", 2), m.bullet_list(["120 members"])], notes="Numbers."
+            ),
             Section(layout="closing", blocks=[m.heading("Thanks", 1)]),
         ],
     )
@@ -122,8 +140,10 @@ def test_generate_meet_from_seeded_run(app_env):
     c = app.test_client()
     _login(c)
     _seed_run(tmp_path)
-    r = c.post("/api/documents/generate",
-               json={"format": "meet_programme", "scope": "meet", "run_id": "r1", "with_ai": False})
+    r = c.post(
+        "/api/documents/generate",
+        json={"format": "meet_programme", "scope": "meet", "run_id": "r1", "with_ai": False},
+    )
     j = r.get_json()
     assert j["ok"], j
     v = c.get(j["url"])
@@ -166,8 +186,12 @@ def test_save_and_delete(app_env):
     _login(c)
     doc_id = c.post("/api/documents/generate", json={"format": "blank"}).get_json()["doc_id"]
 
-    spec = {"doc_id": doc_id, "title": "Renamed", "kind": "document",
-            "sections": [{"blocks": [{"kind": "text", "props": {"text": "hi"}}]}]}
+    spec = {
+        "doc_id": doc_id,
+        "title": "Renamed",
+        "kind": "document",
+        "sections": [{"blocks": [{"kind": "text", "props": {"text": "hi"}}]}],
+    }
     r = c.post(f"/api/documents/{doc_id}/save", json={"spec": spec})
     assert r.get_json()["ok"]
     assert b"Renamed" in c.get(f"/documents/{doc_id}").data
@@ -199,12 +223,17 @@ def test_import_docx(app_env):
     from mediahub.documents import export, models as m
     from mediahub.documents.models import DocumentSpec, Section
 
-    src = DocumentSpec(title="Imported", sections=[Section(blocks=[m.heading("Hello", 1), m.text("World")])])
+    src = DocumentSpec(
+        title="Imported", sections=[Section(blocks=[m.heading("Hello", 1), m.text("World")])]
+    )
     path = tmp_path / "x.docx"
     export.document_docx(src, path)
     data = path.read_bytes()
-    r = c.post("/api/documents/import",
-               data={"file": (io.BytesIO(data), "x.docx")}, content_type="multipart/form-data")
+    r = c.post(
+        "/api/documents/import",
+        data={"file": (io.BytesIO(data), "x.docx")},
+        content_type="multipart/form-data",
+    )
     j = r.get_json()
     assert j["ok"] and j["doc_id"]
 
@@ -335,9 +364,10 @@ def test_pdf_download(app_env):
     c = app.test_client()
     _login(c)
     _seed_run(tmp_path)
-    doc_id = c.post("/api/documents/generate",
-                    json={"format": "meet_programme", "scope": "meet", "run_id": "r1", "with_ai": False}
-                    ).get_json()["doc_id"]
+    doc_id = c.post(
+        "/api/documents/generate",
+        json={"format": "meet_programme", "scope": "meet", "run_id": "r1", "with_ai": False},
+    ).get_json()["doc_id"]
     r = c.get(f"/api/documents/{doc_id}/pdf")
     _skip_if_no_chromium(r)
     assert r.status_code == 200

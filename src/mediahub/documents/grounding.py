@@ -212,8 +212,11 @@ def facts_from_runs(
     headline = [
         {"value": str(tot["meets"]), "label": "Meets"},
         {"value": str(tot["personal_bests"]), "label": "Personal bests"},
-        {"value": str(tot["medals_total"]), "label": "Medals",
-         "sublabel": f"{tot['gold']}G {tot['silver']}S {tot['bronze']}B"},
+        {
+            "value": str(tot["medals_total"]),
+            "label": "Medals",
+            "sublabel": f"{tot['gold']}G {tot['silver']}S {tot['bronze']}B",
+        },
     ]
     if tot["club_records"]:
         headline.append({"value": str(tot["club_records"]), "label": "Club records"})

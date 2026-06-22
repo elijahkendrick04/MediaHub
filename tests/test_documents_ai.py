@@ -20,9 +20,34 @@ def _run():
             "meet_date": "June 2026",
             "n_swims_analysed": 18,
             "ranked_achievements": [
-                {"achievement": {"type": "pb_confirmed", "swimmer_name": "Tunde Adeyemi", "swimmer_id": "s1", "event": "100m Free", "swim_id": "a1", "raw_facts": {"drop_seconds": 1.42}}},
-                {"achievement": {"type": "pb_confirmed", "swimmer_name": "Jess Smith", "swimmer_id": "s2", "event": "200m Free", "swim_id": "a2", "raw_facts": {"drop_seconds": 2.6}}},
-                {"achievement": {"type": "medal_gold", "swimmer_name": "Tunde Adeyemi", "swimmer_id": "s1", "swim_id": "a1"}},
+                {
+                    "achievement": {
+                        "type": "pb_confirmed",
+                        "swimmer_name": "Tunde Adeyemi",
+                        "swimmer_id": "s1",
+                        "event": "100m Free",
+                        "swim_id": "a1",
+                        "raw_facts": {"drop_seconds": 1.42},
+                    }
+                },
+                {
+                    "achievement": {
+                        "type": "pb_confirmed",
+                        "swimmer_name": "Jess Smith",
+                        "swimmer_id": "s2",
+                        "event": "200m Free",
+                        "swim_id": "a2",
+                        "raw_facts": {"drop_seconds": 2.6},
+                    }
+                },
+                {
+                    "achievement": {
+                        "type": "medal_gold",
+                        "swimmer_name": "Tunde Adeyemi",
+                        "swimmer_id": "s1",
+                        "swim_id": "a1",
+                    }
+                },
             ],
         },
     }

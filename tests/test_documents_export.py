@@ -15,13 +15,22 @@ def _doc():
         doc_format="season_report",
         source_refs=["run:r1", "meet results file"],
         sections=[
-            Section(blocks=[m.heading("Highlights", 1), m.text("A **strong** season."),
-                            m.bullet_list(["Grew to 120 members", "9 medals"])]),
-            Section(blocks=[
-                m.heading("By the numbers", 2),
-                m.kpi_row([{"value": "42", "label": "PBs"}, {"value": "9", "label": "Medals"}]),
-                m.table(["Swimmer", "PBs"], [["Ada", "5"], ["Bo", "4"]], caption="Top PB makers"),
-            ]),
+            Section(
+                blocks=[
+                    m.heading("Highlights", 1),
+                    m.text("A **strong** season."),
+                    m.bullet_list(["Grew to 120 members", "9 medals"]),
+                ]
+            ),
+            Section(
+                blocks=[
+                    m.heading("By the numbers", 2),
+                    m.kpi_row([{"value": "42", "label": "PBs"}, {"value": "9", "label": "Medals"}]),
+                    m.table(
+                        ["Swimmer", "PBs"], [["Ada", "5"], ["Bo", "4"]], caption="Top PB makers"
+                    ),
+                ]
+            ),
         ],
     )
 

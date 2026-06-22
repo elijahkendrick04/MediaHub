@@ -8,8 +8,13 @@ from mediahub.documents import models as m
 from mediahub.documents.deck_video import _ffmpeg, deck_to_mp4
 from mediahub.documents.models import DocumentSpec, Section
 
-_RV = {"--mh-primary": "#A30D2D", "--mh-accent": "#F2C14E", "--mh-surface": "#0B1B2E",
-       "--mh-on-primary": "#FFFFFF", "--mh-on-surface": "#FFFFFF"}
+_RV = {
+    "--mh-primary": "#A30D2D",
+    "--mh-accent": "#F2C14E",
+    "--mh-surface": "#0B1B2E",
+    "--mh-on-primary": "#FFFFFF",
+    "--mh-on-surface": "#FFFFFF",
+}
 
 
 def _deck():

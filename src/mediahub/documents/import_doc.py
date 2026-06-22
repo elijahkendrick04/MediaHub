@@ -64,7 +64,9 @@ def import_docx(path: str | Path) -> DocumentSpec:
                 continue
             blocks.append(m.table(rows[0], rows[1:]))
 
-    title = (doc.core_properties.title or Path(path).stem) if doc.core_properties else Path(path).stem
+    title = (
+        (doc.core_properties.title or Path(path).stem) if doc.core_properties else Path(path).stem
+    )
     return DocumentSpec(
         title=str(title) or "Imported document",
         kind="document",

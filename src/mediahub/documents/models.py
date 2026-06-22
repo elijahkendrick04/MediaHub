@@ -54,6 +54,7 @@ DOC_FORMATS: tuple[str, ...] = (
     "blank",  # an empty document the user fills in
 )
 
+
 # Page geometries. ``css_size`` is the ``@page { size: ... }`` value; width/height
 # are the matching CSS box dimensions for each sheet/slide. ``kind`` drives the
 # render mode: ``paper`` flows + paginates, ``slide`` is one fixed box per section.

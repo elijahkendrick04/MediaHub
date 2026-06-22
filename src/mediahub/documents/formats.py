@@ -91,12 +91,16 @@ def build_season_report(
     title = facts.title or "Season report"
     sections: list[Section] = [_cover_section(facts, title, deck=False)]
 
-    glance = [m.heading("The season at a glance", 2)] + _kpi_block(facts) + _prose_block(prose, "intro")
+    glance = (
+        [m.heading("The season at a glance", 2)] + _kpi_block(facts) + _prose_block(prose, "intro")
+    )
     sections.append(Section(blocks=glance))
 
     if facts.chart_specs:
         sections.append(
-            Section(break_before=True, blocks=[m.heading("By the numbers", 2)] + _chart_blocks(facts))
+            Section(
+                break_before=True, blocks=[m.heading("By the numbers", 2)] + _chart_blocks(facts)
+            )
         )
 
     standout = (
@@ -109,7 +113,9 @@ def build_season_report(
     sections.append(Section(break_before=True, blocks=standout))
 
     if _p(prose, "outlook"):
-        sections.append(Section(blocks=[m.heading("Looking ahead", 2)] + _prose_block(prose, "outlook")))
+        sections.append(
+            Section(blocks=[m.heading("Looking ahead", 2)] + _prose_block(prose, "outlook"))
+        )
 
     if _p(prose, "thanks"):
         sections.append(Section(blocks=[m.heading("Thank you", 2)] + _prose_block(prose, "thanks")))
@@ -153,7 +159,9 @@ def build_meet_programme(
         sections.append(Section(blocks=[m.heading("In charts", 2)] + _chart_blocks(facts, limit=2)))
 
     if _p(prose, "about"):
-        sections.append(Section(blocks=[m.heading("About the club", 2)] + _prose_block(prose, "about")))
+        sections.append(
+            Section(blocks=[m.heading("About the club", 2)] + _prose_block(prose, "about"))
+        )
 
     return DocumentSpec(
         title=title,
@@ -184,7 +192,11 @@ def build_sponsor_proposal(
     title = f"Partner with {club}"
     sections: list[Section] = [_cover_section(facts, title, deck=False)]
 
-    why = [m.heading(f"Why partner with {club}", 2)] + _prose_block(prose, "pitch") + _kpi_block(facts)
+    why = (
+        [m.heading(f"Why partner with {club}", 2)]
+        + _prose_block(prose, "pitch")
+        + _kpi_block(facts)
+    )
     sections.append(Section(blocks=why))
 
     season = [m.heading("Our season", 2)] + _highlight_block(facts) + _chart_blocks(facts, limit=2)
@@ -224,7 +236,8 @@ def build_agm_deck(
     title = facts.title or "AGM"
     sections: list[Section] = [
         Section(
-            blocks=[m.heading(title, 1), m.heading(facts.period or "", 3)] if facts.period
+            blocks=[m.heading(title, 1), m.heading(facts.period or "", 3)]
+            if facts.period
             else [m.heading(title, 1)],
             layout="cover",
             background="primary",
@@ -249,8 +262,10 @@ def build_agm_deck(
 
     if facts.chart_specs:
         sections.append(
-            Section(blocks=[m.heading("By the numbers", 2), m.chart(facts.chart_specs[0])],
-                    notes=_p(prose, "chart"))
+            Section(
+                blocks=[m.heading("By the numbers", 2), m.chart(facts.chart_specs[0])],
+                notes=_p(prose, "chart"),
+            )
         )
 
     if facts.tables.get("medal_table"):

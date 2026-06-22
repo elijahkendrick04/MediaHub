@@ -155,7 +155,8 @@ def create_session(
     total = max(1, int(total_slides))
     # Mint a code not currently in use by a live session.
     existing = {
-        s.pairing_code for s in _iter_live()  # avoid collisions among active sessions
+        s.pairing_code
+        for s in _iter_live()  # avoid collisions among active sessions
     }
     code = _make_code()
     while code in existing:
@@ -212,7 +213,9 @@ def apply_action(session_id: str, action: str, value=None) -> Optional[Presenter
     return _save(s)
 
 
-def update_spec(session_id: str, *, total_slides: int, spec_version: str) -> Optional[PresenterSession]:
+def update_spec(
+    session_id: str, *, total_slides: int, spec_version: str
+) -> Optional[PresenterSession]:
     """Reflect a live edit of the deck — bumps the version so the audience reloads."""
     s = get_session(session_id)
     if s is None:

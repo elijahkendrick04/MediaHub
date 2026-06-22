@@ -29,10 +29,44 @@ def _run(name="County Champs"):
             "meet_date": "June 2026",
             "n_swims_analysed": 18,
             "ranked_achievements": [
-                {"achievement": {"type": "pb_confirmed", "swimmer_name": "Tunde Adeyemi", "swimmer_id": "s1", "event": "100m Free", "swim_id": "a1", "raw_facts": {"drop_seconds": 1.42}}},
-                {"achievement": {"type": "pb_confirmed", "swimmer_name": "Jess Smith", "swimmer_id": "s2", "event": "200m Free", "swim_id": "a2", "raw_facts": {"drop_seconds": 2.6}}},
-                {"achievement": {"type": "medal_gold", "swimmer_name": "Tunde Adeyemi", "swimmer_id": "s1", "event": "100m Free", "swim_id": "a1"}},
-                {"achievement": {"type": "medal_silver", "swimmer_name": "Jess Smith", "swimmer_id": "s2", "event": "200m Free", "swim_id": "a2"}},
+                {
+                    "achievement": {
+                        "type": "pb_confirmed",
+                        "swimmer_name": "Tunde Adeyemi",
+                        "swimmer_id": "s1",
+                        "event": "100m Free",
+                        "swim_id": "a1",
+                        "raw_facts": {"drop_seconds": 1.42},
+                    }
+                },
+                {
+                    "achievement": {
+                        "type": "pb_confirmed",
+                        "swimmer_name": "Jess Smith",
+                        "swimmer_id": "s2",
+                        "event": "200m Free",
+                        "swim_id": "a2",
+                        "raw_facts": {"drop_seconds": 2.6},
+                    }
+                },
+                {
+                    "achievement": {
+                        "type": "medal_gold",
+                        "swimmer_name": "Tunde Adeyemi",
+                        "swimmer_id": "s1",
+                        "event": "100m Free",
+                        "swim_id": "a1",
+                    }
+                },
+                {
+                    "achievement": {
+                        "type": "medal_silver",
+                        "swimmer_name": "Jess Smith",
+                        "swimmer_id": "s2",
+                        "event": "200m Free",
+                        "swim_id": "a2",
+                    }
+                },
             ],
         },
     }
@@ -121,7 +155,9 @@ def test_build_document_dispatch_and_unknown():
 
 def test_prose_is_injected_when_provided():
     f = facts_from_run(_run(), club_name="Otters SC")
-    spec = formats.build_season_report(f, prose={"intro": "What a season it was.", "thanks": "Thank you all."})
+    spec = formats.build_season_report(
+        f, prose={"intro": "What a season it was.", "thanks": "Thank you all."}
+    )
     html = render_document_html(spec, role_vars=_RV)
     assert "What a season it was." in html
     assert "Thank you all." in html

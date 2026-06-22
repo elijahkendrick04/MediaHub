@@ -15070,7 +15070,7 @@ def _home_signed_in_quick_actions_html() -> str:
                 '<polyline points="21 15 16 10 5 21"/>'
             ),
             "Media library",
-            "Your athlete and team photography, ready to drop into cards, " "spotlights and reels.",
+            "Your athlete and team photography, ready to drop into cards, spotlights and reels.",
             "Open library",
         )
         + _tile(
@@ -26804,7 +26804,7 @@ document.addEventListener('click', function (e) {{
             else ""
         )
         tags = pv["hashtags"]
-        tag_txt = f'{int(tags["count"])} hashtag{"s" if tags["count"] != 1 else ""}'
+        tag_txt = f"{int(tags['count'])} hashtag{'s' if tags['count'] != 1 else ''}"
         if tags["limit"] is not None:
             tag_cls = "mh-cp-good" if tags["within"] else "mh-cp-bad"
             tag_txt += f' <span class="{tag_cls}">/ {int(tags["limit"])} max</span>'
@@ -27283,7 +27283,7 @@ function mhBoardDrop(e) {{
                 trusted = tp.n >= MIN_SAMPLES
                 cls = "mh-an-up" if pct >= 0 else "mh-an-down"
                 bar_w = max(4, min(100, round(tp.index * 50)))
-                pct_txt = f'{"+" if pct >= 0 else ""}{pct}%'
+                pct_txt = f"{'+' if pct >= 0 else ''}{pct}%"
                 note = (
                     ""
                     if trusted
@@ -49067,9 +49067,13 @@ voice, and queues them for one-click approval.</p>
         docs = _docstore.list_documents(pid)
         runs = _doc_recent_runs(pid)
 
-        run_opts = "".join(
-            f'<option value="{_h(rid)}">{_h(name)} ({n} cards)</option>' for rid, name, n in runs
-        ) or '<option value="">No processed meets yet</option>'
+        run_opts = (
+            "".join(
+                f'<option value="{_h(rid)}">{_h(name)} ({n} cards)</option>'
+                for rid, name, n in runs
+            )
+            or '<option value="">No processed meets yet</option>'
+        )
 
         saved = ""
         if docs:
@@ -49079,7 +49083,7 @@ voice, and queues them for one-click approval.</p>
                 rows.append(
                     '<a class="card" style="display:block;text-decoration:none" '
                     f'href="{url_for("document_view", doc_id=d["doc_id"])}">'
-                    f'<strong>{_h(d["title"])}</strong>'
+                    f"<strong>{_h(d['title'])}</strong>"
                     f'<div class="dim" style="font-size:12px;margin-top:4px">{_h(badge)}</div></a>'
                 )
             saved = (
@@ -49091,28 +49095,28 @@ voice, and queues them for one-click approval.</p>
         body = (
             '<section class="mh-hero"><h1>Documents</h1>'
             '<p class="muted">Build a meet programme, season report, sponsor proposal or '
-            'AGM deck from your real results — then export, present or download it.</p></section>'
+            "AGM deck from your real results — then export, present or download it.</p></section>"
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
             # meet programme (meet scope)
             '<div class="card"><h3 style="margin-top:0">Meet programme</h3>'
             '<p class="dim" style="font-size:13px">A gala-night programme/recap from one meet.</p>'
             f'<select id="prog-run" class="input">{run_opts}</select>'
             '<button class="btn" style="margin-top:8px" '
-            'onclick="genDoc(\'meet_programme\',\'meet\',document.getElementById(\'prog-run\').value)">'
-            'Generate</button></div>'
+            "onclick=\"genDoc('meet_programme','meet',document.getElementById('prog-run').value)\">"
+            "Generate</button></div>"
             # season report (season scope)
             '<div class="card"><h3 style="margin-top:0">Season report</h3>'
             '<p class="dim" style="font-size:13px">The committee report from your whole season.</p>'
-            '<button class="btn" onclick="genDoc(\'season_report\',\'season\')">Generate</button></div>'
+            "<button class=\"btn\" onclick=\"genDoc('season_report','season')\">Generate</button></div>"
             # sponsor proposal
             '<div class="card"><h3 style="margin-top:0">Sponsor proposal</h3>'
             '<p class="dim" style="font-size:13px">A sponsorship pitch with your reach and packages.</p>'
-            '<button class="btn" onclick="genDoc(\'sponsor_proposal\',\'season\')">Generate</button></div>'
+            "<button class=\"btn\" onclick=\"genDoc('sponsor_proposal','season')\">Generate</button></div>"
             # AGM deck
             '<div class="card"><h3 style="margin-top:0">AGM deck</h3>'
             '<p class="dim" style="font-size:13px">The year in review, ready to present.</p>'
-            '<button class="btn" onclick="genDoc(\'agm_deck\',\'season\')">Generate</button></div>'
-            '</div>'
+            "<button class=\"btn\" onclick=\"genDoc('agm_deck','season')\">Generate</button></div>"
+            "</div>"
             # tools row
             '<h2 style="margin-top:28px">PDF tools</h2>'
             '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">'
@@ -49128,7 +49132,7 @@ voice, and queues them for one-click approval.</p>
             '<p class="dim" style="font-size:13px">Turn photos/screenshots into a single PDF.</p>'
             '<input type="file" id="img-files" accept="image/*" multiple class="input">'
             '<button class="btn secondary" style="margin-top:8px" onclick="imagesToPdf()">Build &amp; download</button></div>'
-            '</div>'
+            "</div>"
             + saved
             + _DOCUMENTS_HOME_JS.replace("__GEN_URL__", url_for("api_documents_generate"))
             .replace("__IMPORT_URL__", url_for("api_documents_import"))
@@ -49157,7 +49161,13 @@ voice, and queues them for one-click approval.</p>
         if fmt == "blank":
             spec = new_document("Untitled document", "blank", brand_profile_id=pid)
             _docstore.save_document(pid, spec)
-            return jsonify({"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)})
+            return jsonify(
+                {
+                    "ok": True,
+                    "doc_id": spec.doc_id,
+                    "url": url_for("document_view", doc_id=spec.doc_id),
+                }
+            )
 
         if fmt not in ("meet_programme", "season_report", "sponsor_proposal", "agm_deck"):
             return jsonify({"ok": False, "error": "bad_format"}), 400
@@ -49169,8 +49179,13 @@ voice, and queues them for one-click approval.</p>
         brand_kit = _doc_brand_kit(pid)
         facts = _doc_facts_for(pid, brand_kit, scope=scope, run_id=run_id)
         if facts is None:
-            return jsonify({"ok": False, "error": "no_data",
-                            "message": "No processed meets to build from yet."}), 200
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_data",
+                    "message": "No processed meets to build from yet.",
+                }
+            ), 200
         try:
             spec = generate_document(facts, fmt, brand_profile_id=pid, tone=tone, with_ai=with_ai)
         except Exception as e:  # honest AI-unavailable signal — offer a data-only build
@@ -49181,18 +49196,23 @@ voice, and queues them for one-click approval.</p>
             log.warning("document generation failed", exc_info=True)
             return jsonify({"ok": False, "error": "generate_failed"}), 500
         _docstore.save_document(pid, spec)
-        return jsonify({"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)})
+        return jsonify(
+            {"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)}
+        )
 
     @app.route("/documents/<doc_id>")
     def document_view(doc_id: str):
         if not _documents_ok:
-            return _recovery_page("Documents unavailable", "Not enabled here.",
-                                  primary_cta=("Home", url_for("home")))
+            return _recovery_page(
+                "Documents unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
         pid, spec = _doc_load_owned(doc_id)
         if spec is None:
-            return _recovery_page("Document not found",
-                                  "It may have been deleted, or belongs to another organisation.",
-                                  primary_cta=("All documents", url_for("documents_home")))
+            return _recovery_page(
+                "Document not found",
+                "It may have been deleted, or belongs to another organisation.",
+                primary_cta=("All documents", url_for("documents_home")),
+            )
         is_deck = spec.is_deck
         present_btns = ""
         if is_deck:
@@ -49203,13 +49223,13 @@ voice, and queues them for one-click approval.</p>
         spec_json = _h(json.dumps(spec.to_dict(), indent=2))
         body = (
             f'<section class="mh-hero"><h1>{_h(spec.title)}</h1>'
-            f'<p class="muted">{_h(spec.subtitle or spec.doc_format.replace("_"," ").title())}</p></section>'
+            f'<p class="muted">{_h(spec.subtitle or spec.doc_format.replace("_", " ").title())}</p></section>'
             '<div style="margin-bottom:14px">'
             + present_btns
             + f'<a class="btn secondary" href="{url_for("api_document_pdf", doc_id=doc_id)}?dl=1">Download PDF</a> '
             f'<a class="btn secondary" href="{url_for("api_document_pptx", doc_id=doc_id)}">PowerPoint (.pptx)</a> '
             f'<a class="btn secondary" href="{url_for("api_document_docx", doc_id=doc_id)}">Word (.docx)</a>'
-            '</div>'
+            "</div>"
             f'<iframe src="{url_for("api_document_pdf", doc_id=doc_id)}" '
             'style="width:100%;height:70vh;border:1px solid var(--panel);border-radius:8px;background:#fff"></iframe>'
             '<details style="margin-top:18px"><summary class="dim">Edit document (advanced — spec JSON)</summary>'
@@ -49217,8 +49237,7 @@ voice, and queues them for one-click approval.</p>
             '<button class="btn" style="margin-top:8px" onclick="saveSpec()">Save changes</button> '
             '<button class="btn secondary" style="margin-top:8px" onclick="delDoc()">Delete document</button>'
             '<span id="save-msg" class="dim" style="margin-left:10px"></span></details>'
-            + _DOCUMENT_VIEW_JS
-            .replace("__SAVE_URL__", url_for("api_document_save", doc_id=doc_id))
+            + _DOCUMENT_VIEW_JS.replace("__SAVE_URL__", url_for("api_document_save", doc_id=doc_id))
             .replace("__DEL_URL__", url_for("api_document_delete", doc_id=doc_id))
             .replace("__HOME_URL__", url_for("documents_home"))
         )
@@ -49239,8 +49258,12 @@ voice, and queues them for one-click approval.</p>
             log.warning("document pdf render failed", exc_info=True)
             return jsonify({"error": "render_failed", "detail": str(e)[:200]}), 503
         dl = request.args.get("dl") == "1"
-        return send_file(path, mimetype="application/pdf", as_attachment=dl,
-                         download_name=_safe_filename(spec.title, "pdf"))
+        return send_file(
+            path,
+            mimetype="application/pdf",
+            as_attachment=dl,
+            download_name=_safe_filename(spec.title, "pdf"),
+        )
 
     @app.route("/api/documents/<doc_id>/pptx")
     def api_document_pptx(doc_id: str):
@@ -49256,8 +49279,12 @@ voice, and queues them for one-click approval.</p>
             document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
-        return send_file(out, as_attachment=True, download_name=_safe_filename(spec.title, "pptx"),
-                         mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        return send_file(
+            out,
+            as_attachment=True,
+            download_name=_safe_filename(spec.title, "pptx"),
+            mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
 
     @app.route("/api/documents/<doc_id>/docx")
     def api_document_docx(doc_id: str):
@@ -49273,8 +49300,12 @@ voice, and queues them for one-click approval.</p>
             document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
-        return send_file(out, as_attachment=True, download_name=_safe_filename(spec.title, "docx"),
-                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        return send_file(
+            out,
+            as_attachment=True,
+            download_name=_safe_filename(spec.title, "docx"),
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     @app.route("/api/documents/<doc_id>/video")
     def api_document_video(doc_id: str):
@@ -49291,8 +49322,12 @@ voice, and queues them for one-click approval.</p>
             path = deck_to_mp4(spec, brand_kit=_doc_brand_kit(pid))
         except Exception as e:
             return jsonify({"error": "video_failed", "detail": str(e)[:200]}), 503
-        return send_file(path, mimetype="video/mp4", as_attachment=True,
-                         download_name=_safe_filename(spec.title, "mp4"))
+        return send_file(
+            path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name=_safe_filename(spec.title, "mp4"),
+        )
 
     @app.route("/api/documents/<doc_id>/save", methods=["POST"])
     def api_document_save(doc_id: str):
@@ -49355,7 +49390,9 @@ voice, and queues them for one-click approval.</p>
 
         spec = _dc_replace(spec, brand_profile_id=pid)
         _docstore.save_document(pid, spec)
-        return jsonify({"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)})
+        return jsonify(
+            {"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)}
+        )
 
     @app.route("/api/documents/tools/merge", methods=["POST"])
     def api_documents_tool_merge():
@@ -49367,7 +49404,6 @@ voice, and queues them for one-click approval.</p>
         pdfs = [f for f in files if f and (f.filename or "").lower().endswith(".pdf")]
         if len(pdfs) < 2:
             return jsonify({"error": "need_two_pdfs"}), 400
-        import io as _io
 
         from mediahub.documents.pdf_utils import merge_pdfs
 
@@ -49387,7 +49423,9 @@ voice, and queues them for one-click approval.</p>
                     p.unlink()
                 except OSError:
                     pass
-        return send_file(out, mimetype="application/pdf", as_attachment=True, download_name="merged.pdf")
+        return send_file(
+            out, mimetype="application/pdf", as_attachment=True, download_name="merged.pdf"
+        )
 
     @app.route("/api/documents/tools/images-to-pdf", methods=["POST"])
     def api_documents_tool_images_to_pdf():
@@ -49417,27 +49455,36 @@ voice, and queues them for one-click approval.</p>
                     p.unlink()
                 except OSError:
                     pass
-        return send_file(out, mimetype="application/pdf", as_attachment=True, download_name="images.pdf")
+        return send_file(
+            out, mimetype="application/pdf", as_attachment=True, download_name="images.pdf"
+        )
 
     # ---- Presenter surface (deck) -------------------------------------
     @app.route("/documents/<doc_id>/present")
     def document_present(doc_id: str):
         if not _documents_ok:
-            return _recovery_page("Documents unavailable", "Not enabled here.",
-                                  primary_cta=("Home", url_for("home")))
+            return _recovery_page(
+                "Documents unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
         pid, spec = _doc_load_owned(doc_id)
         if spec is None:
-            return _recovery_page("Document not found", "It may have been deleted.",
-                                  primary_cta=("All documents", url_for("documents_home")))
+            return _recovery_page(
+                "Document not found",
+                "It may have been deleted.",
+                primary_cta=("All documents", url_for("documents_home")),
+            )
         if not spec.is_deck:
-            return _recovery_page("Not a deck",
-                                  "Only AGM decks can be presented. Generate an AGM deck to present.",
-                                  primary_cta=("All documents", url_for("documents_home")))
+            return _recovery_page(
+                "Not a deck",
+                "Only AGM decks can be presented. Generate an AGM deck to present.",
+                primary_cta=("All documents", url_for("documents_home")),
+            )
         from mediahub.documents import presenter as _pres
         from mediahub.documents.deck import deck_view, spec_version
 
-        session = _pres.create_session(doc_id, len(spec.sections), owner=pid,
-                                       spec_version=spec_version(spec))
+        session = _pres.create_session(
+            doc_id, len(spec.sections), owner=pid, spec_version=spec_version(spec)
+        )
         view = deck_view(spec)
         # Script-safe JSON: neutralise </script> by escaping '<' (embedded as a JS
         # literal, not HTML), so speaker notes can carry any text.
@@ -49445,10 +49492,12 @@ voice, and queues them for one-click approval.</p>
         titles = json.dumps([s["title"] for s in view["slides"]]).replace("<", "\\u003c")
         remote_url = url_for("remote_landing", _external=True)
         body = (
-            _DOC_PRESENT_CONSOLE
-            .replace("__CODE__", _h(session.pairing_code))
+            _DOC_PRESENT_CONSOLE.replace("__CODE__", _h(session.pairing_code))
             .replace("__TOTAL__", str(len(spec.sections)))
-            .replace("__SLIDE_URL__", url_for("api_present_slide", session_id=session.session_id, i=0).rsplit("/0", 1)[0])
+            .replace(
+                "__SLIDE_URL__",
+                url_for("api_present_slide", session_id=session.session_id, i=0).rsplit("/0", 1)[0],
+            )
             .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
             .replace("__ACTION_URL__", url_for("api_present_action", session_id=session.session_id))
             .replace("__AUDIENCE_URL__", url_for("present_audience", session_id=session.session_id))
@@ -49461,18 +49510,24 @@ voice, and queues them for one-click approval.</p>
     @app.route("/present/<session_id>")
     def present_audience(session_id: str):
         if not _documents_ok:
-            return _recovery_page("Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home")))
+            return _recovery_page(
+                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
         from mediahub.documents import presenter as _pres
 
         session = _pres.get_session(session_id)
         if session is None or session.ended:
-            return _recovery_page("Presentation ended",
-                                  "This presentation has finished or expired.",
-                                  primary_cta=("Home", url_for("home")))
+            return _recovery_page(
+                "Presentation ended",
+                "This presentation has finished or expired.",
+                primary_cta=("Home", url_for("home")),
+            )
         body = (
-            _DOC_PRESENT_AUDIENCE
-            .replace("__TOTAL__", str(session.total_slides))
-            .replace("__SLIDE_URL__", url_for("api_present_slide", session_id=session_id, i=0).rsplit("/0", 1)[0])
+            _DOC_PRESENT_AUDIENCE.replace("__TOTAL__", str(session.total_slides))
+            .replace(
+                "__SLIDE_URL__",
+                url_for("api_present_slide", session_id=session_id, i=0).rsplit("/0", 1)[0],
+            )
             .replace("__STATE_URL__", url_for("api_present_state", session_id=session_id))
         )
         return Response(body, mimetype="text/html")
@@ -49527,7 +49582,9 @@ voice, and queues them for one-click approval.</p>
     @app.route("/remote")
     def remote_landing():
         if not _documents_ok:
-            return _recovery_page("Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home")))
+            return _recovery_page(
+                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
         code = (request.args.get("code") or "").strip().upper()
         if code:
             return redirect(url_for("remote_control", code=code))
@@ -49537,24 +49594,27 @@ voice, and queues them for one-click approval.</p>
             '<input id="code" class="input" maxlength="6" autocapitalize="characters" '
             'style="text-transform:uppercase;font-size:24px;text-align:center;letter-spacing:4px" placeholder="ABC123">'
             '<button class="btn" style="margin-top:12px;width:100%" '
-            'onclick="location.href=\'/remote/\'+document.getElementById(\'code\').value.toUpperCase()">Connect</button></div>'
+            "onclick=\"location.href='/remote/'+document.getElementById('code').value.toUpperCase()\">Connect</button></div>"
         )
         return _layout("Slide remote", body, active="create")
 
     @app.route("/remote/<code>")
     def remote_control(code: str):
         if not _documents_ok:
-            return _recovery_page("Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home")))
+            return _recovery_page(
+                "Unavailable", "Not enabled here.", primary_cta=("Home", url_for("home"))
+            )
         from mediahub.documents import presenter as _pres
 
         session = _pres.get_by_pairing_code(code)
         if session is None:
-            return _recovery_page("Code not found",
-                                  "That code is wrong or the presentation has ended.",
-                                  primary_cta=("Try again", url_for("remote_landing")))
+            return _recovery_page(
+                "Code not found",
+                "That code is wrong or the presentation has ended.",
+                primary_cta=("Try again", url_for("remote_landing")),
+            )
         body = (
-            _DOC_REMOTE
-            .replace("__CODE__", _h(session.pairing_code))
+            _DOC_REMOTE.replace("__CODE__", _h(session.pairing_code))
             .replace("__STATE_URL__", url_for("api_present_state", session_id=session.session_id))
             .replace("__ACTION_URL__", url_for("api_remote_action", code=session.pairing_code))
         )
@@ -49570,7 +49630,9 @@ voice, and queues them for one-click approval.</p>
         if session is None:
             return jsonify({"ok": False, "error": "no_session"}), 404
         body = request.get_json(silent=True) or {}
-        updated = _pres.apply_action(session.session_id, str(body.get("action", "")), body.get("value"))
+        updated = _pres.apply_action(
+            session.session_id, str(body.get("action", "")), body.get("value")
+        )
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
     # Start the in-process scheduler once per worker. Idempotent and self-
