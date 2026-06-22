@@ -16093,6 +16093,12 @@ def create_app() -> Flask:
             "site_sitemap",
             "site_robots",
             "site_unlock",
+            # 1.19 — a shared bulk-export ZIP download: a token-keyed public
+            # surface (a 1.18 share token is the access control), so a
+            # recipient can fetch it without an active organisation. The route
+            # itself still requires either a run-owning session OR a valid
+            # share token scoped to that run.
+            "api_run_bulk_export_file",
         }
     )
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -39090,6 +39096,7 @@ function mhSetupMode(mode) {{
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
         _export_zip_url = url_for("pack_export_zip", run_id=run_id)
+        _bulk_export_url = url_for("export_run_tool_page", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
@@ -39228,6 +39235,8 @@ function mhSetupMode(mode) {{
   <a class="btn" href="{_export_zip_url}"
      title="Every approved card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
   <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
+  <a class="btn secondary" href="{_bulk_export_url}"
+     title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
 
@@ -47077,6 +47086,440 @@ voice, and queues them for one-click approval.</p>
             if fmt != "story"
             else f"meet_reel_{run_id}.mp4",
         )
+
+    # ====================================================================
+    # Export & conversion engine (roadmap 1.19)
+    # One first-party engine every download surface calls. The heavy lifting
+    # lives in mediahub.export_engine (deterministic Pillow/FFmpeg, honest
+    # errors); these routes are the thin web exposure: a capability surface,
+    # the media-library quick-actions toolbox, and a background bulk-export
+    # job whose download link is unified with the 1.18 share tokens.
+    # ====================================================================
+
+    def _export_quick_dir() -> Path:
+        from mediahub.export_engine import cache as _ee_cache
+
+        d = _ee_cache.cache_dir() / "quick"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _bulk_items_for_run(run_id: str):
+        """One BulkItem per rendered card in a run (a representative still)."""
+        from mediahub.export_engine.bulk import BulkItem
+
+        visuals = RUNS_DIR / run_id / "visuals"
+        items: list = []
+        if not visuals.is_dir():
+            return items
+        for sub in sorted(p for p in visuals.iterdir() if p.is_dir()):
+            pick = None
+            for cand in ("feed_portrait.png", "story.png", "feed_square.png"):
+                if (sub / cand).is_file():
+                    pick = sub / cand
+                    break
+            if pick is None:
+                pngs = sorted(sub.glob("*.png"))
+                pick = pngs[0] if pngs else None
+            if pick is not None:
+                items.append(BulkItem(name=sub.name, source=pick))
+        return items
+
+    @app.route("/api/export/formats")
+    def api_export_formats():
+        """The export catalogue + capability map the UI renders its options from."""
+        from mediahub import export_engine as ee
+
+        cats: dict[str, list] = {}
+        for f in ee.all_formats():
+            cats.setdefault(f.category, []).append(
+                {
+                    "key": f.key,
+                    "label": f.label,
+                    "suffix": f.suffix,
+                    "mime": f.mime,
+                    "accepts": sorted(f.accepts),
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "status": ee.engine_status(),
+                "categories": cats,
+                "quick_actions": ee.quick_actions.ACTIONS,
+            }
+        )
+
+    @app.route("/api/media-library/<asset_id>/quick-action", methods=["POST"])
+    def api_media_library_quick_action(asset_id: str):
+        """Run a one-click quick action on a library asset; stream the result.
+
+        Image actions (convert/resize/crop) run anywhere; video/GIF actions need
+        FFmpeg and honest-error (503) when it isn't installed. The result is a
+        download — a quick action makes you a file, it never posts anything.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        src = Path(a.path)
+        if not src.is_file():
+            return jsonify({"error": "asset_file_missing"}), 404
+
+        body = request.get_json(silent=True) or {}
+        action = str(body.get("action") or "").strip().lower()
+        from mediahub import export_engine as ee
+        from mediahub.export_engine import quick_actions as qa
+        from mediahub.export_engine.options import ExportOptions
+
+        opts = ExportOptions.from_dict(body.get("options") or {})
+        cat = ee.source_category(src)
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "-", src.stem)[:50] or "asset"
+
+        def _out(suffix: str) -> Path:
+            return _export_quick_dir() / f"{stem}-{action}-{uuid.uuid4().hex[:8]}{suffix}"
+
+        from flask import send_file
+
+        try:
+            if action == "convert":
+                fmt = ee.normalise_key(str(body.get("format") or "png"))
+                out = _out(ee.suffix_for(fmt))
+                qa.convert_image(src, out, fmt=fmt, options=opts)
+            elif action == "resize" and cat == "image":
+                out = _out(src.suffix or ".png")
+                qa.resize_image(
+                    src,
+                    out,
+                    width=int(body.get("width", 0) or 0),
+                    height=int(body.get("height", 0) or 0),
+                    scale=float(body.get("scale", 0) or 0),
+                )
+            elif action == "crop" and cat == "image":
+                out = _out(src.suffix or ".png")
+                qa.crop_image(
+                    src,
+                    out,
+                    x=float(body.get("x", 0) or 0),
+                    y=float(body.get("y", 0) or 0),
+                    w=float(body.get("w", 1) or 1),
+                    h=float(body.get("h", 1) or 1),
+                )
+            elif action == "to_gif" and cat == "video":
+                out = _out(".gif")
+                qa.video_to_gif(
+                    src,
+                    out,
+                    fps=int(body.get("fps", 12) or 12),
+                    width=int(body.get("width", 480) or 480),
+                )
+            elif action in ("to_mp4", "to_webm") and cat == "gif":
+                fmt = "mp4" if action == "to_mp4" else "webm"
+                out = _out(f".{fmt}")
+                qa.gif_to_video(src, out, fmt=fmt)
+            elif action == "trim" and cat == "video":
+                out = _out(".mp4")
+                qa.video_trim(src, out, start=float(body.get("start", 0) or 0), end=body.get("end"))
+            elif action == "reverse" and cat == "video":
+                out = _out(".mp4")
+                qa.video_reverse(src, out, mute=bool(body.get("mute", False)))
+            elif action == "mute" and cat == "video":
+                out = _out(".mp4")
+                qa.video_mute(src, out)
+            elif action == "speed" and cat == "video":
+                out = _out(".mp4")
+                qa.video_speed(
+                    src,
+                    out,
+                    factor=float(body.get("factor", 1.0) or 1.0),
+                    mute=bool(body.get("mute", False)),
+                )
+            else:
+                return jsonify(
+                    {"error": "bad_action", "message": f"'{action}' not valid for a {cat} asset"}
+                ), 400
+        except (ee.ExportUnavailable,) as exc:
+            return jsonify({"error": "engine_unavailable", "message": str(exc)}), 503
+        except Exception as exc:  # noqa: BLE001 - any op failure is a clean 4xx/5xx
+            from mediahub.export_engine.images import ImageConvertError
+
+            code = 503 if "FFmpeg" in str(exc) else 400
+            if isinstance(exc, (ImageConvertError, ValueError)):
+                code = 400
+            return jsonify({"error": "quick_action_failed", "message": str(exc)}), code
+
+        if not out.is_file() or out.stat().st_size == 0:
+            return jsonify({"error": "no_output"}), 500
+        return send_file(str(out), as_attachment=True, download_name=out.name)
+
+    @app.route("/api/runs/<run_id>/bulk-export", methods=["POST"])
+    def api_run_bulk_export(run_id: str):
+        """Kick a background bulk export of a run's cards × formats → one ZIP.
+
+        Mirrors the reel job: render in a daemon thread, poll for the outcome,
+        download the finished ZIP from the file route (whose link unifies with
+        the 1.18 share tokens).
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        raw_formats = body.get("formats") or ["jpg"]
+        if not isinstance(raw_formats, list):
+            raw_formats = [raw_formats]
+        from mediahub import export_engine as ee
+        from mediahub.export_engine.bulk import BulkExportSpec, run_bulk_export
+        from mediahub.export_engine.options import ExportOptions
+
+        formats = [ee.normalise_key(f) for f in raw_formats if ee.has_format(f)]
+        if not formats:
+            return jsonify({"error": "no_valid_formats"}), 400
+        opts = ExportOptions.from_dict(body.get("options") or {})
+
+        items = _bulk_items_for_run(run_id)
+        if not items:
+            return jsonify(
+                {
+                    "error": "no_visuals",
+                    "message": "No graphics have been rendered for this run yet.",
+                }
+            ), 404
+
+        meet = (run_data or {}).get("meet") or {}
+        label = meet.get("name") or run_id
+
+        job_id = uuid.uuid4().hex
+        out_path = RUNS_DIR / run_id / "exports" / f"bulk_{job_id}.zip"
+        file_url = url_for("api_run_bulk_export_file", run_id=run_id, job=job_id)
+        owner_pid = _active_profile_id() or ""
+        job: dict = {
+            "id": job_id,
+            "kind": "bulk_export",
+            "status": "running",
+            "error": "",
+            "done": 0,
+            "total": len(items),
+            "file_url": "",
+            "file_count": 0,
+            "error_count": 0,
+            "created_at": time.time(),
+            "owner_pid": owner_pid,
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                spec = BulkExportSpec(items=items, formats=formats, options=opts, label=label)
+
+                def _prog(done: int, total: int, _name: str) -> None:
+                    job["done"] = done
+                    job["total"] = total
+                    _variant_job_save(job)
+
+                res = run_bulk_export(spec, out=out_path, progress=_prog)
+                job["status"] = "done"
+                job["file_url"] = file_url
+                job["file_count"] = res.file_count
+                job["error_count"] = res.error_count
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(owner_pid, run_id=run_id, label="bulk export")
+                except Exception:
+                    pass
+            except Exception as exc:  # noqa: BLE001
+                job["status"] = "error"
+                job["error"] = str(exc)
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"bulkexp-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_export_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
+    @app.route("/api/export-jobs/<job_id>")
+    def api_export_job_status(job_id: str):
+        """Progress + outcome for a background bulk-export job."""
+        job = _variant_job_load(job_id)
+        if job is None or job.get("kind") != "bulk_export":
+            return jsonify({"error": "job_not_found"}), 404
+        if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
+            return jsonify({"error": "job_not_found"}), 404
+        status = job.get("status", "running")
+        error = job.get("error") or None
+        if status == "running" and (
+            time.time() - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S
+        ):
+            status = "error"
+            error = "job_lost: the export worker restarted mid-job — try again"
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "status": status,
+                "done": int(job.get("done") or 0),
+                "total": int(job.get("total") or 0),
+                "file_url": job.get("file_url") or "",
+                "file_count": int(job.get("file_count") or 0),
+                "error_count": int(job.get("error_count") or 0),
+                "error": error,
+            }
+        )
+
+    @app.route("/api/runs/<run_id>/bulk-export/file")
+    def api_run_bulk_export_file(run_id: str):
+        """Serve a finished bulk-export ZIP. Access by session OR a 1.18 share
+        token scoped to this run — the unified export download link."""
+        # Access first (never leak even a 'bad request' to a foreign org): a
+        # run-owning session, or a valid share token scoped to this run.
+        ok = _can_access_run(run_id, _load_run(run_id), _active_profile_id())
+        if not ok:
+            token = (request.args.get("token") or "").strip()
+            if token:
+                try:
+                    from mediahub.collab import share_tokens as _st
+
+                    share = _st.resolve(token)
+                    ok = bool(share and share.run_id == run_id)
+                except Exception:
+                    ok = False
+        if not ok:
+            return jsonify({"error": "forbidden"}), 404
+
+        job_id = (request.args.get("job") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+            return jsonify({"error": "bad_job"}), 400
+
+        path = RUNS_DIR / run_id / "exports" / f"bulk_{job_id}.zip"
+        if not path.is_file():
+            return jsonify({"error": "export_not_found"}), 404
+        from flask import send_file
+
+        return send_file(
+            str(path),
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"mediahub-export-{run_id}.zip",
+        )
+
+    @app.route("/api/runs/<run_id>/export-share", methods=["POST"])
+    def api_run_export_share(run_id: str):
+        """Mint a 1.18 share token so a finished export ZIP has a shareable,
+        revocable, expiring download link (no login needed to fetch it)."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        body = request.get_json(silent=True) or {}
+        job_id = (body.get("job") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+            return jsonify({"error": "bad_job"}), 400
+        # Don't mint a link for an export that doesn't exist (failed/never ran),
+        # so a recipient never gets a dead 404 link.
+        if not (RUNS_DIR / run_id / "exports" / f"bulk_{job_id}.zip").is_file():
+            return jsonify({"error": "export_not_found"}), 404
+        try:
+            from mediahub.collab import share_tokens as _st
+
+            share = _st.create_share(
+                run_id=run_id, perm=_st.PERM_VIEW, created_by=_active_profile_id() or "", ttl_days=7
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": "share_failed", "message": str(exc)}), 500
+        url = url_for("api_run_bulk_export_file", run_id=run_id, job=job_id, token=share.token)
+        return jsonify(
+            {"ok": True, "token": share.token, "url": url, "expires_at": share.expires_at}
+        )
+
+    @app.route("/export")
+    def export_center_page():
+        """A plain-English reference of every format MediaHub can export."""
+        from mediahub import export_engine as ee
+
+        order = ["image", "video", "audio", "document", "data", "pack"]
+        sections = []
+        for cat in order:
+            fmts = ee.formats_for_category(cat)
+            if not fmts:
+                continue
+            chips = "".join(
+                f'<span class="mh-chip" title="{_h(f.mime)}">{_h(f.label)}</span>' for f in fmts
+            )
+            sections.append(
+                f'<section class="panel" style="margin-bottom:var(--sp-4)">'
+                f'<h2 style="text-transform:capitalize">{_h(cat)}</h2>'
+                f'<div class="mh-chip-row">{chips}</div></section>'
+            )
+        st = ee.engine_status()
+        engines = (
+            f'<p class="muted">Video engine (FFmpeg): '
+            f'<strong>{"ready" if st["ffmpeg"] else "not installed"}</strong> · '
+            f'WebP: <strong>{"yes" if st["webp_encode"] else "no"}</strong> · '
+            f'AVIF: <strong>{"yes" if st["avif_encode"] else "no"}</strong></p>'
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">'
+            '<span class="mh-hero-eyebrow">Export &amp; convert</span>'
+            '<h1>Export <em class="editorial">anything</em>, your way.</h1>'
+            '<p class="lede">Every card, reel, document and photo can leave MediaHub in the '
+            "format you need — with quality, size and transparency options. Open a meet's "
+            "review page to bulk-export its content pack.</p>"
+            f"{engines}</section>" + "".join(sections)
+        )
+        return _layout("Export & convert", body)
+
+    @app.route("/export/<run_id>")
+    def export_run_tool_page(run_id: str):
+        """The bulk-export tool for one run: pick formats, run it, download/share."""
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "Export",
+                '<div class="empty">That meet isn\'t available to export.</div>',
+            ), 404
+        from mediahub import export_engine as ee
+
+        meet = (run_data or {}).get("meet") or {}
+        title = _h(meet.get("name") or run_id)
+        img_fmts = [
+            f for f in ee.formats_for_category("image") if f.key in ("png", "jpg", "webp", "avif")
+        ]
+        boxes = "".join(
+            f'<label class="mh-check"><input type="checkbox" name="fmt" value="{f.key}"'
+            f'{" checked" if f.key == "jpg" else ""}> {_h(f.label)}</label>'
+            for f in img_fmts
+        )
+        kick_url = url_for("api_run_bulk_export", run_id=run_id)
+        share_url = url_for("api_run_export_share", run_id=run_id)
+        body = (
+            f'<section class="panel" data-bulk-export data-kick-url="{_h(kick_url)}" '
+            f'data-share-url="{_h(share_url)}">'
+            f'<h1 style="margin-top:0">Bulk export — {title}</h1>'
+            '<p class="muted">Convert every rendered card in this pack to the formats you '
+            "tick, bundled into one ZIP with a manifest. A format a card can't become is "
+            "listed honestly in the manifest — the rest still export.</p>"
+            f'<div class="mh-chip-row" style="margin:var(--sp-3) 0">{boxes}</div>'
+            '<label class="mh-field">Quality '
+            '<input type="range" id="bx-quality" min="10" max="100" value="90"></label>'
+            '<div style="margin-top:var(--sp-3)">'
+            '<button class="btn primary" id="bx-start">Start export</button> '
+            '<span id="bx-status" class="muted" role="status" aria-live="polite"></span>'
+            "</div>"
+            '<div id="bx-result" style="margin-top:var(--sp-3)"></div>'
+            "</section>"
+            '<script src="' + url_for("static", filename="js/bulk_export.js") + '"></script>'
+        )
+        return _layout("Bulk export", body)
 
     # ---- UI 1.8: timestamp-anchored reel review comments ----------------
     # Frame.io-style feedback markers pinned to a moment on a generated reel
