@@ -266,7 +266,16 @@ def delete_org(
     except OSError:
         pass
 
-    # 9. Memberships (compacting rewrite), then the profile JSON itself —
+    # 9. Org-scoped collab collections (folders over runs/packs) — the runs are
+    # already gone above; drop the empty groupings too.
+    try:
+        from mediahub.collab.collections import delete_for_org as _drop_collections
+
+        report["collections_deleted"] = _drop_collections(pid)
+    except Exception:
+        log.warning("org delete: collections sweep failed", exc_info=True)
+
+    # 10. Memberships (compacting rewrite), then the profile JSON itself —
     # deleting the profile clears the public wall token structurally.
     try:
         from mediahub.web.tenancy import MembershipStore

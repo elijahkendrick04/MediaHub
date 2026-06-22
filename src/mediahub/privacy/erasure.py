@@ -136,6 +136,7 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         "collab_comments": 0,
         "collab_locks": 0,
         "collab_shares": 0,
+        "collab_collection_items": 0,
     }
     try:
         from mediahub.pb_discovery.cache import _discovered_root
@@ -195,6 +196,12 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         report["collab_shares"] = _delete_shares_for_run(run_id)
     except Exception as exc:
         log.warning("erasure: collab shares sweep failed for %s: %s", run_id, exc)
+    try:
+        from mediahub.collab.collections import delete_run_everywhere as _drop_run_from_collections
+
+        report["collab_collection_items"] = _drop_run_from_collections(run_id)
+    except Exception as exc:
+        log.warning("erasure: collab collections sweep failed for %s: %s", run_id, exc)
     return report
 
 

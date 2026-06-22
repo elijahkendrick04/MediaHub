@@ -30,7 +30,13 @@ drafts, a coach checks the names, the chair approves.
   club (a parent confirming a name) view, or comment on, one run or card
   without an account. The link is just an unguessable token; what it opens and
   when it dies lives in a ledger so it can be listed and switched off.
+- `collections.py` — folders. Group a workspace's meets and packs into named
+  collections (a season, a championship) without touching the meets themselves
+  — it is just a list of which thing is in which folder.
+- `context.py` — "Team Context": the same picture the AI copilot works from —
+  the club's brand voice, palette and tone, its standing preferences, and its
+  recent content — gathered into one read-only view so people can see it too.
 
-More pieces may land here as 1.18 finishes (collections, team context). Each is
-a thin, testable module — no AI in the engine sense, just careful bookkeeping
-around the human review.
+Each module is a thin, testable unit — no AI in the engine sense, just careful
+bookkeeping around the human review (the one AI touch, the @assistant reply in a
+thread, lives in `web.py` and honest-errors when no provider is configured).

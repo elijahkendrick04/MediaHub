@@ -14,9 +14,20 @@ Exposes (built incrementally across the 1.18 sub-builds):
   revisions    — design-spec version history, diff & restore
   locks        — per-card element locks, enforced at edit time
   share_tokens — expiring, scoped, revocable external review links
+  collections  — org-level folders over runs & packs
+  context      — Team Context: the org context the AI reads, surfaced to humans
 """
 
-from . import locks, mentions, permissions, revisions, share_tokens, threads
+from . import (
+    collections,
+    context,
+    locks,
+    mentions,
+    permissions,
+    revisions,
+    share_tokens,
+    threads,
+)
 
 __all__ = [
     "permissions",
@@ -25,4 +36,6 @@ __all__ = [
     "revisions",
     "locks",
     "share_tokens",
+    "collections",
+    "context",
 ]

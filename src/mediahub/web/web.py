@@ -47236,6 +47236,65 @@ voice, and queues them for one-click approval.</p>
         d["reactions"] = reactions.get(c.id, {})
         return d
 
+    def _assistant_thread_answer(run_id: str, card_id: str, message: str, run_data) -> str:
+        """The assistant's plain-text reply to an @assistant comment (1.18).
+
+        Explains or suggests in words, grounded only in the card's verified facts
+        (never invents times/names). Honest-errors when no provider is configured
+        — the MediaHub AI rule: a clear "not configured" beats a fabricated reply.
+        """
+        from mediahub.ai_core import ProviderError, ProviderNotConfigured, ask
+
+        facts: dict = {}
+        try:
+            if card_id:
+                facts = _assistant_card_facts(run_data or _load_run(run_id) or {}, card_id)
+        except Exception:
+            facts = {}
+        system = (
+            "You are MediaHub's review assistant. A club reviewer has tagged you in a "
+            "comment about a piece of content. Reply briefly and concretely (2-4 "
+            "sentences): explain a design choice or suggest an improvement in words. "
+            "Never invent facts (times, names, places) — use only what you are given."
+        )
+        user = f"Card facts: {facts}\n\nReviewer's comment: {message}\n\nYour reply:"
+        try:
+            out = (ask(system, user, max_tokens=300) or "").strip()
+            return out or "I don't have anything to add."
+        except ProviderNotConfigured:
+            return (
+                "The AI assistant isn't configured on this deployment, so I can't reply "
+                "automatically — a teammate can still help here."
+            )
+        except ProviderError as e:
+            return f"I couldn't reply just now (provider error: {str(e)[:120]})."
+        except Exception:
+            return "I couldn't reply just now."
+
+    def _assistant_thread_reply(ctx, run_id: str, parent) -> None:
+        """When @assistant is tagged in a comment, post the assistant's reply as a
+        thread reply (1.18). Best-effort: never breaks posting the human comment."""
+        try:
+            from mediahub.collab import mentions as _m
+            from mediahub.collab import threads as _th
+
+            if not _m.mentions_assistant(parent.body):
+                return
+            text = _assistant_thread_answer(
+                run_id, parent.card_id, parent.body, ctx.get("run_data")
+            )
+            _th.add_comment(
+                run_id,
+                parent.card_id,
+                text,
+                author_name="MediaHub Assistant",
+                author_email="assistant@mediahub.local",
+                parent_id=parent.thread_id,
+                kind="comment",
+            )
+        except Exception:
+            pass
+
     def _collab_notify_mentions(ctx, run_id: str, comment) -> None:
         """Fire inbox notifications for @mentions and a task assignment (1.18).
 
@@ -47325,6 +47384,8 @@ voice, and queues them for one-click approval.</p>
         except _threads.ThreadError as e:
             return jsonify({"error": "bad_request", "detail": str(e)}), 400
         _collab_notify_mentions(ctx, run_id, comment)
+        # 1.18: tag @assistant in a thread and it replies (honest-error if no AI).
+        _assistant_thread_reply(ctx, run_id, comment)
         reactions = _threads.reactions_for([comment.id])
         return jsonify({"ok": True, "comment": _collab_comment_payload(comment, reactions)}), 201
 
@@ -47734,6 +47795,144 @@ voice, and queues them for one-click approval.</p>
         except Exception:
             pass
         return redirect(url_for("share_review_page", token=token))
+
+    # =====================================================================
+    # Collections (folders) & Team Context (roadmap 1.18)
+    # ---------------------------------------------------------------------
+    # Org-level folders over runs/packs, and the org context the AI reads
+    # (brand, standing preferences, recent content) surfaced to humans too.
+    # Org-scoped to the active workspace; create/edit need the edit capability.
+    # =====================================================================
+
+    @app.route("/api/collections", methods=["GET", "POST"])
+    def api_collections():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org"}), 403
+        from mediahub.collab import collections as _col
+
+        if request.method == "GET":
+            return jsonify({"ok": True, "collections": _col.list_collections(pid)})
+        if not _perms.can_edit(_active_role(pid)):
+            return jsonify(
+                {"error": "forbidden", "reason": "Your role can't edit collections."}
+            ), 403
+        payload = request.get_json(silent=True) or {}
+        try:
+            col = _col.create_collection(pid, payload.get("name", ""))
+        except _col.CollectionError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        return jsonify({"ok": True, "collection": col}), 201
+
+    @app.route("/api/collections/<collection_id>", methods=["GET", "POST"])
+    def api_collection_detail(collection_id: str):
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "no_org"}), 403
+        from mediahub.collab import collections as _col
+
+        if request.method == "GET":
+            items = _col.list_items(pid, collection_id)
+            if items is None:
+                return jsonify({"error": "not_found"}), 404
+            return jsonify({"ok": True, "items": items})
+
+        if not _perms.can_edit(_active_role(pid)):
+            return jsonify(
+                {"error": "forbidden", "reason": "Your role can't edit collections."}
+            ), 403
+        payload = request.get_json(silent=True) or {}
+        action = (payload.get("action") or "").strip().lower()
+        try:
+            if action == "rename":
+                ok = _col.rename_collection(pid, collection_id, payload.get("name", ""))
+            elif action == "delete":
+                ok = _col.delete_collection(pid, collection_id)
+            elif action == "add_item":
+                ok = _col.add_item(
+                    pid, collection_id, payload.get("item_type", ""), payload.get("item_id", "")
+                )
+            elif action == "remove_item":
+                ok = _col.remove_item(
+                    pid, collection_id, payload.get("item_type", ""), payload.get("item_id", "")
+                )
+            else:
+                return jsonify({"error": "unknown_action"}), 400
+        except _col.CollectionError as e:
+            return jsonify({"error": "bad_request", "detail": str(e)}), 400
+        if not ok:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"ok": True})
+
+    @app.route("/api/organisation/context", methods=["GET"])
+    def api_organisation_context():
+        """Team Context — the org context the AI reads, surfaced to humans."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "context": {"brand": {}, "preferences": [], "recent": []}})
+        from mediahub.collab import context as _ctx
+
+        return jsonify({"ok": True, "context": _ctx.team_context(pid)})
+
+    @app.route("/collections")
+    def collections_page():
+        """Manage org collections (folders over runs & packs)."""
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.collab import collections as _col
+
+        cols = _col.list_collections(pid)
+        can_edit = _perms.can_edit(_active_role(pid))
+        rows = ""
+        for c in cols:
+            rows += (
+                '<div class="card" style="padding:12px 16px;margin-bottom:10px;display:flex;'
+                'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+                f'<div><strong>{_h(c["name"])}</strong>'
+                f'<span style="color:var(--ink-muted);font-size:12px;margin-left:8px">'
+                f'{c["count"]} item{"s" if c["count"] != 1 else ""}</span></div>'
+                + (
+                    f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                    f"onclick=\"mhDeleteCollection('{c['id']}')\">Delete</button>"
+                    if can_edit
+                    else ""
+                )
+                + "</div>"
+            )
+        rows = rows or '<p class="lede">No collections yet — create one to group your meets.</p>'
+        create_html = ""
+        if can_edit:
+            create_html = (
+                '<div class="card" style="padding:14px 16px;margin-bottom:16px">'
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+                '<input id="mh-col-name" type="text" placeholder="New collection name" '
+                'style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--border);'
+                'border-radius:6px;background:rgba(255,255,255,0.04);color:inherit"/>'
+                '<button class="btn" onclick="mhCreateCollection()">Create</button></div></div>'
+            )
+        body = (
+            "<h1>Collections</h1>"
+            '<p class="lede" style="margin-bottom:var(--sp-6)">Group your meets and packs '
+            "into folders — a season, a championship, a sponsor campaign.</p>"
+            + create_html
+            + f'<div id="mh-col-list">{rows}</div>'
+            + "<script>\n"
+            "function mhCreateCollection(){var n=document.getElementById('mh-col-name');"
+            "if(!n||!n.value.trim())return;"
+            "fetch('" + url_for("api_collections") + "',{method:'POST',"
+            "headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n.value.trim()})})"
+            ".then(function(r){return r.json();}).then(function(j){if(j.ok)location.reload();"
+            "else if(window.MH&&MH.toast)MH.toast(j.reason||j.detail||'Could not create','error',3000);})"
+            ".catch(function(){});}\n"
+            "function mhDeleteCollection(id){if(!confirm('Delete this collection? The meets "
+            "themselves are kept.'))return;"
+            "fetch('" + url_for("api_collections") + "/'+encodeURIComponent(id),{method:'POST',"
+            "headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete'})})"
+            ".then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){});}\n"
+            "</script>"
+        )
+        return _layout("Collections", body, active="settings")
 
     # =====================================================================
     # Video suite (roadmap 1.6) — the footage path
