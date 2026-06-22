@@ -232,10 +232,17 @@ p{margin:0 0 1rem}
 
 
 def site_style(role_vars: dict[str, str], *, theme: str = "dark") -> str:
-    """The complete inner CSS for a microsite: fonts + tokens + responsive base."""
+    """The complete inner CSS for a microsite: fonts + tokens + responsive base +
+    the vetted-widget styles."""
     tokens = site_tokens(role_vars, theme=theme)
     root = ":root{" + "".join(f"{k}:{v};" for k, v in tokens.items()) + "}"
-    return "\n".join([font_face_css(), root, _BASE_CSS])
+    try:
+        from .widgets import widget_styles
+
+        widgets_css = widget_styles()
+    except Exception:
+        widgets_css = ""
+    return "\n".join([font_face_css(), root, _BASE_CSS, widgets_css])
 
 
 def role_vars_for(brand_kit=None, palette: Optional[dict] = None) -> dict[str, str]:

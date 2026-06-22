@@ -97,14 +97,28 @@ def test_reused_document_blocks_render():
     assert "Numbers" in html
 
 
-def test_qr_block_degrades_to_link_without_qr_module():
-    # In build 1 sites.qr does not exist yet → honest link, never a broken image.
+def test_qr_block_renders_svg():
+    # sites.qr (build 3) is available → the block renders a real brand QR SVG.
     blocks = [m.qr_block("https://club.example/site/abc", caption="Scan me")]
     page = m.SitePage(title="Home", slug="", sections=[m.SiteSection(blocks=blocks)])
     html = render_page_html(m.SiteSpec(title="S", pages=[page]), page)
     assert "qr-block" in html
-    assert "https://club.example/site/abc" in html
+    assert "<svg" in html
     assert "Scan me" in html
+
+
+def test_qr_block_degrades_to_link_on_error(monkeypatch):
+    # the defensive branch: if QR rendering fails, fall back to an honest link.
+    import mediahub.sites.qr as qr
+
+    def _boom(*a, **k):
+        raise RuntimeError("qr down")
+
+    monkeypatch.setattr(qr, "qr_svg", _boom)
+    blocks = [m.qr_block("https://club.example/site/abc", caption="Scan me")]
+    page = m.SitePage(title="Home", slug="", sections=[m.SiteSection(blocks=blocks)])
+    html = render_page_html(m.SiteSpec(title="S", pages=[page]), page)
+    assert "https://club.example/site/abc" in html  # honest link, never a broken image
 
 
 def test_form_and_widget_use_injected_resolvers():
@@ -112,10 +126,11 @@ def test_form_and_widget_use_injected_resolvers():
     page = m.SitePage(title="Home", slug="", sections=[m.SiteSection(blocks=blocks)])
     spec = m.SiteSpec(title="S", pages=[page])
 
-    # no resolver → labelled placeholders (never silently missing)
+    # no resolver → the form shows a labelled placeholder (it needs a real submit
+    # URL); the widget falls back to the built-in catalogue renderer and renders live.
     plain = render_page_html(spec, page)
     assert "site-form-placeholder" in plain
-    assert "site-widget-placeholder" in plain
+    assert "mhw-countdown" in plain
 
     # resolver wired → live HTML, and the CSP nonce is threaded through
     html = render_page_html(
