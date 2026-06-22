@@ -1165,6 +1165,13 @@ the editor.
 
 ## 1.17 — Email & newsletter design
 
+**✅ Shipped.** The `email_design/` package (email-safe block renderer +
+newsletter formats), deterministic auto-assembly from the period's approved
+content + planner fixtures + sponsor, the fact-grounded AI editorial pass, and
+the web surface (generate / edit / preview, HTML + plaintext export, copy, and a
+token-gated hosted view) are all live. Direct send stays out of scope (a
+provider adapter behind the publish gate is a later, flagged build).
+
 **What Canva/Adobe have.** Canva Email Design — branded email campaigns,
 exportable as HTML; newsletters as a design type.
 
@@ -1192,8 +1199,8 @@ rebuilt — we integrate, we don't become a CRM.
 
 | Source | Feature | MediaHub home / status |
 |---|---|---|
-| C1 | Canva Email Design (branded campaigns, HTML export) | 🆕 1.17 email-safe composer + HTML export |
-| C1 | Newsletters (design type) | 🔵 text newsletter shipped (`turn_into`) → 🆕 1.17 visual newsletter formats |
+| C1 | Canva Email Design (branded campaigns, HTML export) | ✅ 1.17 email-safe composer + HTML/plaintext export + hosted view (shipped) |
+| C1 | Newsletters (design type) | ✅ 1.17 visual newsletter formats (meet digest / monthly roundup / season highlights) auto-assembled from approved content (shipped) |
 
 ---
 
