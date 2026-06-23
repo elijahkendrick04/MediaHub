@@ -25,9 +25,11 @@ This pins the port, ``.mh-shiny-text``:
      heading is always legible whether or not the kit runs.
   3. It rides the shared ``.is-in`` reveal (``ui-kit.js`` ``observe``), so there
      is one reveal convention, not a second bespoke trigger.
-  4. Singular, earned home — the athlete-spotlight Content builder wears it on
-     exactly one element: the spotlighted swimmer's name, inside the hero
-     ``<h1>``. Never a grid (that would be the over-animation the rules forbid).
+  4. Singular, earned home — it marks the *subject* of a content pack: the
+     spotlighted swimmer's name, or a meet's name on the content-pack heroes.
+     One element per page, inside the hero ``<h1>`` — never a grid (that would
+     be the over-animation the rules forbid). This module pins the spotlight
+     wiring as the representative case.
 
 Presentation-only: the deterministic engine, AI surfaces and explainability
 logic are untouched.
