@@ -1952,6 +1952,24 @@ _RUN_MAX_LIVENESS_SECS = 1800.0
 # (read by polls that land on the *other* gunicorn worker) only needs to
 # be fresh to the second.
 _RUN_DB_HEARTBEAT_SECS = 2.0
+# QA-015 — durable big-meet runs. The pipeline runs in a daemon thread inside a
+# gunicorn worker; a `--max-requests` recycle, an overlapping deploy, or an OOM
+# kills that thread mid-run. County/championship-sized meets (500+ swims) take
+# long enough — dominated by per-swimmer PB lookups + meet-identity research, NOT
+# the cheap detector loop (measured: ~0.4s for 1,000+ swims) — that a recycle is
+# far likelier to land while they are in flight, which is why size correlates
+# with the failure. Rather than lose the run, we RESUME it: re-run from the
+# stored launch input (the pipeline is deterministic + cache-backed, so a resume
+# on a fresh worker re-walks the same steps, warm where cached). Bounded so a
+# genuinely-broken input cannot loop forever — after this many resumes a stale
+# run is surfaced with the honest "please upload again" error instead.
+_RUN_MAX_RESUMES = max(0, int(os.environ.get("MEDIAHUB_RUN_MAX_RESUMES", "2") or "2"))
+# The honest dead-run message, shared by the status poller and the startup
+# reconciler so the wording lives in one place.
+_RUN_STALE_ERROR = (
+    "Processing stopped responding — the server worker was recycled "
+    "mid-run or a step timed out. Please upload the file again."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -2760,52 +2778,58 @@ def _init_db():
         conn.execute("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT")
     if "n_achievements" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN n_achievements INTEGER")
+    # QA-015 — how many times a stale (interrupted) run has been auto-resumed.
+    # Old rows keep NULL (treated as 0); bounded by _RUN_MAX_RESUMES.
+    if "resume_count" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN resume_count INTEGER")
     conn.commit()
     conn.close()
 
 
 def _reconcile_interrupted_runs():
-    """Stamp interrupted runs as failed at startup.
+    """Resume — or, failing that, stamp as failed — interrupted runs at startup.
 
     The pipeline runs in a daemon thread inside a gunicorn worker. When a
-    worker is recycled (--max-requests) or the container restarts, that
-    thread dies WITHOUT running _persist_run or the error handler, leaving
-    the DB row stuck at 'queued'/'running' forever — the status poller then
-    spins indefinitely. A daemon thread never survives its process, so any
-    non-terminal run whose heartbeat has gone stale (or was never set) is
-    definitively dead. Gate strictly on staleness so a run still in flight
-    on the *other* live worker (fresh heartbeat) is never wrongly killed.
+    worker is recycled (--max-requests) or the container restarts (deploy/OOM),
+    that thread dies WITHOUT running _persist_run or the error handler, leaving
+    the DB row stuck at 'queued'/'running' forever — the status poller would
+    otherwise spin indefinitely. A daemon thread never survives its process, so
+    any non-terminal run whose heartbeat has gone stale (or was never set) is
+    definitively dead. Gate strictly on staleness so a run still in flight on
+    the *other* live worker (fresh heartbeat) is never wrongly killed.
+
+    QA-015: a dead run with its launch input still on disk is RESUMED (re-run
+    from the same input) instead of lost — this is what makes a 500+-swim meet
+    interrupted by a recycle/deploy finish on its own. A dead run with no stored
+    input (a run from before this fix, or one whose input was cleaned up) or one
+    that has used up its resume budget gets the honest "upload again" error.
     """
     try:
         conn = _db()
         rows = conn.execute(
-            "SELECT id, heartbeat_at, created_at FROM runs WHERE status IN ('queued','running')"
+            "SELECT id, heartbeat_at, created_at, resume_count "
+            "FROM runs WHERE status IN ('queued','running')"
         ).fetchall()
-        dead = []
-        for r in rows:
-            age = _iso_age_secs(r["heartbeat_at"] or r["created_at"])
-            if age is None or age > _RUN_STALE_SECS:
-                dead.append(r["id"])
-        if dead:
-            conn.executemany(
-                "UPDATE runs SET status='error', error=? WHERE id=?",
-                [
-                    (
-                        "Processing was interrupted before it finished (the server "
-                        "restarted mid-run). Please upload the file again.",
-                        d,
-                    )
-                    for d in dead
-                ],
-            )
-            conn.commit()
         conn.close()
     except Exception:
-        pass
+        return
+    for r in rows:
+        age = _iso_age_secs(r["heartbeat_at"] or r["created_at"])
+        if not (age is None or age > _RUN_STALE_SECS):
+            continue  # still in flight on a live worker — leave it alone
+        # _maybe_resume_stale_run resumes when it can and stamps the honest
+        # error when it cannot, with an atomic claim so two booting workers
+        # never resume the same run twice.
+        try:
+            _maybe_resume_stale_run(r["id"])
+        except Exception:
+            pass
 
 
 _init_db()
-_reconcile_interrupted_runs()
+# _reconcile_interrupted_runs() is invoked AFTER the run-worker / resume helpers
+# are defined (see below _start_run), so a startup sweep can re-launch the
+# interrupted runs it finds.
 
 
 def _prune_orphaned_runs():
@@ -5956,172 +5980,465 @@ def _start_run(
     conn.commit()
     conn.close()
 
-    def _worker():
+    # QA-015 — persist the launch input so a worker recycle / deploy / OOM that
+    # kills the in-thread pipeline can RESUME this run (re-run from the same
+    # input) instead of losing it. Best-effort: resume is simply unavailable if
+    # this write fails, and the run otherwise behaves exactly as before.
+    _store_run_input(
+        run_id,
+        file_bytes,
+        file_name,
+        profile_id,
+        use_pb_cache,
+        fetch_pbs,
+        club_filter,
+        source_url,
+    )
+    _spawn_run_thread(
+        run_id=run_id,
+        file_bytes=file_bytes,
+        file_name=file_name,
+        profile_id=profile_id,
+        use_pb_cache=use_pb_cache,
+        fetch_pbs=fetch_pbs,
+        club_filter=club_filter,
+    )
+    return run_id
+
+
+# ---------------------------------------------------------------------
+# QA-015 — durable run worker + resume machinery
+# ---------------------------------------------------------------------
+# The pipeline runs in a daemon thread inside a gunicorn worker, so a
+# `--max-requests` recycle, an overlapping deploy, or an OOM kills it mid-run —
+# and the bigger the meet the longer it runs, so a recycle is far likelier to
+# land while a 500+-swim run is in flight (which is why size correlates with the
+# failure). Rather than lose the run, _start_run persists its launch input and
+# these helpers RE-RUN it from there when it is found dead. The pipeline is
+# deterministic and cache-backed, so a resume on a fresh worker re-walks the
+# same steps (warm where cached) and converges; it is bounded by _RUN_MAX_RESUMES
+# so a genuinely-broken input surfaces the honest "upload again" error instead of
+# looping forever. The honest error is kept for the truly-unrecoverable case.
+
+
+def _run_input_dir(run_id: str) -> Path:
+    return RUNS_DIR / run_id
+
+
+def _store_run_input(
+    run_id: str,
+    file_bytes: bytes,
+    file_name: str,
+    profile_id: Optional[str],
+    use_pb_cache: bool,
+    fetch_pbs: bool,
+    club_filter: Optional[str],
+    source_url: Optional[str],
+) -> None:
+    """Persist a run's launch inputs beside it so an interrupted run can be
+    resumed. Best-effort; a failure here just means resume is unavailable."""
+    try:
+        d = _run_input_dir(run_id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "input.bin").write_bytes(file_bytes)
+        (d / "resume.json").write_text(
+            json.dumps(
+                {
+                    "file_name": file_name,
+                    "profile_id": profile_id,
+                    "use_pb_cache": bool(use_pb_cache),
+                    "fetch_pbs": bool(fetch_pbs),
+                    "club_filter": club_filter,
+                    "source_url": source_url,
+                }
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        log.warning("QA-015: could not store resume input for run %s", run_id, exc_info=True)
+
+
+def _load_run_input(run_id: str) -> Optional[tuple[bytes, dict]]:
+    """The (file_bytes, launch-params) for a resumable run, or None."""
+    try:
+        d = _run_input_dir(run_id)
+        meta = json.loads((d / "resume.json").read_text(encoding="utf-8"))
+        data = (d / "input.bin").read_bytes()
+        return data, meta
+    except Exception:
+        return None
+
+
+def _resume_input_exists(run_id: str) -> bool:
+    d = _run_input_dir(run_id)
+    return (d / "input.bin").exists() and (d / "resume.json").exists()
+
+
+def _cleanup_run_input(run_id: str) -> None:
+    """Drop a finished run's stored launch input. Only ever called from the
+    worker's own ``finally`` — i.e. the pipeline reached a clean terminal — so a
+    killed worker never reaches here and its input stays put for resume."""
+    try:
+        d = _run_input_dir(run_id)
+        for name in ("input.bin", "resume.json"):
+            p = d / name
+            if p.exists():
+                p.unlink()
+    except Exception:
+        pass
+
+
+def _execute_run(
+    *,
+    run_id: str,
+    file_bytes: bytes,
+    file_name: str,
+    profile_id: Optional[str],
+    use_pb_cache: bool,
+    fetch_pbs: bool,
+    club_filter: Optional[str],
+) -> None:
+    """Run the pipeline to completion and persist it. Shared by the initial
+    launch (_start_run) and a resume (_resume_run); a resume differs only in
+    that the in-memory log already carries a 'Resuming…' note."""
+    with _active_lock:
+        entry = _active_runs.get(run_id)
+        if entry is not None:
+            entry["status"] = "running"
+            entry["heartbeat"] = time.time()
+        # Persist whatever the entry was seeded with ("Run queued" for a fresh
+        # run, the resume note for a resume) instead of clobbering it.
+        start_log = list((entry or {}).get("log") or ["Run queued"])
+    _persist_run_progress(run_id, "running", start_log)
+
+    # Throttle DB writes: the in-memory log updates on every line, but
+    # the DB only needs to be fresh to the second for cross-worker polls.
+    _last_db = [0.0]
+
+    def cb(msg: str):
+        now = time.time()
         with _active_lock:
             entry = _active_runs.get(run_id)
-            if entry is not None:
-                entry["status"] = "running"
-                entry["heartbeat"] = time.time()
-        _persist_run_progress(run_id, "running", ["Run queued"])
+            if entry is None:
+                # Run was evicted from the bounded cache while in
+                # flight — silently drop the progress line.
+                return
+            entry["heartbeat"] = now
+            log_list = entry.setdefault("log", [])
+            log_list.append(msg)
+            # Cap each run's progress log so a buggy progress
+            # callback can't grow the in-memory list to thousands
+            # of entries × hundreds of bytes. Keep the first 5
+            # entries (queue/start markers — useful for diagnosis)
+            # and the most recent N-5 of the tail.
+            if len(log_list) > _RUN_LOG_LIMIT:
+                keep_tail = _RUN_LOG_LIMIT - 5
+                entry["log"] = log_list[:5] + log_list[-keep_tail:]
+            snapshot = list(entry["log"])
+        # Stream to the DB outside the lock (SQLite write is slow-ish).
+        if now - _last_db[0] >= _RUN_DB_HEARTBEAT_SECS:
+            _last_db[0] = now
+            _persist_run_progress(run_id, "running", snapshot)
 
-        # Throttle DB writes: the in-memory log updates on every line, but
-        # the DB only needs to be fresh to the second for cross-worker polls.
-        _last_db = [0.0]
+    def _record_terminal(status: str, error: Optional[str] = None) -> None:
+        """Stamp the in-memory entry with a terminal status. The
+        entry may have been evicted from the bounded cache (a
+        long-running pipeline outliving the LRU window), in
+        which case the on-disk DB row remains the source of
+        truth and the polling endpoint falls back to it."""
+        with _active_lock:
+            entry = _active_runs.get(run_id)
+            if entry is None:
+                return
+            entry["status"] = status
+            entry["heartbeat"] = time.time()
+            if error is not None:
+                entry["error"] = error
 
-        def cb(msg: str):
-            now = time.time()
-            with _active_lock:
-                entry = _active_runs.get(run_id)
-                if entry is None:
-                    # Run was evicted from the bounded cache while in
-                    # flight — silently drop the progress line.
-                    return
-                entry["heartbeat"] = now
-                log_list = entry.setdefault("log", [])
-                log_list.append(msg)
-                # Cap each run's progress log so a buggy progress
-                # callback can't grow the in-memory list to thousands
-                # of entries × hundreds of bytes. Keep the first 5
-                # entries (queue/start markers — useful for diagnosis)
-                # and the most recent N-5 of the tail.
-                if len(log_list) > _RUN_LOG_LIMIT:
-                    keep_tail = _RUN_LOG_LIMIT - 5
-                    entry["log"] = log_list[:5] + log_list[-keep_tail:]
-                snapshot = list(entry["log"])
-            # Stream to the DB outside the lock (SQLite write is slow-ish).
-            if now - _last_db[0] >= _RUN_DB_HEARTBEAT_SECS:
-                _last_db[0] = now
-                _persist_run_progress(run_id, "running", snapshot)
+    # Liveness ticker: keep the heartbeat fresh for as long as THIS worker
+    # thread is alive, independent of how often the pipeline emits a progress
+    # line. Without it a long, progress-silent step — the heavy LLM
+    # interpretation of a large fresh PDF, which can run past
+    # _RUN_STALE_SECS without a single line — lets the heartbeat go stale and
+    # the run is falsely declared dead mid-interpretation. If the worker is
+    # recycled/killed this daemon thread dies with it, so a genuinely dead
+    # run still goes stale exactly as before.
+    _hb_stop = threading.Event()
 
-        def _record_terminal(status: str, error: Optional[str] = None) -> None:
-            """Stamp the in-memory entry with a terminal status. The
-            entry may have been evicted from the bounded cache (a
-            long-running pipeline outliving the LRU window), in
-            which case the on-disk DB row remains the source of
-            truth and the polling endpoint falls back to it."""
-            with _active_lock:
-                entry = _active_runs.get(run_id)
-                if entry is None:
-                    return
-                entry["status"] = status
-                entry["heartbeat"] = time.time()
-                if error is not None:
-                    entry["error"] = error
+    def _heartbeat_ticker():
+        started = time.time()
+        while not _hb_stop.wait(_RUN_HEARTBEAT_TICK_SECS):
+            if time.time() - started > _RUN_MAX_LIVENESS_SECS:
+                return  # safety cap: let a truly wedged run finally go stale
+            if not _advance_run_heartbeat(run_id):
+                return  # run finished or was evicted — stop ticking
 
-        # Liveness ticker: keep the heartbeat fresh for as long as THIS worker
-        # thread is alive, independent of how often the pipeline emits a progress
-        # line. Without it a long, progress-silent step — the heavy LLM
-        # interpretation of a large fresh PDF, which can run past
-        # _RUN_STALE_SECS without a single line — lets the heartbeat go stale and
-        # the run is falsely declared dead mid-interpretation. If the worker is
-        # recycled/killed this daemon thread dies with it, so a genuinely dead
-        # run still goes stale exactly as before.
-        _hb_stop = threading.Event()
+    _hb_thread = threading.Thread(target=_heartbeat_ticker, name=f"hb-{run_id[:8]}", daemon=True)
+    _hb_thread.start()
 
-        def _heartbeat_ticker():
-            started = time.time()
-            while not _hb_stop.wait(_RUN_HEARTBEAT_TICK_SECS):
-                if time.time() - started > _RUN_MAX_LIVENESS_SECS:
-                    return  # safety cap: let a truly wedged run finally go stale
-                if not _advance_run_heartbeat(run_id):
-                    return  # run finished or was evicted — stop ticking
-
-        _hb_thread = threading.Thread(
-            target=_heartbeat_ticker, name=f"hb-{run_id[:8]}", daemon=True
+    try:
+        run = run_pipeline_v4(
+            file_bytes=file_bytes,
+            filename=file_name,
+            profile_id=profile_id,
+            use_pb_cache=use_pb_cache,
+            fetch_pbs=fetch_pbs,
+            progress_cb=cb,
+            run_id=run_id,
+            club_filter=club_filter,
         )
-        _hb_thread.start()
+        _persist_run(run, file_name)
+        _record_terminal(
+            "error" if run.error else "done",
+            run.error if run.error else None,
+        )
+        if not run.error:
+            # "Pack ready for review" ping. Inert (no-op) unless an operator
+            # configured a notification channel; runs in its own thread so it
+            # never delays the run, and never raises.
+            try:
+                from mediahub.notify import notify_pack_ready
 
-        try:
-            run = run_pipeline_v4(
-                file_bytes=file_bytes,
-                filename=file_name,
-                profile_id=profile_id,
-                use_pb_cache=use_pb_cache,
-                fetch_pbs=fetch_pbs,
-                progress_cb=cb,
-                run_id=run_id,
-                club_filter=club_filter,
-            )
-            _persist_run(run, file_name)
-            _record_terminal(
-                "error" if run.error else "done",
-                run.error if run.error else None,
-            )
-            if not run.error:
-                # "Pack ready for review" ping. Inert (no-op) unless an operator
-                # configured a notification channel; runs in its own thread so it
-                # never delays the run, and never raises.
-                try:
-                    from mediahub.notify import notify_pack_ready
+                notify_pack_ready(run_id)
+            except Exception:
+                pass
+            # In-app notifications inbox (UI 1.14) — always-on, no-config:
+            # record the "pack ready" milestone against the owning org so it
+            # lands in the bell dropdown even with no push channel set up.
+            try:
+                from mediahub.notify import inbox as _inbox
 
-                    notify_pack_ready(run_id)
-                except Exception:
-                    pass
-                # In-app notifications inbox (UI 1.14) — always-on, no-config:
-                # record the "pack ready" milestone against the owning org so it
-                # lands in the bell dropdown even with no push channel set up.
-                try:
-                    from mediahub.notify import inbox as _inbox
+                _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
+            except Exception:
+                pass
+            # Outbound webhook (1.21): notify subscribed integrations that a
+            # run finished. Best-effort; never blocks or breaks the run.
+            try:
+                from mediahub import webhooks as _webhooks
+                from mediahub.webhooks import events as _wh_events
 
-                    _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
-                except Exception:
-                    pass
-                # Outbound webhook (1.21): notify subscribed integrations that a
-                # run finished. Best-effort; never blocks or breaks the run.
-                try:
-                    from mediahub import webhooks as _webhooks
-                    from mediahub.webhooks import events as _wh_events
-
-                    _webhooks.emit(
-                        _wh_events.EVENT_RUN_FINISHED,
-                        profile_id,
-                        _wh_events.run_finished(profile_id, run_id, card_count=len(run.cards)),
-                    )
-                except Exception:
-                    pass
-            else:
-                # The pipeline reported a terminal error (rather than raising) —
-                # surface it in the inbox so the operator isn't left guessing.
-                try:
-                    from mediahub.notify import inbox as _inbox
-
-                    _inbox.record_error(
-                        profile_id,
-                        "Run couldn't be processed",
-                        str(run.error),
-                        run_id=run_id,
-                    )
-                except Exception:
-                    pass
-        except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            _record_terminal("error", str(e))
-            conn = _db()
-            conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
-            conn.commit()
-            conn.close()
+                _webhooks.emit(
+                    _wh_events.EVENT_RUN_FINISHED,
+                    profile_id,
+                    _wh_events.run_finished(profile_id, run_id, card_count=len(run.cards)),
+                )
+            except Exception:
+                pass
+        else:
+            # The pipeline reported a terminal error (rather than raising) —
+            # surface it in the inbox so the operator isn't left guessing.
             try:
                 from mediahub.notify import inbox as _inbox
 
                 _inbox.record_error(
                     profile_id,
                     "Run couldn't be processed",
-                    str(e),
+                    str(run.error),
                     run_id=run_id,
                 )
             except Exception:
                 pass
-        finally:
-            # Stop the liveness ticker the moment the pipeline returns (success
-            # or error) so a finished run's heartbeat freezes and the entry can
-            # settle into its terminal status.
-            _hb_stop.set()
+    except Exception as e:
+        import traceback
 
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    return run_id
+        traceback.print_exc()
+        _record_terminal("error", str(e))
+        conn = _db()
+        conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
+        conn.commit()
+        conn.close()
+        try:
+            from mediahub.notify import inbox as _inbox
+
+            _inbox.record_error(
+                profile_id,
+                "Run couldn't be processed",
+                str(e),
+                run_id=run_id,
+            )
+        except Exception:
+            pass
+    finally:
+        # Stop the liveness ticker the moment the pipeline returns (success
+        # or error) so a finished run's heartbeat freezes and the entry can
+        # settle into its terminal status.
+        _hb_stop.set()
+        # Reaching here means a clean terminal — the run will not be resumed,
+        # so reclaim its stored launch input. A killed worker never gets here,
+        # so an interrupted run keeps its input and stays resumable.
+        _cleanup_run_input(run_id)
+
+
+def _spawn_run_thread(
+    *,
+    run_id: str,
+    file_bytes: bytes,
+    file_name: str,
+    profile_id: Optional[str],
+    use_pb_cache: bool,
+    fetch_pbs: bool,
+    club_filter: Optional[str],
+) -> None:
+    threading.Thread(
+        target=_execute_run,
+        kwargs=dict(
+            run_id=run_id,
+            file_bytes=file_bytes,
+            file_name=file_name,
+            profile_id=profile_id,
+            use_pb_cache=use_pb_cache,
+            fetch_pbs=fetch_pbs,
+            club_filter=club_filter,
+        ),
+        name=f"run-{run_id[:8]}",
+        daemon=True,
+    ).start()
+
+
+def _mark_run_errored(run_id: str, message: str) -> None:
+    """Stamp a still-non-terminal run as errored (DB + any in-memory entry).
+
+    Errored is terminal — the run will never be resumed — so reclaim its stored
+    launch input here too (covers the resume-budget-exhausted / unrecoverable
+    paths, which never reach the worker's own cleanup)."""
+    try:
+        conn = _db()
+        conn.execute(
+            "UPDATE runs SET status='error', error=COALESCE(error, ?) "
+            "WHERE id=? AND status IN ('queued','running')",
+            (message, run_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    with _active_lock:
+        entry = _active_runs.get(run_id)
+        if isinstance(entry, dict) and entry.get("status") in ("queued", "running", None):
+            entry["status"] = "error"
+            entry["error"] = entry.get("error") or message
+    _cleanup_run_input(run_id)
+
+
+def _claim_stale_run_for_resume(run_id: str, max_resumes: int) -> str:
+    """Atomically claim a stale, resumable run for THIS worker to resume.
+
+    Compare-and-swap on ``heartbeat_at`` so that when several workers spot the
+    same dead run, exactly one wins (its UPDATE flips the heartbeat, the rest
+    match zero rows). Returns ``'claimed'`` | ``'exhausted'`` | ``'skip'``
+    (``skip`` = not stale / still alive / already handled elsewhere)."""
+    conn = None
+    try:
+        conn = _db()
+        row = conn.execute(
+            "SELECT status, heartbeat_at, resume_count FROM runs WHERE id=?",
+            (run_id,),
+        ).fetchone()
+        if row is None or row["status"] not in ("queued", "running"):
+            conn.close()
+            return "skip"
+        age = _iso_age_secs(row["heartbeat_at"])
+        if not (age is None or age > _RUN_STALE_SECS):
+            conn.close()
+            return "skip"  # fresh heartbeat — still alive, or just claimed
+        if (row["resume_count"] or 0) >= max_resumes:
+            conn.close()
+            return "exhausted"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        old_hb = row["heartbeat_at"]
+        if old_hb is None:
+            cur = conn.execute(
+                "UPDATE runs SET status='running', heartbeat_at=?, "
+                "resume_count=COALESCE(resume_count,0)+1 "
+                "WHERE id=? AND status IN ('queued','running') AND heartbeat_at IS NULL",
+                (now_iso, run_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE runs SET status='running', heartbeat_at=?, "
+                "resume_count=COALESCE(resume_count,0)+1 "
+                "WHERE id=? AND status IN ('queued','running') AND heartbeat_at=?",
+                (now_iso, run_id, old_hb),
+            )
+        conn.commit()
+        claimed = cur.rowcount == 1
+        conn.close()
+        return "claimed" if claimed else "skip"
+    except Exception:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+        return "skip"
+
+
+def _resume_run(run_id: str) -> None:
+    """Re-launch an interrupted run from its stored input. The DB row has already
+    been claimed (status → 'running', resume_count bumped) by the caller."""
+    loaded = _load_run_input(run_id)
+    if not loaded:
+        _mark_run_errored(run_id, _RUN_STALE_ERROR)
+        return
+    data, meta = loaded
+    note = (
+        "Resuming after an interrupted run — the previous server worker was "
+        "recycled mid-run. Picking up from your uploaded file…"
+    )
+    started_at = datetime.now(timezone.utc).isoformat()
+    with _active_lock:
+        _active_runs[run_id] = {
+            "status": "running",
+            "log": [note],
+            "started_at": started_at,
+            "file_name": meta.get("file_name") or "",
+            "heartbeat": time.time(),
+        }
+        _maybe_evict_active_runs()
+    _persist_run_progress(run_id, "running", [note])
+    _spawn_run_thread(
+        run_id=run_id,
+        file_bytes=data,
+        file_name=meta.get("file_name") or "upload.bin",
+        profile_id=meta.get("profile_id"),
+        use_pb_cache=bool(meta.get("use_pb_cache", True)),
+        fetch_pbs=bool(meta.get("fetch_pbs", True)),
+        club_filter=meta.get("club_filter"),
+    )
+
+
+def _maybe_resume_stale_run(run_id: str) -> bool:
+    """Handle a run whose in-thread pipeline has gone stale (a dead worker).
+
+    Returns True when the caller should report the run as ``running`` — it is
+    being resumed, was claimed by another worker, or turned out to still be
+    alive. Returns False when the run is genuinely unrecoverable (no stored
+    input, or the resume budget is exhausted), in which case it has been stamped
+    with the honest error for the caller to surface."""
+    if not _resume_input_exists(run_id):
+        _mark_run_errored(run_id, _RUN_STALE_ERROR)
+        return False
+    outcome = _claim_stale_run_for_resume(run_id, _RUN_MAX_RESUMES)
+    if outcome == "claimed":
+        try:
+            _resume_run(run_id)
+            return True
+        except Exception:
+            _mark_run_errored(run_id, _RUN_STALE_ERROR)
+            return False
+    if outcome == "exhausted":
+        _mark_run_errored(run_id, _RUN_STALE_ERROR)
+        return False
+    # "skip" — claimed by another worker, or its heartbeat is fresh (alive). A
+    # rare lost-race against a run that just finished/errored corrects itself on
+    # the next poll, which reads the real terminal status from the DB.
+    return True
+
+
+# Startup sweep — defined here, after the resume machinery, so the import-time
+# call can re-launch (or honestly fail) any run the previous process left
+# interrupted.
+_reconcile_interrupted_runs()
 
 
 # ---------------------------------------------------------------------
@@ -19385,11 +19702,7 @@ def create_app() -> Flask:
     # is dead (its worker was recycled or it wedged past every per-call
     # timeout). Surface it as a terminal error so the poller stops instead
     # of spinning forever.
-    _STALE_ERR = (
-        "Processing stopped responding — the server worker was "
-        "recycled mid-run or a step timed out. Please upload the "
-        "file again."
-    )
+    _STALE_ERR = _RUN_STALE_ERROR
 
     @app.route("/api/runs/<run_id>/status")
     def api_status(run_id):
@@ -19455,8 +19768,17 @@ def create_app() -> Flask:
         if status in ("queued", "running"):
             age = _iso_age_secs(row["heartbeat_at"])
             if age is None or age > _RUN_STALE_SECS:
-                status = "error"
-                error = error or _STALE_ERR
+                # QA-015: this is the path a real worker recycle takes — the
+                # worker that ran the pipeline is gone, so its in-memory entry
+                # is too and the poll falls through to here. A dead run whose
+                # launch input is still on disk is RESUMED (re-run) rather than
+                # lost; only a genuinely unrecoverable one (no stored input, or
+                # the resume budget is spent) surfaces the honest error.
+                if _maybe_resume_stale_run(run_id):
+                    status = "running"
+                else:
+                    status = "error"
+                    error = error or _STALE_ERR
         payload = {"status": status, "error": error, "log": plog}
         if status == "done":
             payload["n_achievements"] = _n_achievements_from_run(_run_data)
