@@ -404,9 +404,7 @@ def interpreted_to_canonical(
             # the canonical "heat" code is what keeps a heat place-1 from
             # surfacing as a fabricated gold while the genuine final still wins
             # its medal with the final time.
-            swim_round = (
-                "heat" if getattr(swim, "round_hint", None) == "prelim" else "timed_final"
-            )
+            swim_round = "heat" if getattr(swim, "round_hint", None) == "prelim" else "timed_final"
 
             result = RaceResult(
                 swimmer_key=swimmer_key,
