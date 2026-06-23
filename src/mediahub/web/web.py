@@ -11694,7 +11694,7 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 {_ai_banner_html}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">{_h(cfg["eyebrow"])}</span>
-  <h1>{_h(swimmer)}</h1>
+  <h1><span class="mh-shiny-text">{_h(swimmer)}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">{strap_html}</div>
 </section>
 
@@ -39182,7 +39182,7 @@ function mhSetupMode(mode) {{
 {_ai_banner_html}
 <section class="mh-hero no-print" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Content builder</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(approved):02d} approved {
             "card" if len(approved) == 1 else "cards"
@@ -40462,7 +40462,7 @@ function mhSetupMode(mode) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Repurpose pack</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
     <span>generated {gen_at}</span><span class="sep">/</span>
@@ -40828,7 +40828,7 @@ function tiRegenerate() {{
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">All recommendations</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
     <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
