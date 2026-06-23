@@ -368,6 +368,13 @@ NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
         "sub-processor. When wired and an org enables it, Rask MUST move to "
         "legal.SUBPROCESSORS (and the club DPA) before any data flows."
     ),
+    "MEDIAHUB_API_TOKEN": (
+        "MediaHub's OWN platform-API token (roadmap 1.21), used by the first-party "
+        "MCP server (mediahub.mcp_server) to call MediaHub's own /api/v1 surface. "
+        "It is a self-call credential — no third party is involved, so it is not an "
+        "Art. 28 sub-processor. The token is redacted from logs and never echoed in "
+        "responses."
+    ),
 }
 
 
