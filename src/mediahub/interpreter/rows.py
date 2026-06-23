@@ -210,6 +210,20 @@ def _extract_swim_from_cells(
                 field_vals[schema.col_type] = raw
                 field_conf[schema.col_type] = _eff
 
+    # A disqualified / non-finish row carries a DSQ marker cell (DQ/DNS/DNF/…)
+    # alongside — or instead of — a printed time. The printed time on a DQ swim
+    # is struck out and must NOT surface as a valid result, so let the marker BE
+    # the time: the bridge maps a non-numeric time to finals_time_cs=None /
+    # dq=True, which excludes the swim from PB & moment detection. Match a cell
+    # whose first token is a DSQ marker so "DQ", "DNS" and rule-coded "DQ 8.2"
+    # forms are all caught.
+    for cell in cells:
+        head = cell.strip().split()[:1]
+        if head and head[0].upper() in _DSQ_VALUES:
+            field_vals["time"] = head[0].upper()
+            field_conf["time"] = max(field_conf.get("time", 0.0), 0.85)
+            break
+
     # A competition result must identify a competitor. A row with a time but no
     # name is a split/continuation line (cumulative lap times listed under a
     # swimmer on a distance event), not a result — dropping it keeps overall
@@ -291,14 +305,25 @@ def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
 def _split_into_records(
     tokens: list[tuple[str, bool]],
 ) -> list[list[tuple[str, bool]]]:
-    """Break a tokenised line into records, each ending at a time token."""
+    """Break a tokenised line into records, each ending at a time token.
+
+    A real time token immediately followed by a disqualification marker
+    ("3:29.20 DQ") is the *void* time of a disqualified swim, not the end of a
+    valid record: the DSQ marker is the true terminal and strikes the time out.
+    Defer closing the record at such a time so the marker terminates it — the
+    swim then carries the DSQ status instead of a fabricated valid result.
+    """
     records: list[list[tuple[str, bool]]] = []
     cur: list[tuple[str, bool]] = []
-    for tok, big in tokens:
+    for i, (tok, big) in enumerate(tokens):
         cur.append((tok, big))
-        if _is_time_like(tok):
-            records.append(cur)
-            cur = []
+        if not _is_time_like(tok):
+            continue
+        nxt = tokens[i + 1][0] if i + 1 < len(tokens) else ""
+        if _TIME_TOKEN.match(tok) and _DSQ_TOKEN.match(nxt):
+            continue
+        records.append(cur)
+        cur = []
     return records
 
 
@@ -323,6 +348,14 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         return None
     time_tok = rec[-1][0]
     body = rec[:-1]
+
+    # A disqualified swim may print its now-void time right before the DSQ
+    # marker ("… 3:29.20 DQ"): the marker is the terminal token and the
+    # preceding real-time token is struck out. Drop that void time from the body
+    # so it is not mis-read as club/age data, and so the swim carries the DSQ
+    # status (time = the marker) rather than a fabricated valid result.
+    if _DSQ_TOKEN.match(time_tok) and body and _TIME_TOKEN.match(body[-1][0]):
+        body = body[:-1]
 
     # Place (optional leading rank).
     place_val: int | None = None
