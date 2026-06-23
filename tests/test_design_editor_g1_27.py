@@ -236,14 +236,26 @@ def test_coerce_non_dict_yields_defaults():
         assert p.palette == DE.DEFAULT_PALETTE
 
 
-def test_size_is_half_native_for_preview_and_native_for_full():
+def test_preview_composes_at_native_geometry_with_light_raster():
+    # QA-011: the live preview must COMPOSE at the same native CSS geometry as
+    # the download, so the v2 archetypes' fixed-px furniture keeps its authored
+    # proportions and the result time never clips / wraps / collides. The
+    # "snappy preview" stays light via the RASTER (preview_raster_size +
+    # a DPR-1 quality), never by shrinking the composition geometry.
     prev = DE.coerce_params({"format": "story", "full": False})
     full = DE.coerce_params({"format": "story", "full": True})
     assert full.size == (1080, 1920)
-    assert prev.size == (540, 960)
-    # square + portrait too
-    assert DE.coerce_params({"format": "feed_square", "full": True}).size == (1080, 1080)
-    assert DE.coerce_params({"format": "feed_portrait", "full": True}).size == (1080, 1350)
+    assert prev.size == (1080, 1920)  # native composition, not the old half-scale
+    # the download keeps native pixels; the preview downsamples the finished
+    # native render to PREVIEW_SCALE for a light payload
+    assert full.preview_raster_size == (1080, 1920)
+    assert prev.preview_raster_size == (540, 960)
+    assert prev.render_quality == "fast"  # light DPR-1 capture
+    assert full.render_quality is None  # default profile for the download
+    # square + portrait compose natively for BOTH preview and download
+    for fmt, native in (("feed_square", (1080, 1080)), ("feed_portrait", (1080, 1350))):
+        assert DE.coerce_params({"format": fmt, "full": True}).size == native
+        assert DE.coerce_params({"format": fmt, "full": False}).size == native
 
 
 def test_signature_is_stable_and_change_sensitive():
@@ -470,9 +482,12 @@ def stub_render(monkeypatch):
 
     cap: dict = {}
 
-    def _fake_png(html, output_path, size):
+    def _fake_png(html, output_path, size, **kwargs):
+        # mirror render_html_to_png's real signature (…, *, image_format=None,
+        # quality=None): the studio passes a light DPR-1 quality for previews.
         cap["html"] = html
         cap["size"] = size
+        cap["quality"] = kwargs.get("quality")
         Path(output_path).write_bytes(_STUB_PNG)
         return len(_STUB_PNG)
 
@@ -518,8 +533,11 @@ def test_render_api_returns_png_and_explainability(client, stub_render):
     meta = d["meta"]
     assert meta["archetype"]["name"] == "big_number_dominant"
     assert any(role["var"] == "--mh-accent" and role["hex"] == "#F2C14E" for role in meta["roles"])
-    # the stub captured the REAL assembled HTML — preview size + chosen colours rode in
-    assert stub_render["size"] == (540, 540)
+    # the stub captured the REAL assembled HTML — the preview composes at NATIVE
+    # geometry (QA-011: never the old half-scale, which clipped the result time),
+    # at a light DPR-1 quality; chosen colours rode in
+    assert stub_render["size"] == (1080, 1080)
+    assert stub_render["quality"] == "fast"
     assert "#11332E" in stub_render["html"]
     assert "{{" not in stub_render["html"]
 
@@ -569,9 +587,9 @@ def test_render_api_caches_identical_requests(client, stub_render):
 
     orig = R.render_html_to_png
 
-    def _counting(html, output_path, size):
+    def _counting(html, output_path, size, **kwargs):
         calls["n"] += 1
-        return orig(html, output_path, size)
+        return orig(html, output_path, size, **kwargs)
 
     R.render_html_to_png = _counting
     try:
@@ -587,7 +605,7 @@ def test_render_api_caches_identical_requests(client, stub_render):
 def test_render_api_honest_error_when_browser_unavailable(client, monkeypatch):
     import mediahub.graphic_renderer.render as R
 
-    def _boom(html, output_path, size):
+    def _boom(html, output_path, size, **kwargs):
         raise RuntimeError("Playwright not installed: chromium missing")
 
     monkeypatch.setattr(R, "render_html_to_png", _boom)
