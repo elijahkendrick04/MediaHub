@@ -42058,7 +42058,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         Carries the caller's choice of whether to surface a 415 (the upload
         form) or quietly skip the file (the bulk share-target receiver)."""
 
-    def _save_library_photo(file_storage, profile_id, *, description="", asset_type="athlete_photo"):
+    def _save_library_photo(
+        file_storage, profile_id, *, description="", asset_type="athlete_photo"
+    ):
         """Persist one uploaded image into a profile's media library.
 
         Shared by the media-library upload form and the PWA share-target
