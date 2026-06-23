@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `e995022ea` · fix(web): resume interrupted runs so large meets finish (QA-015) (#1028)
+**Last updated:** 2026-06-23 · `cbfd3670a` · fix(web): /plan index renders persisted plans defensively (QA-016) (#1031)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1205,6 +1205,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `510ccb177` | fix(web): /plan index renders persisted plans defensively (QA-016) |
 | 2026-06-23 | `c2a3b9397` | fix(web): resume interrupted runs so large meets finish (QA-015) |
 | 2026-06-23 | `f25c368ab` | style(pwa): wrap _save_library_photo signature (ruff-format) |
 | 2026-06-23 | `6bc8dfda8` | test(interpreter): native-text-PDF regression for QA-014 (swum result, never seed) |
@@ -1214,5 +1215,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `7c819303c` | Apply ruff-format v0.8.4 to the 1.21 source (pre-commit hygiene) |
 | 2026-06-23 | `346d3d45b` | fix(interpreter): read the swum result time, never the seed (QA-014) |
 | 2026-06-23 | `191686ad6` | style: ruff-format interpreter_bridge swim_round line |
-| 2026-06-23 | `63d9d5644` | File interop + read-only embed (roadmap 1.21, build 4/4) |
 <!-- /ROADMAP:ACTIVITY -->
