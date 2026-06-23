@@ -42,8 +42,7 @@ def psd_to_png(psd_bytes: bytes) -> bytes:
         from psd_tools import PSDImage  # noqa: PLC0415
     except Exception as e:
         raise PsdImportUnavailable(
-            "PSD import needs the optional 'psd-tools' backend "
-            "(pip install 'mediahub[psd]')."
+            "PSD import needs the optional 'psd-tools' backend " "(pip install 'mediahub[psd]')."
         ) from e
     try:
         psd = PSDImage.open(io.BytesIO(psd_bytes))

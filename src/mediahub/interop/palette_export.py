@@ -63,7 +63,7 @@ def to_ase(colours, names: Optional[list[str]] = None) -> bytes:
     cols = _clean(colours)
     blocks = []
     for i, c in enumerate(cols):
-        name = (names[i] if names and i < len(names) else c)
+        name = names[i] if names and i < len(names) else c
         blocks.append(_ase_colour_block(name, c))
     header = b"ASEF" + struct.pack(">HH", 1, 0) + struct.pack(">I", len(blocks))
     return header + b"".join(blocks)

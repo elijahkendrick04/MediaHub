@@ -72,9 +72,7 @@ def deliver_now(delivery_id: str) -> bool:
     Returns True iff it was delivered."""
     conn = _db.connect()
     try:
-        row = conn.execute(
-            "SELECT * FROM webhook_deliveries WHERE id=?", (delivery_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM webhook_deliveries WHERE id=?", (delivery_id,)).fetchone()
         if row is None or row["status"] == "delivered":
             return row is not None and row["status"] == "delivered"
         ep = EndpointStore().get(row["endpoint_id"])

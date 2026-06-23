@@ -63,7 +63,11 @@ def sanitize_svg(svg_bytes: bytes) -> bytes:
 
     # Entities + network OFF: blocks XXE and external-entity expansion.
     parser = etree.XMLParser(
-        resolve_entities=False, no_network=True, load_dtd=False, dtd_validation=False, huge_tree=False
+        resolve_entities=False,
+        no_network=True,
+        load_dtd=False,
+        dtd_validation=False,
+        huge_tree=False,
     )
     try:
         root = etree.fromstring(svg_bytes, parser=parser)

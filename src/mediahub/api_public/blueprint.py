@@ -33,8 +33,9 @@ BASE_PATH = "/api/v1"
 _PUBLIC = {"index", "health", "openapi_spec"}
 
 
-def build_api_v1_blueprint(*, token_store: ApiTokenStore | None = None,
-                           rate_limiter: RateLimiter | None = None) -> Blueprint:
+def build_api_v1_blueprint(
+    *, token_store: ApiTokenStore | None = None, rate_limiter: RateLimiter | None = None
+) -> Blueprint:
     bp = Blueprint("api_v1", __name__, url_prefix=BASE_PATH)
     tokens = token_store or ApiTokenStore()
     limiter = rate_limiter or RateLimiter()

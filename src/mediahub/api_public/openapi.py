@@ -275,9 +275,7 @@ def build_spec(base_path: str = "/api/v1", *, server_url: Optional[str] = None) 
         if params:
             op["parameters"] = params
         if ep.get("body") == "json":
-            op["requestBody"] = {
-                "content": {"application/json": {"schema": {"type": "object"}}}
-            }
+            op["requestBody"] = {"content": {"application/json": {"schema": {"type": "object"}}}}
         elif ep.get("body") == "binary":
             op["requestBody"] = {
                 "content": {

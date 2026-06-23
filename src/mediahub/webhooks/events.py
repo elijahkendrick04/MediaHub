@@ -88,7 +88,9 @@ def pack_exported(profile_id: str, run_id: str, *, format: str = "all-formats") 
     )
 
 
-def form_submitted(profile_id: str, form_id: str, *, submission_id: str = "", site_id: str = "") -> dict:
+def form_submitted(
+    profile_id: str, form_id: str, *, submission_id: str = "", site_id: str = ""
+) -> dict:
     return envelope(
         EVENT_FORM_SUBMITTED,
         profile_id,

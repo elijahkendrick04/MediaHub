@@ -60,8 +60,11 @@ class MCPServer:
     def handle_message(self, msg: dict) -> Optional[dict]:
         """Process one JSON-RPC message; return a response dict or None."""
         if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
-            return self._error(msg.get("id") if isinstance(msg, dict) else None,
-                               INVALID_REQUEST, "Invalid JSON-RPC request")
+            return self._error(
+                msg.get("id") if isinstance(msg, dict) else None,
+                INVALID_REQUEST,
+                "Invalid JSON-RPC request",
+            )
         method = msg.get("method")
         msg_id = msg.get("id")
         params = msg.get("params") or {}

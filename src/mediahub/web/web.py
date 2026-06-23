@@ -35725,7 +35725,7 @@ what you're doing, what they should do.</p>
                 '<p class="dim" style="margin:0 0 8px;font-size:13px">Copy it now — for '
                 "security it is hashed at rest and can never be shown again.</p>"
                 f'<code style="display:block;padding:10px 12px;background:var(--bg);'
-                'border:1px solid var(--line);border-radius:8px;font-size:13px;'
+                "border:1px solid var(--line);border-radius:8px;font-size:13px;"
                 f'word-break:break-all">{_h(new_secret)}</code></div>'
             )
         if new_webhook_secret:
@@ -35737,7 +35737,7 @@ what you're doing, what they should do.</p>
                 "receiver to verify the <code>X-MediaHub-Signature</code> header with "
                 "this secret.</p>"
                 f'<code style="display:block;padding:10px 12px;background:var(--bg);'
-                'border:1px solid var(--line);border-radius:8px;font-size:13px;'
+                "border:1px solid var(--line);border-radius:8px;font-size:13px;"
                 f'word-break:break-all">{_h(new_webhook_secret)}</code></div>'
             )
         if notice:
@@ -35867,9 +35867,13 @@ what you're doing, what they should do.</p>
         if endpoints:
             wh_rows = ""
             for ep in endpoints:
-                ev_pills = " ".join(
-                    f'<span class="pill" style="font-size:11px">{_h(e)}</span>' for e in ep.events
-                ) or '<span class="dim" style="font-size:12px">all events off</span>'
+                ev_pills = (
+                    " ".join(
+                        f'<span class="pill" style="font-size:11px">{_h(e)}</span>'
+                        for e in ep.events
+                    )
+                    or '<span class="dim" style="font-size:12px">all events off</span>'
+                )
                 del_html = ""
                 if can_admin:
                     del_html = (
@@ -35912,7 +35916,7 @@ what you're doing, what they should do.</p>
             '<section class="mh-hero" data-lane="" '
             'style="padding-top:var(--sp-6);padding-bottom:var(--sp-4)">'
             '<span class="mh-hero-eyebrow">Organisation</span>'
-            f"<h1>API &amp; webhooks</h1><p class=\"lede\">Programmatic access to {org_name} — "
+            f'<h1>API &amp; webhooks</h1><p class="lede">Programmatic access to {org_name} — '
             "submit results, list and approve cards, export packs, query your data hub, "
             "and get signed event callbacks.</p>"
             "</section>"
@@ -36318,7 +36322,7 @@ what you're doing, what they should do.</p>
             if not store.is_bound(pid):
                 return False, {}
             # The operator is the super-admin and can always finalise.
-            if (is_operator if is_operator is not None else _auth.is_dev_operator()):
+            if is_operator if is_operator is not None else _auth.is_dev_operator():
                 return False, {}
             email = actor_email if actor_email is not None else (_auth.current_user_email() or "")
             ledger = _get_approval_ledger()
@@ -53875,7 +53879,9 @@ voice, and queues them for one-click approval.</p>
     # approval, pack export) run through these callbacks so the public API uses
     # the SAME consent / brand-lock / group-approval gates as the UI.
     def _api_run_starter(profile_id, file_bytes, file_name, *, fetch_pbs=True, club_filter=None):
-        return _start_run(file_bytes, file_name, profile_id, True, fetch_pbs, club_filter=club_filter)
+        return _start_run(
+            file_bytes, file_name, profile_id, True, fetch_pbs, club_filter=club_filter
+        )
 
     def _api_pack_exporter(profile_id, run_id):
         run_data = _load_run(run_id) or {}

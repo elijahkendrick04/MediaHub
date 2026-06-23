@@ -55,8 +55,13 @@ def build_brand_bundle(
         z.writestr("README.txt", readme)
         if cols:
             z.writestr("palette.ase", palette_export.to_ase(cols, names=role_names))
-            z.writestr("palette.gpl", palette_export.to_gpl(cols, palette_name=safe_name, names=role_names))
-            z.writestr("palette.json", palette_export.to_json(cols, palette_name=safe_name, names=role_names))
+            z.writestr(
+                "palette.gpl", palette_export.to_gpl(cols, palette_name=safe_name, names=role_names)
+            )
+            z.writestr(
+                "palette.json",
+                palette_export.to_json(cols, palette_name=safe_name, names=role_names),
+            )
     return buf.getvalue()
 
 

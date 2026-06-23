@@ -24,9 +24,7 @@ Transport = Callable[..., tuple[int, str]]
 def _requests_transport(method, url, headers, params, body):
     import requests  # noqa: PLC0415
 
-    r = requests.request(
-        method, url, headers=headers, params=params, data=body, timeout=30
-    )
+    r = requests.request(method, url, headers=headers, params=params, data=body, timeout=30)
     return r.status_code, r.text
 
 
@@ -80,9 +78,7 @@ def flask_test_transport(client) -> Transport:
             if path.startswith(prefix):
                 path = "/" + path.split("/", 3)[3] if path.count("/") >= 3 else "/"
                 break
-        resp = client.open(
-            path, method=method, headers=headers, query_string=params, data=body
-        )
+        resp = client.open(path, method=method, headers=headers, query_string=params, data=body)
         return resp.status_code, resp.get_data(as_text=True)
 
     return _t

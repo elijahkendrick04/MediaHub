@@ -70,7 +70,9 @@ def _h_reject_card(c: ApiClient, a: dict):
 
 def _h_edit_caption(c: ApiClient, a: dict):
     s, b = c.request(
-        "PATCH", f"/runs/{a['run_id']}/cards/{a['card_id']}", json_body={"edits": a.get("edits", {})}
+        "PATCH",
+        f"/runs/{a['run_id']}/cards/{a['card_id']}",
+        json_body={"edits": a.get("edits", {})},
     )
     return _ok(s), b
 
