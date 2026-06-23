@@ -635,7 +635,7 @@
     each(root, ".mh-lens", bindLens);
     each(root, ".mh-tilt", bindTilt);
     each(root, ".mh-text-generate", function (el) { splitWords(el); observe(el); });
-    each(root, ".mh-highlight, .mh-flapboard", observe);
+    each(root, ".mh-highlight, .mh-flapboard, .mh-shiny-text", observe);
     each(root, ".mh-flip-words", bindFlipWords);
     each(root, ".mh-tabs", bindTabs);
     each(root, ".mh-cs-copy", bindCopy);

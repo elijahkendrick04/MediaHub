@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `af4e82a2a` · Merge pull request #1007: Fix Video Studio footage upload 500 (QA-010) — store now honours DATA_DIR
+**Last updated:** 2026-06-23 · `c2aa83137` · Merge pull request #1017: Platform surface — API, webhooks, MCP, interop (roadmap 1.21)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.21** · Phase 1 (Product) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
 - **1.22** · Phase 1 (Product) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
 - **1.23** · Phase 1 (Product) — AI governance: per-org/per-feature quota ledger on `observability/`, generative moderation, provenance manifests on AI media, role-based feature permissions · ❌ **NOT STARTED**
 - **1.24** · Phase 1 (Product) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
@@ -1207,16 +1206,15 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `7c819303c` | Apply ruff-format v0.8.4 to the 1.21 source (pre-commit hygiene) |
+| 2026-06-23 | `63d9d5644` | File interop + read-only embed (roadmap 1.21, build 4/4) |
+| 2026-06-23 | `296c33f67` | First-party MCP server MediaHub exposes (roadmap 1.21, build 3/4) |
+| 2026-06-23 | `5110a6f32` | Signed outbound webhooks (roadmap 1.21, build 2/4) |
+| 2026-06-23 | `97f958d2e` | Fix QA-011: studio preview composed at half geometry clipped the result time |
+| 2026-06-23 | `ec76e3c82` | fix(interpreter): exclude disqualified swims from PB/moment detection (QA-013) |
+| 2026-06-23 | `fef551a5f` | UI: extend mh-shiny-text to the content-pack meet heroes |
+| 2026-06-23 | `6d3ffc66a` | Public platform API core — /api/v1 (roadmap 1.21, build 1/4) |
 | 2026-06-22 | `ae6e05ba4` | Fix Video Studio footage upload 500 (QA-010): store now honours DATA_DIR |
+| 2026-06-22 | `1a735effc` | UI: add mh-shiny-text glyph sheen from a reactbits.dev audit |
 | 2026-06-22 | `aea5c7bd3` | Fix media library false "store wasn't readable" error on an empty store (QA-009) |
-| 2026-06-22 | `94928f692` | Drop the unused Optional import in fulfilment.py (ruff hygiene hook) |
-| 2026-06-22 | `cf96bebe6` | Mark roadmap 1.20 done — print & merch pipeline |
-| 2026-06-22 | `96ec12e42` | Re-clean stale HY-TEK banner meet titles at render time (QA-008) |
-| 2026-06-22 | `ed470fd5d` | Wire print/merch into the web app + merch mockups + fulfilment slot (1.20, build D) |
-| 2026-06-22 | `e91f5fe3b` | Add print-ready export: PDF/X + the orchestrator (roadmap 1.20, build C) |
-| 2026-06-22 | `b8b36c037` | Add the deterministic print auto-proofer (roadmap 1.20, build B) |
-| 2026-06-22 | `ef02899e1` | Fix three studio/run/finalise UI bugs (QA sweep 2026-06-22, batch 2) |
-| 2026-06-22 | `20b07c17c` | Build the print/merch product foundation (roadmap 1.20, build A) |
-| 2026-06-22 | `70229376b` | Mark roadmap 1.19 done — export & conversion engine |
-| 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
 <!-- /ROADMAP:ACTIVITY -->

@@ -215,6 +215,20 @@ def _extract_swim_from_cells(
                 field_vals[schema.col_type] = raw
                 field_conf[schema.col_type] = _eff
 
+    # A disqualified / non-finish row carries a DSQ marker cell (DQ/DNS/DNF/…)
+    # alongside — or instead of — a printed time. The printed time on a DQ swim
+    # is struck out and must NOT surface as a valid result, so let the marker BE
+    # the time: the bridge maps a non-numeric time to finals_time_cs=None /
+    # dq=True, which excludes the swim from PB & moment detection. Match a cell
+    # whose first token is a DSQ marker so "DQ", "DNS" and rule-coded "DQ 8.2"
+    # forms are all caught.
+    for cell in cells:
+        head = cell.strip().split()[:1]
+        if head and head[0].upper() in _DSQ_VALUES:
+            field_vals["time"] = head[0].upper()
+            field_conf["time"] = max(field_conf.get("time", 0.0), 0.85)
+            break
+
     # A competition result must identify a competitor. A row with a time but no
     # name is a split/continuation line (cumulative lap times listed under a
     # swimmer on a distance event), not a result — dropping it keeps overall
@@ -302,20 +316,29 @@ def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
 def _split_into_records(
     tokens: list[tuple[str, bool]],
 ) -> list[list[tuple[str, bool]]]:
-    """Break a tokenised line into records, each ending at the LAST time token
-    of a consecutive run of time tokens.
+    """Break a tokenised line into records, each ending at the LAST time-like
+    token of a consecutive run of time-like tokens.
 
-    A competitor's row can carry more than one time column — HY-TEK prints the
-    Seed (entry) time immediately before the swum result (Finals, or Prelim on
-    a prelim-only sheet): ``… 2:55.80  3:03.47``. Ending a record at the *first*
-    time token would slice the seed off as the record's time and discard the
-    real result. So we only close a record when the next token is NOT itself a
-    time token, keeping a seed+result pair together; ``_record_to_swim`` then
-    selects the result (the last of the run) and keeps the seed separately.
+    A competitor's row can carry more than one time-like token in a trailing
+    run, for two reasons that both mean "don't close the record at the first
+    one":
+
+    * **Seed + result.** HY-TEK prints the Seed (entry) time immediately before
+      the swum result (Finals, or Prelim on a prelim-only sheet):
+      ``… 2:55.80  3:03.47``. Closing at the *first* time would slice the seed
+      off as the record's time and discard the real result.
+    * **Void time + DSQ marker.** A disqualified swim prints its now-void time
+      right before the DSQ marker (``… 3:29.20  DQ``); the marker is the true
+      terminal and strikes the time out.
+
+    Because a DSQ marker is itself time-like, "close only when the next token is
+    NOT time-like" handles both: the seed+result pair and the void-time+marker
+    pair each stay in one record, and ``_record_to_swim`` selects the result
+    (the last of the run — the Finals/Prelim time, or the DSQ marker for a DQ).
 
     This still splits the common two-records-per-line layout correctly, because
-    there the next token after a record's time is the following record's place
-    number — not a time.
+    there the token after a record's time is the next record's place number —
+    not a time.
     """
     records: list[list[tuple[str, bool]]] = []
     cur: list[tuple[str, bool]] = []
@@ -371,6 +394,11 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         return None
     body = rec[:k]
     time_tok = swim_times[-1]  # the swum result (Finals/Prelim), never the seed
+    # An earlier time in the run is the Seed/entry time, kept separately so it is
+    # never read as the result. For a DQ'd swim ("… 2:55.80 DQ") the result is
+    # the marker and the preceding time is the swimmer's seed. Peeling the whole
+    # run keeps both the seed and any void time out of the body, so neither is
+    # mis-read as club/age data.
     seed_tok = swim_times[0] if len(swim_times) >= 2 else None
 
     # Place (optional leading rank).

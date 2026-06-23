@@ -86,6 +86,13 @@ ocr = [
   "pytesseract>=0.3.13",
   "pypdfium2>=5.10.1",
 ]
+# Optional PSD import (roadmap 1.21, interop/psd_import.py). psd-tools is
+# MIT-licensed, pure-Python (reads .psd; renders the flattened composite via
+# Pillow, already a core dep). Off by default — import_psd() honest-errors with
+# a clear "install the psd extra" message when this is absent, never a stub.
+psd = [
+  "psd-tools>=1.10.0",
+]
 # Voiceover backends (operator-gated by MEDIAHUB_VOICEOVER=1). Roadmap 1.7 made
 # local Piper the DEFAULT (zero-cost, fully offline; caption text never leaves
 # the box). piper-tts is GPL-3.0-or-later, used only server-side in the
