@@ -397,6 +397,17 @@ def interpreted_to_canonical(
             except (TypeError, ValueError):
                 place_int = None
 
+            # Round: a row carrying a finals-qualification marker ("q") is a
+            # heat/preliminary swim, so it must NOT be read as a final-round
+            # result (the medal detector awards medals only from finals). Every
+            # other row keeps the default timed-final reading. Mapping prelim →
+            # the canonical "heat" code is what keeps a heat place-1 from
+            # surfacing as a fabricated gold while the genuine final still wins
+            # its medal with the final time.
+            swim_round = (
+                "heat" if getattr(swim, "round_hint", None) == "prelim" else "timed_final"
+            )
+
             result = RaceResult(
                 swimmer_key=swimmer_key,
                 club_code=club_code or None,
@@ -408,7 +419,7 @@ def interpreted_to_canonical(
                 finals_time_cs=time_cs,
                 seed_time_cs=None,
                 place=place_int,
-                round="timed_final",
+                round=swim_round,
                 dq=time_cs is None,
                 status="completed" if time_cs else "dq",
                 swim_date=start_date,

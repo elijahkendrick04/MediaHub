@@ -267,9 +267,29 @@ _PLACE_TOKEN = re.compile(r"^=?\*?\d{1,3}\.?$|^-{2,}$")
 _AGEYOB_TOKEN = re.compile(r"^\(?\d{1,4}\)?$")
 _DSQ_VALUES = {"DQ", "DNS", "DNF", "DNC", "NS", "SCR", "WD"}
 
+# Finals-qualification marker trailing a heat/prelim time: "q", "Q" or the FINA-
+# points form "q430". HY-TEK stamps it only on a preliminary swim that advanced
+# to a final, so a row carrying it is a heat, not a final-round result. It is
+# report furniture (like the DSQ markers above), not swim ontology.
+_QUALIFIER_TOKEN = re.compile(r"^[qQ]\d*$")
+
+# A reaction time is a sub-second value ("0.63", "+0.71") printed after the swim
+# time in some layouts. It is never the achieved race result (no pool race is
+# under a second), so it must not be mistaken for the time when a row prints
+# several time-shaped tokens.
+_REACTION_TOKEN = re.compile(r"^[+\-]?0\.\d{2,3}$")
+
 
 def _is_time_like(tok: str) -> bool:
     return bool(_TIME_TOKEN.match(tok) or _DSQ_TOKEN.match(tok))
+
+
+def _is_qualifier(tok: str) -> bool:
+    return bool(_QUALIFIER_TOKEN.match(tok))
+
+
+def _is_reaction_like(tok: str) -> bool:
+    return bool(_REACTION_TOKEN.match(tok))
 
 
 def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
@@ -291,14 +311,40 @@ def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
 def _split_into_records(
     tokens: list[tuple[str, bool]],
 ) -> list[list[tuple[str, bool]]]:
-    """Break a tokenised line into records, each ending at a time token."""
+    """Break a tokenised line into one record per competitor.
+
+    A record runs from a competitor's leading token up to AND INCLUDING their
+    achieved time. Crucially, several time columns for ONE competitor stay in
+    the same record: a "Seed Finals" or "Prelim Finals" layout prints two times
+    on the row, and a finals-qualification marker ("q"/"q430") trails the time
+    on a heat. A new record only begins when a non-time, non-qualifier token
+    appears AFTER a time has been seen — i.e. the next competitor's place/name.
+
+    This fixes two faults of the old "split at the first time token" rule, which
+    truncated every row at its first time: it surfaced the SEED time as the
+    result (discarding the achieved final time), and it threw away the trailing
+    "q" marker that distinguishes a heat from a final. The multi-competitor
+    per-line layout still works, because the next competitor starts with a
+    place/name token (never time-shaped).
+    """
     records: list[list[tuple[str, bool]]] = []
     cur: list[tuple[str, bool]] = []
+    seen_time = False
     for tok, big in tokens:
+        if seen_time and not _is_time_like(tok) and not _is_qualifier(tok):
+            # First non-time, non-qualifier token after a time → the previous
+            # competitor's record is complete; this token begins the next one.
+            records.append(cur)
+            cur = [(tok, big)]
+            seen_time = False
+            continue
         cur.append((tok, big))
         if _is_time_like(tok):
-            records.append(cur)
-            cur = []
+            seen_time = True
+    # Close the final record only if it actually carries a time (a trailing
+    # fragment of points/markers with no time is not a competitor).
+    if cur and any(_is_time_like(t) for t, _ in cur):
+        records.append(cur)
     return records
 
 
@@ -318,11 +364,29 @@ def _looks_like_relay(name_toks: list[str]) -> bool:
 
 
 def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
-    """Classify one time-terminated record's tokens into an InterpretedSwim."""
+    """Classify one competitor record's tokens into an InterpretedSwim."""
     if not rec:
         return None
-    time_tok = rec[-1][0]
-    body = rec[:-1]
+
+    # Locate the time column(s). A row may print several time-shaped tokens —
+    # seed + finals, or prelim + finals (+ a reaction time, + a "q" marker). The
+    # ACHIEVED race time is the LAST real race time on the row; a sub-second
+    # value is a reaction time, never the result; and the body (place/name/club)
+    # is everything BEFORE the first time. Falling back to the first time only
+    # if every time-shaped token is reaction-shaped keeps degenerate rows alive.
+    time_idxs = [i for i, (t, _) in enumerate(rec) if _is_time_like(t)]
+    if not time_idxs:
+        return None
+    first_time_idx = time_idxs[0]
+    achieved_candidates = [i for i in time_idxs if not _is_reaction_like(rec[i][0])]
+    achieved_idx = achieved_candidates[-1] if achieved_candidates else time_idxs[-1]
+    time_tok = rec[achieved_idx][0]
+    body = rec[:first_time_idx]
+
+    # A finals-qualification marker ("q"/"q430") trailing the achieved time means
+    # this row is a heat/preliminary swim that qualified to a final — not a
+    # final-round result. Surface it so the canonical bridge marks the round.
+    qualified = any(_is_qualifier(t) for t, _ in rec[achieved_idx + 1 :])
 
     # Place (optional leading rank).
     place_val: int | None = None
@@ -400,6 +464,7 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         confidence=round(min(row_conf, 1.0), 4),
         raw_row=" ".join(t for t, _ in rec),
         field_confidence=field_conf,
+        round_hint="prelim" if qualified else None,
     )
 
 
