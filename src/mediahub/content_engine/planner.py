@@ -477,7 +477,12 @@ def load_latest_plan(org_id: str, *, data_dir: Optional[Path] = None) -> Optiona
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+        # Any unreadable/undecodable file degrades to "never planned". ValueError
+        # covers both json.JSONDecodeError (malformed JSON) and UnicodeDecodeError
+        # (a non-UTF-8 file on the durable disk) — both are ValueError subclasses,
+        # neither is an OSError, so the narrower (OSError, JSONDecodeError) used to
+        # let a non-UTF-8 latest.json escape and 500 the loader (QA-016).
         return None
     if not isinstance(raw, dict):
         return None

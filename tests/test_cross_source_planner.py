@@ -677,3 +677,53 @@ def test_plan_index_survives_malformed_persisted_plan(app_with_org):
         html = page.get_data(as_text=True)
         # The one well-formed item still renders; the junk entries are skipped.
         assert "Good item" in html
+
+
+def test_plan_routes_survive_non_utf8_persisted_files(app_with_org):
+    """QA-016 (re-open #2) — the crash is in plan *loading*, not page rendering.
+
+    DATA_DIR is a durable mounted disk, so a persisted
+    ``content_plans/<org>/latest.json`` or ``planner_inputs/<org>.json`` can end
+    up non-UTF-8 (a torn write, a disk fault, a file re-encoded by an external
+    tool). ``read_text(encoding='utf-8')`` then raises ``UnicodeDecodeError`` — a
+    ``ValueError`` subclass, NOT ``OSError``/``JSONDecodeError`` — which escaped
+    both loaders' narrow ``except`` and 500'd them. ``/api/plan/latest`` (which
+    only does ``load_latest_plan`` → ``jsonify``, never rendering a page) 500'd
+    too, proving the fault is in loading, not rendering — which the prior two
+    fixes (page-render hardening) never touched. The loaders must degrade a
+    corrupt file to None / empty so BOTH routes return 200.
+
+    Fails before the fix (UnicodeDecodeError escapes the loaders), passes after.
+    """
+    from mediahub.content_engine.inputs import (
+        _inputs_path,
+        empty_inputs,
+        load_planner_inputs,
+    )
+    from mediahub.content_engine.planner import _plans_dir, load_latest_plan
+
+    # A JSON-shaped document with a raw 0xe9 byte inside a string: valid bytes on
+    # disk, but invalid UTF-8, so the utf-8 decode raises before json.loads runs.
+    bad = b'{"profile_id":"org-test","items":["caf\xe9"]}'
+    (_plans_dir("org-test") / "latest.json").write_bytes(bad)
+    _inputs_path("org-test").write_bytes(bad)
+
+    # The loaders degrade the unreadable file rather than raising.
+    assert load_latest_plan("org-test") is None
+    assert load_planner_inputs("org-test") == empty_inputs()
+
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+
+        # The JSON endpoint never renders a page — a 200 here proves the crash
+        # was in plan loading, the layer the prior page-render fixes missed.
+        api = client.get("/api/plan/latest")
+        assert api.status_code == 200
+        body = api.get_json()
+        assert body["ok"] is True and body["plan"] is None
+
+        # And the page renders its honest empty state.
+        page = client.get("/plan")
+        assert page.status_code == 200
+        html = page.get_data(as_text=True)
+        assert "What should we" in html and "post next?" in html
