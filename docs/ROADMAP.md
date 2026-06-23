@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `cbfd3670a` · fix(web): /plan index renders persisted plans defensively (QA-016) (#1031)
+**Last updated:** 2026-06-23 · `a26e7f329` · Merge pull request #1036 from elijahkendrick04/claude/nice-goodall-j9tmca
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1205,6 +1205,9 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `28b63d95e` | fix(observability): measure uptime over the tracked span, not the full window (QA-017) |
+| 2026-06-23 | `b5f7b660c` | test(qa015): wait for async resume-input cleanup (fix parallel-CI flake) |
+| 2026-06-23 | `3a9738027` | fix(web): /plan index must not 500 on sport-load or malformed plan (QA-016 re-open) |
 | 2026-06-23 | `510ccb177` | fix(web): /plan index renders persisted plans defensively (QA-016) |
 | 2026-06-23 | `c2a3b9397` | fix(web): resume interrupted runs so large meets finish (QA-015) |
 | 2026-06-23 | `f25c368ab` | style(pwa): wrap _save_library_photo signature (ruff-format) |
@@ -1212,7 +1215,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `05bb2a12b` | feat(pwa): mobile caption/crop sheet, install affordance, icons + docs (1.22 build 3) |
 | 2026-06-23 | `430ebfecc` | feat(pwa): offline-tolerant approval queue (1.22 build 2) |
 | 2026-06-23 | `c41b6cf6d` | feat(pwa): share-target + mobile camera capture to media library (1.22 build 1) |
-| 2026-06-23 | `7c819303c` | Apply ruff-format v0.8.4 to the 1.21 source (pre-commit hygiene) |
-| 2026-06-23 | `346d3d45b` | fix(interpreter): read the swum result time, never the seed (QA-014) |
-| 2026-06-23 | `191686ad6` | style: ruff-format interpreter_bridge swim_round line |
 <!-- /ROADMAP:ACTIVITY -->

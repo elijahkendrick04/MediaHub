@@ -24971,6 +24971,33 @@ self.addEventListener('fetch', function(e){
         except (ValueError, TypeError):
             return _h(ts[:19])
 
+    def _uptime_tracking_note(*stats: dict) -> str:
+        """Explain a clamped uptime window.
+
+        The heartbeat store starts fresh on a new disk / after a deploy that
+        didn't carry the DB forward, so a 7d/30d window can be older than the
+        data. ``uptime_stats`` then measures uptime over the tracked period
+        only (first heartbeat → now) and flags ``window_clamped``. Surface
+        that here so an operator understands why the longer windows read
+        "tracking since …" rather than mistaking a young store for an outage.
+        """
+        since = ""
+        for s in stats:
+            if s.get("has_data") and s.get("window_clamped"):
+                ts = s.get("tracking_since")
+                if ts:
+                    since = ts
+                    break
+        if not since:
+            return ""
+        return (
+            '<p class="dim" style="margin-top:10px;font-size:12px">'
+            "Uptime is measured from the first recorded heartbeat &mdash; "
+            f"tracking since <b>{_h(since[:19])} UTC</b> ({_h(_humanize_when(since))}). "
+            "Windows longer than that cover the tracked period only, so a recent "
+            "deploy or restart isn&rsquo;t counted as downtime.</p>"
+        )
+
     @app.route("/status")
     def status_page():
         # Public view: just "Website operational" / "Website down". The detailed
@@ -25107,7 +25134,8 @@ self.addEventListener('fetch', function(e){
             f"<td>{_format_uptime_pct(s30)}</td>"
             f"<td>{_h(s30.get('samples', 0))}</td>"
             f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
-            "</tbody></table></div>"
+            "</tbody></table>"
+            f"{_uptime_tracking_note(s24, s7d, s30)}</div>"
             f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
             f"{last_incident_html}</div>"
             f"{incidents_html}"
@@ -26620,7 +26648,8 @@ self.addEventListener('fetch', function(e){
             f"<td>{_format_uptime_pct(s30)}</td>"
             f"<td>{_h(s30.get('samples', 0))}</td>"
             f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
-            "</tbody></table></div>"
+            "</tbody></table>"
+            f"{_uptime_tracking_note(s24, s7d, s30)}</div>"
             f'<div class="card" style="padding:14px 22px">'
             f"{last_incident_html}</div>"
         )
@@ -27158,7 +27187,19 @@ self.addEventListener('fetch', function(e){
 
         plan = load_latest_plan(pid)
         inputs = load_planner_inputs(pid)
-        sports = [(p.sport, p.display_name) for p in list_sport_profiles()]
+        # Load the sport list defensively. This is the one piece of shared
+        # config the index reads that every working /plan/<view> sub-view
+        # either guards (calendar/analytics resolve the sport through
+        # _org_calendar_sport, which wraps list_sport_profiles in try/except)
+        # or never touches (board/grid). An unguarded raise here — a malformed
+        # or operator-added profile YAML, a profiles dir pointed elsewhere, an
+        # I/O error — would 500 ONLY the index while every sub-view stays up,
+        # which is exactly the QA-016 scope. Degrade like the sub-views do.
+        try:
+            sports = [(p.sport, p.display_name) for p in list_sport_profiles()]
+        except Exception:
+            app.logger.warning("plan page: sport profiles failed to load", exc_info=True)
+            sports = []
 
         # The sport comes from the ORGANISATION, not a per-page dropdown.
         # org_type was chosen at setup; map it onto an available sport
@@ -27205,19 +27246,27 @@ self.addEventListener('fetch', function(e){
 
         # Persisted plans are durable state — DATA_DIR is a mounted disk that
         # survives redeploys — so the index can load a plan an *older* planner
-        # wrote, whose item carries a None/blank numeric field the current
-        # engine no longer emits. Coerce defensively: one legacy field must
-        # never 500 the landing page while every sub-view (none of which read
-        # the plan) stays up. This is the /plan-vs-/plan/<view> diff (QA-016).
+        # wrote, whose shape the current engine no longer emits (a None/blank
+        # numeric field, a non-list `items`, a stray non-dict entry). The index
+        # is the ONLY handler that renders plan items — no /plan/<view> sub-view
+        # reads the plan — so any such shape would 500 only the index. Render
+        # defensively: coerce the scalars, treat only real lists as lists, and
+        # skip anything that isn't a proper item, so one stale field never takes
+        # down the landing page. This is the /plan-vs-/plan/<view> diff (QA-016).
         def _as_int(value: object, default: int = 0) -> int:
             try:
                 return int(value)
             except (TypeError, ValueError):
                 return default
 
+        def _as_list(value: object) -> list:
+            return value if isinstance(value, list) else []
+
         items_html = ""
         if plan:
-            for rank, item in enumerate(plan.get("items") or [], start=1):
+            for rank, item in enumerate(_as_list(plan.get("items")), start=1):
+                if not isinstance(item, dict):
+                    continue
                 slug = item.get("post_type", "")
                 ct = implemented_content_type(slug)
                 create_link = ""
@@ -27231,12 +27280,12 @@ self.addEventListener('fetch', function(e){
                             )
                         except Exception:
                             create_link = ""
-                chips = "".join(src_chip.get(s, "") for s in item.get("sources_used") or [])
+                chips = "".join(src_chip.get(s, "") for s in _as_list(item.get("sources_used")))
                 if not chips:
                     chips = '<span class="tag">baseline</span>'
                 reasons = "".join(
                     f'<li style="margin:2px 0;color:var(--ink-muted);font-size:12.5px">{_h(r)}</li>'
-                    for r in item.get("reasons") or []
+                    for r in _as_list(item.get("reasons"))
                 )
                 autonomy = _h(
                     (item.get("default_autonomy") or "approval_required").replace("_", " ")
@@ -27266,7 +27315,7 @@ self.addEventListener('fetch', function(e){
             counts = plan.get("source_counts") or {}
             notes_html = "".join(
                 f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>'
-                for n in plan.get("notes") or []
+                for n in _as_list(plan.get("notes"))
             )
             plan_meta = f"""
 <div class="card" style="margin-bottom:14px">
