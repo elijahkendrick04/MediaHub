@@ -15010,6 +15010,10 @@ def _hero_product_demo() -> str:
         '<span class="mh-demo-eyebrow">02 · Review</span>'
         '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
         "</div>"
+        # Queue position indicator: shows the volunteer which moment they are
+        # on and how many remain — fixes the dead-end where "3 moments ranked"
+        # in Scene 1 was never reflected in the review/approve stages.
+        '<div class="mh-demo-qcount">1 of 3 &middot; 2 remaining</div>'
         '<div class="mh-demo-card">'
         # The OUTPUT — a real, premium branded story card the engine returns.
         '<div class="mh-demo-thumb">'

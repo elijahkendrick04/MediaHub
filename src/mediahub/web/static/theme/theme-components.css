@@ -1496,6 +1496,17 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   transform: scaleX(0);
 }
 .mh-demo-phase.p2 .mh-demo-conf .track i { animation: mh-demo-conf 12s var(--ease-out) infinite; }
+/* Queue position indicator — shows '1 of 3 · 2 remaining' between the row
+   header and the card so a visitor understands there are more moments to triage
+   (fixes the dead-end after Scene 1 advertises 3 ranked moments). */
+.mh-demo-qcount {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: var(--sp-2);
+}
 .mh-demo-card {
   display: grid;
   grid-template-columns: 150px 1fr;
