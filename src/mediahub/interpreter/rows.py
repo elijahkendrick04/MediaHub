@@ -163,6 +163,11 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
 
 _NORMALISERS = {
     "time": _normalise_time,
+    # The seed/entry-time column normalises identically to a result time but is
+    # kept under its own type so it is never selected as the swum result. The
+    # header-driven schema (priority Finals Time > Prelim Time; never Seed Time)
+    # assigns "time" to the result column and "seed_time" to the entry column.
+    "seed_time": _normalise_time,
     "place": _normalise_place,
     "yob": _normalise_yob,
     "reaction": _normalise_reaction,
@@ -240,6 +245,7 @@ def _extract_swim_from_cells(
         club=field_vals.get("club"),  # type: ignore[arg-type]
         place=field_vals.get("place"),  # type: ignore[arg-type]
         time=field_vals.get("time"),  # type: ignore[arg-type]
+        seed_time=field_vals.get("seed_time"),  # type: ignore[arg-type]
         reaction=field_vals.get("reaction"),  # type: ignore[arg-type]
         confidence=round(min(row_conf, 1.0), 4),
         raw_row="\t".join(cells),
@@ -401,6 +407,13 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     time_tok = rec[achieved_idx][0]
     body = rec[:first_time_idx]
 
+    # The Seed/entry time is the FIRST real race time when a row prints more than
+    # one (Seed before Finals/Prelim). Kept separately (never read as the result)
+    # so raw extraction stays distinct from the canonical swum time and a swim
+    # slower than its seed can never be mistaken for a PB. For a DQ'd swim
+    # ("… 2:55.80 DQ") the achieved time is the marker and this is the seed.
+    seed_tok = rec[achieved_candidates[0]][0] if len(achieved_candidates) >= 2 else None
+
     # A finals-qualification marker ("q"/"q430") trailing the achieved time means
     # this row is a heat/preliminary swim that qualified to a final — not a
     # final-round result. Surface it so the canonical bridge marks the round.
@@ -451,6 +464,13 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     if time_val is None:
         return None
 
+    # Seed/entry time (the column before the result), kept separately so it is
+    # never confused with the swum result or a prior best. Drop any J/X/R marker
+    # prefix exactly as the result token does.
+    seed_val: str | None = None
+    if seed_tok is not None:
+        seed_val, _seed_conf = _normalise_time(re.sub(r"^[JXRjxr]", "", seed_tok))
+
     # Drop leading lane / heat numbers sitting before the name (the place was
     # already consumed, and a competitor name never begins with a bare number).
     while name_toks and name_toks[0].strip("()").isdigit():
@@ -477,6 +497,9 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         if club_val is not None:
             field_conf["club"] = cconf
 
+    if seed_val is not None:
+        field_conf["seed_time"] = 0.80
+
     row_conf = sum(field_conf.values()) / len(field_conf)
     return InterpretedSwim(
         swimmer_name=name,
@@ -484,6 +507,7 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         club=club_val,
         place=place_val,
         time=time_val,
+        seed_time=seed_val,
         reaction=None,
         confidence=round(min(row_conf, 1.0), 4),
         raw_row=" ".join(t for t, _ in rec),

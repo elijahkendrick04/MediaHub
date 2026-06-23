@@ -69,11 +69,17 @@ class InterpretedSwim:
     yob: Optional[int]
     club: Optional[str]
     place: Optional[int]
-    time: Optional[str]  # canonical "mm:ss.cc" or "ss.cc"
+    time: Optional[str]  # canonical "mm:ss.cc" or "ss.cc" — the SWUM result
     reaction: Optional[str]
     confidence: float  # 0..1 per swim
     raw_row: str
     field_confidence: dict[str, float] = field(default_factory=dict)
+    # The swimmer's seed/entry time when the source prints one alongside the
+    # result (HY-TEK "Seed Time" column). It is the entry time, NOT the time
+    # swum, and must never be read as the result. Kept separately so raw
+    # extraction stays distinct from the canonical swum time and so a regression
+    # vs the same row's seed can never be mistaken for a PB.
+    seed_time: Optional[str] = None
     # Governing-body member id (Swim England/Wales "tiref", USS id) when the
     # source format carries it (HY3/CL2/LENEX). None for formats that don't
     # (PDF/HTML/free text). Used to look a swimmer's official PBs up directly.
