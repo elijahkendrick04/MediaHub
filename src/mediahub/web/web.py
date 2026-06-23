@@ -33302,8 +33302,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             title="Create account",
             heading='Create your <em class="editorial">account</em>.',
             lede=(
-                "One account runs your club's content. Free to start &mdash; "
-                "3 runs a month, no card required."
+                "One account runs your club&rsquo;s content. Free to start &mdash; "
+                "3 runs a month, no card required. "
+                "Before you start, have your club&rsquo;s website, social profiles, and brand "
+                "guidelines to hand &mdash; the engine needs them to produce on-brand content "
+                "(setup takes about 5&nbsp;minutes)."
             ),
             action_url=url_for("signup_post"),
             submit_label="Create account",
