@@ -274,7 +274,14 @@ def test_interrupted_large_run_resumes_to_completion(web):
     assert row["status"] == "done", f"resume did not complete: {row['error']}"
     rd = web._load_run(run_id)
     assert rd and len(rd.get("cards") or []) > 0
-    # A clean terminal reclaims the stored input.
+    # A clean terminal reclaims the stored input — but the reclaim runs in
+    # _execute_run's `finally`, *after* the DB status flips to 'done' (and after
+    # the post-run notifications), so _wait_terminal can return a beat before the
+    # input file is gone. Wait for the reclaim rather than assuming it lands in
+    # lock-step with the status flip — the gap only opens under parallel CI load.
+    cleanup_deadline = time.time() + 30.0
+    while web._resume_input_exists(run_id) and time.time() < cleanup_deadline:
+        time.sleep(0.05)
     assert not web._resume_input_exists(run_id)
 
 
