@@ -61,6 +61,7 @@ Parts C & D. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
 | `openfootball/football.json` | Football fixtures/results | Public domain |
 | `ndPPPhz/Fixture-Generator` | Round-robin fixtures (npm) | MIT |
 | `mutonby/openshorts` | Clip + publish shorts | MIT |
+| `psd-tools/psd-tools` (pip `psd-tools`) | Optional PSD import (roadmap 1.21, `interop/psd_import.py`) — reads `.psd` and renders the flattened composite via Pillow (a core dep). The `psd` extra; off by default, `import_psd()` honest-errors without it. | MIT — pure-Python, no per-call cost, no external service |
 
 ### ⚠️ ADOPT WITH CAUTION — usable if the caveat is respected
 
