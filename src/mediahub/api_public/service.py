@@ -326,6 +326,75 @@ def list_brand_kits(profile_id: str) -> dict:
     return {"brand_kits": out, "count": len(out)}
 
 
+# --- file interop (roadmap 1.21 build 4) -----------------------------------
+def _kit_colours(profile_id: str, kit_id: str):
+    """Resolve a kit's ordered colours + role names, or raise not_found."""
+    from mediahub.brand import kits as _kits
+    from mediahub.web.club_profile import load_profile
+
+    prof = load_profile(profile_id)
+    if prof is None:
+        raise not_found("brand kit")
+    kit = _kits.get_kit(prof, kit_id)
+    if kit is None:
+        raise not_found("brand kit")
+    pal = kit.palette or {}
+    order = ["primary", "secondary", "accent", "fourth"]
+    names = [r for r in order if pal.get(r)]
+    colours = [pal[r] for r in names]
+    return kit, colours, names
+
+
+def export_palette(profile_id: str, kit_id: str, fmt: str = "ase") -> tuple[bytes, str, str]:
+    """Export a kit's palette. Returns (bytes, mime, download_name)."""
+    from mediahub.interop import palette_export
+
+    if fmt not in palette_export.FORMATS:
+        raise bad_request(f"format must be one of {palette_export.FORMATS}")
+    kit, colours, names = _kit_colours(profile_id, kit_id)
+    if not colours:
+        raise not_found("palette (kit has no colours)")
+    data = palette_export.export(colours, fmt, palette_name=kit.name, names=names)
+    return data, palette_export.MIME[fmt], f"{kit_id}-palette{palette_export.EXT[fmt]}"
+
+
+def export_brand_bundle(profile_id: str, kit_id: str) -> tuple[bytes, str]:
+    """Export a kit as a ZIP bundle. Returns (zip_bytes, download_name)."""
+    from mediahub.interop import asset_bundle
+    from mediahub.web.club_profile import load_profile
+
+    kit, colours, names = _kit_colours(profile_id, kit_id)
+    prof = load_profile(profile_id)
+    data = asset_bundle.build_brand_bundle(
+        kit.name,
+        colours,
+        font_pairing=kit.font_pairing,
+        role_names=names,
+        org_name=(getattr(prof, "display_name", "") or ""),
+    )
+    return data, f"{kit_id}-brand-bundle.zip"
+
+
+def import_svg_asset(profile_id: str, svg_bytes: bytes, filename: str = "import.svg") -> dict:
+    from mediahub.interop.svg_import import SvgImportError, import_svg
+
+    try:
+        return import_svg(profile_id, svg_bytes, filename)
+    except SvgImportError as e:
+        raise bad_request(str(e))
+
+
+def import_psd_asset(profile_id: str, psd_bytes: bytes, filename: str = "import.psd") -> dict:
+    from mediahub.interop.psd_import import PsdImportError, PsdImportUnavailable, import_psd
+
+    try:
+        return import_psd(profile_id, psd_bytes, filename)
+    except PsdImportUnavailable as e:
+        raise unavailable(str(e))
+    except PsdImportError as e:
+        raise bad_request(str(e))
+
+
 # --- webhooks (roadmap 1.21 build 2) ---------------------------------------
 def list_webhooks(profile_id: str) -> dict:
     from mediahub.webhooks.registry import EndpointStore
@@ -420,4 +489,8 @@ __all__ = [
     "get_webhook",
     "delete_webhook",
     "list_webhook_deliveries",
+    "export_palette",
+    "export_brand_bundle",
+    "import_svg_asset",
+    "import_psd_asset",
 ]

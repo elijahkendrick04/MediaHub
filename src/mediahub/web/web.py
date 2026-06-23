@@ -16110,6 +16110,8 @@ def create_app() -> Flask:
             "public_wall_json",
             "public_wall_rss",
             "public_wall_card_png",
+            # 1.21 — oEmbed discovery for the public wall (read-only, public).
+            "oembed",
             # 1.16 — published club microsites: token-keyed public surfaces (the
             # token is the access control; a per-site password may gate pages).
             "site_public_home",
@@ -45000,6 +45002,54 @@ ever appear; queued, edited and rejected cards never do.</p>
         resp = make_response(_wall_page_html(prof, _pw.wall_cards(prof), token, embed=True))
         resp.headers["Cache-Control"] = "public, max-age=300"
         return resp
+
+    @app.route("/oembed")
+    def oembed():
+        """oEmbed (read-only) for a club's public achievements wall (roadmap 1.21).
+
+        Pass ``?url=<wall url>`` (a ``/wall/<token>`` page) and get oEmbed JSON
+        whose ``html`` is the wall's embed iframe — so a CMS (WordPress, etc.) can
+        auto-embed approved content. The unguessable wall token is the capability
+        (the "signed" embed); an unknown or disabled wall returns 404. Only
+        APPROVED cards are ever shown (enforced by the wall itself)."""
+        raw = (request.args.get("url") or "").strip()
+        fmt = (request.args.get("format") or "json").lower()
+        if fmt != "json":
+            # We offer JSON oEmbed only; XML is not implemented.
+            return jsonify({"error": "unsupported_format", "message": "format must be json"}), 501
+        m = re.search(r"/wall/([A-Za-z0-9_\-]+)", raw)
+        if not m:
+            abort(404)
+        token = m.group(1)
+        prof = _resolve_wall_or_404(token)  # 404 if invalid / wall disabled
+
+        def _clamp(name, default, lo, hi):
+            try:
+                return max(lo, min(hi, int(request.args.get(name, default))))
+            except (TypeError, ValueError):
+                return default
+
+        width = _clamp("maxwidth", 600, 200, 1200)
+        height = _clamp("maxheight", 800, 200, 2000)
+        embed_url = url_for("public_wall_embed", token=token, _external=True)
+        html = (
+            f'<iframe src="{_h(embed_url)}" width="{width}" height="{height}" '
+            'style="border:0;max-width:100%" loading="lazy" '
+            'title="MediaHub achievements wall"></iframe>'
+        )
+        return jsonify(
+            {
+                "version": "1.0",
+                "type": "rich",
+                "provider_name": "MediaHub",
+                "provider_url": request.host_url.rstrip("/"),
+                "title": f"{prof.display_name} — achievements",
+                "html": html,
+                "width": width,
+                "height": height,
+                "cache_age": 300,
+            }
+        )
 
     @app.route("/wall/<token>/feed.json")
     def public_wall_json(token: str):

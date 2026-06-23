@@ -80,7 +80,12 @@ scope it needed.
 | PATCH | `/runs/{id}/cards/{cid}` | `cards:write` | Edit captions (`{"edits": {…}}`) |
 | GET | `/runs/{id}/export` | `content:export` | Download the pack ZIP |
 | GET | `/brand-kits` | `brand:read` | List brand kits |
+| GET | `/brand-kits/{id}/palette` | `brand:read` | Export a palette (`?format=ase\|gpl\|json`) |
+| GET | `/brand-kits/{id}/bundle` | `brand:read` | Export a brand-bundle ZIP |
 | GET | `/data/tables` | `data:read` | List data-hub tables |
+| GET | `/webhooks` … | `webhooks:read`/`:manage` | Webhook CRUD + deliveries (see [WEBHOOKS.md](WEBHOOKS.md)) |
+| POST | `/media/import-svg` | `media:write` | Import a sanitised SVG (see [INTEROP.md](INTEROP.md)) |
+| POST | `/media/import-psd` | `media:write` | Import a PSD (flattened; needs the `psd` extra) |
 
 ## Quickstart
 

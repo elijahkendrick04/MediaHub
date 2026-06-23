@@ -199,6 +199,45 @@ OPERATIONS: list[dict] = [
         "tag": "Webhooks",
         "params": ["endpoint_id"],
     },
+    {
+        "method": "get",
+        "path": "/brand-kits/{kit_id}/palette",
+        "operation_id": "exportPalette",
+        "summary": "Export a kit's palette (?format=ase|gpl|json)",
+        "scope": "brand:read",
+        "tag": "Interop",
+        "params": ["kit_id"],
+        "query": [("format", "string")],
+    },
+    {
+        "method": "get",
+        "path": "/brand-kits/{kit_id}/bundle",
+        "operation_id": "exportBrandBundle",
+        "summary": "Export a kit as a portable brand-bundle ZIP",
+        "scope": "brand:read",
+        "tag": "Interop",
+        "params": ["kit_id"],
+    },
+    {
+        "method": "post",
+        "path": "/media/import-svg",
+        "operation_id": "importSvg",
+        "summary": "Import an SVG as a sanitised media asset",
+        "scope": "media:write",
+        "tag": "Interop",
+        "body": "binary",
+        "query": [("filename", "string")],
+    },
+    {
+        "method": "post",
+        "path": "/media/import-psd",
+        "operation_id": "importPsd",
+        "summary": "Import a PSD (flattened) as a media asset (needs the psd extra)",
+        "scope": "media:write",
+        "tag": "Interop",
+        "body": "binary",
+        "query": [("filename", "string")],
+    },
 ]
 
 
@@ -274,6 +313,7 @@ def build_spec(base_path: str = "/api/v1", *, server_url: Optional[str] = None) 
             {"name": "Brand"},
             {"name": "Data"},
             {"name": "Webhooks"},
+            {"name": "Interop"},
         ],
         "paths": paths,
         "components": {

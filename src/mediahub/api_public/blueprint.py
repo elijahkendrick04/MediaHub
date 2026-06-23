@@ -280,6 +280,47 @@ def build_api_v1_blueprint(*, token_store: ApiTokenStore | None = None,
         pid = _require("webhooks:read")
         return jsonify(service.list_webhook_deliveries(pid, endpoint_id))
 
+    # --- file interop ------------------------------------------------------
+    @bp.route("/brand-kits/<kit_id>/palette", methods=["GET"])
+    def export_palette(kit_id: str):
+        pid = _require("brand:read")
+        data, mime, name = service.export_palette(pid, kit_id, request.args.get("format", "ase"))
+        return send_file(io.BytesIO(data), as_attachment=True, download_name=name, mimetype=mime)
+
+    @bp.route("/brand-kits/<kit_id>/bundle", methods=["GET"])
+    def export_bundle(kit_id: str):
+        pid = _require("brand:read")
+        data, name = service.export_brand_bundle(pid, kit_id)
+        return send_file(
+            io.BytesIO(data), as_attachment=True, download_name=name, mimetype="application/zip"
+        )
+
+    @bp.route("/media/import-svg", methods=["POST"])
+    def import_svg():
+        pid = _require("media:write")
+        filename = request.args.get("filename") or "import.svg"
+        data = b""
+        if request.files:
+            f = next(iter(request.files.values()))
+            data = f.read()
+            filename = f.filename or filename
+        else:
+            data = request.get_data() or b""
+        return jsonify(service.import_svg_asset(pid, data, filename)), 201
+
+    @bp.route("/media/import-psd", methods=["POST"])
+    def import_psd():
+        pid = _require("media:write")
+        filename = request.args.get("filename") or "import.psd"
+        data = b""
+        if request.files:
+            f = next(iter(request.files.values()))
+            data = f.read()
+            filename = f.filename or filename
+        else:
+            data = request.get_data() or b""
+        return jsonify(service.import_psd_asset(pid, data, filename)), 201
+
     return bp
 
 
