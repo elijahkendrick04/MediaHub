@@ -116,7 +116,7 @@ def test_store_construction_failure_with_no_db_renders_empty_state(org_app, monk
     monkeypatch.setattr(wm, "_v8_get_media_store", _boom)
     # Point the fallback default DB at a path that does not exist, mirroring a
     # deploy where the DB was never (and could never be) created.
-    monkeypatch.setattr(ml_store, "_DEFAULT_DB", tmp_path / "absent" / "data.db")
+    monkeypatch.setattr(ml_store, "_default_db_path", lambda: tmp_path / "absent" / "data.db")
 
     resp, body = _get_library(app)
     assert resp.status_code == 200

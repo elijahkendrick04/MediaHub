@@ -174,6 +174,58 @@ def test_footage_upload_cap_raised_above_global_50mb(app):
         assert application.config["MAX_CONTENT_LENGTH"] == 50 * 1024 * 1024
 
 
+def test_media_store_default_paths_follow_data_dir(tmp_path, monkeypatch):
+    """Regression (QA-010): footage/photo blobs and the asset DB must live under
+    DATA_DIR — the writable persistent disk — not the package dir.
+
+    On the deploy the code tree (``/app/src/mediahub``) is root-owned and the
+    runtime user (uid 10001) can't write there. The store hardcoded a
+    package-relative default, so every footage upload tried to ``mkdir``/write
+    under that read-only tree and raised ``PermissionError`` → an unhandled HTTP
+    500 (the reported bug). The default must derive from ``DATA_DIR`` like
+    ``video/projects.py`` and the rest of the app do. Resolved at construction
+    time, so simply setting the env var is enough — no import reload.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.media_library.store import MediaLibraryStore
+
+    store = MediaLibraryStore()  # no explicit paths ⇒ must come from DATA_DIR
+    assert store.db_path == tmp_path / "data.db"
+    assert store.uploads_dir == tmp_path / "uploads_v4" / "media_library"
+    # A written blob lands under DATA_DIR, never under the read-only package tree.
+    blob = store.store_blob(b"\x00\x01\x02", "race.mp4", "alpha")
+    assert str(blob).startswith(str(tmp_path))
+    pkg_dir = Path(__file__).resolve().parents[1] / "src" / "mediahub"
+    assert str(pkg_dir) not in str(blob)
+
+
+def test_footage_upload_valid_mp4_does_not_500(app, tmp_path):
+    """Regression (QA-010): a valid small MP4 posted to /api/video/footage must
+    not 500. A real H.264+AAC clip is used when FFmpeg is present (matching the
+    QA repro); otherwise a small .mp4 payload still exercises the store/ingest
+    path, which must succeed honestly even with no probe binary available.
+    """
+    application, _ = app
+    with application.test_client() as c:
+        _pin(c, "alpha")
+        exe = _ffmpeg_exe()
+        if exe:
+            r = _upload_real_clip(c, tmp_path, size="720x1280", dur=1)
+        else:
+            import io
+
+            r = c.post(
+                "/api/video/footage",
+                data={"file": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64), "race.mp4")},
+                content_type="multipart/form-data",
+            )
+        assert r.status_code != 500, r.get_data(as_text=True)
+        body = r.get_json()
+        assert body is not None and body.get("ok") is True
+        # And never the generic placeholder the QA report saw.
+        assert body.get("error") != "internal_error"
+
+
 def test_video_studio_exposes_upload_cap_to_js(app):
     """The studio page must hand the configured cap to the client (no placeholder)."""
     import re

@@ -11694,7 +11694,7 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 {_ai_banner_html}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">{_h(cfg["eyebrow"])}</span>
-  <h1>{_h(swimmer)}</h1>
+  <h1><span class="mh-shiny-text">{_h(swimmer)}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">{strap_html}</div>
 </section>
 
@@ -39182,7 +39182,7 @@ function mhSetupMode(mode) {{
 {_ai_banner_html}
 <section class="mh-hero no-print" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Content builder</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(approved):02d} approved {
             "card" if len(approved) == 1 else "cards"
@@ -40462,7 +40462,7 @@ function mhSetupMode(mode) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Repurpose pack</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
     <span>generated {gen_at}</span><span class="sep">/</span>
@@ -40828,7 +40828,7 @@ function tiRegenerate() {{
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">All recommendations</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
     <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
@@ -41152,9 +41152,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except Exception as e:
             db_path = None
             try:
-                from mediahub.media_library.store import _DEFAULT_DB as _ml_default_db
+                from mediahub.media_library.store import _default_db_path as _ml_default_db
 
-                db_path = Path(getattr(store, "db_path", None) or _ml_default_db)
+                db_path = Path(getattr(store, "db_path", None) or _ml_default_db())
             except Exception:
                 db_path = None
             if db_path is not None and db_path.exists():
@@ -48988,6 +48988,37 @@ voice, and queues them for one-click approval.</p>
             )
         except ValueError as e:
             return jsonify({"error": "bad_footage", "message": str(e)}), 400
+        except OSError:
+            # The clip couldn't be written to storage (disk full, or a
+            # misconfigured/unwritable data path). Surface an honest, specific
+            # message — never the generic "internal_error" — and keep the real
+            # cause in the server log for the operator.
+            log.exception("footage upload could not be stored")
+            return jsonify(
+                {
+                    "error": "storage_failed",
+                    "message": (
+                        "The clip couldn't be saved on the server — its storage is "
+                        "full or unavailable. Please try again; if it keeps "
+                        "happening, the deployment status page has the latest "
+                        "health signal."
+                    ),
+                }
+            ), 500
+        except Exception:
+            # Any other unexpected failure: don't let it fall through to the
+            # generic 500 handler ("internal_error"). Log the traceback and tell
+            # the volunteer something they can act on.
+            log.exception("footage upload failed")
+            return jsonify(
+                {
+                    "error": "footage_failed",
+                    "message": (
+                        "The clip couldn't be processed. Please try again, or try a "
+                        "different clip."
+                    ),
+                }
+            ), 500
         return jsonify({"ok": True, "asset": _video_footage_summary(asset)})
 
     def _video_footage_summary(asset) -> dict:
