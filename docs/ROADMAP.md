@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `c2aa83137` · Merge pull request #1017: Platform surface — API, webhooks, MCP, interop (roadmap 1.21)
+**Last updated:** 2026-06-23 · `2c6932091` · Merge pull request #1015: QA-012 — award medals only from finals, with the final time
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1207,7 +1207,9 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-23 | `7c819303c` | Apply ruff-format v0.8.4 to the 1.21 source (pre-commit hygiene) |
+| 2026-06-23 | `191686ad6` | style: ruff-format interpreter_bridge swim_round line |
 | 2026-06-23 | `63d9d5644` | File interop + read-only embed (roadmap 1.21, build 4/4) |
+| 2026-06-23 | `ecc5aa417` | QA-012: award medals only from finals, with the final time |
 | 2026-06-23 | `296c33f67` | First-party MCP server MediaHub exposes (roadmap 1.21, build 3/4) |
 | 2026-06-23 | `5110a6f32` | Signed outbound webhooks (roadmap 1.21, build 2/4) |
 | 2026-06-23 | `97f958d2e` | Fix QA-011: studio preview composed at half geometry clipped the result time |
@@ -1216,5 +1218,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `6d3ffc66a` | Public platform API core — /api/v1 (roadmap 1.21, build 1/4) |
 | 2026-06-22 | `ae6e05ba4` | Fix Video Studio footage upload 500 (QA-010): store now honours DATA_DIR |
 | 2026-06-22 | `1a735effc` | UI: add mh-shiny-text glyph sheen from a reactbits.dev audit |
-| 2026-06-22 | `aea5c7bd3` | Fix media library false "store wasn't readable" error on an empty store (QA-009) |
 <!-- /ROADMAP:ACTIVITY -->
