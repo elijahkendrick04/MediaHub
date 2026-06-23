@@ -246,6 +246,40 @@ def build_api_v1_blueprint(*, token_store: ApiTokenStore | None = None,
         pid = _require("data:read")
         return jsonify(service.list_data_tables(pid))
 
+    # --- webhooks ----------------------------------------------------------
+    @bp.route("/webhooks", methods=["GET"])
+    def list_webhooks():
+        pid = _require("webhooks:read")
+        return jsonify(service.list_webhooks(pid))
+
+    @bp.route("/webhooks", methods=["POST"])
+    def create_webhook():
+        pid = _require("webhooks:manage")
+        payload = request.get_json(silent=True) or {}
+        url = payload.get("url") or ""
+        events = payload.get("events") or []
+        if not url:
+            raise ApiError("bad_request", "`url` is required.", 400)
+        result = service.create_webhook(
+            pid, url, events, description=payload.get("description", ""), created_by=_actor()
+        )
+        return jsonify(result), 201
+
+    @bp.route("/webhooks/<endpoint_id>", methods=["GET"])
+    def get_webhook(endpoint_id: str):
+        pid = _require("webhooks:read")
+        return jsonify(service.get_webhook(pid, endpoint_id))
+
+    @bp.route("/webhooks/<endpoint_id>", methods=["DELETE"])
+    def delete_webhook(endpoint_id: str):
+        pid = _require("webhooks:manage")
+        return jsonify(service.delete_webhook(pid, endpoint_id))
+
+    @bp.route("/webhooks/<endpoint_id>/deliveries", methods=["GET"])
+    def list_webhook_deliveries(endpoint_id: str):
+        pid = _require("webhooks:read")
+        return jsonify(service.list_webhook_deliveries(pid, endpoint_id))
+
     return bp
 
 

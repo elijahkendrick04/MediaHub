@@ -326,6 +326,58 @@ def list_brand_kits(profile_id: str) -> dict:
     return {"brand_kits": out, "count": len(out)}
 
 
+# --- webhooks (roadmap 1.21 build 2) ---------------------------------------
+def list_webhooks(profile_id: str) -> dict:
+    from mediahub.webhooks.registry import EndpointStore
+
+    eps = EndpointStore().list_for_profile(profile_id)
+    return {"webhooks": [e.to_public_dict() for e in eps], "count": len(eps)}
+
+
+def create_webhook(
+    profile_id: str, url: str, events, *, description: str = "", created_by: str = ""
+) -> dict:
+    from mediahub.webhooks.registry import EndpointStore
+
+    try:
+        ep = EndpointStore().create(
+            profile_id, url, events=events, description=description, created_by=created_by
+        )
+    except ValueError as e:
+        raise bad_request(str(e))
+    # The signing secret is returned once here so the integrator can configure
+    # their receiver; it is also retrievable by the org owner in the app.
+    return ep.to_public_dict(include_secret=True)
+
+
+def get_webhook(profile_id: str, endpoint_id: str) -> dict:
+    from mediahub.webhooks.registry import EndpointStore
+
+    ep = EndpointStore().get(endpoint_id)
+    if ep is None or ep.profile_id != profile_id:
+        raise not_found("webhook")
+    return ep.to_public_dict()
+
+
+def delete_webhook(profile_id: str, endpoint_id: str) -> dict:
+    from mediahub.webhooks.registry import EndpointStore
+
+    if not EndpointStore().delete(endpoint_id, profile_id):
+        raise not_found("webhook")
+    return {"deleted": True, "id": endpoint_id}
+
+
+def list_webhook_deliveries(profile_id: str, endpoint_id: str, *, limit: int = 50) -> dict:
+    from mediahub.webhooks.delivery import DeliveryStore
+    from mediahub.webhooks.registry import EndpointStore
+
+    ep = EndpointStore().get(endpoint_id)
+    if ep is None or ep.profile_id != profile_id:
+        raise not_found("webhook")
+    deliveries = DeliveryStore().list_for_endpoint(endpoint_id, limit=limit)
+    return {"endpoint_id": endpoint_id, "deliveries": deliveries, "count": len(deliveries)}
+
+
 def list_data_tables(profile_id: str) -> dict:
     """List the org's data-hub tables (names + row/column counts only)."""
     try:
@@ -363,4 +415,9 @@ __all__ = [
     "export_pack",
     "list_brand_kits",
     "list_data_tables",
+    "list_webhooks",
+    "create_webhook",
+    "get_webhook",
+    "delete_webhook",
+    "list_webhook_deliveries",
 ]

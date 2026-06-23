@@ -155,6 +155,50 @@ OPERATIONS: list[dict] = [
         "scope": "data:read",
         "tag": "Data",
     },
+    {
+        "method": "get",
+        "path": "/webhooks",
+        "operation_id": "listWebhooks",
+        "summary": "List the organisation's webhook endpoints",
+        "scope": "webhooks:read",
+        "tag": "Webhooks",
+    },
+    {
+        "method": "post",
+        "path": "/webhooks",
+        "operation_id": "createWebhook",
+        "summary": "Register a webhook endpoint (returns the signing secret once)",
+        "scope": "webhooks:manage",
+        "tag": "Webhooks",
+        "body": "json",
+    },
+    {
+        "method": "get",
+        "path": "/webhooks/{endpoint_id}",
+        "operation_id": "getWebhook",
+        "summary": "Get one webhook endpoint",
+        "scope": "webhooks:read",
+        "tag": "Webhooks",
+        "params": ["endpoint_id"],
+    },
+    {
+        "method": "delete",
+        "path": "/webhooks/{endpoint_id}",
+        "operation_id": "deleteWebhook",
+        "summary": "Delete a webhook endpoint",
+        "scope": "webhooks:manage",
+        "tag": "Webhooks",
+        "params": ["endpoint_id"],
+    },
+    {
+        "method": "get",
+        "path": "/webhooks/{endpoint_id}/deliveries",
+        "operation_id": "listWebhookDeliveries",
+        "summary": "Recent delivery attempts for a webhook endpoint",
+        "scope": "webhooks:read",
+        "tag": "Webhooks",
+        "params": ["endpoint_id"],
+    },
 ]
 
 
@@ -229,6 +273,7 @@ def build_spec(base_path: str = "/api/v1", *, server_url: Optional[str] = None) 
             {"name": "Content"},
             {"name": "Brand"},
             {"name": "Data"},
+            {"name": "Webhooks"},
         ],
         "paths": paths,
         "components": {

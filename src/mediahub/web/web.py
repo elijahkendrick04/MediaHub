@@ -6066,6 +6066,19 @@ def _start_run(
                     _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
                 except Exception:
                     pass
+                # Outbound webhook (1.21): notify subscribed integrations that a
+                # run finished. Best-effort; never blocks or breaks the run.
+                try:
+                    from mediahub import webhooks as _webhooks
+                    from mediahub.webhooks import events as _wh_events
+
+                    _webhooks.emit(
+                        _wh_events.EVENT_RUN_FINISHED,
+                        profile_id,
+                        _wh_events.run_finished(profile_id, run_id, card_count=len(run.cards)),
+                    )
+                except Exception:
+                    pass
             else:
                 # The pipeline reported a terminal error (rather than raising) —
                 # surface it in the inbox so the operator isn't left guessing.
@@ -35603,8 +35616,12 @@ what you're doing, what they should do.</p>
         is_operator = _auth.is_dev_operator()
         can_admin = is_operator or bool(user_email and store.is_active_owner(user_email, pid))
 
+        from mediahub.webhooks import events as _wh_events
+        from mediahub.webhooks.registry import EndpointStore as _EndpointStore
+
+        wh_store = _EndpointStore()
         tok_store = _ApiTokenStore()
-        notice, error, new_secret = "", "", ""
+        notice, error, new_secret, new_webhook_secret = "", "", "", ""
         if request.method == "POST":
             if not can_admin:
                 abort(404)  # anti-enumeration, same as the members gate
@@ -35640,6 +35657,27 @@ what you're doing, what they should do.</p>
                     notice = "Token revoked."
                 else:
                     error = "That token could not be revoked."
+            elif action == "create_webhook":
+                url = (request.form.get("url") or "").strip()
+                evs = _wh_events.validate_events(request.form.getlist("event"))
+                try:
+                    ep = wh_store.create(
+                        pid,
+                        url,
+                        events=evs,
+                        description=(request.form.get("description") or "").strip(),
+                        created_by=user_email or _auth._dev_operator_email(),
+                    )
+                    new_webhook_secret = ep.secret
+                    notice = "Webhook created. Copy the signing secret now."
+                except ValueError as exc:
+                    error = str(exc)
+            elif action == "delete_webhook":
+                endpoint_id = (request.form.get("endpoint_id") or "").strip()
+                if wh_store.delete(endpoint_id, pid):
+                    notice = "Webhook deleted."
+                else:
+                    error = "That webhook could not be deleted."
             else:
                 error = "Unknown action."
 
@@ -35658,6 +35696,18 @@ what you're doing, what they should do.</p>
                 f'<code style="display:block;padding:10px 12px;background:var(--bg);'
                 'border:1px solid var(--line);border-radius:8px;font-size:13px;'
                 f'word-break:break-all">{_h(new_secret)}</code></div>'
+            )
+        if new_webhook_secret:
+            banner += (
+                '<div class="card" style="border-color:var(--ok);'
+                'background:rgba(16,185,129,0.08);margin-bottom:var(--sp-4)">'
+                '<p style="margin:0 0 6px;font-weight:600">Your webhook signing secret</p>'
+                '<p class="dim" style="margin:0 0 8px;font-size:13px">Configure your '
+                "receiver to verify the <code>X-MediaHub-Signature</code> header with "
+                "this secret.</p>"
+                f'<code style="display:block;padding:10px 12px;background:var(--bg);'
+                'border:1px solid var(--line);border-radius:8px;font-size:13px;'
+                f'word-break:break-all">{_h(new_webhook_secret)}</code></div>'
             )
         if notice:
             banner += f'<div class="flash ok">{_h(notice)}</div>'
@@ -35753,22 +35803,93 @@ what you're doing, what they should do.</p>
                 "or an AI assistant.</div></section>"
             )
 
+        # --- webhooks section ---
+        webhook_create = ""
+        if can_admin:
+            ev_checks = "".join(
+                '<label style="display:flex;gap:8px;align-items:center;'
+                'padding:4px 0;font-size:13px">'
+                f'<input type="checkbox" name="event" value="{_h(ev)}"/>'
+                f"<span><code>{_h(ev)}</code> — {_h(_wh_events.event_label(ev))}</span></label>"
+                for ev in _wh_events.ALL_EVENTS
+            )
+            webhook_create = (
+                '<section class="card" style="margin-bottom:var(--sp-4)">'
+                '<h3 style="margin:0 0 4px">Add a webhook</h3>'
+                '<p class="dim" style="margin:0 0 12px;font-size:13px">MediaHub POSTs a '
+                "signed JSON payload to your URL when these events happen. Verify the "
+                "<code>X-MediaHub-Signature</code> header with the secret shown on create.</p>"
+                f'<form method="post" action="{url_for("organisation_api_tokens_page")}">'
+                '<input type="hidden" name="action" value="create_webhook"/>'
+                '<label style="display:block;font-size:13px;margin-bottom:4px">Endpoint URL</label>'
+                '<input type="url" name="url" required placeholder="https://example.com/hooks/mediahub" '
+                'style="width:100%;max-width:420px;padding:8px 10px;margin-bottom:12px;'
+                'background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--ink)"/>'
+                '<fieldset style="border:1px solid var(--line);border-radius:8px;'
+                'padding:10px 12px;margin:0 0 12px">'
+                '<legend style="font-size:12px;color:var(--ink-muted);text-transform:uppercase;'
+                f'letter-spacing:0.08em">Events</legend>{ev_checks}</fieldset>'
+                '<button type="submit" class="btn">Add webhook</button></form></section>'
+            )
+
+        endpoints = wh_store.list_for_profile(pid)
+        if endpoints:
+            wh_rows = ""
+            for ep in endpoints:
+                ev_pills = " ".join(
+                    f'<span class="pill" style="font-size:11px">{_h(e)}</span>' for e in ep.events
+                ) or '<span class="dim" style="font-size:12px">all events off</span>'
+                del_html = ""
+                if can_admin:
+                    del_html = (
+                        f'<form method="post" action="{url_for("organisation_api_tokens_page")}" '
+                        'style="display:inline" onsubmit="return confirm('
+                        "'Delete this webhook? Events will stop being delivered.')\">"
+                        '<input type="hidden" name="action" value="delete_webhook"/>'
+                        f'<input type="hidden" name="endpoint_id" value="{_h(ep.id)}"/>'
+                        '<button type="submit" class="btn secondary" '
+                        'style="padding:3px 9px;font-size:11px">Delete</button></form>'
+                    )
+                wh_rows += (
+                    f'<tr><td style="max-width:280px;word-break:break-all">'
+                    f"<code style=\"font-size:12px\">{_h(ep.url)}</code></td>"
+                    f'<td style="max-width:280px">{ev_pills}</td>'
+                    f'<td style="font-size:12px;color:var(--ink-muted)">{_h((ep.last_delivery_at or "—")[:10])}</td>'
+                    f"<td>{del_html}</td></tr>"
+                )
+            webhook_list = (
+                '<section class="card"><h3 style="margin:0 0 10px">Webhooks</h3>'
+                '<table style="width:100%;border-collapse:collapse" class="mh-table">'
+                "<thead><tr><th>URL</th><th>Events</th><th>Last delivery</th><th></th>"
+                f"</tr></thead><tbody>{wh_rows}</tbody></table></section>"
+            )
+        else:
+            webhook_list = (
+                '<section class="card"><div class="empty">No webhooks yet. Add one above to '
+                "get a signed POST when a run finishes, a card is approved, a pack is "
+                "exported, or a form is submitted.</div></section>"
+            )
+
         docs_link = (
             f'<p class="dim" style="font-size:13px;margin-top:var(--sp-4)">'
-            f'See the <a href="{url_for("api_docs_page")}">API reference</a> and the '
-            f'<a href="/api/v1/openapi.json">OpenAPI spec</a> for the full endpoint list.</p>'
+            f'See the <a href="{url_for("api_docs_page")}">API reference</a>, the '
+            f'<a href="/api/v1/openapi.json">OpenAPI spec</a>, and '
+            f'<a href="{url_for("api_docs_page")}">the webhooks guide</a> for the full list.</p>'
         )
 
         body = (
             '<section class="mh-hero" data-lane="" '
             'style="padding-top:var(--sp-6);padding-bottom:var(--sp-4)">'
             '<span class="mh-hero-eyebrow">Organisation</span>'
-            f"<h1>API tokens</h1><p class=\"lede\">Programmatic access to {org_name} — "
-            "submit results, list and approve cards, export packs, query your data hub.</p>"
+            f"<h1>API &amp; webhooks</h1><p class=\"lede\">Programmatic access to {org_name} — "
+            "submit results, list and approve cards, export packs, query your data hub, "
+            "and get signed event callbacks.</p>"
             "</section>"
-            f"{banner}{create_form}{token_list}{docs_link}"
+            f"{banner}{create_form}{token_list}"
+            '<div style="height:var(--sp-5)"></div>'
+            f"{webhook_create}{webhook_list}{docs_link}"
         )
-        return _layout("API tokens", body, active="")
+        return _layout("API & webhooks", body, active="")
 
     @app.route("/organisation/members", methods=["GET", "POST"])
     def organisation_members_page():
@@ -50140,6 +50261,19 @@ voice, and queues them for one-click approval.</p>
             statuses=statuses,
             order=order,
         )
+        # Outbound webhook (1.21): a pack was exported. Single chokepoint shared
+        # by the download route and the public API. Best-effort.
+        try:
+            from mediahub import webhooks as _webhooks
+            from mediahub.webhooks import events as _wh_events
+
+            _webhooks.emit(
+                _wh_events.EVENT_PACK_EXPORTED,
+                profile_id,
+                _wh_events.pack_exported(profile_id, run_id),
+            )
+        except Exception:
+            pass
         return result.zip_bytes
 
     @app.route("/pack/<run_id>/export.zip")
@@ -51322,6 +51456,23 @@ voice, and queues them for one-click approval.</p>
         ):
             _fs.save_form(pid, result["form"])  # persist the freshly-created response table id
         if result.get("ok"):
+            # Outbound webhook (1.21): a form was submitted. Best-effort.
+            try:
+                from mediahub import webhooks as _webhooks
+                from mediahub.webhooks import events as _wh_events
+
+                _webhooks.emit(
+                    _wh_events.EVENT_FORM_SUBMITTED,
+                    pid,
+                    _wh_events.form_submitted(
+                        pid,
+                        form_id,
+                        submission_id=str(result.get("submission_id") or ""),
+                        site_id=site_id,
+                    ),
+                )
+            except Exception:
+                pass
             return jsonify({"ok": True, "message": result.get("message", "Thanks!")})
         return jsonify({"ok": False, "errors": result.get("errors", {})}), 400
 
@@ -52047,6 +52198,20 @@ voice, and queues them for one-click approval.</p>
         Best-effort by design: a telemetry or records failure must never
         block the approval itself.
         """
+        # Outbound webhook (1.21): a single chokepoint for BOTH the web route and
+        # the public API, so every approval fans out identically. Best-effort.
+        if action == "approved":
+            try:
+                from mediahub import webhooks as _webhooks
+                from mediahub.webhooks import events as _wh_events
+
+                _webhooks.emit(
+                    _wh_events.EVENT_CARD_APPROVED,
+                    pid,
+                    _wh_events.card_approved(pid, run_id, card_id, via=via),
+                )
+            except Exception:
+                pass
         card = None
         try:
             data = _load_run(run_id) or {}
@@ -53526,6 +53691,28 @@ voice, and queues them for one-click approval.</p>
                 register_refresh_task()
             except Exception:
                 pass
+        # 1.21: outbound-webhook retry sweep. emit() attempts each delivery
+        # immediately; this durable backstop re-attempts any that are still
+        # pending (with exponential backoff) and survives restarts.
+        try:
+            from mediahub.webhooks.delivery import deliver_pending as _wh_deliver_pending
+
+            def _webhook_delivery_handler(params: dict) -> None:
+                _wh_deliver_pending()
+
+            _register_task_type("webhook_delivery", _webhook_delivery_handler)
+            from mediahub.workflow.schedule import create_task as _wh_create_task
+            from mediahub.workflow.schedule import list_tasks as _wh_list_tasks
+
+            if not any(t.task_type == "webhook_delivery" for t in _wh_list_tasks()):
+                _wh_create_task(
+                    name="Webhook delivery retry (1.21)",
+                    task_type="webhook_delivery",
+                    schedule_kind="cron",
+                    schedule_expr="*/5 * * * *",
+                )
+        except Exception:
+            log.warning("webhook retry task not registered", exc_info=True)
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)
