@@ -22,6 +22,7 @@ honest I/O errors on save.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -30,6 +31,8 @@ from pathlib import Path
 from typing import Optional
 
 from mediahub.club_platform.post_types import canonical_slug
+
+log = logging.getLogger(__name__)
 
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 _LOCK = threading.Lock()
@@ -91,13 +94,18 @@ def empty_inputs() -> dict:
 
 
 def load_planner_inputs(org_id: str, *, data_dir: Optional[Path] = None) -> dict:
-    """Load the org's direct inputs; missing/corrupt files load as empty."""
-    path = _inputs_path(org_id, data_dir)
-    if not path.exists():
-        return empty_inputs()
+    """Load the org's direct inputs; missing OR unreadable/corrupt files load
+    as empty. A partial or non-UTF-8 write raises ``UnicodeDecodeError`` from
+    ``read_text`` (not the ``OSError`` / ``JSONDecodeError`` the old narrow
+    catch handled), so catch broadly — a corrupt inputs file must degrade to
+    empty, never 500 the ``/plan`` page that reads it (QA-016)."""
     try:
+        path = _inputs_path(org_id, data_dir)
+        if not path.exists():
+            return empty_inputs()
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except Exception:
+        log.warning("planner inputs unreadable for org %r — loading as empty", org_id)
         return empty_inputs()
     if not isinstance(raw, dict):
         return empty_inputs()

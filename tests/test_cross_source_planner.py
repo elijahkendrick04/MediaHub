@@ -677,3 +677,70 @@ def test_plan_index_survives_malformed_persisted_plan(app_with_org):
         html = page.get_data(as_text=True)
         # The one well-formed item still renders; the junk entries are skipped.
         assert "Good item" in html
+
+
+# ---------------------------------------------------------------------------
+# QA-016 (true root cause, live-reproduced) — corrupt persisted plan file
+# ---------------------------------------------------------------------------
+
+
+def test_load_latest_plan_tolerates_corrupt_utf8(tmp_path, monkeypatch):
+    """The live 500: an interrupted save left ``latest.json`` with invalid UTF-8
+    (truncated mid-multibyte-character). ``load_latest_plan`` read it with
+    ``read_text(encoding="utf-8")``, which raises ``UnicodeDecodeError`` — NOT
+    the ``OSError`` / ``JSONDecodeError`` the old narrow catch handled — so the
+    raise propagated out of every surface that loads the plan. The plan is a
+    regenerable cache, so a corrupt file must degrade to ``None``.
+
+    Fails before the fix (``UnicodeDecodeError``), passes after.
+    """
+    from mediahub.content_engine.planner import _plans_dir, load_latest_plan
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    org = "org-corrupt-plan"
+    # Valid-JSON prefix then a lone UTF-8 lead byte — exactly an interrupted write.
+    (_plans_dir(org) / "latest.json").write_bytes(
+        b'{"profile_id": "' + org.encode() + b'", "items": [{"title": "Br\xc3'
+    )
+    assert load_latest_plan(org) is None  # degraded, did not raise
+
+
+def test_load_planner_inputs_tolerates_corrupt_utf8(tmp_path, monkeypatch):
+    """The sibling loader had the identical narrow catch — a corrupt inputs file
+    must load as empty, never raise. Fails before the fix, passes after."""
+    from mediahub.content_engine.inputs import _inputs_path, load_planner_inputs
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    org = "org-corrupt-inputs"
+    _inputs_path(org).write_bytes(b'{"goals": [\xff\xfe not utf8}')
+    assert load_planner_inputs(org) == {
+        "upcoming_events": [],
+        "goals": [],
+        "blackout_dates": [],
+    }
+
+
+def test_plan_index_and_api_survive_corrupt_persisted_plan(app_with_org):
+    """QA-016 true root cause, reproduced from the live site. Brighton & Cardiff's
+    ``latest.json`` on the durable disk held invalid UTF-8 from an interrupted
+    save, so ``load_latest_plan(pid)`` raised ``UnicodeDecodeError`` at the very
+    top of ``plan_page`` *and* of ``/api/plan/latest`` (both call it), 500ing
+    both — while every ``/plan/<view>`` sub-view, none of which load the plan,
+    returned 200. Exactly the reported scope, and upstream of the earlier
+    render-side guards. With the loader hardened, both must return 200.
+
+    Fails before the fix (``UnicodeDecodeError`` -> 500), passes after.
+    """
+    from mediahub.content_engine.planner import _plans_dir
+
+    (_plans_dir("org-test") / "latest.json").write_bytes(
+        b'{"profile_id": "org-test", "items": [{"title": "Br\xc3'
+    )
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        # Both surfaces that load the plan must survive the corrupt file.
+        assert client.get("/api/plan/latest").status_code == 200
+        page = client.get("/plan")
+        assert page.status_code == 200
+        # The corrupt plan degrades to the honest no-plan landing view.
+        assert "What should we" in page.get_data(as_text=True)

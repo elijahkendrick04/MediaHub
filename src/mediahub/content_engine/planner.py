@@ -29,6 +29,7 @@ reviews and approves before any content leaves the system.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -41,6 +42,8 @@ from typing import Optional
 from mediahub.club_platform.post_types import SportPostType, post_types_for
 from mediahub.content_engine.signals import Signal, gather_all_signals
 from mediahub.sport_profiles import load_sport_profile
+
+log = logging.getLogger(__name__)
 
 PLAN_VERSION = 1
 HORIZON_DAYS_DEFAULT = 14
@@ -471,13 +474,23 @@ def save_plan(plan: ContentPlan, *, data_dir: Optional[Path] = None) -> Path:
 
 
 def load_latest_plan(org_id: str, *, data_dir: Optional[Path] = None) -> Optional[dict]:
-    """The org's most recent plan as a dict, or None when never planned."""
-    path = _plans_dir(org_id, data_dir) / "latest.json"
-    if not path.exists():
-        return None
+    """The org's most recent plan as a dict, or None when never planned.
+
+    A missing OR unreadable/corrupt plan file loads as None. The plan is a
+    regenerable cache (the planner can always rebuild it), so a partial or
+    non-UTF-8 write — e.g. a save interrupted mid-multibyte-character, which
+    raises ``UnicodeDecodeError`` from ``read_text`` rather than the
+    ``OSError`` / ``JSONDecodeError`` the old narrow catch handled — must
+    degrade to "no plan", never 500 the surfaces that read it (the ``/plan``
+    page and ``/api/plan/latest`` both load this; QA-016).
+    """
     try:
+        path = _plans_dir(org_id, data_dir) / "latest.json"
+        if not path.exists():
+            return None
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except Exception:
+        log.warning("plan: latest.json unreadable for org %r — loading as no-plan", org_id)
         return None
     if not isinstance(raw, dict):
         return None
