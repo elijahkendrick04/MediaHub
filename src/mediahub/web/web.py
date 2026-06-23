@@ -28433,8 +28433,17 @@ function mhAnDigest(btn) {{
                     size=params.size,
                     format_name=params.format_id,
                     brand_kit=brand_kit,
+                    quality=params.render_quality,
                 )
                 png_bytes = Path(result.visual.file_path).read_bytes()
+                # QA-011: the live preview composes at the SAME native geometry
+                # as the download (so fixed-px archetype furniture keeps its
+                # proportions and the result time never clips / collides). The
+                # light, snappy preview payload comes from downsampling the
+                # finished native render — never from shrinking the geometry.
+                _raster = params.preview_raster_size
+                if _raster != params.size:
+                    png_bytes = _studio.downscale_png_bytes(png_bytes, _raster)
         except RuntimeError as exc:
             # Playwright/Chromium not installed — surface an honest error rather
             # than ever fabricating a preview image (CLAUDE.md honest-error rule).
