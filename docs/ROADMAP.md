@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `6aca21209` · Mobile PWA (roadmap 1.22): share-target, offline approval queue, mobile caption/crop (#1023)
+**Last updated:** 2026-06-23 · `e995022ea` · fix(web): resume interrupted runs so large meets finish (QA-015) (#1028)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1205,6 +1205,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `c2a3b9397` | fix(web): resume interrupted runs so large meets finish (QA-015) |
 | 2026-06-23 | `f25c368ab` | style(pwa): wrap _save_library_photo signature (ruff-format) |
 | 2026-06-23 | `6bc8dfda8` | test(interpreter): native-text-PDF regression for QA-014 (swum result, never seed) |
 | 2026-06-23 | `05bb2a12b` | feat(pwa): mobile caption/crop sheet, install affordance, icons + docs (1.22 build 3) |
@@ -1214,6 +1215,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `346d3d45b` | fix(interpreter): read the swum result time, never the seed (QA-014) |
 | 2026-06-23 | `191686ad6` | style: ruff-format interpreter_bridge swim_round line |
 | 2026-06-23 | `63d9d5644` | File interop + read-only embed (roadmap 1.21, build 4/4) |
-| 2026-06-23 | `ecc5aa417` | QA-012: award medals only from finals, with the final time |
-| 2026-06-23 | `296c33f67` | First-party MCP server MediaHub exposes (roadmap 1.21, build 3/4) |
 <!-- /ROADMAP:ACTIVITY -->
