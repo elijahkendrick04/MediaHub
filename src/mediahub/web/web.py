@@ -12125,6 +12125,10 @@ def _layout(
      before DOMContentLoaded. Self-hosted (no CDN); a load failure leaves every
      page fully usable (effects are decorative). -->
 <script defer src="{{ ui_kit_js_url }}"></script>
+<!-- Offline approval queue indicator (roadmap 1.22) — keeps a small "N changes
+     waiting to sync" pill in step with the service worker's queue. Deferred and
+     decorative: a load failure leaves approvals working exactly as before. -->
+<script defer src="{{ url_for('static', filename='js/offline-queue.js') }}"></script>
 </head>
 <body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
@@ -13693,9 +13697,16 @@ def _layout(
     if (window.mhDockSync) window.mhDockSync();
     var origLabel = btn.textContent;
     btn.disabled = true; btn.style.opacity = '0.7';
-    window.mhWorkflowSet(runId, cardId, status).then(function(){
+    window.mhWorkflowSet(runId, cardId, status).then(function(result){
       btn.disabled = false; btn.style.opacity = '';
-      if (window.MH && MH.toast) MH.toast('Marked as ' + status, 'success', 1500);
+      if (result && result.queued) {
+        // Offline: the service worker stashed this action and will replay it
+        // (idempotently) the moment the connection returns. The optimistic UI
+        // above stands — the volunteer can keep triaging on the bus.
+        if (window.MH && MH.toast) MH.toast('Saved offline — will sync when you reconnect', 'info', 2400);
+      } else if (window.MH && MH.toast) {
+        MH.toast('Marked as ' + status, 'success', 1500);
+      }
     }).catch(function(){
       btn.disabled = false; btn.style.opacity = '';
       btn.textContent = origLabel;
@@ -23974,47 +23985,196 @@ Relay team broke club record"></textarea>
     # online; falls back to cache (then a tiny offline page) only when the
     # network is unavailable — so a stale cache can never be served to an online
     # user. Only same-origin /static/ assets are opportunistically cached.
-    _SERVICE_WORKER_JS = (
-        "const CACHE = 'mediahub-shell-v1';\n"
-        "self.addEventListener('install', function(e){ self.skipWaiting(); });\n"
-        "self.addEventListener('activate', function(e){\n"
-        "  e.waitUntil((async function(){\n"
-        "    var keys = await caches.keys();\n"
-        "    await Promise.all(keys.map(function(k){ return k === CACHE ? null : caches.delete(k); }));\n"
-        "    await self.clients.claim();\n"
-        "  })());\n"
-        "});\n"
-        "self.addEventListener('fetch', function(e){\n"
-        "  var req = e.request;\n"
-        "  if (req.method !== 'GET') return;\n"
-        "  var url = new URL(req.url);\n"
-        "  if (url.origin !== self.location.origin) return;\n"
-        "  e.respondWith((async function(){\n"
-        "    try {\n"
-        "      var res = await fetch(req);\n"
-        "      if (res && res.status === 200 && url.pathname.indexOf('/static/') !== -1) {\n"
-        "        var c = await caches.open(CACHE); c.put(req, res.clone());\n"
-        "      }\n"
-        "      return res;\n"
-        "    } catch (err) {\n"
-        "      var cached = await caches.match(req);\n"
-        "      if (cached) return cached;\n"
-        "      if (req.mode === 'navigate') {\n"
-        "        return new Response('<!doctype html><meta charset=utf-8>'\n"
-        "          + '<meta name=viewport content=\"width=device-width,initial-scale=1\">'\n"
-        "          + '<title>Offline \\u2014 MediaHub</title>'\n"
-        "          + '<body style=\"font-family:system-ui,sans-serif;background:rgb(10,11,17);'\n"
-        "          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'\n"
-        '          + \'height:100vh;margin:0"><div style="text-align:center;padding:24px">\'\n'
-        "          + '<h1 style=\"margin:0 0 8px\">You are offline</h1>'\n"
-        "          + '<p style=\"opacity:.7\">Reconnect to use MediaHub.</p></div></body>',\n"
-        "          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });\n"
-        "      }\n"
-        "      return new Response('', { status: 503 });\n"
-        "    }\n"
-        "  })());\n"
-        "});\n"
-    )
+    #
+    # Offline-tolerant approval queue (roadmap 1.22): POSTs to /api/workflow/
+    # (approve / reject / caption-edit — the actions a volunteer takes on the
+    # bus) are intercepted. Online they pass straight through; offline they are
+    # persisted to IndexedDB and a Background Sync is registered, then replayed
+    # when the connection returns. The workflow API is idempotent (re-approving
+    # is a no-op), so replay is always safe.
+    _SERVICE_WORKER_JS = r"""
+const CACHE = 'mediahub-shell-v2';
+const DB_NAME = 'mediahub-pwa';
+const STORE = 'approval-queue';
+const SYNC_TAG = 'mediahub-approval-queue';
+// Approve / reject / caption-edit all POST to /api/workflow/<run>/<card>.
+const WF_RX = /\/api\/workflow\//;
+
+self.addEventListener('install', function(e){ self.skipWaiting(); });
+
+self.addEventListener('activate', function(e){
+  e.waitUntil((async function(){
+    var keys = await caches.keys();
+    await Promise.all(keys.map(function(k){ return k === CACHE ? null : caches.delete(k); }));
+    await self.clients.claim();
+  })());
+});
+
+// --- IndexedDB queue: one tiny object store, keyed by a generated id --------
+function idbOpen(){
+  return new Promise(function(resolve, reject){
+    var rq = indexedDB.open(DB_NAME, 1);
+    rq.onupgradeneeded = function(){
+      var db = rq.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+    };
+    rq.onsuccess = function(){ resolve(rq.result); };
+    rq.onerror = function(){ reject(rq.error); };
+  });
+}
+function idbAdd(rec){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(rec);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = function(){ rej(tx.error); };
+  }); });
+}
+function idbGetAll(){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readonly');
+    var rq = tx.objectStore(STORE).getAll();
+    rq.onsuccess = function(){ res(rq.result || []); };
+    rq.onerror = function(){ rej(rq.error); };
+  }); });
+}
+function idbDelete(id){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = function(){ rej(tx.error); };
+  }); });
+}
+function idbCount(){ return idbGetAll().then(function(a){ return a.length; }); }
+
+function genId(){
+  return (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : ('q-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+}
+
+function registerSync(){
+  try {
+    if (self.registration && self.registration.sync) {
+      return self.registration.sync.register(SYNC_TAG).catch(function(){});
+    }
+  } catch (e) {}
+  return Promise.resolve();
+}
+
+async function notifyClients(){
+  var n = await idbCount();
+  var cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n }); });
+}
+
+// Replay every queued action in submission order. A 2xx/3xx/4xx is a final
+// server decision (idempotent — re-approving is a no-op), so the entry is
+// dropped; a 5xx or a network failure keeps it for the next sync.
+async function drainQueue(){
+  var items = await idbGetAll();
+  items.sort(function(a, b){ return a.ts - b.ts; });
+  for (var i = 0; i < items.length; i++){
+    var it = items[i];
+    try {
+      var res = await fetch(it.url, {
+        method: it.method,
+        headers: it.headers,
+        body: it.body,
+        credentials: 'same-origin'
+      });
+      if (res && res.status < 500) { await idbDelete(it.id); }
+    } catch (e) {
+      break; // still offline — leave the remainder queued
+    }
+  }
+  await notifyClients();
+}
+
+async function handleWorkflowPost(req){
+  try {
+    return await fetch(req.clone());
+  } catch (err) {
+    try {
+      var body = await req.clone().text();
+      await idbAdd({
+        id: genId(),
+        url: req.url,
+        method: 'POST',
+        headers: { 'Content-Type': req.headers.get('Content-Type') || 'application/json' },
+        body: body,
+        ts: Date.now()
+      });
+      await registerSync();
+      await notifyClients();
+      return new Response(
+        JSON.stringify({ ok: true, queued: true, status: 'queued' }),
+        { status: 202, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (e2) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'queue_failed' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+}
+
+self.addEventListener('sync', function(e){
+  if (e.tag === SYNC_TAG) e.waitUntil(drainQueue());
+});
+
+self.addEventListener('message', function(e){
+  var data = e.data || {};
+  if (data.type === 'mediahub-queue-status'){
+    idbCount().then(function(n){
+      var msg = { type: 'mediahub-queue', count: n };
+      if (e.ports && e.ports[0]) e.ports[0].postMessage(msg);
+      else if (e.source && e.source.postMessage) e.source.postMessage(msg);
+    });
+  } else if (data.type === 'mediahub-queue-replay'){
+    drainQueue();
+  }
+});
+
+self.addEventListener('fetch', function(e){
+  var req = e.request;
+  var url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  // Offline-tolerant approval queue (roadmap 1.22): queue workflow POSTs and
+  // replay them when the connection returns.
+  if (req.method === 'POST' && WF_RX.test(url.pathname)) {
+    e.respondWith(handleWorkflowPost(req));
+    return;
+  }
+  if (req.method !== 'GET') return;
+  e.respondWith((async function(){
+    try {
+      var res = await fetch(req);
+      if (res && res.status === 200 && url.pathname.indexOf('/static/') !== -1) {
+        var c = await caches.open(CACHE); c.put(req, res.clone());
+      }
+      return res;
+    } catch (err) {
+      var cached = await caches.match(req);
+      if (cached) return cached;
+      if (req.mode === 'navigate') {
+        return new Response('<!doctype html><meta charset=utf-8>'
+          + '<meta name=viewport content="width=device-width,initial-scale=1">'
+          + '<title>Offline — MediaHub</title>'
+          + '<body style="font-family:system-ui,sans-serif;background:rgb(10,11,17);'
+          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'
+          + 'height:100vh;margin:0"><div style="text-align:center;padding:24px">'
+          + '<h1 style="margin:0 0 8px">You are offline</h1>'
+          + '<p style="opacity:.7">Your approvals are saved and will sync when you reconnect.</p></div></body>',
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+      return new Response('', { status: 503 });
+    }
+  })());
+});
+"""
 
     @app.route("/favicon.svg")
     @app.route("/favicon.ico")
