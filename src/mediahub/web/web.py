@@ -24971,6 +24971,33 @@ self.addEventListener('fetch', function(e){
         except (ValueError, TypeError):
             return _h(ts[:19])
 
+    def _uptime_tracking_note(*stats: dict) -> str:
+        """Explain a clamped uptime window.
+
+        The heartbeat store starts fresh on a new disk / after a deploy that
+        didn't carry the DB forward, so a 7d/30d window can be older than the
+        data. ``uptime_stats`` then measures uptime over the tracked period
+        only (first heartbeat → now) and flags ``window_clamped``. Surface
+        that here so an operator understands why the longer windows read
+        "tracking since …" rather than mistaking a young store for an outage.
+        """
+        since = ""
+        for s in stats:
+            if s.get("has_data") and s.get("window_clamped"):
+                ts = s.get("tracking_since")
+                if ts:
+                    since = ts
+                    break
+        if not since:
+            return ""
+        return (
+            '<p class="dim" style="margin-top:10px;font-size:12px">'
+            "Uptime is measured from the first recorded heartbeat &mdash; "
+            f"tracking since <b>{_h(since[:19])} UTC</b> ({_h(_humanize_when(since))}). "
+            "Windows longer than that cover the tracked period only, so a recent "
+            "deploy or restart isn&rsquo;t counted as downtime.</p>"
+        )
+
     @app.route("/status")
     def status_page():
         # Public view: just "Website operational" / "Website down". The detailed
@@ -25107,7 +25134,8 @@ self.addEventListener('fetch', function(e){
             f"<td>{_format_uptime_pct(s30)}</td>"
             f"<td>{_h(s30.get('samples', 0))}</td>"
             f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
-            "</tbody></table></div>"
+            "</tbody></table>"
+            f"{_uptime_tracking_note(s24, s7d, s30)}</div>"
             f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
             f"{last_incident_html}</div>"
             f"{incidents_html}"
@@ -26620,7 +26648,8 @@ self.addEventListener('fetch', function(e){
             f"<td>{_format_uptime_pct(s30)}</td>"
             f"<td>{_h(s30.get('samples', 0))}</td>"
             f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
-            "</tbody></table></div>"
+            "</tbody></table>"
+            f"{_uptime_tracking_note(s24, s7d, s30)}</div>"
             f'<div class="card" style="padding:14px 22px">'
             f"{last_incident_html}</div>"
         )
