@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `2c6932091` · Merge pull request #1015: QA-012 — award medals only from finals, with the final time
+**Last updated:** 2026-06-23 · `2b1cab522` · fix(interpreter): read the swum result time, never the seed (QA-014) (#1018)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1207,6 +1207,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-23 | `7c819303c` | Apply ruff-format v0.8.4 to the 1.21 source (pre-commit hygiene) |
+| 2026-06-23 | `346d3d45b` | fix(interpreter): read the swum result time, never the seed (QA-014) |
 | 2026-06-23 | `191686ad6` | style: ruff-format interpreter_bridge swim_round line |
 | 2026-06-23 | `63d9d5644` | File interop + read-only embed (roadmap 1.21, build 4/4) |
 | 2026-06-23 | `ecc5aa417` | QA-012: award medals only from finals, with the final time |
@@ -1216,6 +1217,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `ec76e3c82` | fix(interpreter): exclude disqualified swims from PB/moment detection (QA-013) |
 | 2026-06-23 | `fef551a5f` | UI: extend mh-shiny-text to the content-pack meet heroes |
 | 2026-06-23 | `6d3ffc66a` | Public platform API core — /api/v1 (roadmap 1.21, build 1/4) |
-| 2026-06-22 | `ae6e05ba4` | Fix Video Studio footage upload 500 (QA-010): store now honours DATA_DIR |
-| 2026-06-22 | `1a735effc` | UI: add mh-shiny-text glyph sheen from a reactbits.dev audit |
 <!-- /ROADMAP:ACTIVITY -->
