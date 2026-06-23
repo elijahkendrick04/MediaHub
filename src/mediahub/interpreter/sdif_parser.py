@@ -230,6 +230,18 @@ def _parse_d0(line: str) -> dict:
     finals_time = _parse_sdif_time(line[115:123]) if len(line) > 123 else None
     finals_course_raw = _safe_str(line, 123, 1) if len(line) > 123 else ""
 
+    # QA-018: a disqualified swim has its result replaced by a "DQ" marker in
+    # the prelim/finals time-code region (the finals field reads "DQ"/"DQS",
+    # not a time). Void the result so the swim bridges to dq=True /
+    # finals_time_cs=None and is excluded from PB / time-drop / medal / barrier /
+    # biggest-drop / possible-PB detection ALIKE — the same single exclusion the
+    # HY3 'Q' code and a PDF 'DQ' row feed (QA-013). Scanning the result region
+    # (well past the swimmer-name and id fields) makes this explicit and robust
+    # to the ±column drift different Hy-Tek versions introduce, and never
+    # false-positives on a name, club, or member id.
+    if "DQ" in line[60:]:
+        finals_time = None
+
     # Place at col 134:140 (6 chars right-justified)
     place: Optional[int] = None
     if len(line) > 140:

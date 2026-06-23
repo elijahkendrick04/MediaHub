@@ -111,6 +111,23 @@ def _hy3_distance(token: str) -> Optional[int]:
     return None
 
 
+# A disqualification code stamped on a Hy-Tek E2 result record. After the
+# 8-char finals-time field (cols 3-10) and its 1-char course flag (col 11:
+# L/S/Y), HY-TEK writes the result/exception code; a leading ``Q`` there marks
+# a disqualification — e.g. ``E2P  151.39SQ1F`` (course ``S``, DQ code ``Q1F``,
+# whose rule a following ``H1`` record spells out). The struck-out time printed
+# before the code is the swim the athlete WOULD have done; it is NOT a legal
+# result, so it must never surface as a valid time (QA-018). Anchoring on the
+# course-flag-then-Q (or a bare Q when no course flag is present) keeps a valid
+# swim's course/code chars (``S``/space/``R``) from ever being read as a DQ.
+_E2_DQ_RE = re.compile(r"^E2.{9}[LSY]?Q")
+
+
+def _is_dq_e2(line: str) -> bool:
+    """True if a Hy-Tek E2 result record carries a disqualification code."""
+    return bool(_E2_DQ_RE.match(line))
+
+
 # ---------------------------------------------------------------------------
 # Athlete cache built from D1 records
 # ---------------------------------------------------------------------------
@@ -232,6 +249,15 @@ def _parse_e2(line: str) -> dict:
     try to recover it heuristically by scanning for the swimmer's place.
     """
     finals_time = _parse_hy3_time(_safe_str(line, 3, 8))
+    # QA-018: a disqualified swim carries a 'Q' exception code after the time +
+    # course flag. Void the struck-out time so the swim bridges to dq=True /
+    # finals_time_cs=None (status "dq") and is excluded from PB / time-drop /
+    # medal / barrier / biggest-drop / possible-PB detection ALIKE — the same
+    # single exclusion a PDF 'DQ' row already feeds (QA-013). Without this the
+    # void 151.39 surfaced as a valid result, and a swimmer with no online PB
+    # baseline saw it celebrated as "POSSIBLE PB — UNCONFIRMED".
+    if _is_dq_e2(line):
+        finals_time = None
     # Place in HY3 E2: the stats block at cols 12-36 contains
     # prelim_place, heat, lane, semi_place, finals_place, dq_flag.
     # Corpus-verified position for finals_place is col 30:33 (3 chars,
