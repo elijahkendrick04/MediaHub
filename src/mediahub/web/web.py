@@ -27203,6 +27203,18 @@ self.addEventListener('fetch', function(e){
             "direct": '<span class="tag" style="background:rgba(250,204,21,.12);color:var(--lane)">DIRECT</span>',
         }
 
+        # Persisted plans are durable state — DATA_DIR is a mounted disk that
+        # survives redeploys — so the index can load a plan an *older* planner
+        # wrote, whose item carries a None/blank numeric field the current
+        # engine no longer emits. Coerce defensively: one legacy field must
+        # never 500 the landing page while every sub-view (none of which read
+        # the plan) stays up. This is the /plan-vs-/plan/<view> diff (QA-016).
+        def _as_int(value: object, default: int = 0) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
         items_html = ""
         if plan:
             for rank, item in enumerate(plan.get("items") or [], start=1):
@@ -27226,7 +27238,9 @@ self.addEventListener('fetch', function(e){
                     f'<li style="margin:2px 0;color:var(--ink-muted);font-size:12.5px">{_h(r)}</li>'
                     for r in item.get("reasons") or []
                 )
-                autonomy = _h(item.get("default_autonomy", "approval_required").replace("_", " "))
+                autonomy = _h(
+                    (item.get("default_autonomy") or "approval_required").replace("_", " ")
+                )
                 badge = (
                     '<span class="tag live">Ready to create</span>'
                     if item.get("implemented")
@@ -27240,7 +27254,7 @@ self.addEventListener('fetch', function(e){
     {chips}
     {badge}
     <span class="tag" title="Default autonomy for this type">{autonomy}</span>
-    <span style="font-variant-numeric:tabular-nums;font-weight:700;font-size:15px" title="Priority score">{int(item.get("score", 0))}</span>
+    <span style="font-variant-numeric:tabular-nums;font-weight:700;font-size:15px" title="Priority score">{_as_int(item.get("score"))}</span>
     {create_link}
   </summary>
   <div style="padding:10px 4px 2px 46px">
@@ -27258,8 +27272,8 @@ self.addEventListener('fetch', function(e){
 <div class="card" style="margin-bottom:14px">
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
     <strong>{_h(plan.get("sport_display") or plan.get("sport", ""))} plan</strong>
-    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · horizon {int(plan.get("horizon_days", 14))}d</span>
-    <span style="font-size:12.5px">{src_chip["own"]} {int(counts.get("own", 0))} · {src_chip["external"]} {int(counts.get("external", 0))} · {src_chip["direct"]} {int(counts.get("direct", 0))} signals</span>
+    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · horizon {_as_int(plan.get("horizon_days"), 14)}d</span>
+    <span style="font-size:12.5px">{src_chip["own"]} {_as_int(counts.get("own"))} · {src_chip["external"]} {_as_int(counts.get("external"))} · {src_chip["direct"]} {_as_int(counts.get("direct"))} signals</span>
   </div>
   {f'<ul style="margin:8px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
 </div>"""

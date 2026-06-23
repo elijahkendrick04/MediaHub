@@ -526,3 +526,73 @@ def test_plan_latest_is_org_scoped(app_with_org, tmp_path):
         _with_org(client, "org-other")
         body = client.get("/api/plan/latest").get_json()
         assert body["plan"] is None  # org B never sees org A's plan
+
+
+# ---------------------------------------------------------------------------
+# QA-016 — the /plan landing page must not 500
+# ---------------------------------------------------------------------------
+
+
+def test_plan_index_renders_in_empty_state(app_with_org):
+    """The /plan index must render (200), not 500, when the org has no plan yet
+    — the state a freshly-signed-in org lands in. Every /plan/<view> sub-view
+    already handles this; the index must too."""
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        page = client.get("/plan")
+        assert page.status_code == 200
+        html = page.get_data(as_text=True)
+        # The default plan view, with the honest empty state.
+        assert "What should we" in html and "post next?" in html
+        assert "No plan yet" in html
+
+
+def test_plan_index_survives_legacy_persisted_plan(app_with_org):
+    """QA-016 root cause — DATA_DIR is a durable mounted disk, so the index can
+    load a plan an *older* planner wrote whose item carries a None/blank field
+    (``score`` / ``default_autonomy`` / ``horizon_days`` / source counts) the
+    current engine no longer emits. The index is the only handler that renders
+    plan items, so such a plan 500'd just the index while every /plan/<view>
+    sub-view (none of which read the plan) stayed up — exactly the reported
+    scope. It must now coerce defensively (200), never crash on ``int(None)``
+    or ``None.replace(...)``.
+
+    Fails before the fix (TypeError), passes after.
+    """
+    from mediahub.content_engine.planner import _plans_dir
+
+    plans_dir = _plans_dir("org-test")
+    legacy_plan = {
+        "plan_id": "legacy-1",
+        "profile_id": "org-test",
+        "sport": "swimming",
+        "sport_display": "Swimming",
+        "engine_sport": "swimming",
+        "generated_at": "2026-01-01T09:00:00+00:00",
+        "horizon_days": None,  # legacy/blank numeric — int(None) used to 500
+        "version": 1,
+        "notes": [],
+        "signals": [],
+        "source_counts": {"own": None, "external": None, "direct": None},
+        "items": [
+            {
+                "post_type": "meet_recap",
+                "title": "Weekend recap",
+                "score": None,  # legacy/blank numeric — int(None) used to 500
+                "reasons": ["legacy item"],
+                "sources_used": ["own"],
+                # no "default_autonomy" key at all → None.replace used to 500
+                "implemented": True,
+            }
+        ],
+    }
+    (plans_dir / "latest.json").write_text(json.dumps(legacy_plan), encoding="utf-8")
+
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        page = client.get("/plan")
+        assert page.status_code == 200
+        html = page.get_data(as_text=True)
+        # The legacy plan's item still renders, with coerced numerics.
+        assert "Weekend recap" in html
+        assert "What should we" in html
