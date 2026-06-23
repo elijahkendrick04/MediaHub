@@ -596,3 +596,84 @@ def test_plan_index_survives_legacy_persisted_plan(app_with_org):
         # The legacy plan's item still renders, with coerced numerics.
         assert "Weekend recap" in html
         assert "What should we" in html
+
+
+def test_plan_index_survives_unloadable_sport_profiles(app_with_org, monkeypatch):
+    """QA-016 (re-open) — the index loads the sport list with a bare
+    ``list_sport_profiles()`` call, while every working /plan/<view> sub-view
+    either guards it (calendar/analytics resolve the sport through
+    ``_org_calendar_sport``, which wraps ``list_sport_profiles`` in try/except)
+    or never calls it (board/grid). So when ``list_sport_profiles`` raises — a
+    malformed or operator-added profile YAML, a profiles dir pointed elsewhere,
+    an I/O error — ONLY the index 500s while every sub-view stays up. That is
+    exactly the reported scope (``/plan`` 500, all ``/plan/<view>`` 200), and it
+    happens in the *empty* no-plan state because the sport list loads before any
+    plan is read. The index must now degrade like the sub-views (200).
+
+    Fails before the fix (the raise propagates out of plan_page), passes after.
+    """
+    import mediahub.sport_profiles as sport_profiles
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("sport profiles unreadable")
+
+    # plan_page does `from mediahub.sport_profiles import list_sport_profiles`
+    # at call time, so patching the package attribute is what it resolves.
+    monkeypatch.setattr(sport_profiles, "list_sport_profiles", _raise)
+
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        page = client.get("/plan")
+        assert page.status_code == 200
+        html = page.get_data(as_text=True)
+        # The page still renders its default view despite the sport-load failure.
+        assert "What should we" in html and "post next?" in html
+
+
+def test_plan_index_survives_malformed_persisted_plan(app_with_org):
+    """QA-016 (re-open) — a plan an older planner wrote (kept on the durable
+    disk) can carry a non-list ``items``, a stray non-dict entry, or non-list
+    ``reasons`` / ``sources_used`` / ``notes``. The index is the only handler
+    that renders plan items, so such a plan 500'd only the index. It must render
+    defensively (200), skipping junk entries while still showing the good ones.
+
+    Fails before the fix (``None.get`` / non-iterable in a comprehension),
+    passes after.
+    """
+    from mediahub.content_engine.planner import _plans_dir
+
+    plans_dir = _plans_dir("org-test")
+    malformed_plan = {
+        "plan_id": "m1",
+        "profile_id": "org-test",
+        "sport": "swimming",
+        "sport_display": "Swimming",
+        "engine_sport": "swimming",
+        "generated_at": "2026-01-01T09:00:00+00:00",
+        "horizon_days": None,
+        "version": 1,
+        "notes": "not-a-list",  # non-list — used to break the notes comprehension
+        "signals": [],
+        "source_counts": {"own": None, "external": None, "direct": None},
+        "items": [
+            None,  # stray entry — None.get used to 500
+            "junk",  # stray entry — str.get used to 500
+            {
+                "post_type": "meet_recap",
+                "title": "Good item",
+                "score": None,
+                "reasons": 7,  # non-list — used to break the reasons comprehension
+                "sources_used": 9,  # non-list — used to break the chips comprehension
+                "implemented": True,
+            },
+        ],
+    }
+    (plans_dir / "latest.json").write_text(json.dumps(malformed_plan), encoding="utf-8")
+
+    with app_with_org.test_client() as client:
+        _with_org(client, "org-test")
+        page = client.get("/plan")
+        assert page.status_code == 200
+        html = page.get_data(as_text=True)
+        # The one well-formed item still renders; the junk entries are skipped.
+        assert "Good item" in html
