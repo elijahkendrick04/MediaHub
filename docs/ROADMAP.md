@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `2b1cab522` · fix(interpreter): read the swum result time, never the seed (QA-014) (#1018)
+**Last updated:** 2026-06-23 · `0cb64c1b2` · test(interpreter): native-text-PDF regression for QA-014 (swum result, never seed) (#1024)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1206,6 +1206,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `6bc8dfda8` | test(interpreter): native-text-PDF regression for QA-014 (swum result, never seed) |
 | 2026-06-23 | `7c819303c` | Apply ruff-format v0.8.4 to the 1.21 source (pre-commit hygiene) |
 | 2026-06-23 | `346d3d45b` | fix(interpreter): read the swum result time, never the seed (QA-014) |
 | 2026-06-23 | `191686ad6` | style: ruff-format interpreter_bridge swim_round line |
@@ -1215,6 +1216,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `5110a6f32` | Signed outbound webhooks (roadmap 1.21, build 2/4) |
 | 2026-06-23 | `97f958d2e` | Fix QA-011: studio preview composed at half geometry clipped the result time |
 | 2026-06-23 | `ec76e3c82` | fix(interpreter): exclude disqualified swims from PB/moment detection (QA-013) |
-| 2026-06-23 | `fef551a5f` | UI: extend mh-shiny-text to the content-pack meet heroes |
-| 2026-06-23 | `6d3ffc66a` | Public platform API core — /api/v1 (roadmap 1.21, build 1/4) |
 <!-- /ROADMAP:ACTIVITY -->
