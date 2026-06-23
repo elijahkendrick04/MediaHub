@@ -163,6 +163,11 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
 
 _NORMALISERS = {
     "time": _normalise_time,
+    # The seed/entry-time column normalises identically to a result time but is
+    # kept under its own type so it is never selected as the swum result. The
+    # header-driven schema (priority Finals Time > Prelim Time; never Seed Time)
+    # assigns "time" to the result column and "seed_time" to the entry column.
+    "seed_time": _normalise_time,
     "place": _normalise_place,
     "yob": _normalise_yob,
     "reaction": _normalise_reaction,
@@ -226,6 +231,7 @@ def _extract_swim_from_cells(
         club=field_vals.get("club"),  # type: ignore[arg-type]
         place=field_vals.get("place"),  # type: ignore[arg-type]
         time=field_vals.get("time"),  # type: ignore[arg-type]
+        seed_time=field_vals.get("seed_time"),  # type: ignore[arg-type]
         reaction=field_vals.get("reaction"),  # type: ignore[arg-type]
         confidence=round(min(row_conf, 1.0), 4),
         raw_row="\t".join(cells),
@@ -259,6 +265,11 @@ def _extract_swim_from_cells(
 _LETTER = r"[^\W\d_]"
 # Time token: optional J/X/R judged-or-marker prefix, then mm:ss.cc or ss.cc.
 _TIME_TOKEN = re.compile(r"^[JXRjxr]?\d{0,3}:?\d{1,2}\.\d{2}$")
+# Reaction-time shape ("0.63" / "0.700"): a sub-second start reaction, NOT a
+# swum time. It is time-token-shaped, so when a result row carries a trailing
+# reaction column it must be excluded from seed/result selection (mirrors
+# `_normalise_reaction`).
+_REACTION_SHAPE = re.compile(r"^0\.\d{2,3}$")
 # Disqualification / no-time markers that occupy the time column.
 _DSQ_TOKEN = re.compile(r"^(?:DQ|DNS|DNF|DNC|NS|SCR|WD)$", re.IGNORECASE)
 # Rank token starting a record: 1, 1., =1, *1 (ties), or --- (no place / DQ).
@@ -291,14 +302,32 @@ def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
 def _split_into_records(
     tokens: list[tuple[str, bool]],
 ) -> list[list[tuple[str, bool]]]:
-    """Break a tokenised line into records, each ending at a time token."""
+    """Break a tokenised line into records, each ending at the LAST time token
+    of a consecutive run of time tokens.
+
+    A competitor's row can carry more than one time column — HY-TEK prints the
+    Seed (entry) time immediately before the swum result (Finals, or Prelim on
+    a prelim-only sheet): ``… 2:55.80  3:03.47``. Ending a record at the *first*
+    time token would slice the seed off as the record's time and discard the
+    real result. So we only close a record when the next token is NOT itself a
+    time token, keeping a seed+result pair together; ``_record_to_swim`` then
+    selects the result (the last of the run) and keeps the seed separately.
+
+    This still splits the common two-records-per-line layout correctly, because
+    there the next token after a record's time is the following record's place
+    number — not a time.
+    """
     records: list[list[tuple[str, bool]]] = []
     cur: list[tuple[str, bool]] = []
-    for tok, big in tokens:
+    n = len(tokens)
+    for i in range(n):
+        tok, big = tokens[i]
         cur.append((tok, big))
         if _is_time_like(tok):
-            records.append(cur)
-            cur = []
+            next_is_time = (i + 1 < n) and _is_time_like(tokens[i + 1][0])
+            if not next_is_time:
+                records.append(cur)
+                cur = []
     return records
 
 
@@ -318,11 +347,31 @@ def _looks_like_relay(name_toks: list[str]) -> bool:
 
 
 def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
-    """Classify one time-terminated record's tokens into an InterpretedSwim."""
+    """Classify one record's tokens into an InterpretedSwim.
+
+    A record ends in a run of one or more time tokens: ``[seed] [prelim] result``.
+    The SWUM result is the LAST of that run (Finals if present, else Prelim);
+    any earlier time token is the Seed/entry time and must never be read as the
+    result. (The header-driven schema path makes the same Finals > Prelim >
+    never-Seed selection by column label; this is its layout-independent
+    equivalent for the collapsed-line parser, where the result is the rightmost
+    time column before the points/end and the seed is the column before it.)
+    """
     if not rec:
         return None
-    time_tok = rec[-1][0]
-    body = rec[:-1]
+    # Peel the trailing run of time-like tokens off the record.
+    k = len(rec)
+    while k > 0 and _is_time_like(rec[k - 1][0]):
+        k -= 1
+    time_run = [t for t, _ in rec[k:]]
+    # A trailing reaction-time column ("0.63") is time-shaped but is a start
+    # reaction, not a swum time — drop it so it is never read as the result.
+    swim_times = [t for t in time_run if not _REACTION_SHAPE.match(t)]
+    if not swim_times:
+        return None
+    body = rec[:k]
+    time_tok = swim_times[-1]  # the swum result (Finals/Prelim), never the seed
+    seed_tok = swim_times[0] if len(swim_times) >= 2 else None
 
     # Place (optional leading rank).
     place_val: int | None = None
@@ -363,6 +412,13 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     if time_val is None:
         return None
 
+    # Seed/entry time (the column before the result), kept separately so it is
+    # never confused with the swum result or a prior best. Drop any J/X/R marker
+    # prefix exactly as the result token does.
+    seed_val: str | None = None
+    if seed_tok is not None:
+        seed_val, _seed_conf = _normalise_time(re.sub(r"^[JXRjxr]", "", seed_tok))
+
     # Drop leading lane / heat numbers sitting before the name (the place was
     # already consumed, and a competitor name never begins with a bare number).
     while name_toks and name_toks[0].strip("()").isdigit():
@@ -389,6 +445,9 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         if club_val is not None:
             field_conf["club"] = cconf
 
+    if seed_val is not None:
+        field_conf["seed_time"] = 0.80
+
     row_conf = sum(field_conf.values()) / len(field_conf)
     return InterpretedSwim(
         swimmer_name=name,
@@ -396,6 +455,7 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         club=club_val,
         place=place_val,
         time=time_val,
+        seed_time=seed_val,
         reaction=None,
         confidence=round(min(row_conf, 1.0), 4),
         raw_row=" ".join(t for t, _ in rec),

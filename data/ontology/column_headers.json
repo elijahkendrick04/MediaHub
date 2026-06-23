@@ -3,6 +3,7 @@
   "name": ["Name", "Athlete", "Swimmer", "Competitor"],
   "yob": ["YoB", "YOB", "Year", "Born", "DOB", "Date of Birth"],
   "club": ["Club", "Team", "School", "Affiliation"],
-  "time": ["Time", "Result", "Final Time", "Swim Time", "Mark"],
+  "seed_time": ["Seed Time", "Seed", "Entry Time", "Entry"],
+  "time": ["Time", "Result", "Final Time", "Finals Time", "Final", "Finals", "Prelim Time", "Prelim", "Prelims", "Heat Time", "Swim Time", "Mark"],
   "reaction": ["RT", "Reaction", "React", "Start"]
 }
