@@ -15778,6 +15778,15 @@ def create_app() -> Flask:
             request.max_content_length = _video_upload_max
         if not _csrf_enforced() or request.path in _CSRF_EXEMPT_PATHS:
             return None
+        # The public platform API (1.21) authenticates with a bearer token in the
+        # Authorization header, never the session cookie — so it is not exposed to
+        # CSRF (a cross-site page cannot read or attach the token). It accepts
+        # non-JSON bodies (a raw results upload on POST /runs, empty-body
+        # approve/reject), which the content-type exemption below wouldn't cover,
+        # so exempt the whole versioned surface here. The blueprint enforces the
+        # token itself.
+        if request.path.startswith("/api/v1/") or request.path == "/api/v1":
+            return None
         ctype = (request.content_type or "").lower()
         if ctype.startswith("application/json"):
             return None
@@ -16111,6 +16120,11 @@ def create_app() -> Flask:
         "/api/llm",
         "/api/health",
         "/api/organisation",
+        # The public platform API (1.21) carries its own bearer-token auth and
+        # bakes the org (profile_id) into the token, so it must not be gated by
+        # the *session's* org-setup state. The blueprint enforces a valid token
+        # for every non-public endpoint itself.
+        "/api/v1",
     )
 
     # Logins must not linger across visits. Flask's session cookie is
@@ -22454,14 +22468,24 @@ Relay team broke club record"></textarea>
         auth = (
             '<section class="card">'
             "<h2>Authentication</h2>"
-            "<p>Most endpoints are scoped to your signed-in organisation and authenticate with "
-            "the <strong>session cookie</strong> the app sets when you log in &mdash; send it with "
+            "<p><strong>Platform API (<code>/api/v1</code>) &mdash; recommended.</strong> "
+            "The versioned platform API authenticates with an <strong>organisation API "
+            "token</strong> sent as a bearer credential "
+            "(<code>Authorization: Bearer mhk_&hellip;</code>). Each token is scoped to one "
+            "organisation and carries least-privilege scopes &mdash; <code>runs:read</code>, "
+            "<code>cards:approve</code>, <code>content:export</code>, and so on &mdash; so an "
+            "integration gets exactly the access you grant it. Mint and revoke tokens on the "
+            f'<a href="{url_for("organisation_api_tokens_page")}">API tokens</a> page; the full '
+            'machine-readable contract is the <a href="/api/v1/openapi.json">OpenAPI spec</a>. '
+            "Approving a card over the API counts as the human-publish signal and runs the same "
+            "consent and brand checks as the app &mdash; MediaHub never posts to a social account.</p>"
+            "<p><strong>Legacy session endpoints.</strong> The original <code>/api/&hellip;</code> "
+            "routes below are scoped to your signed-in organisation and authenticate with the "
+            "<strong>session cookie</strong> the app sets when you log in &mdash; send it with "
             'each request (<code>credentials: "include"</code> in the browser, or a '
             "<code>Cookie:</code> header from a script). A request for a run that is not yours "
-            "returns <code>404</code> &mdash; never another organisation's data.</p>"
-            "<p><code>/health</code> is the one public endpoint; it needs no session. There is no "
-            "public API-key programme yet &mdash; if you need machine-to-machine access, get in "
-            "touch.</p>"
+            "returns <code>404</code> &mdash; never another organisation's data. "
+            "<code>/health</code> is public and needs no session.</p>"
             "</section>"
         )
 
@@ -35558,6 +35582,194 @@ what you're doing, what they should do.</p>
             log.warning("invite email failed", exc_info=True)
             return False
 
+    @app.route("/organisation/api", methods=["GET", "POST"])
+    def organisation_api_tokens_page():
+        """Manage the organisation's API tokens (roadmap 1.21).
+
+        Owner-/operator-only. Tokens are org-scoped bearer credentials for the
+        public ``/api/v1`` surface; the secret is shown exactly once at creation
+        and only its sha256 hash is stored.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from mediahub.api_public import scopes as _api_scopes
+        from mediahub.api_public.tokens import ApiTokenStore as _ApiTokenStore
+
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        store = _tenancy.MembershipStore()
+        user_email = _auth.current_user_email()
+        is_operator = _auth.is_dev_operator()
+        can_admin = is_operator or bool(user_email and store.is_active_owner(user_email, pid))
+
+        tok_store = _ApiTokenStore()
+        notice, error, new_secret = "", "", ""
+        if request.method == "POST":
+            if not can_admin:
+                abort(404)  # anti-enumeration, same as the members gate
+            action = (request.form.get("action") or "").strip().lower()
+            if action == "create":
+                name = (request.form.get("name") or "").strip()
+                wanted = _api_scopes.validate_scopes(request.form.getlist("scope"))
+                if not wanted:
+                    error = "Pick at least one scope for the token."
+                else:
+                    expires_at = None
+                    raw_days = (request.form.get("expires_days") or "").strip()
+                    if raw_days:
+                        try:
+                            days = max(1, min(3650, int(raw_days)))
+                            expires_at = (
+                                datetime.now(timezone.utc) + timedelta(days=days)
+                            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        except ValueError:
+                            error = "Expiry must be a whole number of days."
+                    if not error:
+                        _tok, new_secret = tok_store.create(
+                            pid,
+                            name=name,
+                            scopes=wanted,
+                            created_by=user_email or _auth._dev_operator_email(),
+                            expires_at=expires_at,
+                        )
+                        notice = "Token created. Copy it now — it won't be shown again."
+            elif action == "revoke":
+                token_id = (request.form.get("token_id") or "").strip()
+                if tok_store.revoke(token_id, pid):
+                    notice = "Token revoked."
+                else:
+                    error = "That token could not be revoked."
+            else:
+                error = "Unknown action."
+
+        prof = _active_profile()
+        org_name = _h(prof.display_name if prof else pid)
+        tokens = tok_store.list_for_profile(pid)
+
+        banner = ""
+        if new_secret:
+            banner = (
+                '<div class="card" style="border-color:var(--ok);'
+                'background:rgba(16,185,129,0.08);margin-bottom:var(--sp-4)">'
+                '<p style="margin:0 0 6px;font-weight:600">Your new API token</p>'
+                '<p class="dim" style="margin:0 0 8px;font-size:13px">Copy it now — for '
+                "security it is hashed at rest and can never be shown again.</p>"
+                f'<code style="display:block;padding:10px 12px;background:var(--bg);'
+                'border:1px solid var(--line);border-radius:8px;font-size:13px;'
+                f'word-break:break-all">{_h(new_secret)}</code></div>'
+            )
+        if notice:
+            banner += f'<div class="flash ok">{_h(notice)}</div>'
+        if error:
+            banner += f'<div class="flash err">{_h(error)}</div>'
+
+        # Create form (owner/operator only).
+        create_form = ""
+        if can_admin:
+            groups_html = ""
+            for group_name, group_scopes in _api_scopes.SCOPE_GROUPS.items():
+                checks = "".join(
+                    '<label style="display:flex;gap:8px;align-items:flex-start;'
+                    'padding:5px 0;font-size:13px">'
+                    f'<input type="checkbox" name="scope" value="{_h(s)}"'
+                    f'{" checked" if group_name == "Read-only" else ""}/>'
+                    f"<span><code>{_h(s)}</code> — {_h(_api_scopes.scope_label(s))}</span></label>"
+                    for s in group_scopes
+                )
+                groups_html += (
+                    '<fieldset style="border:1px solid var(--line);border-radius:8px;'
+                    'padding:10px 12px;margin:0 0 10px">'
+                    f'<legend style="font-size:12px;color:var(--ink-muted);'
+                    f'text-transform:uppercase;letter-spacing:0.08em">{_h(group_name)}</legend>'
+                    f"{checks}</fieldset>"
+                )
+            create_form = (
+                '<section class="card" style="margin-bottom:var(--sp-4)">'
+                "<h3 style=\"margin:0 0 4px\">Create a token</h3>"
+                '<p class="dim" style="margin:0 0 12px;font-size:13px">A token acts as '
+                f"<strong>{org_name}</strong> with exactly the scopes you grant — nothing more. "
+                "Approving via the API still runs the same consent and brand checks as the app.</p>"
+                f'<form method="post" action="{url_for("organisation_api_tokens_page")}">'
+                '<input type="hidden" name="action" value="create"/>'
+                '<label style="display:block;font-size:13px;margin-bottom:4px">Name</label>'
+                '<input type="text" name="name" placeholder="e.g. Zapier, Mobile app" '
+                'style="width:100%;max-width:360px;padding:8px 10px;margin-bottom:12px;'
+                'background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+                'color:var(--ink)"/>'
+                f"{groups_html}"
+                '<label style="display:block;font-size:13px;margin:4px 0">'
+                'Expires after (days, optional)</label>'
+                '<input type="number" name="expires_days" min="1" max="3650" '
+                'placeholder="never" style="width:140px;padding:8px 10px;margin-bottom:12px;'
+                'background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+                'color:var(--ink)"/><br/>'
+                '<button type="submit" class="btn">Create token</button></form></section>'
+            )
+
+        # Token list.
+        if tokens:
+            rows = ""
+            for t in tokens:
+                scope_pills = " ".join(
+                    f'<span class="pill" style="font-size:11px">{_h(s)}</span>' for s in t.scopes
+                )
+                state = (
+                    '<span class="pill" style="background:rgba(16,185,129,0.10);'
+                    'color:var(--ok)">Active</span>'
+                    if t.is_active()
+                    else '<span class="pill" style="opacity:0.6">Inactive</span>'
+                )
+                revoke_html = ""
+                if can_admin and t.is_active():
+                    revoke_html = (
+                        f'<form method="post" action="{url_for("organisation_api_tokens_page")}" '
+                        'style="display:inline" onsubmit="return confirm('
+                        "'Revoke this token? Apps using it will stop working immediately.')\">"
+                        '<input type="hidden" name="action" value="revoke"/>'
+                        f'<input type="hidden" name="token_id" value="{_h(t.id)}"/>'
+                        '<button type="submit" class="btn secondary" '
+                        'style="padding:3px 9px;font-size:11px">Revoke</button></form>'
+                    )
+                rows += (
+                    "<tr>"
+                    f"<td><strong>{_h(t.name or '(unnamed)')}</strong><br>"
+                    f'<code style="font-size:11px;color:var(--ink-muted)">{_h(t.token_prefix)}…</code></td>'
+                    f'<td style="max-width:320px">{scope_pills}</td>'
+                    f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.created_at[:10])}<br>'
+                    f"last used {_h((t.last_used_at or '—')[:10])}</td>"
+                    f"<td>{state}</td><td>{revoke_html}</td></tr>"
+                )
+            token_list = (
+                '<section class="card"><h3 style="margin:0 0 10px">Tokens</h3>'
+                '<table style="width:100%;border-collapse:collapse" class="mh-table">'
+                "<thead><tr><th>Name</th><th>Scopes</th><th>Created</th><th>Status</th><th></th>"
+                f"</tr></thead><tbody>{rows}</tbody></table></section>"
+            )
+        else:
+            token_list = (
+                '<section class="card"><div class="empty">No API tokens yet. '
+                "Create one above to drive MediaHub from your own tools, Zapier/Make, "
+                "or an AI assistant.</div></section>"
+            )
+
+        docs_link = (
+            f'<p class="dim" style="font-size:13px;margin-top:var(--sp-4)">'
+            f'See the <a href="{url_for("api_docs_page")}">API reference</a> and the '
+            f'<a href="/api/v1/openapi.json">OpenAPI spec</a> for the full endpoint list.</p>'
+        )
+
+        body = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-6);padding-bottom:var(--sp-4)">'
+            '<span class="mh-hero-eyebrow">Organisation</span>'
+            f"<h1>API tokens</h1><p class=\"lede\">Programmatic access to {org_name} — "
+            "submit results, list and approve cards, export packs, query your data hub.</p>"
+            "</section>"
+            f"{banner}{create_form}{token_list}{docs_link}"
+        )
+        return _layout("API tokens", body, active="")
+
     @app.route("/organisation/members", methods=["GET", "POST"])
     def organisation_members_page():
         """Who can sign in to the active workspace.
@@ -35925,7 +36137,7 @@ what you're doing, what they should do.</p>
             return None
         return None
 
-    def _group_approval_block(run_id: str, card_id: str):
+    def _group_approval_block(run_id: str, card_id: str, *, actor_email=None, is_operator=None):
         """Record the current user's approval vote and evaluate the kit's
         group-approver rule. Returns (blocked, info_dict).
 
@@ -35933,6 +36145,11 @@ what you're doing, what they should do.</p>
         held in QUEUE. Default-safe: no rule, an unbound (pilot) workspace, or
         the operator → never blocks. ``info_dict`` carries the pending detail
         for the response/UI (1.18 renders it richly).
+
+        ``actor_email`` / ``is_operator`` default to the session identity (the
+        web route's behaviour, byte-identical), but the public API passes the
+        token's owner so an API approval is recorded as that person's vote and
+        the same group rule is enforced — never bypassed.
         """
         try:
             prof, kit = _resolved_kit_for_run(run_id)
@@ -35949,9 +36166,9 @@ what you're doing, what they should do.</p>
             if not store.is_bound(pid):
                 return False, {}
             # The operator is the super-admin and can always finalise.
-            if _auth.is_dev_operator():
+            if (is_operator if is_operator is not None else _auth.is_dev_operator()):
                 return False, {}
-            email = _auth.current_user_email() or ""
+            email = actor_email if actor_email is not None else (_auth.current_user_email() or "")
             ledger = _get_approval_ledger()
             if ledger is None:
                 return False, {}
@@ -49840,39 +50057,16 @@ voice, and queues them for one-click approval.</p>
             mimetype="application/zip",
         )
 
-    @app.route("/pack/<run_id>/export.zip")
-    def pack_export_zip(run_id: str):
-        """G1.15 — batch ZIP of a pack's EVERY rendered format + a metadata.json manifest.
-
-        Distinct from ``content_pack_zip`` (which groups PNGs by destination
-        bucket + an approval-summary.json): this export groups by card with
-        every size together (square / portrait / story), writes a real
-        ``metadata.json`` manifest (layout, palette, dimensions, per-format
-        sha256, confidence, design reasoning, and honest format-coverage), and
-        a plain-English README. Built by ``graphic_renderer.pack_export``.
-
-        Packaging only — it bundles what the generation pipeline already
-        rendered; it never re-renders (no Chromium in the request path).
-        """
-        if not _v8_ok:
-            return jsonify({"error": "v8_unavailable"}), 503
-        run_data = _load_run(run_id)
-        if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return _layout(
-                "No visuals",
-                '<div class="empty">No graphics have been generated for this run yet. '
-                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
-            ), 404
-
+    def _build_run_pack_zip(run_id: str, run_data: dict, profile_id: str):
+        """Build the all-formats content-pack ZIP for a run, or None if no
+        graphics have been rendered yet. Shared by the ``/pack/<id>/export.zip``
+        download route and the public API's ``/api/v1/runs/<id>/export`` so both
+        produce byte-identical bundles. Packaging only — never re-renders."""
         from mediahub.graphic_renderer import pack_export as _pack_export
 
         visuals_dir = RUNS_DIR / run_id / "visuals"
         if not visuals_dir.is_dir() or not any(visuals_dir.iterdir()):
-            return _layout(
-                "No visuals",
-                '<div class="empty">No graphics have been generated for this run yet. '
-                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
-            ), 404
+            return None
 
         run_data = run_data or {}
         meet = run_data.get("meet") or {}
@@ -49882,7 +50076,6 @@ voice, and queues them for one-click approval.</p>
             "date": meet.get("date") or meet.get("start_date") or "",
         }
 
-        profile_id = run_data.get("profile_id") or _active_profile_id() or ""
         club: dict = {}
         try:
             from mediahub.brand.store import load_brand
@@ -49947,12 +50140,47 @@ voice, and queues them for one-click approval.</p>
             statuses=statuses,
             order=order,
         )
+        return result.zip_bytes
+
+    @app.route("/pack/<run_id>/export.zip")
+    def pack_export_zip(run_id: str):
+        """G1.15 — batch ZIP of a pack's EVERY rendered format + a metadata.json manifest.
+
+        Distinct from ``content_pack_zip`` (which groups PNGs by destination
+        bucket + an approval-summary.json): this export groups by card with
+        every size together (square / portrait / story), writes a real
+        ``metadata.json`` manifest (layout, palette, dimensions, per-format
+        sha256, confidence, design reasoning, and honest format-coverage), and
+        a plain-English README. Built by ``graphic_renderer.pack_export``.
+
+        Packaging only — it bundles what the generation pipeline already
+        rendered; it never re-renders (no Chromium in the request path).
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
+
+        profile_id = run_data.get("profile_id") if run_data else None
+        profile_id = profile_id or _active_profile_id() or ""
+        zip_bytes = _build_run_pack_zip(run_id, run_data or {}, profile_id)
+        if zip_bytes is None:
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. '
+                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
 
         from flask import send_file
         import io as _io
 
         return send_file(
-            _io.BytesIO(result.zip_bytes),
+            _io.BytesIO(zip_bytes),
             as_attachment=True,
             download_name=f"content-pack-{run_id}-all-formats.zip",
             mimetype="application/zip",
@@ -53312,6 +53540,125 @@ voice, and queues them for one-click approval.</p>
         start_sentinel()
     except Exception:
         log.warning("log sentinel did not start", exc_info=True)
+
+    # ---- Public platform API (roadmap 1.21) ---------------------------------
+    # Register the first-party /api/v1 blueprint and wire its write callbacks
+    # back to the monolith's gated internals. Reads happen directly in the
+    # service layer (strict per-token tenant check); writes (run-trigger, card
+    # approval, pack export) run through these callbacks so the public API uses
+    # the SAME consent / brand-lock / group-approval gates as the UI.
+    def _api_run_starter(profile_id, file_bytes, file_name, *, fetch_pbs=True, club_filter=None):
+        return _start_run(file_bytes, file_name, profile_id, True, fetch_pbs, club_filter=club_filter)
+
+    def _api_pack_exporter(profile_id, run_id):
+        run_data = _load_run(run_id) or {}
+        zb = _build_run_pack_zip(run_id, run_data, profile_id)
+        return (zb or b""), f"content-pack-{run_id}-all-formats.zip"
+
+    def _api_card_action(profile_id, run_id, card_id, action, payload):
+        """Apply a workflow action for the public API, mirroring the session
+        route's gate sequence exactly (authorised upstream by token scope, not
+        session role). Parity is guarded by tests/test_api_public_endpoints.py."""
+        from mediahub.workflow.status import CardStatus
+
+        run_data = _load_run(run_id)
+        if not run_data or (run_data.get("profile_id") or "") != (profile_id or ""):
+            return {"error": "not_found", "message": "No such run."}, 404
+        ws = _get_wf_store()
+        if ws is None:
+            return {"error": "unavailable", "message": "Workflow not available."}, 503
+        actor_email = payload.get("_actor_email") or ""
+
+        if action == "set_status":
+            status_str = payload.get("status", "queue")
+            try:
+                status = CardStatus(status_str)
+            except (ValueError, NameError):
+                return {"error": "bad_request", "message": f"invalid status: {status_str}"}, 400
+            # Consent gate — the legal/safeguarding rule; identical to the route.
+            if status in (CardStatus.APPROVED, CardStatus.POSTED):
+                from mediahub.compliance.gate import (
+                    consent_block_reason_for_card,
+                    find_card_in_run,
+                )
+
+                card = find_card_in_run(run_data, card_id)
+                reason = consent_block_reason_for_card(run_data.get("profile_id", ""), card)
+                if reason:
+                    return {"error": "consent_blocked", "message": reason}, 403
+            # Brand-lock gate.
+            if status in (CardStatus.APPROVED, CardStatus.POSTED):
+                brand_reason = _brand_lock_block_reason(run_id, card_id)
+                if brand_reason:
+                    return {"error": "brand_locked", "message": brand_reason}, 403
+            # Open-review-task gate.
+            if status == CardStatus.APPROVED:
+                task_reason = _open_tasks_block_reason(run_id, card_id)
+                if task_reason:
+                    return {"error": "tasks_open", "message": task_reason}, 403
+            # Group-approval rule — recorded under the token owner's identity.
+            if status == CardStatus.APPROVED:
+                held, info = _group_approval_block(
+                    run_id, card_id, actor_email=actor_email, is_operator=False
+                )
+                if held:
+                    return {"ok": True, "status": "queue", **info}, 200
+            if status in (CardStatus.REJECTED, CardStatus.QUEUE):
+                _led = _get_approval_ledger()
+                if _led is not None:
+                    _led.clear(run_id, card_id)
+            ws.set_status(run_id, card_id, status, notes=payload.get("notes"))
+            if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
+                _action = {
+                    CardStatus.APPROVED: "approved",
+                    CardStatus.REJECTED: "rejected",
+                    CardStatus.QUEUE: "requeued",
+                }[status]
+                _phase_w_after_status_change(profile_id, run_id, card_id, _action, via="api")
+            return {"ok": True, "status": status_str, "summary": ws.summary(run_id)}, 200
+
+        if action == "set_edits":
+            edits = payload.get("edits", {})
+            if isinstance(edits, dict) and edits:
+                try:
+                    from mediahub.collab import locks as _locks
+
+                    _locked = _locks.locked_elements(run_id, card_id)
+                    if _locked:
+                        _insp_element = {
+                            "insp.hideSponsor": "sponsor",
+                            "insp.noPhoto": "photo",
+                            "insp.focus": "photo",
+                            "insp.accent": "accent",
+                        }
+                        edits = {
+                            k: v for k, v in edits.items() if _insp_element.get(k) not in _locked
+                        }
+                except Exception:
+                    pass
+            ws.set_edits(run_id, card_id, edits)
+            _phase_w_after_status_change(profile_id, run_id, card_id, "edited", via="api")
+            try:
+                cur_state = ws.load(run_id).get(card_id)
+                cur_status = cur_state.status if cur_state else CardStatus.QUEUE
+                if cur_status == CardStatus.QUEUE:
+                    ws.set_status(run_id, card_id, CardStatus.EDITED)
+            except Exception:
+                pass
+            return {"ok": True, "status": "edited"}, 200
+
+        return {"error": "bad_request", "message": "unknown action"}, 400
+
+    try:
+        from mediahub.api_public import build_api_v1_blueprint
+        from mediahub.api_public import service as _api_service
+
+        _api_service.register_run_starter(_api_run_starter)
+        _api_service.register_card_action(_api_card_action)
+        _api_service.register_pack_exporter(_api_pack_exporter)
+        app.register_blueprint(build_api_v1_blueprint())
+    except Exception:
+        log.warning("public API blueprint did not register", exc_info=True)
 
     return app
 
