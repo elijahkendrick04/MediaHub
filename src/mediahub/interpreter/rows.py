@@ -210,6 +210,20 @@ def _extract_swim_from_cells(
                 field_vals[schema.col_type] = raw
                 field_conf[schema.col_type] = _eff
 
+    # A disqualified / non-finish row carries a DSQ marker cell (DQ/DNS/DNF/…)
+    # alongside — or instead of — a printed time. The printed time on a DQ swim
+    # is struck out and must NOT surface as a valid result, so let the marker BE
+    # the time: the bridge maps a non-numeric time to finals_time_cs=None /
+    # dq=True, which excludes the swim from PB & moment detection. Match a cell
+    # whose first token is a DSQ marker so "DQ", "DNS" and rule-coded "DQ 8.2"
+    # forms are all caught.
+    for cell in cells:
+        head = cell.strip().split()[:1]
+        if head and head[0].upper() in _DSQ_VALUES:
+            field_vals["time"] = head[0].upper()
+            field_conf["time"] = max(field_conf.get("time", 0.0), 0.85)
+            break
+
     # A competition result must identify a competitor. A row with a time but no
     # name is a split/continuation line (cumulative lap times listed under a
     # swimmer on a distance event), not a result — dropping it keeps overall
@@ -342,7 +356,11 @@ def _split_into_records(
         if _is_time_like(tok):
             seen_time = True
     # Close the final record only if it actually carries a time (a trailing
-    # fragment of points/markers with no time is not a competitor).
+    # fragment of points/markers with no time is not a competitor). A real time
+    # immediately followed by a DSQ marker ("3:29.20 DQ") stays in one record:
+    # the marker is time-like too, so it is the record's terminal (achieved)
+    # token and the struck-out time is dropped as the body boundary below — the
+    # swim then carries the DSQ status, not a fabricated valid result (QA-013).
     if cur and any(_is_time_like(t) for t, _ in cur):
         records.append(cur)
     return records
@@ -387,6 +405,12 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     # this row is a heat/preliminary swim that qualified to a final — not a
     # final-round result. Surface it so the canonical bridge marks the round.
     qualified = any(_is_qualifier(t) for t, _ in rec[achieved_idx + 1 :])
+
+    # A disqualified swim ("… 3:29.20 DQ") needs no special-casing here: the DSQ
+    # marker is time-like, so it is the LAST time token and becomes the achieved
+    # `time_tok` (the bridge maps a non-numeric time to dq=True / no PB), while
+    # `body` — everything before the FIRST time — already excludes the struck-out
+    # void time so it is never mis-read as club/age data (QA-013).
 
     # Place (optional leading rank).
     place_val: int | None = None

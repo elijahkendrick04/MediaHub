@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `fd87094d6` · Merge pull request #1013: QA-011 — studio preview composed at native geometry (result time no longer
+**Last updated:** 2026-06-23 · `3a4950272` · Merge pull request #1012: exclude disqualified (DQ) swims from PB/moment detection (QA-013)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1208,6 +1208,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-23 | `97f958d2e` | Fix QA-011: studio preview composed at half geometry clipped the result time |
+| 2026-06-23 | `ec76e3c82` | fix(interpreter): exclude disqualified swims from PB/moment detection (QA-013) |
 | 2026-06-23 | `fef551a5f` | UI: extend mh-shiny-text to the content-pack meet heroes |
 | 2026-06-22 | `ae6e05ba4` | Fix Video Studio footage upload 500 (QA-010): store now honours DATA_DIR |
 | 2026-06-22 | `1a735effc` | UI: add mh-shiny-text glyph sheen from a reactbits.dev audit |
@@ -1217,5 +1218,4 @@ list and the auto table below, not here.
 | 2026-06-22 | `96ec12e42` | Re-clean stale HY-TEK banner meet titles at render time (QA-008) |
 | 2026-06-22 | `ed470fd5d` | Wire print/merch into the web app + merch mockups + fulfilment slot (1.20, build D) |
 | 2026-06-22 | `e91f5fe3b` | Add print-ready export: PDF/X + the orchestrator (roadmap 1.20, build C) |
-| 2026-06-22 | `b8b36c037` | Add the deterministic print auto-proofer (roadmap 1.20, build B) |
 <!-- /ROADMAP:ACTIVITY -->
