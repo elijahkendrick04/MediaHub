@@ -4225,7 +4225,33 @@ kbd {
 .mh-insp-status { flex: 1; font-size: 11px; color: var(--ink-muted, #9a988a); }
 
 @media (max-width: 560px) {
-  .mh-inspector { width: 100vw; border-left: none; }
+  /* Mobile-first review / caption / crop (roadmap 1.22): on a phone the
+     inspector becomes a thumb-reachable bottom sheet — its caption box, accent
+     swatches and crop grid sit near the bottom of the screen where the thumb
+     lands, it rises from the bottom edge, and a grab handle signals the
+     gesture. Desktop keeps the right-hand drawer untouched. */
+  .mh-inspector {
+    top: auto; left: 0; right: 0; bottom: 0;
+    width: 100%; max-height: 88vh;
+    border-left: none;
+    border-top: 1px solid var(--chrome, rgba(245, 242, 232, 0.14));
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -24px 60px rgba(0, 0, 0, 0.55);
+    transform: translateY(100%);
+  }
+  .mh-inspector.is-open { transform: translateY(0); }
+  /* Grab handle. */
+  .mh-insp-head { position: relative; padding-top: calc(var(--sp-5, 20px) + 6px); }
+  .mh-insp-head::before {
+    content: ''; position: absolute; top: 8px; left: 50%;
+    width: 36px; height: 4px; margin-left: -18px;
+    border-radius: 2px; background: var(--chrome, rgba(245, 242, 232, 0.22));
+  }
+  /* Generous tap targets for the phone: full-width crop grid, 44px cells. */
+  .mh-insp-cropgrid { max-width: 100%; gap: 8px; }
+  .mh-insp-crop { min-height: 44px; }
+  .mh-insp-close { min-width: 44px; min-height: 44px; }
+  .mh-insp-foot { padding-bottom: calc(var(--sp-4, 16px) + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .mh-inspector, .mh-inspector-scrim { transition: none; }
@@ -5304,4 +5330,94 @@ span.mh-an-down { background: var(--warn); }
 }
 @media (max-width: 700px) {
   .mh-av-grid { grid-template-columns: 1fr; }
+}
+
+/* === Offline approval queue indicator (roadmap 1.22) =======================
+   A small status pill that offline-queue.js shows when the service worker has
+   approvals/caption-edits stashed for replay. Fixed and centred, floating
+   above the mobile action dock; hidden + out of the a11y tree when empty (the
+   script toggles [hidden]). Calm by design — no motion under reduced-motion. */
+#mh-offline-queue {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+  transform: translateX(-50%);
+  z-index: 97;                 /* above the action dock (96), below modals (1000) */
+  max-width: calc(100vw - 24px);
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--bg-deep) 88%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--chrome);
+  box-shadow: var(--shadow-3);
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  animation: mh-oq-in var(--dur-slow) var(--ease-spring) both;
+}
+#mh-offline-queue::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  vertical-align: middle;
+}
+#mh-offline-queue[data-state="synced"] { color: var(--good); }
+#mh-offline-queue[data-state="synced"]::before { background: var(--good); }
+@keyframes mh-oq-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #mh-offline-queue { animation: none; }
+}
+
+/* === Install / Add-to-Home-Screen chip (roadmap 1.22) ======================
+   A calm lane-yellow chip that pwa-install.js shows bottom-left when the
+   browser offers an install (or on iOS, a one-time A2HS hint). Dismissible via
+   the ×; never shown once the app runs standalone. Bottom-left keeps it clear
+   of the centred action dock and the offline-queue pill. */
+#mh-install-chip {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  z-index: 96;                 /* with the dock; below modals (1000) */
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 9px 12px 9px 14px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--lane, #d4ff3a);
+  color: var(--lane-ink, #0a0b11);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-3);
+  animation: mh-chip-in var(--dur-slow) var(--ease-spring) both;
+}
+#mh-install-chip .mh-install-x {
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.65;
+  padding: 0 2px;
+}
+#mh-install-chip:hover .mh-install-x { opacity: 1; }
+#mh-install-chip:active { transform: translateY(1px); }
+@keyframes mh-chip-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #mh-install-chip { animation: none; }
 }

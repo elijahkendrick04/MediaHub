@@ -12125,6 +12125,13 @@ def _layout(
      before DOMContentLoaded. Self-hosted (no CDN); a load failure leaves every
      page fully usable (effects are decorative). -->
 <script defer src="{{ ui_kit_js_url }}"></script>
+<!-- Offline approval queue indicator (roadmap 1.22) — keeps a small "N changes
+     waiting to sync" pill in step with the service worker's queue. Deferred and
+     decorative: a load failure leaves approvals working exactly as before. -->
+<script defer src="{{ url_for('static', filename='js/offline-queue.js') }}"></script>
+<!-- Install / Add-to-Home-Screen affordance (roadmap 1.22). Deferred; no-op
+     where the browser can't install or once the app already runs standalone. -->
+<script defer src="{{ url_for('static', filename='js/pwa-install.js') }}"></script>
 </head>
 <body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
@@ -13693,9 +13700,16 @@ def _layout(
     if (window.mhDockSync) window.mhDockSync();
     var origLabel = btn.textContent;
     btn.disabled = true; btn.style.opacity = '0.7';
-    window.mhWorkflowSet(runId, cardId, status).then(function(){
+    window.mhWorkflowSet(runId, cardId, status).then(function(result){
       btn.disabled = false; btn.style.opacity = '';
-      if (window.MH && MH.toast) MH.toast('Marked as ' + status, 'success', 1500);
+      if (result && result.queued) {
+        // Offline: the service worker stashed this action and will replay it
+        // (idempotently) the moment the connection returns. The optimistic UI
+        // above stands — the volunteer can keep triaging on the bus.
+        if (window.MH && MH.toast) MH.toast('Saved offline — will sync when you reconnect', 'info', 2400);
+      } else if (window.MH && MH.toast) {
+        MH.toast('Marked as ' + status, 'success', 1500);
+      }
     }).catch(function(){
       btn.disabled = false; btn.style.opacity = '';
       btn.textContent = origLabel;
@@ -15784,7 +15798,12 @@ def create_app() -> Flask:
     import hmac as _hmac
     import secrets as _secrets_mod
 
-    _CSRF_EXEMPT_PATHS = {"/webhooks/stripe"}
+    # /share-target receives a top-level multipart POST from the phone's OS
+    # share sheet (PWA Web Share Target, roadmap 1.22), which cannot carry a
+    # CSRF token. It is safe to exempt: it only ever writes a photo into the
+    # *signed-in* session's own media library — a non-destructive, immediately
+    # visible action — and the handler still requires an active profile.
+    _CSRF_EXEMPT_PATHS = {"/webhooks/stripe", "/share-target"}
     _FORM_TAG_RX = re.compile(r"(<form\b[^>]*\bmethod=[\"']?post[\"']?[^>]*>)", re.IGNORECASE)
 
     def _csrf_token() -> str:
@@ -16112,6 +16131,7 @@ def create_app() -> Flask:
             "web_manifest",
             "service_worker",
             "favicon",
+            "app_icon",
             "static",
             # PC.7 — the public try-before-signup demo: the entire point is
             # a stranger with no account and no org. Caps + the sandbox demo
@@ -16395,6 +16415,7 @@ def create_app() -> Flask:
             "logout",
             "static",
             "favicon",
+            "app_icon",
             "web_manifest",
             "service_worker",
             "healthz",
@@ -23969,47 +23990,196 @@ Relay team broke club record"></textarea>
     # online; falls back to cache (then a tiny offline page) only when the
     # network is unavailable — so a stale cache can never be served to an online
     # user. Only same-origin /static/ assets are opportunistically cached.
-    _SERVICE_WORKER_JS = (
-        "const CACHE = 'mediahub-shell-v1';\n"
-        "self.addEventListener('install', function(e){ self.skipWaiting(); });\n"
-        "self.addEventListener('activate', function(e){\n"
-        "  e.waitUntil((async function(){\n"
-        "    var keys = await caches.keys();\n"
-        "    await Promise.all(keys.map(function(k){ return k === CACHE ? null : caches.delete(k); }));\n"
-        "    await self.clients.claim();\n"
-        "  })());\n"
-        "});\n"
-        "self.addEventListener('fetch', function(e){\n"
-        "  var req = e.request;\n"
-        "  if (req.method !== 'GET') return;\n"
-        "  var url = new URL(req.url);\n"
-        "  if (url.origin !== self.location.origin) return;\n"
-        "  e.respondWith((async function(){\n"
-        "    try {\n"
-        "      var res = await fetch(req);\n"
-        "      if (res && res.status === 200 && url.pathname.indexOf('/static/') !== -1) {\n"
-        "        var c = await caches.open(CACHE); c.put(req, res.clone());\n"
-        "      }\n"
-        "      return res;\n"
-        "    } catch (err) {\n"
-        "      var cached = await caches.match(req);\n"
-        "      if (cached) return cached;\n"
-        "      if (req.mode === 'navigate') {\n"
-        "        return new Response('<!doctype html><meta charset=utf-8>'\n"
-        "          + '<meta name=viewport content=\"width=device-width,initial-scale=1\">'\n"
-        "          + '<title>Offline \\u2014 MediaHub</title>'\n"
-        "          + '<body style=\"font-family:system-ui,sans-serif;background:rgb(10,11,17);'\n"
-        "          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'\n"
-        '          + \'height:100vh;margin:0"><div style="text-align:center;padding:24px">\'\n'
-        "          + '<h1 style=\"margin:0 0 8px\">You are offline</h1>'\n"
-        "          + '<p style=\"opacity:.7\">Reconnect to use MediaHub.</p></div></body>',\n"
-        "          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });\n"
-        "      }\n"
-        "      return new Response('', { status: 503 });\n"
-        "    }\n"
-        "  })());\n"
-        "});\n"
-    )
+    #
+    # Offline-tolerant approval queue (roadmap 1.22): POSTs to /api/workflow/
+    # (approve / reject / caption-edit — the actions a volunteer takes on the
+    # bus) are intercepted. Online they pass straight through; offline they are
+    # persisted to IndexedDB and a Background Sync is registered, then replayed
+    # when the connection returns. The workflow API is idempotent (re-approving
+    # is a no-op), so replay is always safe.
+    _SERVICE_WORKER_JS = r"""
+const CACHE = 'mediahub-shell-v2';
+const DB_NAME = 'mediahub-pwa';
+const STORE = 'approval-queue';
+const SYNC_TAG = 'mediahub-approval-queue';
+// Approve / reject / caption-edit all POST to /api/workflow/<run>/<card>.
+const WF_RX = /\/api\/workflow\//;
+
+self.addEventListener('install', function(e){ self.skipWaiting(); });
+
+self.addEventListener('activate', function(e){
+  e.waitUntil((async function(){
+    var keys = await caches.keys();
+    await Promise.all(keys.map(function(k){ return k === CACHE ? null : caches.delete(k); }));
+    await self.clients.claim();
+  })());
+});
+
+// --- IndexedDB queue: one tiny object store, keyed by a generated id --------
+function idbOpen(){
+  return new Promise(function(resolve, reject){
+    var rq = indexedDB.open(DB_NAME, 1);
+    rq.onupgradeneeded = function(){
+      var db = rq.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+    };
+    rq.onsuccess = function(){ resolve(rq.result); };
+    rq.onerror = function(){ reject(rq.error); };
+  });
+}
+function idbAdd(rec){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(rec);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = function(){ rej(tx.error); };
+  }); });
+}
+function idbGetAll(){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readonly');
+    var rq = tx.objectStore(STORE).getAll();
+    rq.onsuccess = function(){ res(rq.result || []); };
+    rq.onerror = function(){ rej(rq.error); };
+  }); });
+}
+function idbDelete(id){
+  return idbOpen().then(function(db){ return new Promise(function(res, rej){
+    var tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = function(){ rej(tx.error); };
+  }); });
+}
+function idbCount(){ return idbGetAll().then(function(a){ return a.length; }); }
+
+function genId(){
+  return (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : ('q-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+}
+
+function registerSync(){
+  try {
+    if (self.registration && self.registration.sync) {
+      return self.registration.sync.register(SYNC_TAG).catch(function(){});
+    }
+  } catch (e) {}
+  return Promise.resolve();
+}
+
+async function notifyClients(){
+  var n = await idbCount();
+  var cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+  cs.forEach(function(c){ c.postMessage({ type: 'mediahub-queue', count: n }); });
+}
+
+// Replay every queued action in submission order. A 2xx/3xx/4xx is a final
+// server decision (idempotent — re-approving is a no-op), so the entry is
+// dropped; a 5xx or a network failure keeps it for the next sync.
+async function drainQueue(){
+  var items = await idbGetAll();
+  items.sort(function(a, b){ return a.ts - b.ts; });
+  for (var i = 0; i < items.length; i++){
+    var it = items[i];
+    try {
+      var res = await fetch(it.url, {
+        method: it.method,
+        headers: it.headers,
+        body: it.body,
+        credentials: 'same-origin'
+      });
+      if (res && res.status < 500) { await idbDelete(it.id); }
+    } catch (e) {
+      break; // still offline — leave the remainder queued
+    }
+  }
+  await notifyClients();
+}
+
+async function handleWorkflowPost(req){
+  try {
+    return await fetch(req.clone());
+  } catch (err) {
+    try {
+      var body = await req.clone().text();
+      await idbAdd({
+        id: genId(),
+        url: req.url,
+        method: 'POST',
+        headers: { 'Content-Type': req.headers.get('Content-Type') || 'application/json' },
+        body: body,
+        ts: Date.now()
+      });
+      await registerSync();
+      await notifyClients();
+      return new Response(
+        JSON.stringify({ ok: true, queued: true, status: 'queued' }),
+        { status: 202, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (e2) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'queue_failed' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+}
+
+self.addEventListener('sync', function(e){
+  if (e.tag === SYNC_TAG) e.waitUntil(drainQueue());
+});
+
+self.addEventListener('message', function(e){
+  var data = e.data || {};
+  if (data.type === 'mediahub-queue-status'){
+    idbCount().then(function(n){
+      var msg = { type: 'mediahub-queue', count: n };
+      if (e.ports && e.ports[0]) e.ports[0].postMessage(msg);
+      else if (e.source && e.source.postMessage) e.source.postMessage(msg);
+    });
+  } else if (data.type === 'mediahub-queue-replay'){
+    drainQueue();
+  }
+});
+
+self.addEventListener('fetch', function(e){
+  var req = e.request;
+  var url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  // Offline-tolerant approval queue (roadmap 1.22): queue workflow POSTs and
+  // replay them when the connection returns.
+  if (req.method === 'POST' && WF_RX.test(url.pathname)) {
+    e.respondWith(handleWorkflowPost(req));
+    return;
+  }
+  if (req.method !== 'GET') return;
+  e.respondWith((async function(){
+    try {
+      var res = await fetch(req);
+      if (res && res.status === 200 && url.pathname.indexOf('/static/') !== -1) {
+        var c = await caches.open(CACHE); c.put(req, res.clone());
+      }
+      return res;
+    } catch (err) {
+      var cached = await caches.match(req);
+      if (cached) return cached;
+      if (req.mode === 'navigate') {
+        return new Response('<!doctype html><meta charset=utf-8>'
+          + '<meta name=viewport content="width=device-width,initial-scale=1">'
+          + '<title>Offline — MediaHub</title>'
+          + '<body style="font-family:system-ui,sans-serif;background:rgb(10,11,17);'
+          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'
+          + 'height:100vh;margin:0"><div style="text-align:center;padding:24px">'
+          + '<h1 style="margin:0 0 8px">You are offline</h1>'
+          + '<p style="opacity:.7">Your approvals are saved and will sync when you reconnect.</p></div></body>',
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+      return new Response('', { status: 503 });
+    }
+  })());
+});
+"""
 
     @app.route("/favicon.svg")
     @app.route("/favicon.ico")
@@ -24022,6 +24192,62 @@ Relay team broke club record"></textarea>
         return app.response_class(
             _FAVICON_SVG,
             mimetype="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    _APP_ICON_CACHE: dict = {}
+
+    def _app_icon_png(size: int) -> bytes:
+        """Render the MediaHub podium mark as a maskable PNG home-screen icon
+        (roadmap 1.22). SVG favicons don't install as a home-screen icon on
+        every platform, so a real raster icon makes the installed PWA polished.
+        The podium is drawn into the central ~72% safe zone over a full-bleed
+        dark background, so a maskable crop (circle / squircle) never clips it.
+        Cached per size — the geometry is deterministic."""
+        if size in _APP_ICON_CACHE:
+            return _APP_ICON_CACHE[size]
+        from PIL import Image, ImageDraw
+        import io as _io
+
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle(
+            [0, 0, size - 1, size - 1], radius=int(size * 0.22), fill=(10, 11, 17, 255)
+        )
+        # The favicon is drawn on a 32-unit grid; scale it into a centred 72% box.
+        inner = size * 0.72
+        pad = (size - inner) / 2.0
+        u = inner / 32.0
+
+        def _bar(x, y, w, h, color):
+            d.rounded_rectangle(
+                [pad + x * u, pad + y * u, pad + (x + w) * u, pad + (y + h) * u],
+                radius=max(1, int(u)),
+                fill=color,
+            )
+
+        _bar(6, 20, 5, 7, (182, 178, 166, 255))  # third place (silver-grey)
+        _bar(13.5, 9, 5, 18, (212, 255, 58, 255))  # winner (lane yellow)
+        _bar(21, 14, 5, 13, (244, 213, 141, 255))  # runner-up (medal gold)
+        d.line(
+            [pad + 4 * u, pad + 28.5 * u, pad + 28 * u, pad + 28.5 * u],
+            fill=(212, 255, 58, 255),
+            width=max(1, int(1.5 * u)),
+        )
+        buf = _io.BytesIO()
+        img.save(buf, format="PNG")
+        out = buf.getvalue()
+        _APP_ICON_CACHE[size] = out
+        return out
+
+    @app.route("/icon-<int:size>.png")
+    def app_icon(size):
+        # Only the two manifest sizes are rendered; anything else snaps to 192.
+        if size not in (192, 512):
+            size = 192
+        return app.response_class(
+            _app_icon_png(size),
+            mimetype="image/png",
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
@@ -24045,9 +24271,41 @@ Relay team broke club record"></textarea>
                     "src": url_for("favicon"),
                     "sizes": "any",
                     "type": "image/svg+xml",
+                    "purpose": "any",
+                },
+                # Raster home-screen icons (roadmap 1.22) — a real maskable PNG
+                # installs cleanly where an SVG icon doesn't.
+                {
+                    "src": url_for("app_icon", size=192),
+                    "sizes": "192x192",
+                    "type": "image/png",
                     "purpose": "any maskable",
-                }
+                },
+                {
+                    "src": url_for("app_icon", size=512),
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "any maskable",
+                },
             ],
+            # Web Share Target (roadmap 1.22) — registers MediaHub in the phone's
+            # OS share sheet so a poolside volunteer can share a camera-roll photo
+            # straight into the org's media library. The browser POSTs a multipart
+            # navigation to /share-target with the image(s) under the "photos"
+            # field declared here.
+            "share_target": {
+                "action": url_for("share_target_receiver"),
+                "method": "POST",
+                "enctype": "multipart/form-data",
+                "params": {
+                    "title": "title",
+                    "text": "text",
+                    "url": "url",
+                    "files": [
+                        {"name": "photos", "accept": ["image/*"]},
+                    ],
+                },
+            },
         }
         return app.response_class(json.dumps(manifest), mimetype="application/manifest+json")
 
@@ -41663,6 +41921,39 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "</div></div><script>" + _imagine_js + "</script>"
             )
 
+        # A success banner after a share-target drop (roadmap 1.22) or a
+        # camera/quick upload that round-tripped through ?shared=N&skipped=M.
+        try:
+            _shared_n = int(_req.args.get("shared") or 0)
+        except (TypeError, ValueError):
+            _shared_n = 0
+        try:
+            _skipped_n = int(_req.args.get("skipped") or 0)
+        except (TypeError, ValueError):
+            _skipped_n = 0
+        shared_banner = ""
+        if _shared_n > 0 or _skipped_n > 0:
+            if _shared_n > 0:
+                _sb_msg = (
+                    f"<strong>{_shared_n} photo{'s' if _shared_n != 1 else ''} added</strong> "
+                    "to your library."
+                )
+            else:
+                _sb_msg = "<strong>No photos added.</strong>"
+            if _skipped_n > 0:
+                _sb_msg += (
+                    f" {_skipped_n} item{'s' if _skipped_n != 1 else ''} skipped "
+                    "(not a supported image)."
+                )
+            shared_banner = (
+                '<div class="mh-flash" role="status" style="'
+                "margin:0 0 var(--sp-5);padding:14px 18px;"
+                "border:1px solid rgba(212,255,58,0.30);border-left:3px solid var(--accent);"
+                "background:rgba(212,255,58,0.06);color:var(--ink);"
+                'border-radius:var(--radius-sm);font-size:13px;line-height:1.5">'
+                f"{_sb_msg}</div>"
+            )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
@@ -41674,15 +41965,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         }</span>
   </div>
 </section>
-
+{shared_banner}
 <div class="card">
   <h2>Upload a photo</h2>
-  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment.</p>
-  <form method="POST" action="{
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
+  <form id="ml-upload-form" data-mh-capture-form method="POST" action="{
             url_for("api_media_library_upload")
         }" enctype="multipart/form-data" data-loader-text="Uploading photo">
     <label class="req" for="ml-file">File</label>
     <input id="ml-file" type="file" name="file" accept="image/*" required>
+    <input id="ml-capture" type="file" accept="image/*" capture="environment" hidden>
     <label for="ml-desc">Description</label>
     <input id="ml-desc" type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
     <label for="ml-type">Type</label>
@@ -41695,7 +41987,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       <option value="logo">Logo</option>
     </select>
     <input type="hidden" name="profile_id" value="{profile_id}">
-    <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
+    <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+      <button type="submit" class="btn">Upload photo &rarr;</button>
+      <button type="button" id="ml-capture-btn" class="btn secondary" hidden>Take photo</button>
+    </div>
+    <div id="ml-capture-status" class="dim" role="status" aria-live="polite" style="margin-top:var(--sp-3);min-height:1.2em"></div>
   </form>
 </div>
 {imagine_panel}
@@ -41752,8 +42048,74 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
+<script src="{url_for("static", filename="js/mobile-capture.js")}"></script>
 """
         return _layout("Media library", body, active="media")
+
+    class _HeicUnsupportedError(Exception):
+        """A HEIC/HEIF upload couldn't be decoded on this deployment.
+
+        Carries the caller's choice of whether to surface a 415 (the upload
+        form) or quietly skip the file (the bulk share-target receiver)."""
+
+    def _save_library_photo(
+        file_storage, profile_id, *, description="", asset_type="athlete_photo"
+    ):
+        """Persist one uploaded image into a profile's media library.
+
+        Shared by the media-library upload form and the PWA share-target
+        receiver (roadmap 1.22) so both paths handle on-disk storage, HEIC
+        normalisation, and metadata parsing identically. Raises
+        ``_HeicUnsupportedError`` when a HEIC photo can't be decoded — the
+        caller decides whether to 415 or skip it.
+        """
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        import uuid as _uuid
+
+        ext = Path(file_storage.filename or "upload.jpg").suffix.lower() or ".jpg"
+        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
+        file_storage.save(str(dest))
+
+        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
+        # show — normalise it to a web-safe JPEG on the way in. Honest-error
+        # (don't keep an unreadable asset) when the optional decoder is absent.
+        from mediahub.media_library import heic as _heic
+
+        if _heic.is_heic(dest.name):
+            try:
+                dest, _converted = _heic.normalize_upload(dest)
+            except _heic.HeicUnsupported as exc:
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise _HeicUnsupportedError() from exc
+
+        meta = _v8_parse_description(description) if description else {}
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        athlete_names = list(meta.get("athletes") or [])
+        asset = MediaAsset(
+            id="",
+            filename=Path(file_storage.filename or dest.name).name,
+            path=str(dest),
+            type=asset_type,
+            description_raw=description,
+            description_parsed=meta,
+            profile_id=profile_id,
+            linked_athlete_names=athlete_names,
+            linked_venue=meta.get("venue"),
+            linked_event=meta.get("event"),
+            tags=meta.get("tags") or [],
+        )
+        return store.save(asset)
+
+    _HEIC_UNSUPPORTED_MSG = (
+        "HEIC/HEIF photos need conversion support that isn't installed on this "
+        "deployment. Re-save the photo as JPEG or PNG and upload again."
+    )
 
     @app.route("/api/media-library", methods=["POST"])
     def api_media_library_upload():
@@ -41776,60 +42138,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         description = _req.form.get("description", "").strip()
         asset_type = _req.form.get("asset_type", "athlete_photo").strip()
 
-        # Save to disk
-        upload_dir = UPLOADS_DIR / "media_library" / profile_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        import uuid as _uuid
+        try:
+            asset = _save_library_photo(
+                f, profile_id, description=description, asset_type=asset_type
+            )
+        except _HeicUnsupportedError:
+            return jsonify({"error": "heic_unsupported", "message": _HEIC_UNSUPPORTED_MSG}), 415
 
-        ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
-        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
-        f.save(str(dest))
-
-        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
-        # show — normalise it to a web-safe JPEG on the way in. Honest-error
-        # (don't keep an unreadable asset) when the optional decoder is absent.
-        from mediahub.media_library import heic as _heic
-
-        if _heic.is_heic(dest.name):
-            try:
-                dest, _converted = _heic.normalize_upload(dest)
-            except _heic.HeicUnsupported:
-                try:
-                    dest.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                return (
-                    jsonify(
-                        {
-                            "error": "heic_unsupported",
-                            "message": "HEIC/HEIF photos need conversion support that "
-                            "isn't installed on this deployment. Re-save the photo as "
-                            "JPEG or PNG and upload again.",
-                        }
-                    ),
-                    415,
-                )
-
-        # Parse metadata
-        meta = _v8_parse_description(description) if description else {}
-        store = _v8_get_media_store()
-        from mediahub.media_library.models import MediaAsset
-
-        athlete_names = list(meta.get("athletes") or [])
-        asset = MediaAsset(
-            id="",
-            filename=Path(f.filename or dest.name).name,
-            path=str(dest),
-            type=asset_type,
-            description_raw=description,
-            description_parsed=meta,
-            profile_id=profile_id,
-            linked_athlete_names=athlete_names,
-            linked_venue=meta.get("venue"),
-            linked_event=meta.get("event"),
-            tags=meta.get("tags") or [],
-        )
-        asset = store.save(asset)
         # AJAX callers get JSON; plain form submissions redirect back to the library.
         if (
             _req.headers.get("Accept", "").find("application/json") != -1
@@ -41839,6 +42154,55 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 {"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset}
             )
         return redirect(url_for("media_library_page", profile_id=profile_id))
+
+    @app.route("/share-target", methods=["POST"])
+    def share_target_receiver():
+        """PWA Web Share Target (roadmap 1.22).
+
+        Receives photos shared from the phone's OS share sheet ("share to
+        MediaHub") and drops them straight into the active organisation's media
+        library — the single highest-value poolside mobile behaviour. The OS
+        sends a top-level multipart navigation that can't carry a CSRF token
+        (so the path is CSRF-exempt) and writes only to the *signed-in*
+        session's own library. Non-image attachments are ignored; HEIC photos
+        that can't be decoded are skipped and counted.
+        """
+        if not _v8_ok:
+            return redirect(url_for("media_library_page"))
+        from flask import request as _req
+
+        profile_id = _active_profile_id()
+        if not profile_id:
+            # Shared while signed out — the org-readiness gate normally catches
+            # this, but guard explicitly: bounce to sign-in (the photo isn't
+            # kept) rather than 500 on a missing tenant.
+            return redirect(url_for("sign_in_page"))
+
+        # Browsers post shared files under the manifest-declared "photos" field;
+        # accept "file" too for resilience across share-sheet implementations.
+        files = _req.files.getlist("photos") + _req.files.getlist("file")
+        saved = 0
+        skipped = 0
+        for f in files:
+            if not f or not (f.filename or "").strip():
+                continue
+            ctype = (f.mimetype or "").lower()
+            if ctype and not ctype.startswith("image/"):
+                skipped += 1  # the OS bundled a non-image attachment — ignore it
+                continue
+            try:
+                _save_library_photo(f, profile_id, description="", asset_type="athlete_photo")
+                saved += 1
+            except _HeicUnsupportedError:
+                skipped += 1
+            except Exception:
+                log.exception("share-target: failed to save a shared photo")
+                skipped += 1
+
+        args = {"shared": saved}
+        if skipped:
+            args["skipped"] = skipped
+        return redirect(url_for("media_library_page", **args))
 
     def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
         """Profile-scoped access guard for media-library files.

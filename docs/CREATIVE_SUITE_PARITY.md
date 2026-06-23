@@ -1587,6 +1587,13 @@ dependency.
 
 ## 1.22 — Mobile, PWA & access surfaces
 
+> **Status: shipped (2026-06-23).** Installable PWA with maskable icons + an
+> install/A2HS affordance, a Web Share-Target that drops camera-roll photos
+> straight into the media library, camera capture with on-device downscale, an
+> offline-tolerant approval queue (IndexedDB + Background Sync, idempotent
+> replay), and a mobile-first bottom-sheet for caption/crop. Full reference:
+> [`PWA_MOBILE.md`](PWA_MOBILE.md).
+
 **What Canva/Adobe have.** Native iOS/Android apps (full editing), iPad
 apps, desktop apps (Mac/Windows), PWA, Chrome extension, mobile presenting,
 mobile photo/video editing, guest/logged-out access, cross-device sync,
@@ -1621,9 +1628,9 @@ cross-device sync is inherent (server-side state).
 | C18 | Desktop apps (Mac, Windows) | 🚫 adapted — hosted web app only (ADR-0011) |
 | C18 | Web browser (cross-platform) | ✅ shipped — the product is the web app |
 | C18 | Mobile presenting (present from pocket) | ↗ 1.15 phone-remote + mobile deck view |
-| C18 | Mobile photo/video editing | 🆕 1.22 mobile-scoped editing (approve/caption/crop/pick); full editors stay desktop-primary |
+| C18 | Mobile photo/video editing | ✅ 1.22 — mobile-scoped editing shipped (approve/caption/quick-crop/pick via the thumb-reach bottom-sheet inspector); full editors stay desktop-primary |
 | C18 | Designs open in new browser tab by default (toggleable) | 🆕 1.22 small UX preference, noted for completeness |
-| A19 | Web (desktop browser), mobile apps (iOS/Android), iPad app, PWA, Chrome extension | 🆕 1.22 PWA (+ share-target replacing the extension); iPad = the responsive web app |
+| A19 | Web (desktop browser), mobile apps (iOS/Android), iPad app, PWA, Chrome extension | ✅ 1.22 — installable PWA shipped (+ Web Share-Target replacing the extension); iPad = the responsive web app |
 | A19 | Guest/logged-out access | 🆕 1.22 token-scoped guest views (1.18) |
 | A19 | Cross-device sync | ✅ inherent (hosted state) |
 | A19 | Adobe Express for Education (classrooms, assignments, galleries) | 🚫 adapted — society/education packaging is a PC.4 commercial decision; no classroom LMS build |
