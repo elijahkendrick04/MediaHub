@@ -279,11 +279,6 @@ def _extract_swim_from_cells(
 _LETTER = r"[^\W\d_]"
 # Time token: optional J/X/R judged-or-marker prefix, then mm:ss.cc or ss.cc.
 _TIME_TOKEN = re.compile(r"^[JXRjxr]?\d{0,3}:?\d{1,2}\.\d{2}$")
-# Reaction-time shape ("0.63" / "0.700"): a sub-second start reaction, NOT a
-# swum time. It is time-token-shaped, so when a result row carries a trailing
-# reaction column it must be excluded from seed/result selection (mirrors
-# `_normalise_reaction`).
-_REACTION_SHAPE = re.compile(r"^0\.\d{2,3}$")
 # Disqualification / no-time markers that occupy the time column.
 _DSQ_TOKEN = re.compile(r"^(?:DQ|DNS|DNF|DNC|NS|SCR|WD)$", re.IGNORECASE)
 # Rank token starting a record: 1, 1., =1, *1 (ties), or --- (no place / DQ).
@@ -292,9 +287,29 @@ _PLACE_TOKEN = re.compile(r"^=?\*?\d{1,3}\.?$|^-{2,}$")
 _AGEYOB_TOKEN = re.compile(r"^\(?\d{1,4}\)?$")
 _DSQ_VALUES = {"DQ", "DNS", "DNF", "DNC", "NS", "SCR", "WD"}
 
+# Finals-qualification marker trailing a heat/prelim time: "q", "Q" or the FINA-
+# points form "q430". HY-TEK stamps it only on a preliminary swim that advanced
+# to a final, so a row carrying it is a heat, not a final-round result. It is
+# report furniture (like the DSQ markers above), not swim ontology.
+_QUALIFIER_TOKEN = re.compile(r"^[qQ]\d*$")
+
+# A reaction time is a sub-second value ("0.63", "+0.71") printed after the swim
+# time in some layouts. It is never the achieved race result (no pool race is
+# under a second), so it must not be mistaken for the time when a row prints
+# several time-shaped tokens.
+_REACTION_TOKEN = re.compile(r"^[+\-]?0\.\d{2,3}$")
+
 
 def _is_time_like(tok: str) -> bool:
     return bool(_TIME_TOKEN.match(tok) or _DSQ_TOKEN.match(tok))
+
+
+def _is_qualifier(tok: str) -> bool:
+    return bool(_QUALIFIER_TOKEN.match(tok))
+
+
+def _is_reaction_like(tok: str) -> bool:
+    return bool(_REACTION_TOKEN.match(tok))
 
 
 def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
@@ -316,41 +331,44 @@ def _tokenise_with_gaps(text: str) -> list[tuple[str, bool]]:
 def _split_into_records(
     tokens: list[tuple[str, bool]],
 ) -> list[list[tuple[str, bool]]]:
-    """Break a tokenised line into records, each ending at the LAST time-like
-    token of a consecutive run of time-like tokens.
+    """Break a tokenised line into one record per competitor.
 
-    A competitor's row can carry more than one time-like token in a trailing
-    run, for two reasons that both mean "don't close the record at the first
-    one":
+    A record runs from a competitor's leading token up to AND INCLUDING their
+    achieved time. Crucially, several time columns for ONE competitor stay in
+    the same record: a "Seed Finals" or "Prelim Finals" layout prints two times
+    on the row, and a finals-qualification marker ("q"/"q430") trails the time
+    on a heat. A new record only begins when a non-time, non-qualifier token
+    appears AFTER a time has been seen — i.e. the next competitor's place/name.
 
-    * **Seed + result.** HY-TEK prints the Seed (entry) time immediately before
-      the swum result (Finals, or Prelim on a prelim-only sheet):
-      ``… 2:55.80  3:03.47``. Closing at the *first* time would slice the seed
-      off as the record's time and discard the real result.
-    * **Void time + DSQ marker.** A disqualified swim prints its now-void time
-      right before the DSQ marker (``… 3:29.20  DQ``); the marker is the true
-      terminal and strikes the time out.
-
-    Because a DSQ marker is itself time-like, "close only when the next token is
-    NOT time-like" handles both: the seed+result pair and the void-time+marker
-    pair each stay in one record, and ``_record_to_swim`` selects the result
-    (the last of the run — the Finals/Prelim time, or the DSQ marker for a DQ).
-
-    This still splits the common two-records-per-line layout correctly, because
-    there the token after a record's time is the next record's place number —
-    not a time.
+    This fixes two faults of the old "split at the first time token" rule, which
+    truncated every row at its first time: it surfaced the SEED time as the
+    result (discarding the achieved final time), and it threw away the trailing
+    "q" marker that distinguishes a heat from a final. The multi-competitor
+    per-line layout still works, because the next competitor starts with a
+    place/name token (never time-shaped).
     """
     records: list[list[tuple[str, bool]]] = []
     cur: list[tuple[str, bool]] = []
-    n = len(tokens)
-    for i in range(n):
-        tok, big = tokens[i]
+    seen_time = False
+    for tok, big in tokens:
+        if seen_time and not _is_time_like(tok) and not _is_qualifier(tok):
+            # First non-time, non-qualifier token after a time → the previous
+            # competitor's record is complete; this token begins the next one.
+            records.append(cur)
+            cur = [(tok, big)]
+            seen_time = False
+            continue
         cur.append((tok, big))
         if _is_time_like(tok):
-            next_is_time = (i + 1 < n) and _is_time_like(tokens[i + 1][0])
-            if not next_is_time:
-                records.append(cur)
-                cur = []
+            seen_time = True
+    # Close the final record only if it actually carries a time (a trailing
+    # fragment of points/markers with no time is not a competitor). A real time
+    # immediately followed by a DSQ marker ("3:29.20 DQ") stays in one record:
+    # the marker is time-like too, so it is the record's terminal (achieved)
+    # token and the struck-out time is dropped as the body boundary below — the
+    # swim then carries the DSQ status, not a fabricated valid result (QA-013).
+    if cur and any(_is_time_like(t) for t, _ in cur):
+        records.append(cur)
     return records
 
 
@@ -370,36 +388,42 @@ def _looks_like_relay(name_toks: list[str]) -> bool:
 
 
 def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
-    """Classify one record's tokens into an InterpretedSwim.
-
-    A record ends in a run of one or more time tokens: ``[seed] [prelim] result``.
-    The SWUM result is the LAST of that run (Finals if present, else Prelim);
-    any earlier time token is the Seed/entry time and must never be read as the
-    result. (The header-driven schema path makes the same Finals > Prelim >
-    never-Seed selection by column label; this is its layout-independent
-    equivalent for the collapsed-line parser, where the result is the rightmost
-    time column before the points/end and the seed is the column before it.)
-    """
+    """Classify one competitor record's tokens into an InterpretedSwim."""
     if not rec:
         return None
-    # Peel the trailing run of time-like tokens off the record.
-    k = len(rec)
-    while k > 0 and _is_time_like(rec[k - 1][0]):
-        k -= 1
-    time_run = [t for t, _ in rec[k:]]
-    # A trailing reaction-time column ("0.63") is time-shaped but is a start
-    # reaction, not a swum time — drop it so it is never read as the result.
-    swim_times = [t for t in time_run if not _REACTION_SHAPE.match(t)]
-    if not swim_times:
+
+    # Locate the time column(s). A row may print several time-shaped tokens —
+    # seed + finals, or prelim + finals (+ a reaction time, + a "q" marker). The
+    # ACHIEVED race time is the LAST real race time on the row; a sub-second
+    # value is a reaction time, never the result; and the body (place/name/club)
+    # is everything BEFORE the first time. Falling back to the first time only
+    # if every time-shaped token is reaction-shaped keeps degenerate rows alive.
+    time_idxs = [i for i, (t, _) in enumerate(rec) if _is_time_like(t)]
+    if not time_idxs:
         return None
-    body = rec[:k]
-    time_tok = swim_times[-1]  # the swum result (Finals/Prelim), never the seed
-    # An earlier time in the run is the Seed/entry time, kept separately so it is
-    # never read as the result. For a DQ'd swim ("… 2:55.80 DQ") the result is
-    # the marker and the preceding time is the swimmer's seed. Peeling the whole
-    # run keeps both the seed and any void time out of the body, so neither is
-    # mis-read as club/age data.
-    seed_tok = swim_times[0] if len(swim_times) >= 2 else None
+    first_time_idx = time_idxs[0]
+    achieved_candidates = [i for i in time_idxs if not _is_reaction_like(rec[i][0])]
+    achieved_idx = achieved_candidates[-1] if achieved_candidates else time_idxs[-1]
+    time_tok = rec[achieved_idx][0]
+    body = rec[:first_time_idx]
+
+    # The Seed/entry time is the FIRST real race time when a row prints more than
+    # one (Seed before Finals/Prelim). Kept separately (never read as the result)
+    # so raw extraction stays distinct from the canonical swum time and a swim
+    # slower than its seed can never be mistaken for a PB. For a DQ'd swim
+    # ("… 2:55.80 DQ") the achieved time is the marker and this is the seed.
+    seed_tok = rec[achieved_candidates[0]][0] if len(achieved_candidates) >= 2 else None
+
+    # A finals-qualification marker ("q"/"q430") trailing the achieved time means
+    # this row is a heat/preliminary swim that qualified to a final — not a
+    # final-round result. Surface it so the canonical bridge marks the round.
+    qualified = any(_is_qualifier(t) for t, _ in rec[achieved_idx + 1 :])
+
+    # A disqualified swim ("… 3:29.20 DQ") needs no special-casing here: the DSQ
+    # marker is time-like, so it is the LAST time token and becomes the achieved
+    # `time_tok` (the bridge maps a non-numeric time to dq=True / no PB), while
+    # `body` — everything before the FIRST time — already excludes the struck-out
+    # void time so it is never mis-read as club/age data (QA-013).
 
     # Place (optional leading rank).
     place_val: int | None = None
@@ -488,6 +512,7 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
         confidence=round(min(row_conf, 1.0), 4),
         raw_row=" ".join(t for t, _ in rec),
         field_confidence=field_conf,
+        round_hint="prelim" if qualified else None,
     )
 
 

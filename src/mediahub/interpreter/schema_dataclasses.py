@@ -85,6 +85,14 @@ class InterpretedSwim:
     # (PDF/HTML/free text). Used to look a swimmer's official PBs up directly.
     asa_id: Optional[str] = None
     age: Optional[int] = None  # swimmer age at the meet, when stated in the file
+    # Round provenance when the source row carries a structural marker that the
+    # round can be read from. "prelim" is set when a finals-qualification marker
+    # ("q"/"q430" in HY-TEK results) trails the time — that marker is only ever
+    # stamped on a heat/preliminary swim that advanced to a final, so the row is
+    # NOT a final-round result. None ⇒ no round marker on the row (the canonical
+    # bridge then treats it as a timed final). Kept structural (a marker was/was
+    # not present) so the parsing layer stays free of round semantics.
+    round_hint: Optional[str] = None
 
 
 @dataclass
