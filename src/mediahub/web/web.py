@@ -15784,7 +15784,12 @@ def create_app() -> Flask:
     import hmac as _hmac
     import secrets as _secrets_mod
 
-    _CSRF_EXEMPT_PATHS = {"/webhooks/stripe"}
+    # /share-target receives a top-level multipart POST from the phone's OS
+    # share sheet (PWA Web Share Target, roadmap 1.22), which cannot carry a
+    # CSRF token. It is safe to exempt: it only ever writes a photo into the
+    # *signed-in* session's own media library — a non-destructive, immediately
+    # visible action — and the handler still requires an active profile.
+    _CSRF_EXEMPT_PATHS = {"/webhooks/stripe", "/share-target"}
     _FORM_TAG_RX = re.compile(r"(<form\b[^>]*\bmethod=[\"']?post[\"']?[^>]*>)", re.IGNORECASE)
 
     def _csrf_token() -> str:
@@ -24048,6 +24053,24 @@ Relay team broke club record"></textarea>
                     "purpose": "any maskable",
                 }
             ],
+            # Web Share Target (roadmap 1.22) — registers MediaHub in the phone's
+            # OS share sheet so a poolside volunteer can share a camera-roll photo
+            # straight into the org's media library. The browser POSTs a multipart
+            # navigation to /share-target with the image(s) under the "photos"
+            # field declared here.
+            "share_target": {
+                "action": url_for("share_target_receiver"),
+                "method": "POST",
+                "enctype": "multipart/form-data",
+                "params": {
+                    "title": "title",
+                    "text": "text",
+                    "url": "url",
+                    "files": [
+                        {"name": "photos", "accept": ["image/*"]},
+                    ],
+                },
+            },
         }
         return app.response_class(json.dumps(manifest), mimetype="application/manifest+json")
 
@@ -41663,6 +41686,39 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "</div></div><script>" + _imagine_js + "</script>"
             )
 
+        # A success banner after a share-target drop (roadmap 1.22) or a
+        # camera/quick upload that round-tripped through ?shared=N&skipped=M.
+        try:
+            _shared_n = int(_req.args.get("shared") or 0)
+        except (TypeError, ValueError):
+            _shared_n = 0
+        try:
+            _skipped_n = int(_req.args.get("skipped") or 0)
+        except (TypeError, ValueError):
+            _skipped_n = 0
+        shared_banner = ""
+        if _shared_n > 0 or _skipped_n > 0:
+            if _shared_n > 0:
+                _sb_msg = (
+                    f"<strong>{_shared_n} photo{'s' if _shared_n != 1 else ''} added</strong> "
+                    "to your library."
+                )
+            else:
+                _sb_msg = "<strong>No photos added.</strong>"
+            if _skipped_n > 0:
+                _sb_msg += (
+                    f" {_skipped_n} item{'s' if _skipped_n != 1 else ''} skipped "
+                    "(not a supported image)."
+                )
+            shared_banner = (
+                '<div class="mh-flash" role="status" style="'
+                "margin:0 0 var(--sp-5);padding:14px 18px;"
+                "border:1px solid rgba(212,255,58,0.30);border-left:3px solid var(--accent);"
+                "background:rgba(212,255,58,0.06);color:var(--ink);"
+                'border-radius:var(--radius-sm);font-size:13px;line-height:1.5">'
+                f"{_sb_msg}</div>"
+            )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
@@ -41674,15 +41730,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         }</span>
   </div>
 </section>
-
+{shared_banner}
 <div class="card">
   <h2>Upload a photo</h2>
-  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment.</p>
-  <form method="POST" action="{
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
+  <form id="ml-upload-form" data-mh-capture-form method="POST" action="{
             url_for("api_media_library_upload")
         }" enctype="multipart/form-data" data-loader-text="Uploading photo">
     <label class="req" for="ml-file">File</label>
     <input id="ml-file" type="file" name="file" accept="image/*" required>
+    <input id="ml-capture" type="file" accept="image/*" capture="environment" hidden>
     <label for="ml-desc">Description</label>
     <input id="ml-desc" type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
     <label for="ml-type">Type</label>
@@ -41695,7 +41752,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       <option value="logo">Logo</option>
     </select>
     <input type="hidden" name="profile_id" value="{profile_id}">
-    <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
+    <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+      <button type="submit" class="btn">Upload photo &rarr;</button>
+      <button type="button" id="ml-capture-btn" class="btn secondary" hidden>Take photo</button>
+    </div>
+    <div id="ml-capture-status" class="dim" role="status" aria-live="polite" style="margin-top:var(--sp-3);min-height:1.2em"></div>
   </form>
 </div>
 {imagine_panel}
@@ -41752,8 +41813,72 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
+<script src="{url_for("static", filename="js/mobile-capture.js")}"></script>
 """
         return _layout("Media library", body, active="media")
+
+    class _HeicUnsupportedError(Exception):
+        """A HEIC/HEIF upload couldn't be decoded on this deployment.
+
+        Carries the caller's choice of whether to surface a 415 (the upload
+        form) or quietly skip the file (the bulk share-target receiver)."""
+
+    def _save_library_photo(file_storage, profile_id, *, description="", asset_type="athlete_photo"):
+        """Persist one uploaded image into a profile's media library.
+
+        Shared by the media-library upload form and the PWA share-target
+        receiver (roadmap 1.22) so both paths handle on-disk storage, HEIC
+        normalisation, and metadata parsing identically. Raises
+        ``_HeicUnsupportedError`` when a HEIC photo can't be decoded — the
+        caller decides whether to 415 or skip it.
+        """
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        import uuid as _uuid
+
+        ext = Path(file_storage.filename or "upload.jpg").suffix.lower() or ".jpg"
+        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
+        file_storage.save(str(dest))
+
+        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
+        # show — normalise it to a web-safe JPEG on the way in. Honest-error
+        # (don't keep an unreadable asset) when the optional decoder is absent.
+        from mediahub.media_library import heic as _heic
+
+        if _heic.is_heic(dest.name):
+            try:
+                dest, _converted = _heic.normalize_upload(dest)
+            except _heic.HeicUnsupported as exc:
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise _HeicUnsupportedError() from exc
+
+        meta = _v8_parse_description(description) if description else {}
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        athlete_names = list(meta.get("athletes") or [])
+        asset = MediaAsset(
+            id="",
+            filename=Path(file_storage.filename or dest.name).name,
+            path=str(dest),
+            type=asset_type,
+            description_raw=description,
+            description_parsed=meta,
+            profile_id=profile_id,
+            linked_athlete_names=athlete_names,
+            linked_venue=meta.get("venue"),
+            linked_event=meta.get("event"),
+            tags=meta.get("tags") or [],
+        )
+        return store.save(asset)
+
+    _HEIC_UNSUPPORTED_MSG = (
+        "HEIC/HEIF photos need conversion support that isn't installed on this "
+        "deployment. Re-save the photo as JPEG or PNG and upload again."
+    )
 
     @app.route("/api/media-library", methods=["POST"])
     def api_media_library_upload():
@@ -41776,60 +41901,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         description = _req.form.get("description", "").strip()
         asset_type = _req.form.get("asset_type", "athlete_photo").strip()
 
-        # Save to disk
-        upload_dir = UPLOADS_DIR / "media_library" / profile_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        import uuid as _uuid
+        try:
+            asset = _save_library_photo(
+                f, profile_id, description=description, asset_type=asset_type
+            )
+        except _HeicUnsupportedError:
+            return jsonify({"error": "heic_unsupported", "message": _HEIC_UNSUPPORTED_MSG}), 415
 
-        ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
-        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
-        f.save(str(dest))
-
-        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
-        # show — normalise it to a web-safe JPEG on the way in. Honest-error
-        # (don't keep an unreadable asset) when the optional decoder is absent.
-        from mediahub.media_library import heic as _heic
-
-        if _heic.is_heic(dest.name):
-            try:
-                dest, _converted = _heic.normalize_upload(dest)
-            except _heic.HeicUnsupported:
-                try:
-                    dest.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                return (
-                    jsonify(
-                        {
-                            "error": "heic_unsupported",
-                            "message": "HEIC/HEIF photos need conversion support that "
-                            "isn't installed on this deployment. Re-save the photo as "
-                            "JPEG or PNG and upload again.",
-                        }
-                    ),
-                    415,
-                )
-
-        # Parse metadata
-        meta = _v8_parse_description(description) if description else {}
-        store = _v8_get_media_store()
-        from mediahub.media_library.models import MediaAsset
-
-        athlete_names = list(meta.get("athletes") or [])
-        asset = MediaAsset(
-            id="",
-            filename=Path(f.filename or dest.name).name,
-            path=str(dest),
-            type=asset_type,
-            description_raw=description,
-            description_parsed=meta,
-            profile_id=profile_id,
-            linked_athlete_names=athlete_names,
-            linked_venue=meta.get("venue"),
-            linked_event=meta.get("event"),
-            tags=meta.get("tags") or [],
-        )
-        asset = store.save(asset)
         # AJAX callers get JSON; plain form submissions redirect back to the library.
         if (
             _req.headers.get("Accept", "").find("application/json") != -1
@@ -41839,6 +41917,55 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 {"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset}
             )
         return redirect(url_for("media_library_page", profile_id=profile_id))
+
+    @app.route("/share-target", methods=["POST"])
+    def share_target_receiver():
+        """PWA Web Share Target (roadmap 1.22).
+
+        Receives photos shared from the phone's OS share sheet ("share to
+        MediaHub") and drops them straight into the active organisation's media
+        library — the single highest-value poolside mobile behaviour. The OS
+        sends a top-level multipart navigation that can't carry a CSRF token
+        (so the path is CSRF-exempt) and writes only to the *signed-in*
+        session's own library. Non-image attachments are ignored; HEIC photos
+        that can't be decoded are skipped and counted.
+        """
+        if not _v8_ok:
+            return redirect(url_for("media_library_page"))
+        from flask import request as _req
+
+        profile_id = _active_profile_id()
+        if not profile_id:
+            # Shared while signed out — the org-readiness gate normally catches
+            # this, but guard explicitly: bounce to sign-in (the photo isn't
+            # kept) rather than 500 on a missing tenant.
+            return redirect(url_for("sign_in_page"))
+
+        # Browsers post shared files under the manifest-declared "photos" field;
+        # accept "file" too for resilience across share-sheet implementations.
+        files = _req.files.getlist("photos") + _req.files.getlist("file")
+        saved = 0
+        skipped = 0
+        for f in files:
+            if not f or not (f.filename or "").strip():
+                continue
+            ctype = (f.mimetype or "").lower()
+            if ctype and not ctype.startswith("image/"):
+                skipped += 1  # the OS bundled a non-image attachment — ignore it
+                continue
+            try:
+                _save_library_photo(f, profile_id, description="", asset_type="athlete_photo")
+                saved += 1
+            except _HeicUnsupportedError:
+                skipped += 1
+            except Exception:
+                log.exception("share-target: failed to save a shared photo")
+                skipped += 1
+
+        args = {"shared": saved}
+        if skipped:
+            args["skipped"] = skipped
+        return redirect(url_for("media_library_page", **args))
 
     def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
         """Profile-scoped access guard for media-library files.
