@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `a26e7f329` · Merge pull request #1036 from elijahkendrick04/claude/nice-goodall-j9tmca
+**Last updated:** 2026-06-23 · `095e91bc9` · QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path (#1037)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1205,6 +1205,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `b34331344` | QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path |
 | 2026-06-23 | `28b63d95e` | fix(observability): measure uptime over the tracked span, not the full window (QA-017) |
 | 2026-06-23 | `b5f7b660c` | test(qa015): wait for async resume-input cleanup (fix parallel-CI flake) |
 | 2026-06-23 | `3a9738027` | fix(web): /plan index must not 500 on sport-load or malformed plan (QA-016 re-open) |
