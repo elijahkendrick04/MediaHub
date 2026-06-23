@@ -214,22 +214,37 @@ def uptime_stats(window_hours: int = 24) -> dict:
 
       * ``window_hours``       — the window the stats cover
       * ``window_start``       — ISO timestamp of the window's lower bound
+      * ``tracking_since``     — ISO timestamp of the first heartbeat ever
+                                 recorded (when uptime measurement began),
+                                 or None on an empty store
+      * ``window_clamped``     — True when the requested window reaches back
+                                 further than ``tracking_since`` (i.e. the
+                                 store is younger than the window), so the
+                                 stats only cover the tracked period
       * ``samples``            — total heartbeat rows in the window
       * ``ok_count``           — rows with ok=1
       * ``failed_count``       — rows with ok=0
       * ``uptime_pct``         — heartbeat-density derived uptime %
                                  (1.0 = perfect, 0.0 = silent for the
-                                 whole window)
+                                 whole tracked window)
       * ``downtime_seconds``   — total seconds covered by gaps > 5 min
       * ``has_data``           — False if the table has no rows at all
                                  (lets the status page show "no data
                                  yet" instead of a misleading 0%)
 
-    Uptime is computed as ``1 - (downtime_seconds / window_seconds)``
+    Uptime is computed as ``1 - (downtime_seconds / observed_seconds)``
     where ``downtime_seconds`` is the sum of:
       * any ``ok=0`` rows (counts the heartbeat's own minute as down), and
       * any gap > 5 minutes between consecutive heartbeats (rounded down
         to the gap length minus the 5-minute grace window).
+
+    ``observed_seconds`` is the *tracked* span, not the raw requested
+    window: it runs from ``max(window_start, tracking_since)`` to now. The
+    store starts empty on a fresh disk / after a deploy that didn't carry
+    the DB forward, so a young store would otherwise count every second
+    before its first heartbeat as downtime — making a healthy, always-on
+    service read ~14% over 30 days. Clamping to the tracked span keeps the
+    number honest: pre-tracking time is unknown, not down.
 
     A window with no heartbeats at all returns ``has_data=False`` and
     ``uptime_pct=0.0`` so the status page can render "no data yet" rather
@@ -239,13 +254,15 @@ def uptime_stats(window_hours: int = 24) -> dict:
         window_hours = max(1, int(window_hours))
     except (TypeError, ValueError):
         window_hours = 24
-    window_start = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(hours=window_hours)
     window_start_iso = window_start.isoformat()
-    window_seconds = float(window_hours * 3600)
 
     default = {
         "window_hours": window_hours,
         "window_start": window_start_iso,
+        "tracking_since": None,
+        "window_clamped": False,
         "samples": 0,
         "ok_count": 0,
         "failed_count": 0,
@@ -262,6 +279,11 @@ def uptime_stats(window_hours: int = 24) -> dict:
                 (window_start_iso,),
             )
             rows = cur.fetchall()
+            # The first heartbeat ever recorded marks when measurement began.
+            # The ts index makes this a cheap single-row lookup.
+            first_row = conn.execute(
+                "SELECT ts FROM uptime_heartbeats ORDER BY ts ASC LIMIT 1"
+            ).fetchone()
         finally:
             conn.close()
     except sqlite3.Error as exc:
@@ -274,15 +296,36 @@ def uptime_stats(window_hours: int = 24) -> dict:
     if not rows:
         return default
 
+    # Clamp the measured span to the period we have actually been observing.
+    # If tracking began *inside* the requested window (a young store), only
+    # count from the first heartbeat onward — never treat pre-tracking silence
+    # as downtime. Otherwise the full window applies and a real in-window
+    # outage at the start still counts.
+    tracking_since = None
+    if first_row is not None:
+        try:
+            tracking_since = _parse_ts(first_row["ts"])
+        except (ValueError, TypeError, KeyError):
+            tracking_since = None
+
+    effective_start = window_start
+    window_clamped = False
+    if tracking_since is not None and tracking_since > window_start:
+        effective_start = tracking_since
+        window_clamped = True
+
+    observed_seconds = max((now - effective_start).total_seconds(), 1.0)
+
     samples = len(rows)
     ok_count = sum(1 for r in rows if r["ok"])
     failed_count = samples - ok_count
 
     downtime_s = 0.0
-    # Sum gaps > _DOWNTIME_GAP_SECONDS between consecutive heartbeats.
-    # We anchor the gap walk at the window start so a long pre-window
-    # silence followed by recent pings doesn't get credit for "100%".
-    last_ts = window_start
+    # Sum gaps > _DOWNTIME_GAP_SECONDS between consecutive heartbeats. The
+    # walk is anchored at the effective (tracked) window start so a genuine
+    # gap at the start of the observed period still counts, while time before
+    # tracking began does not.
+    last_ts = effective_start
     for r in rows:
         try:
             ts_val = _parse_ts(r["ts"])
@@ -296,7 +339,6 @@ def uptime_stats(window_hours: int = 24) -> dict:
         last_ts = ts_val
 
     # Tail gap — from the last heartbeat to "now".
-    now = datetime.now(timezone.utc)
     tail_gap = (now - last_ts).total_seconds()
     if tail_gap > _DOWNTIME_GAP_SECONDS:
         downtime_s += tail_gap - _DOWNTIME_GAP_SECONDS
@@ -306,14 +348,16 @@ def uptime_stats(window_hours: int = 24) -> dict:
     # real degradation that should count against uptime.
     downtime_s += failed_count * 60
 
-    # Clamp: downtime can't exceed the window.
-    downtime_s = min(downtime_s, window_seconds)
-    uptime_pct = 1.0 - (downtime_s / window_seconds)
+    # Clamp: downtime can't exceed the observed span.
+    downtime_s = min(downtime_s, observed_seconds)
+    uptime_pct = 1.0 - (downtime_s / observed_seconds)
     uptime_pct = max(0.0, min(1.0, uptime_pct))
 
     return {
         "window_hours": window_hours,
         "window_start": window_start_iso,
+        "tracking_since": tracking_since.isoformat() if tracking_since else None,
+        "window_clamped": window_clamped,
         "samples": samples,
         "ok_count": ok_count,
         "failed_count": failed_count,

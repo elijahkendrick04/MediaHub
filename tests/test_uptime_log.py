@@ -154,6 +154,80 @@ class TestUptimeStatsWithData:
         assert 0.0 <= stats["uptime_pct"] <= 1.0
 
 
+class TestUptimeStatsYoungStore:
+    """QA-017 — a freshly-tracking store must not report a healthy,
+    always-on service as mostly down.
+
+    The heartbeat store starts empty on a fresh disk / after a deploy that
+    didn't carry the DB forward. Before the fix, uptime was computed over the
+    *full* requested window, so every second before the first heartbeat was
+    counted as downtime: a service tracked for ~2 days showed ~14% "30-day
+    uptime" and ~62% "7-day uptime" while being continuously up. The fix
+    clamps the measured span to the tracked period (first heartbeat → now).
+    """
+
+    def test_continuous_short_history_reports_full_uptime(self, fresh_uptime):
+        # Tracking began N hours ago; continuous heartbeats ever since, one
+        # every 4 minutes — inside the 5-minute grace, so a healthy run has
+        # no gaps to count.
+        now = datetime.now(timezone.utc)
+        n_hours = 48
+        step_min = 4
+        steps = n_hours * 60 // step_min  # 720 heartbeats + the one at "now"
+        for k in range(steps, -1, -1):
+            fresh_uptime.record_heartbeat(
+                ok=True,
+                ts=(now - timedelta(minutes=k * step_min)).isoformat(),
+            )
+
+        s7d = fresh_uptime.uptime_stats(window_hours=24 * 7)
+        s30 = fresh_uptime.uptime_stats(window_hours=24 * 30)
+
+        # The bug reported ~N/(7d) ≈ 28.6% and ~N/(30d) ≈ 6.7%. The honest
+        # number for a continuously-up service is ~100%.
+        assert s7d["uptime_pct"] >= 0.99, s7d
+        assert s30["uptime_pct"] >= 0.99, s30
+
+        # The windows reach back further than the store is old → clamped,
+        # and the result advertises when tracking began.
+        assert s7d["window_clamped"] is True
+        assert s30["window_clamped"] is True
+        assert s7d["tracking_since"] is not None
+        assert s30["tracking_since"] == s7d["tracking_since"]
+
+        # A window SHORTER than the tracked history is NOT clamped and still
+        # reads full uptime.
+        s24 = fresh_uptime.uptime_stats(window_hours=24)
+        assert s24["window_clamped"] is False
+        assert s24["uptime_pct"] >= 0.99
+
+    def test_real_outage_inside_tracked_window_still_counts(self, fresh_uptime):
+        """Clamping must not blanket-hide downtime: a genuine gap *after*
+        tracking began is still counted against uptime."""
+        now = datetime.now(timezone.utc)
+        # 4 days of continuous heartbeats, with a real 3-hour silence centred
+        # ~36h ago (no heartbeats recorded during it).
+        outage_start = now - timedelta(hours=37, minutes=30)
+        outage_end = now - timedelta(hours=34, minutes=30)
+        for k in range(4 * 24 * 15, -1, -1):  # 4 days, every 4 min
+            ts = now - timedelta(minutes=k * 4)
+            if outage_start <= ts <= outage_end:
+                continue
+            fresh_uptime.record_heartbeat(ok=True, ts=ts.isoformat())
+
+        s7d = fresh_uptime.uptime_stats(window_hours=24 * 7)
+        # ~3h of downtime over a ~4-day tracked span → high but NOT 100%.
+        assert s7d["window_clamped"] is True
+        assert s7d["downtime_seconds"] > 9_000  # ≈ 3h − 5min grace
+        assert 0.95 < s7d["uptime_pct"] < 0.99, s7d
+
+    def test_empty_store_exposes_tracking_fields(self, fresh_uptime):
+        stats = fresh_uptime.uptime_stats(window_hours=24 * 30)
+        assert stats["has_data"] is False
+        assert stats["tracking_since"] is None
+        assert stats["window_clamped"] is False
+
+
 class TestRecentGaps:
     def test_returns_empty_when_under_two_heartbeats(self, fresh_uptime):
         assert fresh_uptime.recent_gaps() == []
