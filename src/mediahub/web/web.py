@@ -41152,9 +41152,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except Exception as e:
             db_path = None
             try:
-                from mediahub.media_library.store import _DEFAULT_DB as _ml_default_db
+                from mediahub.media_library.store import _default_db_path as _ml_default_db
 
-                db_path = Path(getattr(store, "db_path", None) or _ml_default_db)
+                db_path = Path(getattr(store, "db_path", None) or _ml_default_db())
             except Exception:
                 db_path = None
             if db_path is not None and db_path.exists():
@@ -48988,6 +48988,37 @@ voice, and queues them for one-click approval.</p>
             )
         except ValueError as e:
             return jsonify({"error": "bad_footage", "message": str(e)}), 400
+        except OSError:
+            # The clip couldn't be written to storage (disk full, or a
+            # misconfigured/unwritable data path). Surface an honest, specific
+            # message — never the generic "internal_error" — and keep the real
+            # cause in the server log for the operator.
+            log.exception("footage upload could not be stored")
+            return jsonify(
+                {
+                    "error": "storage_failed",
+                    "message": (
+                        "The clip couldn't be saved on the server — its storage is "
+                        "full or unavailable. Please try again; if it keeps "
+                        "happening, the deployment status page has the latest "
+                        "health signal."
+                    ),
+                }
+            ), 500
+        except Exception:
+            # Any other unexpected failure: don't let it fall through to the
+            # generic 500 handler ("internal_error"). Log the traceback and tell
+            # the volunteer something they can act on.
+            log.exception("footage upload failed")
+            return jsonify(
+                {
+                    "error": "footage_failed",
+                    "message": (
+                        "The clip couldn't be processed. Please try again, or try a "
+                        "different clip."
+                    ),
+                }
+            ), 500
         return jsonify({"ok": True, "asset": _video_footage_summary(asset)})
 
     def _video_footage_summary(asset) -> dict:

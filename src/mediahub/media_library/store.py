@@ -21,8 +21,29 @@ from .models import MediaAsset
 log = logging.getLogger(__name__)
 
 
-_DEFAULT_DB = Path(__file__).resolve().parents[1] / "data.db"
-_DEFAULT_UPLOADS = Path(__file__).resolve().parents[1] / "uploads_v4" / "media_library"
+def _data_dir() -> Path:
+    """Runtime data root, resolved from ``DATA_DIR`` at call time.
+
+    The same convention ``video/projects.py`` and the rest of the app follow:
+    storage lives under the ``DATA_DIR`` persistent disk (``/var/mediahub`` on the
+    deploy), falling back to the package dir only when ``DATA_DIR`` is unset (dev /
+    bare sandboxes). Hardcoding the package dir here wrote asset blobs and the
+    ``data.db`` under the deployed code tree, which is root-owned and not writable
+    by the runtime user (uid 10001) — so every footage/photo upload raised
+    ``PermissionError`` → HTTP 500, and anything that did land there was lost on
+    redeploy. Resolved per call (not at import) so a process that sets ``DATA_DIR``
+    before first use — and the test suite — gets the right root.
+    """
+    env = os.environ.get("DATA_DIR")
+    return Path(env) if env else Path(__file__).resolve().parents[1]
+
+
+def _default_db_path() -> Path:
+    return _data_dir() / "data.db"
+
+
+def _default_uploads_dir() -> Path:
+    return _data_dir() / "uploads_v4" / "media_library"
 
 
 _lock = threading.Lock()
@@ -95,8 +116,8 @@ class MediaLibraryStore:
     """Thread-safe SQLite-backed media asset store."""
 
     def __init__(self, db_path: Optional[Path] = None, uploads_dir: Optional[Path] = None):
-        self.db_path = Path(db_path) if db_path else _DEFAULT_DB
-        self.uploads_dir = Path(uploads_dir) if uploads_dir else _DEFAULT_UPLOADS
+        self.db_path = Path(db_path) if db_path else _default_db_path()
+        self.uploads_dir = Path(uploads_dir) if uploads_dir else _default_uploads_dir()
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
