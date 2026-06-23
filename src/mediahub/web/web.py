@@ -12129,6 +12129,9 @@ def _layout(
      waiting to sync" pill in step with the service worker's queue. Deferred and
      decorative: a load failure leaves approvals working exactly as before. -->
 <script defer src="{{ url_for('static', filename='js/offline-queue.js') }}"></script>
+<!-- Install / Add-to-Home-Screen affordance (roadmap 1.22). Deferred; no-op
+     where the browser can't install or once the app already runs standalone. -->
+<script defer src="{{ url_for('static', filename='js/pwa-install.js') }}"></script>
 </head>
 <body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
@@ -16128,6 +16131,7 @@ def create_app() -> Flask:
             "web_manifest",
             "service_worker",
             "favicon",
+            "app_icon",
             "static",
             # PC.7 — the public try-before-signup demo: the entire point is
             # a stranger with no account and no org. Caps + the sandbox demo
@@ -16411,6 +16415,7 @@ def create_app() -> Flask:
             "logout",
             "static",
             "favicon",
+            "app_icon",
             "web_manifest",
             "service_worker",
             "healthz",
@@ -24190,6 +24195,62 @@ self.addEventListener('fetch', function(e){
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
+    _APP_ICON_CACHE: dict = {}
+
+    def _app_icon_png(size: int) -> bytes:
+        """Render the MediaHub podium mark as a maskable PNG home-screen icon
+        (roadmap 1.22). SVG favicons don't install as a home-screen icon on
+        every platform, so a real raster icon makes the installed PWA polished.
+        The podium is drawn into the central ~72% safe zone over a full-bleed
+        dark background, so a maskable crop (circle / squircle) never clips it.
+        Cached per size — the geometry is deterministic."""
+        if size in _APP_ICON_CACHE:
+            return _APP_ICON_CACHE[size]
+        from PIL import Image, ImageDraw
+        import io as _io
+
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle(
+            [0, 0, size - 1, size - 1], radius=int(size * 0.22), fill=(10, 11, 17, 255)
+        )
+        # The favicon is drawn on a 32-unit grid; scale it into a centred 72% box.
+        inner = size * 0.72
+        pad = (size - inner) / 2.0
+        u = inner / 32.0
+
+        def _bar(x, y, w, h, color):
+            d.rounded_rectangle(
+                [pad + x * u, pad + y * u, pad + (x + w) * u, pad + (y + h) * u],
+                radius=max(1, int(u)),
+                fill=color,
+            )
+
+        _bar(6, 20, 5, 7, (182, 178, 166, 255))  # third place (silver-grey)
+        _bar(13.5, 9, 5, 18, (212, 255, 58, 255))  # winner (lane yellow)
+        _bar(21, 14, 5, 13, (244, 213, 141, 255))  # runner-up (medal gold)
+        d.line(
+            [pad + 4 * u, pad + 28.5 * u, pad + 28 * u, pad + 28.5 * u],
+            fill=(212, 255, 58, 255),
+            width=max(1, int(1.5 * u)),
+        )
+        buf = _io.BytesIO()
+        img.save(buf, format="PNG")
+        out = buf.getvalue()
+        _APP_ICON_CACHE[size] = out
+        return out
+
+    @app.route("/icon-<int:size>.png")
+    def app_icon(size):
+        # Only the two manifest sizes are rendered; anything else snaps to 192.
+        if size not in (192, 512):
+            size = 192
+        return app.response_class(
+            _app_icon_png(size),
+            mimetype="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @app.route("/manifest.webmanifest")
     def web_manifest():
         """PWA manifest — lets MediaHub be installed to a phone home screen so a
@@ -24210,8 +24271,22 @@ self.addEventListener('fetch', function(e){
                     "src": url_for("favicon"),
                     "sizes": "any",
                     "type": "image/svg+xml",
+                    "purpose": "any",
+                },
+                # Raster home-screen icons (roadmap 1.22) — a real maskable PNG
+                # installs cleanly where an SVG icon doesn't.
+                {
+                    "src": url_for("app_icon", size=192),
+                    "sizes": "192x192",
+                    "type": "image/png",
                     "purpose": "any maskable",
-                }
+                },
+                {
+                    "src": url_for("app_icon", size=512),
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "any maskable",
+                },
             ],
             # Web Share Target (roadmap 1.22) — registers MediaHub in the phone's
             # OS share sheet so a poolside volunteer can share a camera-roll photo
