@@ -354,6 +354,42 @@ class TestEmptyAndGuards:
 
 
 # ---------------------------------------------------------------------------
+# 7b. QA-008 — stale HY-TEK banner title in PERSISTED metadata is cleaned at
+#     render time (the QA-002 parser fix is forward-only; runs parsed before it
+#     still carry the licensee/software/page banner as the meet name).
+# ---------------------------------------------------------------------------
+
+_BANNER_TITLE = (
+    "Sussex County ASA- LC Champ - Organization License "
+    "HY-TEK's MEET MANAGER 8.0 - 6:29 PM 15/02/2026 Page 1"
+)
+
+
+class TestStaleBannerTitle:
+    def test_banner_title_is_cleaned_on_timeline(self, gated_client):
+        c, _, wm = gated_client
+        from mediahub.web.club_profile import ClubProfile, save_profile
+
+        save_profile(ClubProfile(
+            profile_id="club-banner", display_name="Banner SC",
+            brand_voice_summary="x",
+        ))
+        conn = wm._db()
+        _insert_run(conn, "banner-1", "club-banner", _BANNER_TITLE)
+        conn.commit()
+        conn.close()
+        _pin(c, "club-banner")
+        body = c.get("/season").get_data(as_text=True)
+        # The cleaned meet name shows…
+        assert "Sussex County ASA- LC Champ" in body
+        # …and none of the HY-TEK licensee/software/page boilerplate does.
+        assert "Organization License" not in body
+        assert "HY-TEK" not in body
+        assert "MEET MANAGER" not in body
+        assert _BANNER_TITLE not in body
+
+
+# ---------------------------------------------------------------------------
 # 8. Navigation — Season is a first-class signed-in nav item.
 # ---------------------------------------------------------------------------
 

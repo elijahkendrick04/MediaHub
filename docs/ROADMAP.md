@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `365b5749b` · Merge pull request #1000: Print & merch pipeline (roadmap 1.20)
+**Last updated:** 2026-06-23 · `fd87094d6` · Merge pull request #1013: QA-011 — studio preview composed at native geometry (result time no longer
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1207,16 +1207,15 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-23 | `97f958d2e` | Fix QA-011: studio preview composed at half geometry clipped the result time |
+| 2026-06-23 | `fef551a5f` | UI: extend mh-shiny-text to the content-pack meet heroes |
+| 2026-06-22 | `ae6e05ba4` | Fix Video Studio footage upload 500 (QA-010): store now honours DATA_DIR |
+| 2026-06-22 | `1a735effc` | UI: add mh-shiny-text glyph sheen from a reactbits.dev audit |
+| 2026-06-22 | `aea5c7bd3` | Fix media library false "store wasn't readable" error on an empty store (QA-009) |
 | 2026-06-22 | `94928f692` | Drop the unused Optional import in fulfilment.py (ruff hygiene hook) |
 | 2026-06-22 | `cf96bebe6` | Mark roadmap 1.20 done — print & merch pipeline |
+| 2026-06-22 | `96ec12e42` | Re-clean stale HY-TEK banner meet titles at render time (QA-008) |
 | 2026-06-22 | `ed470fd5d` | Wire print/merch into the web app + merch mockups + fulfilment slot (1.20, build D) |
 | 2026-06-22 | `e91f5fe3b` | Add print-ready export: PDF/X + the orchestrator (roadmap 1.20, build C) |
 | 2026-06-22 | `b8b36c037` | Add the deterministic print auto-proofer (roadmap 1.20, build B) |
-| 2026-06-22 | `ef02899e1` | Fix three studio/run/finalise UI bugs (QA sweep 2026-06-22, batch 2) |
-| 2026-06-22 | `20b07c17c` | Build the print/merch product foundation (roadmap 1.20, build A) |
-| 2026-06-22 | `70229376b` | Mark roadmap 1.19 done — export & conversion engine |
-| 2026-06-22 | `de018bbb8` | Fix four export-engine bugs found in pre-merge review (roadmap 1.19) |
-| 2026-06-22 | `1d9efb75d` | Apply pinned ruff-format (v0.8.4) to the 1.19 source files (CI hygiene) |
-| 2026-06-22 | `3387f98c7` | Check run access before params on the export ZIP route; record 1.19 as shipped |
-| 2026-06-22 | `1169c18b3` | Wire the export engine into the web app (roadmap 1.19, build C) |
 <!-- /ROADMAP:ACTIVITY -->

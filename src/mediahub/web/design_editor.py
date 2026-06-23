@@ -291,7 +291,33 @@ class StudioParams:
 
     @property
     def size(self) -> tuple[int, int]:
-        w, h = _FORMAT_SIZES.get(self.format_id, _FORMAT_SIZES[DEFAULT_FORMAT])
+        """CSS composition geometry — ALWAYS native, preview and download alike.
+
+        The v2 archetypes are authored with fixed-px furniture (paddings,
+        labels, the quote glyph, the scorebug cells) that only keeps its
+        intended proportions at the native canvas size. Rendering the live
+        preview at a shrunken geometry (the old half-scale) mis-weighted that
+        furniture and clipped / wrapped / collided the result time across most
+        archetypes (QA-011). The preview now composes identically to the
+        download and stays light via the RASTER, not the geometry — see
+        :pyattr:`render_quality` and :pyattr:`preview_raster_size`.
+        """
+        return _FORMAT_SIZES.get(self.format_id, _FORMAT_SIZES[DEFAULT_FORMAT])
+
+    @property
+    def render_quality(self) -> str | None:
+        """Render-quality profile: a light DPR-1 ``"fast"`` capture for the live
+        preview, the default profile for the full-resolution download. Both
+        compose at the same native :pyattr:`size`; only the raster differs."""
+        return None if self.full else "fast"
+
+    @property
+    def preview_raster_size(self) -> tuple[int, int]:
+        """Final pixel size of the response image. The download keeps native
+        pixels; the live preview downsamples the finished native-geometry render
+        to ``PREVIEW_SCALE`` for a light, snappy payload — WITHOUT shrinking the
+        composition geometry (which is what previously clipped the time)."""
+        w, h = self.size
         if self.full:
             return (w, h)
         return (max(2, round(w * PREVIEW_SCALE)), max(2, round(h * PREVIEW_SCALE)))
@@ -450,6 +476,40 @@ def brand_kit_for_params(params: StudioParams):
         secondary_colour=params.palette["secondary"],
         accent_colour=params.palette["accent"],
     )
+
+
+def downscale_png_bytes(png: bytes, size: tuple[int, int]) -> bytes:
+    """Downsample a PNG to ``size`` (high-quality Lanczos), composition intact.
+
+    This lets the live studio preview stay a light payload while it composes at
+    full native geometry (QA-011): the renderer paints the native-geometry card,
+    then this shrinks only the raster. Returns the original bytes unchanged when
+    Pillow is unavailable, the target is non-positive, or the image is already at
+    or below the target — a preview never fails over a raster optimisation; it
+    just ships the larger, equally-correct image.
+    """
+    try:
+        import io
+
+        from PIL import Image
+    except Exception:
+        return png
+    try:
+        tw, th = int(size[0]), int(size[1])
+        if tw <= 0 or th <= 0:
+            return png
+        with Image.open(io.BytesIO(png)) as im:
+            im.load()
+            if im.width <= tw and im.height <= th:
+                return png
+            # match the renderer's own DPR downsample (RGBA + Lanczos + optimize)
+            src = im.convert("RGBA") if im.mode != "RGBA" else im
+            resized = src.resize((tw, th), Image.LANCZOS)
+            buf = io.BytesIO()
+            resized.save(buf, format="PNG", optimize=True)
+            return buf.getvalue()
+    except Exception:
+        return png
 
 
 # ---------------------------------------------------------------------------
@@ -1036,6 +1096,7 @@ __all__ = [
     "coerce_params",
     "build_brief_from_params",
     "brand_kit_for_params",
+    "downscale_png_bytes",
     "explain",
     "vocabulary",
     "archetype_options",

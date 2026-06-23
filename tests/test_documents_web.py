@@ -124,6 +124,49 @@ def test_home_signed_in(app_env):
     assert b"Season report" in r.data
 
 
+def _insert_db_run(wm, run_id, profile_id, meet, *, n_achievements=3):
+    """Seed a 'done' row in the runs DB table — the Documents/Sites source
+    pickers list runs from there (via _doc_recent_runs), not from runs_v4 JSON."""
+    conn = wm._db()
+    conn.execute(
+        "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
+        "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
+        "VALUES (?, ?, ?, 'done', ?, ?, ?, 10, 0, 0, ?, NULL)",
+        (
+            run_id,
+            "2026-06-10T09:00:00Z",
+            "2026-06-10T09:00:00Z",
+            profile_id,
+            meet,
+            f"{meet[:40]}.pdf",
+            n_achievements,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+_BANNER_TITLE = (
+    "Sussex County ASA- LC Champ - Organization License "
+    "HY-TEK's MEET MANAGER 8.0 - 6:29 PM 15/02/2026 Page 1"
+)
+
+
+def test_source_picker_cleans_stale_banner_title(app_env):
+    """QA-008: a run parsed before the QA-002 fix stored the HY-TEK banner as
+    its meet name. The Documents source picker must show the cleaned name."""
+    app, wm, _ = app_env
+    c = app.test_client()
+    _login(c)
+    _insert_db_run(wm, "banner-1", "club-a", _BANNER_TITLE)
+    body = c.get("/documents").get_data(as_text=True)
+    assert "Sussex County ASA- LC Champ" in body
+    assert "Organization License" not in body
+    assert "HY-TEK" not in body
+    assert "MEET MANAGER" not in body
+    assert _BANNER_TITLE not in body
+
+
 def test_generate_blank_then_view(app_env):
     app, wm, _ = app_env
     c = app.test_client()

@@ -11161,6 +11161,24 @@ def _clean_meet_label(text: str) -> str:
     return t
 
 
+def _clean_stored_meet_title(text: str) -> str:
+    """Clean a meet title read from PERSISTED run metadata before display.
+
+    Runs parsed before the QA-002 title fix stored the HY-TEK
+    licensee/software/page banner as the meet name (e.g. ``"Sussex County
+    ASA- LC Champ - Organization License HY-TEK's MEET MANAGER 8.0 - 6:29 PM
+    15/02/2026 Page 1"``). The parser is fixed forward-only, so we re-derive a
+    clean display name at render time with the *same* deterministic helper the
+    parser uses — fixing any stale stored title on the season timeline and the
+    Sites/Documents source pickers without a data migration. Returns ``""``
+    when nothing survives, so callers fall back to a sensible default (file
+    name / run id / "Meet"). No AI, no heuristic guessing — pure boilerplate
+    stripping, on the deterministic side of the engine boundary."""
+    from mediahub.interpreter import _clean_meet_name  # noqa: PLC0415
+
+    return _clean_meet_name(text or "")
+
+
 def _strip_source_suffix(text: str) -> str:
     """Strip the trailing source reference the recognition headline template
     appends (``… at entry_url: https://…`` / ``… at https://…``) plus any stray
@@ -11689,7 +11707,7 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 {_ai_banner_html}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">{_h(cfg["eyebrow"])}</span>
-  <h1>{_h(swimmer)}</h1>
+  <h1><span class="mh-shiny-text">{_h(swimmer)}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">{strap_html}</div>
 </section>
 
@@ -17740,7 +17758,9 @@ def create_app() -> Flask:
                 badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
                     status, ""
                 )
-                title = r["meet_name"] or r["file_name"] or r["id"]
+                # Re-clean a stale HY-TEK banner title (pre-QA-002 runs) so the
+                # timeline shows the real meet name, not the licensee banner.
+                title = _clean_stored_meet_title(r["meet_name"]) or r["file_name"] or r["id"]
                 review_href = url_for("review", run_id=r["id"])
                 is_peak = peak_run_id is not None and r["id"] == peak_run_id and peak_moments > 0
 
@@ -28452,8 +28472,17 @@ function mhAnDigest(btn) {{
                     size=params.size,
                     format_name=params.format_id,
                     brand_kit=brand_kit,
+                    quality=params.render_quality,
                 )
                 png_bytes = Path(result.visual.file_path).read_bytes()
+                # QA-011: the live preview composes at the SAME native geometry
+                # as the download (so fixed-px archetype furniture keeps its
+                # proportions and the result time never clips / collides). The
+                # light, snappy preview payload comes from downsampling the
+                # finished native render — never from shrinking the geometry.
+                _raster = params.preview_raster_size
+                if _raster != params.size:
+                    png_bytes = _studio.downscale_png_bytes(png_bytes, _raster)
         except RuntimeError as exc:
             # Playwright/Chromium not installed — surface an honest error rather
             # than ever fabricating a preview image (CLAUDE.md honest-error rule).
@@ -39502,7 +39531,7 @@ function mhSetupMode(mode) {{
 {_ai_banner_html}
 <section class="mh-hero no-print" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Content builder</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(approved):02d} approved {
             "card" if len(approved) == 1 else "cards"
@@ -40782,7 +40811,7 @@ function mhSetupMode(mode) {{
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Repurpose pack</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
     <span>generated {gen_at}</span><span class="sep">/</span>
@@ -41148,7 +41177,7 @@ function tiRegenerate() {{
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">All recommendations</span>
-  <h1>{meet_name}</h1>
+  <h1><span class="mh-shiny-text">{meet_name}</span></h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
     <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
@@ -41456,17 +41485,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 )
                 return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
-        # Fail-soft on the media store. A corrupted assets DB used to 500
-        # the whole page; now we keep the upload form visible and tell
-        # the user the listing wasn't loadable so they can keep working.
+        # Fail-soft on the media store, but tell two different stories apart.
+        # A store that simply isn't there yet — a fresh org, or a data volume
+        # with nothing uploaded — is an EMPTY library, not a fault: the asset
+        # DB is created lazily on first write, so "no file on disk" just means
+        # "no photos uploaded here yet" and must render the clean empty state.
+        # Only a store whose DB file IS on disk but won't read (corrupt /
+        # unreadable) earns the "check the data volume" recovery message.
         assets: list = []
         store_failed = False
+        store = None
         try:
             store = _v8_get_media_store()
             assets = store.list(profile_id=profile_id)
         except Exception as e:
-            log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
-            store_failed = True
+            db_path = None
+            try:
+                from mediahub.media_library.store import _default_db_path as _ml_default_db
+
+                db_path = Path(getattr(store, "db_path", None) or _ml_default_db())
+            except Exception:
+                db_path = None
+            if db_path is not None and db_path.exists():
+                # The DB file is on disk but the read failed → genuinely
+                # corrupt or unreadable. Surface the recovery message.
+                log.warning(
+                    "media-library: store.list(%s) failed on an existing store: %s",
+                    profile_id,
+                    e,
+                )
+                store_failed = True
+            else:
+                # No DB file yet → nothing has been uploaded on this
+                # deployment. Render the clean empty state, not an error.
+                log.info(
+                    "media-library: no store yet for %s; empty state (%s)",
+                    profile_id,
+                    e,
+                )
         rows_html = ""
         gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         for a in assets[:200]:
@@ -49329,6 +49385,37 @@ voice, and queues them for one-click approval.</p>
             )
         except ValueError as e:
             return jsonify({"error": "bad_footage", "message": str(e)}), 400
+        except OSError:
+            # The clip couldn't be written to storage (disk full, or a
+            # misconfigured/unwritable data path). Surface an honest, specific
+            # message — never the generic "internal_error" — and keep the real
+            # cause in the server log for the operator.
+            log.exception("footage upload could not be stored")
+            return jsonify(
+                {
+                    "error": "storage_failed",
+                    "message": (
+                        "The clip couldn't be saved on the server — its storage is "
+                        "full or unavailable. Please try again; if it keeps "
+                        "happening, the deployment status page has the latest "
+                        "health signal."
+                    ),
+                }
+            ), 500
+        except Exception:
+            # Any other unexpected failure: don't let it fall through to the
+            # generic 500 handler ("internal_error"). Log the traceback and tell
+            # the volunteer something they can act on.
+            log.exception("footage upload failed")
+            return jsonify(
+                {
+                    "error": "footage_failed",
+                    "message": (
+                        "The clip couldn't be processed. Please try again, or try a "
+                        "different clip."
+                    ),
+                }
+            ), 500
         return jsonify({"ok": True, "asset": _video_footage_summary(asset)})
 
     def _video_footage_summary(asset) -> dict:
@@ -52553,7 +52640,10 @@ voice, and queues them for one-click approval.</p>
                 (pid, int(limit)),
             ).fetchall()
             for r in rows:
-                out.append((r["id"], r["meet_name"] or "Meet", r["n_achievements"] or 0))
+                # Clean a stale HY-TEK banner title (pre-QA-002 runs) at render
+                # time so the Sites/Documents source pickers show the real name.
+                meet = _clean_stored_meet_title(r["meet_name"]) or "Meet"
+                out.append((r["id"], meet, r["n_achievements"] or 0))
         except Exception:
             pass
         return out
