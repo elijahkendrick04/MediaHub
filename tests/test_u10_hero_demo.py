@@ -144,6 +144,27 @@ def test_helper_review_scene_shows_card_caption_and_confidence():
     assert "Nothing leaves the queue without your approval." in html
 
 
+def test_demo_review_confidence_score_has_label():
+    """The confidence number in the Review demo panel must carry an explanatory
+    tooltip so a volunteer does not see a bare decimal with no context.
+
+    Regression guard for: 'Two unexplained decimal numbers appear on the
+    review card with no label, tooltip, or legend indicating what they
+    represent or what an acceptable value looks like.'
+    """
+    import re
+
+    html = _demo_html()
+    m = re.search(r'<span[^>]*class="mh-demo-conf"[^>]*>', html)
+    assert m, "mh-demo-conf span not found in demo HTML"
+    tag = m.group()
+    assert "title=" in tag, (
+        "mh-demo-conf span must include a title= tooltip explaining what the "
+        "confidence score means; currently the bare value '0.94' appears with "
+        "no label or tooltip (regression: unexplained decimal on review card)"
+    )
+
+
 def test_helper_is_decorative_and_aria_hidden():
     html = _demo_html()
     # Hidden from assistive tech (the four-step explainer carries the text).

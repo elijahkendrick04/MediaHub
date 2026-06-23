@@ -15339,7 +15339,11 @@ def _hero_product_demo() -> str:
         '<div class="mh-demo-phase p2 is-rest">'
         '<div class="mh-demo-row">'
         '<span class="mh-demo-eyebrow">02 · Review</span>'
-        '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
+        '<span class="mh-demo-conf"'
+        ' title="Confidence — how certain the engine is the facts are correct.'
+        " Above 0.85 means the achievement is well-grounded in the uploaded"
+        ' results.">'
+        '<span class="track"><i></i></span>0.94</span>'
         "</div>"
         '<div class="mh-demo-card">'
         # The OUTPUT — a real, premium branded story card the engine returns.
