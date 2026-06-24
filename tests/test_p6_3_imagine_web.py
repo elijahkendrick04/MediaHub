@@ -185,6 +185,26 @@ def test_generate_quota_exceeded_429(app_env, monkeypatch):
     assert r.get_json()["error"] == "quota_exceeded"
 
 
+def test_operator_bypasses_imagine_quota(app_env, monkeypatch):
+    """The signed-in developer/operator has no AI quotas: even a zero imagery
+    limit doesn't block, and their generations aren't metered against the org."""
+    app, wm, tmp_path, iu, st = app_env
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setenv("MEDIAHUB_IMAGINE_QUOTA_MONTHLY", "0")  # would block any normal user
+    import mediahub.media_ai.imagine_providers.gemini_imagine as g
+    from mediahub.web import auth
+
+    monkeypatch.setattr(g, "imagen_predict", lambda *a, **k: [_png_bytes()])
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["active_profile_id"] = "club-x"
+        s[auth._DEV_SESSION_KEY] = True  # operator session
+    r = c.post("/api/media-library/imagine/generate", json={"prompt": "x"})
+    assert r.status_code == 200, r.get_json()
+    # Operator generation is not charged to the club's imagery ledger.
+    assert iu.count_for_org("club-x") == 0
+
+
 def test_generate_isolates_orgs(app_env, monkeypatch):
     app, wm, tmp_path, iu, st = app_env
     monkeypatch.setenv("GEMINI_API_KEY", "k")

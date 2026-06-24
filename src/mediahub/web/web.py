@@ -21823,13 +21823,19 @@ function copyWhyCard(btn, taId) {{
             # unchanged). Quota gates HOW MUCH, hard-blocking only where a
             # specific caption limit is configured. The plan comes from the
             # acting user. Usage is recorded once in the finally below.
+            #
+            # The signed-in developer/operator is fully exempt: blanking the
+            # governance org skips the permission gate, the quota enforce, AND
+            # the metering record below — so the operator is never blocked and
+            # their test generations never count against the club they are
+            # working on. (The global llm_usage ledger still tracks real cost.)
             from mediahub.governance import (
                 features as _gov_features,
                 permissions as _gov_perms,
                 quota as _gov_quota,
             )
 
-            _gov_org = run_profile_id or ""
+            _gov_org = "" if _auth.is_dev_operator() else (run_profile_id or "")
             _gov_ok = False
             _gov_plan = _auth.current_plan()
             if _gov_org and not _gov_perms.can_use_feature(
@@ -43067,6 +43073,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "no_profile"}), 403
         if not _imagine_role_ok(pid):
             return _imagine_forbidden(pid)
+        # No AI quotas for the signed-in developer/operator: a None org_id makes
+        # imagine skip both quota enforcement and the per-org usage record.
+        _iq_org = None if _auth.is_dev_operator() else pid
         body = request.get_json(silent=True) or {}
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
@@ -43079,7 +43088,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         allow_people = bool(body.get("allow_people"))
         try:
             results = _imagine.generate(
-                prompt, style=style, aspect=aspect, n=1, allow_people=allow_people, org_id=pid
+                prompt, style=style, aspect=aspect, n=1, allow_people=allow_people, org_id=_iq_org
             )
         except Exception as exc:
             return _imagine_error_response(exc)
@@ -43152,6 +43161,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "no_profile"}), 403
         if not _imagine_role_ok(pid):
             return _imagine_forbidden(pid)
+        # No AI quotas for the signed-in developer/operator (see generate route).
+        _iq_org = None if _auth.is_dev_operator() else pid
         store = _v8_get_media_store()
         a = store.get(asset_id)
         if not a:
@@ -43178,7 +43189,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     img,
                     (body.get("instruction") or "").strip(),
                     allow_people=bool(body.get("allow_people")),
-                    org_id=pid,
+                    org_id=_iq_org,
                     source_asset_id=a.id,
                 )
             elif op == "expand":
@@ -43186,21 +43197,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     img,
                     aspect=(body.get("aspect") or "1:1").strip(),
                     prompt=(body.get("prompt") or "").strip(),
-                    org_id=pid,
+                    org_id=_iq_org,
                     source_asset_id=a.id,
                 )
             elif op == "remove":
-                result = _imagine.remove(img, org_id=pid, source_asset_id=a.id)
+                result = _imagine.remove(img, org_id=_iq_org, source_asset_id=a.id)
             elif op == "upscale":
                 result = _imagine.upscale(
-                    img, factor=int(body.get("factor") or 2), org_id=pid, source_asset_id=a.id
+                    img, factor=int(body.get("factor") or 2), org_id=_iq_org, source_asset_id=a.id
                 )
             elif op == "similar":
                 results = _imagine.similar(
                     img,
                     prompt=(body.get("prompt") or "").strip(),
                     n=1,
-                    org_id=pid,
+                    org_id=_iq_org,
                     source_asset_id=a.id,
                 )
                 result = results[0]
@@ -43209,7 +43220,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     img,
                     style=(body.get("style") or "editorial").strip(),
                     palette=body.get("palette") or None,
-                    org_id=pid,
+                    org_id=_iq_org,
                     source_asset_id=a.id,
                 )
         except Exception as exc:

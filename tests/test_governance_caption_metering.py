@@ -157,3 +157,31 @@ def test_voice_tone_is_not_metered(app_with_run):
     resp = client.post(f"/api/runs/run-1/swim/{SWIM}/caption?tone=warm_club")
     assert resp.status_code == 200
     assert _ledger_count() == 0
+
+
+def test_operator_is_exempt_from_caption_quota(app_with_run, monkeypatch):
+    """The signed-in developer/operator has no AI quotas: never blocked even with
+    a configured limit, and their generations don't count against the club."""
+    from mediahub.web import auth
+
+    monkeypatch.setenv("MEDIAHUB_QUOTA_CAPTION", "1")  # would block a normal user fast
+    client = app_with_run.test_client()
+    with client.session_transaction() as sess:
+        sess[auth._DEV_SESSION_KEY] = True  # operator session
+    bundle = {
+        "caption": "operator caption",
+        "alt_text": "",
+        "caption_secondary": None,
+        "secondary_language": None,
+    }
+    with (
+        mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+        mock.patch("mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle),
+    ):
+        # Several generations, all past the limit of 1 — none blocked.
+        for _ in range(3):
+            r = client.post(_caption_url())
+            assert r.status_code == 200
+            assert r.get_json()["caption"] == "operator caption"
+    # Nothing metered against the club.
+    assert _ledger_count() == 0
