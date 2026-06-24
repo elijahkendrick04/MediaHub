@@ -118,6 +118,33 @@ class WorkflowStore:
             states[card_id] = existing
             self._save(run_id, states)
 
+    def set_translation(
+        self,
+        run_id: str,
+        card_id: str,
+        language: str,
+        variant: dict,
+    ) -> None:
+        """Store a translated variant for a card, keyed by target language.
+
+        1.24 localisation: the variant rides with the card, so approving the
+        card approves the language pair as one decision. Re-translating the same
+        language overwrites that slot; other languages are preserved. This is a
+        non-destructive add — it never changes the card's status (translation
+        is not an edit or an approval), so a queued card stays queued.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        lang = (language or "").strip()
+        if not lang:
+            return
+        with self._lock:
+            states = self.load(run_id)
+            existing = states.get(card_id, CardWorkflowState(card_id=card_id))
+            existing.translations = {**(existing.translations or {}), lang: variant}
+            existing.last_changed_at = now
+            states[card_id] = existing
+            self._save(run_id, states)
+
     def summary(self, run_id: str) -> dict:
         """Return {queue, approved, rejected, posted, edited, total}."""
         states = self.load(run_id)

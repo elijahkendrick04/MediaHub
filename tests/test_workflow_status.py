@@ -83,6 +83,7 @@ class TestToDict:
             "notes",
             "posted_at",
             "last_changed_at",
+            "translations",  # 1.24 localisation: per-language variants
         }
         assert set(d.keys()) == expected
 

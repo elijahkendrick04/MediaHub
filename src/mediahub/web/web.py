@@ -3441,13 +3441,29 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
     return pid or ""
 
 
+def _translatable_langs_js() -> str:
+    """``window.MH_TR_LANGS`` — the static [code, label] list the review/pack
+    caption toolbar offers as on-demand translation targets (1.24). Excludes
+    bare English (the usual source — a no-op) but offers the two English
+    regional variants plus every other registry language. Static (registry-
+    derived), so it ships inside the shared caption JS rather than per page."""
+    from mediahub.web.languages import single_language_options as _single_lang_opts
+
+    langs = [[c, lbl] for (c, lbl) in _single_lang_opts() if c != "en"]
+    langs += [
+        ["en-GB", "English (UK spelling)"],
+        ["en-US", "English (US spelling)"],
+    ]
+    return "<script>window.MH_TR_LANGS = " + json.dumps(langs) + ";</script>\n"
+
+
 def _card_creative_js() -> str:
     """Shared client JS for the per-card creative toolbar: live caption
     tone tabs, create-graphic, motion render, and the 3-variant graphic
     picker. Lives on the Content builder page (post-approval). The host
     page must define `WF_API_BASE` and `window._API_BASE` before this
     block so caption edits and visual picks can persist."""
-    return """
+    return _translatable_langs_js() + """
 <script>
 // V8: Live caption tone toggle + regenerate
 // switchTone() kept for backwards compat (content pack, other pages).
@@ -3603,6 +3619,55 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         secBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(j.secondary_language_label || 'Translation') + '</div>'
           + '<span style="white-space:pre-wrap" dir="' + (j.secondary_rtl ? 'rtl' : 'auto') + '">' + safeText(j.caption_secondary) + '</span>';
         captionDiv.appendChild(secBox);
+      }
+      // 1.24 localisation: on-demand "translate this caption" into any
+      // supported language, shown as a bilingual pair and SAVED with the card
+      // so one approval covers both. Only appears where the page provided the
+      // language list (review). Reuses the secBox look.
+      if (captionDiv && j.live && window.MH_TR_LANGS && window.MH_TR_LANGS.length) {
+        var trWrap = document.createElement('div');
+        trWrap.style.cssText = 'margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+        var trSel = document.createElement('select');
+        trSel.className = 'tr-lang-select';
+        trSel.style.cssText = 'font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)';
+        var optsHtml = '<option value="">Translate to&hellip;</option>';
+        window.MH_TR_LANGS.forEach(function(o){ optsHtml += '<option value="' + o[0] + '">' + safeText(o[1]) + '</option>'; });
+        trSel.innerHTML = optsHtml;
+        var trBtn = document.createElement('button');
+        trBtn.type = 'button'; trBtn.className = 'btn secondary tr-go';
+        trBtn.style.cssText = 'font-size:11px;padding:4px 10px';
+        trBtn.textContent = 'Translate';
+        var trOut = document.createElement('div'); trOut.className = 'tr-out';
+        trWrap.appendChild(trSel); trWrap.appendChild(trBtn);
+        captionDiv.appendChild(trWrap); captionDiv.appendChild(trOut);
+        trBtn.addEventListener('click', function(){
+          var lang = trSel.value; if (!lang) return;
+          var capNow = (textarea && textarea.value) || variants[0] || text || '';
+          if (!capNow.trim()) { return; }
+          var runBase = captionUrl.split('/swim/')[0];
+          var trUrl = runBase + '/card/' + encodeURIComponent(cardId) + '/translate';
+          var bodyObj = { lang: lang, caption: capNow };
+          var altEl = captionDiv.querySelector('.alt-text-input');
+          if (altEl && altEl.value) { bodyObj.alt_text = altEl.value; }
+          trBtn.disabled = true; trBtn.textContent = 'Translating…';
+          fetch(trUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj)})
+            .then(function(r){ return r.json().then(function(jj){ return {ok:r.ok, j:jj}; }); })
+            .then(function(res){
+              trBtn.disabled = false; trBtn.textContent = 'Translate';
+              var jj = res.j || {};
+              if (!res.ok || jj.error) {
+                trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">' + safeText(jj.message || 'Translation unavailable.') + '</div>';
+                return;
+              }
+              var s = (jj.slots && jj.slots.caption) || '';
+              var lbl = jj.language_label || lang;
+              var warnHtml = (jj.warnings && jj.warnings.length) ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">&#x26A0; ' + safeText(jj.warnings.join('; ')) + '</div>' : '';
+              trOut.innerHTML = '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
+                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(lbl) + ' &middot; saved with this card</div>'
+                + '<span style="white-space:pre-wrap" dir="' + (jj.rtl ? 'rtl' : 'auto') + '">' + safeText(s) + '</span>' + warnHtml + '</div>';
+            })
+            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed &mdash; try again.</div>'; });
+        });
       }
       // W.11: result-grounded alt text — editable, saved with the card so
       // every export/publish surface carries what the approver saw.
@@ -22309,6 +22374,113 @@ function copyWhyCard(btn, taId) {{
                 "generated_at": now_iso,
             }
         )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/translate", methods=["POST"])
+    def api_card_translate(run_id, card_id):
+        """1.24 localisation — translate a card's text into a target language.
+
+        POST body: {lang: "cy"|"en-US"|…, caption: str, alt_text?: str,
+                    headline?: str, subhead?: str}
+
+        Translates exactly the text the approver is looking at (passed in the
+        body) through the glossary-constrained engine, persists it on the card as
+        a language variant (so the bilingual pair rides into approval/export),
+        and returns it for side-by-side display. Honest-errors (503) when no
+        provider is configured — never a fake translation.
+        """
+        import urllib.parse as _up
+
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()) or not data:
+            return jsonify({"error": "run not found"}), 404
+        # Translating produces content for review — an edit-class action.
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id)
+        if denied:
+            return denied
+
+        payload = request.get_json(silent=True) or {}
+        target = (payload.get("lang") or payload.get("language") or "").strip()
+        if not target:
+            return jsonify(
+                {"error": "no_language", "message": "Pick a language to translate into."}
+            ), 400
+
+        from mediahub.localize import base_code as _base_code
+        from mediahub.web.languages import get_language as _get_language
+
+        if _get_language(_base_code(target)) is None:
+            return jsonify(
+                {"error": "bad_language", "message": "That language isn't supported."}
+            ), 400
+
+        # Translate exactly the slots the approver sees (sent in the body).
+        slots: dict[str, str] = {}
+        for key in ("caption", "alt_text", "headline", "subhead"):
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                slots[key] = val
+        if not slots:
+            return jsonify(
+                {"error": "empty", "message": "Generate a caption first, then translate it."}
+            ), 400
+
+        # Source language = the workspace's primary caption language.
+        source_language = "en"
+        run_profile_id = data.get("profile_id") or ""
+        if run_profile_id:
+            try:
+                from mediahub.web.languages import primary_language_for as _primary
+
+                prof = load_profile(run_profile_id)
+                if prof:
+                    source_language = _primary(prof) or "en"
+            except Exception:
+                source_language = "en"
+
+        from mediahub.media_ai.llm import is_available as _llm_available
+
+        if not _llm_available():
+            return jsonify(
+                {
+                    "error": "no_key",
+                    "message": (
+                        "AI translation is unavailable on this deployment. "
+                        "Contact your administrator to enable it."
+                    ),
+                }
+            ), 503
+
+        from mediahub.web.translate_card import (
+            ClaudeUnavailableError as _CUE,
+            translate_card_slots,
+        )
+
+        try:
+            variant = translate_card_slots(slots, target, source_language=source_language)
+        except _CUE:
+            return jsonify(
+                {
+                    "error": "no_key",
+                    "message": "AI translation is unavailable on this deployment.",
+                }
+            ), 503
+        except Exception:
+            return jsonify(
+                {
+                    "error": "transient",
+                    "message": "The AI is briefly busy — wait a few seconds and try again.",
+                }
+            ), 200
+
+        # Persist on the card so approving the card approves the pair.
+        card_id_dec = _up.unquote(card_id)
+        ws = _get_wf_store()
+        if ws is not None:
+            try:
+                ws.set_translation(run_id, card_id_dec, variant.get("language") or target, variant)
+            except Exception:
+                pass
+        return jsonify({"ok": True, **variant})
 
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
 
