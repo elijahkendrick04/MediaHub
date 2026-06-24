@@ -20,9 +20,7 @@ def db(tmp_path):
 
 def test_record_and_count(db):
     assert fq.count_for_org("club-a", db_path=db) == 0
-    rid = fq.record_use(
-        org_id="club-a", feature="caption", ok=True, provider="gemini", db_path=db
-    )
+    rid = fq.record_use(org_id="club-a", feature="caption", ok=True, provider="gemini", db_path=db)
     assert rid > 0
     assert fq.count_for_org("club-a", db_path=db) == 1
     # A different org is isolated.

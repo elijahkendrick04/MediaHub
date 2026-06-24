@@ -165,9 +165,8 @@ def build_generated_image_manifest(
         m["sources"] = {"source_asset_id": str(source_asset_id)}
     if content_sha256:
         m["content_sha256"] = str(content_sha256)
-    m["summary"] = (
-        f"AI-{'edited' if composite else 'generated'} image"
-        + (f" ({provider})" if provider else "")
+    m["summary"] = f"AI-{'edited' if composite else 'generated'} image" + (
+        f" ({provider})" if provider else ""
     )
     return m
 

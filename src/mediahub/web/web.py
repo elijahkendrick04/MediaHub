@@ -21852,9 +21852,7 @@ function copyWhyCard(btn, taId) {{
                 ), 403
             if _gov_org:
                 try:
-                    _gov_quota.enforce(
-                        _gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan
-                    )
+                    _gov_quota.enforce(_gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan)
                 except _gov_quota.QuotaExceeded as _qe:
                     return jsonify(
                         {
@@ -25461,7 +25459,9 @@ self.addEventListener('fetch', function(e){
         per_org.sort(key=lambda r: r["total"], reverse=True)
 
         feat_keys = _gf.feature_keys()
-        head = "".join(f'<th style="text-align:right">{_h(_gf.label_for(k))}</th>' for k in feat_keys)
+        head = "".join(
+            f'<th style="text-align:right">{_h(_gf.label_for(k))}</th>' for k in feat_keys
+        )
         rows = ""
         for r in per_org:
             cells = "".join(
@@ -25469,7 +25469,7 @@ self.addEventListener('fetch', function(e){
                 for k in feat_keys
             )
             rows += (
-                f'<tr><td>{_h(r["org_id"])}</td>{cells}'
+                f"<tr><td>{_h(r['org_id'])}</td>{cells}"
                 f'<td style="text-align:right"><strong>{int(r["total"])}</strong></td></tr>'
             )
         if not rows:
@@ -36658,7 +36658,7 @@ what you're doing, what they should do.</p>
                     '<label style="display:flex;gap:8px;align-items:flex-start;'
                     'padding:5px 0;font-size:13px">'
                     f'<input type="checkbox" name="scope" value="{_h(s)}"'
-                    f'{" checked" if group_name == "Read-only" else ""}/>'
+                    f"{' checked' if group_name == 'Read-only' else ''}/>"
                     f"<span><code>{_h(s)}</code> — {_h(_api_scopes.scope_label(s))}</span></label>"
                     for s in group_scopes
                 )
@@ -36671,7 +36671,7 @@ what you're doing, what they should do.</p>
                 )
             create_form = (
                 '<section class="card" style="margin-bottom:var(--sp-4)">'
-                "<h3 style=\"margin:0 0 4px\">Create a token</h3>"
+                '<h3 style="margin:0 0 4px">Create a token</h3>'
                 '<p class="dim" style="margin:0 0 12px;font-size:13px">A token acts as '
                 f"<strong>{org_name}</strong> with exactly the scopes you grant — nothing more. "
                 "Approving via the API still runs the same consent and brand checks as the app.</p>"
@@ -36680,14 +36680,14 @@ what you're doing, what they should do.</p>
                 '<label style="display:block;font-size:13px;margin-bottom:4px">Name</label>'
                 '<input type="text" name="name" placeholder="e.g. Zapier, Mobile app" '
                 'style="width:100%;max-width:360px;padding:8px 10px;margin-bottom:12px;'
-                'background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+                "background:var(--bg);border:1px solid var(--line);border-radius:8px;"
                 'color:var(--ink)"/>'
                 f"{groups_html}"
                 '<label style="display:block;font-size:13px;margin:4px 0">'
-                'Expires after (days, optional)</label>'
+                "Expires after (days, optional)</label>"
                 '<input type="number" name="expires_days" min="1" max="3650" '
                 'placeholder="never" style="width:140px;padding:8px 10px;margin-bottom:12px;'
-                'background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+                "background:var(--bg);border:1px solid var(--line);border-radius:8px;"
                 'color:var(--ink)"/><br/>'
                 '<button type="submit" class="btn">Create token</button></form></section>'
             )
@@ -36791,7 +36791,7 @@ what you're doing, what they should do.</p>
                     )
                 wh_rows += (
                     f'<tr><td style="max-width:280px;word-break:break-all">'
-                    f"<code style=\"font-size:12px\">{_h(ep.url)}</code></td>"
+                    f'<code style="font-size:12px">{_h(ep.url)}</code></td>'
                     f'<td style="max-width:280px">{ev_pills}</td>'
                     f'<td style="font-size:12px;color:var(--ink-muted)">{_h((ep.last_delivery_at or "—")[:10])}</td>'
                     f"<td>{del_html}</td></tr>"
@@ -47862,8 +47862,8 @@ voice, and queues them for one-click approval.</p>
         ff = _ff.status()
         caps = (
             f'<p class="muted">CMYK conversion (Ghostscript): '
-            f'<strong>{"ready" if ghostscript_available() else "not installed"}</strong> · '
-            f'PDF/X-3: <strong>{"ready" if _pdfx.pdfx_available() else "needs an ICC profile"}'
+            f"<strong>{'ready' if ghostscript_available() else 'not installed'}</strong> · "
+            f"PDF/X-3: <strong>{'ready' if _pdfx.pdfx_available() else 'needs an ICC profile'}"
             f"</strong> · Fulfilment: <strong>{_h(ff['message'])}</strong></p>"
         )
         body = (
@@ -49353,9 +49353,9 @@ voice, and queues them for one-click approval.</p>
         st = ee.engine_status()
         engines = (
             f'<p class="muted">Video engine (FFmpeg): '
-            f'<strong>{"ready" if st["ffmpeg"] else "not installed"}</strong> · '
-            f'WebP: <strong>{"yes" if st["webp_encode"] else "no"}</strong> · '
-            f'AVIF: <strong>{"yes" if st["avif_encode"] else "no"}</strong></p>'
+            f"<strong>{'ready' if st['ffmpeg'] else 'not installed'}</strong> · "
+            f"WebP: <strong>{'yes' if st['webp_encode'] else 'no'}</strong> · "
+            f"AVIF: <strong>{'yes' if st['avif_encode'] else 'no'}</strong></p>"
         )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">'
@@ -49386,7 +49386,7 @@ voice, and queues them for one-click approval.</p>
         ]
         boxes = "".join(
             f'<label class="mh-check"><input type="checkbox" name="fmt" value="{f.key}"'
-            f'{" checked" if f.key == "jpg" else ""}> {_h(f.label)}</label>'
+            f"{' checked' if f.key == 'jpg' else ''}> {_h(f.label)}</label>"
             for f in img_fmts
         )
         kick_url = url_for("api_run_bulk_export", run_id=run_id)
@@ -50222,9 +50222,9 @@ voice, and queues them for one-click approval.</p>
             rows += (
                 '<div class="card" style="padding:12px 16px;margin-bottom:10px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
-                f'<div><strong>{_h(c["name"])}</strong>'
+                f"<div><strong>{_h(c['name'])}</strong>"
                 f'<span style="color:var(--ink-muted);font-size:12px;margin-left:8px">'
-                f'{c["count"]} item{"s" if c["count"] != 1 else ""}</span></div>'
+                f"{c['count']} item{'s' if c['count'] != 1 else ''}</span></div>"
                 + (
                     f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
                     f"onclick=\"mhDeleteCollection('{c['id']}')\">Delete</button>"
@@ -50457,8 +50457,7 @@ voice, and queues them for one-click approval.</p>
                 {
                     "error": "footage_failed",
                     "message": (
-                        "The clip couldn't be processed. Please try again, or try a "
-                        "different clip."
+                        "The clip couldn't be processed. Please try again, or try a different clip."
                     ),
                 }
             ), 500

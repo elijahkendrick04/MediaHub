@@ -94,10 +94,17 @@ def _url():
 
 def test_viewer_is_forbidden_and_llm_untouched(app_bound):
     client = _signed_in(app_bound, "viewer@club.org")
-    gen = mock.Mock(return_value={"caption": "x", "alt_text": "", "caption_secondary": None,
-                                  "secondary_language": None})
-    with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), mock.patch(
-        "mediahub.web.ai_caption.generate_caption_bundle", gen
+    gen = mock.Mock(
+        return_value={
+            "caption": "x",
+            "alt_text": "",
+            "caption_secondary": None,
+            "secondary_language": None,
+        }
+    )
+    with (
+        mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+        mock.patch("mediahub.web.ai_caption.generate_caption_bundle", gen),
     ):
         resp = client.post(_url())
     assert resp.status_code == 403
@@ -110,10 +117,15 @@ def test_viewer_is_forbidden_and_llm_untouched(app_bound):
 
 def test_editor_is_allowed_and_metered(app_bound):
     client = _signed_in(app_bound, "editor@club.org")
-    bundle = {"caption": "Emma PB!", "alt_text": "", "caption_secondary": None,
-              "secondary_language": None}
-    with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), mock.patch(
-        "mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle
+    bundle = {
+        "caption": "Emma PB!",
+        "alt_text": "",
+        "caption_secondary": None,
+        "secondary_language": None,
+    }
+    with (
+        mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+        mock.patch("mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle),
     ):
         resp = client.post(_url())
     assert resp.status_code == 200

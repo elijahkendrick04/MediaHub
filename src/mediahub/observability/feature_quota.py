@@ -174,9 +174,7 @@ def record_use(
         ensure_schema(db_path)
         conn = _connect(db_path)
         try:
-            cur = conn.execute(
-                sql, (when, org, feat, 1 if ok else 0, prov, mdl, det, ek, em)
-            )
+            cur = conn.execute(sql, (when, org, feat, 1 if ok else 0, prov, mdl, det, ek, em))
             new_id = int(cur.lastrowid or 0)
             conn.commit()
             _maybe_prune(conn)

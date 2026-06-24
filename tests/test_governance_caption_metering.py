@@ -32,9 +32,7 @@ def app_with_run(tmp_path, monkeypatch):
     from mediahub.web.club_profile import ClubProfile, save_profile
     import mediahub.web.web as web_module
 
-    save_profile(
-        ClubProfile(profile_id=ORG, display_name="Club X", org_type="swimming_club")
-    )
+    save_profile(ClubProfile(profile_id=ORG, display_name="Club X", org_type="swimming_club"))
 
     achievement = {
         "swim_id": SWIM,
@@ -91,8 +89,9 @@ def test_successful_caption_is_metered(app_with_run):
         "caption_secondary": None,
         "secondary_language": None,
     }
-    with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), mock.patch(
-        "mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle
+    with (
+        mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+        mock.patch("mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle),
     ):
         resp = client.post(_caption_url())
     assert resp.status_code == 200
@@ -114,8 +113,9 @@ def test_quota_reached_hard_blocks_without_calling_llm(app_with_run, monkeypatch
     }
 
     gen = mock.Mock(return_value=bundle)
-    with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), mock.patch(
-        "mediahub.web.ai_caption.generate_caption_bundle", gen
+    with (
+        mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+        mock.patch("mediahub.web.ai_caption.generate_caption_bundle", gen),
     ):
         # First call consumes the single allowed caption.
         r1 = client.post(_caption_url())
@@ -142,8 +142,9 @@ def test_no_limit_never_blocks(app_with_run):
         "caption_secondary": None,
         "secondary_language": None,
     }
-    with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), mock.patch(
-        "mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle
+    with (
+        mock.patch("mediahub.media_ai.llm.is_available", return_value=True),
+        mock.patch("mediahub.web.ai_caption.generate_caption_bundle", return_value=bundle),
     ):
         for _ in range(5):
             assert client.post(_caption_url()).status_code == 200
