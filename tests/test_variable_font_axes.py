@@ -13,6 +13,7 @@ C. **Render wiring** — every v2 result slot binds the axes var, and the render
    emits an override ONLY when a slot cannot fit at its requested weight (so a
    slot that already fits renders byte-identically to before).
 """
+
 from __future__ import annotations
 
 import re
@@ -83,9 +84,10 @@ class TestShippedFontsAreVariable:
         for tag, (lo, hi) in expected.items():
             assert tag in axes, f"{slug}.woff2 is missing the {tag!r} axis"
             got_lo, got_hi = axes[tag]
-            assert (round(got_lo), round(got_hi)) == (lo, hi), (
-                f"{slug}.woff2 {tag} range {got_lo}..{got_hi} != declared {lo}..{hi}"
-            )
+            assert (round(got_lo), round(got_hi)) == (
+                lo,
+                hi,
+            ), f"{slug}.woff2 {tag} range {got_lo}..{got_hi} != declared {lo}..{hi}"
 
     @pytest.mark.parametrize("slug", _STATIC)
     def test_display_faces_stay_static(self, slug):
@@ -103,12 +105,21 @@ class TestSharedCssDeclaresRanges:
     @pytest.mark.parametrize("family,rng", list(_CSS_FAMILIES.items()))
     def test_single_variable_face_with_range(self, family, rng):
         css = _SHARED_CSS.read_text(encoding="utf-8")
-        # exactly one @font-face per family (the per-weight faces are collapsed)
-        assert len(re.findall(rf"font-family:\s*'{re.escape(family)}'", css)) == 1
+        # Exactly one PRIMARY variable face per family (the per-weight faces are
+        # collapsed into the variable woff2). 1.24 adds non-Latin fallback faces
+        # under the same family names pointing at a noto-*.woff2 (per-glyph
+        # unicode-range fallback so translated text renders) — those are NOT the
+        # variable face and are excluded here.
+        blocks = re.findall(r"@font-face\s*\{[^}]*\}", css, re.S)
+        own = [
+            b
+            for b in blocks
+            if re.search(rf"font-family:\s*'{re.escape(family)}'", b) and "noto-" not in b
+        ]
+        assert len(own) == 1, f"expected exactly one primary {family} face, got {len(own)}"
         lo, hi = rng
         assert re.search(
-            rf"font-family:\s*'{re.escape(family)}';.*?font-weight:\s*{lo} {hi}\b",
-            css, re.S,
+            rf"font-weight:\s*{lo} {hi}\b", own[0]
         ), f"{family} not declared as a font-weight: {lo} {hi} range face"
 
     def test_optical_sizing_enabled(self):
@@ -163,11 +174,21 @@ class TestOptimiseAxes:
 
     def test_weight_clamped_to_face_range(self):
         # Space Grotesk caps at 700; JetBrains Mono floors at 100.
-        assert af.optimise_axes("X", 9999, font_family="Space Grotesk", weight=900, fitted_px=40).wght == 700
-        assert af.optimise_axes("X", 9999, font_family="JetBrains Mono", weight="thin", fitted_px=40).wght == 100
+        assert (
+            af.optimise_axes("X", 9999, font_family="Space Grotesk", weight=900, fitted_px=40).wght
+            == 700
+        )
+        assert (
+            af.optimise_axes(
+                "X", 9999, font_family="JetBrains Mono", weight="thin", fitted_px=40
+            ).wght
+            == 100
+        )
 
     def test_fitting_slot_emits_no_css(self):
-        plan = af.optimise_axes("1:58.2", 600, font_family="JetBrains Mono", weight=700, fitted_px=90)
+        plan = af.optimise_axes(
+            "1:58.2", 600, font_family="JetBrains Mono", weight=700, fitted_px=90
+        )
         assert plan.css == "" and plan.wght == 700
 
     def test_overflowing_slot_trades_weight_down(self):
@@ -178,7 +199,9 @@ class TestOptimiseAxes:
         assert plan.wght is not None and plan.wght < 700
 
     def test_weight_trade_never_below_floor(self):
-        plan = af.optimise_axes("X" * 80, 50, font_family="JetBrains Mono", weight=700, fitted_px=120)
+        plan = af.optimise_axes(
+            "X" * 80, 50, font_family="JetBrains Mono", weight=700, fitted_px=120
+        )
         assert plan.wght >= af._WEIGHT_FIT_FLOOR
 
     def test_width_axis_condenses_when_the_face_has_one(self):
@@ -232,9 +255,9 @@ class TestV2LayoutsConsumeAxesVar:
         for html in sorted(_V2.glob("*.html")):
             text = html.read_text(encoding="utf-8")
             if "--mh-fit-result-px" in text or "--mh-fit-mega-result-px" in text:
-                assert "font-variation-settings: var(--mh-axes" in text, (
-                    f"{html.name}: result slot is not wired to an axes var"
-                )
+                assert (
+                    "font-variation-settings: var(--mh-axes" in text
+                ), f"{html.name}: result slot is not wired to an axes var"
 
     def test_mega_archetypes_use_the_mega_var(self):
         for name in ("big_number_dominant", "cornerstone_numeral"):
@@ -245,7 +268,9 @@ class TestV2LayoutsConsumeAxesVar:
         # the fallback keeps a non-deviating slot byte-identical to before
         for html in _V2.glob("*.html"):
             text = html.read_text(encoding="utf-8")
-            for m in re.findall(r"font-variation-settings: var\((--mh-axes-[a-z-]+)(, normal)?\)", text):
+            for m in re.findall(
+                r"font-variation-settings: var\((--mh-axes-[a-z-]+)(, normal)?\)", text
+            ):
                 assert m[1] == ", normal", f"{html.name}: axes var must default to normal"
 
 
