@@ -12689,6 +12689,7 @@ def _layout(
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
       <a href="{{ url_for('logout') }}">Log out</a>
     {% else %}
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Sign up</a>
       <a href="{{ url_for('login_page') }}">Log in</a>
       {# "Developer" sign-in link removed from the top bar — operator sign-in
          lives in the footer ("Developer access") on the home page. The header
