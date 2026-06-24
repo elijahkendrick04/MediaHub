@@ -39,6 +39,10 @@ class BulkItem:
     post_angle: str = ""
     output_path: str = ""  # rendered artifact, if any
     error: str = ""
+    # 1.24 localisation: the target language for this item's content ("" = the
+    # workspace default). A per-language bulk job fans out one item per
+    # (card × language), each carrying its language so the generator localises.
+    language: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -49,6 +53,7 @@ class BulkItem:
             "post_angle": self.post_angle,
             "output_path": self.output_path,
             "error": self.error,
+            "language": self.language,
         }
 
     @classmethod
@@ -61,6 +66,7 @@ class BulkItem:
             post_angle=str(d.get("post_angle", "") or ""),
             output_path=str(d.get("output_path", "") or ""),
             error=str(d.get("error", "") or ""),
+            language=str(d.get("language", "") or ""),
         )
 
 

@@ -148,6 +148,7 @@ class GenContext:
     card_id: str
     out_dir: Path
     bindings: dict
+    language: str = ""  # 1.24: target language for this item ("" = workspace default)
 
 
 @dataclass
@@ -192,15 +193,37 @@ def _certificate_generator(ctx: GenContext) -> GenOutput:
         club_name = ctx.profile_id
         brand = {"primary": "#1746a2", "secondary": "#0b1f44"}
 
+    # 1.24 localisation: for a per-language item, translate the descriptive
+    # labels (event + headline) into the target language; names/times stay
+    # verbatim. Honest — if no provider is configured this is a per-item failure,
+    # never a fake-translated certificate. The filename carries the language so a
+    # multi-language job's artifacts never overwrite each other.
+    event_label = ach.get("event", "")
+    headline = ach.get("headline", "")
+    lang = (ctx.language or "").strip()
+    lang_suffix = ""
+    if lang and lang.split("-", 1)[0] != "en":
+        try:
+            from mediahub.web.translate_card import translate_card_labels
+
+            loc = translate_card_labels(
+                {"event_name": event_label, "achievement_label": headline}, lang
+            )
+            event_label = loc.get("event_name", event_label)
+            headline = loc.get("achievement_label", headline)
+            lang_suffix = f"-{lang.split('-', 1)[0]}"
+        except Exception as exc:  # noqa: BLE001 — honest per-item error, never fake
+            return GenOutput(False, error=f"Localisation unavailable for {lang}: {exc}")
+
     ctx.out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = ctx.out_dir / f"certificate-{ctx.card_id}.pdf"
+    pdf_path = ctx.out_dir / f"certificate-{ctx.card_id}{lang_suffix}.pdf"
     try:
         export_certificate_print_pdf(
             pdf_path,
             swimmer_name=ach.get("swimmer_name", ""),
-            event_label=ach.get("event", ""),
+            event_label=event_label,
             time_str=str(facts.get("time_str") or ach.get("time") or ""),
-            achievement_headline=ach.get("headline", ""),
+            achievement_headline=headline,
             meet_name=meet.get("name", ""),
             meet_date=meet.get("start_date", "") or "",
             club_name=club_name,
@@ -228,8 +251,16 @@ def plan_bulk(
     title: str = "",
     cap: int = DEFAULT_CAP,
     runs_dir: Optional[Path] = None,
+    languages: Optional[list[str]] = None,
 ) -> BulkJob:
-    """Resolve targets into a planned job (no generation yet) — for preview."""
+    """Resolve targets into a planned job (no generation yet) — for preview.
+
+    ``languages`` (1.24): when given, the job fans out one item per
+    (card × language) — e.g. ``["cy", "fr"]`` over 20 PB cards plans 40 items,
+    each carrying its target language so the generator localises it. Empty/None
+    keeps the historic one-item-per-card behaviour. The safety cap bounds the
+    TOTAL item count, not the card count, so a language fan-out can't run away.
+    """
     run_data = _load_run(run_id, runs_dir)
     if run_data is None:
         raise ValueError(f"Run not found: {run_id}")
@@ -237,8 +268,15 @@ def plan_bulk(
         raise PermissionError("Run belongs to another organisation.")
 
     cards = resolve_cards(run_data, row_query)
-    if cap and len(cards) > cap:
-        cards = cards[:cap]
+    # Normalise the language fan-out: drop blanks/dupes, preserve order. "" means
+    # the single default-language item (the historic behaviour).
+    langs: list[str] = []
+    for lang in languages or [""]:
+        lang = (lang or "").strip()
+        if lang not in langs:
+            langs.append(lang)
+    if not langs:
+        langs = [""]
 
     job = BulkJob(
         job_id=uuid.uuid4().hex[:12],
@@ -251,14 +289,19 @@ def plan_bulk(
     for ra in cards:
         cid = _card_id_for(ra)
         ach = ra.get("achievement") or {}
-        job.items.append(
-            BulkItem(
-                item_id=uuid.uuid4().hex[:10],
-                card_id=cid,
-                label=_label_for(ra),
-                post_angle=ra.get("post_angle") or ach.get("post_angle") or "",
+        base_label = _label_for(ra)
+        for lang in langs:
+            if cap and len(job.items) >= cap:
+                break
+            job.items.append(
+                BulkItem(
+                    item_id=uuid.uuid4().hex[:10],
+                    card_id=cid,
+                    label=f"{base_label} · {lang}" if lang else base_label,
+                    post_angle=ra.get("post_angle") or ach.get("post_angle") or "",
+                    language=lang,
+                )
             )
-        )
     return job
 
 
@@ -320,6 +363,7 @@ def run_bulk(
                 card_id=item.card_id,
                 out_dir=out_dir,
                 bindings=dict(job.__dict__.get("_bindings", {})),
+                language=item.language,
             )
             out = gen(ctx)
             if out.ok:
@@ -353,8 +397,13 @@ def bulk_generate(
     progress_cb: Optional[Callable[[BulkJob], None]] = None,
     save: bool = True,
     jobs_dir: Optional[Path] = None,
+    languages: Optional[list[str]] = None,
 ) -> BulkJob:
-    """Plan + run a bulk job. The one-call entry point used by the route."""
+    """Plan + run a bulk job. The one-call entry point used by the route.
+
+    ``languages`` (1.24): fan out one item per (card × language) — see
+    :func:`plan_bulk`.
+    """
     job = plan_bulk(
         profile_id,
         run_id,
@@ -363,6 +412,7 @@ def bulk_generate(
         title=title,
         cap=cap,
         runs_dir=runs_dir,
+        languages=languages,
     )
     if save:
         _store.save_job(job, jobs_dir=jobs_dir)

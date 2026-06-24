@@ -12149,6 +12149,52 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 """
 
 
+def _ui_locale() -> str:
+    """Resolve the UI-chrome language for this request (1.24 localisation).
+
+    Order: a ``?lang=`` override → a ``ui_lang`` session pin → the signed-in
+    org's primary caption language when we ship that UI locale → English. Only
+    locales that actually have a UI catalogue are honoured, so the chrome is
+    never half-translated into a locale we don't have — it degrades to English.
+    """
+    from mediahub.localize.ui_catalogue import DEFAULT_UI_LOCALE, has_ui_locale
+
+    try:
+        from flask import request, session
+    except Exception:
+        return DEFAULT_UI_LOCALE
+    try:
+        q = (request.args.get("lang") or "").strip().lower()
+        if q and has_ui_locale(q):
+            base = q.split("-", 1)[0]
+            # Pin the choice so it sticks for the session (a Welsh club picks
+            # Welsh once via a ?lang=cy link and stays in Welsh).
+            try:
+                session["ui_lang"] = base
+            except Exception:
+                pass
+            return base
+    except Exception:
+        pass
+    try:
+        s = (session.get("ui_lang") or "").strip().lower()
+        if s and has_ui_locale(s):
+            return s.split("-", 1)[0]
+    except Exception:
+        pass
+    try:
+        pid = (session.get("active_profile_id") or "").strip()
+        if pid:
+            from mediahub.web.languages import primary_language_for
+
+            prim = primary_language_for(load_profile(pid))
+            if has_ui_locale(prim):
+                return prim
+    except Exception:
+        pass
+    return DEFAULT_UI_LOCALE
+
+
 def _layout(
     title: str,
     body: str,
@@ -12451,10 +12497,19 @@ def _layout(
             "</nav>"
         )
 
+    # 1.24 localisation: resolve the UI-chrome language and bind a per-request
+    # translator the template calls as t('nav.home'). Falls back to English for
+    # any key/locale we don't ship, so the chrome is never half-translated.
+    ui_locale = _ui_locale()
+    from mediahub.localize.ui_catalogue import t as _ui_t
+
+    def _t_render(key: str) -> str:
+        return _ui_t(key, ui_locale)
+
     return render_template_string(
         """
 <!DOCTYPE html>
-<html lang="en" class="{{ 'mh-signed-in' if signed_in else '' }}">
+<html lang="{{ lang }}" class="{{ 'mh-signed-in' if signed_in else '' }}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -12556,11 +12611,11 @@ def _layout(
     <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
   </button>
   <nav id="mh-primary-nav">
-    <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
+    <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">{{ t('nav.home') }}</a>
     {# Plan moved out of the top bar and under Create — it answers "what should
        we make?", so it lives as the strategic entry point on the Create page
        (and stays on the g→p keyboard shortcut). #}
-    <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">{{ t('nav.create') }}</a>
     {# Templates, the design studio and the video studio stay off the top bar:
        the template gallery is reached from Settings (a tile in the settings
        grid) and both studios are full Create tiles (the live design editor and
@@ -12580,10 +12635,10 @@ def _layout(
        a club profile it lives in Settings ("Pricing & plans") so the signed-in
        chrome stays operations-focused, not sales-focused. #}
     {% if not signed_in %}
-    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
     {% if account_email %}
-    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">{{ t('nav.sign_in') }}</a>
     {% endif %}
     {% endif %}
     {% if dev_operator %}
@@ -12670,12 +12725,12 @@ def _layout(
       <div id="mh-orgmenu-panel" class="mh-orgmenu-panel" role="menu"
            aria-label="Account and organisation">
         <a href="{{ url_for('settings_page') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">Settings</a>
+           class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">Switch organisation</a>
-        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">Sign out</a>
+           class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
+        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
       </div>
     </div>
     {% endif %}
@@ -14706,6 +14761,8 @@ def _layout(
 </html>
 """,
         title=title,
+        lang=ui_locale,
+        t=_t_render,
         css=BASE_CSS,
         body=body,
         active=active,
