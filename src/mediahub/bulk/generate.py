@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from mediahub.localize import base_code
 from mediahub.workflow.status import CardStatus
 from mediahub.workflow.store import WorkflowStore
 
@@ -200,9 +201,9 @@ def _certificate_generator(ctx: GenContext) -> GenOutput:
     # multi-language job's artifacts never overwrite each other.
     event_label = ach.get("event", "")
     headline = ach.get("headline", "")
-    lang = (ctx.language or "").strip()
+    lang = base_code(ctx.language)
     lang_suffix = ""
-    if lang and lang.split("-", 1)[0] != "en":
+    if lang and lang != "en":
         try:
             from mediahub.web.translate_card import translate_card_labels
 
@@ -211,7 +212,7 @@ def _certificate_generator(ctx: GenContext) -> GenOutput:
             )
             event_label = loc.get("event_name", event_label)
             headline = loc.get("achievement_label", headline)
-            lang_suffix = f"-{lang.split('-', 1)[0]}"
+            lang_suffix = f"-{lang}"
         except Exception as exc:  # noqa: BLE001 — honest per-item error, never fake
             return GenOutput(False, error=f"Localisation unavailable for {lang}: {exc}")
 
@@ -268,13 +269,17 @@ def plan_bulk(
         raise PermissionError("Run belongs to another organisation.")
 
     cards = resolve_cards(run_data, row_query)
-    # Normalise the language fan-out: drop blanks/dupes, preserve order. "" means
-    # the single default-language item (the historic behaviour).
+    # Normalise the language fan-out to base ISO codes, drop blanks/dupes,
+    # preserve order. "" means the single default-language item (the historic
+    # behaviour); the source language English (any region) collapses to that
+    # default rather than translating English→English. Normalising here means
+    # "CY"/"cy"/"cy-GB" are one language, not three duplicate items/files.
     langs: list[str] = []
     for lang in languages or [""]:
-        lang = (lang or "").strip()
-        if lang not in langs:
-            langs.append(lang)
+        base = base_code(lang)
+        norm = "" if base in ("", "en") else base
+        if norm not in langs:
+            langs.append(norm)
     if not langs:
         langs = [""]
 
@@ -286,12 +291,16 @@ def plan_bulk(
         title=title or f"{format_slug} × {len(cards)}",
         cap=cap,
     )
+    capped = False
     for ra in cards:
+        if capped:
+            break
         cid = _card_id_for(ra)
         ach = ra.get("achievement") or {}
         base_label = _label_for(ra)
         for lang in langs:
             if cap and len(job.items) >= cap:
+                capped = True  # stop the OUTER card loop too, not just this one
                 break
             job.items.append(
                 BulkItem(
