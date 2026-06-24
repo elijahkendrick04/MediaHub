@@ -97,7 +97,13 @@ def load_planner_inputs(org_id: str, *, data_dir: Optional[Path] = None) -> dict
         return empty_inputs()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+        # "missing/corrupt files load as empty" (per the module docstring): any
+        # unreadable/undecodable file degrades gracefully. ValueError covers both
+        # json.JSONDecodeError (malformed JSON) and UnicodeDecodeError (a non-UTF-8
+        # file on the durable disk) — both are ValueError subclasses, neither is an
+        # OSError, so the narrower (OSError, JSONDecodeError) used to let a non-UTF-8
+        # inputs file escape and 500 the loader (QA-016).
         return empty_inputs()
     if not isinstance(raw, dict):
         return empty_inputs()
