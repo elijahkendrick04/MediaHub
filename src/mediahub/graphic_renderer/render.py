@@ -1541,12 +1541,23 @@ def _localized_overrides_css(language: str) -> str:
     """RTL text-direction CSS for a right-to-left target language (1.24).
 
     Non-Latin glyph coverage is handled globally by _shared.css (the Noto
-    ``@font-face`` faces fall back per ``unicode-range``), so the only
-    per-render need for localisation is to flip text direction for Arabic/Urdu.
+    ``@font-face`` faces fall back per ``unicode-range``), so the per-render
+    localisation work is the bidi layout:
+
+    1. ``direction: rtl`` on the root so the card reads right-to-left.
+    2. ``unicode-bidi: plaintext`` on every text box so each box picks its OWN
+       base direction from its content. Without this, the global RTL context
+       runs the Unicode bidi algorithm over embedded *left*-to-right runs —
+       recorded times (``1:02.34``), ``@handles``, ``#hashtags``, URLs and the
+       Latin athlete/club names the glossary keeps verbatim — and reorders them
+       so punctuation and digits visually scramble. ``plaintext`` makes an
+       Arabic label flow RTL while a Latin name or a time inside the same card
+       stays LTR and intact.
+
     Latin / left-to-right languages (and the empty default) return "", so a
     non-localised render is byte-identical to the pre-1.24 output and keeps its
-    content-cache key. Physical-property layout (absolute left/right, the
-    cutout side) is unaffected — only inline text flow flips.
+    content-cache key. Physical-property layout (absolute left/right, the cutout
+    side) is unaffected — only text directionality changes.
     """
     if not language:
         return ""
@@ -1559,6 +1570,9 @@ def _localized_overrides_css(language: str) -> str:
     return (
         "\n/* --- 1.24 localisation: right-to-left text direction --- */\n"
         "html, body { direction: rtl; }\n"
+        "/* auto-detect each text box's base direction so embedded Latin runs "
+        "(names, times, @handles, #tags, URLs) don't scramble under RTL */\n"
+        "body * { unicode-bidi: plaintext; }\n"
     )
 
 

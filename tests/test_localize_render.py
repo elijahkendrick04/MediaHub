@@ -20,10 +20,12 @@ _FONTS = _LAYOUTS / "fonts"
 
 # --- RTL direction helper (unit) -------------------------------------------
 class TestLocalizedOverridesCss:
-    def test_rtl_languages_flip_direction(self):
-        assert "direction: rtl" in R._localized_overrides_css("ar")
-        assert "direction: rtl" in R._localized_overrides_css("ur")
-        assert "direction: rtl" in R._localized_overrides_css("ar-EG")
+    def test_rtl_languages_flip_direction_and_isolate_bidi(self):
+        for code in ("ar", "ur", "ar-EG"):
+            css = R._localized_overrides_css(code)
+            assert "direction: rtl" in css
+            # embedded LTR runs (names/times/handles) must not scramble
+            assert "unicode-bidi: plaintext" in css
 
     def test_ltr_and_empty_inject_nothing(self):
         for code in ("cy", "en", "fr", "ru", "zh", "", None):
@@ -99,6 +101,7 @@ class TestRenderHtmlLocalisation:
     def test_arabic_render_injects_rtl_and_self_hosted_noto(self, monkeypatch):
         html = _capture_render_html(monkeypatch, "ar")
         assert "direction: rtl" in html
+        assert "unicode-bidi: plaintext" in html  # embedded LTR runs stay intact
         # The Noto faces from _shared.css ride in, rewritten to file:// (never CDN).
         assert "noto-sans-arabic.woff2" in html
         assert "gstatic" not in html and "googleapis" not in html
