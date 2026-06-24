@@ -163,13 +163,23 @@ def glossary_prompt(sport: str | None, target_code: str) -> str:
 def check_protected(sport: str | None, source: str, translated: str) -> list[str]:
     """Deterministic post-check: which keep-verbatim terms vanished in translation.
 
-    For each protected term present in ``source``, confirm it is still present
-    (case-insensitively, as a whole token) in ``translated``. Returns a list of
-    human-readable warnings — one per term that was dropped or altered. Empty
-    list means every protected term survived.
+    For each protected term that appears in ``source``, confirm it still appears
+    in ``translated`` — as a whole token, in the SAME casing it had in the source
+    (or its canonical glossary casing). Returns a human-readable warning per term
+    that was dropped or altered; an empty list means every protected term
+    survived.
 
-    This never edits the translation; it only reports, so the caller can flag
-    the card for human review rather than silently shipping a mangled code.
+    Casing matters here. A naïve case-insensitive output check silently passes
+    mangled cards: the protected set is full of 2-letter codes (``IM``, ``NT``,
+    ``SB``, ``SC``, ``CR`` …) and, lower-cased, several collide with ordinary
+    words in the target language (German ``im``, Spanish ``nt`` …), so a *dropped*
+    ``IM`` would be reported as present the moment any such word appears. We
+    therefore match the output case-SENSITIVELY against exactly the casings the
+    term had in the source (plus the canonical form), which keeps "``DQ`` stayed
+    ``DQ``" passing while catching "``IM`` became German ``im``".
+
+    This never edits the translation; it only reports, so the caller can flag the
+    card for human review rather than silently shipping a mangled code.
     """
     import re
 
@@ -177,10 +187,21 @@ def check_protected(sport: str | None, source: str, translated: str) -> list[str
     src = source or ""
     out = translated or ""
     for term in protected_terms(sport):
-        # whole-token, case-insensitive; \b doesn't bracket non-word chars so
-        # we guard with lookarounds on alphanumerics only.
-        pattern = re.compile(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", re.IGNORECASE)
-        if pattern.search(src) and not pattern.search(out):
+        # whole-token, case-insensitive in the SOURCE to know the term is present
+        # (\b doesn't bracket non-word chars, so guard with alphanumeric lookarounds).
+        src_hits = re.findall(
+            rf"(?<![A-Za-z0-9])({re.escape(term)})(?![A-Za-z0-9])", src, re.IGNORECASE
+        )
+        if not src_hits:
+            continue
+        # The casings the code may legitimately survive as: exactly as written in
+        # the source, plus the canonical glossary casing. Matched case-SENSITIVELY
+        # so a coincidental lower-cased foreign word can't mask a real drop.
+        wanted = {term, *src_hits}
+        survived = any(
+            re.search(rf"(?<![A-Za-z0-9]){re.escape(c)}(?![A-Za-z0-9])", out) for c in wanted
+        )
+        if not survived:
             warnings.append(f'protected term "{term}" was dropped or altered in the translation')
     return warnings
 

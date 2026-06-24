@@ -84,9 +84,25 @@ class TestCheckProtected:
         warns = G.check_protected("swimming", "New PB!", "PB newydd!")
         assert warns == []
 
-    def test_case_insensitive_presence(self):
-        # Source has DQ; translation keeps it (any case) → no warning.
-        assert G.check_protected("swimming", "Sadly a DQ", "Yn anffodus, dq") == []
+    def test_code_must_survive_in_its_source_casing(self):
+        # A code that loses its canonical casing (DQ -> dq) is flagged for review:
+        # codes are kept EXACTLY (Latin caps), and case-sensitivity is what stops
+        # the 2-letter-code false negative below.
+        warns = G.check_protected("swimming", "Sadly a DQ", "Yn anffodus, dq")
+        assert len(warns) == 1 and "DQ" in warns[0]
+        # Same casing survives cleanly.
+        assert G.check_protected("swimming", "Sadly a DQ", "Yn anffodus, DQ") == []
+        # A lower-case source code that stays lower-case still counts as survival.
+        assert G.check_protected("swimming", "a new pb", "pb newydd") == []
+
+    def test_two_letter_code_false_negative_is_caught(self):
+        # The bug this fixes: a DROPPED "IM" must not be masked by a coincidental
+        # lower-case foreign word ("im" is German for "in the"). Case-insensitive
+        # output matching used to pass this silently.
+        warns = G.check_protected("swimming", "Great IM swim", "Tolles Schwimmen im Wettkampf")
+        assert len(warns) == 1 and "IM" in warns[0]
+        # And the genuine survival (IM kept as IM) passes.
+        assert G.check_protected("swimming", "Great IM swim", "Nofio IM gwych") == []
 
     def test_whole_token_only(self):
         # "PB" inside another word doesn't count as the protected code present.

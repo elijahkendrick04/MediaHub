@@ -175,12 +175,109 @@ class TestCaptionToolbarUI:
         assert '["en",' not in snippet
 
 
+class TestStoredTranslationsRender:
+    """1.24: a saved translation re-appears on reload (the bilingual pair must
+    survive a refresh), server-side rendered and escaped."""
+
+    def test_helper_renders_label_caption_and_rtl(self):
+        import mediahub.web.web as web_module
+
+        card = {
+            "workflow": {
+                "translations": {
+                    "cy": {"language_label": "Cymraeg", "rtl": False, "slots": {"caption": "Nofio gwych!"}},
+                    "ar": {"language_label": "العربية", "rtl": True, "slots": {"caption": "تعليق"}},
+                }
+            }
+        }
+        html = web_module._render_stored_translations(card)
+        assert "Saved translations" in html
+        assert "Cymraeg" in html and "Nofio gwych!" in html
+        assert "العربية" in html and 'dir="rtl"' in html  # RTL variant flagged
+
+    def test_helper_empty_when_no_translations(self):
+        import mediahub.web.web as web_module
+
+        assert web_module._render_stored_translations({}) == ""
+        assert web_module._render_stored_translations({"workflow": {}}) == ""
+        assert web_module._render_stored_translations({"workflow": {"translations": {}}}) == ""
+        # a variant with no caption text contributes nothing
+        empty = {"workflow": {"translations": {"cy": {"slots": {}}}}}
+        assert web_module._render_stored_translations(empty) == ""
+
+    def test_helper_escapes_caption(self):
+        import mediahub.web.web as web_module
+
+        card = {"workflow": {"translations": {"cy": {"slots": {"caption": "<script>x</script>"}}}}}
+        out = web_module._render_stored_translations(card)
+        assert "<script>" not in out and "&lt;script&gt;" in out
+
+    def test_pack_page_shows_saved_translation_on_load(self, app_with_run):
+        from mediahub.workflow.status import CardStatus
+        from mediahub.workflow.store import WorkflowStore
+
+        ws = WorkflowStore(app_with_run._runs_dir)
+        ws.set_status("run-1", SWIM, CardStatus.APPROVED)
+        ws.set_translation(
+            "run-1",
+            SWIM,
+            "cy",
+            {
+                "language": "cy",
+                "language_label": "Cymraeg",
+                "rtl": False,
+                "slots": {"caption": "Torrodd Emma PB newydd!"},
+            },
+        )
+        client = _client(app_with_run)
+        html = client.get("/pack/run-1").get_data(as_text=True)
+        assert "Saved translations" in html
+        assert "Cymraeg" in html
+        assert "Torrodd Emma PB newydd!" in html
+
+
+class TestMetering:
+    """1.23 governance: translation is metered AI spend like captions."""
+
+    def _count(self):
+        from mediahub.observability import feature_quota
+
+        return feature_quota.count_for_org(ORG, feature="translate")
+
+    def test_successful_translate_records_one_use(self, app_with_run):
+        client = _client(app_with_run)
+        p_av, p_gj, p_prov = _mock_provider()
+        with p_av, p_gj, p_prov:
+            resp = client.post(_url(), json={"lang": "cy", "caption": "Emma smashed a new PB!"})
+        assert resp.status_code == 200 and resp.get_json()["ok"] is True
+        assert self._count() == 1  # one translation → one metered use
+
+    def test_quota_reached_blocks_without_calling_provider(self, app_with_run, monkeypatch):
+        monkeypatch.setenv("MEDIAHUB_QUOTA_TRANSLATE", "1")
+        client = _client(app_with_run)
+        from mediahub.localize import translate as T
+
+        with mock.patch("mediahub.media_ai.llm.is_available", return_value=True), mock.patch.object(
+            T, "generate_json", return_value={"caption": "x"}
+        ) as gj, mock.patch.object(T, "active_provider", return_value="gemini-api"):
+            r1 = client.post(_url(), json={"lang": "cy", "caption": "first"})
+            assert r1.status_code == 200 and r1.get_json()["ok"] is True
+            assert gj.call_count == 1 and self._count() == 1
+            # Second call is over the single-use limit → blocked, provider untouched.
+            r2 = client.post(_url(), json={"lang": "fr", "caption": "second"})
+            assert r2.get_json()["error"] == "quota_reached"
+            assert gj.call_count == 1  # generation not attempted again
+            assert self._count() == 1  # blocked call not recorded
+
+
 class TestHonestError:
-    def test_no_provider_is_503_and_does_not_persist(self, app_with_run):
+    def test_no_provider_returns_no_key_and_does_not_persist(self, app_with_run):
         client = _client(app_with_run)
         # No keys configured (fixture deleted them) and is_available unmocked → False.
         resp = client.post(_url(), json={"lang": "cy", "caption": "Emma smashed a new PB!"})
-        assert resp.status_code == 503
+        # 200 + an {"error": "no_key"} body — same honest-error shape as the
+        # caption/assist routes (the UI branches on `error`, not the status).
+        assert resp.status_code == 200
         assert resp.get_json()["error"] == "no_key"
         # Nothing was written.
         assert _wf_translations(app_with_run) is None

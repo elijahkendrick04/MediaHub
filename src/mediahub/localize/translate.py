@@ -199,9 +199,12 @@ def translate_slots(
         regional_only=regional_only,
     )
 
-    # Same language and same region → nothing to do. (A genuine no-op, so we
-    # never spend a provider call or require one to be configured.)
-    if tgt_base == src_base and not regional_only:
+    # Nothing to do — never spend a provider call (or require one to be
+    # configured) when: the target is empty/unparseable, OR it's the same
+    # language+region as the source. (An unknown target can't be translated to,
+    # so returning the source untouched is the honest no-op; the route validates
+    # the language up front, but translate_text/translate_slots are public API.)
+    if not tgt_base or (tgt_base == src_base and not regional_only):
         return result
 
     # Only translate the slots that actually have text.

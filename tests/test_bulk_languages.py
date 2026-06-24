@@ -49,6 +49,26 @@ class TestPlanFanOut:
         # the label notes the language
         assert any("· cy" in i.label for i in job.items)
 
+    def test_case_and_region_variants_collapse_to_one_base(self, tmp_path):
+        _seed_run(tmp_path, n=1)
+        job = plan_bulk(
+            "club-x",
+            "run-1",
+            "certificate",
+            runs_dir=tmp_path,
+            languages=["CY", "cy", "cy-GB", "fr"],
+        )
+        # CY/cy/cy-GB are one language ("cy"); fr is separate → 2 items, not 4.
+        assert [i.language for i in job.items] == ["cy", "fr"]
+
+    def test_english_any_region_collapses_to_default(self, tmp_path):
+        _seed_run(tmp_path, n=1)
+        job = plan_bulk(
+            "club-x", "run-1", "certificate", runs_dir=tmp_path, languages=["EN", "en-US"]
+        )
+        # English (the source) is the default no-op item, never an en→en translation.
+        assert [i.language for i in job.items] == [""]
+
     def test_blank_and_duplicate_languages_collapse(self, tmp_path):
         _seed_run(tmp_path, n=1)
         job = plan_bulk(
