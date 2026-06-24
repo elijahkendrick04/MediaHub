@@ -25433,6 +25433,57 @@ self.addEventListener('fetch', function(e){
         except Exception as e:
             return jsonify({"ok": False, "error": f"sentinel_health_unavailable: {e}"}), 500
 
+    @app.route("/healthz/governance")
+    def healthz_governance():
+        """Operator-only: per-org AI feature usage across the deployment (1.23)."""
+        if not _auth.is_dev_operator():
+            return redirect(url_for("settings_page"))
+        from mediahub.observability import feature_quota as _fq
+        from mediahub.governance import features as _gf
+
+        per_org = _fq.usage_all_orgs(limit=100)
+        # Fold in generative-imagery usage (it keeps its own dedicated ledger).
+        if _imagine_ok:
+            try:
+                from mediahub.observability import imagine_usage as _iu
+
+                for row in per_org:
+                    n = _iu.count_for_org(row["org_id"])
+                    if n:
+                        row["by_feature"]["imagine"] = n
+                        row["total"] += n
+            except Exception:
+                pass
+        per_org.sort(key=lambda r: r["total"], reverse=True)
+
+        feat_keys = _gf.feature_keys()
+        head = "".join(f'<th style="text-align:right">{_h(_gf.label_for(k))}</th>' for k in feat_keys)
+        rows = ""
+        for r in per_org:
+            cells = "".join(
+                f'<td style="text-align:right">{int(r["by_feature"].get(k, 0))}</td>'
+                for k in feat_keys
+            )
+            rows += (
+                f'<tr><td>{_h(r["org_id"])}</td>{cells}'
+                f'<td style="text-align:right"><strong>{int(r["total"])}</strong></td></tr>'
+            )
+        if not rows:
+            rows = (
+                f'<tr><td colspan="{len(feat_keys) + 2}" class="dim">'
+                "No AI usage recorded in the last 30 days.</td></tr>"
+            )
+        body = (
+            '<div class="card"><h1 style="margin-top:0">AI governance &mdash; usage</h1>'
+            '<p class="dim">Per-org AI feature use over a rolling 30-day window '
+            "(successful calls only). Operator-only.</p>"
+            '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            f'<thead><tr><th style="text-align:left">Org</th>{head}'
+            '<th style="text-align:right">Total</th></tr></thead>'
+            f"<tbody>{rows}</tbody></table></div></div>"
+        )
+        return _layout("AI governance · usage", body, active="")
+
     @app.route("/healthz/usage")
     def healthz_usage():
         from mediahub.observability import llm_usage as _u
@@ -25728,6 +25779,12 @@ self.addEventListener('fetch', function(e){
                 url_for("sponsors_page"),
             ),
             (
+                "AI governance",
+                "AI usage and quota headroom, who can use which AI feature, and provenance.",
+                "governance",
+                url_for("settings_section", section="governance"),
+            ),
+            (
                 "Account",
                 "Two-factor security, data export, and account deletion.",
                 "account",
@@ -25779,6 +25836,112 @@ self.addEventListener('fetch', function(e){
         )
         return _layout("Settings", body, active="settings")
 
+    def _render_settings_governance_section(prof: Optional[ClubProfile]) -> str:
+        """AI governance for the active org (1.23): usage + quota headroom per
+        feature, the role→feature permission matrix, and a provenance note."""
+        if prof is None:
+            return (
+                '<div class="card"><p>Select or create a club first to see its '
+                "AI usage and permissions.</p></div>"
+            )
+        from mediahub import governance
+        from mediahub.governance import features as _gf
+        from mediahub.collab import permissions as _cperms
+
+        pid = prof.profile_id
+        plan = _auth.current_plan()
+
+        # --- Usage + quota per feature ---
+        usage_rows = ""
+        for spec in _gf.all_features():
+            if spec.key == _gf.FEATURE_IMAGINE:
+                try:
+                    q = _imagine.check_quota(pid)
+                    used, limit = int(q.used), int(q.limit)
+                    unlimited = bool(getattr(q, "unlimited", limit < 0))
+                except Exception:
+                    st = governance.check(pid, spec.key, plan=plan)
+                    used, limit, unlimited = st.used, st.limit, not st.enforced
+            else:
+                st = governance.check(pid, spec.key, plan=plan)
+                used, limit, unlimited = st.used, st.limit, not st.enforced
+
+            if unlimited or limit < 0:
+                limit_cell = "No limit &mdash; metered"
+            else:
+                pct = min(100, int(used * 100 / limit)) if limit else 0
+                colour = (
+                    "#e74c3c" if used >= limit else ("#f1c40f" if pct >= 80 else "var(--accent)")
+                )
+                limit_cell = (
+                    f"{used} / {limit}"
+                    '<div style="height:8px;background:rgba(255,255,255,0.08);'
+                    'border-radius:6px;margin-top:6px">'
+                    f'<div style="height:8px;width:{pct}%;background:{colour};'
+                    'border-radius:6px"></div></div>'
+                )
+            usage_rows += (
+                '<tr><td style="padding:8px 10px">'
+                f"<strong>{_h(spec.label)}</strong>"
+                f'<div style="font-size:12px;color:var(--ink-muted)">{_h(spec.description)}</div>'
+                "</td>"
+                f'<td style="padding:8px 10px;text-align:right">{used}</td>'
+                f'<td style="padding:8px 10px">{limit_cell}</td></tr>'
+            )
+        usage_card = (
+            '<div class="card"><h2 style="margin-top:0;font-size:18px">AI usage this month</h2>'
+            '<p style="color:var(--ink-muted);font-size:13px">A rolling 30-day window. Usage is '
+            "always counted; a feature only blocks if a specific limit has been set for it.</p>"
+            '<table style="width:100%;border-collapse:collapse">'
+            '<thead><tr style="text-align:left;color:var(--ink-muted);font-size:12px">'
+            '<th style="padding:8px 10px">Feature</th>'
+            '<th style="padding:8px 10px;text-align:right">Used</th>'
+            '<th style="padding:8px 10px">Limit</th></tr></thead>'
+            f"<tbody>{usage_rows}</tbody></table></div>"
+        )
+
+        # --- Role → feature permission matrix ---
+        feats = _gf.all_features()
+        head = "".join(
+            f'<th style="padding:6px 8px;font-size:12px">{_h(s.label)}</th>' for s in feats
+        )
+        prows = ""
+        for role in _cperms.assignable_roles():
+            cells = ""
+            for s in feats:
+                ok = governance.can_use_feature(role, s.key, plan=plan)
+                mark = (
+                    '<span style="color:#2ecc71">&#10003;</span>'
+                    if ok
+                    else '<span style="color:var(--ink-muted)">&mdash;</span>'
+                )
+                cells += f'<td style="padding:6px 8px;text-align:center">{mark}</td>'
+            prows += (
+                f'<tr><td style="padding:6px 8px"><strong>{_h(_cperms.role_label(role))}</strong>'
+                f"</td>{cells}</tr>"
+            )
+        your_role = _active_role(pid)
+        perms_card = (
+            '<div class="card"><h2 style="margin-top:0;font-size:18px">Who can use AI</h2>'
+            '<p style="color:var(--ink-muted);font-size:13px">Your role here is '
+            f"<strong>{_h(_cperms.role_label(your_role))}</strong>. Content generation needs "
+            "Editor; brand-defining AI needs the Owner.</p>"
+            '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            '<thead><tr style="text-align:left;color:var(--ink-muted)">'
+            f'<th style="padding:6px 8px">Role</th>{head}</tr></thead>'
+            f"<tbody>{prows}</tbody></table></div></div>"
+        )
+
+        prov_card = (
+            '<div class="card"><h2 style="margin-top:0;font-size:18px">Provenance</h2>'
+            '<p style="color:var(--ink-muted);font-size:13px;margin-bottom:0">Every result card, '
+            "reel and generated image is stamped with an honest provenance manifest &mdash; what "
+            "made it, from what, and when. Result cards are recorded as deterministic composites of "
+            "real photography; AI-generated images are marked as such.</p></div>"
+        )
+
+        return usage_card + perms_card + prov_card
+
     # Detail pages behind the settings cards. ``developer`` is operator-only;
     # everything else is org-scoped and degrades gracefully with no org.
     @app.route("/settings/<section>")
@@ -25797,6 +25960,10 @@ self.addEventListener('fetch', function(e){
                 lambda prof: _render_settings_typography_section(prof),
             ),
             "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
+            "governance": (
+                "AI governance",
+                lambda prof: _render_settings_governance_section(prof),
+            ),
             "account": ("Account", lambda prof: _render_settings_account_section()),
             "status": ("System status", lambda prof: _render_settings_status_public_section()),
             "developer": ("Developer", lambda prof: _render_settings_developer_section()),
@@ -27055,6 +27222,8 @@ self.addEventListener('fetch', function(e){
             '<ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.8">'
             f'<li><a href="{url_for("healthz_usage")}">LLM usage dashboard</a>'
             " &mdash; today's call counts, cost estimate, free-tier headroom.</li>"
+            f'<li><a href="{url_for("healthz_governance")}">AI governance &mdash; usage</a>'
+            " &mdash; per-org AI feature use over a rolling 30-day window.</li>"
             f'<li><a href="{url_for("api_status_json")}">/api/status</a>'
             " &mdash; raw uptime JSON for external monitors.</li>"
             f'<li><a href="{url_for("health")}">/health</a>'
