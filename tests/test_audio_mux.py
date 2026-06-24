@@ -184,9 +184,9 @@ def test_mux_args_voice_plus_music_ducks_via_sidechain(tmp_path):
     assert f"ratio={audio_mux.DUCK_RATIO:g}" in joined
     assert "asplit=2[vmain][vkey]" in joined, "voice keys the sidechain and the mix"
     assert "amix=inputs=2" in joined, "voice and ducked bed are still mixed together"
-    assert f"volume={audio_mux.MUSIC_UNDER_VOICE_WEIGHT:.3f}" in joined, (
-        "the resting bed level under voice is preserved"
-    )
+    assert (
+        f"volume={audio_mux.MUSIC_UNDER_VOICE_WEIGHT:.3f}" in joined
+    ), "the resting bed level under voice is preserved"
     assert "weights=1" not in joined, "the old static-weight mix is gone"
 
 
@@ -275,8 +275,12 @@ def test_music_filterchain_carries_stings_and_beat_accents():
     # Resting level + intro swell + outro accent + a hit on every card cut.
     assert f"volume={audio_mux.MUSIC_BED_VOLUME:.3f}" in chain
     assert f"afade=t=in:st=0:d={audio_mux.INTRO_STING_SEC}" in chain
-    assert f"volume={audio_mux.STING_GAIN}:enable='between(t,0,{audio_mux.INTRO_STING_SEC})'" in chain
-    assert "between(t,2.000," in chain and "between(t,6.000," in chain and "between(t,10.000," in chain
+    assert (
+        f"volume={audio_mux.STING_GAIN}:enable='between(t,0,{audio_mux.INTRO_STING_SEC})'" in chain
+    )
+    assert (
+        "between(t,2.000," in chain and "between(t,6.000," in chain and "between(t,10.000," in chain
+    )
 
 
 def test_music_filterchain_suppresses_stings_on_short_clips():
@@ -415,7 +419,9 @@ def test_build_audio_plan_profile_precedence(monkeypatch):
     )
     # env unset + no valid explicit → balanced → no mix key
     monkeypatch.delenv("MEDIAHUB_REEL_MIX_PROFILE", raising=False)
-    assert "mix" not in audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="garbage")
+    assert "mix" not in audio_mux.build_audio_plan(
+        script="x", content_key="k", mix_profile="garbage"
+    )
 
 
 def test_build_audio_plan_profile_needs_an_audio_source(monkeypatch):
@@ -423,8 +429,7 @@ def test_build_audio_plan_profile_needs_an_audio_source(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
     monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
     assert (
-        audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="music_forward")
-        is None
+        audio_mux.build_audio_plan(script="x", content_key="k", mix_profile="music_forward") is None
     )
 
 
@@ -661,3 +666,47 @@ def test_real_mux_honours_a_non_default_profile(tmp_path, monkeypatch):
     assert rec["mix"] == "voice_lead"
     assert rec["ducking"] == "sidechain"
     assert audio_mux.has_audio_stream(video) is True
+
+
+@pytest.mark.skipif(_FFMPEG is None, reason="no FFmpeg binary available")
+def test_real_mux_dub_stamps_provenance(tmp_path, monkeypatch):
+    """1.24: a dubbed plan muxes and the manifest labels it AI-dubbed."""
+    video = _make_clip(tmp_path / "clip.mp4", seconds=1.0)
+    tone = _make_tone(tmp_path / "voice.wav", seconds=1.2)
+
+    class _Result:
+        audio_path = tone
+        transcript = "Gosododd Hannah PB newydd."
+
+    monkeypatch.setattr("mediahub.visual.voiceover.synthesize", lambda *a, **k: _Result())
+    plan = {
+        "voice": "cy-GB-NiaNeural",
+        "script": "Gosododd Hannah PB newydd.",
+        "dubbed": True,
+        "dub_source_language": "en",
+        "dub_target_language": "cy",
+    }
+    rec = audio_mux.apply_audio(video, plan, duration_sec=1.0)
+    assert rec["status"] == "mixed"
+    assert rec["dubbed"] is True
+    assert rec["dub_source_language"] == "en"
+    assert rec["dub_target_language"] == "cy"
+    assert audio_mux.has_audio_stream(video) is True
+
+
+@pytest.mark.skipif(_FFMPEG is None, reason="no FFmpeg binary available")
+def test_real_mux_plain_voice_has_no_dub_provenance(tmp_path, monkeypatch):
+    """A non-dubbed voice track must NOT carry dub provenance."""
+    video = _make_clip(tmp_path / "clip.mp4", seconds=1.0)
+    tone = _make_tone(tmp_path / "voice.wav", seconds=1.2)
+
+    class _Result:
+        audio_path = tone
+        transcript = "Spring Open. Recap."
+
+    monkeypatch.setattr("mediahub.visual.voiceover.synthesize", lambda *a, **k: _Result())
+    rec = audio_mux.apply_audio(
+        video, {"voice": "en-GB-SoniaNeural", "script": "Spring Open. Recap."}, duration_sec=1.0
+    )
+    assert rec["status"] == "mixed"
+    assert "dubbed" not in rec

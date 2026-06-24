@@ -663,12 +663,21 @@ def _reel_audio_plan(
     *,
     duration_sec: float,
     mix_profile: Optional[str] = None,
+    dub_language: str = "",
 ):
     """The audio plan for a reel render, or None for today's silent path.
 
     ``mix_profile`` is the reel's voice/music balance (the headline card's
     choice; see render_meet_reel) and only shifts the cache key off the
     default when it is not ``balanced``.
+
+    ``dub_language`` (1.24): when set, the reel's verified narration is
+    translated and re-voiced into that language (AI-dub), keeping the music bed.
+    If the dub can't be done honestly (no provider, or no voice for the
+    language) the narration is dropped rather than shipping the source language
+    pretending to be the target — the music bed (if any) is kept, else the reel
+    is silent. The dubbed plan folds into the cache key, so each language is a
+    distinct render.
     """
     try:
         from mediahub.visual import audio_mux, narration
@@ -684,12 +693,22 @@ def _reel_audio_plan(
         key = "reel:{}:{}:{}".format(
             meet_name or "", len(cards_props), first.get("athleteFullName") or ""
         )
-        return audio_mux.build_audio_plan(
+        plan = audio_mux.build_audio_plan(
             script=script,
             content_key=key,
             mix_profile=mix_profile,
             library_track=_library_bed_for(key),
         )
+        if plan and dub_language:
+            from mediahub.visual import dub as _dub
+
+            try:
+                plan = _dub.dub_plan(plan, dub_language)
+            except (_dub.DubUnavailable, _dub.ClaudeUnavailableError):
+                # Honest: couldn't dub → drop the narration (never ship the
+                # source language as if it were the target), keep any music bed.
+                plan = {k: v for k, v in plan.items() if k not in ("voice", "script")} or None
+        return plan
     except Exception:
         return None
 
@@ -1346,6 +1365,7 @@ def _assemble_reel_props(
     duration_sec: Optional[float],
     briefs: Optional[list[Optional[dict]]],
     rhythm: Optional[dict] = None,
+    dub_language: str = "",
 ) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict]]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
@@ -1425,7 +1445,12 @@ def _assemble_reel_props(
         if reel_mix:
             break
     audio_plan = _reel_audio_plan(
-        cards_props, brand_dict, meet_name, duration_sec=duration_sec, mix_profile=reel_mix
+        cards_props,
+        brand_dict,
+        meet_name,
+        duration_sec=duration_sec,
+        mix_profile=reel_mix,
+        dub_language=dub_language,
     )
 
     # Burn-in captions (R1.3): caption each beat from its own verified line when
@@ -1640,6 +1665,7 @@ def render_meet_reel(
     sponsor: str = "",
     next_meet: str = "",
     rhythm: Optional[dict] = None,
+    dub_language: str = "",
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -1694,6 +1720,7 @@ def render_meet_reel(
         duration_sec=duration_sec,
         briefs=briefs,
         rhythm=rhythm,
+        dub_language=dub_language,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -1740,6 +1767,7 @@ def render_meet_reel_all_formats(
     sponsor: str = "",
     next_meet: str = "",
     rhythm: Optional[dict] = None,
+    dub_language: str = "",
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -1805,6 +1833,7 @@ def render_meet_reel_all_formats(
         duration_sec=duration_sec,
         briefs=briefs,
         rhythm=rhythm,
+        dub_language=dub_language,
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 

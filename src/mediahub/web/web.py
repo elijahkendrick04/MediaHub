@@ -48506,8 +48506,20 @@ voice, and queues them for one-click approval.</p>
 
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
+        # 1.24 AI-dub: ?lang= re-voices the reel's verified narration in another
+        # language. Only a dubbable, non-English language is honoured; the cut's
+        # filename is language-suffixed so a dubbed reel never overwrites the
+        # original-language one (and each language caches separately).
+        from mediahub.visual import dub as _dub
+
+        _lang = (request.args.get("lang") or "").strip()
+        dub_language = (
+            _lang if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en") else ""
+        )
+        _lang_suffix = f"_{dub_language.split('-', 1)[0]}" if dub_language else ""
         # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
-        out_path = out_dir / (f"reel_{n}.mp4" if fmt == "story" else f"reel_{n}_{fmt}.mp4")
+        _stem = f"reel_{n}" if fmt == "story" else f"reel_{n}_{fmt}"
+        out_path = out_dir / f"{_stem}{_lang_suffix}.mp4"
 
         # Look up the latest brief per card so every beat of the reel
         # carries its own AI-directed variation. Cards without a brief
@@ -48528,6 +48540,7 @@ voice, and queues them for one-click approval.</p>
                 "briefs": brief_list,
                 "rhythm": rhythm,
                 "sponsor": sponsor_name,
+                "dub_language": dub_language,
             },
             None,
         )
@@ -48561,6 +48574,7 @@ voice, and queues them for one-click approval.</p>
                     format_name=inputs["format"],
                     rhythm=inputs["rhythm"],
                     sponsor=inputs.get("sponsor", ""),
+                    dub_language=inputs.get("dub_language", ""),
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
