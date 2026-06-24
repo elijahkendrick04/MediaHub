@@ -16651,6 +16651,30 @@ def create_app() -> Flask:
     app.active_profile = _active_profile  # type: ignore[attr-defined]
 
     @app.before_request
+    def _bind_governance_context():
+        """Bind the active org + plan for AI-governance metering (1.23).
+
+        AI surfaces read this request-scoped context to attribute usage to the
+        right org/plan without threading ``org_id`` through every signature.
+        Strictly best-effort: a hiccup here must never block a request.
+        """
+        try:
+            from mediahub import governance
+
+            governance.set_request_context(_active_profile_id(), _auth.current_plan())
+        except Exception:
+            pass
+
+    @app.teardown_request
+    def _clear_governance_context(_exc=None):
+        try:
+            from mediahub import governance
+
+            governance.clear_request_context()
+        except Exception:
+            pass
+
+    @app.before_request
     def _gate_until_org_ready():
         # Tests bypass the gate by default — they assert specific
         # behaviour of downstream routes and shouldn't have to seed a
@@ -21789,6 +21813,35 @@ function copyWhyCard(btn, taId) {{
                         "explanation": explanation,
                     }
                 ), 200
+            # Governance (1.23): meter this caption generation against the run's
+            # owning org, and hard-block ONLY if a specific caption quota is
+            # configured for it and reached. The plan comes from the acting user;
+            # with no configured limit this is a no-op (meter-only). Recording
+            # happens once in the finally below.
+            from mediahub.governance import (
+                features as _gov_features,
+                quota as _gov_quota,
+            )
+
+            _gov_org = run_profile_id or ""
+            _gov_ok = False
+            if _gov_org:
+                try:
+                    _gov_quota.enforce(
+                        _gov_org, _gov_features.FEATURE_CAPTION, plan=_auth.current_plan()
+                    )
+                except _gov_quota.QuotaExceeded as _qe:
+                    return jsonify(
+                        {
+                            "caption": "",
+                            "tone": tone,
+                            "live": False,
+                            "generated_at": now_iso,
+                            "error": "quota_reached",
+                            "message": str(_qe),
+                            "explanation": explanation,
+                        }
+                    ), 200
             try:
                 # Generate 3 variants in parallel so the user can pick one
                 # (Holo/Blaze pattern). The first is returned as `caption`
@@ -21969,6 +22022,7 @@ function copyWhyCard(btn, taId) {{
                 for v in variants:
                     _v9_save_caption_history(run_id, swim_id_dec, v)
                 _sec_lang = _get_language(secondary_language) if secondary_language else None
+                _gov_ok = True  # one real caption produced — counts toward quota
                 return jsonify(
                     {
                         "caption": caption_text,
@@ -22036,6 +22090,17 @@ function copyWhyCard(btn, taId) {{
                         "explanation": explanation,
                     }
                 ), 200
+            finally:
+                # Record exactly one caption-feature use for this request —
+                # success counts toward quota, a failed attempt is logged but
+                # not charged. Best-effort; never affects the response.
+                if _gov_org:
+                    _gov_quota.record(
+                        _gov_org,
+                        _gov_features.FEATURE_CAPTION,
+                        ok=_gov_ok,
+                        detail=f"tone={tone}",
+                    )
         else:
             # Voice render &mdash; deterministic template, may be cached by client
             try:
