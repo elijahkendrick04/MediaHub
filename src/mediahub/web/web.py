@@ -5239,6 +5239,48 @@ def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
     )
 
 
+def _render_stored_translations(card: dict) -> str:
+    """Server-side render of a card's SAVED translations (1.24 bilingual pairs).
+
+    The on-demand "Translate to…" control shows a variant only in the seconds
+    after the user clicks it; the variant is persisted on the card's workflow
+    state, but without this it would never reappear. This renders every saved
+    variant from ``card["workflow"]["translations"]`` so the bilingual approval
+    pair survives a page refresh — server-side and ``_h``-escaped (the persisted
+    text came from a provider, so it is treated as untrusted and never injected
+    raw). Empty string when the card has no saved translations (byte-identical
+    to before for the common case)."""
+    wf = card.get("workflow") if isinstance(card, dict) else None
+    translations = (wf or {}).get("translations") if isinstance(wf, dict) else None
+    if not isinstance(translations, dict) or not translations:
+        return ""
+    rows: list[str] = []
+    for _lang, variant in translations.items():
+        if not isinstance(variant, dict):
+            continue
+        caption = str((variant.get("slots") or {}).get("caption") or "").strip()
+        if not caption:
+            continue
+        label = str(variant.get("language_label") or _lang or "Translation")
+        direction = "rtl" if variant.get("rtl") else "auto"
+        rows.append(
+            '<div style="margin-top:6px;padding:8px 10px;border:1px solid var(--border);'
+            'border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
+            '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;'
+            f'letter-spacing:0.5px;margin-bottom:4px">{_h(label)} &middot; saved with this card</div>'
+            f'<span style="white-space:pre-wrap" dir="{direction}">{_h(caption)}</span>'
+            "</div>"
+        )
+    if not rows:
+        return ""
+    return (
+        '<div class="mh-stored-translations" style="margin-top:8px">'
+        '<div style="font-size:11px;color:var(--ink-dim)">Saved translations</div>'
+        + "".join(rows)
+        + "</div>"
+    )
+
+
 def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     """Per-card creative toolbar for the Content builder (post-approval):
     live AI caption tone tabs (AI / Warm / Hype / Precise), Copy, Regenerate,
@@ -22445,7 +22487,8 @@ function copyWhyCard(btn, taId) {{
         Translates exactly the text the approver is looking at (passed in the
         body) through the glossary-constrained engine, persists it on the card as
         a language variant (so the bilingual pair rides into approval/export),
-        and returns it for side-by-side display. Honest-errors (503) when no
+        and returns it for side-by-side display. Honest-errors (200 + an
+        {"error": "no_key"} body, like the caption/assist routes) when no
         provider is configured — never a fake translation.
         """
         import urllib.parse as _up
@@ -22497,9 +22540,42 @@ function copyWhyCard(btn, taId) {{
             except Exception:
                 source_language = "en"
 
+        # 1.23 governance: translation is metered AI spend, like captions — gate
+        # on the org's feature permission + plan, enforce the quota before the
+        # provider call, and record one use after (below). The signed-in
+        # operator is fully exempt (org blanked → no gate, no quota, no metering),
+        # so their test translations never count against the club.
+        from mediahub.governance import (
+            features as _gov_features,
+            permissions as _gov_perms,
+            quota as _gov_quota,
+        )
+
+        _gov_org = "" if _auth.is_dev_operator() else (run_profile_id or "")
+        _gov_plan = _auth.current_plan()
+        if _gov_org and not _gov_perms.can_use_feature(
+            _active_role(_gov_org), _gov_features.FEATURE_TRANSLATE, plan=_gov_plan
+        ):
+            return jsonify(
+                {
+                    "error": "forbidden",
+                    "message": _gov_perms.denial_reason(
+                        _active_role(_gov_org), _gov_features.FEATURE_TRANSLATE, plan=_gov_plan
+                    ),
+                }
+            ), 403
+        if _gov_org:
+            try:
+                _gov_quota.enforce(_gov_org, _gov_features.FEATURE_TRANSLATE, plan=_gov_plan)
+            except _gov_quota.QuotaExceeded as _qe:
+                return jsonify({"error": "quota_reached", "message": str(_qe)}), 200
+
         from mediahub.media_ai.llm import is_available as _llm_available
 
         if not _llm_available():
+            # Honest "no provider" — 200 + an error body, matching the sibling
+            # caption/assist routes (and the route's own transient path); the
+            # review UI branches on the `error` field, not the status code.
             return jsonify(
                 {
                     "error": "no_key",
@@ -22508,7 +22584,7 @@ function copyWhyCard(btn, taId) {{
                         "Contact your administrator to enable it."
                     ),
                 }
-            ), 503
+            ), 200
 
         from mediahub.web.translate_card import (
             ClaudeUnavailableError as _CUE,
@@ -22523,7 +22599,7 @@ function copyWhyCard(btn, taId) {{
                     "error": "no_key",
                     "message": "AI translation is unavailable on this deployment.",
                 }
-            ), 503
+            ), 200
         except Exception:
             return jsonify(
                 {
@@ -22531,6 +22607,13 @@ function copyWhyCard(btn, taId) {{
                     "message": "The AI is briefly busy — wait a few seconds and try again.",
                 }
             ), 200
+
+        # One real translation produced — count it toward the org's quota
+        # (operator exempt). Best-effort; never affects the response.
+        if _gov_org:
+            _gov_quota.record(
+                _gov_org, _gov_features.FEATURE_TRANSLATE, ok=True, detail=f"lang={target}"
+            )
 
         # Persist on the card so approving the card approves the pair.
         card_id_dec = _up.unquote(card_id)
@@ -40613,6 +40696,7 @@ function mhSetupMode(mode) {{
     </div>
   </div>
   {_render_card_creative_toolbar(run_id, card_id_raw)}
+  {_render_stored_translations(card)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
        title="Download caption + visual as a .zip for manual posting">&#x2B07; Download .zip</a>

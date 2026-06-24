@@ -29,6 +29,7 @@ _FEATURE_CAPABILITY: dict[str, str] = {
     features.FEATURE_IMAGINE: caps.CAP_EDIT,
     features.FEATURE_DESCRIBE: caps.CAP_EDIT,
     features.FEATURE_RESEARCH: caps.CAP_EDIT,
+    features.FEATURE_TRANSLATE: caps.CAP_EDIT,
     features.FEATURE_BRAND: caps.CAP_MANAGE,
     features.FEATURE_PALETTE: caps.CAP_MANAGE,
     features.FEATURE_DNA: caps.CAP_MANAGE,

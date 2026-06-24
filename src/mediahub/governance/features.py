@@ -26,6 +26,7 @@ FEATURE_PALETTE = "palette"
 FEATURE_DESCRIBE = "describe"
 FEATURE_DNA = "brand_dna"
 FEATURE_RESEARCH = "research"
+FEATURE_TRANSLATE = "translate"
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,11 @@ _FEATURES: dict[str, FeatureSpec] = {
         "Web research",
         "Search the web and run bounded deep-research lookups.",
     ),
+    FEATURE_TRANSLATE: FeatureSpec(
+        FEATURE_TRANSLATE,
+        "AI translation",
+        "Translate captions, cards and reel narration into other languages (1.24).",
+    ),
 }
 
 
@@ -119,6 +125,7 @@ __all__ = [
     "FEATURE_DESCRIBE",
     "FEATURE_DNA",
     "FEATURE_RESEARCH",
+    "FEATURE_TRANSLATE",
     "FeatureSpec",
     "all_features",
     "feature_keys",

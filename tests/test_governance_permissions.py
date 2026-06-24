@@ -14,6 +14,7 @@ def test_required_capability_map():
     assert p.required_capability(f.FEATURE_IMAGINE) == caps.CAP_EDIT
     assert p.required_capability(f.FEATURE_DESCRIBE) == caps.CAP_EDIT
     assert p.required_capability(f.FEATURE_RESEARCH) == caps.CAP_EDIT
+    assert p.required_capability(f.FEATURE_TRANSLATE) == caps.CAP_EDIT
     assert p.required_capability(f.FEATURE_BRAND) == caps.CAP_MANAGE
     assert p.required_capability(f.FEATURE_PALETTE) == caps.CAP_MANAGE
     assert p.required_capability(f.FEATURE_DNA) == caps.CAP_MANAGE
@@ -52,6 +53,7 @@ def test_features_for_role():
         f.FEATURE_IMAGINE,
         f.FEATURE_DESCRIBE,
         f.FEATURE_RESEARCH,
+        f.FEATURE_TRANSLATE,
     ]
     assert p.features_for_role("viewer") == []
 
