@@ -3632,7 +3632,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         var trSel = document.createElement('select');
         trSel.className = 'tr-lang-select';
         trSel.style.cssText = 'font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)';
-        var optsHtml = '<option value="">Translate to&hellip;</option>';
+        var optsHtml = '<option value="">Translate to…</option>';
         window.MH_TR_LANGS.forEach(function(o){ optsHtml += '<option value="' + o[0] + '">' + safeText(o[1]) + '</option>'; });
         trSel.innerHTML = optsHtml;
         var trBtn = document.createElement('button');
@@ -3663,12 +3663,12 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
               }
               var s = (jj.slots && jj.slots.caption) || '';
               var lbl = jj.language_label || lang;
-              var warnHtml = (jj.warnings && jj.warnings.length) ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">&#x26A0; ' + safeText(jj.warnings.join('; ')) + '</div>' : '';
+              var warnHtml = (jj.warnings && jj.warnings.length) ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">⚠ ' + safeText(jj.warnings.join('; ')) + '</div>' : '';
               trOut.innerHTML = '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
-                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(lbl) + ' &middot; saved with this card</div>'
+                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(lbl) + ' · saved with this card</div>'
                 + '<span style="white-space:pre-wrap" dir="' + (jj.rtl ? 'rtl' : 'auto') + '">' + safeText(s) + '</span>' + warnHtml + '</div>';
             })
-            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed &mdash; try again.</div>'; });
+            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
         });
       }
       // W.11: result-grounded alt text — editable, saved with the card so

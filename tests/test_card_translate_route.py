@@ -54,6 +54,10 @@ def app_with_run(tmp_path, monkeypatch):
     }
     runs_dir = tmp_path / "runs_v4"
     monkeypatch.setattr(web_module, "RUNS_DIR", runs_dir, raising=False)
+    # _get_wf_store() caches a module-global WorkflowStore built from RUNS_DIR on
+    # first call; under xdist an earlier test can leave it pointing elsewhere.
+    # Reset it so the route persists into THIS test's runs dir.
+    monkeypatch.setattr(web_module, "_wf_store", None, raising=False)
     (runs_dir / "run-1.json").write_text(json.dumps(run), encoding="utf-8")
 
     app = web_module.create_app()
