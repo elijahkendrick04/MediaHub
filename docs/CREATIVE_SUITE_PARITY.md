@@ -1690,6 +1690,15 @@ action limits = the same quota mechanism with PC.4-decided numbers.
 
 ## 1.24 — Localisation & translation
 
+> ✅ **Shipped 2026-06-24.** Built across five parts: the `localize/` engine
+> (provider-backed, glossary-protected, length-budgeted translation +
+> writing-system/RTL metadata); on-demand card translation with bilingual
+> approval pairs; layout-aware re-render (RTL + self-hosted non-Latin Noto
+> fonts; CJK deferred on repo-size grounds); UI internationalisation (`t()`
+> catalogue, `<html lang>`, Welsh-first chrome); bulk per-language variants;
+> and the AI-dub pipeline for reels (`visual/dub.py` + manifest provenance).
+> Voice-preservation/lip-sync remain out, as planned.
+
 **What Canva/Adobe have.** AI Translate for designs (100+ languages, bulk
 localisation, regional variants), 100+ language Magic-Write/prompt support,
 interface in 100+ languages, AI dubbing into ~5 target languages preserving
