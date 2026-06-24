@@ -1537,6 +1537,31 @@ _MEDAL_ACCENTS = {
 }
 
 
+def _localized_overrides_css(language: str) -> str:
+    """RTL text-direction CSS for a right-to-left target language (1.24).
+
+    Non-Latin glyph coverage is handled globally by _shared.css (the Noto
+    ``@font-face`` faces fall back per ``unicode-range``), so the only
+    per-render need for localisation is to flip text direction for Arabic/Urdu.
+    Latin / left-to-right languages (and the empty default) return "", so a
+    non-localised render is byte-identical to the pre-1.24 output and keeps its
+    content-cache key. Physical-property layout (absolute left/right, the
+    cutout side) is unaffected — only inline text flow flips.
+    """
+    if not language:
+        return ""
+    try:
+        from mediahub.localize.scripts import is_rtl
+    except Exception:
+        return ""
+    if not is_rtl(language):
+        return ""
+    return (
+        "\n/* --- 1.24 localisation: right-to-left text direction --- */\n"
+        "html, body { direction: rtl; }\n"
+    )
+
+
 def _common_replacements(
     brief,
     width: int,
@@ -1551,6 +1576,7 @@ def _common_replacements(
     bg_photo_uri: str = "",
     theme_json: Optional[dict] = None,
     skip_ai_bg: bool = False,
+    language: str = "",
 ) -> dict[str, str]:
     palette = dict(brief.palette or {})
 
@@ -1745,6 +1771,16 @@ def _common_replacements(
         base_css = (
             base_css + "\n\n/* --- variation overrides --- */\n" + "\n".join(variation_css_blocks)
         )
+
+    # 1.24 localisation: when rendering a card in a right-to-left language
+    # (Arabic, Urdu) flip the text direction. Non-Latin GLYPH coverage is
+    # handled globally by _shared.css (the Noto @font-face fall back per
+    # unicode-range), so no per-render font work is needed here. Latin/LTR
+    # languages get "" — the render stays byte-identical to pre-1.24 output, so
+    # cache keys for English cards are unchanged.
+    rtl_css = _localized_overrides_css(language)
+    if rtl_css:
+        base_css = base_css + rtl_css
 
     accent_overlay_html = _accent_decoration_html(
         accent_style,
@@ -3721,6 +3757,7 @@ def render_brief(
     photo_pos_override: str = "",
     image_format: str = "png",
     quality=None,
+    language: str = "",
 ) -> RenderResult:
     """Render a CreativeBrief into a single still. Returns RenderResult.
 
@@ -3864,6 +3901,7 @@ def render_brief(
         ),
         sponsor_block=_build_sponsor_block(sponsor_name, _sponsor_logo_uri) if sponsor_name else "",
         skip_ai_bg=bool(_v2_archetype),
+        language=language or getattr(brief, "language", "") or "",
     )
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
 

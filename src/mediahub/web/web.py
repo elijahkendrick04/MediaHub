@@ -3441,13 +3441,31 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
     return pid or ""
 
 
+def _translatable_langs_js() -> str:
+    """``window.MH_TR_LANGS`` — the static [code, label] list the review/pack
+    caption toolbar offers as on-demand translation targets (1.24). Excludes
+    bare English (the usual source — a no-op) but offers the two English
+    regional variants plus every other registry language. Static (registry-
+    derived), so it ships inside the shared caption JS rather than per page."""
+    from mediahub.web.languages import single_language_options as _single_lang_opts
+
+    langs = [[c, lbl] for (c, lbl) in _single_lang_opts() if c != "en"]
+    langs += [
+        ["en-GB", "English (UK spelling)"],
+        ["en-US", "English (US spelling)"],
+    ]
+    return "<script>window.MH_TR_LANGS = " + json.dumps(langs) + ";</script>\n"
+
+
 def _card_creative_js() -> str:
     """Shared client JS for the per-card creative toolbar: live caption
     tone tabs, create-graphic, motion render, and the 3-variant graphic
     picker. Lives on the Content builder page (post-approval). The host
     page must define `WF_API_BASE` and `window._API_BASE` before this
     block so caption edits and visual picks can persist."""
-    return """
+    return (
+        _translatable_langs_js()
+        + """
 <script>
 // V8: Live caption tone toggle + regenerate
 // switchTone() kept for backwards compat (content pack, other pages).
@@ -3603,6 +3621,55 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         secBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(j.secondary_language_label || 'Translation') + '</div>'
           + '<span style="white-space:pre-wrap" dir="' + (j.secondary_rtl ? 'rtl' : 'auto') + '">' + safeText(j.caption_secondary) + '</span>';
         captionDiv.appendChild(secBox);
+      }
+      // 1.24 localisation: on-demand "translate this caption" into any
+      // supported language, shown as a bilingual pair and SAVED with the card
+      // so one approval covers both. Only appears where the page provided the
+      // language list (review). Reuses the secBox look.
+      if (captionDiv && j.live && window.MH_TR_LANGS && window.MH_TR_LANGS.length) {
+        var trWrap = document.createElement('div');
+        trWrap.style.cssText = 'margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+        var trSel = document.createElement('select');
+        trSel.className = 'tr-lang-select';
+        trSel.style.cssText = 'font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)';
+        var optsHtml = '<option value="">Translate to…</option>';
+        window.MH_TR_LANGS.forEach(function(o){ optsHtml += '<option value="' + o[0] + '">' + safeText(o[1]) + '</option>'; });
+        trSel.innerHTML = optsHtml;
+        var trBtn = document.createElement('button');
+        trBtn.type = 'button'; trBtn.className = 'btn secondary tr-go';
+        trBtn.style.cssText = 'font-size:11px;padding:4px 10px';
+        trBtn.textContent = 'Translate';
+        var trOut = document.createElement('div'); trOut.className = 'tr-out';
+        trWrap.appendChild(trSel); trWrap.appendChild(trBtn);
+        captionDiv.appendChild(trWrap); captionDiv.appendChild(trOut);
+        trBtn.addEventListener('click', function(){
+          var lang = trSel.value; if (!lang) return;
+          var capNow = (textarea && textarea.value) || variants[0] || text || '';
+          if (!capNow.trim()) { return; }
+          var runBase = captionUrl.split('/swim/')[0];
+          var trUrl = runBase + '/card/' + encodeURIComponent(cardId) + '/translate';
+          var bodyObj = { lang: lang, caption: capNow };
+          var altEl = captionDiv.querySelector('.alt-text-input');
+          if (altEl && altEl.value) { bodyObj.alt_text = altEl.value; }
+          trBtn.disabled = true; trBtn.textContent = 'Translating…';
+          fetch(trUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj)})
+            .then(function(r){ return r.json().then(function(jj){ return {ok:r.ok, j:jj}; }); })
+            .then(function(res){
+              trBtn.disabled = false; trBtn.textContent = 'Translate';
+              var jj = res.j || {};
+              if (!res.ok || jj.error) {
+                trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">' + safeText(jj.message || 'Translation unavailable.') + '</div>';
+                return;
+              }
+              var s = (jj.slots && jj.slots.caption) || '';
+              var lbl = jj.language_label || lang;
+              var warnHtml = (jj.warnings && jj.warnings.length) ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">⚠ ' + safeText(jj.warnings.join('; ')) + '</div>' : '';
+              trOut.innerHTML = '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:color-mix(in oklab, var(--lane) 3%, transparent)">'
+                + '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(lbl) + ' · saved with this card</div>'
+                + '<span style="white-space:pre-wrap" dir="' + (jj.rtl ? 'rtl' : 'auto') + '">' + safeText(s) + '</span>' + warnHtml + '</div>';
+            })
+            .catch(function(){ trBtn.disabled = false; trBtn.textContent = 'Translate'; trOut.innerHTML = '<div style="font-size:10px;color:var(--warn);margin-top:4px">Translation failed — try again.</div>'; });
+        });
       }
       // W.11: result-grounded alt text — editable, saved with the card so
       // every export/publish surface carries what the approver saw.
@@ -5153,6 +5220,7 @@ function shareRevoke(cardId, token) {
 }
 </script>
 """
+    )
 
 
 def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
@@ -12081,6 +12149,52 @@ def _render_content_builder(pack_id: str, rec: dict, mode: str = "spotlight") ->
 """
 
 
+def _ui_locale() -> str:
+    """Resolve the UI-chrome language for this request (1.24 localisation).
+
+    Order: a ``?lang=`` override → a ``ui_lang`` session pin → the signed-in
+    org's primary caption language when we ship that UI locale → English. Only
+    locales that actually have a UI catalogue are honoured, so the chrome is
+    never half-translated into a locale we don't have — it degrades to English.
+    """
+    from mediahub.localize.ui_catalogue import DEFAULT_UI_LOCALE, has_ui_locale
+
+    try:
+        from flask import request, session
+    except Exception:
+        return DEFAULT_UI_LOCALE
+    try:
+        q = (request.args.get("lang") or "").strip().lower()
+        if q and has_ui_locale(q):
+            base = q.split("-", 1)[0]
+            # Pin the choice so it sticks for the session (a Welsh club picks
+            # Welsh once via a ?lang=cy link and stays in Welsh).
+            try:
+                session["ui_lang"] = base
+            except Exception:
+                pass
+            return base
+    except Exception:
+        pass
+    try:
+        s = (session.get("ui_lang") or "").strip().lower()
+        if s and has_ui_locale(s):
+            return s.split("-", 1)[0]
+    except Exception:
+        pass
+    try:
+        pid = (session.get("active_profile_id") or "").strip()
+        if pid:
+            from mediahub.web.languages import primary_language_for
+
+            prim = primary_language_for(load_profile(pid))
+            if has_ui_locale(prim):
+                return prim
+    except Exception:
+        pass
+    return DEFAULT_UI_LOCALE
+
+
 def _layout(
     title: str,
     body: str,
@@ -12383,10 +12497,19 @@ def _layout(
             "</nav>"
         )
 
+    # 1.24 localisation: resolve the UI-chrome language and bind a per-request
+    # translator the template calls as t('nav.home'). Falls back to English for
+    # any key/locale we don't ship, so the chrome is never half-translated.
+    ui_locale = _ui_locale()
+    from mediahub.localize.ui_catalogue import t as _ui_t
+
+    def _t_render(key: str) -> str:
+        return _ui_t(key, ui_locale)
+
     return render_template_string(
         """
 <!DOCTYPE html>
-<html lang="en" class="{{ 'mh-signed-in' if signed_in else '' }}">
+<html lang="{{ lang }}" class="{{ 'mh-signed-in' if signed_in else '' }}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -12488,11 +12611,11 @@ def _layout(
     <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
   </button>
   <nav id="mh-primary-nav">
-    <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
+    <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">{{ t('nav.home') }}</a>
     {# Plan moved out of the top bar and under Create — it answers "what should
        we make?", so it lives as the strategic entry point on the Create page
        (and stays on the g→p keyboard shortcut). #}
-    <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">{{ t('nav.create') }}</a>
     {# Templates, the design studio and the video studio stay off the top bar:
        the template gallery is reached from Settings (a tile in the settings
        grid) and both studios are full Create tiles (the live design editor and
@@ -12512,10 +12635,10 @@ def _layout(
        a club profile it lives in Settings ("Pricing & plans") so the signed-in
        chrome stays operations-focused, not sales-focused. #}
     {% if not signed_in %}
-    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
     {% if account_email %}
-    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">{{ t('nav.sign_in') }}</a>
     {% endif %}
     {% endif %}
     {% if dev_operator %}
@@ -12602,12 +12725,12 @@ def _layout(
       <div id="mh-orgmenu-panel" class="mh-orgmenu-panel" role="menu"
            aria-label="Account and organisation">
         <a href="{{ url_for('settings_page') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">Settings</a>
+           class="mh-orgmenu-item {{ 'active' if active=='settings' else '' }}">{{ t('nav.settings') }}</a>
         <a href="{{ url_for('help_page') }}" role="menuitem"
            class="mh-orgmenu-item {{ 'active' if active=='help' else '' }}">Help</a>
         <a href="{{ url_for('sign_in_page') }}" role="menuitem"
-           class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">Switch organisation</a>
-        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">Sign out</a>
+           class="mh-orgmenu-item {{ 'active' if active=='signin' else '' }}">{{ t('nav.switch_org') }}</a>
+        <a href="{{ url_for('sign_out') }}" role="menuitem" class="mh-orgmenu-item">{{ t('nav.sign_out') }}</a>
       </div>
     </div>
     {% endif %}
@@ -14638,6 +14761,8 @@ def _layout(
 </html>
 """,
         title=title,
+        lang=ui_locale,
+        t=_t_render,
         css=BASE_CSS,
         body=body,
         active=active,
@@ -22309,6 +22434,113 @@ function copyWhyCard(btn, taId) {{
                 "generated_at": now_iso,
             }
         )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/translate", methods=["POST"])
+    def api_card_translate(run_id, card_id):
+        """1.24 localisation — translate a card's text into a target language.
+
+        POST body: {lang: "cy"|"en-US"|…, caption: str, alt_text?: str,
+                    headline?: str, subhead?: str}
+
+        Translates exactly the text the approver is looking at (passed in the
+        body) through the glossary-constrained engine, persists it on the card as
+        a language variant (so the bilingual pair rides into approval/export),
+        and returns it for side-by-side display. Honest-errors (503) when no
+        provider is configured — never a fake translation.
+        """
+        import urllib.parse as _up
+
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()) or not data:
+            return jsonify({"error": "run not found"}), 404
+        # Translating produces content for review — an edit-class action.
+        denied = _role_denied_json(_perms.CAP_EDIT, run_id)
+        if denied:
+            return denied
+
+        payload = request.get_json(silent=True) or {}
+        target = (payload.get("lang") or payload.get("language") or "").strip()
+        if not target:
+            return jsonify(
+                {"error": "no_language", "message": "Pick a language to translate into."}
+            ), 400
+
+        from mediahub.localize import base_code as _base_code
+        from mediahub.web.languages import get_language as _get_language
+
+        if _get_language(_base_code(target)) is None:
+            return jsonify(
+                {"error": "bad_language", "message": "That language isn't supported."}
+            ), 400
+
+        # Translate exactly the slots the approver sees (sent in the body).
+        slots: dict[str, str] = {}
+        for key in ("caption", "alt_text", "headline", "subhead"):
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                slots[key] = val
+        if not slots:
+            return jsonify(
+                {"error": "empty", "message": "Generate a caption first, then translate it."}
+            ), 400
+
+        # Source language = the workspace's primary caption language.
+        source_language = "en"
+        run_profile_id = data.get("profile_id") or ""
+        if run_profile_id:
+            try:
+                from mediahub.web.languages import primary_language_for as _primary
+
+                prof = load_profile(run_profile_id)
+                if prof:
+                    source_language = _primary(prof) or "en"
+            except Exception:
+                source_language = "en"
+
+        from mediahub.media_ai.llm import is_available as _llm_available
+
+        if not _llm_available():
+            return jsonify(
+                {
+                    "error": "no_key",
+                    "message": (
+                        "AI translation is unavailable on this deployment. "
+                        "Contact your administrator to enable it."
+                    ),
+                }
+            ), 503
+
+        from mediahub.web.translate_card import (
+            ClaudeUnavailableError as _CUE,
+            translate_card_slots,
+        )
+
+        try:
+            variant = translate_card_slots(slots, target, source_language=source_language)
+        except _CUE:
+            return jsonify(
+                {
+                    "error": "no_key",
+                    "message": "AI translation is unavailable on this deployment.",
+                }
+            ), 503
+        except Exception:
+            return jsonify(
+                {
+                    "error": "transient",
+                    "message": "The AI is briefly busy — wait a few seconds and try again.",
+                }
+            ), 200
+
+        # Persist on the card so approving the card approves the pair.
+        card_id_dec = _up.unquote(card_id)
+        ws = _get_wf_store()
+        if ws is not None:
+            try:
+                ws.set_translation(run_id, card_id_dec, variant.get("language") or target, variant)
+            except Exception:
+                pass
+        return jsonify({"ok": True, **variant})
 
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
 
@@ -48274,8 +48506,20 @@ voice, and queues them for one-click approval.</p>
 
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
+        # 1.24 AI-dub: ?lang= re-voices the reel's verified narration in another
+        # language. Only a dubbable, non-English language is honoured; the cut's
+        # filename is language-suffixed so a dubbed reel never overwrites the
+        # original-language one (and each language caches separately).
+        from mediahub.visual import dub as _dub
+
+        _lang = (request.args.get("lang") or "").strip()
+        dub_language = (
+            _lang if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en") else ""
+        )
+        _lang_suffix = f"_{dub_language.split('-', 1)[0]}" if dub_language else ""
         # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
-        out_path = out_dir / (f"reel_{n}.mp4" if fmt == "story" else f"reel_{n}_{fmt}.mp4")
+        _stem = f"reel_{n}" if fmt == "story" else f"reel_{n}_{fmt}"
+        out_path = out_dir / f"{_stem}{_lang_suffix}.mp4"
 
         # Look up the latest brief per card so every beat of the reel
         # carries its own AI-directed variation. Cards without a brief
@@ -48296,6 +48540,7 @@ voice, and queues them for one-click approval.</p>
                 "briefs": brief_list,
                 "rhythm": rhythm,
                 "sponsor": sponsor_name,
+                "dub_language": dub_language,
             },
             None,
         )
@@ -48329,6 +48574,7 @@ voice, and queues them for one-click approval.</p>
                     format_name=inputs["format"],
                     rhythm=inputs["rhythm"],
                     sponsor=inputs.get("sponsor", ""),
+                    dub_language=inputs.get("dub_language", ""),
                 )
         except _RenderBusy:
             return _render_busy_response("reel")

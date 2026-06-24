@@ -6,6 +6,7 @@ back across deploys. Round-trip stability matters more than feature
 coverage; these tests pin the dict shape, enum values, and the
 defensive fallbacks for unknown / legacy status strings.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -83,6 +84,7 @@ class TestToDict:
             "notes",
             "posted_at",
             "last_changed_at",
+            "translations",  # 1.24 localisation: per-language variants
         }
         assert set(d.keys()) == expected
 
@@ -190,15 +192,11 @@ class TestReviewProgressCalculation:
         assert pct == 100
 
     def test_zero_cards_gives_zero_pct(self) -> None:
-        decided, grand_total, pct = self._calc(
-            n_approved=0, n_rejected=0, wf_n_total=0, n_ranked=0
-        )
+        decided, grand_total, pct = self._calc(n_approved=0, n_rejected=0, wf_n_total=0, n_ranked=0)
         assert grand_total == 0
         assert pct == 0
 
     def test_ranked_takes_precedence_over_store_total(self) -> None:
         """Even when wf_n_total > 0, n_ranked must win if both are truthy."""
-        _, grand_total, _ = self._calc(
-            n_approved=1, n_rejected=1, wf_n_total=2, n_ranked=100
-        )
+        _, grand_total, _ = self._calc(n_approved=1, n_rejected=1, wf_n_total=2, n_ranked=100)
         assert grand_total == 100

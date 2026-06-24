@@ -38,12 +38,39 @@ rendered size by `font-optical-sizing: auto`. The three display faces (`anton`,
 single static instances. `tests/test_variable_font_axes.py` verifies each
 shipped file's real `fvar` axes against the CSS declarations.
 
+## Non-Latin script fonts (1.24 localisation)
+
+When a card is translated into a non-Latin language, the six Latin brand
+families above have no glyphs for the script. These self-hosted **Noto** faces
+(SIL Open Font Licence — first-party, never the Google Fonts CDN) cover the
+scripts the localisation registry needs:
+
+| File | Script | Languages |
+| --- | --- | --- |
+| `noto-sans-cyrillic.woff2` | Cyrillic | Russian |
+| `noto-sans-arabic.woff2` | Arabic | Arabic, Urdu |
+| `noto-sans-devanagari.woff2` | Devanagari | Hindi |
+| `noto-sans-bengali.woff2` | Bengali | Bengali |
+
+`../_shared.css` declares each as a standalone family (`'Noto Sans Arabic'`…)
+**and** registers it as a per-glyph fallback under every brand family via
+`unicode-range`, so an Arabic event name inside an Anton headline renders in
+Noto with no template change — and English cards never fetch these files (the
+`unicode-range` gate means the browser only downloads a face when a glyph in its
+range is actually used). The renderer flips text direction for right-to-left
+languages (`render_brief(..., language="ar")`).
+
+**CJK (Han) is not shipped:** a usable Han subset is ~10 MB, over the repo's
+1.5 MB-per-file hygiene gate, so `zh` falls back to a generic family until an
+operator installs a Han face (see `localize/scripts.py`).
+
 ## Regenerate
 
 ```bash
-python scripts/fetch_renderer_fonts.py
+python scripts/fetch_renderer_fonts.py    # the six Latin brand families
+python scripts/fetch_script_fonts.py      # the non-Latin Noto faces (1.24)
 ```
 
-Resolves each family's current latin `.woff2` from the Google Fonts CSS API **by
-name** (not the stale pinned URLs), downloads it here, and rewrites `../_shared.css`
-to local URLs. Network needed only to refresh; the committed files are what ship.
+Each resolves the current `.woff2` from the Google Fonts CSS API **by name**,
+downloads it here, and rewrites `../_shared.css` to local URLs. Network needed
+only to refresh; the committed files are what ship.

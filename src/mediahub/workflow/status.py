@@ -32,6 +32,12 @@ class CardWorkflowState:
     notes: Optional[str] = None
     posted_at: Optional[str] = None
     last_changed_at: str = ""
+    # 1.24 localisation: per-language translated variants of this card's text,
+    # keyed by target language code ("cy", "en-US", …). Each value is the
+    # variant dict the localize engine produced (slots + provider + warnings +
+    # display metadata). Approving the card approves its translations with it —
+    # a bilingual pair is one approval. None until a translation is requested.
+    translations: Optional[dict[str, dict]] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -52,4 +58,5 @@ class CardWorkflowState:
             notes=d.get("notes"),
             posted_at=d.get("posted_at"),
             last_changed_at=d.get("last_changed_at", ""),
+            translations=d.get("translations"),
         )

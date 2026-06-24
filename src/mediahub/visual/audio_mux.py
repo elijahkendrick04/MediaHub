@@ -589,6 +589,13 @@ def apply_audio(
         "mix": profile,
         "transcript": transcript,
     }
+    # 1.24 AI-dub provenance: when the voice track is a translated dub, label it
+    # in the manifest (clearly AI-dubbed, source→target) so every downstream
+    # surface can show it honestly.
+    if voice_path is not None and plan.get("dubbed"):
+        record["dubbed"] = True
+        record["dub_source_language"] = str(plan.get("dub_source_language") or "")
+        record["dub_target_language"] = str(plan.get("dub_target_language") or "")
     if voice_path is not None and music_path is not None:
         record["ducking"] = "sidechain"
     if music_path is not None:
