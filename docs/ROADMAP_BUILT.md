@@ -191,6 +191,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **1.20** · Phase 1 (Product) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later *(completed 2026-06-22)*
 - ✅ **1.21** · Phase 1 (Product) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded *(completed 2026-06-23)*
 - ✅ **1.22** · Phase 1 (Product) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands *(completed 2026-06-23)*
+- ✅ **1.23** · Phase 1 (Product) — AI governance: per-org/per-feature quota ledger on `observability/`, provenance manifests on AI media, role-based feature permissions (generative moderation descoped by maintainer 2026-06-24 — a human already approves before any external publishing) *(completed 2026-06-24)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
