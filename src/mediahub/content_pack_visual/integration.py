@@ -104,6 +104,21 @@ def persist_visual(visual, *, run_id: str, brief=None) -> Path:
     ids_map[payload.get("id", visual.id)] = fmt_name
     payload["visual_ids"] = ids_map
     sidecar.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+
+    # Governance (1.23): stamp an honest provenance manifest beside the PNG —
+    # what made this card, from what, when. A result card is a deterministic
+    # composite of real photography (not an AI image); only the caption and
+    # creative direction may be AI-assisted, and the manifest says so. Strictly
+    # best-effort: a provenance hiccup never sinks the persist.
+    try:
+        from mediahub.governance import provenance as _prov
+
+        fp = getattr(visual, "file_path", None)
+        if fp:
+            _prov.write_sidecar(fp, _prov.build_card_manifest(visual, brief=brief))
+    except Exception:
+        pass
+
     return sidecar
 
 

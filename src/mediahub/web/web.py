@@ -16651,6 +16651,34 @@ def create_app() -> Flask:
     app.active_profile = _active_profile  # type: ignore[attr-defined]
 
     @app.before_request
+    def _bind_governance_context():
+        """Bind the active org for AI-governance metering (1.23).
+
+        AI surfaces read this request-scoped context to attribute usage to the
+        right org without threading ``org_id`` through every signature. We bind
+        the org only and deliberately do NOT resolve the user's plan here:
+        ``current_plan()`` would validate the user record and self-heal a stale
+        session mid-request (dropping the session email), which is a side effect
+        a metering hook must not have. Routes that enforce a plan-specific quota
+        pass the plan explicitly. Strictly best-effort.
+        """
+        try:
+            from mediahub import governance
+
+            governance.set_request_context(_active_profile_id(), None)
+        except Exception:
+            pass
+
+    @app.teardown_request
+    def _clear_governance_context(_exc=None):
+        try:
+            from mediahub import governance
+
+            governance.clear_request_context()
+        except Exception:
+            pass
+
+    @app.before_request
     def _gate_until_org_ready():
         # Tests bypass the gate by default — they assert specific
         # behaviour of downstream routes and shouldn't have to seed a
@@ -21789,6 +21817,54 @@ function copyWhyCard(btn, taId) {{
                         "explanation": explanation,
                     }
                 ), 200
+            # Governance (1.23): role permission + per-org caption quota.
+            # Permission gates WHO may generate (editor+ on a bound org; pilot
+            # orgs and the operator keep the owner seat, so their flow is
+            # unchanged). Quota gates HOW MUCH, hard-blocking only where a
+            # specific caption limit is configured. The plan comes from the
+            # acting user. Usage is recorded once in the finally below.
+            from mediahub.governance import (
+                features as _gov_features,
+                permissions as _gov_perms,
+                quota as _gov_quota,
+            )
+
+            _gov_org = run_profile_id or ""
+            _gov_ok = False
+            _gov_plan = _auth.current_plan()
+            if _gov_org and not _gov_perms.can_use_feature(
+                _active_role(_gov_org), _gov_features.FEATURE_CAPTION, plan=_gov_plan
+            ):
+                return jsonify(
+                    {
+                        "caption": "",
+                        "tone": tone,
+                        "live": False,
+                        "generated_at": now_iso,
+                        "error": "forbidden",
+                        "message": _gov_perms.denial_reason(
+                            _active_role(_gov_org),
+                            _gov_features.FEATURE_CAPTION,
+                            plan=_gov_plan,
+                        ),
+                        "explanation": explanation,
+                    }
+                ), 403
+            if _gov_org:
+                try:
+                    _gov_quota.enforce(_gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan)
+                except _gov_quota.QuotaExceeded as _qe:
+                    return jsonify(
+                        {
+                            "caption": "",
+                            "tone": tone,
+                            "live": False,
+                            "generated_at": now_iso,
+                            "error": "quota_reached",
+                            "message": str(_qe),
+                            "explanation": explanation,
+                        }
+                    ), 200
             try:
                 # Generate 3 variants in parallel so the user can pick one
                 # (Holo/Blaze pattern). The first is returned as `caption`
@@ -21969,6 +22045,7 @@ function copyWhyCard(btn, taId) {{
                 for v in variants:
                     _v9_save_caption_history(run_id, swim_id_dec, v)
                 _sec_lang = _get_language(secondary_language) if secondary_language else None
+                _gov_ok = True  # one real caption produced — counts toward quota
                 return jsonify(
                     {
                         "caption": caption_text,
@@ -22036,6 +22113,17 @@ function copyWhyCard(btn, taId) {{
                         "explanation": explanation,
                     }
                 ), 200
+            finally:
+                # Record exactly one caption-feature use for this request —
+                # success counts toward quota, a failed attempt is logged but
+                # not charged. Best-effort; never affects the response.
+                if _gov_org:
+                    _gov_quota.record(
+                        _gov_org,
+                        _gov_features.FEATURE_CAPTION,
+                        ok=_gov_ok,
+                        detail=f"tone={tone}",
+                    )
         else:
             # Voice render &mdash; deterministic template, may be cached by client
             try:
@@ -25347,6 +25435,59 @@ self.addEventListener('fetch', function(e){
         except Exception as e:
             return jsonify({"ok": False, "error": f"sentinel_health_unavailable: {e}"}), 500
 
+    @app.route("/healthz/governance")
+    def healthz_governance():
+        """Operator-only: per-org AI feature usage across the deployment (1.23)."""
+        if not _auth.is_dev_operator():
+            return redirect(url_for("settings_page"))
+        from mediahub.observability import feature_quota as _fq
+        from mediahub.governance import features as _gf
+
+        per_org = _fq.usage_all_orgs(limit=100)
+        # Fold in generative-imagery usage (it keeps its own dedicated ledger).
+        if _imagine_ok:
+            try:
+                from mediahub.observability import imagine_usage as _iu
+
+                for row in per_org:
+                    n = _iu.count_for_org(row["org_id"])
+                    if n:
+                        row["by_feature"]["imagine"] = n
+                        row["total"] += n
+            except Exception:
+                pass
+        per_org.sort(key=lambda r: r["total"], reverse=True)
+
+        feat_keys = _gf.feature_keys()
+        head = "".join(
+            f'<th style="text-align:right">{_h(_gf.label_for(k))}</th>' for k in feat_keys
+        )
+        rows = ""
+        for r in per_org:
+            cells = "".join(
+                f'<td style="text-align:right">{int(r["by_feature"].get(k, 0))}</td>'
+                for k in feat_keys
+            )
+            rows += (
+                f"<tr><td>{_h(r['org_id'])}</td>{cells}"
+                f'<td style="text-align:right"><strong>{int(r["total"])}</strong></td></tr>'
+            )
+        if not rows:
+            rows = (
+                f'<tr><td colspan="{len(feat_keys) + 2}" class="dim">'
+                "No AI usage recorded in the last 30 days.</td></tr>"
+            )
+        body = (
+            '<div class="card"><h1 style="margin-top:0">AI governance &mdash; usage</h1>'
+            '<p class="dim">Per-org AI feature use over a rolling 30-day window '
+            "(successful calls only). Operator-only.</p>"
+            '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            f'<thead><tr><th style="text-align:left">Org</th>{head}'
+            '<th style="text-align:right">Total</th></tr></thead>'
+            f"<tbody>{rows}</tbody></table></div></div>"
+        )
+        return _layout("AI governance · usage", body, active="")
+
     @app.route("/healthz/usage")
     def healthz_usage():
         from mediahub.observability import llm_usage as _u
@@ -25642,6 +25783,12 @@ self.addEventListener('fetch', function(e){
                 url_for("sponsors_page"),
             ),
             (
+                "AI governance",
+                "AI usage and quota headroom, who can use which AI feature, and provenance.",
+                "privacy",
+                url_for("settings_section", section="governance"),
+            ),
+            (
                 "Account",
                 "Two-factor security, data export, and account deletion.",
                 "account",
@@ -25693,6 +25840,114 @@ self.addEventListener('fetch', function(e){
         )
         return _layout("Settings", body, active="settings")
 
+    def _render_settings_governance_section(prof: Optional[ClubProfile]) -> str:
+        """AI governance for the active org (1.23): usage + quota headroom per
+        feature, the role→feature permission matrix, and a provenance note."""
+        if prof is None:
+            return (
+                '<div class="card"><p>Select or create a club first to see its '
+                "AI usage and permissions.</p></div>"
+            )
+        from mediahub import governance
+        from mediahub.governance import features as _gf
+        from mediahub.collab import permissions as _cperms
+
+        pid = prof.profile_id
+        plan = _auth.current_plan()
+
+        # --- Usage + quota per feature ---
+        usage_rows = ""
+        for spec in _gf.all_features():
+            if spec.key == _gf.FEATURE_IMAGINE:
+                try:
+                    q = _imagine.check_quota(pid)
+                    used, limit = int(q.used), int(q.limit)
+                    unlimited = bool(getattr(q, "unlimited", limit < 0))
+                except Exception:
+                    st = governance.check(pid, spec.key, plan=plan)
+                    used, limit, unlimited = st.used, st.limit, not st.enforced
+            else:
+                st = governance.check(pid, spec.key, plan=plan)
+                used, limit, unlimited = st.used, st.limit, not st.enforced
+
+            if unlimited or limit < 0:
+                limit_cell = "No limit &mdash; metered"
+            else:
+                pct = min(100, int(used * 100 / limit)) if limit else 0
+                colour = (
+                    "var(--mh-prim-error-500)"
+                    if used >= limit
+                    else ("var(--mh-prim-warning-500)" if pct >= 80 else "var(--accent)")
+                )
+                limit_cell = (
+                    f"{used} / {limit}"
+                    '<div style="height:8px;background:rgba(255,255,255,0.08);'
+                    'border-radius:6px;margin-top:6px">'
+                    f'<div style="height:8px;width:{pct}%;background:{colour};'
+                    'border-radius:6px"></div></div>'
+                )
+            usage_rows += (
+                '<tr><td style="padding:8px 10px">'
+                f"<strong>{_h(spec.label)}</strong>"
+                f'<div style="font-size:12px;color:var(--ink-muted)">{_h(spec.description)}</div>'
+                "</td>"
+                f'<td style="padding:8px 10px;text-align:right">{used}</td>'
+                f'<td style="padding:8px 10px">{limit_cell}</td></tr>'
+            )
+        usage_card = (
+            '<div class="card"><h2 style="margin-top:0;font-size:18px">AI usage this month</h2>'
+            '<p style="color:var(--ink-muted);font-size:13px">A rolling 30-day window. Usage is '
+            "always counted; a feature only blocks if a specific limit has been set for it.</p>"
+            '<table style="width:100%;border-collapse:collapse">'
+            '<thead><tr style="text-align:left;color:var(--ink-muted);font-size:12px">'
+            '<th style="padding:8px 10px">Feature</th>'
+            '<th style="padding:8px 10px;text-align:right">Used</th>'
+            '<th style="padding:8px 10px">Limit</th></tr></thead>'
+            f"<tbody>{usage_rows}</tbody></table></div>"
+        )
+
+        # --- Role → feature permission matrix ---
+        feats = _gf.all_features()
+        head = "".join(
+            f'<th style="padding:6px 8px;font-size:12px">{_h(s.label)}</th>' for s in feats
+        )
+        prows = ""
+        for role in _cperms.assignable_roles():
+            cells = ""
+            for s in feats:
+                ok = governance.can_use_feature(role, s.key, plan=plan)
+                mark = (
+                    '<span style="color:var(--mh-prim-success-400)">&#10003;</span>'
+                    if ok
+                    else '<span style="color:var(--ink-muted)">&mdash;</span>'
+                )
+                cells += f'<td style="padding:6px 8px;text-align:center">{mark}</td>'
+            prows += (
+                f'<tr><td style="padding:6px 8px"><strong>{_h(_cperms.role_label(role))}</strong>'
+                f"</td>{cells}</tr>"
+            )
+        your_role = _active_role(pid)
+        perms_card = (
+            '<div class="card"><h2 style="margin-top:0;font-size:18px">Who can use AI</h2>'
+            '<p style="color:var(--ink-muted);font-size:13px">Your role here is '
+            f"<strong>{_h(_cperms.role_label(your_role))}</strong>. Content generation needs "
+            "Editor; brand-defining AI needs the Owner.</p>"
+            '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            '<thead><tr style="text-align:left;color:var(--ink-muted)">'
+            f'<th style="padding:6px 8px">Role</th>{head}</tr></thead>'
+            f"<tbody>{prows}</tbody></table></div></div>"
+        )
+
+        prov_card = (
+            '<div class="card"><h2 style="margin-top:0;font-size:18px">Provenance</h2>'
+            '<p style="color:var(--ink-muted);font-size:13px;margin-bottom:0">Every result card, '
+            "reel and generated image is stamped with an honest provenance manifest &mdash; what "
+            "made it, from what, and when. Result cards are recorded as deterministic composites of "
+            "real photography; AI-generated images are marked as such.</p></div>"
+        )
+
+        return usage_card + perms_card + prov_card
+
     # Detail pages behind the settings cards. ``developer`` is operator-only;
     # everything else is org-scoped and degrades gracefully with no org.
     @app.route("/settings/<section>")
@@ -25711,6 +25966,10 @@ self.addEventListener('fetch', function(e){
                 lambda prof: _render_settings_typography_section(prof),
             ),
             "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
+            "governance": (
+                "AI governance",
+                lambda prof: _render_settings_governance_section(prof),
+            ),
             "account": ("Account", lambda prof: _render_settings_account_section()),
             "status": ("System status", lambda prof: _render_settings_status_public_section()),
             "developer": ("Developer", lambda prof: _render_settings_developer_section()),
@@ -26969,6 +27228,8 @@ self.addEventListener('fetch', function(e){
             '<ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.8">'
             f'<li><a href="{url_for("healthz_usage")}">LLM usage dashboard</a>'
             " &mdash; today's call counts, cost estimate, free-tier headroom.</li>"
+            f'<li><a href="{url_for("healthz_governance")}">AI governance &mdash; usage</a>'
+            " &mdash; per-org AI feature use over a rolling 30-day window.</li>"
             f'<li><a href="{url_for("api_status_json")}">/api/status</a>'
             " &mdash; raw uptime JSON for external monitors.</li>"
             f'<li><a href="{url_for("health")}">/health</a>'
@@ -36397,7 +36658,7 @@ what you're doing, what they should do.</p>
                     '<label style="display:flex;gap:8px;align-items:flex-start;'
                     'padding:5px 0;font-size:13px">'
                     f'<input type="checkbox" name="scope" value="{_h(s)}"'
-                    f'{" checked" if group_name == "Read-only" else ""}/>'
+                    f"{' checked' if group_name == 'Read-only' else ''}/>"
                     f"<span><code>{_h(s)}</code> — {_h(_api_scopes.scope_label(s))}</span></label>"
                     for s in group_scopes
                 )
@@ -36410,7 +36671,7 @@ what you're doing, what they should do.</p>
                 )
             create_form = (
                 '<section class="card" style="margin-bottom:var(--sp-4)">'
-                "<h3 style=\"margin:0 0 4px\">Create a token</h3>"
+                '<h3 style="margin:0 0 4px">Create a token</h3>'
                 '<p class="dim" style="margin:0 0 12px;font-size:13px">A token acts as '
                 f"<strong>{org_name}</strong> with exactly the scopes you grant — nothing more. "
                 "Approving via the API still runs the same consent and brand checks as the app.</p>"
@@ -36419,14 +36680,14 @@ what you're doing, what they should do.</p>
                 '<label style="display:block;font-size:13px;margin-bottom:4px">Name</label>'
                 '<input type="text" name="name" placeholder="e.g. Zapier, Mobile app" '
                 'style="width:100%;max-width:360px;padding:8px 10px;margin-bottom:12px;'
-                'background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+                "background:var(--bg);border:1px solid var(--line);border-radius:8px;"
                 'color:var(--ink)"/>'
                 f"{groups_html}"
                 '<label style="display:block;font-size:13px;margin:4px 0">'
-                'Expires after (days, optional)</label>'
+                "Expires after (days, optional)</label>"
                 '<input type="number" name="expires_days" min="1" max="3650" '
                 'placeholder="never" style="width:140px;padding:8px 10px;margin-bottom:12px;'
-                'background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+                "background:var(--bg);border:1px solid var(--line);border-radius:8px;"
                 'color:var(--ink)"/><br/>'
                 '<button type="submit" class="btn">Create token</button></form></section>'
             )
@@ -36530,7 +36791,7 @@ what you're doing, what they should do.</p>
                     )
                 wh_rows += (
                     f'<tr><td style="max-width:280px;word-break:break-all">'
-                    f"<code style=\"font-size:12px\">{_h(ep.url)}</code></td>"
+                    f'<code style="font-size:12px">{_h(ep.url)}</code></td>'
                     f'<td style="max-width:280px">{ev_pills}</td>'
                     f'<td style="font-size:12px;color:var(--ink-muted)">{_h((ep.last_delivery_at or "—")[:10])}</td>'
                     f"<td>{del_html}</td></tr>"
@@ -42748,6 +43009,34 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
         return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
 
+    def _imagine_role_ok(pid: str) -> bool:
+        """Governance (1.23): may the actor's role use generative imagery?
+
+        Editor+ on a bound org; pilot orgs and the operator keep the owner seat,
+        so their flow is unchanged. Deterministic ops (subject-lift, grab-text)
+        spend no AI budget and are not gated here.
+        """
+        from mediahub.governance import features as _gf, permissions as _gp
+
+        return _gp.can_use_feature(
+            _active_role(pid), _gf.FEATURE_IMAGINE, plan=_auth.current_plan()
+        )
+
+    def _imagine_forbidden(pid: str):
+        from mediahub.governance import features as _gf, permissions as _gp
+
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "user_message": _gp.denial_reason(
+                        _active_role(pid), _gf.FEATURE_IMAGINE, plan=_auth.current_plan()
+                    ),
+                }
+            ),
+            403,
+        )
+
     @app.route("/api/media-library/imagine/info")
     def api_imagine_info():
         """Capabilities, active provider, style presets, and this org's quota."""
@@ -42776,6 +43065,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         pid = _active_profile_id()
         if not pid:
             return jsonify({"error": "no_profile"}), 403
+        if not _imagine_role_ok(pid):
+            return _imagine_forbidden(pid)
         body = request.get_json(silent=True) or {}
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
@@ -42859,6 +43150,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         pid = _active_profile_id()
         if not pid:
             return jsonify({"error": "no_profile"}), 403
+        if not _imagine_role_ok(pid):
+            return _imagine_forbidden(pid)
         store = _v8_get_media_store()
         a = store.get(asset_id)
         if not a:
@@ -47569,8 +47862,8 @@ voice, and queues them for one-click approval.</p>
         ff = _ff.status()
         caps = (
             f'<p class="muted">CMYK conversion (Ghostscript): '
-            f'<strong>{"ready" if ghostscript_available() else "not installed"}</strong> · '
-            f'PDF/X-3: <strong>{"ready" if _pdfx.pdfx_available() else "needs an ICC profile"}'
+            f"<strong>{'ready' if ghostscript_available() else 'not installed'}</strong> · "
+            f"PDF/X-3: <strong>{'ready' if _pdfx.pdfx_available() else 'needs an ICC profile'}"
             f"</strong> · Fulfilment: <strong>{_h(ff['message'])}</strong></p>"
         )
         body = (
@@ -49060,9 +49353,9 @@ voice, and queues them for one-click approval.</p>
         st = ee.engine_status()
         engines = (
             f'<p class="muted">Video engine (FFmpeg): '
-            f'<strong>{"ready" if st["ffmpeg"] else "not installed"}</strong> · '
-            f'WebP: <strong>{"yes" if st["webp_encode"] else "no"}</strong> · '
-            f'AVIF: <strong>{"yes" if st["avif_encode"] else "no"}</strong></p>'
+            f"<strong>{'ready' if st['ffmpeg'] else 'not installed'}</strong> · "
+            f"WebP: <strong>{'yes' if st['webp_encode'] else 'no'}</strong> · "
+            f"AVIF: <strong>{'yes' if st['avif_encode'] else 'no'}</strong></p>"
         )
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">'
@@ -49093,7 +49386,7 @@ voice, and queues them for one-click approval.</p>
         ]
         boxes = "".join(
             f'<label class="mh-check"><input type="checkbox" name="fmt" value="{f.key}"'
-            f'{" checked" if f.key == "jpg" else ""}> {_h(f.label)}</label>'
+            f"{' checked' if f.key == 'jpg' else ''}> {_h(f.label)}</label>"
             for f in img_fmts
         )
         kick_url = url_for("api_run_bulk_export", run_id=run_id)
@@ -49929,9 +50222,9 @@ voice, and queues them for one-click approval.</p>
             rows += (
                 '<div class="card" style="padding:12px 16px;margin-bottom:10px;display:flex;'
                 'justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
-                f'<div><strong>{_h(c["name"])}</strong>'
+                f"<div><strong>{_h(c['name'])}</strong>"
                 f'<span style="color:var(--ink-muted);font-size:12px;margin-left:8px">'
-                f'{c["count"]} item{"s" if c["count"] != 1 else ""}</span></div>'
+                f"{c['count']} item{'s' if c['count'] != 1 else ''}</span></div>"
                 + (
                     f'<button class="btn secondary" style="font-size:12px;padding:4px 10px" '
                     f"onclick=\"mhDeleteCollection('{c['id']}')\">Delete</button>"
@@ -50164,8 +50457,7 @@ voice, and queues them for one-click approval.</p>
                 {
                     "error": "footage_failed",
                     "message": (
-                        "The clip couldn't be processed. Please try again, or try a "
-                        "different clip."
+                        "The clip couldn't be processed. Please try again, or try a different clip."
                     ),
                 }
             ), 500
