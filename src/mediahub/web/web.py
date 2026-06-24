@@ -2782,6 +2782,13 @@ def _init_db():
     # Old rows keep NULL (treated as 0); bounded by _RUN_MAX_RESUMES.
     if "resume_count" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN resume_count INTEGER")
+    # Re-run detection — content_hash (exact same file/source) + meet_fingerprint
+    # (same meet via any tool). Old rows keep NULL until re-run, so they simply
+    # don't participate in duplicate badging/warnings; new runs stamp both.
+    if "content_hash" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN content_hash TEXT")
+    if "meet_fingerprint" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN meet_fingerprint TEXT")
     conn.commit()
     conn.close()
 
@@ -2945,11 +2952,26 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     meet_name = run.canonical_meet.name if run.canonical_meet else "(unknown)"
     status = "error" if run.error else "done"
     conn = _db()
+    # Re-run detection: INSERT OR REPLACE rewrites the whole row, so carry the
+    # content hash captured at queue time forward (else it would be lost), and
+    # stamp the meet fingerprint now the canonical meet (name + date) is known.
+    prior_hash = ""
+    try:
+        _hr = conn.execute(
+            "SELECT content_hash FROM runs WHERE id = ?", (run.run_id,)
+        ).fetchone()
+        if _hr and _hr["content_hash"]:
+            prior_hash = _hr["content_hash"]
+    except Exception:  # noqa: BLE001
+        prior_hash = ""
+    meet_date = run.canonical_meet.start_date if run.canonical_meet else ""
+    meet_fp = _meet_fingerprint(run.profile_id, meet_name, meet_date)
     conn.execute(
         """INSERT OR REPLACE INTO runs
            (id, created_at, finished_at, status, profile_id, meet_name,
-            our_swims, n_cards, n_queue, n_achievements, error, file_name)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            our_swims, n_cards, n_queue, n_achievements, error, file_name,
+            content_hash, meet_fingerprint)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             run.run_id,
             run.started_at,
@@ -2963,6 +2985,8 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
             n_achievements,
             run.error,
             file_name,
+            prior_hash,
+            meet_fp,
         ),
     )
     conn.commit()
@@ -3439,6 +3463,283 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
         return None
     pid = row[0] if not hasattr(row, "keys") else row["profile_id"]
     return pid or ""
+
+
+# ---------------------------------------------------------------------
+# Run de-duplication — "have we processed this meet before?"
+# ---------------------------------------------------------------------
+# Two independent signals decide whether a new run repeats an existing one,
+# scoped to the owning organisation:
+#   * content_hash    — SHA-256 of the uploaded bytes. Catches an EXACT re-run
+#                       of the same file/source, regardless of meet metadata.
+#   * meet_fingerprint — org + normalised meet name + meet date (day precision).
+#                       Catches the SAME meet processed through a DIFFERENT tool
+#                       or file format, where the bytes differ but it's the same
+#                       competition. Deliberately fuzzy on the name (punctuation
+#                       and case are stripped) so "County Champs!" fingerprints
+#                       the same as "county champs".
+# Both are persisted on the runs row (see _start_run / _persist_run) so the
+# upload step can WARN before a re-run and the listings can BADGE repeats. We
+# never block — the human decides (MediaHub never silently guesses).
+
+
+def _content_hash(file_bytes: bytes) -> str:
+    """SHA-256 of an uploaded file's bytes; '' when it can't be computed."""
+    try:
+        return hashlib.sha256(file_bytes).hexdigest()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+_MEET_NAME_NOISE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_meet_name(name: str) -> str:
+    """Lower-case, strip punctuation, collapse whitespace — so trivially
+    different spellings of the same meet name fingerprint identically."""
+    s = _MEET_NAME_NOISE.sub(" ", (name or "").strip().lower())
+    return " ".join(s.split())
+
+
+def _meet_fingerprint(
+    profile_id: Optional[str], meet_name: Optional[str], meet_date: Optional[str]
+) -> str:
+    """Stable identity for 'the same meet': org + normalised name + day.
+
+    Returns '' when there is no usable meet name (a meet we can't name can't be
+    fingerprinted — those runs simply never match on the fuzzy signal, though
+    they can still match an exact re-run by content hash).
+    """
+    norm = _normalize_meet_name(meet_name or "")
+    if not norm:
+        return ""
+    day = str(meet_date or "").strip()[:10]
+    basis = f"{(profile_id or '').strip()}|{norm}|{day}"
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+
+
+def _find_duplicate_run(
+    profile_id: Optional[str],
+    content_hash: str,
+    meet_fingerprint: str,
+    *,
+    exclude_run_id: Optional[str] = None,
+) -> Optional[dict]:
+    """The most recent FINISHED run in this org that repeats either signal,
+    or None. Used by the upload step to warn before a re-run lands."""
+    if not profile_id:
+        return None
+    clauses: list[str] = []
+    params: list = []
+    if content_hash:
+        clauses.append("content_hash = ?")
+        params.append(content_hash)
+    if meet_fingerprint:
+        clauses.append("meet_fingerprint = ?")
+        params.append(meet_fingerprint)
+    if not clauses:
+        return None
+    sql = (
+        "SELECT id, meet_name, created_at, content_hash, meet_fingerprint, our_swims "
+        "FROM runs WHERE profile_id = ? AND status = 'done' AND ("
+        + " OR ".join(clauses)
+        + ") "
+    )
+    args: list = [profile_id, *params]
+    if exclude_run_id:
+        sql += "AND id != ? "
+        args.append(exclude_run_id)
+    sql += "ORDER BY created_at DESC LIMIT 1"
+    try:
+        conn = _db()
+        row = conn.execute(sql, args).fetchone()
+        conn.close()
+    except Exception:  # noqa: BLE001
+        return None
+    if not row:
+        return None
+    return {
+        "run_id": row["id"],
+        "meet_name": row["meet_name"] or "",
+        "created_at": row["created_at"] or "",
+        "our_swims": row["our_swims"] or 0,
+        "exact": bool(content_hash and row["content_hash"] == content_hash),
+    }
+
+
+def _duplicate_map(rows) -> dict:
+    """Map run_id -> {original_id, original_date, count} for every run that
+    repeats a meet already seen in an EARLIER run within ``rows``.
+
+    Two runs are 'the same meet' when they share a content hash OR a meet
+    fingerprint; the relation is transitive (union-find), so a PDF uploaded
+    once and later re-fetched from a link all land in one group. The OLDEST
+    run in a group is the original and is never badged; every newer run points
+    back to it. ``rows`` is the DB result set (sqlite3.Row); missing columns on
+    legacy rows are tolerated and simply never match.
+    """
+    parent: dict = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    def _col(r, name):
+        try:
+            return (r[name] if name in r.keys() else "") or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    by_fp: dict = {}
+    by_hash: dict = {}
+    order: list = []
+    rowmap: dict = {}
+    for r in rows:
+        rid = r["id"]
+        order.append(rid)
+        rowmap[rid] = r
+        find(rid)
+        fp = _col(r, "meet_fingerprint")
+        ch = _col(r, "content_hash")
+        if fp:
+            if fp in by_fp:
+                union(rid, by_fp[fp])
+            else:
+                by_fp[fp] = rid
+        if ch:
+            if ch in by_hash:
+                union(rid, by_hash[ch])
+            else:
+                by_hash[ch] = rid
+
+    groups: dict = {}
+    for rid in order:
+        groups.setdefault(find(rid), []).append(rid)
+
+    dup: dict = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        members_sorted = sorted(members, key=lambda i: (rowmap[i]["created_at"] or ""))
+        oldest = members_sorted[0]
+        for rid in members_sorted[1:]:
+            dup[rid] = {
+                "original_id": oldest,
+                "original_date": (rowmap[oldest]["created_at"] or "")[:10],
+                "count": len(members),
+            }
+    return dup
+
+
+def _org_duplicate_map(profile_id: Optional[str], limit: int = 500) -> dict:
+    """Duplicate map across ALL of an org's runs, independent of any view
+    filter/limit — so a re-run is still badged when the original is hidden by a
+    status filter or has scrolled past the displayed page. Fail-soft to {}."""
+    if not profile_id:
+        return {}
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT id, created_at, content_hash, meet_fingerprint "
+            "FROM runs WHERE profile_id = ? ORDER BY created_at DESC LIMIT ?",
+            (profile_id, limit),
+        ).fetchall()
+        conn.close()
+    except Exception:  # noqa: BLE001
+        return {}
+    return _duplicate_map(rows)
+
+
+def _dup_badge_html(dup_entry: Optional[dict]) -> str:
+    """A compact 'Re-run' chip linking back to the original run, or '' when this
+    run isn't a repeat. Communicates that the same meet was processed before —
+    used on Activity and My Season. Inline-styled (no dedicated .tag class)."""
+    if not dup_entry:
+        return ""
+    original_id = dup_entry.get("original_id")
+    when = (dup_entry.get("original_date") or "").strip()
+    title = "Same meet already processed" + (f" on {when}" if when else "")
+    title += " — open the original"
+    style = (
+        "display:inline-flex;align-items:center;margin-left:8px;padding:1px 8px;"
+        "border-radius:999px;font-size:11px;font-weight:600;line-height:1.6;"
+        "border:1px solid var(--warn);color:var(--warn);background:var(--warn-bg);"
+        "text-decoration:none;vertical-align:middle;white-space:nowrap"
+    )
+    if original_id:
+        href = url_for("review", run_id=original_id)
+        return (
+            f'<a href="{href}" title="{_h(title)}" style="{style}">Re-run</a>'
+        )
+    return f'<span title="{_h(title)}" style="{style}">Re-run</span>'
+
+
+# Shared client JS for run-row deletion + bulk clear. Bound once (delegated),
+# so it covers the per-run "Delete" forms (class ``mh-run-delete`` — removes the
+# row in place via fetch) AND a "Clear all runs" form (class
+# ``mh-clear-all-runs`` — confirms with the count, then reloads). Reused
+# verbatim on Activity, My Season and the Settings activity table; no-JS falls
+# back to the plain form POST (the route honours ``next`` / redirects).
+_RUN_DELETE_JS = """
+<script>
+(function(){
+  if (window.__mhRunDeleteBound) return; window.__mhRunDeleteBound = true;
+  function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : String(v).replace(/["\\\\]/g,'\\\\$&'); }
+  document.addEventListener('submit', function(e){
+    var form = e.target;
+    if (!form || !form.classList) return;
+    if (form.classList.contains('mh-run-delete')) {
+      e.preventDefault();
+      if (!window.confirm('Delete this run? This cannot be undone.')) return;
+      var rid = form.getAttribute('data-run-id');
+      var btn = form.querySelector('button');
+      if (btn) btn.disabled = true;
+      // Send the form body so the auto-injected csrf_token rides along (the
+      // delete route is not CSRF-exempt); X-Requested-With asks for JSON back.
+      fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
+        .then(function(r){ return r.json().catch(function(){ return {}; }); })
+        .then(function(j){
+          if (j && j.ok) {
+            var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
+            var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
+            if (err && err.parentNode) err.parentNode.removeChild(err);
+            if (row && row.parentNode) row.parentNode.removeChild(row);
+            if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
+          } else if (btn) { btn.disabled = false; }
+        })
+        .catch(function(){ if (btn) btn.disabled = false; });
+    } else if (form.classList.contains('mh-clear-all-runs')) {
+      e.preventDefault();
+      var n = form.getAttribute('data-count') || '';
+      var msg = n
+        ? ('Permanently delete all ' + n + ' runs for this organisation? This cannot be undone.')
+        : 'Permanently delete every run for this organisation? This cannot be undone.';
+      if (!window.confirm(msg)) return;
+      var cbtn = form.querySelector('button');
+      if (cbtn) cbtn.disabled = true;
+      fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:new FormData(form)})
+        .then(function(r){ return r.json().catch(function(){ return {}; }); })
+        .then(function(j){
+          if (j && j.ok) {
+            if (window.MH && MH.toast) MH.toast((j.deleted || 0) + ' runs deleted.', 'success');
+            window.location.reload();
+          } else if (cbtn) { cbtn.disabled = false; }
+        })
+        .catch(function(){ if (cbtn) cbtn.disabled = false; });
+    }
+  }, false);
+})();
+</script>"""
 
 
 def _translatable_langs_js() -> str:
@@ -6072,11 +6373,15 @@ def _start_run(
         }
         # Evict completed older runs to keep the dict bounded.
         _maybe_evict_active_runs()
+    # Fingerprint the input now (we have the bytes here) so a re-run of the same
+    # file can be flagged. _persist_run carries this forward and adds the
+    # meet-identity fingerprint once the canonical meet is known.
+    content_hash = _content_hash(file_bytes)
     conn = _db()
     conn.execute(
         """INSERT INTO runs (id, created_at, status, file_name, profile_id,
-                             progress_log, heartbeat_at)
-           VALUES (?,?,?,?,?,?,?)""",
+                             progress_log, heartbeat_at, content_hash)
+           VALUES (?,?,?,?,?,?,?,?)""",
         (
             run_id,
             started_at,
@@ -6085,6 +6390,7 @@ def _start_run(
             profile_id or "",
             json.dumps(["Run queued"]),
             started_at,
+            content_hash,
         ),
     )
     conn.commit()
@@ -6822,6 +7128,7 @@ def _stage_results_zip(zip_bytes: bytes, source_url: str, profile_id: Optional[s
                     clubs.append(c)
         meta["clubs"] = sorted(clubs, key=str.lower)
         meta["meet_name"] = interpreted.meet_name or ""
+        meta["meet_date"] = (interpreted.dates[0] if interpreted.dates else "") or ""
         meta["n_events"] = len(interpreted.events)
         meta["file_byte_size"] = len(zip_bytes)
     except Exception as exc:
@@ -17426,7 +17733,8 @@ def create_app() -> Flask:
                 if status_q:
                     rows = conn.execute(
                         "SELECT id, created_at, finished_at, status, profile_id, "
-                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
+                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name, "
+                        "content_hash, meet_fingerprint "
                         "FROM runs WHERE profile_id = ? AND status = ? "
                         "ORDER BY created_at DESC LIMIT 100",
                         (prof.profile_id, status_q),
@@ -17443,7 +17751,8 @@ def create_app() -> Flask:
                 else:
                     rows = conn.execute(
                         "SELECT id, created_at, finished_at, status, profile_id, "
-                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
+                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name, "
+                        "content_hash, meet_fingerprint "
                         "FROM runs WHERE profile_id = ? "
                         "ORDER BY created_at DESC LIMIT 100",
                         (prof.profile_id,),
@@ -17580,6 +17889,10 @@ def create_app() -> Flask:
                 n_errored += 1
             grouped[_bucket((r["created_at"] or "")[:19])].append(r)
 
+        # Re-run badging is org-wide (not limited to the filtered/visible rows),
+        # so a re-run still links back to its original even when a status filter
+        # hides it.
+        dup_map = _org_duplicate_map(prof.profile_id)
         rows_html = ""
         for bucket in bucket_order:
             bucket_rows = grouped[bucket]
@@ -17600,15 +17913,18 @@ def create_app() -> Flask:
                 started = (r["created_at"] or "")[:19]
                 started_iso = started.replace(" ", "T") + "Z" if started else ""
                 search_haystack = (r["meet_name"] or r["file_name"] or r["id"] or "").lower()
+                dup_badge = _dup_badge_html(dup_map.get(r["id"]))
                 rows_html += (
-                    f'<tr data-status="{_h(r["status"])}" data-q="{_h(search_haystack)}">'
-                    f'<td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                    f'<tr data-run-row="{_h(r["id"])}" data-status="{_h(r["status"])}" data-q="{_h(search_haystack)}">'
+                    f'<td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a>{dup_badge}</td>'
                     f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                     f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                     f'<td><form method="post" action="{delete_href}" '
-                    f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
+                    f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
+                    f'style="display:inline" data-no-loader="1">'
+                    f'<input type="hidden" name="next" value="{_h(request.path)}">'
                     f'<button class="btn danger" type="submit" '
                     f'style="font-size:11px;padding:4px 10px">Delete</button>'
                     f"</form></td></tr>"
@@ -17617,7 +17933,7 @@ def create_app() -> Flask:
                     err_text = str(r["error"])
                     truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
                     rows_html += (
-                        '<tr class="run-error-row">'
+                        f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
                         '<td colspan="7" style="padding:6px 14px 14px 14px;'
                         'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                         "<details>"
@@ -17696,6 +18012,22 @@ def create_app() -> Flask:
                 f' class="{active_cls.strip()}" href="{url_for("activity_page")}{url_arg}">'
                 f'{label}<span class="count">{count}</span></a>'
             )
+        # Bulk "Clear all runs" — permanently delete every run for THIS org
+        # (per-tenant; never touches another org's runs). Right-aligned in the
+        # toolbar, shown only when there's something to clear.
+        clear_all_html = ""
+        if total_unfiltered:
+            _clear_href = url_for("privacy_clear_all_runs")
+            clear_all_html = (
+                f'<form method="post" action="{_clear_href}" class="mh-clear-all-runs" '
+                f'data-count="{total_unfiltered}" data-no-loader="1" '
+                'style="display:inline-flex;margin-left:auto">'
+                f'<input type="hidden" name="next" value="{_h(request.path)}">'
+                '<button class="btn danger" type="submit" '
+                'style="font-size:12px;padding:6px 12px" '
+                'title="Permanently delete every run for this organisation">'
+                "Clear all runs</button></form>"
+            )
         toolbar_html = (
             '<div class="mh-toolbar">'
             f'<div class="grow mh-search mh-vanish" {_VANISH_PH_ATTR_SEARCH}>'
@@ -17706,6 +18038,7 @@ def create_app() -> Flask:
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
             f"{seg_buttons}"
             "</nav>"
+            f"{clear_all_html}"
             "</div>"
             '<div id="mh-activity-empty" class="mh-empty-inline" style="display:none">'
             "<b>Nothing matches.</b><br>Try clearing the search box or picking a different status."
@@ -17773,6 +18106,7 @@ def create_app() -> Flask:
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
             f"{filter_js}"
+            f"{_RUN_DELETE_JS}"
         )
         return _layout("Activity", body, active="activity")
 
@@ -18158,7 +18492,8 @@ def create_app() -> Flask:
             try:
                 rows = conn.execute(
                     "SELECT id, created_at, finished_at, status, profile_id, "
-                    "meet_name, our_swims, n_achievements, error, file_name "
+                    "meet_name, our_swims, n_achievements, error, file_name, "
+                    "content_hash, meet_fingerprint "
                     "FROM runs WHERE profile_id = ? "
                     "ORDER BY created_at DESC LIMIT 200",
                     (prof.profile_id,),
@@ -18262,6 +18597,10 @@ def create_app() -> Flask:
             bucket["swims"] += swims
             bucket["moments"] += moments
 
+        # Re-run badging across the whole season (``rows`` is already the full
+        # org set, up to 200, with the hash + fingerprint columns).
+        dup_map = _duplicate_map(rows)
+
         # Pass 2 — render each month as a labelled section of meet cards.
         items_html = ""
         for bucket in months:
@@ -18295,6 +18634,8 @@ def create_app() -> Flask:
                 # timeline shows the real meet name, not the licensee banner.
                 title = _clean_stored_meet_title(r["meet_name"]) or r["file_name"] or r["id"]
                 review_href = url_for("review", run_id=r["id"])
+                delete_href = url_for("privacy_delete_run", run_id=r["id"])
+                dup_badge = _dup_badge_html(dup_map.get(r["id"]))
                 is_peak = peak_run_id is not None and r["id"] == peak_run_id and peak_moments > 0
 
                 # Stat chips. The "<n> swims matched" / "<n> moments detected"
@@ -18321,7 +18662,7 @@ def create_app() -> Flask:
                 peak_attr = ' data-peak="1"' if is_peak else ""
 
                 item = (
-                    f'<div class="mh-timeline__item"{peak_attr}>'
+                    f'<div class="mh-timeline__item" data-run-row="{_h(r["id"])}"{peak_attr}>'
                     f'<article class="{card_cls}">'
                     '<div class="mh-tl-top">'
                     '<div class="mh-tl-meta">'
@@ -18331,7 +18672,7 @@ def create_app() -> Flask:
                     "</div>"
                     f'<span class="tag {badge}">{_h(status)}</span>'
                     "</div>"
-                    f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
+                    f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a>{dup_badge}</h3>'
                     f'<div class="mh-tl-stats">{chips}</div>'
                 )
                 if status == "error" and r["error"]:
@@ -18342,6 +18683,20 @@ def create_app() -> Flask:
                         "<summary>Why did this run fail?</summary>"
                         f"<pre>{_h(err)}</pre></details>"
                     )
+                # Per-run delete (in-place via the shared JS; no-JS posts back to
+                # this page). Quiet by default — a subtle danger link, not a
+                # primary action — since the timeline is a celebratory surface.
+                item += (
+                    '<div class="mh-tl-actions" style="margin-top:var(--sp-3);'
+                    'display:flex;justify-content:flex-end">'
+                    f'<form method="post" action="{delete_href}" class="mh-run-delete" '
+                    f'data-run-id="{_h(r["id"])}" data-no-loader="1" style="display:inline">'
+                    f'<input type="hidden" name="next" value="{_h(request.path)}">'
+                    '<button class="btn ghost" type="submit" '
+                    'style="font-size:11px;padding:4px 10px;color:var(--bad)">'
+                    "Delete</button>"
+                    "</form></div>"
+                )
                 item += "</article></div>"
                 items_html += item
 
@@ -18433,6 +18788,17 @@ def create_app() -> Flask:
         range_html = (
             f'<span>{range_str}</span><span class="sep">&middot;</span>' if range_str else ""
         )
+        # Bulk "Clear all runs" — per-tenant; a quiet danger link in the strap.
+        _clear_href = url_for("privacy_clear_all_runs")
+        clear_all_html = (
+            '<span class="sep">&middot;</span><span>'
+            f'<form method="post" action="{_clear_href}" class="mh-clear-all-runs" '
+            f'data-count="{n_meets}" data-no-loader="1" style="display:inline">'
+            f'<input type="hidden" name="next" value="{_h(request.path)}">'
+            '<button type="submit" style="background:none;border:0;padding:0;'
+            'cursor:pointer;color:var(--bad);font:inherit;text-decoration:underline">'
+            "Clear all runs</button></form></span>"
+        )
         hero = (
             f'<section class="mh-hero" data-lane="{n_meets}" '
             'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
@@ -18445,6 +18811,7 @@ def create_app() -> Flask:
             f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
             '<span class="sep">&middot;</span>'
             f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            f"{clear_all_html}"
             "</div></section>"
         )
 
@@ -18456,7 +18823,7 @@ def create_app() -> Flask:
             "</div></div>"
         )
 
-        body = season_css + hero + summary_html + timeline_html
+        body = season_css + hero + summary_html + timeline_html + _RUN_DELETE_JS
         return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
@@ -18533,6 +18900,7 @@ def create_app() -> Flask:
                             clubs.append(c)
                 meta["clubs"] = sorted(clubs, key=str.lower)
                 meta["meet_name"] = interpreted.meet_name or ""
+                meta["meet_date"] = (interpreted.dates[0] if interpreted.dates else "") or ""
                 meta["n_events"] = len(interpreted.events)
                 meta["file_byte_size"] = len(data)
             except Exception as exc:
@@ -18906,11 +19274,44 @@ def create_app() -> Flask:
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
     def _render_configure(
-        run_id: str, meta: dict, *, error: str = "", selected_club: str = ""
+        run_id: str,
+        meta: dict,
+        *,
+        error: str = "",
+        selected_club: str = "",
+        duplicate: Optional[dict] = None,
     ) -> str:
         clubs = meta.get("clubs") or []
         meet_name = meta.get("meet_name") or ""
         parse_err = meta.get("parse_error") or ""
+
+        # Re-run warning banner (warn, never block). Rendered into the body
+        # below; empty when this meet/file hasn't been processed before.
+        dup_banner_html = ""
+        if duplicate:
+            _dup_when = (duplicate.get("created_at") or "")[:10]
+            _dup_name = duplicate.get("meet_name") or "this meet"
+            _review_dup = url_for("review", run_id=duplicate["run_id"])
+            _dup_lead = (
+                "You&rsquo;ve already run this exact file."
+                if duplicate.get("exact")
+                else "Looks like you&rsquo;ve already run this meet."
+            )
+            dup_banner_html = (
+                '<div class="card" role="alert" style="margin-bottom:var(--sp-4);'
+                'border-left:3px solid var(--warn);background:rgba(255,200,90,0.06)">'
+                f"<b>{_dup_lead}</b> "
+                f'<span class="dim">{_h(_dup_name)}'
+                + (f" &middot; {_h(_dup_when)}" if _dup_when else "")
+                + "</span>"
+                '<p class="dim" style="margin:6px 0 10px;font-size:var(--fs-sm)">'
+                "You can still run it again &mdash; we never block a re-run &mdash; "
+                "but if this is a duplicate you may want to open the existing pack "
+                "instead of generating it twice.</p>"
+                '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+                f'<a class="btn secondary" href="{_review_dup}">View existing run &rarr;</a>'
+                "</div></div>"
+            )
 
         # No clubs detected. Only render an error state when the file is
         # genuinely unusable:
@@ -19143,7 +19544,7 @@ def create_app() -> Flask:
   <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
   <p class="lede">{_h(meet_name) or "Meet uploaded."} &mdash; {len(clubs)} club{"s" if len(clubs) != 1 else ""} detected. Pick yours and tune the palette for this one-off. Photos are added later, per graphic, so each one lands on the right athlete&rsquo;s card.</p>
 </section>
-
+{dup_banner_html}
 <nav class="mh-stepper" aria-label="Upload progress">
   <span class="mh-stepper-item is-done"><span class="num">1</span>Upload</span>
   <span class="mh-stepper-arrow"></span>
@@ -19639,7 +20040,20 @@ def create_app() -> Flask:
         # change it); an unconfident match pre-selects nothing.
         _ap = _active_profile()
         _preselect = _best_club_match(meta.get("clubs") or [], _ap.display_name if _ap else "")
-        return _render_configure(run_id, meta, selected_club=_preselect)
+        # Re-run guard (warn, never block): has this org already processed this
+        # exact file, or this same meet via any tool? Compare the staged file's
+        # content hash and the meet identity against finished runs.
+        duplicate = None
+        try:
+            _pid = _active_profile_id()
+            _chash = _content_hash(input_path.read_bytes())
+            _fp = _meet_fingerprint(_pid, meta.get("meet_name"), meta.get("meet_date"))
+            duplicate = _find_duplicate_run(_pid, _chash, _fp, exclude_run_id=run_id)
+        except Exception:  # noqa: BLE001
+            duplicate = None
+        return _render_configure(
+            run_id, meta, selected_club=_preselect, duplicate=duplicate
+        )
 
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
@@ -23776,6 +24190,54 @@ Relay team broke club record"></textarea>
         nxt = _safe_next(request.form.get("next") or request.args.get("next"))
         return redirect(nxt or url_for("settings_page"))
 
+    @app.route("/privacy/runs/clear-all", methods=["POST"])
+    def privacy_clear_all_runs():
+        # Per-tenant bulk erase: permanently delete EVERY finished run owned by
+        # the active organisation, via the same cascade as the single-run delete
+        # (run JSON + sidecars + DB rows + re-derivable caches). The
+        # ``WHERE profile_id`` gate is the tenant-isolation boundary — this never
+        # touches another org's runs (mirrors privacy_delete_run).
+        #
+        # Only terminal runs (done/error) are cleared: deleting a run still in
+        # flight would race the worker, whose _persist_run could resurrect the
+        # DB row after we removed it. In-flight runs finish, then become
+        # deletable like any other.
+        active = _active_profile_id() or ""
+        if not active:
+            # No active org → nothing safe to scope a wipe to (a blank
+            # profile_id would match legacy untagged rows of unknown ownership).
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"ok": False, "error": "no active organisation"}), 400
+            _flash_toast("No active organisation to clear.", "error")
+            nxt = _safe_next(request.form.get("next") or request.args.get("next"))
+            return redirect(nxt or url_for("activity_page"))
+        try:
+            conn = _db()
+            ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM runs WHERE profile_id = ? "
+                    "AND status IN ('done','error')",
+                    (active,),
+                ).fetchall()
+            ]
+            conn.close()
+        except Exception:  # noqa: BLE001
+            ids = []
+        deleted = 0
+        for rid in ids:
+            try:
+                _delete_run(rid)
+                deleted += 1
+            except Exception:  # noqa: BLE001
+                log.warning("clear-all: failed to delete run %s", rid, exc_info=True)
+        log.info("clear-all: org=%r removed %d runs", active, deleted)
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": True, "deleted": deleted})
+        _flash_toast(f"Deleted {deleted} run{'s' if deleted != 1 else ''}.")
+        nxt = _safe_next(request.form.get("next") or request.args.get("next"))
+        return redirect(nxt or url_for("activity_page"))
+
     @app.route("/privacy/cache/clear", methods=["POST"])
     def privacy_cache_clear():
         for d in [DATA_DIR / ".cache" / "pb_lookup", DATA_DIR / ".cache" / "swimmingresults"]:
@@ -27087,40 +27549,9 @@ self.addEventListener('fetch', function(e){
                 "see the pipeline error.</div>"
             )
 
-        # Delete in place: a run row's Delete posts via fetch() and is removed
-        # from the DOM on success, so the user "deletes there and then and stays
-        # on the page" instead of being bounced home. Bound once, delegated, so
-        # it covers every current and future row. No-JS falls back to the form's
-        # ``next`` (this page).
-        run_delete_js = """
-<script>
-(function(){
-  if (window.__mhRunDeleteBound) return; window.__mhRunDeleteBound = true;
-  function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : String(v).replace(/["\\\\]/g,'\\\\$&'); }
-  document.addEventListener('submit', function(e){
-    var form = e.target;
-    if (!form || !form.classList || !form.classList.contains('mh-run-delete')) return;
-    e.preventDefault();
-    if (!window.confirm('Delete this run? This cannot be undone.')) return;
-    var rid = form.getAttribute('data-run-id');
-    var btn = form.querySelector('button');
-    if (btn) btn.disabled = true;
-    fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}})
-      .then(function(r){ return r.json().catch(function(){ return {}; }); })
-      .then(function(j){
-        if (j && j.ok) {
-          var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
-          var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
-          if (err && err.parentNode) err.parentNode.removeChild(err);
-          if (row && row.parentNode) row.parentNode.removeChild(row);
-          if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
-        } else if (btn) { btn.disabled = false; }
-      })
-      .catch(function(){ if (btn) btn.disabled = false; });
-  }, false);
-})();
-</script>"""
-
+        # Delete in place + bulk clear: shared, delegated handler (mh-run-delete
+        # removes a row via fetch; mh-clear-all-runs confirms then reloads).
+        # No-JS falls back to the plain form POST (honours ``next``).
         return (
             f"{section_header}"
             f"{section_intro}"
@@ -27131,7 +27562,7 @@ self.addEventListener('fetch', function(e){
             "<th>Started</th><th></th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
-            f"{run_delete_js}"
+            f"{_RUN_DELETE_JS}"
         )
 
     def _render_settings_status_section() -> str:
