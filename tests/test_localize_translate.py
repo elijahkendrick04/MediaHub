@@ -51,6 +51,16 @@ class TestNoOp:
         gj.assert_not_called()
         assert res.slots == {"caption": "  ", "headline": ""}
 
+    def test_empty_or_unparseable_target_is_a_no_op(self):
+        # An empty/blank target can't be translated to — return the source
+        # untouched without spending (or requiring) a provider call.
+        gj = mock.MagicMock()
+        with mock.patch.object(T, "generate_json", gj):
+            for target in ("", "   ", None):
+                res = translate_slots({"caption": "Great swim!"}, target)
+                assert res.slots == {"caption": "Great swim!"}
+        gj.assert_not_called()
+
 
 class TestTranslation:
     def _patch(self, return_value, provider="gemini-api"):
