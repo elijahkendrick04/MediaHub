@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-24 · `be7ec3815` · QA-016: degrade non-UTF-8 plan/inputs files instead of 500ing (#1041)
+**Last updated:** 2026-06-24 · `0f638eeb3` · AI governance (roadmap 1.23): quotas, role permissions, provenance (#1043)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.23** · Phase 1 (Product) — AI governance: per-org/per-feature quota ledger on `observability/`, provenance manifests on AI media, role-based feature permissions (generative moderation descoped by maintainer 2026-06-24 — a human already approves before any external publishing) · ❌ **NOT STARTED**
 - **1.24** · Phase 1 (Product) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
 - **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 - **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
@@ -1205,14 +1204,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-24 | `20c9952bf` | governance(1.23): apply ruff-format (pre-commit hygiene hook) |
+| 2026-06-24 | `bfc68d343` | governance(1.23): fix two regressions found by the full suite |
+| 2026-06-24 | `997188f99` | governance(1.23): dashboard, settings surface + docs (Build 4b) |
+| 2026-06-24 | `cc70437cd` | governance(1.23): honest provenance manifests on AI media (Build 4a) |
+| 2026-06-24 | `04ee26b46` | governance(1.23): role-based AI feature permissions (Build 3) |
+| 2026-06-24 | `f37490233` | governance(1.23): meter + enforce AI captions at the route (Build 2) |
+| 2026-06-24 | `4dacbf3c2` | governance(1.23): per-org/per-feature quota ledger + policy foundation |
 | 2026-06-24 | `cb237d25f` | QA-016: record full-suite result (11039 passed) in QA sweep doc |
 | 2026-06-23 | `8e801abbc` | QA-016: degrade non-UTF-8 plan/inputs files instead of 500ing |
 | 2026-06-23 | `b34331344` | QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path |
 | 2026-06-23 | `28b63d95e` | fix(observability): measure uptime over the tracked span, not the full window (QA-017) |
 | 2026-06-23 | `b5f7b660c` | test(qa015): wait for async resume-input cleanup (fix parallel-CI flake) |
-| 2026-06-23 | `3a9738027` | fix(web): /plan index must not 500 on sport-load or malformed plan (QA-016 re-open) |
-| 2026-06-23 | `510ccb177` | fix(web): /plan index renders persisted plans defensively (QA-016) |
-| 2026-06-23 | `c2a3b9397` | fix(web): resume interrupted runs so large meets finish (QA-015) |
-| 2026-06-23 | `f25c368ab` | style(pwa): wrap _save_library_photo signature (ruff-format) |
-| 2026-06-23 | `6bc8dfda8` | test(interpreter): native-text-PDF regression for QA-014 (swum result, never seed) |
 <!-- /ROADMAP:ACTIVITY -->
