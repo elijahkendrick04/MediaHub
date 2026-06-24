@@ -28,8 +28,9 @@ of truth all three concerns key off.
 
 from __future__ import annotations
 
-from . import features, quota, context
+from . import features, quota, context, permissions
 from .quota import QuotaExceeded, QuotaStatus, UNLIMITED, check, enforce, limit_for, record
+from .permissions import can_use_feature, denial_reason, features_for_role, required_capability
 from .context import (
     FeatureScope,
     bind,
@@ -44,6 +45,7 @@ __all__ = [
     "features",
     "quota",
     "context",
+    "permissions",
     # quota policy
     "QuotaExceeded",
     "QuotaStatus",
@@ -52,6 +54,11 @@ __all__ = [
     "enforce",
     "limit_for",
     "record",
+    # feature permissions
+    "can_use_feature",
+    "denial_reason",
+    "features_for_role",
+    "required_capability",
     # request context + guard
     "FeatureScope",
     "feature_scope",

@@ -21813,22 +21813,43 @@ function copyWhyCard(btn, taId) {{
                         "explanation": explanation,
                     }
                 ), 200
-            # Governance (1.23): meter this caption generation against the run's
-            # owning org, and hard-block ONLY if a specific caption quota is
-            # configured for it and reached. The plan comes from the acting user;
-            # with no configured limit this is a no-op (meter-only). Recording
-            # happens once in the finally below.
+            # Governance (1.23): role permission + per-org caption quota.
+            # Permission gates WHO may generate (editor+ on a bound org; pilot
+            # orgs and the operator keep the owner seat, so their flow is
+            # unchanged). Quota gates HOW MUCH, hard-blocking only where a
+            # specific caption limit is configured. The plan comes from the
+            # acting user. Usage is recorded once in the finally below.
             from mediahub.governance import (
                 features as _gov_features,
+                permissions as _gov_perms,
                 quota as _gov_quota,
             )
 
             _gov_org = run_profile_id or ""
             _gov_ok = False
+            _gov_plan = _auth.current_plan()
+            if _gov_org and not _gov_perms.can_use_feature(
+                _active_role(_gov_org), _gov_features.FEATURE_CAPTION, plan=_gov_plan
+            ):
+                return jsonify(
+                    {
+                        "caption": "",
+                        "tone": tone,
+                        "live": False,
+                        "generated_at": now_iso,
+                        "error": "forbidden",
+                        "message": _gov_perms.denial_reason(
+                            _active_role(_gov_org),
+                            _gov_features.FEATURE_CAPTION,
+                            plan=_gov_plan,
+                        ),
+                        "explanation": explanation,
+                    }
+                ), 403
             if _gov_org:
                 try:
                     _gov_quota.enforce(
-                        _gov_org, _gov_features.FEATURE_CAPTION, plan=_auth.current_plan()
+                        _gov_org, _gov_features.FEATURE_CAPTION, plan=_gov_plan
                     )
                 except _gov_quota.QuotaExceeded as _qe:
                     return jsonify(
@@ -42813,6 +42834,34 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
         return jsonify({"error": "imagine_failed", "user_message": str(exc)}), 502
 
+    def _imagine_role_ok(pid: str) -> bool:
+        """Governance (1.23): may the actor's role use generative imagery?
+
+        Editor+ on a bound org; pilot orgs and the operator keep the owner seat,
+        so their flow is unchanged. Deterministic ops (subject-lift, grab-text)
+        spend no AI budget and are not gated here.
+        """
+        from mediahub.governance import features as _gf, permissions as _gp
+
+        return _gp.can_use_feature(
+            _active_role(pid), _gf.FEATURE_IMAGINE, plan=_auth.current_plan()
+        )
+
+    def _imagine_forbidden(pid: str):
+        from mediahub.governance import features as _gf, permissions as _gp
+
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "user_message": _gp.denial_reason(
+                        _active_role(pid), _gf.FEATURE_IMAGINE, plan=_auth.current_plan()
+                    ),
+                }
+            ),
+            403,
+        )
+
     @app.route("/api/media-library/imagine/info")
     def api_imagine_info():
         """Capabilities, active provider, style presets, and this org's quota."""
@@ -42841,6 +42890,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         pid = _active_profile_id()
         if not pid:
             return jsonify({"error": "no_profile"}), 403
+        if not _imagine_role_ok(pid):
+            return _imagine_forbidden(pid)
         body = request.get_json(silent=True) or {}
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
@@ -42924,6 +42975,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         pid = _active_profile_id()
         if not pid:
             return jsonify({"error": "no_profile"}), 403
+        if not _imagine_role_ok(pid):
+            return _imagine_forbidden(pid)
         store = _v8_get_media_store()
         a = store.get(asset_id)
         if not a:
