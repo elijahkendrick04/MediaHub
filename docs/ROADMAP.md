@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-23 · `095e91bc9` · QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path (#1037)
+**Last updated:** 2026-06-24 · `be7ec3815` · QA-016: degrade non-UTF-8 plan/inputs files instead of 500ing (#1041)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1205,6 +1205,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-24 | `cb237d25f` | QA-016: record full-suite result (11039 passed) in QA sweep doc |
+| 2026-06-23 | `8e801abbc` | QA-016: degrade non-UTF-8 plan/inputs files instead of 500ing |
 | 2026-06-23 | `b34331344` | QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path |
 | 2026-06-23 | `28b63d95e` | fix(observability): measure uptime over the tracked span, not the full window (QA-017) |
 | 2026-06-23 | `b5f7b660c` | test(qa015): wait for async resume-input cleanup (fix parallel-CI flake) |
@@ -1213,7 +1215,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `c2a3b9397` | fix(web): resume interrupted runs so large meets finish (QA-015) |
 | 2026-06-23 | `f25c368ab` | style(pwa): wrap _save_library_photo signature (ruff-format) |
 | 2026-06-23 | `6bc8dfda8` | test(interpreter): native-text-PDF regression for QA-014 (swum result, never seed) |
-| 2026-06-23 | `05bb2a12b` | feat(pwa): mobile caption/crop sheet, install affordance, icons + docs (1.22 build 3) |
-| 2026-06-23 | `430ebfecc` | feat(pwa): offline-tolerant approval queue (1.22 build 2) |
-| 2026-06-23 | `c41b6cf6d` | feat(pwa): share-target + mobile camera capture to media library (1.22 build 1) |
 <!-- /ROADMAP:ACTIVITY -->
