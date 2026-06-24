@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-24 · `0763e3dd1` · governance(1.23): exempt the signed-in developer/operator from AI quotas (#1045)
+**Last updated:** 2026-06-24 · `c89a54740` · Localisation & translation (roadmap 1.24) (#1047)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -142,7 +142,6 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
-- **1.24** · Phase 1 (Product) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
 - **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 - **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
 - **1.27** · Phase 1 (Product) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
@@ -1204,16 +1203,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-24 | `c76085dc8` | docs(1.24): mark localisation shipped in the creative-suite parity map |
+| 2026-06-24 | `859010b1d` | localize(1.24): AI-dub pipeline for reels (Build 5/5) |
+| 2026-06-24 | `405167e0c` | localize(1.24): UI i18n (Welsh-first) + bulk per-language variants (Build 4/5) |
+| 2026-06-24 | `ec278326b` | localize(1.24): renderer RTL + non-Latin script fonts + re-render (Build 3/5) |
+| 2026-06-24 | `e44f9884e` | fix(1.24): CI green for Build 2 — textContent Unicode + wf-store test isolation |
+| 2026-06-24 | `b6dcde03a` | style(1.24): ruff-format the web.py + workflow-status edits |
+| 2026-06-24 | `216318701` | localize(1.24): card translation + bilingual approval pairs (Build 2/5) |
+| 2026-06-24 | `39c59524e` | localize(1.24): core translation engine + per-sport glossary (Build 1/5) |
 | 2026-06-24 | `c334d2f4a` | governance(1.23): exempt the signed-in developer/operator from AI quotas |
 | 2026-06-24 | `20c9952bf` | governance(1.23): apply ruff-format (pre-commit hygiene hook) |
 | 2026-06-24 | `bfc68d343` | governance(1.23): fix two regressions found by the full suite |
 | 2026-06-24 | `997188f99` | governance(1.23): dashboard, settings surface + docs (Build 4b) |
-| 2026-06-24 | `cc70437cd` | governance(1.23): honest provenance manifests on AI media (Build 4a) |
-| 2026-06-24 | `04ee26b46` | governance(1.23): role-based AI feature permissions (Build 3) |
-| 2026-06-24 | `f37490233` | governance(1.23): meter + enforce AI captions at the route (Build 2) |
-| 2026-06-24 | `4dacbf3c2` | governance(1.23): per-org/per-feature quota ledger + policy foundation |
-| 2026-06-24 | `cb237d25f` | QA-016: record full-suite result (11039 passed) in QA sweep doc |
-| 2026-06-23 | `8e801abbc` | QA-016: degrade non-UTF-8 plan/inputs files instead of 500ing |
-| 2026-06-23 | `b34331344` | QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path |
-| 2026-06-23 | `28b63d95e` | fix(observability): measure uptime over the tracked span, not the full window (QA-017) |
 <!-- /ROADMAP:ACTIVITY -->
