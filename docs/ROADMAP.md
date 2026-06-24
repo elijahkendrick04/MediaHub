@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-24 · `0f638eeb3` · AI governance (roadmap 1.23): quotas, role permissions, provenance (#1043)
+**Last updated:** 2026-06-24 · `0763e3dd1` · governance(1.23): exempt the signed-in developer/operator from AI quotas (#1045)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1204,6 +1204,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-24 | `c334d2f4a` | governance(1.23): exempt the signed-in developer/operator from AI quotas |
 | 2026-06-24 | `20c9952bf` | governance(1.23): apply ruff-format (pre-commit hygiene hook) |
 | 2026-06-24 | `bfc68d343` | governance(1.23): fix two regressions found by the full suite |
 | 2026-06-24 | `997188f99` | governance(1.23): dashboard, settings surface + docs (Build 4b) |
@@ -1215,5 +1216,4 @@ list and the auto table below, not here.
 | 2026-06-23 | `8e801abbc` | QA-016: degrade non-UTF-8 plan/inputs files instead of 500ing |
 | 2026-06-23 | `b34331344` | QA-018: exclude DQ swims from the HY3/SDIF "possible PB" path |
 | 2026-06-23 | `28b63d95e` | fix(observability): measure uptime over the tracked span, not the full window (QA-017) |
-| 2026-06-23 | `b5f7b660c` | test(qa015): wait for async resume-input cleanup (fix parallel-CI flake) |
 <!-- /ROADMAP:ACTIVITY -->
