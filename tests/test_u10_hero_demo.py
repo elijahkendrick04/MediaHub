@@ -444,3 +444,35 @@ def test_reduced_motion_rests_every_new_beat_composed():
     assert ".mh-demo-chip { opacity: 1; transform: none; }" in rm
     # the new beats are also in the hard `animation: none !important` reset
     assert ".mh-demo-chip { animation: none !important; }" in rm
+
+
+# =========================================================================== #
+# Group F — queue context (regression guard for autotest finding f51fbb0c9424)
+# =========================================================================== #
+def test_review_scene_shows_queue_position():
+    """The review scene must surface a queue position indicator so a visitor
+    understands there are 3 ranked moments to triage — not just the one
+    visible Tom Davies card.
+
+    Without this the demo advertises '3 moments ranked' in Scene 1, then
+    dead-ends after a single card with no indication that the relay and Aoife
+    Nolan's sub-1:00 are also waiting for approval.
+
+    Regression guard for autotest finding f51fbb0c9424 (re-appeared after
+    PR #219 fixed the approve-all button but left the root cause unfixed).
+    """
+    html = _demo_html()
+    # Scene 1 must still advertise 3 moments (precondition for the bug).
+    assert "3 moments ranked" in html
+    # The review scene must carry a queue position indicator so the visitor
+    # knows which moment they are looking at and how many remain.
+    assert "mh-demo-qcount" in html, (
+        "review scene must carry a queue position element (mh-demo-qcount); "
+        "without it '3 moments ranked' advertises a queue that appears to have "
+        "only 1 card — the other 2 ranked moments have no visible path to review"
+    )
+    # The indicator text must show position-in-queue context (e.g. '1 of 3').
+    assert "of 3" in html, (
+        "queue indicator must show position context e.g. '1 of 3' so the visitor "
+        "understands two more moments follow Tom Davies in the queue"
+    )
