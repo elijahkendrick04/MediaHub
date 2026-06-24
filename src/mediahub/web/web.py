@@ -3463,7 +3463,9 @@ def _card_creative_js() -> str:
     picker. Lives on the Content builder page (post-approval). The host
     page must define `WF_API_BASE` and `window._API_BASE` before this
     block so caption edits and visual picks can persist."""
-    return _translatable_langs_js() + """
+    return (
+        _translatable_langs_js()
+        + """
 <script>
 // V8: Live caption tone toggle + regenerate
 // switchTone() kept for backwards compat (content pack, other pages).
@@ -5218,6 +5220,7 @@ function shareRevoke(cardId, token) {
 }
 </script>
 """
+    )
 
 
 def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
