@@ -22,15 +22,18 @@ external publishing, and the existing prompt-injection guard, child-policy
 backstop and data-minimisation already cover the safety surface that matters
 here.
 
-The feature registry (:mod:`mediahub.governance.features`) is the shared source
-of truth all three concerns key off.
+Import note: ``features``, ``quota``, ``context`` and ``provenance`` are pure
+(stdlib + observability) and imported eagerly. ``permissions`` reaches the
+collaboration role matrix (and thus the web layer), so it is imported lazily via
+``__getattr__`` — ``import mediahub.governance`` and
+``from mediahub.governance import provenance`` stay cheap for the rendering and
+request paths.
 """
 
 from __future__ import annotations
 
-from . import features, quota, context, permissions
+from . import features, quota, context, provenance
 from .quota import QuotaExceeded, QuotaStatus, UNLIMITED, check, enforce, limit_for, record
-from .permissions import can_use_feature, denial_reason, features_for_role, required_capability
 from .context import (
     FeatureScope,
     bind,
@@ -41,10 +44,34 @@ from .context import (
     set_request_context,
 )
 
+# Lazily-resolved names that live in the web-coupled permissions submodule.
+_LAZY_PERMISSION_NAMES = frozenset(
+    {
+        "permissions",
+        "can_use_feature",
+        "denial_reason",
+        "features_for_role",
+        "required_capability",
+    }
+)
+
+
+def __getattr__(name: str):
+    if name in _LAZY_PERMISSION_NAMES:
+        import importlib
+
+        # import_module (not ``from . import``) so this doesn't recurse back
+        # through __getattr__ while the submodule is still unbound.
+        _permissions = importlib.import_module(f"{__name__}.permissions")
+        return _permissions if name == "permissions" else getattr(_permissions, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "features",
     "quota",
     "context",
+    "provenance",
     "permissions",
     # quota policy
     "QuotaExceeded",
@@ -54,11 +81,6 @@ __all__ = [
     "enforce",
     "limit_for",
     "record",
-    # feature permissions
-    "can_use_feature",
-    "denial_reason",
-    "features_for_role",
-    "required_capability",
     # request context + guard
     "FeatureScope",
     "feature_scope",
@@ -67,4 +89,9 @@ __all__ = [
     "clear_request_context",
     "current_org_id",
     "current_plan",
+    # feature permissions (lazy)
+    "can_use_feature",
+    "denial_reason",
+    "features_for_role",
+    "required_capability",
 ]
