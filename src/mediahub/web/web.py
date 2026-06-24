@@ -16652,16 +16652,20 @@ def create_app() -> Flask:
 
     @app.before_request
     def _bind_governance_context():
-        """Bind the active org + plan for AI-governance metering (1.23).
+        """Bind the active org for AI-governance metering (1.23).
 
         AI surfaces read this request-scoped context to attribute usage to the
-        right org/plan without threading ``org_id`` through every signature.
-        Strictly best-effort: a hiccup here must never block a request.
+        right org without threading ``org_id`` through every signature. We bind
+        the org only and deliberately do NOT resolve the user's plan here:
+        ``current_plan()`` would validate the user record and self-heal a stale
+        session mid-request (dropping the session email), which is a side effect
+        a metering hook must not have. Routes that enforce a plan-specific quota
+        pass the plan explicitly. Strictly best-effort.
         """
         try:
             from mediahub import governance
 
-            governance.set_request_context(_active_profile_id(), _auth.current_plan())
+            governance.set_request_context(_active_profile_id(), None)
         except Exception:
             pass
 
@@ -25781,7 +25785,7 @@ self.addEventListener('fetch', function(e){
             (
                 "AI governance",
                 "AI usage and quota headroom, who can use which AI feature, and provenance.",
-                "governance",
+                "privacy",
                 url_for("settings_section", section="governance"),
             ),
             (
@@ -25871,7 +25875,9 @@ self.addEventListener('fetch', function(e){
             else:
                 pct = min(100, int(used * 100 / limit)) if limit else 0
                 colour = (
-                    "#e74c3c" if used >= limit else ("#f1c40f" if pct >= 80 else "var(--accent)")
+                    "var(--mh-prim-error-500)"
+                    if used >= limit
+                    else ("var(--mh-prim-warning-500)" if pct >= 80 else "var(--accent)")
                 )
                 limit_cell = (
                     f"{used} / {limit}"
@@ -25911,7 +25917,7 @@ self.addEventListener('fetch', function(e){
             for s in feats:
                 ok = governance.can_use_feature(role, s.key, plan=plan)
                 mark = (
-                    '<span style="color:#2ecc71">&#10003;</span>'
+                    '<span style="color:var(--mh-prim-success-400)">&#10003;</span>'
                     if ok
                     else '<span style="color:var(--ink-muted)">&mdash;</span>'
                 )
