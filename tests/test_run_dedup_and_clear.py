@@ -7,6 +7,7 @@ Covers:
   * the delete / clear / "Re-run" UI on My Season and Activity
   * the additive schema migration (content_hash + meet_fingerprint columns)
 """
+
 from __future__ import annotations
 
 import importlib
@@ -140,8 +141,22 @@ def _seed_run(
         "INSERT OR REPLACE INTO runs (id, created_at, finished_at, status, profile_id, "
         "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name, "
         "content_hash, meet_fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (run_id, created_at, created_at, status, pid, meet, our_swims, 0, 0, n_ach,
-         None, "f.hy3", content_hash, meet_fingerprint),
+        (
+            run_id,
+            created_at,
+            created_at,
+            status,
+            pid,
+            meet,
+            our_swims,
+            0,
+            0,
+            n_ach,
+            None,
+            "f.hy3",
+            content_hash,
+            meet_fingerprint,
+        ),
     )
     conn.commit()
     conn.close()
@@ -164,8 +179,13 @@ def test_runs_table_has_dedup_columns(client):
 def test_find_duplicate_run_by_hash_and_fingerprint(client):
     _c, wm, _ = client
     _seed_run(
-        wm, "orig", "club-a", "Spring Open", created_at="2026-05-10T10:00:00",
-        content_hash="HASHX", meet_fingerprint="FPX",
+        wm,
+        "orig",
+        "club-a",
+        "Spring Open",
+        created_at="2026-05-10T10:00:00",
+        content_hash="HASHX",
+        meet_fingerprint="FPX",
     )
     # Exact file re-run (same hash, unrelated fingerprint).
     d = wm._find_duplicate_run("club-a", "HASHX", "OTHER")
@@ -209,9 +229,10 @@ def test_clear_all_skips_in_flight_runs(client):
     r = c.post("/privacy/runs/clear-all", headers={"X-Requested-With": "XMLHttpRequest"})
     assert r.get_json()["deleted"] == 1
     conn = wm._db()
-    remaining = [row["id"] for row in conn.execute(
-        "SELECT id FROM runs WHERE profile_id='club-a'"
-    ).fetchall()]
+    remaining = [
+        row["id"]
+        for row in conn.execute("SELECT id FROM runs WHERE profile_id='club-a'").fetchall()
+    ]
     conn.close()
     assert remaining == ["run1"]  # the in-flight run survives
 
@@ -255,11 +276,19 @@ def test_activity_shows_rerun_badge_for_duplicate(client):
     c, wm, _ = client
     # Two runs, same meet fingerprint → the newer is a re-run of the older.
     _seed_run(
-        wm, "first", "club-a", "Spring Open", created_at="2026-05-10T10:00:00",
+        wm,
+        "first",
+        "club-a",
+        "Spring Open",
+        created_at="2026-05-10T10:00:00",
         meet_fingerprint="FP1",
     )
     _seed_run(
-        wm, "second", "club-a", "Spring Open", created_at="2026-05-12T10:00:00",
+        wm,
+        "second",
+        "club-a",
+        "Spring Open",
+        created_at="2026-05-12T10:00:00",
         meet_fingerprint="FP1",
     )
     _pin(c, "club-a")
@@ -274,11 +303,19 @@ def test_activity_shows_rerun_badge_for_duplicate(client):
 def test_no_rerun_badge_for_distinct_meets(client):
     c, wm, _ = client
     _seed_run(
-        wm, "m1", "club-a", "Spring Open", created_at="2026-05-10T10:00:00",
+        wm,
+        "m1",
+        "club-a",
+        "Spring Open",
+        created_at="2026-05-10T10:00:00",
         meet_fingerprint="FP1",
     )
     _seed_run(
-        wm, "m2", "club-a", "Autumn Gala", created_at="2026-05-12T10:00:00",
+        wm,
+        "m2",
+        "club-a",
+        "Autumn Gala",
+        created_at="2026-05-12T10:00:00",
         meet_fingerprint="FP2",
     )
     _pin(c, "club-a")

@@ -29,6 +29,7 @@ Usage:
     python scripts/purge_all_runs.py --yes      # no prompt (scripted / CI)
     python scripts/purge_all_runs.py --dry-run  # count only; delete nothing
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,9 +49,7 @@ def main() -> int:
     parser.add_argument(
         "--yes", action="store_true", help="skip the interactive confirmation prompt"
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="report counts only; delete nothing"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="report counts only; delete nothing")
     args = parser.parse_args()
 
     from mediahub.web import web as wm

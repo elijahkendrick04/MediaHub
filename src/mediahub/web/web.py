@@ -2957,9 +2957,7 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     # stamp the meet fingerprint now the canonical meet (name + date) is known.
     prior_hash = ""
     try:
-        _hr = conn.execute(
-            "SELECT content_hash FROM runs WHERE id = ?", (run.run_id,)
-        ).fetchone()
+        _hr = conn.execute("SELECT content_hash FROM runs WHERE id = ?", (run.run_id,)).fetchone()
         if _hr and _hr["content_hash"]:
             prior_hash = _hr["content_hash"]
     except Exception:  # noqa: BLE001
@@ -3515,7 +3513,9 @@ def _meet_fingerprint(
         return ""
     day = str(meet_date or "").strip()[:10]
     basis = f"{(profile_id or '').strip()}|{norm}|{day}"
-    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+    # SHA-256 (not SHA-1) — this is just a stable identity key, never a security
+    # primitive, but SHA-256 keeps the static-analysis gate (bandit B324) clean.
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
 def _find_duplicate_run(
@@ -3541,9 +3541,7 @@ def _find_duplicate_run(
         return None
     sql = (
         "SELECT id, meet_name, created_at, content_hash, meet_fingerprint, our_swims "
-        "FROM runs WHERE profile_id = ? AND status = 'done' AND ("
-        + " OR ".join(clauses)
-        + ") "
+        "FROM runs WHERE profile_id = ? AND status = 'done' AND (" + " OR ".join(clauses) + ") "
     )
     args: list = [profile_id, *params]
     if exclude_run_id:
@@ -3630,7 +3628,7 @@ def _duplicate_map(rows) -> dict:
     for members in groups.values():
         if len(members) < 2:
             continue
-        members_sorted = sorted(members, key=lambda i: (rowmap[i]["created_at"] or ""))
+        members_sorted = sorted(members, key=lambda i: rowmap[i]["created_at"] or "")
         oldest = members_sorted[0]
         for rid in members_sorted[1:]:
             dup[rid] = {
@@ -3678,9 +3676,7 @@ def _dup_badge_html(dup_entry: Optional[dict]) -> str:
     )
     if original_id:
         href = url_for("review", run_id=original_id)
-        return (
-            f'<a href="{href}" title="{_h(title)}" style="{style}">Re-run</a>'
-        )
+        return f'<a href="{href}" title="{_h(title)}" style="{style}">Re-run</a>'
     return f'<span title="{_h(title)}" style="{style}">Re-run</span>'
 
 
@@ -20051,9 +20047,7 @@ def create_app() -> Flask:
             duplicate = _find_duplicate_run(_pid, _chash, _fp, exclude_run_id=run_id)
         except Exception:  # noqa: BLE001
             duplicate = None
-        return _render_configure(
-            run_id, meta, selected_club=_preselect, duplicate=duplicate
-        )
+        return _render_configure(run_id, meta, selected_club=_preselect, duplicate=duplicate)
 
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
@@ -24216,8 +24210,7 @@ Relay team broke club record"></textarea>
             ids = [
                 row["id"]
                 for row in conn.execute(
-                    "SELECT id FROM runs WHERE profile_id = ? "
-                    "AND status IN ('done','error')",
+                    "SELECT id FROM runs WHERE profile_id = ? AND status IN ('done','error')",
                     (active,),
                 ).fetchall()
             ]
