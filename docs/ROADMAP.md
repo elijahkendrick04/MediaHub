@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-24 · `c5288250d` · Harden localisation (1.24): bidi, glossary casing, bulk norm, metered translate (#1049)
+**Last updated:** 2026-06-25 · `26e7a3a78` · Run deletion + bulk clear (My Season, Activity) and duplicate-meet detection (#1051)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1203,6 +1203,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-24 | `b8eedb581` | Fix CI: use SHA-256 for meet fingerprint (bandit B324) + ruff-format |
+| 2026-06-24 | `6c12bac0d` | Add run deletion + bulk clear (My Season, Activity) and duplicate-meet detection |
 | 2026-06-24 | `b1184fc43` | 1.24: persist-visible translations, honest error shape, metered translate |
 | 2026-06-24 | `a9543cd73` | 1.24: normalise bulk language fan-out and fix the cap break |
 | 2026-06-24 | `4982f9dff` | 1.24: isolate bidi on RTL renders so embedded LTR runs don't scramble |
@@ -1213,6 +1215,4 @@ list and the auto table below, not here.
 | 2026-06-24 | `ec278326b` | localize(1.24): renderer RTL + non-Latin script fonts + re-render (Build 3/5) |
 | 2026-06-24 | `e44f9884e` | fix(1.24): CI green for Build 2 — textContent Unicode + wf-store test isolation |
 | 2026-06-24 | `b6dcde03a` | style(1.24): ruff-format the web.py + workflow-status edits |
-| 2026-06-24 | `216318701` | localize(1.24): card translation + bilingual approval pairs (Build 2/5) |
-| 2026-06-24 | `39c59524e` | localize(1.24): core translation engine + per-sport glossary (Build 1/5) |
 <!-- /ROADMAP:ACTIVITY -->
