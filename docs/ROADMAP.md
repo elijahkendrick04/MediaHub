@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-25 · `26e7a3a78` · Run deletion + bulk clear (My Season, Activity) and duplicate-meet detection (#1051)
+**Last updated:** 2026-06-26 · `c4e4ea2c5` · Merge pull request #1054 from elijahkendrick04/dependabot/github_actions/actions/cache-6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1203,6 +1203,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-26 | `5269ea922` | build(deps): bump actions/cache from 5 to 6 |
 | 2026-06-24 | `b8eedb581` | Fix CI: use SHA-256 for meet fingerprint (bandit B324) + ruff-format |
 | 2026-06-24 | `6c12bac0d` | Add run deletion + bulk clear (My Season, Activity) and duplicate-meet detection |
 | 2026-06-24 | `b1184fc43` | 1.24: persist-visible translations, honest error shape, metered translate |
@@ -1214,5 +1215,4 @@ list and the auto table below, not here.
 | 2026-06-24 | `405167e0c` | localize(1.24): UI i18n (Welsh-first) + bulk per-language variants (Build 4/5) |
 | 2026-06-24 | `ec278326b` | localize(1.24): renderer RTL + non-Latin script fonts + re-render (Build 3/5) |
 | 2026-06-24 | `e44f9884e` | fix(1.24): CI green for Build 2 — textContent Unicode + wf-store test isolation |
-| 2026-06-24 | `b6dcde03a` | style(1.24): ruff-format the web.py + workflow-status edits |
 <!-- /ROADMAP:ACTIVITY -->
