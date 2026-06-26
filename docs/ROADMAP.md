@@ -142,6 +142,10 @@ second sport on Phases 1–3 — the swimming wedge is sold before we broaden
 > [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md). The build queue below opens at Phase 2.
 
 <!-- ROADMAP:TODO -->
+- **RP.1** · Repo-private fast-track (pre-flight, do first) — Full-history secret re-audit + public-exposure inventory: re-run gitleaks over all history, confirm `.env`/keys were never committed, list what stays permanently clonable by anyone who already took a copy (children's-data fixtures + the committed pricing/sales strategy in `docs/`, no credentials per the prior audit), rotate anything found, and re-confirm 0 forks / no unauthenticated runtime fetch of this repo's own files (README badges are static shields.io; the Dockerfile's raw.githubusercontent fetch targets SearXNG, not us) · ❌ **NOT STARTED**
+- **RP.2** · Repo-private fast-track (pre-flight) — Trim CI Actions-minutes and ship it BEFORE the flip (the one real cost: a private repo on Free gets 2,000 min/mo, and today's `autotest` every 6 h × 70 min + `dependabot-automerge` every 30 min + nightly Lighthouse/cross-browser + daily contract would burn that in days): `autotest` 6 h → daily, automerge 30 min → 4–6 h, consolidate the nightlies, add `concurrency: cancel-in-progress` on the push/PR suites · ❌ **NOT STARTED**
+- **RP.3** · Repo-private fast-track (pre-flight) — Keep `main` protection alive on private: classic protected-branches are **public-only on the Free plan**, so migrate `main`'s protection to a repository **ruleset** (free on private) and verify the three self-merging bots (autotest fixer, `roadmap-autoupdate`, `dependabot-automerge`) and the `claude/*` app-token PRs all still merge under it — else the flip silently drops branch protection and the bot-merge model breaks · ❌ **NOT STARTED**
+- **RP.4** · Repo-private fast-track (pre-flight) — Make "private repo" read true in the docs + leave no dangling public dependency: update `DATA_MAP` §6 + `OPEN_LEGAL_QUESTIONS` Q13 with the honest public-window dates, keep the CI security gates (gitleaks/bandit/semgrep/pip-audit) that replace GitHub's free public-repo secret-scanning, and record that Upptime's public status page / GitHub Pages must not be turned on while private without Pro · ❌ **NOT STARTED**
 - **1.25** · Phase 1 (Product) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 - **1.26** · Phase 1 (Product) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
 - **1.27** · Phase 1 (Product) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
@@ -166,6 +170,9 @@ lawful-to-sell / payments / ops groundwork (F.1–F.7, F.13, F.12); then the
 selling motion itself (PC.4 pricing, PC.6 the first ~10 clubs).
 
 <!-- ROADMAP:TODO_FOUNDER -->
+- **F.14** · Repo-private fast-track — Decide the CI billing/plan before flipping (the one real cost): accept the RP.2 trimmed-CI Free-tier 2,000-min/mo budget, or upgrade to GitHub Pro (~$4/mo, 3,000 min); settle it so the Actions quota never silently stalls CI the day after the flip · ❌ **NOT STARTED**
+- **F.13** · Repo-private fast-track — **THE FLIP** (admin-only, do now; de-gated from Phase 3 on founder directive 2026-06-26 because the repo is now being found publicly): once RP.1–RP.4 + F.14 are settled, Settings → General → Danger Zone → Change visibility → **Make private** (type the repo name). First confirm no external party still needs read access (convert any who do to collaborators) and re-check forks = 0 at the moment of flipping (a fork made while public survives as an independent public copy). The flip recalls nothing already cloned, and turns off GitHub's free public-repo secret-scanning/push-protection (CI's own gitleaks/bandit/semgrep keep running) · ❌ **NOT STARTED**
+- **F.15** · Repo-private fast-track — Re-verify every integration AFTER the flip: confirm the Render GitHub App still has access to the now-private repo (re-grant private-repo permission if needed) and trigger a manual deploy; push a trivial commit and watch CI + `roadmap-autoupdate` + Dependabot go green; confirm Claude Code web/remote sessions still drive the private repo; a logged-out browser must 404 on the repo URL; then pin the public-window dates from the account security log (`github.com/settings/security-log`, filter `repo.access`) into the compliance docs and confirm Billing shows Actions usage inside budget · ❌ **NOT STARTED**
 - **F.9** · Choose the real company name (MediaHub is a filler): run the four-register name diligence — Companies House, UK trade marks, domain, social handles — and make the call · ❌ **NOT STARTED**
 - **F.10** · Register the company at Companies House: verify your identity, file online (£100), then the post-registration basics — Corporation Tax, business bank account, statutory diary · ❌ **NOT STARTED**
 - **F.11** · Buy the .co.uk domain in the company's name and point it at the live app (custom domain + TLS on Render today; Stripe webhook and base URL move with it) · ❌ **NOT STARTED**
@@ -176,7 +183,6 @@ selling motion itself (PC.4 pricing, PC.6 the first ~10 clubs).
 - **F.5** · Adapt and submit the drafted Swim England API application · ❌ **NOT STARTED**
 - **F.6** · Production ops decisions: retention period, breach owner named in the runbook, insurance, Remotion licence (or the free ffmpeg engine), Render snapshots + off-site backup target · ❌ **NOT STARTED**
 - **F.7** · Each season: refresh the qualifying-time tables (recurring; runbook in `data/standards/README.md`) · ❌ **NOT STARTED**
-- **F.13** · Take the GitHub repo private again (public today; the children's-data fixtures' lawful-basis note assumes a private repo): pre-flight sweep, CI-minutes plan, the Settings flip, integration re-checks — at the latest before the first club pays · ❌ **NOT STARTED**
 - **F.12** · 🔒 Gated (Phases 1–2 first) — Decide and execute the cheaper-hosting move off Render (≈£20/mo → ≈£4–8/mo VPS) via the rehearsed backup-restore cutover — after F.11, never ahead of selling · ❌ **NOT STARTED**
 - **PC.4** · Phase 3 (Go to market · 🔒 gated: Phases 1–2 first) — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–2 land) · 🔵 **IN PROGRESS**
 - **PC.6** · Phase 3 (Go to market · 🔒 gated: Phases 1–2 first) — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–2 land) · 🔵 **IN PROGRESS**
@@ -594,11 +600,20 @@ are curated, not scraped.
 3. **Verify:** one known qualifying swim produces a "qualified" card naming
    the new standard and its source.
 
-#### F.13 — Take the GitHub repo private again
+#### F.13 / F.14 / F.15 — Take the GitHub repo private again (fast-tracked)
+
+> **Founder directive 2026-06-26 — fast-track.** People have started coming
+> across the public repo, so this is no longer gated behind Phases 1–2: it is
+> pulled to the top of both to-do lists and de-gated from Phase 3. The work
+> splits into a Claude-doable **pre-flight** (build list: **RP.1** secret
+> re-audit, **RP.2** CI-minutes trim, **RP.3** branch-protection→ruleset
+> migration, **RP.4** docs/compliance honesty) and three **admin-only** founder
+> steps (**F.14** decide the CI plan, **F.13** the flip itself, **F.15**
+> post-flip re-verify). Do RP.1–RP.4 and F.14 first, then flip (F.13), then
+> verify (F.15).
 
 The repo (`github.com/elijahkendrick04/MediaHub`) is **public today** and
-needs to return to private; the only open questions are *when* and *what to
-check on the way*. Why it matters, in weight order: (1) **compliance** — the
+needs to return to private now. Why it matters, in weight order: (1) **compliance** — the
 parser fixtures hold real children's personal data from published meets
 (`samples/MISM-2024-Results.pdf`, `samples/learning_corpus/level1/*`), and
 the documented justification for keeping them
@@ -612,10 +627,9 @@ hands competitors the pricing strategy and sales playbook committed in
 `docs/`; (3) **the clock runs one way** — flipping private recalls nothing,
 so everything pushed while public stays permanently clonable by anyone who
 took a copy (the full-history gitleaks audit found no real secrets, so the
-exposure is the fixtures + strategy, not credentials). **Latest sensible
-deadline: before the first club pays** — the sell gate's compliance posture
-leans on Q13's "repo stays private". Do it earlier the moment whatever
-needed the repo public is finished.
+exposure is the fixtures + strategy, not credentials). **The flip recalls nothing already cloned**, so the only lever
+left is to stop adding to the public window — do it now (fast-tracked
+2026-06-26), not "before the first club pays".
 
 1. Confirm the reason it is public has expired and nobody external still
    needs read access — anyone who does becomes a collaborator instead (repo
@@ -637,23 +651,32 @@ needed the repo public is finished.
    ship the trim *before* the flip so the quota never silently stalls CI;
    GitHub Pro (~$4/mo, 3,000 min) if trimming isn't enough; heavy jobs onto
    a self-hosted runner (the F.12 box) later if both fall short.
-4. Flip it: repo → Settings → General → Danger Zone → **Change visibility →
+4. **Migrate `main`'s branch protection to a ruleset (RP.3) — the easily-missed
+   break.** GitHub Free offers classic *protected branches* on **public repos
+   only**; `main` is protected today, and the whole bot-merge model leans on it
+   (autotest fixer, `roadmap-autoupdate`, `dependabot-automerge`, and the
+   `claude/*` app-token PRs). Recreate the same rules as a repository
+   **ruleset** (Settings → Rules → Rulesets — free on private) *before* flipping,
+   or the protection silently disappears the moment the repo goes private.
+   Verify all three bots still merge under the ruleset.
+5. Flip it: repo → Settings → General → Danger Zone → **Change visibility →
    Make private** (type the repo name to confirm). Only you can do this
    (admin). Going private permanently drops stars/watchers (currently 0) and
    turns off GitHub's free public-repo secret scanning / push protection —
    the CI security workflow's own scanners keep running.
-5. Re-verify everything that reads the repo: trigger a manual Render deploy
+6. Re-verify everything that reads the repo: trigger a manual Render deploy
    (the Render GitHub App keeps its access to private repos it was granted),
    open a Claude Code session on the repo, push a trivial commit and watch
    CI + the roadmap-autoupdate bot go green, and confirm Dependabot still
-   files PRs.
-6. Ask Claude Code to record the public window honestly in the compliance docs
+   files PRs, and confirm Claude Code web/remote sessions still drive the
+   private repo.
+7. Ask Claude Code to record the public window honestly in the compliance docs
    (Q13 in `OPEN_LEGAL_QUESTIONS.md` + `DATA_MAP` §6): pin the make-public
    date from your account security log (github.com/settings/security-log,
    filter `repo.access` — 90-day retention), or state repo creation
    (2026-05-08) as the conservative start. "Repo stays private" must read
    true again, with its history accurate.
-7. **Verify:** a logged-out browser gets a 404 on
+8. **Verify:** a logged-out browser gets a 404 on
    `github.com/elijahkendrick04/MediaHub`; CI is green on the next push; a
    Render deploy succeeded after the flip; Settings → Billing shows the
    month's Actions usage tracking inside budget.
@@ -674,7 +697,7 @@ in place when editing.
 <!-- ROADMAP:PHASES
 1 = 1., P6.1, P6.2
 2 = 2., F.9, F.10, F.11
-3 = 3., PC.4, PC.6, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.12, F.13
+3 = 3., PC.4, PC.6, F.1, F.2, F.3, F.4, F.5, F.6, F.7, F.12
 4 = 4.
 -->
 
