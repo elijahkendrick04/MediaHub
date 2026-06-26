@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-26 · `c4e4ea2c5` · Merge pull request #1054 from elijahkendrick04/dependabot/github_actions/actions/cache-6
+**Last updated:** 2026-06-26 · `23152a688` · Merge pull request #1053 from elijahkendrick04/claude/github-repo-private-plan-gk7lok
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1227,6 +1227,7 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-26 | `5269ea922` | build(deps): bump actions/cache from 5 to 6 |
+| 2026-06-26 | `6e332f7e8` | docs(roadmap): fast-track repo-private plan to top of both to-do lists |
 | 2026-06-24 | `b8eedb581` | Fix CI: use SHA-256 for meet fingerprint (bandit B324) + ruff-format |
 | 2026-06-24 | `6c12bac0d` | Add run deletion + bulk clear (My Season, Activity) and duplicate-meet detection |
 | 2026-06-24 | `b1184fc43` | 1.24: persist-visible translations, honest error shape, metered translate |
@@ -1237,5 +1238,4 @@ list and the auto table below, not here.
 | 2026-06-24 | `859010b1d` | localize(1.24): AI-dub pipeline for reels (Build 5/5) |
 | 2026-06-24 | `405167e0c` | localize(1.24): UI i18n (Welsh-first) + bulk per-language variants (Build 4/5) |
 | 2026-06-24 | `ec278326b` | localize(1.24): renderer RTL + non-Latin script fonts + re-render (Build 3/5) |
-| 2026-06-24 | `e44f9884e` | fix(1.24): CI green for Build 2 — textContent Unicode + wf-store test isolation |
 <!-- /ROADMAP:ACTIVITY -->
