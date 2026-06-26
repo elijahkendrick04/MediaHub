@@ -112,7 +112,7 @@ jobs:
         # existing browser across version bumps too (`playwright install` then
         # just verifies and skips the download), so the cache effectively never
         # goes fully cold once any run has populated it.
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
