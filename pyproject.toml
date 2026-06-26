@@ -27,7 +27,7 @@ dependencies = [
   "markupsafe>=3.0.3",
   "requests>=2.34.2",
   "pdfplumber>=0.11.10",
-  "pypdf>=6.13.3",
+  "pypdf>=6.14.2",
   # Document engine (roadmap 1.15): deterministic PPTX/DOCX round-trip for the
   # programme / report / deck formats (take-it-elsewhere editing). Pure-Python.
   "python-pptx>=1.0.2",
@@ -45,11 +45,11 @@ dependencies = [
   # 1.16 microsite QR generator (mediahub.sites.qr): segno is a tiny, pure-Python,
   # MIT-licensed QR encoder (no deps, no external service). The brand-colour /
   # contrast-guard / logo / PNG-SVG-PDF layer is MediaHub's own; honest-errors if absent.
-  "segno>=1.6.0",
+  "segno>=1.6.6",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.
   "materialyoucolor>=3.0.2",
-  "coloraide>=8.8.1",
+  "coloraide>=8.10",
   "numpy>=2.4.6",
   # Sport-profile config loader (mediahub.sport_profiles) parses the
   # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
@@ -68,12 +68,12 @@ dependencies = [
   # means billing 503s and the rest of the app is unaffected.
   "bcrypt>=5.0.0",
   "argon2-cffi>=25.1.0",
-  "stripe>=15.2.1",
+  "stripe>=15.3.0",
 ]
 
 [project.optional-dependencies]
 ai = [
-  "anthropic>=0.111.0",
+  "anthropic>=0.112.0",
   "replicate>=1.0.7",
 ]
 # W.10 OCR fallback for scanned/photographed result sheets (interpreter/ocr.py).
@@ -91,7 +91,7 @@ ocr = [
 # Pillow, already a core dep). Off by default — import_psd() honest-errors with
 # a clear "install the psd extra" message when this is absent, never a stub.
 psd = [
-  "psd-tools>=1.10.0",
+  "psd-tools>=1.17.4",
 ]
 # Voiceover backends (operator-gated by MEDIAHUB_VOICEOVER=1). Roadmap 1.7 made
 # local Piper the DEFAULT (zero-cost, fully offline; caption text never leaves
@@ -144,7 +144,7 @@ dev = [
   # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
   # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
   # API drift, so a future bump can't redden CI — only a real 5xx fails it.
-  "schemathesis>=4.21.9,<5",
+  "schemathesis>=4.21.10,<5",
   # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
   # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
   "pytest-rerunfailures>=16.3",
