@@ -3,7 +3,7 @@ gunicorn>=26.0.0
 requests>=2.34.2
 beautifulsoup4>=4.15.0
 lxml>=6.1.1
-pypdf>=6.13.3
+pypdf>=6.14.2
 # Floor must stay <= the exact pdfminer.six that pdfplumber pins (0.11.9 pins
 # ==20251230); dependabot's >=20260107 bump made the pair unresolvable and
 # broke pip-audit (ResolutionImpossible).
@@ -31,10 +31,10 @@ pillow-heif>=1.4.0
 # MIT-licensed QR encoder (no deps, no external service, no per-call cost). The
 # brand-colour/contrast-guard/logo/PNG-SVG-PDF layer is MediaHub's own; segno only
 # supplies the matrix. The module honest-errors (QRUnavailable) if it's absent.
-segno>=1.6.0
+segno>=1.6.6
 rembg>=2.0.76
 onnxruntime>=1.27.0
-anthropic>=0.111.0
+anthropic>=0.112.0
 replicate>=1.0.7
 
 # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): ships a static FFmpeg
@@ -89,7 +89,7 @@ sqlite-vec>=0.1.9,<0.2
 # the saliency cropper (energy maps), and variant_metrics (perceptual hashing).
 # See docs/THEMING.md for the architecture.
 materialyoucolor>=3.0.2
-coloraide>=8.8.1
+coloraide>=8.10
 numpy>=2.4.6
 
 # Sport-profile config loader (mediahub.sport_profiles) reads the human-authored
@@ -120,7 +120,7 @@ bcrypt>=5.0.0
 # argon2-cffi (MIT): argon2id password hashing (ASVS L2 V2.4); bcrypt stays
 # for verifying legacy hashes, upgraded on next login.
 argon2-cffi>=25.1.0
-stripe>=15.2.1
+stripe>=15.3.0
 
 # W.10 OPTIONAL OCR fallback (interpreter/ocr.py) — deliberately NOT installed
 # here. Scanned/photographed result sheets need a real OCR engine; without one
