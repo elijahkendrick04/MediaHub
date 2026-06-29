@@ -4420,7 +4420,7 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
           '</div>' +
           '<div style="flex:1;min-width:min(200px,100%)">' +
             '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
-            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered via Remotion. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
+            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered by Video Maker. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
               '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
@@ -4597,7 +4597,7 @@ function mhRenderReelBatch(panel, reelUrl, videoUrls, failed) {
   var failedKeys = failed ? Object.keys(failed) : [];
   if (failedKeys.length) {
     var names = failedKeys.map(function(f){ return f.charAt(0).toUpperCase() + f.slice(1); }).join(', ');
-    failNote = '<div style="font-size:12px;color:var(--ink-muted);margin-top:8px">Not produced by the active render engine: ' + names + '. Switch to the Remotion engine for those cuts.</div>';
+    failNote = '<div style="font-size:12px;color:var(--ink-muted);margin-top:8px">Not produced by the active render engine: ' + names + '. Switch to the full Video Maker engine for those cuts.</div>';
   }
   panel.innerHTML =
     '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
@@ -42648,7 +42648,7 @@ function tiRegenerate() {{
                         f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
                         f'href="{_h(_motion_url)}" target="_blank" rel="noopener" '
                         f'title="Render a 6-second branded story-format MP4 for this card. '
-                        f'First time can take 30-90s while Remotion runs.">'
+                        f'First time can take 30-90s while Video Maker renders.">'
                         f"&#x25B6; Motion video</a>"
                     )
                 # Per-card sponsor variant — Phase 1.2 deliverable.
@@ -47891,10 +47891,10 @@ voice, and queues them for one-click approval.</p>
                 "kind": "infra_missing",
                 "detail": detail,
                 "user_message": (
-                    "Motion video rendering isn't available on this "
+                    "Video Maker isn't available on this "
                     "deployment. The operator needs to install Node and "
-                    "run npm install inside src/mediahub/remotion/ for "
-                    "Remotion to work. Static graphics and downloads "
+                    "run npm install inside src/mediahub/remotion/ to "
+                    "enable video rendering. Static graphics and downloads "
                     "still work in the meantime."
                 ),
             }
