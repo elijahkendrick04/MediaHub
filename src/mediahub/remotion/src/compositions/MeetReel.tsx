@@ -1278,8 +1278,11 @@ export const MeetReel: React.FC<Props> = ({
   );
   cursor += coverFrames;
 
-  // One consistent connective cut for every same-rank handoff, derived from
-  // the reel (the top card's seed) so the lower beats feel like one piece.
+  // Connective handoffs stay in the quiet trio (crossfade / push / wipe) — the
+  // bold cuts remain peak-only — but each beat picks its own quiet kind from
+  // its card's seed, so a longer reel no longer plays the identical cut between
+  // every lower beat. `connective` is the reel-level fallback (top card's seed)
+  // for the rare beat that carries no seed of its own.
   const connective = transitionFor(safeCards[0]?.variationSeed || 0);
 
   safeCards.forEach((card, i) => {
@@ -1289,7 +1292,9 @@ export const MeetReel: React.FC<Props> = ({
     const isPeak = i === 0 && safeCards.length > 1;
     const spec = isPeak
       ? transitionFor(card.variationSeed || 0, { peak: true, mood: card.mood })
-      : connective;
+      : card.variationSeed
+        ? transitionFor(card.variationSeed)
+        : connective;
     // Per-card timing: the chosen cut's own duration, capped at the handoff
     // budget so it stays inside the beat overlap (never eats the next build).
     const fadeFrames = transitionFramesFor(spec.durationSeconds, transitionFrames, fps);
