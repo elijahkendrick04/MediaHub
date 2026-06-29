@@ -1184,7 +1184,10 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 # separately and stay byte-identical, so this is reel-only.
 #   "2" — R1.14: expanded transition library (glitch / slide-stack /
 #         light-sweep) + per-card transition timing.
-REEL_COMPOSITION_REVISION = "2"
+#   "3" — per-card connective cut (each lower beat picks its own quiet kind
+#         from its seed instead of sharing one) + stronger on-video text
+#         legibility (bolder keyline/extrude, firmer photo scrim).
+REEL_COMPOSITION_REVISION = "3"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

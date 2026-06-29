@@ -158,24 +158,27 @@ function declarationsFor(
     }
     case "outline": {
       // A steady dark keyline around every glyph (legibility over photos).
-      return `text-shadow: ${keyline(ink, 0.022)};`;
+      // Firmer than a hairline so headlines hold their edge on a busy photo
+      // at feed distance with the sound off.
+      return `text-shadow: ${keyline(ink, 0.03)};`;
     }
     case "shadow3d": {
       // Stepped down-right extrude in the ground role for depth.
       const soft = withAlpha(ink, 0x99);
       return (
-        `text-shadow: 0.018em 0.018em 0 ${ink}, 0.036em 0.036em 0 ${ink}, ` +
-        `0.054em 0.054em 0 ${soft}, 0.072em 0.072em 0.02em ${soft};`
+        `text-shadow: 0.024em 0.024em 0 ${ink}, 0.048em 0.048em 0 ${ink}, ` +
+        `0.072em 0.072em 0 ${soft}, 0.096em 0.096em 0.02em ${soft};`
       );
     }
     case "stroke_animate": {
       // Keyline drawn on: width 0 → target over ~0.5s, then held. Frame-driven
-      // (this whole rule is rebuilt each frame), so it stays frame-pure.
+      // (this whole rule is rebuilt each frame), so it stays frame-pure. Lands
+      // at the same firmer weight the steady outline holds.
       const t = interpolate(frame, [3, 3 + fps * 0.5], [0, 1], {
         ...clamp,
         easing: Easing.out(Easing.cubic),
       });
-      return `text-shadow: ${keyline(ink, 0.026 * t)};`;
+      return `text-shadow: ${keyline(ink, 0.032 * t)};`;
     }
     case "blur_to_focus": {
       // The whole card blooms into focus. `filter` is not inherited, so this

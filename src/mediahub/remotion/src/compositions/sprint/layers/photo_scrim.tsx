@@ -39,14 +39,15 @@ type ScrimVariant = "gradient" | "edge" | "radial" | "corner";
 // calmest scrim, with the more sculpted shapes earned by later seeds.
 const VARIANTS: ScrimVariant[] = ["gradient", "edge", "radial", "corner"];
 
-// Peak scrim alpha per variant (0..1), capped low on purpose: this paints OVER
-// the scene's own under-text scrim, so it only reinforces the edges and never
-// approaches the heavy bottom-band darkening a scene applies beneath its copy.
+// Peak scrim alpha per variant (0..1), kept moderate on purpose: this paints
+// OVER the scene's own under-text scrim, so it reinforces the edges to hold
+// text legible over a busy photo on a muted feed, without approaching the
+// heavy bottom-band darkening a scene applies beneath its copy.
 const PEAK_ALPHA: Record<ScrimVariant, number> = {
-  gradient: 0.34,
-  edge: 0.3,
-  radial: 0.34,
-  corner: 0.32,
+  gradient: 0.4,
+  edge: 0.38,
+  radial: 0.4,
+  corner: 0.4,
 };
 
 /**

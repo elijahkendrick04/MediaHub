@@ -227,9 +227,11 @@ def test_xfade_mapping_covers_every_kind_with_real_transition_names():
     assert reel_ffmpeg._xfade_for("unknown_kind") == "fade"  # safe fallback
 
 
-def test_reel_transition_names_earn_one_peak_cut_then_stay_connective():
+def test_reel_transition_names_earn_one_peak_cut_then_vary_connective_per_card():
     # >1 card: cover→peak earns the mood cut (celebratory → iris/circleopen),
-    # every later handoff shares the one connective kind from the top seed.
+    # then every later handoff picks its OWN quiet connective kind from that
+    # card's seed — so a long reel no longer plays the identical cut between
+    # every lower beat (the bold cuts still stay peak-only).
     cards = [
         {"variationSeed": 0, "mood": "celebratory"},
         {"variationSeed": 9, "mood": "fierce"},
@@ -238,7 +240,11 @@ def test_reel_transition_names_earn_one_peak_cut_then_stay_connective():
     names = reel_ffmpeg._reel_transition_names(cards)
     assert len(names) == 3  # one join per card beat (cover→c0, c0→c1, c1→c2)
     assert names[0] == "circleopen"  # earned peak cut from card 0's mood
-    assert names[1] == names[2] == "fade"  # connective from seed 0 → crossfade
+    assert names[1] == "fade"  # connective from card 1's seed 9 → crossfade
+    assert names[2] == "slideup"  # connective from card 2's seed 4 → push
+    # The connective handoffs only ever draw from the quiet trio — never a bold
+    # peak cut.
+    assert set(names[1:]) <= {"fade", "slideup", "wiperight"}
     # A single-card reel has no peak — the lone handoff is connective.
     assert reel_ffmpeg._reel_transition_names([{"variationSeed": 1}]) == ["slideup"]
     assert reel_ffmpeg._reel_transition_names([]) == []
