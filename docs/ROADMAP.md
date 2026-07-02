@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-26 · `23152a688` · Merge pull request #1053 from elijahkendrick04/claude/github-repo-private-plan-gk7lok
+**Last updated:** 2026-07-02 · `8af514f04` · Merge pull request #1059 from elijahkendrick04/claude/audit-last-350-prs-u9r9lc
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1226,6 +1226,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-02 | `43f80c72e` | feat: audit of last 350 PRs — wire three merged-but-unreachable capabilities (batch 2) |
+| 2026-07-02 | `e96737277` | fix: audit of last 350 PRs — close verified gaps and defects (batch 1) |
 | 2026-06-26 | `5269ea922` | build(deps): bump actions/cache from 5 to 6 |
 | 2026-06-26 | `6e332f7e8` | docs(roadmap): fast-track repo-private plan to top of both to-do lists |
 | 2026-06-24 | `b8eedb581` | Fix CI: use SHA-256 for meet fingerprint (bandit B324) + ruff-format |
@@ -1236,6 +1238,4 @@ list and the auto table below, not here.
 | 2026-06-24 | `e3c884299` | 1.24: harden localise engine (glossary casing, empty-target no-op) |
 | 2026-06-24 | `c76085dc8` | docs(1.24): mark localisation shipped in the creative-suite parity map |
 | 2026-06-24 | `859010b1d` | localize(1.24): AI-dub pipeline for reels (Build 5/5) |
-| 2026-06-24 | `405167e0c` | localize(1.24): UI i18n (Welsh-first) + bulk per-language variants (Build 4/5) |
-| 2026-06-24 | `ec278326b` | localize(1.24): renderer RTL + non-Latin script fonts + re-render (Build 3/5) |
 <!-- /ROADMAP:ACTIVITY -->
