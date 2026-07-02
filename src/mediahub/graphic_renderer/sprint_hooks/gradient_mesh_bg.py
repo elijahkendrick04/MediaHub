@@ -13,6 +13,12 @@ Opt-in contract (``brief.background_style``):
   deterministically from the card seed.
 * ``"gradient_mesh:radial"`` (``:linear`` / ``:conic``) — force a specific mode.
 
+The reachable production emitter is the style-pack bridge
+(``creative_brief.generator._sync_background_style_with_pack``): a card whose
+deterministic style pack carries the ``gradient_mesh`` *ground* lever gets the
+bare token, so the engine paints the brand-role mesh as the card ground and the
+pack's darken-only pools read as atmosphere over it — one composed treatment.
+
 The mesh is injected as a ``background-image`` override on the card's existing
 ground element rather than as a floating overlay: v1 layouts paint their ground on
 a dedicated ``.bg-gradient`` / ``.bg-primary`` child of an ``isolation:isolate``

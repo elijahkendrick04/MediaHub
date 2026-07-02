@@ -631,6 +631,11 @@ def _bg_duotone_data_uri() -> str:
 # Lookup table: brief.background_style → CSS url() value
 def _background_pattern_for(style: str) -> str:
     style = (style or "water").lower()
+    # G1.8: a gradient-mesh ground (any accepted trigger spelling, with or
+    # without a ``:mode`` suffix) is painted by the sprint render hook
+    # (sprint_hooks/gradient_mesh_bg.py) — no pattern tile on top of it.
+    if style.partition(":")[0] in ("gradient_mesh", "gradient-mesh", "mesh"):
+        return _bg_clean_data_uri()
     builders = {
         "water": _water_pattern_data_uri,
         "halftone": _bg_halftone_data_uri,
@@ -771,6 +776,111 @@ def _accent_decoration_html(
             f"width:{size}px;height:{size}px;border-radius:50%;background:{color};"
             f"opacity:0.85;z-index:11;pointer-events:none;"
             f'box-shadow:0 6px 18px rgba(0,0,0,0.35);"></div>'
+        )
+    if style == "diagonal_underline":
+        m = min(width, height)
+        bar_h = max(4, int(m * 0.004))
+        return (
+            f'<div style="position:absolute;left:80px;top:{int(height * 0.82)}px;'
+            f"width:{int(m * 0.22)}px;height:{bar_h}px;background:{color};"
+            f"transform:rotate(-6deg);transform-origin:left center;"
+            f'z-index:11;pointer-events:none;"></div>'
+        )
+    # ---- R1.5 accent expansion pack -------------------------------------
+    # Sizing/style variants of the base accents. The geometry below mirrors
+    # the motion twins under remotion/.../sprint/accents/<style>.tsx (held
+    # frame) 1:1, so a card's video and its approved still carry the SAME
+    # decoration — the registry contract ("name == still-engine token").
+    m = min(width, height)
+    if style == "thick_stripe":
+        return (
+            f'<div style="position:absolute;left:80px;top:{int(height * 0.42)}px;'
+            f"width:{int(m * 0.18)}px;height:{max(12, int(m * 0.016))}px;"
+            f'background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "thin_stripe":
+        return (
+            f'<div style="position:absolute;left:80px;top:{int(height * 0.43)}px;'
+            f"width:{int(m * 0.26)}px;height:{max(2, int(m * 0.0035))}px;"
+            f'background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "double_stripe":
+        bar_w = int(m * 0.16)
+        bar_h = max(5, int(m * 0.007))
+        gap = max(10, int(m * 0.024))
+        top = int(height * 0.42)
+
+        def _bar(y: int) -> str:
+            return (
+                f'<div style="position:absolute;left:80px;top:{y}px;'
+                f"width:{bar_w}px;height:{bar_h}px;background:{color};"
+                f'z-index:11;pointer-events:none;"></div>'
+            )
+
+        return _bar(top) + _bar(top + gap)
+    if style == "side_rail":
+        return (
+            f'<div style="position:absolute;left:48px;top:{int(height * 0.30)}px;'
+            f"width:{max(5, int(m * 0.007))}px;height:{int(height * 0.34)}px;"
+            f'background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "large_brackets":
+        size = int(m * 0.09)
+        w = max(4, int(m * 0.006))
+        return (
+            f'<div style="position:absolute;left:56px;top:{int(height * 0.40)}px;'
+            f"width:{size}px;height:{size}px;border-left:{w}px solid {color};"
+            f'border-top:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:90px;bottom:{int(height * 0.18)}px;'
+            f"width:{size}px;height:{size}px;border-right:{w}px solid {color};"
+            f'border-bottom:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "small_brackets":
+        size = int(m * 0.035)
+        w = max(2, int(m * 0.0035))
+        return (
+            f'<div style="position:absolute;left:64px;top:{int(height * 0.44)}px;'
+            f"width:{size}px;height:{size}px;border-left:{w}px solid {color};"
+            f'border-top:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:96px;bottom:{int(height * 0.22)}px;'
+            f"width:{size}px;height:{size}px;border-right:{w}px solid {color};"
+            f'border-bottom:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "bracket_frame":
+        size = int(m * 0.05)
+        w = max(3, int(m * 0.0045))
+        inset = 56
+        corners = (
+            ("left", "top"),
+            ("right", "top"),
+            ("left", "bottom"),
+            ("right", "bottom"),
+        )
+        return "".join(
+            f'<div style="position:absolute;{x}:{inset}px;{y}:{inset}px;'
+            f"width:{size}px;height:{size}px;border-{x}:{w}px solid {color};"
+            f'border-{y}:{w}px solid {color};z-index:11;pointer-events:none;"></div>'
+            for x, y in corners
+        )
+    if style == "corner_tabs":
+        size = int(m * 0.045)
+        return (
+            f'<div style="position:absolute;left:56px;top:{int(height * 0.41)}px;'
+            f'width:{size}px;height:{size}px;background:{color};z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:92px;bottom:{int(height * 0.19)}px;'
+            f'width:{size}px;height:{size}px;background:{color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "offset_badge":
+        size = int(m * 0.085)
+        w = max(3, int(m * 0.005))
+        off = int(m * 0.022)
+        return (
+            f'<div style="position:absolute;right:{72 - off}px;bottom:{int(height * 0.20) - off}px;'
+            f"width:{size}px;height:{size}px;border-radius:50%;border:{w}px solid {color};"
+            f'opacity:0.5;z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:72px;bottom:{int(height * 0.20)}px;'
+            f"width:{size}px;height:{size}px;border-radius:50%;border:{w}px solid {color};"
+            f'z-index:11;pointer-events:none;"></div>'
         )
     return ""
 

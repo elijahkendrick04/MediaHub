@@ -40,6 +40,16 @@ from mediahub.media_ai import is_available as _llm_available
 
 log = logging.getLogger(__name__)
 
+# Human-readable phrases for the graded photo treatments (design_spec
+# PHOTO_TREATMENTS minus the clean "cutout" default). Shared by the
+# VariationProfile path in ``generate()`` and ``apply_design_spec`` so the
+# brief's ``image_treatment`` phrase always matches its ``photo_treatment``.
+_TREATMENT_PHRASES: dict[str, str] = {
+    "vignette": "cutout with vignette glow",
+    "duotone": "duotone-tinted cutout in brand colour",
+    "halftone": "halftone-dot cutout treatment",
+}
+
 
 # ---------------------------------------------------------------------------
 # Multi-axis variation profile
@@ -506,11 +516,9 @@ def generate(
         # Map profile.photo_treatment to a renderer-friendly phrase. The
         # renderer keys off the phrase to pick its filter pipeline.
         treatment_phrases = {
+            **_TREATMENT_PHRASES,
             "no-photo": "no photo, text-led layout",
-            "vignette": "cutout with vignette glow",
-            "duotone": "duotone-tinted cutout in brand colour",
             "frame": "cutout boxed in accent frame",
-            "halftone": "halftone-dot cutout treatment",
             "cutout": image_treatment or "real cutout, contrast lift",
         }
         image_treatment = treatment_phrases.get(variation_profile.photo_treatment, image_treatment)
@@ -730,6 +738,9 @@ def generate(
     except Exception:
         log.debug("gen-v2 style-pack selection skipped", exc_info=True)
 
+    # G1.8: a pack with the gradient_mesh ground triggers the real mesh engine.
+    _sync_background_style_with_pack(brief)
+
     # Stamp a signature so callers can dedupe / audit recent renders.
     _stamp_signature(brief)
     return brief
@@ -774,6 +785,24 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.why_this_design = spec.rationale
     if spec.motion_intent:
         brief.motion_intent = spec.motion_intent
+    # R1.5 — the director's accent treatment IS the brief's accent axis. Both
+    # surfaces execute every ACCENT_TREATMENTS token (still:
+    # render._accent_decoration_html; motion: StoryCard's accentDecoration +
+    # the sprint/accents registry), so the mapping is honest by construction.
+    if spec.accent_treatment:
+        brief.accent_style = spec.accent_treatment
+    # R1.10 — the director's photo grade (duotone / halftone / vignette),
+    # applied only onto the default photo path: a structural treatment the
+    # pipeline already decided ("no-photo" text-led cards, an explicit profile
+    # "frame") is never overridden by an art-direction whim. The still applies
+    # the matching CSS grade (render._photo_treatment_css) and the motion
+    # render the same held grade (sprint/layers/photo_filters.tsx).
+    if (
+        spec.photo_treatment in _TREATMENT_PHRASES
+        and (brief.photo_treatment or "cutout") == "cutout"
+    ):
+        brief.photo_treatment = spec.photo_treatment
+        brief.image_treatment = _TREATMENT_PHRASES[spec.photo_treatment]
     brief.ai_directed = True
     opts = brief.hero_stat_options or {}
     if spec.hero_stat in opts:
@@ -807,8 +836,44 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
                 brief.style_pack = _sp.pick_mood_pack_for_card(brief.mood, _key).id
     except Exception:
         log.debug("gen-v2 mood style-pack re-key skipped", exc_info=True)
+    _sync_background_style_with_pack(brief)
     _stamp_signature(brief)
     return brief
+
+
+def _sync_background_style_with_pack(brief: CreativeBrief) -> None:
+    """Key the G1.8 gradient-mesh ground to the card's selected style pack.
+
+    A style pack whose *ground* lever is ``gradient_mesh`` is the reachable,
+    deterministic trigger for the real mesh engine
+    (``graphic_renderer.gradient_mesh`` via the ``gradient_mesh_bg`` render
+    hook): the brief's ``background_style`` is set to the hook's opt-in token
+    so the brand-role mesh paints the card ground, and the pack's darken-only
+    pools read as atmosphere over it — one composed treatment, not two
+    competing ones.
+
+    Conservative on both edges: only the untouched default (``"water"``) is
+    ever upgraded — an explicit caller/profile choice (``"clean"``, a mono
+    token, ``"animated_loop"``, a mode-suffixed ``"gradient_mesh:radial"``) is
+    never overridden — and only the bare token this helper set is reverted
+    when a mood re-key moves the card onto a non-mesh pack.
+    """
+    try:
+        ground = ""
+        pack_id = (brief.style_pack or "").strip()
+        if pack_id:
+            from mediahub.graphic_renderer import style_packs as _sp
+
+            pack = _sp.style_pack_from_id(pack_id)
+            ground = pack.ground if pack is not None else ""
+        current = (brief.background_style or "water").strip()
+        if ground == "gradient_mesh":
+            if current == "water":
+                brief.background_style = "gradient_mesh"
+        elif current == "gradient_mesh":
+            brief.background_style = "water"
+    except Exception:
+        log.debug("gradient-mesh pack sync skipped", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
