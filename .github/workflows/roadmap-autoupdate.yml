@@ -46,9 +46,10 @@
 #     re-fetches and resets the bot branch to origin/main before running the
 #     script, so the branch is always exactly "latest main + roadmap delta"
 #     and its PR can never conflict on those shared lines; and
-#   * the PR lands by SQUASH, so each refresh is ONE tidy
-#     `docs: auto-update roadmap (#N) [skip render]` commit on main, not a
-#     merge commit plus a sibling branch commit (which read like two writers).
+#   * the PR lands with `gh pr merge --merge` (the repo standardises on merge
+#     commits; squash is disabled repo-side, 2026-06-13), with `--subject`
+#     keeping the tidy `docs: auto-update roadmap (#N) [skip render]` title on
+#     the merge commit Render inspects.
 #
 # Loop safety, three layers:
 #   1. pushes/merges made with the built-in GITHUB_TOKEN do not trigger

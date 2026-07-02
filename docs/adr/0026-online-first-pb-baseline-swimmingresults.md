@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (maintainer directive, 2026-06-20).
 - **Date:** 2026-06-20
-- **Supersedes:** [ADR-0025](0025-accumulating-pb-history-baseline.md) (accumulating
+- **Supersedes:** [ADR-0027](0027-accumulating-pb-history-baseline.md) (accumulating
   per-club PB-history store).
 - **Deciders:** MediaHub maintainer. Directives, in order: *"Ultimately, I want a
   95+% accurate model that finds the swimmers pbs online (typically from
@@ -13,7 +13,7 @@
 
 ## Context
 
-ADR-0025 made the club's **own accumulating results history** the primary PB
+ADR-0027 made the club's **own accumulating results history** the primary PB
 baseline. The maintainer rejected it after identifying a correctness flaw the
 store cannot fix:
 
