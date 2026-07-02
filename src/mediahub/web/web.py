@@ -5155,7 +5155,7 @@ function copilotSend(btn, cardId) {
         var purl = j.reformat_url + '?format=' + encodeURIComponent(j.format);
         extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:11px;padding:2px 9px" onclick=' + _attrEsc('copilotPreview(this, ' + JSON.stringify(purl) + ')') + '>Preview the edit</button></div>';
       }
-      extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:10px;padding:2px 8px" onclick="copilotRemember()" title="Save a standing preference the copilot will always respect">Remember a preference&hellip;</button></div>';
+      extra += '<div style="margin-top:4px"><button class="btn secondary" style="font-size:10px;padding:2px 8px" onclick="copilotRemember(this)" title="Save a standing preference the copilot will always respect">Remember a preference&hellip;</button></div>';
       d.innerHTML += extra;
       panel.querySelector('.cp-log').scrollTop = panel.querySelector('.cp-log').scrollHeight;
     })
@@ -5175,10 +5175,13 @@ function copilotPreview(btn, url) {
     .catch(function(e){ btn.disabled=false; btn.textContent=orig; });
 }
 
-function copilotRemember() {
+function copilotRemember(btn) {
+  var panel = btn.closest('.copilot-panel');
+  var url = panel && panel.dataset.memoryUrl;
+  if (!url) return;
   var txt = prompt('Save a standing preference the copilot will always respect (e.g. "never show times for 8-and-unders"):');
   if (!txt) return;
-  fetch('/api/assistant/memory', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})})
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: txt})})
     .then(function(r){return r.json();})
     .then(function(j){ if (window.MH && MH.toast) MH.toast(j.ok ? 'Saved — the copilot will remember that.' : (j.user_message||'Could not save'), j.ok?'success':'error', 3000); })
     .catch(function(){});
@@ -5593,6 +5596,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _assistant_suggest_url = url_for(
         "api_assistant_suggestions", run_id=run_id, card_id=card_id_raw
     )
+    _assistant_memory_url = url_for("api_assistant_memory")
     _comments_url = url_for("api_collab_comments", run_id=run_id)
     _revisions_url = url_for("api_card_revisions", run_id=run_id, card_id=card_id_raw)
     _locks_url = url_for("api_card_locks", run_id=run_id, card_id=card_id_raw)
@@ -5710,7 +5714,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
-        f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" data-memory-url="{_h(_assistant_memory_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="comments-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-comments-url="{_h(_comments_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="history-panel" data-card="{card_uuid}" data-revisions-url="{_h(_revisions_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="locks-panel" data-card="{card_uuid}" data-locks-url="{_h(_locks_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
@@ -12992,6 +12996,7 @@ def _layout(
       <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
       <a href="{{ url_for('logout') }}">Log out</a>
     {% else %}
+      <a href="{{ url_for('signup_page') }}" class="mh-nav-signup">Sign up</a>
       <a href="{{ url_for('login_page') }}">Log in</a>
       {# "Developer" sign-in link removed from the top bar — operator sign-in
          lives in the footer ("Developer access") on the home page. The header
@@ -15809,8 +15814,16 @@ def _hero_product_demo() -> str:
         '<div class="mh-demo-phase p2 is-rest">'
         '<div class="mh-demo-row">'
         '<span class="mh-demo-eyebrow">02 · Review</span>'
-        '<span class="mh-demo-conf"><span class="track"><i></i></span>0.94</span>'
+        '<span class="mh-demo-conf"'
+        ' title="Confidence — how certain the engine is the facts are correct.'
+        " Above 0.85 means the achievement is well-grounded in the uploaded"
+        ' results.">'
+        '<span class="track"><i></i></span>0.94</span>'
         "</div>"
+        # Queue position indicator: shows the volunteer which moment they are
+        # on and how many remain — fixes the dead-end where "3 moments ranked"
+        # in Scene 1 was never reflected in the review/approve stages.
+        '<div class="mh-demo-qcount">1 of 3 &middot; 2 remaining</div>'
         '<div class="mh-demo-card">'
         # The OUTPUT — a real, premium branded story card the engine returns.
         '<div class="mh-demo-thumb">'
@@ -34951,8 +34964,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             title="Create account",
             heading='Create your <em class="editorial">account</em>.',
             lede=(
-                "One account runs your club's content. Free to start &mdash; "
-                "3 runs a month, no card required."
+                "One account runs your club&rsquo;s content. Free to start &mdash; "
+                "3 runs a month, no card required. "
+                "Before you start, have your club&rsquo;s website, social profiles, and brand "
+                "guidelines to hand &mdash; the engine needs them to produce on-brand content "
+                "(setup takes about 5&nbsp;minutes)."
             ),
             action_url=url_for("signup_post"),
             submit_label="Create account",

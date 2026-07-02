@@ -1,4 +1,4 @@
-# 25. Accumulating PB-history baseline (the scalable "is this a PB?" source)
+# 27. Accumulating PB-history baseline (the scalable "is this a PB?" source)
 
 - **Status:** **SUPERSEDED by [ADR-0026](0026-online-first-pb-baseline-swimmingresults.md)**
   (maintainer directive, 2026-06-20). The accumulating per-club history store was

@@ -563,6 +563,9 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "archetype": card_props.get("archetype") or "",
         "style_pack": card_props.get("stylePack") or "",
         "motion_intent": card_props.get("motionIntent") or "",
+        "accent_style": card_props.get("accentStyle") or "",
+        "photo_treatment": card_props.get("photoTreatment") or "",
+        "background_style": card_props.get("backgroundStyle") or "",
         "mood": card_props.get("mood") or "",
         "variation_seed": card_props.get("variationSeed") or 0,
         "colour_source": "still-parity-roles"

@@ -490,7 +490,9 @@ def is_proxy_host(host: str) -> bool:
 
 
 def _thumb_cache_dir() -> Path:
-    base = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[2])))
+    # No-DATA_DIR fallback lands under src/mediahub/ like the other runtime
+    # writes (gitignored) — never in the tracked source tree.
+    base = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
     d = base / "stock_thumb_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d

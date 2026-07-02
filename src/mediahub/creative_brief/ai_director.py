@@ -201,7 +201,10 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         '  "hero_stat": "final_time|pb_delta|placing|relay_split|event|points",\n'
         '  "secondary_stats": [<stat>, ...],\n'
         '  "headline_hook": <<=80 chars, punchy, no emoji, no cliché ("delve","elevate")>,\n'
-        '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline",\n'
+        '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline|'
+        "diagonal_underline|thick_stripe|thin_stripe|double_stripe|side_rail|"
+        'large_brackets|small_brackets|bracket_frame|corner_tabs|offset_badge",\n'
+        '  "photo_treatment": "cutout|duotone|halftone|vignette",\n'
         '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
         '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
         '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|count_up|static|bounce_in|flip_reveal|swirl|reveal_from_sides|cascade|rise|pop|drop_in",\n'
@@ -221,7 +224,15 @@ def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) ->
         "swirl for a celebratory win, flip_reveal or reveal_from_sides for a single "
         "standout stat, cascade when several facts share the card. rise is a calm "
         "lift for understated results, pop a confident scale punch, drop_in a "
-        "decisive arrival from above."
+        "decisive arrival from above.\n"
+        "accent_treatment is the margin accent the card carries on the still AND "
+        "its motion render: the sizing variants (thick/thin/double stripe, "
+        "large/small brackets, bracket_frame, corner_tabs, offset_badge, "
+        "side_rail) scale the accent to the moment — minimal means none.\n"
+        "photo_treatment is normally cutout (clean). Reach for duotone or "
+        "halftone only when an editorial, monochrome grade suits the mood, and "
+        "vignette to pull focus onto the athlete — never to disguise a weak "
+        "photo, and never on a card without one."
     )
 
 

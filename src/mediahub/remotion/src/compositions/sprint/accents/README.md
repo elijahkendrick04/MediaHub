@@ -18,7 +18,11 @@ margins, at the supplied opacity. Keep it frame-pure (no `Math.random` /
 
 Shipped pack (R1.5 — sizing + style variants of the built-in accents):
 `thick_stripe`, `thin_stripe`, `double_stripe`, `side_rail`, `large_brackets`,
-`small_brackets`, `bracket_frame`, `corner_tabs`, `offset_badge`. The built-in
+`small_brackets`, `bracket_frame`, `corner_tabs`, `offset_badge`, plus
+`diagonal_underline` (the motion twin of that long-standing vocabulary token).
+Every token here is also in `creative_brief/design_spec.ACCENT_TREATMENTS` and
+implemented by the still engine (`render._accent_decoration_html`), so the
+design-spec director and the card copilot can actually emit it. The built-in
 `accentDecoration` switch in `StoryCard.tsx` owns the base set (`stripe`,
 `brackets`, `badge`, `frame`, `ribbon`, `arrow`, `underline`, `minimal`) — pick
 a name here that does NOT collide with those, or the inline case wins and your
