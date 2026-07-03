@@ -32474,7 +32474,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             view_url = url_for("stub_pack_view", pack_id=it["pack_id"])
             delete_url = url_for("stub_pack_delete", pack_id=it["pack_id"])
             label = _STUB_TYPE_LABEL.get(it["stub_type"], it["stub_type"])
-            ts = (it.get("created_at") or "")[:19].replace("T", " ")
+            ts = str(it.get("created_at") or "")[:19].replace("T", " ")
             rows_html += (
                 f'<tr><td><a href="{view_url}">{_h(it["title"])}</a></td>'
                 f'<td><span class="tag info">{_h(label)}</span></td>'
