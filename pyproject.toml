@@ -27,7 +27,7 @@ dependencies = [
   "markupsafe>=3.0.3",
   "requests>=2.34.2",
   "pdfplumber>=0.11.10",
-  "pypdf>=6.13.3",
+  "pypdf>=6.14.2",
   # Document engine (roadmap 1.15): deterministic PPTX/DOCX round-trip for the
   # programme / report / deck formats (take-it-elsewhere editing). Pure-Python.
   "python-pptx>=1.0.2",
@@ -37,7 +37,7 @@ dependencies = [
   # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx): read .xlsx
   # results deterministically, read-only. MIT-licensed.
   "openpyxl>=3.1.5",
-  "Pillow>=12.2.0",
+  "Pillow>=12.3.0",
   # 1.3 photo editor — decode iPhone HEIC/HEIF uploads to web-safe JPEG on
   # ingest (mediahub.media_library.heic). BSD-3 wrapper over bundled libheif
   # (manylinux wheels, no system libs). Decode-only; honest-errors if absent.
@@ -45,11 +45,11 @@ dependencies = [
   # 1.16 microsite QR generator (mediahub.sites.qr): segno is a tiny, pure-Python,
   # MIT-licensed QR encoder (no deps, no external service). The brand-colour /
   # contrast-guard / logo / PNG-SVG-PDF layer is MediaHub's own; honest-errors if absent.
-  "segno>=1.6.0",
+  "segno>=1.6.6",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.
   "materialyoucolor>=3.0.2",
-  "coloraide>=8.8.1",
+  "coloraide>=8.10",
   "numpy>=2.4.6",
   # Sport-profile config loader (mediahub.sport_profiles) parses the
   # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
@@ -68,12 +68,12 @@ dependencies = [
   # means billing 503s and the rest of the app is unaffected.
   "bcrypt>=5.0.0",
   "argon2-cffi>=25.1.0",
-  "stripe>=15.2.1",
+  "stripe>=15.3.0",
 ]
 
 [project.optional-dependencies]
 ai = [
-  "anthropic>=0.111.0",
+  "anthropic>=0.116.0",
   "replicate>=1.0.7",
 ]
 # W.10 OCR fallback for scanned/photographed result sheets (interpreter/ocr.py).
@@ -84,14 +84,14 @@ ai = [
 # rapidocr-onnxruntime (heavier wheel; onnxruntime already ships for rembg).
 ocr = [
   "pytesseract>=0.3.13",
-  "pypdfium2>=5.10.1",
+  "pypdfium2>=5.11.0",
 ]
 # Optional PSD import (roadmap 1.21, interop/psd_import.py). psd-tools is
 # MIT-licensed, pure-Python (reads .psd; renders the flattened composite via
 # Pillow, already a core dep). Off by default — import_psd() honest-errors with
 # a clear "install the psd extra" message when this is absent, never a stub.
 psd = [
-  "psd-tools>=1.10.0",
+  "psd-tools>=1.17.4",
 ]
 # Voiceover backends (operator-gated by MEDIAHUB_VOICEOVER=1). Roadmap 1.7 made
 # local Piper the DEFAULT (zero-cost, fully offline; caption text never leaves
@@ -117,7 +117,7 @@ render = [
   # the matching chromium when it installs this version, so the runtime
   # discovery succeeds (PLAYWRIGHT_BROWSERS_PATH=/ms-playwright pinned
   # in the Dockerfile keeps the path stable).
-  "playwright>=1.60.0,<1.61",
+  "playwright>=1.61.0,<1.62",
   "weasyprint>=69.0",
   # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): a static FFmpeg
   # binary with no system install. The wheel is BSD-2; the bundled binary is
@@ -144,10 +144,10 @@ dev = [
   # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
   # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
   # API drift, so a future bump can't redden CI — only a real 5xx fails it.
-  "schemathesis>=4.21.9,<5",
+  "schemathesis>=4.22.3,<5",
   # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
   # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
-  "pytest-rerunfailures>=16.3",
+  "pytest-rerunfailures>=16.4",
 ]
 # D1 flake-hunting only — kept OUT of `dev` on purpose: pytest-randomly auto-shuffles
 # test order when installed, and the GATING suite must stay deterministic. The separate
