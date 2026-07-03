@@ -31880,7 +31880,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         rows_html = ""
         for it in sessions:
             view_url = url_for("free_text_chat_view", chat_id=it["chat_id"])
-            ts = (it.get("updated_at") or "")[:19].replace("T", " ")
+            ts = str(it.get("updated_at") or "")[:19].replace("T", " ")
             badge = (
                 '<span class="tag good" style="font-size:10px">brief accepted</span>'
                 if it.get("accepted")
