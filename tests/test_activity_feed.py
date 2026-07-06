@@ -408,6 +408,40 @@ class TestFeedRoute:
         assert 'class="tag good"' in body
         assert 'class="mh-rel' in body              # relative timestamps
 
+    def test_precolumn_row_uses_json_count_and_warms_column(self, feed_client):
+        """A pre-column run (NULL n_achievements) shows the JSON-derived count,
+        and one feed view warms the DB column so it isn't re-read next time."""
+        import json as _json
+
+        c, wm = feed_client
+        conn = wm._db()
+        conn.execute(
+            "INSERT INTO runs (id, created_at, finished_at, status, profile_id, "
+            "meet_name, file_name, our_swims, n_cards, n_queue, n_achievements, error) "
+            "VALUES ('rold', datetime('now'), datetime('now'), 'done', 'club-a', "
+            "'Legacy Meet', 'legacy.pdf', 6, 0, 2, NULL, NULL)",
+        )
+        conn.commit()
+        conn.close()
+        # The run JSON carries the real achievement count.
+        (wm.RUNS_DIR / "rold.json").write_text(
+            _json.dumps({"run_id": "rold", "profile_id": "club-a",
+                         "recognition_report": {"n_achievements": 9}}),
+            encoding="utf-8",
+        )
+
+        _pin(c, "club-a")
+        body = c.get("/activity/feed").get_data(as_text=True)
+        assert "Legacy Meet" in body
+
+        # The best-effort backfill warmed the column after the view.
+        conn = wm._db()
+        val = conn.execute(
+            "SELECT n_achievements FROM runs WHERE id = 'rold'"
+        ).fetchone()["n_achievements"]
+        conn.close()
+        assert val == 9
+
     def test_empty_state_for_new_org(self, feed_client):
         c, wm = feed_client
         _pin(c, "club-a")

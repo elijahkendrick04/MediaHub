@@ -542,6 +542,30 @@ def test_render_api_returns_png_and_explainability(client, stub_render):
     assert "{{" not in stub_render["html"]
 
 
+def test_render_api_respects_the_render_gate(stub_render, monkeypatch):
+    """The studio preview goes through the SAME Chromium-concurrency gate as
+    every other render route: with the slot held, the route answers the
+    standard 429 busy payload instead of stacking another Chromium."""
+    monkeypatch.setenv("MEDIAHUB_PREVIEW_RENDER_TIMEOUT", "0.05")
+    import mediahub.web.web as wm
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    assert wm._render_semaphore.acquire(timeout=1), "test could not take the slot"
+    try:
+        r = c.post("/api/studio/render", json={"archetype": DE.default_archetype()})
+    finally:
+        wm._render_semaphore.release()
+    assert r.status_code == 429
+    d = r.get_json()
+    assert d["error"] == "renderer_busy"
+    assert r.headers.get("Retry-After")
+    # And with the slot free the same request renders fine.
+    r2 = c.post("/api/studio/render", json={"archetype": DE.default_archetype()})
+    assert r2.status_code == 200 and r2.get_json()["ok"] is True
+
+
 def test_render_api_coerces_garbage_and_still_renders(client, stub_render):
     r = client.post(
         "/api/studio/render",

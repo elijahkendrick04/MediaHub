@@ -290,6 +290,22 @@ def test_upload_page_injects_real_csrf_into_link_fetch(app_mod):
     assert _CSRF_TOK in body
 
 
+def test_upload_poller_treats_unknown_as_terminal(app_mod):
+    """The url-fetch progress poller must not spin forever on status 'unknown'
+    (job gone after a restart/prune): it treats a short streak of 'unknown' as a
+    terminal failure and caps consecutive network errors, rather than re-polling
+    'Reading the site…' indefinitely."""
+    app, wm = app_mod
+    html = app.test_client().get("/upload").get_data(as_text=True)
+    # The poller branches on the 'unknown' status and fails after a short streak.
+    assert "j.status === 'unknown'" in html
+    assert "unknownStreak" in html
+    # Consecutive network failures are capped (no infinite catch-retry loop).
+    assert "errStreak" in html
+    # A human-readable terminal message for the lost fetch.
+    assert "find this fetch any more" in html
+
+
 def test_from_url_blocked_without_csrf_but_works_with_header(app_mod, monkeypatch):
     app, wm = app_mod
     _enforce_csrf(app)

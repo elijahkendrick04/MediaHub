@@ -297,6 +297,34 @@ def _build_path(rule_str, fill):
     return _ARG_RE.sub(sub, rule_str), missing
 
 
+class TestMembershipReadCaching:
+    def test_sign_in_reads_ledger_once_per_request(self, shared_instance, monkeypatch):
+        """The /sign-in picker filters every profile through
+        _session_can_use_profile; each call used to re-parse memberships.jsonl
+        twice (is_bound + membership). The per-request flask.g snapshot must
+        collapse a whole render to a single ledger read, not scale with the
+        profile count."""
+        from mediahub.web.tenancy import MembershipStore
+
+        reads = {"n": 0}
+        orig = MembershipStore._read_all
+
+        def counting(self):
+            reads["n"] += 1
+            return orig(self)
+
+        monkeypatch.setattr(MembershipStore, "_read_all", counting, raising=True)
+
+        with shared_instance["app"].test_client() as c:
+            _login(c, OWNER_EMAIL)  # a member of one bound org, sees several
+            reads["n"] = 0  # only count the /sign-in render
+            r = c.get("/sign-in")
+            assert r.status_code == 200
+        # Three profiles are filtered plus the active-pin check; pre-fix this was
+        # >= 6 reads (2 per profile). The snapshot keeps it to a single read.
+        assert reads["n"] <= 1, f"expected one ledger read, got {reads['n']}"
+
+
 class TestBoundOrgPinning:
     def test_anonymous_cannot_pin_a_bound_org(self, shared_instance):
         with shared_instance["app"].test_client() as c:

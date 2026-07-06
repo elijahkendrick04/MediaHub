@@ -47,6 +47,10 @@ def fresh_app(tmp_path, monkeypatch):
     app.config["TESTING"] = True
 
     with app.test_client() as c:
+        # /healthz/usage is operator-only; sign the spot-check client in as the
+        # operator so both public-HTML routes render their full template.
+        with c.session_transaction() as s:
+            s["dev_operator"] = True
         yield c
 
 

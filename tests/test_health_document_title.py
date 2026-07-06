@@ -84,7 +84,12 @@ def test_healthz_payloads_keep_their_shape(client):
     """The JSON probes still carry their documented fields after the revert."""
     assert client.get("/healthz").get_json().get("ok") is True
     assert client.get("/healthz/ping").get_json().get("pong") is True
-    assert "rss_mb" in client.get("/healthz/memory").get_json()
+    _mem = client.get("/healthz/memory").get_json()
+    assert "rss_mb" in _mem
+    # rss_mb is CURRENT RSS (leak diagnostic); rss_peak_mb is the lifetime
+    # high-water mark. On Linux current can never exceed peak.
+    assert "rss_peak_mb" in _mem
+    assert _mem["rss_peak_mb"] >= _mem["rss_mb"]
     assert "deps" in client.get("/healthz/deps").get_json()
 
 

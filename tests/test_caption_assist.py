@@ -156,6 +156,34 @@ def test_assist_endpoint_run_not_found(client, monkeypatch):
     assert r.status_code == 404
 
 
+def test_assist_endpoint_caps_oversized_input(client, monkeypatch):
+    """The 140-char maxlength is client-only; the server must cap a multi-KB
+    body before it reaches the provider prompt. A 100KB current_caption and a
+    long custom instruction are truncated in the requirements the writer sees."""
+    monkeypatch.setattr("mediahub.web.web._load_run", lambda rid: _fake_run())
+    monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
+
+    captured = {}
+
+    def fake_gen(ach, brand=None, *, tone="ai", requirements="", **k):
+        captured["requirements"] = requirements
+        return "Revised."
+
+    monkeypatch.setattr(
+        "mediahub.web.ai_caption.generate_caption_for_tone", fake_gen
+    )
+    huge = "A" * 100_000
+    r = client.post(
+        "/api/runs/r1/swim/s1/caption/assist",
+        json={"current_caption": huge, "transform": "custom", "custom": "B" * 5_000},
+    )
+    assert r.status_code == 200
+    req = captured["requirements"]
+    # The current caption is capped at 4000 chars and the instruction at 500.
+    assert req.count("A") <= 4000
+    assert req.count("B") <= 500
+
+
 def test_assist_endpoint_idor_blocked(client, monkeypatch):
     monkeypatch.setattr("mediahub.web.web._load_run", lambda rid: _fake_run())
     monkeypatch.setattr("mediahub.web.web._can_access_run", lambda *a, **k: False)

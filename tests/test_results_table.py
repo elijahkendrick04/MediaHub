@@ -385,6 +385,33 @@ class TestRoute:
         # the meet's PB tally surfaces in the summary stat block
         assert "Personal bests" in b
 
+    def test_embedded_sparkline_payload_drops_dates_and_escapes_script(self, wm):
+        """The embedded <script> DATA must not carry swim_date strings (the JS
+        never reads 'd') and must escape any '</script>' so a crafted date in an
+        uploaded results file can't break out of the script block."""
+        from mediahub.athletes import record_run_swims
+
+        record_run_swims(
+            "org-x",
+            "old1",
+            [{
+                "name": "Alice Lee",
+                "event": "100FRLC",
+                "time_cs": 6300,
+                "swim_date": "2025-12-01</script><script>alert(1)//",
+            }],
+        )
+        _write_run(wm)
+        b = _client(wm).get("/runs/r1/results").get_data(as_text=True)
+        # Isolate the embedded DATA <script> block.
+        assert "var DATA =" in b
+        script = b.split("var DATA =", 1)[1].split("</script>", 1)[0]
+        # The date payload never rides into the page…
+        assert '"d"' not in script
+        assert "alert(1)" not in script
+        # …and any closing-tag sequence is escaped, not raw.
+        assert "</script>" not in script
+
     def test_pb_only_filter_via_route(self, wm):
         from mediahub.athletes import record_run_swims
 

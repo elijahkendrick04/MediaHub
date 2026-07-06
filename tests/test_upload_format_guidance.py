@@ -79,6 +79,26 @@ class TestUploadFormatGuidance:
             "accept attribute does not include .sdif/.sd3 — browser file-picker will hide SDIF files"
         )
 
+    def test_xlsx_accepted_and_advertised(self, upload_body):
+        """.xlsx is ingested by the interpreter (_extract_xlsx) and accepted on
+        the /try path — the primary /upload flow must accept it too, and say so
+        in the accept attribute and the visible hint."""
+        assert ".xlsx" in upload_body, "accept attribute must include .xlsx"
+        assert "xlsx" in upload_body.lower() or "excel" in upload_body.lower()
+
+    def test_xlsx_upload_not_rejected_on_extension(self, upload_client):
+        """A league .xlsx POSTed to /upload must not 400 on the extension guard
+        (it may fail later on parse, but the extension is allowed)."""
+        import io
+
+        # Minimal non-empty bytes; the extension check runs before parsing.
+        data = {"file": (io.BytesIO(b"PK\x03\x04 not-a-real-xlsx"), "results.xlsx")}
+        r = upload_client.post("/upload", data=data, content_type="multipart/form-data")
+        # Anything but a 400 "type isn't supported" — the extension is accepted.
+        assert not (
+            r.status_code == 400 and "isn't supported" in r.get_data(as_text=True)
+        )
+
     def test_format_hint_text_covers_key_types(self, upload_body):
         """The visible dropzone hint text must name more than just .hy3 and ZIP."""
         # At minimum, the hint should now mention three distinct format families:

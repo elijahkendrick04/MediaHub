@@ -216,6 +216,34 @@ class TestForeignReadDenied:
         r = c.get(f"/api/runs/{two_orgs['run_id']}/export")
         assert r.status_code == 404
 
+    def test_api_cards_export_in_progress_run_is_404_for_foreign_org(self, two_orgs, tmp_path):
+        """An IN-PROGRESS run (DB row, no JSON yet) must 404 for a foreign org
+        on /cards and /export — the 202 in_progress short-circuit must not leak
+        that another org's run exists / when it finishes. Owner still gets 202."""
+        import mediahub.web.web as wm
+
+        prog_id = "run-alpha-inprog-" + uuid.uuid4().hex[:8]
+        conn = wm._db()
+        conn.execute(
+            "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, "
+            "meet_name, file_name) VALUES (?, datetime('now'), 'running', ?, ?, ?)",
+            (prog_id, "org-alpha", "SECRET ALPHA INPROGRESS", "alpha2.hy3"),
+        )
+        conn.commit()
+        conn.close()
+        # No JSON file on disk → _run_state is in_progress.
+        assert not (tmp_path / "runs_v4" / f"{prog_id}.json").exists()
+
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        assert c.get(f"/api/runs/{prog_id}/cards").status_code == 404
+        assert c.get(f"/api/runs/{prog_id}/export").status_code == 404
+
+        # The owner still sees the honest 202 in_progress signal.
+        _pin(c, "org-alpha")
+        assert c.get(f"/api/runs/{prog_id}/cards").status_code == 202
+        assert c.get(f"/api/runs/{prog_id}/export").status_code == 202
+
     def test_create_graphic_returns_404(self, two_orgs):
         c = two_orgs["client"]
         _pin(c, "org-beta")

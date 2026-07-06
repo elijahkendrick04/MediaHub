@@ -256,6 +256,14 @@ class TestFaqContent:
         for _question, answer_phrase in FAQ_EXPECTATIONS:
             assert answer_phrase in body, f"missing grounded answer: {answer_phrase!r}"
 
+    def test_privacy_answer_uses_hosted_not_self_host_framing(self, app):
+        # ADR-0011 / CLAUDE.md: MediaHub is operator-hosted SaaS with no
+        # self-host framing. The old "deployment you control" copy implied a
+        # customer-controlled deployment and must be gone.
+        body = _home(app)
+        assert "deployment you control" not in body
+        assert "private workspace on our hosted platform" in body
+
     def test_human_in_the_loop_is_answered_first(self, app):
         # The single most important objection (does it auto-post?) leads.
         sec = _faq_section(_home(app))

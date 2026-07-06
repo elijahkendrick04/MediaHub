@@ -76,6 +76,31 @@ def test_submission_throttled_per_address(client):
     assert _submit(client).status_code == 429
 
 
+def test_throttle_keyed_on_trusted_hop_not_spoofable_first_hop(client):
+    """The throttle keys on the trusted (rightmost) X-Forwarded-For hop, so
+    rotating the client-supplied first hop can't mint fresh buckets: after 5
+    posts every further rotated post 429s, regardless of the spoofed hop."""
+    # Simulate Render's edge appending the real client as the constant LAST hop;
+    # the attacker only controls (and rotates) the leading spoofed hop.
+    codes = []
+    for i in range(7):
+        r = client.post(
+            "/complaints",
+            data={
+                "name": "Pat",
+                "contact": "pat@example.org",
+                "relationship": "parent/guardian",
+                "club": "SC",
+                "details": "spoof rotation attempt",
+            },
+            headers={"X-Forwarded-For": f"10.0.0.{i}, 9.9.9.9"},
+        )
+        codes.append(r.status_code)
+    # First 5 succeed; the rotated 6th/7th still hit the same trusted bucket.
+    assert codes[:5] == [200, 200, 200, 200, 200]
+    assert codes[5] == 429 and codes[6] == 429
+
+
 def test_admin_page_hidden_without_operator_session(client):
     assert client.get("/admin/compliance").status_code == 404
     assert client.post("/admin/compliance/complaints/abc123/ack").status_code == 404

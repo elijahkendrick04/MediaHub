@@ -223,6 +223,31 @@ class TestTotals:
         body = c.get("/season").get_data(as_text=True)
         assert "3 meets" in body
 
+    def test_hero_totals_do_not_double_count_reruns(self, gated_client):
+        """A re-upload of the same meet (shared content_hash) is badged as a
+        re-run and must NOT inflate the celebratory hero stats — each real meet
+        counts once for Meets / Swims matched / Moments detected."""
+        c, _, wm = gated_client
+        conn = wm._db()
+        # A re-run of "June Open Meet" (a-jun-1): same content_hash, newer date.
+        _insert_run(conn, "a-jun-1-rerun", "club-a", "June Open Meet",
+                    created_at="2026-06-11T09:00:00Z", our_swims=24, n_achievements=7)
+        conn.execute(
+            "UPDATE runs SET content_hash = 'shared-hash-1' WHERE id IN (?, ?)",
+            ("a-jun-1", "a-jun-1-rerun"),
+        )
+        conn.commit()
+        conn.close()
+
+        _pin(c, "club-a")
+        body = c.get("/season").get_data(as_text=True)
+        # Still 3 real meets / 64 swims / 22 moments despite the 4th (re-run) row.
+        assert 'data-mh-count="3"' in body
+        assert 'data-mh-count="64"' in body
+        assert 'data-mh-count="22"' in body
+        # …and the re-run still renders (with its badge), so the card is present.
+        assert "a-jun-1-rerun" in body or "Re-run" in body
+
 
 # ---------------------------------------------------------------------------
 # 5. Status badges + failed-run explainability.

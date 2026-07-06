@@ -219,6 +219,33 @@ def test_route_starts_background_job(app_mod, monkeypatch):
     assert re.fullmatch(r"[0-9a-f]{12}", job_id)
 
 
+def test_rate_limit_not_dodgeable_by_fresh_sessions_same_ip(app_mod, monkeypatch):
+    """The crawl rate limit must key on identity/IP, NOT a client-resettable
+    session value — otherwise a fresh session per request dodges the cap. With a
+    constant client IP, a new test client (fresh session) each call still 429s
+    once the 6/5-min budget is spent."""
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site", _fake_crawl_factory(wm)
+    )
+    monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: True)
+    wm._url_fetch_rate.clear()
+
+    codes = []
+    for _ in range(8):
+        # A brand-new client each iteration = a fresh (empty) session cookie.
+        c = app.test_client()
+        r = c.post(
+            "/upload/from-url",
+            data={"url": "https://results.swim.test/agb/"},
+            environ_overrides={"REMOTE_ADDR": "203.0.113.7"},
+        )
+        codes.append(r.status_code)
+    # First 6 succeed (the anonymous IP bucket), the rest are throttled.
+    assert codes[:6] == [200] * 6
+    assert codes[6] == 429 and codes[7] == 429
+
+
 # ---------------------------------------------------------------------------
 # Honest failures — job error, never a 500
 # ---------------------------------------------------------------------------

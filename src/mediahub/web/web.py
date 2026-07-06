@@ -90,6 +90,7 @@ from flask import (
     session,
     make_response,
     abort,
+    g,
 )
 from markupsafe import escape as _h
 
@@ -191,6 +192,25 @@ except ImportError:
 
 # Query-arg parsing helpers (shared by the print-production routes below).
 _TRUTHY = {"1", "true", "yes", "on"}
+
+# Single source of truth mapping an organisation's ``org_type`` onto the sport
+# profile slug its planner scopes to. The three planner sites that read it keep
+# their own distinct availability-fallback (body sport / None / "swimming").
+_ORG_TYPE_TO_SPORT: dict[str, str] = {
+    "swimming_club": "swimming",
+    "football": "football",
+    "athletics": "athletics",
+}
+
+# A sport slug is only ever fed to ``load_sport_profile`` (which joins it into a
+# ``sport_profiles/<slug>.yaml`` path). Sport profile slugs are always
+# ``[a-z0-9_]+`` — reject anything else before it can escape the profiles dir.
+_SPORT_SLUG_RE = re.compile(r"[a-z0-9_]+")
+
+
+def _valid_sport_slug(sport: str) -> bool:
+    """True when ``sport`` is a safe, bare profile slug (no path traversal)."""
+    return bool(_SPORT_SLUG_RE.fullmatch(sport or ""))
 
 
 def _clamp_float(value, *, default: float, lo: float, hi: float) -> float:
@@ -1913,6 +1933,12 @@ _club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
 # repeated Playwright renders. Entries are a few hundred KB each; 48 × keeps it
 # well under the worker's memory ceiling.
 _studio_render_cache: BoundedCache = BoundedCache(max_size=48)
+# Short-lived tally of on-disk cache scale for the operator's cache-purge card.
+# Walking every cache root (tens of thousands of files on a mature deployment)
+# on every /settings/developer render costs seconds; a 60s snapshot is plenty
+# fresh for an informational figure and is cleared on purge.
+_cache_tally_cache: BoundedCache = BoundedCache(max_size=1)
+_CACHE_TALLY_TTL = 60.0
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -10251,18 +10277,33 @@ BASE_CSS = (
 )
 
 
-# Content-hash fingerprint for the progressive-enhancement UI kit. It rides the
-# <script> URL as `?v=…` so the long SEND_FILE_MAX_AGE_DEFAULT browser cache can
-# hold ui-kit.js across navigations, yet a deploy that changes the file ships a
-# new URL and busts that cache immediately. A content hash (not file mtime)
-# means every replica computes the same value, so a load-balanced fleet agrees
-# on the URL. Falls back to a constant only if the file is unreadable at import.
-try:
-    _UI_KIT_VER = hashlib.sha256(
-        (Path(__file__).resolve().parent / "static" / "js" / "ui-kit.js").read_bytes()
-    ).hexdigest()[:10]
-except OSError:
-    _UI_KIT_VER = "static"
+# Per-file content-hash fingerprint for a static asset. It rides the asset URL
+# as `?v=…` so the long SEND_FILE_MAX_AGE_DEFAULT browser cache can hold the file
+# across navigations, yet a deploy that changes the file ships a new URL and busts
+# that cache immediately. A content hash (not file mtime) means every replica
+# computes the same value, so a load-balanced fleet agrees on the URL. Every
+# behaviour-bearing static JS must carry this buster or a returning browser can
+# run week-stale JS against new server code on an auto-deploying trunk. Falls back
+# to a constant only if the file is unreadable. Computed once per file and cached.
+_STATIC_VER_CACHE: dict[str, str] = {}
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _static_ver(filename: str) -> str:
+    """Short sha256 of a file under ``static/`` for cache-busting ``?v=``."""
+    cached = _STATIC_VER_CACHE.get(filename)
+    if cached is not None:
+        return cached
+    try:
+        ver = hashlib.sha256((_STATIC_DIR / filename).read_bytes()).hexdigest()[:10]
+    except OSError:
+        ver = "static"
+    _STATIC_VER_CACHE[filename] = ver
+    return ver
+
+
+# Back-compat alias — the UI kit's buster is now just one file's content hash.
+_UI_KIT_VER = _static_ver("js/ui-kit.js")
 
 
 # U.9 — cycling hero accent word. The content types MediaHub makes, in the
@@ -13059,7 +13100,7 @@ def _layout(
       href="{{ url_for('static', filename='fonts/hanken-latin-normal-400.woff2') }}" />
 <link rel="preload" as="font" type="font/woff2" crossorigin
       href="{{ url_for('static', filename='fonts/bigshoulders-latin-normal-800.woff2') }}" />
-<link rel="stylesheet" href="{{ url_for('static', filename='theme/fonts.css') }}" />
+<link rel="stylesheet" href="{{ fonts_css_url }}" />
 <style>{{ css | safe }}</style>
 {{ theme_seed_style | safe }}
 <script>
@@ -13094,10 +13135,10 @@ def _layout(
 <!-- Offline approval queue indicator (roadmap 1.22) — keeps a small "N changes
      waiting to sync" pill in step with the service worker's queue. Deferred and
      decorative: a load failure leaves approvals working exactly as before. -->
-<script defer src="{{ url_for('static', filename='js/offline-queue.js') }}"></script>
+<script defer src="{{ offline_queue_js_url }}"></script>
 <!-- Install / Add-to-Home-Screen affordance (roadmap 1.22). Deferred; no-op
      where the browser can't install or once the app already runs standalone. -->
-<script defer src="{{ url_for('static', filename='js/pwa-install.js') }}"></script>
+<script defer src="{{ pwa_install_js_url }}"></script>
 </head>
 <body class="{{ 'mh-has-dock' if dock else '' }}" data-page="{{ active }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
@@ -15294,7 +15335,16 @@ def _layout(
         body=body,
         active=active,
         render_progress_js=_RENDER_PROGRESS_JS,
-        ui_kit_js_url=url_for("static", filename="js/ui-kit.js", v=_UI_KIT_VER),
+        ui_kit_js_url=url_for("static", filename="js/ui-kit.js", v=_static_ver("js/ui-kit.js")),
+        offline_queue_js_url=url_for(
+            "static", filename="js/offline-queue.js", v=_static_ver("js/offline-queue.js")
+        ),
+        pwa_install_js_url=url_for(
+            "static", filename="js/pwa-install.js", v=_static_ver("js/pwa-install.js")
+        ),
+        fonts_css_url=url_for(
+            "static", filename="theme/fonts.css", v=_static_ver("theme/fonts.css")
+        ),
         dock=dock,
         chapter_nav_html=chapter_nav_html,
         health_url=url_for("healthz"),
@@ -16034,8 +16084,20 @@ def _hero_product_demo() -> str:
     The block is decorative: the same workflow is conveyed as real text by
     the four-step explainer further down the page, so the whole demo is
     ``aria-hidden`` to keep the screen-reader narrative clean. Every value
-    here is static (no user input), so no escaping is required.
+    here is static except the omnibox host, which is derived from
+    ``request.host`` (a client-influenced header) and therefore ``_h``-escaped
+    before embedding.
     """
+    # The omnibox shows the live host so a custom domain no longer advertises the
+    # internal Render hostname. request.host is client-influenced → escape it;
+    # fall back to the canonical Render host for empty/local values so dev
+    # screenshots stay clean.
+    try:
+        _demo_host = (request.host or "").strip()
+    except Exception:
+        _demo_host = ""
+    if not _demo_host or _demo_host.split(":")[0].lower() in ("localhost", "127.0.0.1"):
+        _demo_host = "mediahub-gzwc.onrender.com"
     check = (
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
         'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" '
@@ -16066,7 +16128,7 @@ def _hero_product_demo() -> str:
         '<span class="mh-demo-nav reload"></span>'
         '<span class="mh-demo-omni">'
         '<span class="mh-demo-lock"></span>'
-        '<span class="mh-demo-url">mediahub-gzwc.onrender.com</span>'
+        f'<span class="mh-demo-url">{_h(_demo_host)}</span>'
         "</span>"
         '<span class="mh-demo-menu"><i></i><i></i><i></i></span>'
         "</div>"
@@ -16403,7 +16465,7 @@ def _home_promise_html() -> str:
         '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
         "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
         '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-        "<div><b>We don't sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>"
+        "<div><b>We don't sell your roster</b><span>Athlete and result data stays in your club's private workspace on our hosted platform and is never sold. Inventory you can audit on the privacy page.</span></div></li>"
         "</ul>"
         "</div>"
         "</section>"
@@ -16458,10 +16520,10 @@ def _home_faq_html() -> str:
         ),
         (
             "Is our athlete data kept private?",
-            "Yes. Athlete and result data stays on the deployment you "
-            "control and is never sold; content featuring minors never "
-            "auto-publishes. You can audit exactly what is stored on the "
-            "privacy page.",
+            "Yes. Athlete and result data stays in your club's private "
+            "workspace on our hosted platform and is never sold; content "
+            "featuring minors never auto-publishes. You can audit exactly "
+            "what is stored on the privacy page.",
         ),
     ]
     faq_rows = "".join(
@@ -16871,8 +16933,10 @@ def create_app() -> Flask:
     _video_upload_max *= 1024 * 1024
     # Let the browser hold static assets (self-hosted fonts, fonts.css, the UI
     # kit) instead of revalidating each with a conditional GET on every single
-    # navigation. The one mutable asset, ui-kit.js, carries a content-hash `?v=`
-    # cache-buster (see _UI_KIT_VER) so a deploy still lands instantly; the woff2
+    # navigation. Every mutable, behaviour-bearing asset — ui-kit.js and the
+    # other page JS (offline-queue / pwa-install / mobile-capture / print_center
+    # / bulk_export) plus fonts.css — carries a per-file content-hash `?v=`
+    # cache-buster (see _static_ver) so a deploy still lands instantly; the woff2
     # faces are effectively immutable. Routes that must stay fresh (sw.js,
     # generated previews) set their own Cache-Control, which overrides this.
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 604800  # 7 days
@@ -17209,8 +17273,9 @@ def create_app() -> Flask:
             "health",
             # Phase 1.5 — public status page, JSON twin, and operator usage
             # dashboard must be reachable without an active org. The first
-            # two are public trust signals; the last is operator-only by
-            # virtue of living under /healthz/* alongside /healthz/deps.
+            # two are public trust signals; the last enforces its own
+            # is_dev_operator() gate inside the handler (this exemption only
+            # lets it past the org-setup wall, it is not an authentication).
             "status_page",
             "api_status_json",
             "healthz_usage",
@@ -17299,22 +17364,68 @@ def create_app() -> Flask:
     # exactly as it always has (standalone/pilot mode), so deployments with
     # no accounts are untouched. The env-gated operator bypasses all gates.
 
+    def _memberships_snapshot() -> dict:
+        """One membership-ledger read per request, cached on ``flask.g``.
+
+        ``_session_can_use_profile`` / ``_active_role`` are called per-profile on
+        /sign-in and the org editor, and each previously re-parsed
+        memberships.jsonl twice (``is_bound`` + the membership lookup). Caching
+        the parsed ``{(email, profile_id): Membership}`` snapshot collapses a
+        whole render to a single ledger read. Membership writes in the same
+        request invalidate it (``_invalidate_memberships_snapshot``) so a
+        just-written grant is visible immediately."""
+        try:
+            snap = getattr(g, "_mh_memberships", None)
+        except Exception:
+            # No application/request context (e.g. a background call) — read
+            # directly rather than cache.
+            return _tenancy.MembershipStore()._read_all()
+        if snap is None:
+            snap = _tenancy.MembershipStore()._read_all()
+            try:
+                g._mh_memberships = snap
+            except Exception:
+                pass
+        return snap
+
+    def _invalidate_memberships_snapshot() -> None:
+        """Drop the per-request membership snapshot after a ledger write."""
+        try:
+            g._mh_memberships = None
+        except Exception:
+            pass
+
+    def _snap_is_bound(snap: dict, pid: str) -> bool:
+        pid = (pid or "").strip()
+        if not pid:
+            return False
+        return any(
+            m.profile_id == pid and m.status == _tenancy.STATUS_ACTIVE for m in snap.values()
+        )
+
+    def _snap_membership(snap: dict, email: str, pid: str):
+        if not email:
+            return None
+        return snap.get((_auth.normalize_email(email), (pid or "").strip()))
+
     def _session_can_use_profile(pid: str) -> bool:
         """May the CURRENT session pin / read-as-active / edit this org?"""
-        store = _tenancy.MembershipStore()
-        if not store.is_bound(pid):
+        snap = _memberships_snapshot()
+        if not _snap_is_bound(snap, pid):
             return True
         if _auth.is_dev_operator():
             return True
         email = _auth.current_user_email()
-        return bool(email and store.is_active_member(email, pid))
+        m = _snap_membership(snap, email, pid)
+        return bool(m and m.status == _tenancy.STATUS_ACTIVE)
 
     def _session_owns_profile(pid: str) -> bool:
         """Operator, or an ACTIVE owner of a bound org (delete/member-admin)."""
         if _auth.is_dev_operator():
             return True
         email = _auth.current_user_email()
-        return bool(email and _tenancy.MembershipStore().is_active_owner(email, pid))
+        m = _snap_membership(_memberships_snapshot(), email, pid)
+        return bool(m and m.status == _tenancy.STATUS_ACTIVE and m.role == _tenancy.ROLE_OWNER)
 
     def _active_role(pid: Optional[str] = None) -> str:
         """The current actor's collaboration role in an org (1.18).
@@ -17331,11 +17442,11 @@ def create_app() -> Flask:
             return _tenancy.ROLE_VIEWER
         if _auth.is_dev_operator():
             return _tenancy.ROLE_OWNER
-        store = _tenancy.MembershipStore()
-        if not store.is_bound(pid):
+        snap = _memberships_snapshot()
+        if not _snap_is_bound(snap, pid):
             return _tenancy.ROLE_OWNER
         email = _auth.current_user_email()
-        m = store.get(email, pid) if email else None
+        m = _snap_membership(snap, email, pid)
         if m and m.status == _tenancy.STATUS_ACTIVE:
             return m.role
         return _tenancy.ROLE_VIEWER
@@ -17358,6 +17469,7 @@ def create_app() -> Flask:
             invited_by=email,
             invited_via_profile_id=pid,
         )
+        _invalidate_memberships_snapshot()
 
     def _active_profile_id() -> Optional[str]:
         """Return the signed-in organisation id, or ``None``.
@@ -18006,6 +18118,41 @@ def create_app() -> Flask:
         body = build_mobile_parity_body(targets)
         return _layout("Mobile parity audit", body, active="settings")
 
+    def _warm_run_achievements(conn, rows) -> dict:
+        """Return ``{run_id: n_achievements}`` for every row — from the
+        ``n_achievements`` column when present, else the run JSON's
+        ``recognition_report``.
+
+        Shared by the runs-table (/activity) and feed (/activity/feed) views so
+        neither duplicates the column-or-JSON logic. JSON-derived counts are
+        best-effort written back to the column so old rows don't re-read the JSON
+        file on every future view; that write is a pure optimisation, wrapped so
+        a locked / read-only DB is a silent no-op — the DISPLAY never depends on
+        it (and never under-counts on a failed write).
+        """
+        out: dict = {}
+        need: list = []
+        for r in rows:
+            v = r["n_achievements"] if "n_achievements" in r.keys() else None
+            if v is None:
+                need.append(r["id"])
+            else:
+                out[r["id"]] = int(v or 0)
+        for _rid in need:
+            _d = _load_run(_rid) or {}
+            out[_rid] = int((_d.get("recognition_report") or {}).get("n_achievements", 0) or 0)
+        if need:
+            try:
+                for _rid in need:
+                    conn.execute(
+                        "UPDATE runs SET n_achievements = ? WHERE id = ?",
+                        (out[_rid], _rid),
+                    )
+                conn.commit()
+            except Exception:
+                pass
+        return out
+
     # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----
     @app.route("/activity")
     def activity_page():
@@ -18072,33 +18219,10 @@ def create_app() -> Flask:
                 # or its run JSON for rows written before the column existed.
                 #
                 # Audit-round hardening: the DISPLAY never depends on a DB
-                # write. We compute the counts in memory (column or JSON), then
-                # best-effort cache-warm the column so old rows don't re-read
-                # JSON next time — but that write is purely an optimisation,
-                # wrapped so a locked / read-only DB is a silent no-op, never a
-                # 500 and never an undercount.
-                _need = []
-                for r in rows:
-                    v = r["n_achievements"] if "n_achievements" in r.keys() else None
-                    if v is None:
-                        _need.append(r["id"])
-                    else:
-                        ach_by_id[r["id"]] = int(v or 0)
-                for _rid in _need:
-                    _d = _load_run(_rid) or {}
-                    ach_by_id[_rid] = int(
-                        (_d.get("recognition_report") or {}).get("n_achievements", 0) or 0
-                    )
-                if _need:
-                    try:
-                        for _rid in _need:
-                            conn.execute(
-                                "UPDATE runs SET n_achievements = ? WHERE id = ?",
-                                (ach_by_id[_rid], _rid),
-                            )
-                        conn.commit()
-                    except Exception:
-                        pass
+                # write. The shared helper computes counts in memory (column or
+                # JSON) and best-effort warms the column — a locked / read-only
+                # DB is a silent no-op, never a 500 and never an undercount.
+                ach_by_id = _warm_run_achievements(conn, rows)
                 ach_unfiltered = sum(ach_by_id.values())
             finally:
                 conn.close()
@@ -18336,7 +18460,7 @@ def create_app() -> Flask:
             '<div class="mh-toolbar">'
             f'<div class="grow mh-search mh-vanish" {_VANISH_PH_ATTR_SEARCH}>'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-            '<input id="mh-activity-search" type="search" placeholder="" autocomplete="off" aria-label="Search runs by meet name, file or run id" />'
+            '<input id="mh-activity-search" type="search" placeholder=" " autocomplete="off" aria-label="Search runs by meet name, file or run id" />'
             f'<span class="mh-vanish__ph" aria-hidden="true">{_h(_VANISH_PH_SEARCH[0])}</span>'
             "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
@@ -18596,14 +18720,10 @@ def create_app() -> Flask:
                     "ORDER BY created_at DESC LIMIT 100",
                     (prof.profile_id,),
                 ).fetchall()
-                # Backfill n_achievements from the run JSON for pre-column rows
-                # (display-only; mirrors the runs-table view, never writes).
-                for r in rows:
-                    if ("n_achievements" not in r.keys()) or (r["n_achievements"] is None):
-                        _d = _load_run(r["id"]) or {}
-                        ach_by_id_feed[r["id"]] = int(
-                            (_d.get("recognition_report") or {}).get("n_achievements", 0) or 0
-                        )
+                # Backfill n_achievements via the shared helper (column or JSON),
+                # which also warms the column so feed-only users don't re-read
+                # the JSON on every visit — same logic the runs-table view uses.
+                ach_by_id_feed = _warm_run_achievements(conn, rows)
             finally:
                 conn.close()
         except Exception as e:
@@ -18866,10 +18986,20 @@ def create_app() -> Flask:
             '-4.5-4.2 6.1-.7z"/></svg>'
         )
 
+        # Re-run badging across the whole season (``rows`` is already the full
+        # org set, up to 200, with the hash + fingerprint columns). Computed
+        # BEFORE the tallies so re-uploads of the same meet don't inflate the
+        # celebratory hero stats: dup_map keys are the re-run ids (the oldest run
+        # in each group is the original and is never in the map).
+        dup_map = _duplicate_map(rows)
+
         # Pass 1 — group runs by calendar month (newest-first order preserved),
         # tally per-month + season totals, note the span, and remember the one
-        # standout meet (most moments) so the timeline can celebrate it.
-        n_meets = len(rows)
+        # standout meet (most moments) so the timeline can celebrate it. Re-runs
+        # still RENDER (with their Re-run badge) but are excluded from every
+        # count so "Meets", "Swims matched" and "Moments detected" count each
+        # real meet once.
+        n_meets = 0
         total_swims = 0
         total_moments = 0
         first_dt = None
@@ -18879,36 +19009,39 @@ def create_app() -> Flask:
         months: list = []
         month_pos: dict = {}
         for r in rows:
+            is_rerun = r["id"] in dup_map
             dt = _parse(r["created_at"])
             month_label = dt.strftime("%B %Y") if dt else "Undated"
             swims = int(r["our_swims"] or 0)
             moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
-            total_swims += swims
-            total_moments += moments
-            if dt is not None:
-                if first_dt is None or dt < first_dt:
-                    first_dt = dt
-                if last_dt is None or dt > last_dt:
-                    last_dt = dt
-            if moments > peak_moments:
-                peak_moments = moments
-                peak_run_id = r["id"]
+            if not is_rerun:
+                n_meets += 1
+                total_swims += swims
+                total_moments += moments
+                if dt is not None:
+                    if first_dt is None or dt < first_dt:
+                        first_dt = dt
+                    if last_dt is None or dt > last_dt:
+                        last_dt = dt
+                if moments > peak_moments:
+                    peak_moments = moments
+                    peak_run_id = r["id"]
             if month_label not in month_pos:
                 month_pos[month_label] = len(months)
                 months.append({"label": month_label, "rows": [], "swims": 0, "moments": 0})
             bucket = months[month_pos[month_label]]
             bucket["rows"].append((r, dt, swims, moments))
-            bucket["swims"] += swims
-            bucket["moments"] += moments
-
-        # Re-run badging across the whole season (``rows`` is already the full
-        # org set, up to 200, with the hash + fingerprint columns).
-        dup_map = _duplicate_map(rows)
+            if not is_rerun:
+                bucket["swims"] += swims
+                bucket["moments"] += moments
 
         # Pass 2 — render each month as a labelled section of meet cards.
         items_html = ""
         for bucket in months:
-            meets_n = len(bucket["rows"])
+            # Count each real meet once (re-runs still render below with their
+            # Re-run badge) so the month label agrees with the deduplicated
+            # season hero totals.
+            meets_n = sum(1 for r, *_ in bucket["rows"] if r["id"] not in dup_map)
             meta_bits = [f"{meets_n} {'meet' if meets_n == 1 else 'meets'}"]
             if bucket["moments"]:
                 meta_bits.append(
@@ -19160,13 +19293,14 @@ def create_app() -> Flask:
                 ".html",
                 ".csv",
                 ".txt",
+                ".xlsx",
             }
             ext = os.path.splitext(f.filename)[1].lower()
             if ext not in _ALLOWED_UPLOAD_EXTS:
                 return _layout(
                     "Upload",
                     '<div class="card"><p class="tag bad">That file type isn\'t supported. '
-                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML or CSV.</p></div>",
+                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML, CSV or Excel (.xlsx).</p></div>",
                     active="create",
                 ), 400
             data = f.read()
@@ -19417,8 +19551,19 @@ def create_app() -> Flask:
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
+    var unknownStreak = 0, errStreak = 0;
+    var lostMsg = 'We can\\u2019t find this fetch any more \\u2014 please try the link again.';
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
+        errStreak = 0;
+        // 'unknown' = the job left memory/disk (worker restart / prune). It is
+        // terminal, but tolerate a couple during a worker swap before failing so
+        // a transient 404 doesn't kill a live fetch.
+        if (j.status === 'unknown') {
+          if (++unknownStreak >= 3) { if (cursor) cursor.done(); fail(lostMsg); return; }
+          setTimeout(tick, 1500); return;
+        }
+        unknownStreak = 0;
         if (typeof j.percent === 'number') setPct(j.percent);
         setStats(j.stats);
         if (j.status === 'done' && j.redirect) { setPct(100); setPhase(null, true); stopActive(); setText(statusEl, 'Done \\u2014 opening configure\\u2026'); if (cursor) cursor.done(); window.location.href = j.redirect; return; }
@@ -19427,7 +19572,11 @@ def create_app() -> Flask:
         setText(statusEl, j.progress || 'Reading the site\\u2026');
         if (cursor) cursor.status(j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
-      }).catch(function(){ setTimeout(tick, 2500); });
+      }).catch(function(){
+        // Cap consecutive network failures so a gone job can't poll forever.
+        if (++errStreak >= 8) { if (cursor) cursor.done(); fail(lostMsg); return; }
+        setTimeout(tick, 2500);
+      });
     };
     tick();
   }
@@ -19447,7 +19596,7 @@ def create_app() -> Flask:
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
-  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3, PDF, CSV or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
+  <p class="lede">Upload your meet results file — Hytek&nbsp;<code>.hy3</code>&hairsp;/&hairsp;<code>.zip</code>, SDIF&hairsp;/&hairsp;SD3, PDF, CSV, Excel&nbsp;<code>.xlsx</code> or HTML. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
 
@@ -19474,7 +19623,7 @@ def create_app() -> Flask:
       </svg>
       <div class="mh-dropzone-headline">Drop your results file</div>
       <div class="mh-dropzone-sub">or click to browse</div>
-      <input id="upload-file" type="file" name="file" accept=".hy3,.hyv,.sd3,.sdif,.cl2,.zip,.pdf,.htm,.html,.csv,.txt" required />
+      <input id="upload-file" type="file" name="file" accept=".hy3,.hyv,.sd3,.sdif,.cl2,.zip,.pdf,.htm,.html,.csv,.txt,.xlsx" required />
       <div class="mh-dropzone-fineprint">HY3 · SDIF/SD3/CL2 · ZIP · PDF · CSV · HTML</div>
       <div class="mh-dropzone-preview" aria-live="polite"></div>
     </label>
@@ -20019,6 +20168,25 @@ def create_app() -> Flask:
             pass
         return redirect(url_for("run_status", run_id=run_id))
 
+    def _url_fetch_rate_key() -> str:
+        """Rate-limit key for the costly headless-browser crawl.
+
+        Keyed on the SIGNED-IN identity (profile_id, else user email) so a client
+        can't dodge the cap by replaying a pre-``mh_sid`` cookie / dropping the
+        updated one to mint a fresh session per request. Anonymous callers fall
+        back to the trusted client IP (rightmost XFF hop / remote_addr), never a
+        client-resettable session value."""
+        pid = _active_profile_id()
+        if pid:
+            return f"pid:{pid}"
+        try:
+            email = _auth.current_user_email()
+        except Exception:
+            email = ""
+        if email:
+            return f"user:{email}"
+        return f"ip:{_client_ip()}"
+
     @app.route("/upload/from-url", methods=["POST"])
     def upload_from_url():
         """Kick off a background results-from-a-link fetch. Returns a job id the
@@ -20051,12 +20219,8 @@ def create_app() -> Flask:
                 jsonify({"error": "That address can't be reached (private/invalid host)."}),
                 400,
             )
-        # Per-session rate limit (a real headless-browser crawl is a real cost).
-        sid = session.get("mh_sid")
-        if not sid:
-            sid = uuid.uuid4().hex
-            session["mh_sid"] = sid
-        if not _url_fetch_rate_ok(sid):
+        # Per-identity rate limit (a real headless-browser crawl is a real cost).
+        if not _url_fetch_rate_ok(_url_fetch_rate_key()):
             return (
                 jsonify({"error": "Too many fetches just now — wait a minute and try again."}),
                 429,
@@ -20130,11 +20294,7 @@ def create_app() -> Flask:
         source_url = _run_source_url(run_id)
         if not source_url:
             return jsonify({"error": "This run wasn't fetched from a link."}), 400
-        sid = session.get("mh_sid")
-        if not sid:
-            sid = uuid.uuid4().hex
-            session["mh_sid"] = sid
-        if not _url_fetch_rate_ok(sid):
+        if not _url_fetch_rate_ok(_url_fetch_rate_key()):
             return (
                 jsonify({"error": "Too many fetches just now — wait a minute and try again."}),
                 429,
@@ -21096,6 +21256,17 @@ def create_app() -> Flask:
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:3px">{_h(_nm_blurb)}</div>'
                 f"{_raw_line}</td>"
                 f"</tr>"
+            )
+        # Honest truncation notice: the table leads with the 40 closest calls, but
+        # a big meet can have far more no-achievement swims. Say so, so the copy
+        # ("Nothing here was silently dropped") stays true — every swim is in the
+        # run trace JSON.
+        if len(no_ach_sorted) > 40:
+            not_gen_rows += (
+                '<tr><td colspan="4" class="muted" '
+                'style="font-size:12px;text-align:center;padding:12px">'
+                f"Showing the 40 leading close calls of {len(no_ach_sorted)} "
+                "&mdash; every swim is in the run trace JSON.</td></tr>"
             )
 
         # --- Legacy V4 cards (collapsed)
@@ -22321,7 +22492,12 @@ function copyWhyCard(btn, taId) {{
 
             if len(r.series_cs) >= 2:
                 sid = f"s{i}"
-                spark_payload[sid] = _rt.sparkline_series(r)
+                _series = _rt.sparkline_series(r)
+                # The drawing JS only reads t/cur/kind; 'd' carries swim_date
+                # strings from the uploaded file and is never used. Drop it so
+                # untrusted file content can't ride into the embedded <script>.
+                _series.pop("d", None)
+                spark_payload[sid] = _series
                 _trend = (
                     f" ({r.delta.label})"
                     if r.delta.kind in ("pb", "improvement", "matched")
@@ -22379,7 +22555,9 @@ function copyWhyCard(btn, taId) {{
             '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">'
             "No swims match these filters.</td></tr>"
         )
-        spark_json = json.dumps(spark_payload)
+        # Belt-and-braces: json.dumps does NOT escape '</script>', so escape the
+        # closing-tag sequence before embedding the payload inside <script>.
+        spark_json = json.dumps(spark_payload).replace("</", "<\\/")
 
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
@@ -23065,9 +23243,12 @@ function copyWhyCard(btn, taId) {{
             return jsonify({"error": "run not found"}), 404
 
         payload = request.get_json(silent=True) or {}
-        current_caption = (payload.get("current_caption") or "").strip()
+        # Server-side length caps: the 140-char maxlength is client-only, so an
+        # oversized body would otherwise be embedded verbatim in the provider
+        # prompt (token cost, provider 400s). Real captions are ~280 chars.
+        current_caption = (payload.get("current_caption") or "").strip()[:4000]
         transform = (payload.get("transform") or "").strip()
-        custom = (payload.get("custom") or "").strip()
+        custom = (payload.get("custom") or "").strip()[:500]
         tone = (payload.get("tone") or "warm-club").strip()
         if tone not in ("ai", "warm-club", "hype", "data-led"):
             tone = "warm-club"
@@ -23710,12 +23891,15 @@ function copyWhyCard(btn, taId) {{
 
     @app.route("/api/runs/<run_id>/cards")
     def api_cards(run_id):
-        state = _run_state(run_id)
-        if state == "in_progress":
-            return jsonify({"error": "in_progress", "retry_after": 4}), 202
+        # Tenant gate BEFORE the in_progress short-circuit — otherwise a foreign
+        # org polling another org's run_id learns it exists and when it finishes.
+        # _run_owner_id falls back to the runs DB row, so ownership resolves even
+        # mid-pipeline before the JSON is written (same basis api_status relies on).
         data = _load_run(run_id)
         if not _can_access_run(run_id, data, _active_profile_id()):
             return jsonify({"error": "not found"}), 404
+        if _run_state(run_id) == "in_progress":
+            return jsonify({"error": "in_progress", "retry_after": 4}), 202
         if not data:
             return jsonify({"error": "not found"}), 404
         return jsonify(data.get("cards", []))
@@ -23731,12 +23915,13 @@ function copyWhyCard(btn, taId) {{
 
     @app.route("/api/runs/<run_id>/export")
     def api_export(run_id):
-        state = _run_state(run_id)
-        if state == "in_progress":
-            return jsonify({"error": "in_progress", "retry_after": 4}), 202
+        # Tenant gate BEFORE the in_progress short-circuit (see api_cards) so a
+        # foreign org can't use the 202 to learn a run exists / when it finishes.
         data = _load_run(run_id)
         if not _can_access_run(run_id, data, _active_profile_id()):
             return jsonify({"error": "not found"}), 404
+        if _run_state(run_id) == "in_progress":
+            return jsonify({"error": "in_progress", "retry_after": 4}), 202
         if not data:
             return jsonify({"error": "not found"}), 404
         return jsonify(data)
@@ -23999,22 +24184,29 @@ Relay team broke club record"></textarea>
             "finishes, then pull the cards it produced.</p>"
             + _switcher(
                 "quickstart",
+                "# These legacy /api routes use your signed-in SESSION COOKIE —\n"
+                "# send it with -b, or every call 404s with {\"status\":\"unknown\"}.\n"
+                'COOKIE="session=<your session cookie>"\n\n'
                 "# 1. Poll the run until the pipeline finishes…\n"
                 'RUN_ID="run_8f2c1a"\n'
-                'curl -s "__BASE__/api/runs/$RUN_ID/status"\n\n'
+                'curl -s -b "$COOKIE" "__BASE__/api/runs/$RUN_ID/status"\n\n'
                 "# 2. …then pull the generated content cards.\n"
-                'curl -s "__BASE__/api/runs/$RUN_ID/cards"\n',
+                'curl -s -b "$COOKIE" "__BASE__/api/runs/$RUN_ID/cards"\n',
                 "import time\n"
                 "import requests\n\n"
                 'BASE = "__BASE__"\n'
-                'run_id = "run_8f2c1a"\n\n'
+                'run_id = "run_8f2c1a"\n'
+                "# Legacy /api routes use your signed-in session cookie — send it\n"
+                "# on every call, or the run reads as 'unknown' (a 404).\n"
+                'cookies = {"session": "<your session cookie>"}\n\n'
                 "# Poll until the recognition + content pipeline is done.\n"
                 "while True:\n"
-                '    status = requests.get(f"{BASE}/api/runs/{run_id}/status").json()\n'
-                '    if status["status"] in ("done", "error"):\n'
+                '    status = requests.get(f"{BASE}/api/runs/{run_id}/status", cookies=cookies).json()\n'
+                "    # 'unknown' = wrong run id or not signed in — terminal, or this loops forever.\n"
+                '    if status["status"] in ("done", "error", "unknown"):\n'
                 "        break\n"
                 "    time.sleep(4)\n\n"
-                'cards = requests.get(f"{BASE}/api/runs/{run_id}/cards").json()\n'
+                'cards = requests.get(f"{BASE}/api/runs/{run_id}/cards", cookies=cookies).json()\n'
                 'print(f"{len(cards)} cards ready")\n',
                 'const BASE = "__BASE__";\n'
                 'const runId = "run_8f2c1a";\n\n'
@@ -24026,7 +24218,8 @@ Relay team broke club record"></textarea>
                 "  });\n"
                 "  status = await res.json();\n"
                 '  if (status.status === "running") await new Promise((r) => setTimeout(r, 4000));\n'
-                '} while (status.status !== "done" && status.status !== "error");\n\n'
+                "  // 'unknown' (wrong run id or not signed in) is terminal — don't loop forever.\n"
+                '} while (status.status !== "done" && status.status !== "error" && status.status !== "unknown");\n\n'
                 "const cards = await fetch(`${BASE}/api/runs/${runId}/cards`, {\n"
                 '  credentials: "include",\n'
                 "}).then((r) => r.json());\n"
@@ -24568,10 +24761,19 @@ Relay team broke club record"></textarea>
 
         now = _time.time()
         window = [t for t in _complaint_recent_posts.get(remote, []) if now - t < 3600]
-        _complaint_recent_posts[remote] = window
+        if window:
+            _complaint_recent_posts[remote] = window
+        else:
+            # Drop empty-window keys so a header-rotating flood can't grow the
+            # dict without bound; opportunistically trim if it still balloons.
+            _complaint_recent_posts.pop(remote, None)
+            if len(_complaint_recent_posts) > 256:
+                for k in list(_complaint_recent_posts)[:128]:
+                    _complaint_recent_posts.pop(k, None)
         if len(window) >= 5:
             return True
         window.append(now)
+        _complaint_recent_posts[remote] = window
         return False
 
     def _complaints_form_body(error: str = "") -> str:
@@ -25862,12 +26064,13 @@ self.addEventListener('fetch', function(e){
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             "<title>Motion vocabulary — MediaHub</title>"
+            f'<link rel="stylesheet" href="{url_for("static", filename="theme/fonts.css")}">'
             f'<link rel="stylesheet" href="{css_url}">'
             "<style>"
             ":root{--bg:#0A0B11;--panel:#14161F;--ink:#EaEcF2;--muted:#8A90A2;--accent:#C9A227;}"
             "*{box-sizing:border-box}"
             "body{margin:0;background:var(--bg);color:var(--ink);"
-            "font-family:'Inter',system-ui,sans-serif;padding:28px 22px 60px}"
+            "font-family:'Hanken Grotesk',system-ui,sans-serif;padding:28px 22px 60px}"
             "header{max-width:1100px;margin:0 auto 8px}"
             "h1{font-size:22px;margin:0 0 4px}"
             ".lede{color:var(--muted);max-width:640px;margin:0 0 4px;font-size:14px;line-height:1.5}"
@@ -25934,10 +26137,25 @@ self.addEventListener('fetch', function(e){
         """
         import resource
 
-        rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # On Linux ru_maxrss is in KB; on macOS it's bytes. Render
-        # is always Linux so KB is correct.
-        rss_mb = rss_kb / 1024.0
+        # Peak (high-water) RSS from ru_maxrss. On Linux it's in KB; on macOS
+        # it's bytes. Render is always Linux so KB is correct.
+        peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+        # CURRENT RSS is what actually spots a leak — ru_maxrss is a lifetime
+        # high-water mark that never falls, so freed memory would be invisible
+        # and a one-off spike would read as a permanent leak. Read VmRSS (and
+        # VmHWM, the peak, from the SAME snapshot so peak >= current holds) from
+        # /proc/self/status (Linux/Render); fall back to ru_maxrss where /proc
+        # is absent (e.g. a macOS dev box).
+        rss_mb = peak_mb
+        try:
+            with open("/proc/self/status", encoding="utf-8") as _st:
+                for _line in _st:
+                    if _line.startswith("VmRSS:"):
+                        rss_mb = int(_line.split()[1]) / 1024.0  # KB → MB
+                    elif _line.startswith("VmHWM:"):
+                        peak_mb = int(_line.split()[1]) / 1024.0  # KB → MB
+        except OSError:
+            pass
         with _active_lock:
             active_n = len(_active_runs)
             active_running = sum(1 for v in _active_runs.values() if v.get("status") == "running")
@@ -25945,6 +26163,7 @@ self.addEventListener('fetch', function(e){
         payload = {
             "ok": True,
             "rss_mb": round(rss_mb, 1),
+            "rss_peak_mb": round(peak_mb, 1),
             "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
             "active_runs": active_n,
             "active_runs_running": active_running,
@@ -26509,13 +26728,17 @@ self.addEventListener('fetch', function(e){
         try:
             from mediahub.log_sentinel import state as _sentinel_state
 
-            return jsonify(
-                {
-                    "ok": True,
-                    "status": _sentinel_state.read_status(),
-                    "audit_tail": _sentinel_state.read_audit_tail(10),
-                }
-            )
+            payload = {
+                "ok": True,
+                "status": _sentinel_state.read_status(),
+            }
+            # The audit tail carries raw production log excerpts (tracebacks,
+            # request paths/IPs) in its 'evidence' fields — operator-only.
+            # Anonymous monitors get the status booleans/timestamps only, like
+            # the sibling /healthz/* probes.
+            if _auth.is_dev_operator():
+                payload["audit_tail"] = _sentinel_state.read_audit_tail(10)
+            return jsonify(payload)
         except Exception as e:
             return jsonify({"ok": False, "error": f"sentinel_health_unavailable: {e}"}), 500
 
@@ -26574,6 +26797,12 @@ self.addEventListener('fetch', function(e){
 
     @app.route("/healthz/usage")
     def healthz_usage():
+        """Operator-only: LLM call counts, token totals, cost estimates,
+        free-tier headroom and the last raw provider error. Same gate as its
+        sibling /healthz/governance — the org-gate exemption above only lets it
+        past the org-setup wall, it is NOT an authentication."""
+        if not _auth.is_dev_operator():
+            return redirect(url_for("settings_page"))
         from mediahub.observability import llm_usage as _u
 
         today = _u.usage_for_window(window_hours=24)
@@ -28297,15 +28526,23 @@ self.addEventListener('fetch', function(e){
             "</ul></div>" + _render_settings_cache_purge_card()
         )
 
-    def _render_settings_cache_purge_card() -> str:
-        """Operator-only — clear every re-derivable cache for the whole site.
+    def _cache_tally() -> tuple[int, int]:
+        """(files, bytes) across every re-derivable cache root, cached ~60s.
 
-        A deployment-wide purge across all organisations and runs. Only safe
-        because everything it removes is re-derivable; source data is untouched.
-        Counts the current on-disk cache so the operator sees the scale before
-        clearing.
+        A mature deployment's motion/render/PB caches hold tens of thousands of
+        files; walking + stat()-ing them on every /settings/developer render
+        costs seconds. Snapshot the tally for _CACHE_TALLY_TTL — the figure is
+        informational and the purge route clears the snapshot.
         """
+        import time
+
         from mediahub.privacy.cache_purge import cache_roots
+
+        cached = _cache_tally_cache.get("cache_tally")
+        if cached is not None:
+            ts, files, nbytes = cached
+            if (time.time() - ts) < _CACHE_TALLY_TTL:
+                return files, nbytes
 
         total_files = 0
         total_bytes = 0
@@ -28322,6 +28559,18 @@ self.addEventListener('fetch', function(e){
                             pass
             except OSError:
                 continue
+        _cache_tally_cache["cache_tally"] = (time.time(), total_files, total_bytes)
+        return total_files, total_bytes
+
+    def _render_settings_cache_purge_card() -> str:
+        """Operator-only — clear every re-derivable cache for the whole site.
+
+        A deployment-wide purge across all organisations and runs. Only safe
+        because everything it removes is re-derivable; source data is untouched.
+        Counts the current on-disk cache so the operator sees the scale before
+        clearing.
+        """
+        total_files, total_bytes = _cache_tally()
         size_mb = total_bytes / (1024 * 1024)
         return (
             '<div class="card" style="padding:18px 22px;margin-top:14px;'
@@ -28331,8 +28580,10 @@ self.addEventListener('fetch', function(e){
             "Permanently deletes every <strong>re-derivable</strong> cache for the whole "
             "deployment — all organisations, all runs: PB lookups, motion &amp; graphic "
             "renders, brand-DNA captures, narration, and web research — and drops the "
-            "matching in-process caches from this worker's <strong>memory</strong> so "
-            "nothing is served stale. Runs, uploads, the databases, the media library and "
+            "matching in-process caches from <strong>this worker's</strong> memory. "
+            "(Under multiple workers the sibling worker keeps its own in-memory entries "
+            "until they expire, so it refreshes shortly after rather than instantly.) "
+            "Runs, uploads, the databases, the media library and "
             "the ledgers are <strong>not</strong> touched; the engine re-derives what it "
             "needs on the next request. Operator-only.</p>"
             '<p class="dim" style="font-size:13px;margin-bottom:12px">'
@@ -28411,6 +28662,8 @@ self.addEventListener('fetch', function(e){
             return jsonify({"error": "No organisation active."}), 403
         body = request.get_json(silent=True) or {}
         sport = str(body.get("sport") or request.form.get("sport") or "swimming").strip().lower()
+        if not _valid_sport_slug(sport):
+            return jsonify({"error": f"No sport profile named {sport!r}."}), 404
         try:
             from mediahub.content_engine.planner import build_content_plan, save_plan
 
@@ -28458,16 +28711,13 @@ self.addEventListener('fetch', function(e){
         from mediahub.club_platform.post_types import post_types_for
         from mediahub.sport_profiles import list_sport_profiles, load_sport_profile
 
-        _ORG_TYPE_TO_SPORT = {
-            "swimming_club": "swimming",
-            "football": "football",
-            "athletics": "athletics",
-        }
         _avail = {p.sport for p in list_sport_profiles()}
         _prof = _active_profile()
         sport = _ORG_TYPE_TO_SPORT.get(getattr(_prof, "org_type", "") or "")
         if sport not in _avail:
             sport = str(body.get("sport") or "swimming").strip().lower()
+        if not _valid_sport_slug(sport):
+            return jsonify({"error": f"No sport profile named {sport!r}."}), 404
         try:
             profile = load_sport_profile(sport)
             goal_choices = [(spt.slug, spt.title) for spt in post_types_for(profile)]
@@ -28520,11 +28770,6 @@ self.addEventListener('fetch', function(e){
         # profile. Only when the org type doesn't imply a sport (a
         # university society could run anything) do we fall back to a
         # visible selector.
-        _ORG_TYPE_TO_SPORT = {
-            "swimming_club": "swimming",
-            "football": "football",
-            "athletics": "athletics",
-        }
         _prof = _active_profile()
         _avail = {slug for slug, _ in sports}
         org_sport = _ORG_TYPE_TO_SPORT.get(getattr(_prof, "org_type", "") or "")
@@ -28966,11 +29211,6 @@ function mhPlanGenerate(btn) {{
         organisation type (same mapping the Plan page uses)."""
         from mediahub.sport_profiles import list_sport_profiles
 
-        _ORG_TYPE_TO_SPORT = {
-            "swimming_club": "swimming",
-            "football": "football",
-            "athletics": "athletics",
-        }
         try:
             avail = {p.sport for p in list_sport_profiles()}
         except Exception:
@@ -29095,7 +29335,7 @@ function mhPlanGenerate(btn) {{
         _kind_style = {
             "blackout": ("var(--bad)", "rgba(255,107,107,.12)"),
             "key_date": ("var(--medal)", "rgba(244,213,141,.12)"),
-            "event": ("var(--lane)", "rgba(212,255,58,.12)"),
+            "event": ("var(--lane)", "color-mix(in oklab, var(--lane) 12%, transparent)"),
             "anniversary": ("var(--ink-dim)", "rgba(182,178,166,.10)"),
             "posted": ("var(--good)", "rgba(94,227,154,.12)"),
         }
@@ -33341,9 +33581,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return jsonify({"error": "unsupported_type"}), 400
 
         payload = request.get_json(silent=True) or {}
-        current_caption = (payload.get("current_caption") or "").strip()
+        # Server-side length caps: the 140-char maxlength is client-only, so an
+        # oversized body would otherwise be embedded verbatim in the provider
+        # prompt (token cost, provider 400s). Real captions are ~280 chars.
+        current_caption = (payload.get("current_caption") or "").strip()[:4000]
         transform = (payload.get("transform") or "").strip()
-        custom = (payload.get("custom") or "").strip()
+        custom = (payload.get("custom") or "").strip()[:500]
         tone = (payload.get("tone") or "warm-club").strip()
         if tone not in ("ai", "warm-club", "hype", "data-led"):
             tone = "warm-club"
@@ -35395,6 +35638,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # binds the moment its invited owner signs up.
         try:
             _tenancy.MembershipStore().activate_invites(user.email)
+            _invalidate_memberships_snapshot()
         except Exception:
             log.warning("invite activation failed for a new account", exc_info=True)
         # PC.14: verification mail (best-effort; only when the email seam
@@ -36176,6 +36420,7 @@ what you're doing, what they should do.</p>
             _perf_context_cache.clear()
             _explanation_cache.clear()
             _studio_render_cache.clear()
+            _cache_tally_cache.clear()
         except Exception:
             pass
 
@@ -36183,7 +36428,8 @@ what you're doing, what they should do.</p>
         mb = (report.get("bytes_reclaimed") or 0) / (1024 * 1024)
         _flash_toast(
             f"Site-wide cache cleared — {files:,} file(s) deleted, {mb:.1f} MB "
-            "reclaimed; in-process caches dropped from memory.",
+            "reclaimed; this worker's in-process caches dropped from memory "
+            "(any sibling worker refreshes as its own entries expire).",
             "success",
         )
         return redirect(url_for("settings_section", section="developer"))
@@ -36747,6 +36993,7 @@ what you're doing, what they should do.</p>
                 invited_by=_auth._dev_operator_email(),
                 invited_via_profile_id=pid,
             )
+            _invalidate_memberships_snapshot()
             _op_flash(
                 notice=(
                     f"{m.email} bound as owner of {pid}."
@@ -38033,6 +38280,7 @@ what you're doing, what they should do.</p>
                         invited_by=inviter,
                         invited_via_profile_id=pid,
                     )
+                    _invalidate_memberships_snapshot()
                     if m.status == _tenancy.STATUS_ACTIVE:
                         notice = f"{m.email} added as {m.role}."
                     else:
@@ -38052,6 +38300,7 @@ what you're doing, what they should do.</p>
                         )
                 elif action == "remove":
                     store.remove(target, pid)
+                    _invalidate_memberships_snapshot()
                     notice = f"{_tenancy.normalize_email(target)} removed."
                 else:
                     error = "Unknown action."
@@ -43903,8 +44152,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             shared_banner = (
                 '<div class="mh-flash" role="status" style="'
                 "margin:0 0 var(--sp-5);padding:14px 18px;"
-                "border:1px solid rgba(212,255,58,0.30);border-left:3px solid var(--accent);"
-                "background:rgba(212,255,58,0.06);color:var(--ink);"
+                "border:1px solid color-mix(in oklab, var(--lane) 30%, transparent);"
+                "border-left:3px solid var(--accent);"
+                "background:color-mix(in oklab, var(--lane) 6%, transparent);color:var(--ink);"
                 'border-radius:var(--radius-sm);font-size:13px;line-height:1.5">'
                 f"{_sb_msg}</div>"
             )
@@ -44018,7 +44268,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
 <script>{_ML_QUICK_ACTION_JS}</script>
-<script src="{url_for("static", filename="js/mobile-capture.js")}"></script>
+<script src="{url_for("static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js"))}"></script>
 """
         return _layout("Media library", body, active="media")
 
@@ -49527,7 +49777,9 @@ voice, and queues them for one-click approval.</p>
             'aria-live="polite"></div>'
             '<div id="pr-preview" style="margin-top:var(--sp-3)"></div>'
             "</section>"
-            '<script src="' + url_for("static", filename="js/print_center.js") + '"></script>'
+            '<script src="'
+            + url_for("static", filename="js/print_center.js", v=_static_ver("js/print_center.js"))
+            + '"></script>'
         )
         return _layout("Print & merch", body)
 
@@ -51087,7 +51339,9 @@ voice, and queues them for one-click approval.</p>
             "</div>"
             '<div id="bx-result" style="margin-top:var(--sp-3)"></div>'
             "</section>"
-            '<script src="' + url_for("static", filename="js/bulk_export.js") + '"></script>'
+            '<script src="'
+            + url_for("static", filename="js/bulk_export.js", v=_static_ver("js/bulk_export.js"))
+            + '"></script>'
         )
         return _layout("Bulk export", body)
 
