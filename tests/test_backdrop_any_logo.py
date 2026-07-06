@@ -347,3 +347,33 @@ def test_one_pixel_tall_silhouette_does_not_raise(tmp_path):
     im.save(sil)
     t = L._treatment_for_silhouette(sil)
     _valid_treatment(t)
+
+
+def test_bg_fit_pil_open_is_memoised_across_renders(client, monkeypatch):
+    """The backdrop pick must not re-open every uploaded logo with PIL on every
+    signed-in render. Two renders of the same profile should open each raster
+    logo at most once (the second render is served from the mtime-keyed cache)."""
+    import PIL.Image as _PILImage
+
+    logos = [
+        _store_img("org-memo", f"l{i}", "png", _img(200, 200), "image/png", "PNG")
+        for i in range(4)
+    ]
+    _make_org("org-memo", logos)
+
+    webmod._bg_fit_cache.clear()
+    real_open = _PILImage.open
+    calls = {"n": 0}
+
+    def _counting_open(*a, **k):
+        calls["n"] += 1
+        return real_open(*a, **k)
+
+    monkeypatch.setattr(_PILImage, "open", _counting_open)
+
+    _home(client, "org-memo")
+    first = calls["n"]
+    assert first >= 1, "first render should open at least one logo"
+    _home(client, "org-memo")
+    # Second render adds no new PIL opens for the same, unchanged logos.
+    assert calls["n"] == first, f"second render re-opened logos: {calls['n']} > {first}"

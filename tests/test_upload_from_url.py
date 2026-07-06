@@ -359,6 +359,38 @@ def test_job_state_survives_a_second_worker(app_mod):
     assert entry["run_id"] == "run-xyz"
 
 
+def test_prune_reaps_stale_running_job_files(app_mod):
+    """A worker crash mid-crawl leaves a 'running' status file that the
+    finished-only sweep never deletes; once the dir exceeds the cap it would
+    grow unbounded. Prune must also drop files whose heartbeat is quiet well
+    past the stall guard, while keeping a freshly-heartbeating running job."""
+    app, wm = app_mod
+    d = wm._url_jobs_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    now = wm.time.time()
+    stale = now - (wm._URL_JOB_STALL_S * 2 + 60)
+
+    # Push the dir over the cap with old 'done' files so prune actually runs.
+    for i in range(wm._URL_JOBS_MAX + 5):
+        (d / f"done{i:03d}00ab.json").write_text(
+            json.dumps({"status": "done", "heartbeat": now - 1000}), encoding="utf-8"
+        )
+    # A wedged 'running' job whose heartbeat went cold long ago.
+    (d / "stalerun0001.json").write_text(
+        json.dumps({"status": "running", "heartbeat": stale}), encoding="utf-8"
+    )
+    # A genuinely alive 'running' job heartbeating right now.
+    (d / "liverun00002.json").write_text(
+        json.dumps({"status": "running", "heartbeat": now}), encoding="utf-8"
+    )
+
+    wm._url_jobs_files_prune()
+
+    names = {p.name for p in d.glob("*.json")}
+    assert "stalerun0001.json" not in names, "wedged running file must be reaped"
+    assert "liverun00002.json" in names, "a live heartbeating job must be kept"
+
+
 # ---------------------------------------------------------------------------
 # Kill-switch + file-upload path unchanged
 # ---------------------------------------------------------------------------

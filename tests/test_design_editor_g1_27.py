@@ -560,6 +560,8 @@ def test_render_api_respects_the_render_gate(stub_render, monkeypatch):
     assert r.status_code == 429
     d = r.get_json()
     assert d["error"] == "renderer_busy"
+    # The busy payload now names which render type saturated (for 429 telemetry).
+    assert d["renderer"] == "preview"
     assert r.headers.get("Retry-After")
     # And with the slot free the same request renders fine.
     r2 = c.post("/api/studio/render", json={"archetype": DE.default_archetype()})

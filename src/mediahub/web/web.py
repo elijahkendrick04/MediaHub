@@ -960,13 +960,6 @@ def _render_why_inner(
             "</div>"
         )
 
-    # AI-unavailable callout — round-3 cleanup. When the LLM provider is
-    # globally unavailable, every single card emits the same alert (177×
-    # on a typical meet review page). Suppress the per-card block here;
-    # the review/pack page now renders a single global notice at the top
-    # so the noise doesn't drown out the actual reasoning where it exists.
-    ai_error_block = ""
-
     # Phase 1.4 — "Use in next caption" button. Only rendered when
     # the caller passed run_id (so legacy callers without a run
     # context don't break). The button piggybacks on the existing
@@ -990,7 +983,6 @@ def _render_why_inner(
   <div style="margin-top:8px">
     <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
     {bullets_block}
-    {ai_error_block}
     {perf_block}
     <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;
       margin-bottom:4px">Source lines (verbatim)</div>
@@ -1788,6 +1780,13 @@ def _get_wf_store() -> Optional["WorkflowStore"]:
     return _wf_store
 
 
+# Memoised backdrop-logo aspect fits, keyed on (profile_id, logo_id, mtime_ns).
+# The backdrop pick opens every uploaded logo with PIL on each signed-in page
+# render; this caches each logo's aspect so repeat renders do zero PIL opens.
+# Keying on the file's mtime self-invalidates when a logo is replaced in place.
+_bg_fit_cache: dict[tuple[str, str, int], float] = {}
+
+
 _approval_ledger = None  # 1.12 group-approver votes (lazy, like _wf_store)
 
 
@@ -2126,12 +2125,47 @@ def _render_slot(kind: str, label: str = "", *, timeout: float):
             log.info("render gate: %s finished (%.0fms) label=%s", kind, dur_ms, label)
 
 
+def _ssrf_safe_stream_get(url: str, *, timeout: int, max_hops: int = 5):
+    """Streaming GET that refuses SSRF on a user-supplied URL.
+
+    The initial URL and every redirect hop must pass
+    ``web_research.safe_fetch.is_url_safe`` (http(s) hosts that resolve to
+    public IPs only), so an authenticated tenant can't aim a media import at an
+    internal / cloud-metadata address. Follows redirects manually
+    (``allow_redirects=False``) so each ``Location`` is re-validated before it
+    is fetched. Returns the final ``requests.Response`` (``stream=True``);
+    raises ``ValueError`` when any hop is unsafe or the chain is too long.
+    """
+    import requests as _requests  # noqa: PLC0415
+    from urllib.parse import urljoin as _urljoin  # noqa: PLC0415
+
+    from mediahub.web_research.safe_fetch import is_url_safe as _is_url_safe  # noqa: PLC0415
+
+    current = url
+    for _ in range(max_hops + 1):
+        if not _is_url_safe(current):
+            raise ValueError("unsafe_url")
+        resp = _requests.get(current, timeout=timeout, stream=True, allow_redirects=False)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("Location") or ""
+            resp.close()
+            if not loc:
+                raise ValueError("unsafe_url")
+            current = _urljoin(current, loc)  # resolve relative redirects
+            continue
+        return resp
+    raise ValueError("too_many_redirects")
+
+
 def _render_busy_response(kind: str):
     """Standard 429 payload returned when the render gate is saturated."""
     resp = jsonify(
         {
             "error": "renderer_busy",
             "kind": "busy",
+            # Which render type saturated (graphic/motion/reel/variant/…) — for
+            # 429 telemetry; JS still keys off error/renderer_busy + HTTP 429.
+            "renderer": kind,
             "user_message": (
                 "The renderer is busy finishing another graphic or video. "
                 "Give it a few seconds and try again."
@@ -3023,7 +3057,15 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     except Exception:  # noqa: BLE001
         prior_hash = ""
     meet_date = run.canonical_meet.start_date if run.canonical_meet else ""
-    meet_fp = _meet_fingerprint(run.profile_id, meet_name, meet_date)
+    # Fingerprint on the REAL canonical name ('' when there's none) — never the
+    # "(unknown)" display placeholder, which _normalize_meet_name reduces to
+    # "unknown" and would make every unnamed/error run in an org share one
+    # fingerprint and falsely badge each other as re-runs. '' → no fp.
+    meet_fp = _meet_fingerprint(
+        run.profile_id,
+        run.canonical_meet.name if run.canonical_meet else "",
+        meet_date,
+    )
     conn.execute(
         """INSERT OR REPLACE INTO runs
            (id, created_at, finished_at, status, profile_id, meet_name,
@@ -3847,9 +3889,15 @@ _RUN_DELETE_JS = """
             if (err && err.parentNode) err.parentNode.removeChild(err);
             if (row && row.parentNode) row.parentNode.removeChild(row);
             if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
-          } else if (btn) { btn.disabled = false; }
+          } else {
+            if (btn) btn.disabled = false;
+            if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+          }
         })
-        .catch(function(){ if (btn) btn.disabled = false; });
+        .catch(function(){
+          if (btn) btn.disabled = false;
+          if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+        });
     } else if (form.classList.contains('mh-clear-all-runs')) {
       e.preventDefault();
       var n = form.getAttribute('data-count') || '';
@@ -3865,9 +3913,15 @@ _RUN_DELETE_JS = """
           if (j && j.ok) {
             if (window.MH && MH.toast) MH.toast((j.deleted || 0) + ' runs deleted.', 'success');
             window.location.reload();
-          } else if (cbtn) { cbtn.disabled = false; }
+          } else {
+            if (cbtn) cbtn.disabled = false;
+            if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+          }
         })
-        .catch(function(){ if (cbtn) cbtn.disabled = false; });
+        .catch(function(){
+          if (cbtn) cbtn.disabled = false;
+          if (window.MH && MH.toast) MH.toast('Could not delete — reload and try again.', 'error');
+        });
     }
   }, false);
 })();
@@ -4420,7 +4474,7 @@ function mhVenueImport(btn, createUrl, cardId, fmt, idx) {
 function _renderVisualPanel(panel, data, cardId, createUrl) {
   var visuals = data.visuals || [];
   if (!visuals.length) {
-    panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No visuals generated. ' + ((data.errors && data.errors.length) ? 'Errors: ' + data.errors.join('; ') : '') + '</div>';
+    panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No visuals generated. ' + ((data.errors && data.errors.length) ? 'Errors: ' + window.safeText(data.errors.join('; ')) : '') + '</div>';
     return;
   }
   var v = visuals[0];
@@ -4482,8 +4536,10 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
         '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)" />' +
       '</div>' +
       '<div style="flex:1;min-width:min(200px,100%)">' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
-        (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + window.safeText(layout || 'auto') + '</div>' +
+        // why_this_design is LLM output that can echo user-provided club/meet
+        // strings — escape before it touches innerHTML.
+        (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + window.safeText(why) + '</div>' : '') +
         '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
         pickerHtml +
         '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
@@ -4541,7 +4597,9 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
         prog.stop();
         btn.disabled = false; btn.textContent = origLabel;
         var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
+        // detail is a raw str(e) that can echo uploaded-file-derived content
+        // (meet names, node stderr) — escape before it touches innerHTML.
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
         return;
       }
       prog.complete(function(){
@@ -4675,7 +4733,9 @@ function generateReel(btn, reelUrl, fmt) {
   var fail = function(msg) {
     prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+    // msg can fall back to a raw str(e) detail (meet names, node stderr) —
+    // escape before it touches innerHTML.
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + window.safeText(msg) + '</div>';
   };
   var success = function(videoUrl) {
     prog.complete(function(){
@@ -4725,7 +4785,7 @@ function generateReelBatch(btn, reelUrl) {
   var fail = function(msg) {
     prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + window.safeText(msg) + '</div>';
   };
   var success = function(videoUrls, failed) {
     prog.complete(function(){
@@ -4777,8 +4837,16 @@ function mhRenderReelBatch(panel, reelUrl, videoUrls, failed) {
   var failNote = '';
   var failedKeys = failed ? Object.keys(failed) : [];
   if (failedKeys.length) {
-    var names = failedKeys.map(function(f){ return f.charAt(0).toUpperCase() + f.slice(1); }).join(', ');
-    failNote = '<div style="font-size:12px;color:var(--ink-muted);margin-top:8px">Not produced by the active render engine: ' + names + '. Switch to the Remotion engine for those cuts.</div>';
+    // Show the API's honest per-cut reason (since R1.16 the ffmpeg engine
+    // renders all four cuts, so a remaining entry is a genuine render failure,
+    // not an engine gap). Escape each reason — they can carry node stderr /
+    // markup — instead of the old misleading "switch engine" advice.
+    var rows = failedKeys.map(function(f){
+      var fmt = f.charAt(0).toUpperCase() + f.slice(1);
+      var reason = (failed[f] == null ? '' : String(failed[f])) || 'render failed';
+      return '<div style="margin-top:2px">' + window.safeText(fmt) + ' — ' + window.safeText(reason) + '</div>';
+    }).join('');
+    failNote = '<div style="font-size:12px;color:var(--ink-muted);margin-top:8px">These cuts failed to render:' + rows + '</div>';
   }
   panel.innerHTML =
     '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
@@ -5045,7 +5113,7 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   function _vFail(msg) {
     prog.stop();
     btn.disabled = false; btn.textContent = origLabel;
-    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
   }
   fetch(variantsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(regenBody)})
     .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
@@ -5104,7 +5172,7 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {
   var tilesHtml = variants.map(function(vt) {
     var v = vt.visual;
     if (!v) {
-      return '<div style="flex:1;min-width:min(160px,100%);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
+      return '<div style="flex:1;min-width:min(160px,100%);padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + window.safeText((vt.errors||[]).join("; ") || 'unknown') + '</div>';
     }
     var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
@@ -5112,8 +5180,8 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {
     return (
       '<div class="variant-tile" style="flex:1;min-width:min(160px,100%);background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
-        (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + window.safeText(label) + '</div>' +
+        (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + window.safeText(hook) + '</div>' : '') +
         '<button class="btn" data-pick-vid="' + v.id + '" data-pick-seed="' + vt.seed + '" data-pick-fmt="' + (v.format_name || 'feed_portrait') + '" style="margin-top:6px;width:100%;font-size:11px;padding:5px 0" onclick=' + _attrEsc('pickVariant(this, ' + JSON.stringify(cardId) + ', ' + JSON.stringify(createUrl) + ')') + '>Pick this one</button>' +
       '</div>'
     );
@@ -5297,12 +5365,20 @@ function copilotToggle(btn, cardId) {
   panel.querySelector('.cp-input').addEventListener('keydown', function(e){ if(e.key==='Enter'){ copilotSend(panel.querySelector('.cp-send'), cardId); }});
 }
 
+/* One shared HTML escaper. Copilot replies, model-derived rejection reasons,
+   comments and edit diffs are all server/LLM-echoed, so they must be escaped
+   before touching innerHTML — a prompt-injection-to-XSS guard on the review
+   surface. Previously `safeText` was only a local var in the caption closure
+   and never global, so the `window.safeText?...` guards silently took the raw
+   branch. Defined once here so every call below can be unconditional. */
+window.safeText = window.safeText || function(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+
 function _cpAppend(panel, role, text) {
   var log = panel.querySelector('.cp-log');
   var who = role==='user' ? 'You' : 'Copilot';
   var col = role==='user' ? 'var(--ink)' : 'var(--lane)';
   var div = document.createElement('div'); div.style.cssText='margin-bottom:6px;font-size:12px';
-  div.innerHTML = '<span style="color:'+col+';font-weight:600">'+who+':</span> ' + (window.safeText?safeText(text):text);
+  div.innerHTML = '<span style="color:'+col+';font-weight:600">'+who+':</span> ' + window.safeText(text);
   log.appendChild(div); log.scrollTop = log.scrollHeight;
   return div;
 }
@@ -5330,7 +5406,7 @@ function copilotSend(btn, cardId) {
       if (j.applied && j.applied.length) extra += '<div style="font-size:11px;color:var(--good);margin-top:2px">&#10003; ' + j.applied.length + ' change(s) applied</div>';
       if (j.rejected && j.rejected.length) {
         var reasons = j.rejected.map(function(x){return (x[1]||'');}).join('; ');
-        extra += '<div style="font-size:11px;color:var(--bad);margin-top:2px">Skipped: ' + (window.safeText?safeText(reasons):reasons) + '</div>';
+        extra += '<div style="font-size:11px;color:var(--bad);margin-top:2px">Skipped: ' + window.safeText(reasons) + '</div>';
       }
       if (j.changed && j.reformat_url && j.format) {
         var purl = j.reformat_url + '?format=' + encodeURIComponent(j.format);
@@ -5349,7 +5425,7 @@ function copilotPreview(btn, url) {
     .then(function(r){ var ct=r.headers.get('Content-Type')||''; if (r.ok && ct.indexOf('image')===0) return r.blob().then(function(b){return {img:URL.createObjectURL(b)};}); return r.json().then(function(j){return {err:(j&&j.user_message)||'preview failed'};}); })
     .then(function(res){ btn.disabled=false; btn.textContent=orig;
       var holder=document.createElement('div'); holder.style.marginTop='6px';
-      if (res.err) holder.innerHTML='<div style="font-size:11px;color:var(--bad)">'+res.err+'</div>';
+      if (res.err) holder.innerHTML='<div style="font-size:11px;color:var(--bad)">'+window.safeText(res.err)+'</div>';
       else holder.innerHTML='<img src="'+res.img+'" alt="Edited design" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" />';
       btn.parentNode.appendChild(holder);
     })
@@ -5381,7 +5457,7 @@ function copilotMic(btn, cardId) {
 }
 
 /* ---- Comments, @mentions & tasks (roadmap 1.18) ---- */
-function _cmTxt(s){ return window.safeText ? safeText(s) : (s||''); }
+function _cmTxt(s){ return window.safeText(s); }
 function _cmShortName(email){ if(!email) return 'Someone'; var i=email.indexOf('@'); return i>0?email.slice(0,i):email; }
 function _cmAgo(ts){ try{ var d=Math.max(0,(Date.now()/1000)-ts); if(d<60)return'just now'; if(d<3600)return Math.floor(d/60)+'m ago'; if(d<86400)return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago'; }catch(e){ return ''; } }
 
@@ -6390,9 +6466,16 @@ function turnMeetIntoPack() {{
   var btn = document.getElementById('ti-btn');
   var status = document.getElementById('ti-status');
   var secs = 0;
+  // Re-entry guard: MH.btnState('loading') only sets pointer-events:none, which
+  // blocks the mouse but NOT a keyboard re-activation (Enter/Space on the still-
+  // focused button) — and if ui-kit.js failed to load there's no guard at all.
+  // The disabled attribute stops both, so one click can't spawn a second
+  // LLM-heavy pack job. Cleared again on failure so the user can retry.
+  if (btn.disabled) return;
+  btn.disabled = true;
   function setState(s) {{ if (window.MH && MH.btnState) MH.btnState(btn, s); }}
   // Stateful CTA: loading spins the primary action; data-mh-state="loading"
-  // also blocks a second click (pointer-events:none), so no disabled toggle.
+  // also blocks a second click (pointer-events:none).
   setState('loading');
   status.style.display = '';
   status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid color-mix(in oklab, var(--lane) 30%, transparent);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
@@ -6405,6 +6488,7 @@ function turnMeetIntoPack() {{
   function _fail(msg) {{
     clearInterval(ticker);
     status.textContent = 'Failed: ' + msg;
+    btn.disabled = false;
     setState('idle');
   }}
   function _done(packUrl) {{
@@ -7157,16 +7241,33 @@ def _url_jobs_files_prune() -> None:
         files = list(_url_jobs_dir().glob("*.json"))
         if len(files) <= _URL_JOBS_MAX:
             return
+        now = time.time()
+        # Files whose heartbeat is quiet well past the status route's stall
+        # guard are dead — a worker crash/restart mid-crawl leaves a "running"
+        # file forever, which the finished-only sweep below never reaps. Prune
+        # them regardless of status so DATA_DIR/url_jobs can't grow unbounded.
+        stale_ttl = _URL_JOB_STALL_S * 2
         finished: list[tuple[float, Path]] = []
         for f in files:
             try:
-                status = (json.loads(f.read_text(encoding="utf-8")) or {}).get("status")
+                data = json.loads(f.read_text(encoding="utf-8")) or {}
             except Exception:
-                status = None
+                data = {}
+            status = data.get("status")
+            try:
+                mtime = f.stat().st_mtime
+            except OSError:
+                continue
+            beat = float(data.get("heartbeat") or 0.0) or mtime
             if status in ("done", "error"):
-                finished.append((f.stat().st_mtime, f))
+                finished.append((mtime, f))
+            elif (now - beat) > stale_ttl:
+                # A genuinely alive crawl heartbeats < stall_ttl; anything older
+                # is wedged and safe to drop.
+                f.unlink(missing_ok=True)
         finished.sort()
-        for _, f in finished[: max(0, len(files) - _URL_JOBS_MAX)]:
+        remaining = len(list(_url_jobs_dir().glob("*.json")))
+        for _, f in finished[: max(0, remaining - _URL_JOBS_MAX)]:
             f.unlink(missing_ok=True)
     except Exception:
         pass
@@ -7224,12 +7325,14 @@ def _run_provenance(run_id: str) -> Optional[dict]:
         path = RUNS_DIR / run_id / "input.bin"
         if not path.is_file():
             return None
-        import io as _io  # noqa: PLC0415
         import zipfile  # noqa: PLC0415
 
         from mediahub.interpreter._zip_safety import safe_infolist, safe_read_member  # noqa: PLC0415
 
-        with zipfile.ZipFile(_io.BytesIO(path.read_bytes())) as zf:
+        # Open the file directly (random access reads only the central directory
+        # + the one member) rather than slurping the whole mirror ZIP — up to the
+        # 50MB crawl cap — into RAM on every review-page render.
+        with zipfile.ZipFile(path) as zf:
             info = {i.filename: i for i in safe_infolist(zf)}.get("_provenance.json")
             if info is None:
                 return None
@@ -10093,6 +10196,10 @@ select:focus-visible {
    rail sits in its own gutter column and the reading column keeps ~its
    original width. */
 .mh-chapter-nav { display: none; }
+/* JS hides the rail (setAttribute('hidden')) when no chapter ids resolve; the
+   >=1240px `display:block` below would otherwise beat the UA [hidden] rule and
+   render an empty rail with dead anchors, so keep [hidden] winning. */
+.mh-chapter-nav[hidden] { display: none; }
 .mh-chapnav-content { min-width: 0; }
 
 /* Offset every chapter anchor so a click — or a no-JS "#id" jump — lands the
@@ -12909,14 +13016,28 @@ def _layout(
                             _pp = _rlp(signed_in_pid, _lid)
                             if not _pp or _pp.suffix.lower() == ".svg":
                                 return 0.6  # vectors: neutral, usually fine
+                            # Memoise the PIL open per (pid, logo, mtime) so a
+                            # 500-logo profile doesn't rasterise-probe every entry
+                            # on every render; mtime keys out replaced files.
+                            try:
+                                _mt = _pp.stat().st_mtime_ns
+                            except OSError:
+                                _mt = 0
+                            _ck = (signed_in_pid, _lid, _mt)
+                            _cached = _bg_fit_cache.get(_ck)
+                            if _cached is not None:
+                                return _cached
                             from PIL import Image as _PImg
 
                             with _PImg.open(_pp) as _im:
                                 _w, _hh = _im.size
                             if _w <= 0 or _hh <= 0:
-                                return 0.0
-                            _ar = _w / _hh if _w >= _hh else _hh / _w
-                            return 1.0 / _ar
+                                _val = 0.0
+                            else:
+                                _ar = _w / _hh if _w >= _hh else _hh / _w
+                                _val = 1.0 / _ar
+                            _bg_fit_cache[_ck] = _val
+                            return _val
                         except Exception:
                             return 0.4
 
@@ -13612,6 +13733,10 @@ def _layout(
     open = v;
     btn.setAttribute('aria-expanded', v ? 'true' : 'false');
     if (v){
+      // Both header dropdowns stopPropagation on their own toggle, so opening
+      // one never fires the other's click-outside close. Announce the open so
+      // the sibling panel (same right edge) closes and they can't overlap.
+      document.dispatchEvent(new CustomEvent('mh:dropdown-open', {detail:'notif'}));
       panel.hidden = false;
       position();
       poll();
@@ -13627,6 +13752,7 @@ def _layout(
   btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
   panel.addEventListener('click', function(e){ e.stopPropagation(); });
   document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('mh:dropdown-open', function(e){ if (open && e.detail !== 'notif') setOpen(false); });
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
   });
@@ -13667,6 +13793,9 @@ def _layout(
     open = v;
     btn.setAttribute('aria-expanded', v ? 'true' : 'false');
     if (v){
+      // Close the sibling notifications panel so the two right-anchored
+      // dropdowns are mutually exclusive (see mh:dropdown-open below).
+      document.dispatchEvent(new CustomEvent('mh:dropdown-open', {detail:'orgmenu'}));
       panel.classList.add('is-open');
       position();
       window.addEventListener('resize', position, {passive:true});
@@ -13680,6 +13809,7 @@ def _layout(
   btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
   panel.addEventListener('click', function(e){ e.stopPropagation(); });
   document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('mh:dropdown-open', function(e){ if (open && e.detail !== 'orgmenu') setOpen(false); });
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
   });
@@ -13751,9 +13881,13 @@ def _layout(
     var t = document.createElement('div');
     t.className = 'mh-toast ' + type;
     t.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    // Icon + close are trusted static markup; the message is server-echoed
+    // (filenames, captions, error strings) so it must never reach innerHTML —
+    // set it via textContent on its own slot to neutralise any HTML in it.
     t.innerHTML = (ICONS[type] || ICONS.info) +
-      '<div style="flex:1;min-width:0">' + message + '</div>' +
+      '<div class="mh-toast-msg" style="flex:1;min-width:0"></div>' +
       '<button class="mh-toast-close" aria-label="Dismiss">&times;</button>';
+    t.querySelector('.mh-toast-msg').textContent = (message == null ? '' : String(message));
     toastContainer.appendChild(t);
     var close = function(){
       t.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
@@ -14283,10 +14417,20 @@ def _layout(
         else io.observe(el);
       }
     });
-    // Safety net: whatever the observer hasn't caught within 1.5s gets
-    // revealed unconditionally so content can never be stuck hidden,
-    // even if a scroll never happens or the observer misfires.
-    setTimeout(function(){ reveals.forEach(revealEl); }, 1500);
+    // Safety net: within 1.5s reveal only what's already in or above the fold,
+    // so a stalled observer can't leave visible content hidden — but leave
+    // below-fold elements observed so the U.5 scroll cascade still plays as the
+    // reader scrolls down.
+    setTimeout(function(){
+      var vh = window.innerHeight || 0;
+      reveals.forEach(function(el){
+        if (el.classList.contains('is-in')) return;
+        if (el.getBoundingClientRect().top < vh) revealEl(el);
+      });
+    }, 1500);
+    // Long-tail net: if the observer genuinely misfired, nothing stays hidden
+    // forever — a much later full sweep reveals anything still pending.
+    setTimeout(function(){ reveals.forEach(revealEl); }, 10000);
   }
   if (document.readyState !== 'loading') bindReveals();
   else document.addEventListener('DOMContentLoaded', bindReveals);
@@ -14674,38 +14818,47 @@ def _layout(
     e.preventDefault();
     var labelMap = {'queue':'In queue','approved':'Approved','rejected':'Rejected','edited':'Edited'};
     var esc = (window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId;
-    document.querySelectorAll('[data-mh-wf-target="' + esc + '"]').forEach(function(el){
-      el.dataset.mhWfState = status;
-      var labelEl = el.querySelector('[data-mh-wf-label]');
-      if (labelEl) labelEl.textContent = labelMap[status] || status;
-    });
-    document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
-      var on = b.getAttribute('data-mh-wf') === status;
-      if (b.classList.contains('mh-wf-approve')) {
-        // Approve flips between outline ("Approve") and filled
-        // ("Approved ✓") — the fill is the confirmation, never the default.
-        b.classList.toggle('is-on', on);
-        b.classList.toggle('secondary', !on);
-        b.textContent = on ? 'Approved ✓' : 'Approve';
-        if (on) b.setAttribute('aria-pressed', 'true');
-        else b.removeAttribute('aria-pressed');
-      } else if (on) {
-        b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
-      } else {
-        b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
-      }
-    });
-    // On the Review page each card is an .ach-row carrying data-status; keep
-    // it in sync so the Queue / Approved / Rejected filter reflects the pile.
     var rowCard = btn.closest('.ach-row');
-    if (rowCard) rowCard.dataset.status = status;
-    // I2: recompute the run-level summary indicators (Reviewed N/total strip,
-    // progress bar width/percent, Queue/Approved/Rejected tallies) from the
-    // current card states so they live-update without a page reload.
-    mhRecountReview();
-    // U.13: keep the floating mobile dock's count + highlight in sync (no-op
-    // when the dock isn't on the page).
-    if (window.mhDockSync) window.mhDockSync();
+    // Snapshot the card's prior status so a failed POST can revert the
+    // optimistic flip below — otherwise the row stays in the new pile and the
+    // tab counts / CSS tab filter drift out of sync until a reload.
+    var firstStrap = document.querySelector('[data-mh-wf-target="' + esc + '"]');
+    var prevStatus = (rowCard && rowCard.dataset.status)
+      || (firstStrap && firstStrap.dataset.mhWfState) || 'queue';
+    function paintState(st){
+      document.querySelectorAll('[data-mh-wf-target="' + esc + '"]').forEach(function(el){
+        el.dataset.mhWfState = st;
+        var labelEl = el.querySelector('[data-mh-wf-label]');
+        if (labelEl) labelEl.textContent = labelMap[st] || st;
+      });
+      document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
+        var on = b.getAttribute('data-mh-wf') === st;
+        if (b.classList.contains('mh-wf-approve')) {
+          // Approve flips between outline ("Approve") and filled
+          // ("Approved ✓") — the fill is the confirmation, never the default.
+          b.classList.toggle('is-on', on);
+          b.classList.toggle('secondary', !on);
+          b.textContent = on ? 'Approved ✓' : 'Approve';
+          if (on) b.setAttribute('aria-pressed', 'true');
+          else b.removeAttribute('aria-pressed');
+        } else if (on) {
+          b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
+        } else {
+          b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
+        }
+      });
+      // On the Review page each card is an .ach-row carrying data-status; keep
+      // it in sync so the Queue / Approved / Rejected filter reflects the pile.
+      if (rowCard) rowCard.dataset.status = st;
+      // I2: recompute the run-level summary indicators (Reviewed N/total strip,
+      // progress bar width/percent, Queue/Approved/Rejected tallies) from the
+      // current card states so they live-update without a page reload.
+      mhRecountReview();
+      // U.13: keep the floating mobile dock's count + highlight in sync (no-op
+      // when the dock isn't on the page).
+      if (window.mhDockSync) window.mhDockSync();
+    }
+    paintState(status);
     var origLabel = btn.textContent;
     btn.disabled = true; btn.style.opacity = '0.7';
     window.mhWorkflowSet(runId, cardId, status).then(function(result){
@@ -14721,6 +14874,10 @@ def _layout(
     }).catch(function(){
       btn.disabled = false; btn.style.opacity = '';
       btn.textContent = origLabel;
+      // Server rejected the change: revert the optimistic flip on the straps,
+      // buttons and row, and resync tab counts so the card returns to its pile.
+      paintState(prevStatus);
+      if (window.MH && MH.toast) MH.toast('Could not save — reverted. Try again.', 'error', 2600);
     });
   });
 
@@ -15304,6 +15461,10 @@ def _layout(
   document.addEventListener('pointerover', onOver, {passive: true});
   document.addEventListener('pointermove', onMove, {passive: true});
   document.addEventListener('pointerdown', hide, {passive: true});
+  // Cursor leaving the document entirely (to browser chrome / another monitor)
+  // fires none of the above, so the frozen preview would stay stuck — catch it.
+  document.addEventListener('pointerleave', hide, {passive: true});
+  document.addEventListener('mouseout', function(e){ if (!e.relatedTarget) hide(); }, {passive: true});
   window.addEventListener('scroll', hide, {passive: true});
   window.addEventListener('blur', hide);
 })();
@@ -15857,11 +16018,31 @@ _BULK_ACTIONS_JS = r"""
     }
     function afterReview(action, body, ids){
       var status = action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : action);
-      var okIds = (body && body.results ? body.results.filter(function(r){ return r.ok; }).map(function(r){ return r.id; }) : ids);
-      applyReviewDom(okIds, status);
+      var results = (body && body.results) || null;
+      if (results){
+        // Paint each card by its ACTUAL server status: a group-approval-held
+        // card returns {ok:true,status:'queue'} and must stay In queue, not flip
+        // to Approved. Group ids by status and apply each group truthfully.
+        var byStatus = {};
+        results.forEach(function(r){
+          if (!r.ok) return;
+          var st = r.status || status;
+          (byStatus[st] = byStatus[st] || []).push(r.id);
+        });
+        Object.keys(byStatus).forEach(function(st){ applyReviewDom(byStatus[st], st); });
+      } else {
+        applyReviewDom(ids, status);
+      }
+      // Count only cards that actually reached the requested status; held cards
+      // are reported separately so the toast matches server state.
+      var okIds = results ? results.filter(function(r){ return r.ok && (r.status || status) === status; }).map(function(r){ return r.id; }) : ids;
+      var held = results ? results.filter(function(r){ return r.ok && r.status && r.status !== status; }).length : 0;
       var nb = (body && body.n_blocked) || 0;
       var verb = action === 'approve' ? 'Approved' : 'Rejected';
       var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
+      if (held){
+        msg += ' ' + held + ' held for another approver.';
+      }
       if (nb){
         // Name the actual gate(s) — n_blocked spans consent, brand-lock
         // and open-task blocks.
@@ -19822,58 +20003,17 @@ def create_app() -> Flask:
 
         # MR-8: pre-select the club that best matches the signed-in
         # organisation instead of defaulting to the alphabetical first club.
-        # Fuzzy match (difflib + containment) on lowercased names so
-        # "Chelmsford SC" still finds "City of Chelmsford" in the meet file.
+        # One shared fuzzy matcher (_best_club_match: containment + token-subset
+        # + difflib, 0.6 floor) so this pre-select and upload_configure never
+        # disagree; "" means nothing cleared the floor, so no wrong auto-pick.
         active_prof = _active_profile()
         org_name = (getattr(active_prof, "display_name", "") or "").strip()
         club_match_warning_html = ""
-        if not selected_club and clubs:
-            best_club, best_ratio = "", 0.0
-            if org_name:
-                from difflib import SequenceMatcher
-
-                # Generic swim-club filler words carry no identity — strip
-                # them so "Chelmsford Swimming Club" vs "City of Chelmsford
-                # SC" compares on the distinctive part ("chelmsford").
-                _generic = {
-                    "swimming",
-                    "swim",
-                    "club",
-                    "sc",
-                    "asc",
-                    "asa",
-                    "city",
-                    "of",
-                    "the",
-                    "amateur",
-                    "aquatics",
-                    "squad",
-                    "team",
-                }
-
-                def _core(name: str) -> str:
-                    toks = [t for t in name.lower().split() if t not in _generic]
-                    return " ".join(toks) or name.lower()
-
-                org_l = org_name.lower()
-                org_core = _core(org_name)
-                for c in clubs:
-                    c_l = str(c).lower()
-                    c_core = _core(str(c))
-                    ratio = max(
-                        SequenceMatcher(None, org_l, c_l).ratio(),
-                        SequenceMatcher(None, org_core, c_core).ratio(),
-                    )
-                    # Containment counts as a strong match either way round
-                    # ("chelmsford" in "city of chelmsford sc").
-                    for a, b in ((org_l, c_l), (org_core, c_core)):
-                        if a and b and (a in b or b in a):
-                            ratio = max(ratio, 0.9)
-                    if ratio > best_ratio:
-                        best_ratio, best_club = ratio, c
-            if best_ratio >= 0.6:
+        if not selected_club and clubs and org_name:
+            best_club = _best_club_match([str(c) for c in clubs], org_name)
+            if best_club:
                 selected_club = best_club
-            elif org_name:
+            else:
                 club_match_warning_html = (
                     '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm);'
                     'color:var(--warn)">Heads up &mdash; none of the clubs in this '
@@ -23112,6 +23252,33 @@ function copyWhyCard(btn, taId) {{
                 for v in variants:
                     _v9_save_caption_history(run_id, swim_id_dec, v)
                 _sec_lang = _get_language(secondary_language) if secondary_language else None
+                # W.13 persistence: the auto side-by-side translation a bilingual
+                # workspace gets from the bundle was only ever rendered in review
+                # — unlike /translate it was never saved on the card, so the
+                # approved pair was dropped at export. Persist it the same way
+                # /translate does (a language-keyed variant with a `slots.caption`)
+                # so approving the card approves the pair and it rides into
+                # exports. Best-effort; never blocks or fails the caption.
+                if caption_secondary and secondary_language:
+                    _ws_tr = _get_wf_store()
+                    if _ws_tr is not None:
+                        try:
+                            _ws_tr.set_translation(
+                                run_id,
+                                swim_id_dec,
+                                secondary_language,
+                                {
+                                    "language": secondary_language,
+                                    "language_label": (
+                                        _sec_lang.native_name if _sec_lang else ""
+                                    ),
+                                    "rtl": bool(_sec_lang and _sec_lang.rtl),
+                                    "slots": {"caption": caption_secondary},
+                                    "provider": "caption_bundle",
+                                },
+                            )
+                        except Exception:
+                            pass
                 _gov_ok = True  # one real caption produced — counts toward quota
                 return jsonify(
                     {
@@ -45937,15 +46104,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
 
-        import requests as _requests
-
         try:
-            resp = _requests.get(direct_url, timeout=15, stream=True)
+            # SSRF guard: validate direct_url + every redirect hop before we
+            # fetch (an authed tenant must not be able to aim this at an
+            # internal / metadata address).
+            resp = _ssrf_safe_stream_get(direct_url, timeout=15)
             resp.raise_for_status()
             ctype = (resp.headers.get("Content-Type") or "").lower()
             if not ctype.startswith("image/"):
                 return jsonify({"error": "not_an_image"}), 400
             data = resp.raw.read(15 * 1024 * 1024 + 1, decode_content=True)
+        except ValueError:
+            return jsonify({"error": "bad_image_url"}), 400
         except Exception as e:
             return jsonify({"error": f"download_failed: {e}"}), 502
         if len(data) > 15 * 1024 * 1024:
@@ -46299,17 +46469,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 }
             ), 409
 
-        import requests as _requests
-
         want_prefix = "video/" if kind == "video" else "image/"
         max_bytes = (60 if kind == "video" else 15) * 1024 * 1024
         try:
-            resp = _requests.get(direct_url, timeout=20, stream=True)
+            # SSRF guard: validate direct_url + every redirect hop before we
+            # fetch, so an authed tenant can't turn this into a read primitive
+            # against internal / cloud-metadata endpoints.
+            resp = _ssrf_safe_stream_get(direct_url, timeout=20)
             resp.raise_for_status()
             ctype = (resp.headers.get("Content-Type") or "").lower()
             if not ctype.startswith(want_prefix):
                 return jsonify({"error": "wrong_media_type"}), 400
             data = resp.raw.read(max_bytes + 1, decode_content=True)
+        except ValueError:
+            return jsonify({"error": "bad_media_url"}), 400
         except Exception as e:
             return jsonify({"error": f"download_failed: {e}"}), 502
         if len(data) > max_bytes:

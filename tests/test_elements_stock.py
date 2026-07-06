@@ -568,9 +568,13 @@ def test_import_stock_creates_asset_and_rights(app_env, monkeypatch):
     app, _wm, tmp_path = app_env
 
     class _Resp:
+        status_code = 200
         headers = {"Content-Type": "image/jpeg"}
 
         def raise_for_status(self):
+            pass
+
+        def close(self):
             pass
 
         @property
@@ -580,6 +584,9 @@ def test_import_stock_creates_asset_and_rights(app_env, monkeypatch):
         def read(self, n, decode_content=True):
             return b"\xff\xd8\xff" + b"0" * 100  # tiny fake jpeg
 
+    import mediahub.web_research.safe_fetch as _sf
+
+    monkeypatch.setattr(_sf, "is_url_safe", lambda u: True)
     monkeypatch.setattr("requests.get", lambda *a, **k: _Resp())
 
     with app.test_client() as c:
@@ -617,6 +624,25 @@ def test_import_stock_rejects_non_commercial(app_env, monkeypatch):
         )
     assert resp.status_code == 409
     assert resp.get_json()["error"] == "licence_not_clear"
+
+
+def test_import_stock_rejects_ssrf_url(app_env, monkeypatch):
+    """A commercially-clean licence must NOT let an authed tenant point the
+    import at a private / metadata address: is_url_safe gates the fetch, so the
+    route answers 400 bad_media_url and never downloads."""
+    app, _wm, _ = app_env
+    import mediahub.web_research.safe_fetch as _sf
+
+    monkeypatch.setattr(_sf, "is_url_safe", lambda u: False)
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("must not fetch unsafe host"))
+    with app.test_client() as c:
+        _signin(c)
+        resp = c.post(
+            "/api/media-library/import-stock",
+            json={"direct_url": "http://169.254.169.254/latest/meta-data/", "licence": "CC0"},
+        )
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "bad_media_url"
 
 
 def test_import_stock_requires_signin(app_env):

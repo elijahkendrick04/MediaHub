@@ -534,3 +534,15 @@ class TestReviewHtml:
         assert f"/api/runs/{run_id}/cards/bulk-export" in body
         # The shared progressive-enhancement JS is wired in.
         assert "data-mh-bulkbar" in body and "mhRecountReview" in body
+
+    def test_bulk_js_respects_per_card_status_for_held_cards(self, env):
+        """A group-approval-held card returns {ok:true,status:'queue'}; the bulk
+        JS must paint it by its actual server status (In queue), not flip it to
+        Approved, and must not count it in the 'Approved N' toast."""
+        import mediahub.web.web as webmod
+        js = webmod._BULK_ACTIONS_JS
+        # Cards are painted by their real per-card status, not the action's.
+        assert "r.status || status" in js
+        assert "held for another approver" in js
+        # The naive "every ok is approved" filter is gone.
+        assert "filter(function(r){ return r.ok; })" not in js
