@@ -95,7 +95,7 @@ def test_dockerfile_routes_failloud_network_steps_through_retry():
     assert "COPY scripts/retry.sh /usr/local/bin/retry" in DOCKERFILE
     assert 'retry python -c "from rembg import new_session' in DOCKERFILE
     assert "retry playwright install --with-deps chromium" in DOCKERFILE
-    assert "retry npm install --no-audit --no-fund" in DOCKERFILE
+    assert "retry npm ci --no-audit --no-fund" in DOCKERFILE
     # Both SearXNG network installs (requirements + git) go through retry.
     assert DOCKERFILE.count('retry "$SEARXNG_VENV/bin/pip" install') >= 2
 
