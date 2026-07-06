@@ -1525,8 +1525,12 @@ def reel_card_beat_frames(
     if n == 0:
         return []
     r = rhythm or {}
-    cover_sec = r["coverSec"] if r.get("coverSec", 0) and float(r["coverSec"]) > 0 else REEL_COVER_SEC
-    outro_sec = r["outroSec"] if r.get("outroSec", 0) and float(r["outroSec"]) > 0 else REEL_OUTRO_SEC
+    cover_sec = (
+        r["coverSec"] if r.get("coverSec", 0) and float(r["coverSec"]) > 0 else REEL_COVER_SEC
+    )
+    outro_sec = (
+        r["outroSec"] if r.get("outroSec", 0) and float(r["outroSec"]) > 0 else REEL_OUTRO_SEC
+    )
     duration_in_frames = max(1, _js_round(float(duration_sec) * fps))
     cover_frames = _js_round(fps * float(cover_sec))
     outro_frames = _js_round(fps * float(outro_sec))
@@ -1544,8 +1548,7 @@ def reel_card_beat_frames(
     weight_sum = sum(weights) or 1.0
     min_beat = transition_frames * 2 + _js_round(fps * 0.5)
     return [
-        max(min_beat, math.floor(remaining * w / weight_sum) + transition_frames)
-        for w in weights
+        max(min_beat, math.floor(remaining * w / weight_sum) + transition_frames) for w in weights
     ]
 
 

@@ -2188,9 +2188,7 @@ def _job_heartbeat(job: dict, interval_s: float = 60.0):
         while not stop.wait(interval_s):
             _variant_job_save(job)
 
-    t = threading.Thread(
-        target=_beat, name=f"jobbeat-{str(job.get('id', ''))[:8]}", daemon=True
-    )
+    t = threading.Thread(target=_beat, name=f"jobbeat-{str(job.get('id', ''))[:8]}", daemon=True)
     t.start()
     try:
         yield
@@ -35677,9 +35675,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     except EmailSendError:
                         log.warning("password reset email failed", exc_info=True)
 
-                threading.Thread(
-                    target=_send_reset_mail, name="pwreset-mail", daemon=True
-                ).start()
+                threading.Thread(target=_send_reset_mail, name="pwreset-mail", daemon=True).start()
             # Identical response whether or not the account exists — the
             # form must not be an email-enumeration oracle.
             body = _account_email_card(
@@ -42474,8 +42470,7 @@ function mhSetupMode(mode) {{
                     "ok": False,
                     "error": "research_busy",
                     "message": (
-                        "Research is already running — wait for it to finish, "
-                        "then ask again."
+                        "Research is already running — wait for it to finish, " "then ask again."
                     ),
                 }
             )
@@ -44012,8 +44007,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         "deployment. Re-save the photo as JPEG or PNG and upload again."
     )
     _PHOTO_TYPE_MSG = (
-        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, "
-        "GIF or HEIC."
+        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, " "GIF or HEIC."
     )
     _PHOTO_UNREADABLE_MSG = (
         "That photo could not be read — the file appears corrupt or isn't "
@@ -49104,7 +49098,9 @@ voice, and queues them for one-click approval.</p>
         placement = product.placement(placement_slug or "") or product.primary_placement
         return product, placement, placement.format
 
-    def _print_card_png(run_id, run_data, card_id, spec, profile_id, brand_kit, *, cached_only=False):
+    def _print_card_png(
+        run_id, run_data, card_id, spec, profile_id, brand_kit, *, cached_only=False
+    ):
         """Re-lay card_id's approved design at ``spec`` and render a print PNG.
 
         Returns the PNG ``Path``, or ``None`` when the card has no design yet.
@@ -49340,9 +49336,9 @@ voice, and queues them for one-click approval.</p>
         if res.note:
             # Header values must be latin-1-safe single-line; the note is
             # operator-written ASCII prose, but guard anyway.
-            resp.headers["X-Print-Note"] = res.note.replace("\n", " ").encode(
-                "latin-1", "replace"
-            ).decode("latin-1")
+            resp.headers["X-Print-Note"] = (
+                res.note.replace("\n", " ").encode("latin-1", "replace").decode("latin-1")
+            )
         return resp
 
     @app.route("/api/runs/<run_id>/card/<card_id>/merch-mockup", methods=["POST", "GET"])

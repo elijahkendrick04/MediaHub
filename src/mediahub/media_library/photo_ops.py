@@ -1037,9 +1037,7 @@ class EditRecipe:
 
     def __post_init__(self) -> None:
         # Cap the step count too — recipes arrive as untrusted posted JSON.
-        self.steps = tuple(s for s in self.steps if isinstance(s, EditOp) and s.valid)[
-            :_MAX_STEPS
-        ]
+        self.steps = tuple(s for s in self.steps if isinstance(s, EditOp) and s.valid)[:_MAX_STEPS]
 
     # --- construction --------------------------------------------------- #
 

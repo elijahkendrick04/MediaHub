@@ -687,8 +687,7 @@ def _hex_cell_path(cx: float, cy: float) -> str:
 
 def _bg_hexmesh_data_uri() -> str:
     cells = " ".join(
-        _hex_cell_path(cx, cy)
-        for cx, cy in ((30, 17.32), (0, 0), (60, 0), (0, 34.64), (60, 34.64))
+        _hex_cell_path(cx, cy) for cx, cy in ((30, 17.32), (0, 0), (60, 0), (0, 34.64), (60, 34.64))
     )
     svg = (
         "<svg xmlns='http://www.w3.org/2000/svg' width='60' height='34.64'>"

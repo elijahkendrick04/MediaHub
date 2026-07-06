@@ -259,9 +259,7 @@ def _b_card(p: dict, pal: dict, band: dict) -> str:
 
 def _b_stat_row(p: dict, pal: dict, band: dict) -> str:
     stats = [
-        s
-        for s in (p.get("stats") or [])
-        if isinstance(s, dict) and str(s.get("value", "")).strip()
+        s for s in (p.get("stats") or []) if isinstance(s, dict) and str(s.get("value", "")).strip()
     ]
     if not stats:
         return ""

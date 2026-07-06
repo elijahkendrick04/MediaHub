@@ -280,7 +280,9 @@ def derive_enhance_strength(asset: MediaAsset, recipe: EditRecipe) -> Optional[f
         return None
 
 
-def maybe_record_enhance_accepted(asset: MediaAsset, recipe: EditRecipe, store: Any) -> Optional[float]:
+def maybe_record_enhance_accepted(
+    asset: MediaAsset, recipe: EditRecipe, store: Any
+) -> Optional[float]:
     """After a recipe save: learn the club's preferred Enhance strength when the
     saved recipe embeds a (possibly scaled) Enhance suggestion. Best-effort —
     returns the recorded strength, or ``None`` when the recipe is unrelated."""

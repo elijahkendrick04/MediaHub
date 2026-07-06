@@ -539,9 +539,7 @@ def _thumb_cache_evict() -> None:
         if len(entries) <= _THUMB_CACHE_MAX_FILES and total <= _THUMB_CACHE_MAX_BYTES:
             return
         entries.sort()  # oldest mtime first
-        while entries and (
-            len(entries) > _THUMB_CACHE_MAX_FILES or total > _THUMB_CACHE_MAX_BYTES
-        ):
+        while entries and (len(entries) > _THUMB_CACHE_MAX_FILES or total > _THUMB_CACHE_MAX_BYTES):
             _, size, p = entries.pop(0)
             try:
                 p.unlink(missing_ok=True)
