@@ -163,6 +163,39 @@ class TestForeignReadDenied:
         assert "ALPHA SECRET DRAFT" not in body
         assert "Alpha-only" not in body
 
+    def test_drafts_index_hides_foreign_packs_shows_own_and_unstamped(self, two_orgs):
+        """/drafts lists only the active org's packs plus unstamped legacy
+        ones — a pack title is the first line of another org's free-text
+        brief, so the index must be per-tenant filtered like the per-pack
+        routes."""
+        from mediahub.club_platform.stub_pack_store import save_pack
+
+        beta_pack = save_pack(
+            "free_text",
+            {"free_text": "BETA OWN DRAFT"},
+            [{"platform": "instagram", "caption": "Beta caption", "confidence": 0.9}],
+            profile_id="org-beta",
+        )
+        legacy_pack = save_pack(
+            "free_text",
+            {"free_text": "LEGACY UNSTAMPED DRAFT"},
+            [{"platform": "instagram", "caption": "Legacy caption", "confidence": 0.9}],
+        )
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        body = c.get("/drafts").get_data(as_text=True)
+        # Own + unstamped legacy visible; Alpha's title must not leak.
+        assert "BETA OWN DRAFT" in body
+        assert "LEGACY UNSTAMPED DRAFT" in body
+        assert "ALPHA SECRET DRAFT" not in body
+        # Alpha still sees her own.
+        _pin(c, "org-alpha")
+        body = c.get("/drafts").get_data(as_text=True)
+        assert "ALPHA SECRET DRAFT" in body
+        assert "BETA OWN DRAFT" not in body
+        assert beta_pack["pack_id"] not in body
+        assert legacy_pack["pack_id"]  # created OK (sanity)
+
     def test_api_cards_returns_404_not_alpha_cards(self, two_orgs):
         c = two_orgs["client"]
         _pin(c, "org-beta")

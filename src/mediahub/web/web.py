@@ -30422,24 +30422,32 @@ function mhAnDigest(btn) {{
         brand_kit = _studio.brand_kit_for_params(params)
         t0 = _time.time()
         try:
-            with _tempfile.TemporaryDirectory() as _d:
-                result = render_brief(
-                    brief,
-                    output_dir=_d,
-                    size=params.size,
-                    format_name=params.format_id,
-                    brand_kit=brand_kit,
-                    quality=params.render_quality,
-                )
-                png_bytes = Path(result.visual.file_path).read_bytes()
-                # QA-011: the live preview composes at the SAME native geometry
-                # as the download (so fixed-px archetype furniture keeps its
-                # proportions and the result time never clips / collides). The
-                # light, snappy preview payload comes from downsampling the
-                # finished native render — never from shrinking the geometry.
-                _raster = params.preview_raster_size
-                if _raster != params.size:
-                    png_bytes = _studio.downscale_png_bytes(png_bytes, _raster)
+            # Same Chromium-concurrency gate as every other still/motion
+            # render route: each render_brief launches a one-shot Chromium,
+            # so ungated concurrent studio previews would pile up unbounded
+            # CPU/memory on the worker (the signature cache above only
+            # dedupes identical params).
+            with _render_slot("preview", sig, timeout=_PREVIEW_RENDER_TIMEOUT):
+                with _tempfile.TemporaryDirectory() as _d:
+                    result = render_brief(
+                        brief,
+                        output_dir=_d,
+                        size=params.size,
+                        format_name=params.format_id,
+                        brand_kit=brand_kit,
+                        quality=params.render_quality,
+                    )
+                    png_bytes = Path(result.visual.file_path).read_bytes()
+                    # QA-011: the live preview composes at the SAME native geometry
+                    # as the download (so fixed-px archetype furniture keeps its
+                    # proportions and the result time never clips / collides). The
+                    # light, snappy preview payload comes from downsampling the
+                    # finished native render — never from shrinking the geometry.
+                    _raster = params.preview_raster_size
+                    if _raster != params.size:
+                        png_bytes = _studio.downscale_png_bytes(png_bytes, _raster)
+        except _RenderBusy:
+            return _render_busy_response("preview")
         except RuntimeError as exc:
             # Playwright/Chromium not installed — surface an honest error rather
             # than ever fabricating a preview image (CLAUDE.md honest-error rule).
@@ -32031,7 +32039,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             if saved:
                 _packs_url = url_for("stub_packs_list")
-                body = body.replace(
+                _new_body = body.replace(
                     f'<a class="btn secondary" href="{_h(back)}">← Start over</a>',
                     (
                         f'<a class="btn" href="{_h(actions_url)}">View &amp; export this pack →</a>'
@@ -32040,6 +32048,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     ),
                     1,
                 )
+                if _new_body == body:
+                    # The anchor is render_cards_html's exact markup; if it
+                    # drifts this replace silently no-ops (PR-118 regression
+                    # class) — make the miss loud so it can't ship unnoticed.
+                    log.warning(
+                        "stub POST: 'Start over' anchor not found — render_cards_html "
+                        "markup drifted; View-&-export actions were not injected"
+                    )
+                body = _new_body
             if _graphic_api_base:
                 body += _VISUAL_PANEL_JS
             return _layout(title, body, active=active_tab)
@@ -32274,28 +32291,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     def _quick_save_library_photo(f, profile_id: str):
         """Save one uploaded photo into the org's media library so it shows up
-        in the per-graphic photo picker. Returns the saved MediaAsset or None."""
+        in the per-graphic photo picker. Returns the saved MediaAsset or None.
+
+        Delegates to ``_save_library_photo`` so quick-build uploads get the
+        same ingest gate as every other path — extension allowlist, HEIC
+        normalisation to a web-safe JPEG (iPhones save HEIC by default,
+        which the browser/renderer can't show), and the decode check. A
+        rejected photo is skipped (None) rather than stored unreadable —
+        an honest gap beats a broken graphic background.
+        """
         if not (_v8_ok and _v8_get_media_store is not None and profile_id):
             return None
-        import uuid as _uuid
-
-        from mediahub.media_library.models import MediaAsset
-
-        upload_dir = UPLOADS_DIR / "media_library" / profile_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
-        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
-        f.save(str(dest))
-        store = _v8_get_media_store()
-        asset = MediaAsset(
-            id="",
-            filename=Path(f.filename or dest.name).name,
-            path=str(dest),
-            type="other",
-            description_raw="",
-            profile_id=profile_id,
-        )
-        return store.save(asset)
+        try:
+            return _save_library_photo(f, profile_id, description="", asset_type="other")
+        except _PhotoRejectedError as e:
+            log.info("quick-build photo skipped (%s): %s", e.code, f.filename)
+            return None
 
     @app.route("/free-text/quick-build", methods=["POST"])
     def free_text_quick_build():
@@ -32726,6 +32737,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         store_failed = False
         try:
             items = list_packs(limit=100)
+            # Tenant isolation (same rule as _can_access_pack): the index must
+            # not list other orgs' drafts — a pack's title is the first line
+            # of another org's free-text brief. Unstamped legacy packs stay
+            # visible, and the active_pid-None sandbox keeps everything
+            # visible, exactly like the per-pack routes.
+            active_pid = _active_profile_id()
+            if active_pid is not None:
+                from mediahub.club_platform.stub_pack_store import load_pack as _load_pack
+
+                items = [
+                    it
+                    for it in items
+                    if _can_access_pack(_load_pack(it.get("pack_id", "")), active_pid)
+                ]
         except Exception as e:
             log.warning("drafts: list_packs failed: %s", e)
             store_failed = True
@@ -32916,13 +32941,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # emits the arrow as the unicode character ``←``, not the
         # ``&larr;`` entity — match on the same form or the replace
         # silently no-ops and the export/regenerate footer never appears.
-        cards_html = cards_html.replace(
+        _default_row = (
             f'<div style="margin-top:24px;display:flex;gap:10px">'
             f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
-            f"</div>",
-            footer,
-            1,
+            f"</div>"
         )
+        _new_cards_html = cards_html.replace(_default_row, footer, 1)
+        if _new_cards_html == cards_html:
+            # PR-118 regression class: any future markup tweak in
+            # render_cards_html silently drops the export/regenerate
+            # footer — log loudly instead of failing invisibly.
+            log.warning(
+                "stub pack view %s: default action row not found — render_cards_html "
+                "markup drifted; export/regenerate footer was not injected",
+                pack_id,
+            )
+        cards_html = _new_cards_html
         # Single-prompt flow lands here with ?autographic=1 — render the first
         # card's graphic on load (with the attached photo as background if one
         # was passed) so "describe it → get a graphic" needs no extra click.

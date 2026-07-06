@@ -213,3 +213,122 @@ def test_quick_build_provider_error_is_honest(app_org, monkeypatch):
         from mediahub.club_platform.stub_pack_store import list_packs
 
         assert list_packs() == []
+
+
+def test_draft_view_footer_replaces_default_anchor(app_org, monkeypatch, caplog):
+    """The draft view swaps render_cards_html's default 'Start over' row for
+    the export/regenerate footer — and the swap actually happened (no silent
+    no-op, no drift warning)."""
+    import logging
+
+    _patch_ask(monkeypatch, returns=_GOOD_BRIEF)
+    with app_org.test_client() as c:
+        _pin(c)
+        r = c.post(
+            "/free-text/quick-build",
+            data={"prompt": "thank our sponsor"},
+            follow_redirects=False,
+        )
+        loc = r.headers["Location"]
+        with caplog.at_level(logging.WARNING, logger="mediahub.web.web"):
+            view = c.get(loc).get_data(as_text=True)
+    # Footer injected, default lone anchor row replaced.
+    assert "Generate new draft" in view
+    assert "All drafts" in view
+    assert "← Start over" not in view
+    assert "markup drifted" not in caplog.text
+
+
+def test_draft_view_warns_loudly_on_marker_drift(app_org, monkeypatch, caplog):
+    """If render_cards_html's anchor markup ever drifts, the replace must not
+    fail silently (the PR-118 regression class): the page still renders and a
+    warning names the miss."""
+    import logging
+
+    _patch_ask(monkeypatch, returns=_GOOD_BRIEF)
+    with app_org.test_client() as c:
+        _pin(c)
+        r = c.post(
+            "/free-text/quick-build",
+            data={"prompt": "thank our sponsor"},
+            follow_redirects=False,
+        )
+        loc = r.headers["Location"]
+        # Simulate a future markup tweak: the emitted anchor no longer
+        # matches what the view tries to replace.
+        import mediahub.club_platform.stubs as stubs_mod
+
+        real = stubs_mod.render_cards_html
+
+        def drifted(*a, **k):
+            return real(*a, **k).replace("← Start over", "⟵ Start over")
+
+        monkeypatch.setattr(stubs_mod, "render_cards_html", drifted)
+        with caplog.at_level(logging.WARNING, logger="mediahub.web.web"):
+            resp = c.get(loc)
+    assert resp.status_code == 200
+    assert "markup drifted" in caplog.text
+
+
+def test_quick_build_photos_share_the_ingest_gate(env, monkeypatch):
+    """Quick-build photos go through the shared ingest gate (sub_25r-1): a
+    HEIC upload is normalised to JPEG (decoder present) or skipped (absent) —
+    never stored raw as an undecodable graphic background — and corrupt
+    bytes are skipped, not saved."""
+    import importlib
+    import io as _io
+
+    import mediahub.web.club_profile as cp
+    import mediahub.web.web as wm
+
+    importlib.reload(cp)
+    importlib.reload(wm)
+    if not wm._v8_ok:
+        pytest.skip("v8 engine unavailable")
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    save_profile(ClubProfile(profile_id=ORG, display_name="Quick SC"))
+    app = wm.create_app()
+    app.config.update(TESTING=True, SECRET_KEY="x")
+    _patch_ask(monkeypatch, returns=_GOOD_BRIEF)
+
+    from PIL import Image
+
+    jpg = _io.BytesIO()
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(jpg, format="JPEG")
+    jpg.seek(0)
+
+    heic_buf = None
+    try:
+        import pillow_heif
+
+        pillow_heif.register_heif_opener()
+        heic_buf = _io.BytesIO()
+        Image.new("RGB", (8, 8), (1, 2, 3)).save(heic_buf, format="HEIF")
+        heic_buf.seek(0)
+    except Exception:
+        heic_buf = None  # no encoder here — the corrupt case still covers the gate
+
+    files = [(jpg, "good.jpg"), (_io.BytesIO(b"not-a-heic"), "corrupt.heic")]
+    if heic_buf is not None:
+        files.append((heic_buf, "real.heic"))
+
+    with app.test_client() as c:
+        with c.session_transaction() as s:
+            s["active_profile_id"] = ORG
+        r = c.post(
+            "/free-text/quick-build",
+            data={"prompt": "thank our sponsor", "photos": files},
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        assert r.status_code == 302, r.status_code
+
+    lib_dir = env / "uploads_v4" / "media_library" / ORG
+    stored = [p.name for p in lib_dir.glob("*")] if lib_dir.exists() else []
+    # No raw .heic/.heif may ever remain on disk.
+    assert not [n for n in stored if n.lower().endswith((".heic", ".heif"))], stored
+    # The plain JPEG (plus the normalised HEIC when the decoder exists) landed.
+    expected = 1 + (1 if heic_buf is not None else 0)
+    jpgs = [n for n in stored if n.lower().endswith((".jpg", ".jpeg"))]
+    assert len(jpgs) == expected, stored
