@@ -94,13 +94,20 @@ def _http_post(url: str, body: bytes, headers: dict) -> tuple[Optional[int], Opt
                 retries=False,
             )
         else:
+            # Operator-registered http:// endpoints are permitted (scheme-checked
+            # above); payloads are HMAC-signed and the connection is IP-pinned.
+            # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
             pool = urllib3.HTTPConnectionPool(
                 ip_text, port=port, timeout=pool_timeout, retries=False
             )
         try:
             r = pool.urlopen(
-                "POST", path, body=body, headers=send_headers,
-                redirect=False, retries=False,
+                "POST",
+                path,
+                body=body,
+                headers=send_headers,
+                redirect=False,
+                retries=False,
             )
             status = int(r.status)
             return status, (None if status < 300 else f"HTTP {status}")

@@ -134,9 +134,7 @@ def _decode_body(body: bytes, content_type: str) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def _pinned_get(
-    url: str, *, timeout: float, max_bytes: int
-) -> Optional[tuple[int, dict, bytes]]:
+def _pinned_get(url: str, *, timeout: float, max_bytes: int) -> Optional[tuple[int, dict, bytes]]:
     """GET ``url`` connecting directly to a pre-validated IP (DNS pinning).
 
     The TCP connection goes to the IP that passed the SSRF check; the original
@@ -185,11 +183,18 @@ def _pinned_get(
                 retries=False,
             )
         else:
+            # http:// targets are allowed by this door's contract (scheme-checked
+            # above); the pinned-IP connection is the SSRF defence, not TLS.
+            # nosemgrep: python.lang.security.audit.network.http-not-https-connection.http-not-https-connection
             pool = urllib3.HTTPConnectionPool(
                 ip_text, port=port, timeout=pool_timeout, retries=False
             )
         r = pool.urlopen(
-            "GET", path, headers=headers, redirect=False, retries=False,
+            "GET",
+            path,
+            headers=headers,
+            redirect=False,
+            retries=False,
             preload_content=False,
         )
         try:
