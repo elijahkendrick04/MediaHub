@@ -22,6 +22,11 @@ regexes = [
   # rule matches the prose "…empty/invalid guards, honest no-key handling…"
   # in five historical commits. Documentation text, not a credential.
   '''empty/invalid guards, honest no-key handling''',
+  # tests/test_club_profile_token_scrub.py verifies at-rest scrubbing of
+  # withdrawn Buffer/scheduler tokens; its fixtures use self-describing
+  # synthetic values ("tok-buf-789", "tok-sched-123"). The generic-api-key
+  # rule matches the `..._access_token": "..."` shape. Never real credentials.
+  '''"(buffer|scheduler)_access_token":\s*"tok-(buf|sched)-\d{3}"''',
 ]
 paths = [
   # Vendored reference material (never executed) and binary corpora.
