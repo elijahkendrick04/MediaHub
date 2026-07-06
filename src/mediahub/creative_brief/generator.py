@@ -1135,7 +1135,6 @@ def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) ->
     }
 
 
-# Six phrase tables so any positive integer seed maps to a hook variant.
 def auto_variation_seed_for(card_id: str | None) -> int:
     """Pick a deterministic non-zero seed for a card from its id.
 

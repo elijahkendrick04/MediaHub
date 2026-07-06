@@ -40,6 +40,8 @@ _MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB upload cap
 _MAX_EXTRACTED_CHARS = 200_000  # ~50 pages of text
 _MAX_ZIP_FILES = 50  # within a single zip
 _MAX_ZIP_DECOMPRESSED = 50 * 1024 * 1024  # 50 MB total inside zip
+_MAX_ZIP_DEPTH = 2  # zip-in-zip allowed once; deeper nesting refused
+_ZIP_CHUNK = 1 * 1024 * 1024  # streamed member-read chunk size
 _RAW_EXCERPT_CHARS = 6_000  # what we persist on the profile
 
 
@@ -181,11 +183,46 @@ def _extract_plain(data: bytes) -> str:
             return ""
 
 
-def _extract_zip(data: bytes) -> str:
+def _read_zip_member(zf: "zipfile.ZipFile", info: "zipfile.ZipInfo", budget: int) -> bytes | None:
+    """Stream one member's decompressed bytes against a hard budget.
+
+    Never trusts ``info.file_size`` (a bomb can lie about it) — the
+    decompressed stream itself is counted as it inflates. Returns None
+    when the member would exceed the remaining budget: a member that
+    inflates past the cap is refused whole rather than truncated to
+    parser-breaking garbage."""
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        with zf.open(info) as fh:
+            while True:
+                chunk = fh.read(_ZIP_CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > budget:
+                    log.debug(
+                        "zip member %r exceeded remaining decompression budget (%d bytes)",
+                        info.filename,
+                        budget,
+                    )
+                    return None
+                chunks.append(chunk)
+    except Exception:
+        return None
+    return b"".join(chunks)
+
+
+def _extract_zip(data: bytes, depth: int = 0) -> str:
     """Walk a ZIP and concatenate extracted text from each readable
-    member. Bounded by file-count and total decompressed size."""
+    member. Bounded by file-count, total decompressed size (enforced
+    WHILE inflating, so a single-member zip bomb can never balloon in
+    RAM), and nesting depth for zip-in-zip members."""
+    if depth >= _MAX_ZIP_DEPTH:
+        log.debug("zip nesting deeper than %d levels refused", _MAX_ZIP_DEPTH)
+        return ""
     out: list[str] = []
-    decompressed = 0
+    remaining = _MAX_ZIP_DECOMPRESSED
     count = 0
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
@@ -194,19 +231,22 @@ def _extract_zip(data: bytes) -> str:
                     continue
                 if count >= _MAX_ZIP_FILES:
                     break
-                if decompressed >= _MAX_ZIP_DECOMPRESSED:
+                if remaining <= 0:
                     break
                 # Skip macOS noise.
                 if info.filename.startswith("__MACOSX/") or info.filename.endswith("/.DS_Store"):
                     continue
-                try:
-                    body = zf.read(info)
-                except Exception:
+                # Early reject on the DECLARED size — cheap, but only a
+                # first filter; the streamed read below is the real cap.
+                if info.file_size > remaining:
                     continue
-                decompressed += len(body)
+                body = _read_zip_member(zf, info, remaining)
+                if body is None:
+                    continue
+                remaining -= len(body)
                 count += 1
                 inner_ext = _ext(info.filename)
-                inner = _dispatch_extract(inner_ext, body)
+                inner = _dispatch_extract(inner_ext, body, zip_depth=depth + 1)
                 if inner.strip():
                     out.append(f"--- {info.filename} ---\n{inner}")
     except Exception as e:
@@ -215,7 +255,7 @@ def _extract_zip(data: bytes) -> str:
     return "\n\n".join(out)
 
 
-def _dispatch_extract(ext: str, data: bytes) -> str:
+def _dispatch_extract(ext: str, data: bytes, *, zip_depth: int = 0) -> str:
     if ext == "pdf":
         return _extract_pdf(data)
     if ext == "docx":
@@ -225,7 +265,7 @@ def _dispatch_extract(ext: str, data: bytes) -> str:
     if ext == "rtf":
         return _extract_rtf(data)
     if ext == "zip":
-        return _extract_zip(data)
+        return _extract_zip(data, depth=zip_depth)
     if ext in ("txt", "md", "markdown", "rst", "csv", "tsv", "json", "yaml", "yml"):
         return _extract_plain(data)
 
@@ -441,32 +481,51 @@ def _normalise_mandatory_rules(raw: object) -> list[str]:
     return out
 
 
-def extract_mandatory_rules(text: str) -> list[str]:
+def extract_mandatory_rules_with_status(text: str) -> tuple[list[str], str]:
     """Pull verbatim non-negotiable rules out of a brand-guidelines
-    text using the configured cloud LLM. Returns ``[]`` when no
-    provider is configured (the UI will surface "AI unavailable" via
-    the parent payload's status field), when the LLM call fails, or
-    when the document contained no mandatory rules.
+    text using the configured cloud LLM.
+
+    Returns ``(rules, status)`` where status is one of:
+      - ``"ok"``          — the LLM ran and found rules
+      - ``"none"``        — the LLM ran and the document has no hard rules
+      - ``"no_provider"`` — no LLM provider is configured
+      - ``"error"``       — a provider is configured but the call failed
+
+    The status lets the UI distinguish "your document has no MUST/NEVER
+    rules" from "the extraction failed — re-run it", instead of silently
+    dropping the user's hard rules behind an ok-looking payload.
 
     Never raises — this is a best-effort enrichment surface.
     """
     if not text or not text.strip():
-        return []
+        return [], "none"
     try:
         from mediahub.media_ai.llm import generate_json, is_available
     except Exception:
-        return []
+        return [], "no_provider"
     if not is_available():
-        return []
+        return [], "no_provider"
     prompt = _build_mandatory_rules_prompt(text)
     try:
         raw = generate_json(
             prompt, system=_MANDATORY_RULES_LLM_SYSTEM, max_tokens=1_800, fallback={}
         )
     except Exception as e:
-        log.debug("mandatory-rules LLM call failed: %s", e)
-        return []
-    return _normalise_mandatory_rules(raw)
+        log.warning("mandatory-rules LLM call failed: %s", e)
+        return [], "error"
+    # ``{}`` is generate_json's unparseable-output fallback — the provider
+    # answered but produced nothing usable. A genuine "no hard rules"
+    # answer carries the mandatory_rules key (an empty array).
+    if not isinstance(raw, dict) or "mandatory_rules" not in raw:
+        return [], "error"
+    rules = _normalise_mandatory_rules(raw)
+    return rules, ("ok" if rules else "none")
+
+
+def extract_mandatory_rules(text: str) -> list[str]:
+    """Rules-only convenience wrapper around
+    :func:`extract_mandatory_rules_with_status`."""
+    return extract_mandatory_rules_with_status(text)[0]
 
 
 def _build_prompt(text: str) -> str:
@@ -663,7 +722,12 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
           "brand_guidelines_extractor": str,
           "brand_guidelines_byte_size": int,
           "brand_guidelines_mandatory_rules": list[str],  # MUST/NEVER/ALWAYS rules, verbatim
+          "brand_guidelines_mandatory_rules_status": str, # "ok"|"none"|"no_provider"|"error"
         }
+    The mandatory-rules status is carried separately from the main
+    status: interpretation can succeed while the dedicated rules pass
+    fails, and the UI must be able to say "re-run extraction" instead
+    of silently presenting zero rules as "document has none".
     Never raises.
     """
     ex = extract_text(filename, file_bytes)
@@ -676,6 +740,7 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
         "brand_guidelines_extractor": ex["extractor"],
         "brand_guidelines_byte_size": ex["byte_size"],
         "brand_guidelines_mandatory_rules": [],
+        "brand_guidelines_mandatory_rules_status": "none",
     }
     if ex["status"] != "ok":
         return payload
@@ -685,7 +750,9 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
     payload["brand_guidelines_raw_excerpt"] = ex["text"][:_RAW_EXCERPT_CHARS]
     # Second dedicated pass: surface non-negotiable rules verbatim so
     # downstream content generators can put them above everything else.
-    payload["brand_guidelines_mandatory_rules"] = extract_mandatory_rules(ex["text"])
+    rules, rules_status = extract_mandatory_rules_with_status(ex["text"])
+    payload["brand_guidelines_mandatory_rules"] = rules
+    payload["brand_guidelines_mandatory_rules_status"] = rules_status
     return payload
 
 
@@ -693,5 +760,6 @@ __all__ = [
     "extract_text",
     "interpret_guidelines",
     "extract_mandatory_rules",
+    "extract_mandatory_rules_with_status",
     "ingest_guidelines_file",
 ]

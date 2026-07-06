@@ -183,3 +183,44 @@ def test_loader_respects_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_SPORT_PROFILES_DIR", str(tmp_path))
     assert load_sport_profile("rowing").sport == "rowing"
     assert {p.sport for p in list_sport_profiles()} == {"rowing"}
+
+
+# --- Slug validation (path-traversal guard) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "../evil",
+        "..",
+        "swimming/../../secrets",
+        "swim ming",
+        "SWIMMING",
+        "swimming.yaml",
+        "",
+    ],
+)
+def test_traversal_shaped_slug_raises_without_touching_disk(tmp_path, bad, monkeypatch):
+    """The sport slug can arrive from request JSON and is interpolated into a
+    filesystem path — anything but ^[a-z0-9_]+$ must raise ValueError before
+    any file access (never resolve to a path outside the profiles dir)."""
+    calls = []
+
+    import mediahub.sport_profiles.loader as loader_mod
+
+    real = loader_mod._profiles_dir
+    monkeypatch.setattr(
+        loader_mod, "_profiles_dir", lambda *a, **k: calls.append(1) or real(*a, **k)
+    )
+    with pytest.raises(ValueError):
+        load_sport_profile(bad)
+    assert not calls, "the filesystem path must never be built for a bad slug"
+
+
+def test_valid_slugs_still_load(tmp_path):
+    assert load_sport_profile("swimming").sport == "swimming"
+    # Underscored slugs are legal identifiers and pass the guard.
+    (tmp_path / "water_polo.yaml").write_text(
+        "sport: water_polo\ndisplay_name: Water Polo\n", encoding="utf-8"
+    )
+    assert load_sport_profile("water_polo", base_dir=tmp_path).sport == "water_polo"

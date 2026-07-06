@@ -40,7 +40,6 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     # Ensure no AI provider is configured, so assistant-in-threads honest-errors.
     for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "MEDIAHUB_LLM_ENDPOINTS"):
         monkeypatch.delenv(k, raising=False)

@@ -242,18 +242,6 @@ class FormatSpec:
             return ""
         return f"{self.width_mm:g} × {self.height_mm:g} mm"
 
-    def effective_dpi(self, source_px: int, *, axis: str = "width") -> float:
-        """Effective dpi if ``source_px`` artwork fills this format's physical axis.
-
-        The honest resolution check for preflight: a 1000 px image placed on an
-        A3 (420 mm ≈ 16.5 in) edge is only ~60 dpi, however large the canvas
-        *spec* is. Returns 0.0 for a screen-native format (no physical size).
-        """
-        inches = self.height_in if axis == "height" else self.width_in
-        if inches <= 0 or source_px <= 0:
-            return 0.0
-        return round(source_px / inches, 1)
-
     def to_dict(self) -> dict:
         return {
             "slug": self.slug,

@@ -72,9 +72,12 @@ class TestActionCatalogue:
     def test_groups_present(self):
         assert set(qa.ACTIONS) == {"image", "video", "gif"}
 
-    def test_video_has_reverse_and_merge(self):
+    def test_video_has_core_actions_but_not_merge(self):
         keys = {k for k, _ in qa.ACTIONS["video"]}
-        assert {"trim", "crop", "resize", "speed", "mute", "reverse", "merge", "to_gif"} <= keys
+        assert {"trim", "crop", "resize", "speed", "mute", "reverse", "to_gif"} <= keys
+        # merge needs multiple sources; the single-asset quick-action route
+        # can't dispatch it, so advertising it would be a guaranteed 400.
+        assert "merge" not in keys
 
     def test_image_has_core_actions(self):
         keys = {k for k, _ in qa.ACTIONS["image"]}

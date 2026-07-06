@@ -45,6 +45,8 @@ from html import escape as _escape
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from .style_packs import mood_preset_note
+
 __all__ = [
     "INSPECT_ENV",
     "SCHEMA",
@@ -302,6 +304,9 @@ def design_explainability(
             "photo_treatment": str(_brief_get(brief, "photo_treatment", "")),
             "decoration_strength": _brief_get(brief, "decoration_strength", None),
             "mood": str(_brief_get(brief, "mood", "")),
+            # The authored one-line rationale for the mood's curated pack
+            # bundle — why a mood-scoped pack pick decorated the card this way.
+            "mood_note": mood_preset_note(str(_brief_get(brief, "mood", ""))),
             "motion_intent": str(_brief_get(brief, "motion_intent", "")),
             "tone": str(_brief_get(brief, "tone", "")),
             "objective": str(_brief_get(brief, "objective", "")),
@@ -432,6 +437,7 @@ def _panel(data: dict, scale: float) -> str:
             row("archetype", str(card.get("archetype", ""))),
             row("format", f"{fmt}  {dims}" if fmt else dims),
             row("style", str(design.get("style_pack", "")) or "—"),
+            row("mood", str(design.get("mood_note", "")) or str(design.get("mood", ""))),
             row("ground", str(design.get("background_style", ""))),
             row("accent", str(design.get("accent_style", ""))),
             row("type", str(design.get("typography_pair", ""))),

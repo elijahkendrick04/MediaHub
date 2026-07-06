@@ -261,6 +261,38 @@ def _is_near_duplicate(candidate: str, reference_list: list[str], threshold: flo
     return any(_ngram_similarity(candidate, ref) >= threshold for ref in reference_list)
 
 
+def filter_caption_variants(
+    variants: list[str],
+    recent_captions: Optional[list[str]] = None,
+    *,
+    dedupe_threshold: float = 0.55,
+) -> list[str]:
+    """Shared post-filter for multi-variant caption surfaces.
+
+    Collapses exact and trigram near-duplicates (against ``recent_captions``
+    and the variants already kept, order preserved) and drops candidates that
+    contain ban-list AI-tells — the same quality gates
+    :func:`generate_caption_candidates` applies during generation, packaged
+    for callers that already hold a produced list (the live caption route's
+    variants). Fail-open: if filtering would empty a non-empty input, the
+    first original variant is returned — a slightly stale caption beats none.
+    """
+    cleaned = [v.strip() for v in (variants or []) if v and v.strip()]
+    if not cleaned:
+        return []
+    recents = [r for r in (recent_captions or []) if r and r.strip()]
+    kept: list[str] = []
+    for v in cleaned:
+        if v in kept:
+            continue
+        if _contains_ai_tell(v):
+            continue
+        if _is_near_duplicate(v, recents + kept, threshold=dedupe_threshold):
+            continue
+        kept.append(v)
+    return kept or [cleaned[0]]
+
+
 # ---------------------------------------------------------------------------
 # Platform format specifications for generate_platform_variants
 # ---------------------------------------------------------------------------
@@ -872,33 +904,6 @@ def generate_ai_caption(
         }
 
 
-# Back-compat exports — the names are imported elsewhere in web.py.
-_SYSTEM_PROMPT = (
-    "You are a sports social-media writer producing one caption for a "
-    "swimming achievement. Keep it specific, human, club-appropriate, "
-    "~280 chars max. Never invent facts. Output only the caption text."
-)
-
-
-def _build_user_message(*_args, **_kwargs) -> str:
-    """Kept for back-compat with tests that import it. The new pipeline
-    builds prose via narrate_achievement instead."""
-    from mediahub.ai_core import narrate_achievement
-
-    a = _args[0] if _args else _kwargs.get("achievement", {}) or {}
-    return narrate_achievement(a if isinstance(a, dict) else {})
-
-
-def _voice_profile_addendum(*_args, **_kwargs) -> str:
-    """Kept for back-compat. New pipeline uses _voice_profile_prose."""
-    vp = _args[0] if _args else _kwargs.get("voice_profile")
-    return _voice_profile_prose(vp if isinstance(vp, dict) else None)
-
-
-# Test/back-compat alias used by tests/test_voice_imitation.py.
-_voice_profile_instructions = _voice_profile_addendum
-
-
 # ---------------------------------------------------------------------------
 # Multi-candidate generation with deduplication
 # ---------------------------------------------------------------------------
@@ -1073,8 +1078,6 @@ __all__ = [
     "generate_caption_bundle",
     "generate_caption_candidates",
     "generate_platform_variants",
+    "filter_caption_variants",
     "record_approved_caption",
-    "_SYSTEM_PROMPT",
-    "_build_user_message",
-    "_voice_profile_addendum",
 ]

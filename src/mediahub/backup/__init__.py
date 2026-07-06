@@ -246,13 +246,14 @@ def restore_backup(archive: Path, data_dir: Optional[Path] = None, *, force: boo
             "pass force=True / --force to restore over it"
         )
     restored = 0
+    root = target.resolve()
     with zipfile.ZipFile(archive) as zf:
         for member in zf.infolist():
             name = member.filename
             if member.is_dir():
                 continue
             dest = (target / name).resolve()
-            if not str(dest).startswith(str(target.resolve())):
+            if not dest.is_relative_to(root):
                 raise RuntimeError(f"archive member escapes the target: {name!r}")
             dest.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, dest.open("wb") as out:

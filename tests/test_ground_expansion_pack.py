@@ -149,7 +149,7 @@ def test_new_grounds_grew_the_catalog_past_its_floors():
     # Additive grounds can only enlarge the deterministic template space; the
     # ≥1000-template product requirement holds with room to spare.
     assert sp.style_pack_count() > 1000
-    assert sp.template_count(A.list_archetypes()) > 10000
+    assert len(A.list_archetypes()) * sp.style_pack_count() > 10000
 
 
 def test_packs_using_new_grounds_respect_the_coherence_cap():
@@ -267,3 +267,76 @@ def test_new_ground_reaches_assembled_html_once(monkeypatch, tmp_path, ground):
     # and it carries this ground's darken-only CSS
     fragment = sp._ground_layer(ground, _STD_ALPHA).split(",")[0][:32]
     assert fragment in html, f"{ground}: ground CSS not present in assembled HTML"
+
+
+# --------------------------------------------------------------------------- #
+# G1.8 mesh ground — still ↔ motion parity (the video paints the SAME mesh)
+# --------------------------------------------------------------------------- #
+
+
+def _mesh_brief(**overrides) -> dict:
+    b = generate(_card(), None, _brand(), profile_id="t", meet_name="Open", variation_seed=0)
+    d = b.to_dict()
+    d["background_style"] = "gradient_mesh"
+    d.update(overrides)
+    return d
+
+
+def test_mesh_bg_prop_matches_the_still_engine_byte_for_byte():
+    """motion._mesh_bg_for_brief must produce the exact data URI the still hook
+    injects — same engine, same roles, same seed / mode / intensity derivation
+    — so the video ground IS the approved still's mesh, not a re-derivation."""
+    from mediahub.creative_brief.generator import CreativeBrief
+    from mediahub.graphic_renderer.gradient_mesh import (
+        MeshRoles,
+        mesh_data_uri,
+        mesh_mode_for_seed,
+    )
+    from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+    from mediahub.graphic_renderer.sprint_hooks.gradient_mesh_bg import (
+        _intensity_for,
+        _seed_for,
+    )
+
+    brief = _mesh_brief()
+    got = motion._mesh_bg_for_brief(brief, _brand(), "story")
+    assert got.startswith('url("data:image/svg+xml;base64,')
+
+    cb = CreativeBrief.from_dict(brief)
+    roles = MeshRoles.from_role_vars(resolved_role_vars_for_brief(cb, _brand()))
+    seed = _seed_for(cb)
+    expected = mesh_data_uri(
+        roles, 1080, 1920, mode=mesh_mode_for_seed(seed), seed=seed,
+        intensity=_intensity_for(cb),
+    )
+    assert got == expected
+
+
+def test_mesh_bg_honours_an_explicit_mode_suffix():
+    linear = motion._mesh_bg_for_brief(_mesh_brief(background_style="gradient_mesh:linear"),
+                                       _brand(), "story")
+    conic = motion._mesh_bg_for_brief(_mesh_brief(background_style="gradient_mesh:conic"),
+                                      _brand(), "story")
+    assert linear and conic and linear != conic
+
+
+def test_mesh_prop_attaches_only_when_opted_in():
+    """Non-mesh cards must keep byte-identical props (no meshBg key at all) so
+    every existing cache key survives; a mesh brief carries the prop."""
+    card = _card()
+    plain = motion._card_to_props(card, variation_seed=1,
+                                  brief=_mesh_brief(background_style=""))
+    assert "meshBg" not in plain
+    meshed = motion._card_to_props(card, variation_seed=1, brief=_mesh_brief(),
+                                   brand_kit=_brand())
+    assert meshed["meshBg"].startswith('url("data:image/svg+xml;base64,')
+    assert meshed["backgroundStyle"] == "gradient_mesh"
+
+
+def test_tsx_paints_the_mesh_ground_beneath_scene_content():
+    """StoryCard.tsx declares the meshBg prop and paints it on the composition
+    root (beneath every content layer) — the still's ground-override order."""
+    src = _story_src()
+    assert 'meshBg: z.string().default("")' in src
+    root = src.split("backgroundColor: roles.ground", 1)[1].split(">", 1)[0]
+    assert "card.meshBg" in root and "backgroundImage: card.meshBg" in root

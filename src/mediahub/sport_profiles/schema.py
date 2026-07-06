@@ -21,8 +21,9 @@ Style matches the rest of the repo: plain ``@dataclass``, ``field(default_factor
 for mutable defaults, and ``from_dict``/``to_dict`` round-trips that tolerate unknown
 keys for forward/backward compatibility (cf. ``brand.kit.BrandKit``).
 
-This module is inert scaffolding — nothing in the running product imports it yet.
-See ``docs/SPORT_PROFILES.md`` for the authoring guide.
+Profiles loaded into this shape are consumed by ``content_engine/planner.py``,
+``club_platform/post_types.py``, ``club_platform/format_catalog.py`` and the web
+routes. See ``docs/SPORT_PROFILES.md`` for the authoring guide.
 """
 
 from __future__ import annotations

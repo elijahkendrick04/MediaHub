@@ -104,3 +104,19 @@ def test_delete_drops_public_token():
 def test_publish_missing_newsletter_returns_none():
     assert store.publish_newsletter("club-a", "nope") is None
     assert store.newsletter_record("club-a", "nope") is None
+
+
+def test_save_newsletter_runs_under_store_lock(monkeypatch):
+    # The save's read-modify-write must hold the same _LOCK publish/unpublish/
+    # delete take, so a save can never interleave with a publish and clobber
+    # the record's publish fields while _tokens.json keeps the token.
+    seen = {}
+    real_read = store._read
+
+    def spy(path):
+        seen.setdefault("locked", store._LOCK.locked())
+        return real_read(path)
+
+    monkeypatch.setattr(store, "_read", spy)
+    store.save_newsletter("club-a", _spec())
+    assert seen.get("locked") is True

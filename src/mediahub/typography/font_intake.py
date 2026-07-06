@@ -882,6 +882,7 @@ def store_woff2(profile_id: str, *, slug: str, woff2: bytes, record_fields: dict
 
 def load_record(profile_id: str, slug: str) -> Optional[FontRecord]:
     """Load one stored font record by slug, or ``None`` if absent."""
+    slug = _slug(slug)  # idempotent for stored slugs; blocks path traversal
     p = font_dir_for(profile_id) / f"{slug}.json"
     if not p.is_file():
         return None
@@ -909,6 +910,7 @@ def list_fonts(profile_id: str) -> list[FontRecord]:
 
 def remove_font(profile_id: str, slug: str) -> bool:
     """Delete a stored font (WOFF2 + sidecar). Returns True if anything was removed."""
+    slug = _slug(slug)  # idempotent for stored slugs; blocks path traversal
     d = font_dir_for(profile_id)
     removed = False
     for suffix in (".woff2", ".json"):

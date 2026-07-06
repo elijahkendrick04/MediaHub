@@ -396,10 +396,11 @@ def _poll_until_settled(client, poll_url, tries=60, delay=0.2):
     return j
 
 
-def _fake_all_formats_writing(rendered_formats, errors=None):
+def _fake_all_formats_writing(rendered_formats, errors=None, captured=None):
     """Return a ``render_meet_reel_all_formats`` stand-in that writes the named
     cuts into ``out_dir`` (so the reel-file route can stream them) and reports
-    ``errors`` for the rest."""
+    ``errors`` for the rest. ``captured``, when given, records the kwargs the
+    route passed (sponsor / next_meet / rhythm / dub_language / base_name)."""
     errors = errors or {}
 
     def _impl(
@@ -413,7 +414,21 @@ def _fake_all_formats_writing(rendered_formats, errors=None):
         duration_sec=None,
         formats=None,
         render_slot=None,
+        sponsor="",
+        next_meet="",
+        rhythm=None,
+        dub_language="",
     ):
+        if captured is not None:
+            captured.update(
+                {
+                    "base_name": base_name,
+                    "sponsor": sponsor,
+                    "next_meet": next_meet,
+                    "rhythm": rhythm,
+                    "dub_language": dub_language,
+                }
+            )
         rendered: dict[str, Path] = {}
         for fmt in motion.MOTION_FORMATS:
             if fmt in rendered_formats:
@@ -523,6 +538,48 @@ class TestReelBatchRoute:
             other.post("/api/organisation/active", data={"profile_id": "beta"})
             assert other.get(poll).status_code == 404
             assert other.post("/api/runs/r1/reel-batch").status_code == 404
+
+    def test_batch_passes_sponsor_rhythm_next_meet_and_dub(self, app_env):
+        """The batch worker forwards the same R1.30 sponsor / next-meet, R1.12
+        rhythm and 1.24 dub inputs the single route resolves, and lang-suffixes
+        its filenames so the reel-file route (given the same lang) finds them.
+        Without these the batch cuts lost the sponsor outro / rhythm / dub and
+        the story cut's cache key diverged from the single route."""
+        app, wm, _ = app_env
+        from mediahub.web.club_profile import ClubProfile, save_profile
+
+        save_profile(
+            ClubProfile(
+                profile_id="alpha",
+                display_name="Alpha SC",
+                sponsor_name="AquaCorp",
+                notes="Next meet: County Champs — 12 Jul",
+            )
+        )
+        captured: dict = {}
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            with mock.patch.object(
+                motion,
+                "render_meet_reel_all_formats",
+                _fake_all_formats_writing(set(motion.MOTION_FORMATS), captured=captured),
+            ):
+                resp = c.post("/api/runs/r1/reel-batch?lang=es&cover=2.5")
+                assert resp.status_code == 202
+                j = _poll_until_settled(c, resp.get_json()["poll_url"])
+
+            assert j["status"] == "done", j
+            assert captured["sponsor"] == "AquaCorp"
+            assert captured["next_meet"].startswith("County Champs")
+            assert captured["dub_language"] == "es"
+            assert captured["rhythm"] is not None  # cover=2.5 customised the skeleton
+            # dubbed batch filenames carry the language suffix on the stem
+            assert captured["base_name"] == "reel_3_es"
+            # …and the minted file URLs carry lang so the cuts actually stream
+            for fmt, url in j["video_urls"].items():
+                assert "lang=es" in url, (fmt, url)
+                f = c.get(url)
+                assert f.status_code == 200, (fmt, url)
 
     def test_single_reel_status_unaffected_by_batch_fields(self, app_env):
         """The shared status route still serves a single-format ``reel`` job;

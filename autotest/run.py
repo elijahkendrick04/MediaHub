@@ -383,9 +383,18 @@ class Tester:
 
     def _add(self, f: Finding, shoot: bool = True) -> None:
         # B1: on a non-default engine, tag the finding so its fingerprint doesn't
-        # collapse with the chromium run's (a WebKit-only layout break is its own bug).
+        # collapse with the chromium run's (a WebKit-only layout break is its own
+        # bug). The tag must land in the fingerprint BASIS — suspect when there is
+        # one, else the HEAD of evidence (the hash uses evidence[:200]); a tag
+        # appended to the evidence tail changed nothing for findings with a
+        # suspect or long evidence. Chromium findings stay untagged, so their
+        # fingerprints are unchanged.
         if self.engine and self.engine != "chromium" and f.is_bug:
-            f.evidence = (f.evidence or "") + f"\n[engine={self.engine}]"
+            if f.suspect:
+                f.suspect = f"{f.suspect}:{self.engine}"
+                f.evidence = (f.evidence or "") + f"\n[engine={self.engine}]"
+            else:
+                f.evidence = f"[engine={self.engine}] " + (f.evidence or "")
         if shoot and f.is_bug:
             self._shoot(f)
         self.findings.append(f)
@@ -654,6 +663,12 @@ class Tester:
         self.artifacts["signup_result"] = signup
         pid = self._active_profile_id_live()
         self.artifacts["lifecycle_profile_id"] = pid
+        # HARD-GUARDED like the delete below: if sign-up failed or was skipped,
+        # the active profile can be a REAL customer org (ensure_signed_in_live
+        # prefers non-autotest orgs) — never upload a test meet into it.
+        if not pid.startswith("autotest"):
+            return (f"lifecycle: signup={signup} | aborted: active profile is "
+                    f"not a test org ({pid!r}) — upload skipped")
         # Upload a REAL meet (real race results) and drive the content flow.
         upload = self.run_primary_flow(flow_timeout)
         # Clean up: delete the test profile we created (and verify the route).

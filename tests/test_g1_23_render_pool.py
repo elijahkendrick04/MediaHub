@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import hashlib
 import io
+import queue
 import sys
 import threading
 import types
+from pathlib import Path
 
 import pytest
 
@@ -341,6 +343,38 @@ def test_broken_pool_falls_back_to_one_shot(tmp_path, monkeypatch):
     # The successful render came from the one-shot path (a with-block enter).
     assert reg.screenshots == 1
     assert reg.browser_closes >= 1
+
+
+def _pool_with_no_workers() -> "R._RenderPool":
+    """A _RenderPool shell whose queue no worker ever drains."""
+    pool = R._RenderPool.__new__(R._RenderPool)
+    pool._q = queue.Queue()
+    pool._broken = threading.Event()
+    pool._size = 1
+    pool._workers = []
+    return pool
+
+
+def test_submit_cancels_queued_future_on_timeout(monkeypatch):
+    # A task abandoned on timeout must be cancelled so a late-recovering
+    # worker skips it (set_running_or_notify_cancel) instead of racing the
+    # one-shot fallback on the same output path.
+    pool = _pool_with_no_workers()
+    monkeypatch.setattr(R, "_POOL_SUBMIT_TIMEOUT_S", 0.6)
+    with pytest.raises(R._PoolUnavailable):
+        pool.submit("<html></html>", Path("never.png"), (10, 10), 1)
+    fut = pool._q.get_nowait()[-1]
+    assert fut.cancelled()
+
+
+def test_submit_cancels_queued_future_when_pool_breaks(monkeypatch):
+    pool = _pool_with_no_workers()
+    monkeypatch.setattr(R, "_POOL_SUBMIT_TIMEOUT_S", 30.0)
+    threading.Timer(0.1, pool._broken.set).start()
+    with pytest.raises(R._PoolUnavailable):
+        pool.submit("<html></html>", Path("never.png"), (10, 10), 1)
+    fut = pool._q.get_nowait()[-1]
+    assert fut.cancelled()
 
 
 def test_shutdown_is_idempotent(monkeypatch):

@@ -69,5 +69,15 @@ def test_ffmpeg_expr_substitutes_progress():
     assert "P" not in expr.replace("PI", "")  # the placeholder is gone (PI kept)
 
 
+def test_ffmpeg_expr_keeps_pi_constant_intact():
+    # ease_in_out_sine is "(0.5-0.5*cos(PI*P))": the PI constant must survive
+    # while both standalone P tokens are substituted.
+    expr = E.get_easing("ease_in_out_sine").ffmpeg_expr("t/2")
+    assert "PI" in expr
+    assert "(t/2)" in expr
+    assert "P" not in expr.replace("PI", "")
+    assert expr == "(0.5-0.5*cos(PI*(t/2)))"
+
+
 def test_unknown_easing_falls_back_to_default():
     assert E.get_easing("does_not_exist") is E.EASINGS[E.DEFAULT_EASING]

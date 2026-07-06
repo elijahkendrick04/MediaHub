@@ -29,6 +29,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -179,11 +180,32 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     brand_primary = src.get("primary_colour") or src.get("primary")
     brand_secondary = src.get("secondary_colour") or src.get("secondary")
     brand_accent = src.get("accent_colour") or src.get("accent")
-    used_brand_kit = bool(brand_primary or brand_secondary or brand_accent)
 
-    primary = brand_primary or (theme_palette or {}).get("primary") or "#0A2540"
-    secondary = brand_secondary or (theme_palette or {}).get("secondary") or "#000000"
-    accent = brand_accent or (theme_palette or {}).get("accent") or "#FFFFFF"
+    tp = theme_palette or {}
+    primary = brand_primary or tp.get("primary") or "#0A2540"
+    secondary = brand_secondary or tp.get("secondary") or "#000000"
+    accent = brand_accent or tp.get("accent") or "#FFFFFF"
+
+    # Exact explainability: report which source actually contributed the
+    # roles used. "brand-kit" only when the kit supplied every role that a
+    # source supplied at all, "theme-store" when the store supplied them all,
+    # else "mixed" (e.g. an accent-only kit filled from the store). Built-in
+    # fallback constants don't count as a source; an all-default palette
+    # keeps the historic "brand-kit" label.
+    contributed = {
+        ("brand-kit" if flat else "theme-store" if themed else "")
+        for flat, themed in (
+            (brand_primary, tp.get("primary")),
+            (brand_secondary, tp.get("secondary")),
+            (brand_accent, tp.get("accent")),
+        )
+    } - {""}
+    if contributed == {"theme-store"}:
+        theme_source = "theme-store"
+    elif contributed <= {"brand-kit"}:
+        theme_source = "brand-kit"
+    else:
+        theme_source = "mixed"
 
     return {
         "primary": primary,
@@ -194,9 +216,7 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
         "logoDataUri": _logo_to_data_uri(
             src.get("logo_svg") or src.get("logoSvg") or src.get("logoDataUri")
         ),
-        "themeSource": "brand-kit"
-        if used_brand_kit
-        else ("theme-store" if theme_palette else "brand-kit"),
+        "themeSource": theme_source,
     }
 
 
@@ -356,6 +376,59 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
         return ""
 
 
+# The still hook's opt-in tokens for the G1.8 gradient-mesh ground (mirrors
+# sprint_hooks/gradient_mesh_bg._TRIGGERS; parsed before any ":mode" suffix).
+_MESH_TRIGGERS = frozenset({"gradient_mesh", "gradient-mesh", "mesh"})
+
+
+def _mesh_bg_for_brief(brief: Optional[dict], brand_kit: Any, format_name: str) -> str:
+    """The still's G1.8 gradient-mesh ground for this card as a CSS
+    ``background-image`` value — or ``""`` when the brief didn't opt in.
+
+    Parity by construction: rather than porting the mesh maths to TSX, the
+    exact Python engine the still hook runs (``graphic_renderer.gradient_mesh``)
+    builds the SVG here, with the same roles / seed / mode / intensity
+    derivation (``sprint_hooks.gradient_mesh_bg``), so the video ground carries
+    the same deterministic brand-role mesh the approved still painted — painted
+    beneath every content layer like the still's ground override. ``""`` (no
+    mesh, or any failure → the flat brand ground, the pre-mesh behaviour) keeps
+    the card props and every cache key byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    raw = str(b.get("background_style") or "").strip().lower()
+    if not raw:
+        return ""
+    base, _, mode_hint = raw.partition(":")
+    if base not in _MESH_TRIGGERS:
+        return ""
+    try:
+        from mediahub.creative_brief.generator import CreativeBrief
+        from mediahub.graphic_renderer.gradient_mesh import (
+            MESH_MODES,
+            MeshRoles,
+            mesh_data_uri,
+            mesh_mode_for_seed,
+        )
+        from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+        from mediahub.graphic_renderer.sprint_hooks.gradient_mesh_bg import (
+            _intensity_for,
+            _seed_for,
+        )
+
+        cb = CreativeBrief.from_dict(b)
+        if cb is None:
+            return ""
+        roles = MeshRoles.from_role_vars(resolved_role_vars_for_brief(cb, brand_kit))
+        seed = _seed_for(cb)
+        width, height = motion_format_size(format_name)
+        mode = mode_hint if mode_hint in MESH_MODES else mesh_mode_for_seed(seed)
+        return mesh_data_uri(
+            roles, width, height, mode=mode, seed=seed, intensity=_intensity_for(cb)
+        )
+    except Exception:
+        return ""
+
+
 def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
     """The exact colour roles the card's STILL graphic paints, for motion.
 
@@ -479,7 +552,10 @@ def _card_to_props(
     # treats unknown names as "no archetype treatment").
     brief_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
     roles = _resolved_motion_roles(b, brand_kit)
-    return {
+    # G1.8 mesh-ground parity: attached ONLY when the brief opted in, so every
+    # other card's props (and cache key) stay byte-identical.
+    mesh_bg = _mesh_bg_for_brief(b, brand_kit, format_name)
+    props = {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
         "athleteSurname": str(surname),
@@ -518,6 +594,9 @@ def _card_to_props(
         "roleAccent": roles.get("roleAccent", ""),
         "roleOnGround": roles.get("roleOnGround", ""),
     }
+    if mesh_bg:
+        props["meshBg"] = mesh_bg
+    return props
 
 
 def _content_hash(payload: dict, *, kind: str) -> str:
@@ -681,12 +760,16 @@ def _reel_audio_plan(
     pretending to be the target — the music bed (if any) is kept, else the reel
     is silent. The dubbed plan folds into the cache key, so each language is a
     distinct render.
+
+    Returns ``(plan, dub_error)`` — ``dub_error`` is the honest reason the dub
+    was dropped (``""`` when it wasn't). It rides *alongside* the plan, never
+    inside it, so it reaches the manifest without shifting any cache key.
     """
     try:
         from mediahub.visual import audio_mux, narration
 
         if not audio_mux.audio_active():
-            return None
+            return None, ""
         script = ""
         if audio_mux.voice_active():
             script = narration.reel_script(
@@ -702,18 +785,21 @@ def _reel_audio_plan(
             mix_profile=mix_profile,
             library_track=_library_bed_for(key),
         )
+        dub_error = ""
         if plan and dub_language:
             from mediahub.visual import dub as _dub
 
             try:
                 plan = _dub.dub_plan(plan, dub_language)
-            except (_dub.DubUnavailable, _dub.ClaudeUnavailableError):
+            except (_dub.DubUnavailable, _dub.ClaudeUnavailableError) as e:
                 # Honest: couldn't dub → drop the narration (never ship the
-                # source language as if it were the target), keep any music bed.
+                # source language as if it were the target), keep any music bed
+                # — and record why for the manifest.
+                dub_error = f"dub to {dub_language!r} dropped: {e}"
                 plan = {k: v for k, v in plan.items() if k not in ("voice", "script")} or None
-        return plan
+        return plan, dub_error
     except Exception:
-        return None
+        return None, ""
 
 
 # ---------------------------------------------------------------------------
@@ -869,15 +955,27 @@ def _ensure_poster_sidecar(cached: Path, *, kind: str, duration_sec: float) -> s
 
 
 def _finish_cached_video(
-    cached: Path, *, kind: str, plan, duration_sec: float, n_cards: int = 0
+    cached: Path,
+    *,
+    kind: str,
+    plan,
+    duration_sec: float,
+    n_cards: int = 0,
+    rhythm: Optional[dict] = None,
+    audio_notes: Optional[dict] = None,
 ) -> dict:
     """Idempotent finishing pass on the cached MP4: attach the planned audio
     (honest silent fallback on failure; retried on the next request) and
     ensure the poster-frame sidecar exists. Returns the manifest-ready
-    audio record.
+    audio record, carrying the poster's provenance under ``poster_source``
+    (``"in-render"`` / ``"ffmpeg"`` / ``""``) for the render manifest.
 
     ``n_cards`` (reels only) yields the card-cut beat grid the music accents
-    align to; stories have no internal cuts and leave it at 0.
+    align to; stories have no internal cuts and leave it at 0. ``rhythm``
+    (reels only, R1.12) moves that grid with the customised carve so accents
+    land on the reel's real cuts. ``audio_notes`` are extra manifest-ready
+    facts about the plan (e.g. a dropped dub's honest reason) merged into the
+    record — never into the cache-keyed plan itself.
 
     R1.29: the poster is normally captured *in-render* by ``render.js`` (a
     Remotion ``renderStill`` that honours the fonts ``delayRender`` hook), so the
@@ -888,7 +986,9 @@ def _finish_cached_video(
     try:
         from mediahub.visual import audio_mux
 
-        cut_times = audio_mux.card_cut_times(duration_sec, n_cards) if kind == "reel" else None
+        cut_times = (
+            audio_mux.card_cut_times(duration_sec, n_cards, rhythm) if kind == "reel" else None
+        )
         if plan:
             record_path = _audio_record_path(cached)
             audio_rec: dict = {}
@@ -903,6 +1003,8 @@ def _finish_cached_video(
                 audio_rec = audio_mux.apply_audio(
                     cached, plan, duration_sec=duration_sec, cut_times=cut_times
                 )
+                if audio_notes:
+                    audio_rec = {**audio_rec, **audio_notes}
                 try:
                     record_path.write_text(
                         json.dumps(audio_rec, indent=2, sort_keys=True, default=str),
@@ -912,10 +1014,12 @@ def _finish_cached_video(
                     pass
         else:
             audio_rec = {"status": "off"}
-        _ensure_poster_sidecar(cached, kind=kind, duration_sec=duration_sec)
-        return audio_rec
+            if audio_notes:
+                audio_rec = {**audio_rec, **audio_notes}
+        poster_source = _ensure_poster_sidecar(cached, kind=kind, duration_sec=duration_sec)
+        return {**audio_rec, "poster_source": poster_source}
     except Exception as e:
-        return {"status": "silent_fallback", "reason": str(e)}
+        return {"status": "silent_fallback", "reason": str(e), "poster_source": ""}
 
 
 def _publish(cached: Path, out_path: Path) -> Path:
@@ -1126,6 +1230,7 @@ def render_story_card(
         audio_rec = _finish_cached_video(
             cached, kind="story", plan=audio_plan, duration_sec=duration_sec
         )
+        audio_rec.pop("poster_source", "")
         if audio_plan:
             _update_manifest_audio(cached, audio_rec)
         return _publish(cached, out_path)
@@ -1142,6 +1247,7 @@ def render_story_card(
     audio_rec = _finish_cached_video(
         cached, kind="story", plan=audio_plan, duration_sec=duration_sec
     )
+    poster_source = audio_rec.pop("poster_source", "")
     from mediahub.visual.audio_mux import poster_path_for
 
     _write_render_manifest(
@@ -1156,6 +1262,7 @@ def render_story_card(
             "audio": audio_rec,
             "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
+            "poster_source": poster_source,
         },
     )
     published = _publish(cached, out_path)
@@ -1289,7 +1396,7 @@ def normalise_reel_rhythm(raw: Any, n_cards: int) -> Optional[dict]:
 
     cover_raw = _pick("cover_sec", "coverSec", "cover")
     outro_raw = _pick("outro_sec", "outroSec", "outro")
-    per_card_raw = _pick("per_card_sec", "perCardSec", "perCard", "beat_sec", "beatSec")
+    per_card_raw = _pick("per_card_sec", "perCardSec", "perCard", "beat_sec", "beatSec", "beat")
     weights_raw = _pick("beat_weights", "beatWeights", "weights")
 
     cover = REEL_COVER_SEC if cover_raw is None else _clamp(cover_raw, *REEL_COVER_RANGE)
@@ -1317,6 +1424,129 @@ def normalise_reel_rhythm(raw: Any, n_cards: int) -> Optional[dict]:
         "perCardSec": round(per_card, 3),
         "beatWeights": weights,
     }
+
+
+# R1.13 — the honest stat vocabulary the reel cover can chip: the exact keys of
+# MeetReel.tsx reelStats' counts table. Every value is counted from real card
+# facts; the config below only chooses WHICH honest chips show, HOW MANY, and
+# their display WORDING — never the numbers themselves.
+REEL_STAT_IDS: tuple[str, ...] = (
+    "swims",
+    "pbs",
+    "medals",
+    "records",
+    "seasonBests",
+    "relayWins",
+    "finals",
+    "topSplits",
+)
+
+
+def normalise_reel_stat_config(raw: Any) -> Optional[dict]:
+    """Resolve a caller's stat-chip config (R1.13) into the canonical
+    ``reelStatConfig`` prop shape — or ``None`` when it asks for nothing.
+
+    Accepts ``include`` (ordered stat ids), ``max`` (chip cap, ≥ 0) and
+    ``labels`` (per-id wording overrides; a ``{n}`` placeholder marks where the
+    honest count renders). Ids are validated against ``REEL_STAT_IDS`` and an
+    unknown id / junk value raises ``ValueError`` — a typo should be a loud
+    error at the caller, never a silently missing chip. Returning ``None`` for
+    an empty request keeps unconfigured reels' props and cache keys
+    byte-identical.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("reel stat config must be an object")
+    if not raw:
+        return None
+
+    out: dict[str, Any] = {}
+
+    include_raw = raw.get("include")
+    if include_raw is not None:
+        if not isinstance(include_raw, (list, tuple)):
+            raise ValueError("stat config 'include' must be a list of stat ids")
+        include = [str(i) for i in include_raw]
+        unknown = sorted(set(include) - set(REEL_STAT_IDS))
+        if unknown:
+            raise ValueError(
+                f"unknown stat id(s) {', '.join(unknown)} — valid: {', '.join(REEL_STAT_IDS)}"
+            )
+        if include:
+            out["include"] = include
+
+    max_raw = raw.get("max")
+    if max_raw is not None:
+        try:
+            max_chips = int(max_raw)
+        except (TypeError, ValueError):
+            raise ValueError("stat config 'max' must be an integer") from None
+        if max_chips < 0:
+            raise ValueError("stat config 'max' must be >= 0")
+        out["max"] = max_chips
+
+    labels_raw = raw.get("labels")
+    if labels_raw is not None:
+        if not isinstance(labels_raw, dict):
+            raise ValueError("stat config 'labels' must map stat ids to wording")
+        unknown = sorted(set(str(k) for k in labels_raw) - set(REEL_STAT_IDS))
+        if unknown:
+            raise ValueError(
+                f"unknown stat id(s) {', '.join(unknown)} — valid: {', '.join(REEL_STAT_IDS)}"
+            )
+        labels = {str(k): str(v) for k, v in labels_raw.items() if str(v).strip()}
+        if labels:
+            out["labels"] = labels
+
+    return out or None
+
+
+def _js_round(x: float) -> int:
+    """JavaScript ``Math.round`` (half away from zero for positives) — Python's
+    banker's rounding would drift off the TSX carve at exact .5 frames."""
+    return int(math.floor(float(x) + 0.5))
+
+
+def reel_card_beat_frames(
+    n_cards: int, duration_sec: float, rhythm: Optional[dict] = None, *, fps: int = MOTION_FPS
+) -> list[int]:
+    """Per-card beat frames — the exact Python mirror of MeetReel.tsx's carve.
+
+    The reel allocates ``durationInFrames`` as cover + rank/weight-carved card
+    beats + outro; each beat's frames come from the rhythm's weights (explicit
+    ``beatWeights``, else the default 1.25× top-card emphasis when more than
+    one card). The caption track for a beat must be sized to *these* frames —
+    not a flat ``REEL_PER_CARD_SEC`` grid — or trailing cues get cut off on
+    shorter beats and end early on the emphasised one. Keep in lock-step with
+    ``MeetReel.tsx`` (coverFrames/outroFrames/transitionFrames/minBeat maths).
+    """
+    n = max(0, min(int(n_cards or 0), 5))
+    if n == 0:
+        return []
+    r = rhythm or {}
+    cover_sec = r["coverSec"] if r.get("coverSec", 0) and float(r["coverSec"]) > 0 else REEL_COVER_SEC
+    outro_sec = r["outroSec"] if r.get("outroSec", 0) and float(r["outroSec"]) > 0 else REEL_OUTRO_SEC
+    duration_in_frames = max(1, _js_round(float(duration_sec) * fps))
+    cover_frames = _js_round(fps * float(cover_sec))
+    outro_frames = _js_round(fps * float(outro_sec))
+    transition_frames = _js_round(fps * 0.35)
+    remaining = max(0, duration_in_frames - cover_frames - outro_frames)
+
+    explicit = list(r.get("beatWeights") or [])
+    weights: list[float] = []
+    for i in range(n):
+        if explicit:
+            w = explicit[i] if i < len(explicit) else None
+            weights.append(float(w) if isinstance(w, (int, float)) and w > 0 else 1.0)
+        else:
+            weights.append(1.25 if i == 0 and n > 1 else 1.0)
+    weight_sum = sum(weights) or 1.0
+    min_beat = transition_frames * 2 + _js_round(fps * 0.5)
+    return [
+        max(min_beat, math.floor(remaining * w / weight_sum) + transition_frames)
+        for w in weights
+    ]
 
 
 def _reel_duration_kwargs(rhythm: Optional[dict]) -> dict:
@@ -1388,7 +1618,9 @@ def _assemble_reel_props(
     historic skeleton and byte-identical cache key.
 
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
-    briefs_list, rhythm_norm)``.
+    briefs_list, rhythm_norm, audio_notes)`` — ``audio_notes`` carries honest
+    manifest-only facts about the plan (e.g. a dropped dub's reason) and never
+    folds into any cache key.
     """
     brand_dict = _brand_to_dict(brand_kit)
 
@@ -1447,7 +1679,7 @@ def _assemble_reel_props(
         reel_mix = _card_mix_profile(c, b)
         if reel_mix:
             break
-    audio_plan = _reel_audio_plan(
+    audio_plan, dub_error = _reel_audio_plan(
         cards_props,
         brand_dict,
         meet_name,
@@ -1455,6 +1687,7 @@ def _assemble_reel_props(
         mix_profile=reel_mix,
         dub_language=dub_language,
     )
+    audio_notes = {"dub_error": dub_error} if dub_error else None
 
     # Burn-in captions (R1.3): caption each beat from its own verified line when
     # the reel has a voice plan and the operator opted in. Only set when a track
@@ -1462,15 +1695,28 @@ def _assemble_reel_props(
     # engine paints these via captions.tsx; the still+FFmpeg fallback does not
     # burn reel captions (it renders pre-baked stills) and silently ignores them.
     # Beat-grid is the per-card duration, not the output size, so the same
-    # captioned cards drive every cut a batch produces.
+    # captioned cards drive every cut a batch produces. Each card's track is
+    # sized to its OWN carved beat (rank-weighted / rhythm-custom — the exact
+    # MeetReel.tsx allocation), not a flat REEL_PER_CARD_SEC grid, so trailing
+    # cues survive short beats and the emphasised beat stays captioned.
     if _subtitles_enabled() and audio_plan and audio_plan.get("voice") and audio_plan.get("script"):
-        beat_frames = max(1, round(REEL_PER_CARD_SEC * MOTION_FPS))
-        for cp in cards_props:
+        beats = reel_card_beat_frames(len(cards_props), duration_sec, rhythm_norm)
+        for idx, cp in enumerate(cards_props):
+            beat_frames = max(1, beats[idx]) if idx < len(beats) else 1
             cj = _reel_caption_json(cp, brand_dict, beat_frames=beat_frames)
             if cj:
                 cp["captionsJson"] = cj
 
-    return cards_props, brand_dict, meet_name, duration_sec, audio_plan, briefs_list, rhythm_norm
+    return (
+        cards_props,
+        brand_dict,
+        meet_name,
+        duration_sec,
+        audio_plan,
+        briefs_list,
+        rhythm_norm,
+        audio_notes,
+    )
 
 
 def _reel_cta_props(sponsor: str, next_meet: str) -> dict[str, str]:
@@ -1530,6 +1776,8 @@ def _render_reel_one_format(
     format_name: str,
     out_path: Path,
     rhythm: Optional[dict] = None,
+    audio_notes: Optional[dict] = None,
+    stat_config: Optional[dict] = None,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -1539,6 +1787,12 @@ def _render_reel_one_format(
     size), so existing cached reels remain valid cache hits whether they were
     produced by the single route or the batch. Carries main's R1.28 parallel
     path, R1.30 outro CTA, R1.19 audio-mix and R1.3 captions through unchanged.
+
+    ``stat_config`` (R1.13, canonical via ``normalise_reel_stat_config``) rides
+    into the Remotion props AND the cache key ONLY when present, so an
+    unconfigured reel stays byte-identical. The still+FFmpeg fallback's cover
+    is a pre-baked still with its own chip policy and silently ignores it
+    (same contract as reel captions).
     """
     size = motion_format_size(format_name)
     out_path = Path(out_path)
@@ -1561,6 +1815,7 @@ def _render_reel_one_format(
             audio_plan=audio_plan,
             format_name=format_name,
             rhythm=rhythm,
+            audio_notes=audio_notes,
         )
 
     cache_payload = {
@@ -1573,6 +1828,8 @@ def _render_reel_one_format(
     }
     if rhythm:
         cache_payload["rhythm"] = rhythm
+    if stat_config:
+        cache_payload["reelStatConfig"] = stat_config
     if cta_props:
         cache_payload["cta"] = cta_props
     if audio_plan:
@@ -1586,7 +1843,10 @@ def _render_reel_one_format(
             plan=audio_plan,
             duration_sec=duration_sec,
             n_cards=len(cards_props),
+            rhythm=rhythm,
+            audio_notes=audio_notes,
         )
+        audio_rec.pop("poster_source", "")
         if audio_plan:
             _update_manifest_audio(cached, audio_rec)
         return _publish(cached, out_path)
@@ -1603,6 +1863,8 @@ def _render_reel_one_format(
     }
     if rhythm:
         reel_props["rhythm"] = rhythm
+    if stat_config:
+        reel_props["reelStatConfig"] = stat_config
     # Cold render. Try the opt-in parallel composition path (R1.28) first: it
     # splits the reel's frames across concurrent segment renders and composites
     # them into a byte-equivalent silent reel, cutting wall-clock on multi-core
@@ -1630,7 +1892,10 @@ def _render_reel_one_format(
         plan=audio_plan,
         duration_sec=duration_sec,
         n_cards=len(cards_props),
+        rhythm=rhythm,
+        audio_notes=audio_notes,
     )
+    poster_source = audio_rec.pop("poster_source", "")
     from mediahub.visual.audio_mux import poster_path_for
 
     _write_render_manifest(
@@ -1647,9 +1912,11 @@ def _render_reel_one_format(
             "rhythm": rhythm or "default",
             "cta": cta_props,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
+            "stat_config": stat_config or "default",
             "audio": audio_rec,
             "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
+            "poster_source": poster_source,
         },
     )
     published = _publish(cached, out_path)
@@ -1669,6 +1936,7 @@ def render_meet_reel(
     next_meet: str = "",
     rhythm: Optional[dict] = None,
     dub_language: str = "",
+    reel_stat_config: Optional[dict] = None,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -1699,6 +1967,13 @@ def render_meet_reel(
                   ``cover``/``outro``/``per_card`` seconds and/or per-card
                   ``weights``). ``None`` or an effectively-default request keeps
                   today's exact skeleton and cache key.
+      reel_stat_config  optional cover stat-chip config (R1.13) — a dict
+                  understood by ``normalise_reel_stat_config`` (``include``
+                  ids from ``REEL_STAT_IDS``, ``max`` cap, ``labels`` wording
+                  overrides). Only selects/renames the honest counted chips,
+                  never the numbers. ``None``/empty keeps the default cover
+                  and cache key byte-identical; an unknown id raises
+                  ``ValueError``.
 
     Audio + poster behaviour matches ``render_story_card``: opt-in narration
     (built only from the cards' own facts) and/or the operator's music bed
@@ -1708,6 +1983,9 @@ def render_meet_reel(
     For every cut in one request, see ``render_meet_reel_all_formats``.
     """
     engine = _dispatch_engine()
+    # Validate the stat-chip config up front so a typo fails loudly before any
+    # expensive photo-embed/prop work.
+    stat_config = normalise_reel_stat_config(reel_stat_config)
     (
         cards_props,
         brand_dict,
@@ -1716,6 +1994,7 @@ def render_meet_reel(
         audio_plan,
         briefs_list,
         rhythm_norm,
+        audio_notes,
     ) = _assemble_reel_props(
         top_cards,
         brand_kit,
@@ -1739,6 +2018,8 @@ def render_meet_reel(
         format_name=format_name,
         out_path=out_path,
         rhythm=rhythm_norm,
+        audio_notes=audio_notes,
+        stat_config=stat_config,
     )
 
 
@@ -1771,6 +2052,7 @@ def render_meet_reel_all_formats(
     next_meet: str = "",
     rhythm: Optional[dict] = None,
     dub_language: str = "",
+    reel_stat_config: Optional[dict] = None,
 ) -> dict[str, Any]:
     """Render + cache every requested reel format in a single pass (R1.15).
 
@@ -1816,6 +2098,7 @@ def render_meet_reel_all_formats(
     # Validate up front so a typo fails loudly before any render work.
     for fmt in requested:
         motion_format_size(fmt)
+    stat_config = normalise_reel_stat_config(reel_stat_config)
     # Render in canonical MOTION_FORMATS order regardless of request order,
     # de-duplicated, so the result is stable and story (the cheapest reuse) is
     # produced first.
@@ -1829,6 +2112,7 @@ def render_meet_reel_all_formats(
         audio_plan,
         briefs_list,
         rhythm_norm,
+        audio_notes,
     ) = _assemble_reel_props(
         top_cards,
         brand_kit,
@@ -1861,6 +2145,8 @@ def render_meet_reel_all_formats(
                     format_name=fmt,
                     out_path=out_path,
                     rhythm=rhythm_norm,
+                    audio_notes=audio_notes,
+                    stat_config=stat_config,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —

@@ -1900,6 +1900,10 @@ _turn_into_jobs: BoundedCache = BoundedCache(max_size=32)
 # Turn-Into — status + the cited answer + source URLs — held in memory for
 # fast same-worker polls and mirrored to disk for the other worker.
 _research_jobs: BoundedCache = BoundedCache(max_size=32)
+# In-flight cap for deep-research jobs: each one holds a worker thread for a
+# 30-90s LLM+network loop, so the bound is on WORK, not just records — the
+# submit route 429s beyond this many status=running jobs.
+_RESEARCH_MAX_INFLIGHT = 2
 # Club-data Q&A jobs ("Ask the data"). Same lifecycle as the research
 # console: background thread, memory + disk record, org-scoped polls.
 _club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
@@ -2163,6 +2167,36 @@ def _variant_job_load(job_id: str) -> Optional[dict]:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+@contextlib.contextmanager
+def _job_heartbeat(job: dict, interval_s: float = 60.0):
+    """Keep a running job's file fresh while a slow render is in flight.
+
+    The status routes flag a "running" job as lost once its file hasn't been
+    touched for ``_VARIANT_JOB_STALL_S`` (5 min) — but a legitimately slow cold
+    reel render is allowed up to the 600s subprocess timeout, so a healthy
+    worker was reported "job_lost … the render worker restarted" while still
+    rendering. This touch thread re-saves the job every ``interval_s`` seconds
+    for the duration of the ``with`` block and stops (joined) before the worker
+    writes its final state, preserving the single-writer rule. A genuinely
+    dead worker stops heartbeating, so honest job-lost reports still happen.
+    """
+    stop = threading.Event()
+
+    def _beat() -> None:
+        while not stop.wait(interval_s):
+            _variant_job_save(job)
+
+    t = threading.Thread(
+        target=_beat, name=f"jobbeat-{str(job.get('id', ''))[:8]}", daemon=True
+    )
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(timeout=5.0)
 
 
 def _variant_jobs_gc() -> None:
@@ -3304,6 +3338,46 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
 # surface. The order here is the left-to-right render order of the buttons.
 REACTION_EMOJI: tuple[str, ...] = ("👍", "❤️", "🔥")
 
+# Row-growth brake: at most this many DISTINCT anonymous reactors per
+# (run, card). reactor_id is client-minted (localStorage), so without a cap a
+# scripted client could insert unbounded rows until run deletion. Far above
+# any legitimate review-page audience.
+REACTION_MAX_REACTORS_PER_CARD = 500
+
+
+def _run_card_id_set(run_data: dict) -> set[str]:
+    """Every card id this run's surfaces can emit reactions for.
+
+    Ranked achievements contribute their ``swim_id`` (or the synthetic
+    ``sp:type:event`` id the review page mints for aggregate rows) plus any
+    ra-level ``id``; the legacy top-level ``cards`` list contributes
+    ``swim_id``/``id``. Used to reject reactions on card ids that aren't
+    part of the run at all.
+    """
+    out: set[str] = set()
+    rr = (run_data or {}).get("recognition_report") or {}
+    for ra in rr.get("ranked_achievements") or []:
+        ach = ra.get("achievement") or {}
+        sid = ach.get("swim_id")
+        if sid:
+            out.add(str(sid))
+        else:
+            out.add(f"sp:{ach.get('type', '')}:{ach.get('event', '')}")
+        rid = ra.get("id")
+        if rid:
+            out.add(str(rid))
+    for c in (run_data or {}).get("cards") or []:
+        for k in ("swim_id", "id", "card_id"):
+            v = c.get(k)
+            if v:
+                out.add(str(v))
+    # The synthetic weekend-in-numbers card is built from the recognition
+    # report at render time (recognition.weekend_in_numbers) — mirror its
+    # id derivation so its reaction strip keeps working.
+    if rr:
+        out.add(f"weekend_in_numbers:{rr.get('meet_name', 'Meet')}")
+    return out
+
 
 def _reaction_counts_for_run(run_id: str) -> dict[str, dict[str, int]]:
     """Server-side reaction tally for a whole run: ``{card_id: {emoji: count}}``.
@@ -3442,6 +3516,42 @@ def _delete_run(run_id: str) -> bool:
     conn.commit()
     conn.close()
     return existed
+
+
+def _sweep_demo_staging_dirs(older_than_hours: int = 24) -> int:
+    """Delete abandoned try-demo staging dirs under RUNS_DIR (PC.7).
+
+    ``POST /try`` stages the upload (input.bin + demo_meta.json) at
+    ``RUNS_DIR/<temp_id>/`` before the club picker; ``/try/start`` removes
+    the dir when the run actually launches. A visitor who abandons the
+    picker leaves the dir orphaned forever — it is never a registered run,
+    so neither ``sweep_demo_runs`` (DB-driven) nor the retention purge
+    (which scans ``runs_dir/*.json``) reaches it. Gate strictly on the
+    ``demo_meta.json`` marker plus age so real run sidecar dirs are never
+    touched. Returns the number of dirs removed.
+    """
+    import shutil  # noqa: PLC0415
+
+    removed = 0
+    cutoff = time.time() - older_than_hours * 3600
+    try:
+        candidates = list(RUNS_DIR.iterdir())
+    except OSError:
+        return 0
+    for d in candidates:
+        try:
+            if not d.is_dir():
+                continue
+            marker = d / "demo_meta.json"
+            if not marker.exists() or marker.stat().st_mtime >= cutoff:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        log.info("demo sweep: removed %d abandoned staging dir(s)", removed)
+    return removed
 
 
 def _run_owner_profile_id(run_id: str) -> Optional[str]:
@@ -4461,6 +4571,51 @@ function _loadMotionWhy(panel, motionUrl, fmt) {
     bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
     slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ');
   }).catch(function(){});
+}
+
+// Voiceover (opt-in, MEDIAHUB_VOICEOVER=1): speak the human-approved caption.
+// The route is the audio approval gate — a 409 means "approve first", a 429
+// means the render slot is busy, a 503 means the speech backend is off/missing.
+// All three surface their honest user_message inline; nothing is fabricated.
+function voiceoverToggle(btn, voUrl, cardId) {
+  var panel = document.querySelector('.voiceover-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  if (panel.dataset.loaded) {
+    panel.style.display = (panel.style.display === 'none') ? '' : 'none';
+    return;
+  }
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Preparing voiceover…';
+  panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--ink-muted)">Synthesising the approved caption… the first run can take a few seconds.</div>';
+  fetch(voUrl + '?format=json', {method:'POST'})
+    .then(function(r){ return r.json().then(function(j){ return {status: r.status, body: j}; }); })
+    .then(function(res){
+      btn.disabled = false; btn.textContent = origLabel;
+      var j = res.body || {};
+      if (res.status !== 200 || !j.ok) {
+        var msg = j.user_message || j.detail || j.error || 'Voiceover failed — try again.';
+        panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--bad)">' + msg + '</div>';
+        return;
+      }
+      panel.dataset.loaded = '1';
+      var esc = function(s){ return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+      var srtLink = j.has_subtitles
+        ? '<a class="btn secondary" style="font-size:11px;padding:4px 10px" href="' + voUrl + '?format=srt" download>Download subtitles (.srt)</a>'
+        : '';
+      panel.innerHTML =
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Voiceover &middot; ' + esc(j.voice) + ' &middot; ' + Math.round((j.duration_ms || 0) / 1000) + 's &middot; speaks the approved caption, verbatim</div>' +
+        '<audio controls preload="none" src="' + voUrl + '" style="width:100%;margin-bottom:8px"></audio>' +
+        (j.transcript ? '<div style="font-size:12px;color:var(--ink-dim);white-space:pre-wrap;margin-bottom:8px">' + esc(j.transcript) + '</div>' : '') +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" style="font-size:11px;padding:4px 10px" href="' + voUrl + '" download>Download MP3</a>' + srtLink +
+        '</div>';
+    })
+    .catch(function(err){
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--bad)">Network error: ' + err + '</div>';
+    });
 }
 
 // Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
@@ -5676,6 +5831,26 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _wf_card_el_id = f"wf-{card_uuid}"
     schedule_btn = _schedule_button_html(run_id, card_id_raw, _wf_card_el_id)
 
+    # Voiceover (roadmap: audio & voiceover) — only rendered when the operator
+    # opted in (MEDIAHUB_VOICEOVER=1 + importable backend). The route itself
+    # re-checks approval and availability; this is just the reachable control.
+    _voiceover_btn = ""
+    _voiceover_panel = ""
+    if _voiceover_enabled():
+        _voiceover_url = url_for("api_card_voiceover", run_id=run_id, card_id=card_id_raw)
+        _voiceover_btn = (
+            f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" '
+            f"onclick=\"voiceoverToggle(this, {repr(_voiceover_url)}, '{card_uuid}')\" "
+            f'title="Hear the approved caption read aloud &mdash; MP3 + subtitles for a muted-autoplay post. Speaks only the human-approved text, verbatim.">'
+            f"&#x1F50A; Voiceover</button>"
+        )
+        _voiceover_panel = (
+            f'<div class="voiceover-panel" data-card="{card_uuid}" '
+            f'data-voiceover-url="{_h(_voiceover_url)}" '
+            f'style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);'
+            f'border:1px solid var(--border);border-radius:8px"></div>'
+        )
+
     return (
         f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">'
         f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
@@ -5687,6 +5862,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
+        f"{_voiceover_btn}"
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
@@ -5713,6 +5889,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f"</div>"
         f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f"{_voiceover_panel}"
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" data-memory-url="{_h(_assistant_memory_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="comments-panel" data-card="{card_uuid}" data-real-card="{_h(card_id_raw)}" data-comments-url="{_h(_comments_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
@@ -15623,6 +15800,9 @@ _BULK_ACTIONS_JS = r"""
         toast(msg, n2 ? 'success' : 'info', 3000);
         selected().forEach(function(c){ c.checked = false; });
         refresh();
+      } else if (action === 'collage'){
+        toast('Collage created — opening the editor…', 'success', 2000);
+        if (body && body.edit_url) window.location = body.edit_url;
       }
     }
     function afterReview(action, body, ids){
@@ -15632,7 +15812,20 @@ _BULK_ACTIONS_JS = r"""
       var nb = (body && body.n_blocked) || 0;
       var verb = action === 'approve' ? 'Approved' : 'Rejected';
       var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
-      if (nb) msg += ' ' + nb + ' blocked by the consent gate.';
+      if (nb){
+        // Name the actual gate(s) — n_blocked spans consent, brand-lock
+        // and open-task blocks.
+        var gateNames = {consent_blocked: 'consent', brand_locked: 'brand lock', tasks_open: 'open task'};
+        var byGate = {};
+        ((body && body.results) || []).forEach(function(r){
+          if (!r.ok && gateNames[r.error]){
+            var g = gateNames[r.error];
+            byGate[g] = (byGate[g] || 0) + 1;
+          }
+        });
+        var parts = Object.keys(byGate).map(function(g){ return byGate[g] + ' ' + g; });
+        msg += ' ' + nb + ' blocked' + (parts.length ? ' (' + parts.join(', ') + ').' : ' by review gates.');
+      }
       toast(msg, okIds.length ? 'success' : 'info', 3500);
       selected().forEach(function(c){ c.checked = false; });
       refresh();
@@ -15644,6 +15837,10 @@ _BULK_ACTIONS_JS = r"""
         e.preventDefault();
         var ids = selected().map(function(c){ return c.value; });
         if (!ids.length){ toast('Select at least one first.', 'info'); return; }
+        if (action === 'collage' && (ids.length < 2 || ids.length > 9)){
+          toast('Pick 2–9 photos for a collage.', 'info');
+          return;
+        }
         var conf = btn.getAttribute('data-confirm');
         if (conf){
           conf = conf.replace('{n}', ids.length);
@@ -15652,6 +15849,10 @@ _BULK_ACTIONS_JS = r"""
         var url = btn.getAttribute('formaction');
         var payload = {ids: ids};
         if (btn.value) payload.status = btn.value;
+        if (action === 'collage'){
+          var lay = document.getElementById('mh-ml-collage-layout');
+          if (lay && lay.value) payload.layout = lay.value;
+        }
         var orig = btn.style.opacity;
         btn.disabled = true; btn.style.opacity = '0.6';
         fetch((window._API_BASE || '') + url, {
@@ -15681,6 +15882,96 @@ _BULK_ACTIONS_JS = r"""
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+})();
+"""
+
+
+# Media-library quick actions (roadmap 1.19) — a per-asset "Convert" menu
+# built from the export engine's live capability map (/api/export/formats),
+# posting to /api/media-library/<id>/quick-action and downloading the result.
+# A plain (non f-string) constant, same rationale as _BULK_ACTIONS_JS. Errors
+# (e.g. an encoder this deployment lacks) surface the route's honest message.
+_ML_QUICK_ACTION_JS = r"""
+(function(){
+  var formatsCache = null;
+  function closeMenus(){
+    Array.prototype.slice.call(document.querySelectorAll('.mh-ml-qa-menu')).forEach(function(m){ m.remove(); });
+  }
+  document.addEventListener('click', function(ev){
+    var btn = ev.target.closest ? ev.target.closest('.mh-ml-qa') : null;
+    if (!btn) {
+      if (!(ev.target.closest && ev.target.closest('.mh-ml-qa-menu'))) closeMenus();
+      return;
+    }
+    var host = btn.parentNode;
+    var existing = host.querySelector('.mh-ml-qa-menu');
+    closeMenus();
+    if (existing) return; // second click on the same button = toggle closed
+    var menu = document.createElement('div');
+    menu.className = 'mh-ml-qa-menu';
+    menu.style.cssText = 'position:absolute;z-index:40;margin-top:4px;padding:8px;' +
+      'background:var(--panel);border:1px solid var(--border);border-radius:8px;' +
+      'display:flex;flex-direction:column;gap:4px;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,0.35)';
+    menu.innerHTML = '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-muted)">Convert to&hellip;</div>';
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    host.appendChild(menu);
+    var fill = function(data){
+      var fmts = ((data && data.categories && data.categories.image) || []).filter(function(f){
+        return (f.accepts || []).indexOf('image') !== -1;
+      });
+      if (!fmts.length) {
+        var none = document.createElement('div');
+        none.style.cssText = 'font-size:12px;color:var(--bad)';
+        none.textContent = 'No image export formats available on this deployment.';
+        menu.appendChild(none);
+        return;
+      }
+      fmts.forEach(function(f){
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn ghost';
+        b.style.cssText = 'font-size:11px;padding:3px 9px;text-align:left';
+        b.textContent = f.label;
+        b.addEventListener('click', function(){
+          b.disabled = true; b.textContent = 'Converting…';
+          fetch(btn.getAttribute('data-qa-url'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'convert', format: f.key})
+          }).then(function(r){
+            if (r.ok) {
+              return r.blob().then(function(bl){
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(bl);
+                var cd = r.headers.get('Content-Disposition') || '';
+                var m = cd.match(/filename="?([^";]+)"?/);
+                a.download = (m && m[1]) || ('asset.' + f.key);
+                document.body.appendChild(a); a.click(); a.remove();
+                closeMenus();
+              });
+            }
+            return r.json().then(function(j){
+              b.disabled = false;
+              b.textContent = (j && (j.message || j.error)) || 'Conversion failed';
+            });
+          }).catch(function(){ b.disabled = false; b.textContent = 'Network error'; });
+        });
+        menu.appendChild(b);
+      });
+    };
+    if (formatsCache) { fill(formatsCache); return; }
+    var fmtHost = document.querySelector('[data-formats-url]');
+    var fmtUrl = (fmtHost && fmtHost.getAttribute('data-formats-url')) || '/api/export/formats';
+    fetch(fmtUrl, {headers: {Accept: 'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(j){ formatsCache = j; fill(j); })
+      .catch(function(){
+        var err = document.createElement('div');
+        err.style.cssText = 'font-size:12px;color:var(--bad)';
+        err.textContent = 'Couldn’t load the export formats — try again.';
+        menu.appendChild(err);
+      });
+  });
 })();
 """
 
@@ -17613,6 +17904,10 @@ def create_app() -> Flask:
             f'<a class="btn secondary" href="{url_for("privacy_page")}">'
             "Privacy &amp; data</a>"
             f'<a class="btn secondary" href="{url_for("research_page")}">Roadmap</a>'
+            f'<a class="btn secondary" href="{url_for("export_center_page")}">'
+            "Export &amp; convert</a>"
+            f'<a class="btn secondary" href="{url_for("print_center_page")}">'
+            "Print &amp; merch</a>"
             "</div>"
             "</section>"
         )
@@ -24315,9 +24610,9 @@ Relay team broke club record"></textarea>
     def complaints_submit():
         from mediahub.compliance.complaints import ComplaintsStore
 
-        remote = (
-            request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
-        )
+        # Same trusted-proxy derivation as the auth limiter — the first XFF
+        # hop is client-supplied, so keying on it would defeat the throttle.
+        remote = _client_ip()
         if _complaints_throttled(remote):
             return _layout(
                 "Complaints",
@@ -32844,8 +33139,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             store = _v8_get_media_store()
             _pid_for_photos = _active_profile_id() or rec.get("profile_id")
             if _pid_for_photos:
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
                 assets = store.list(profile_id=_pid_for_photos)
-                media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
+                media_assets = asset_dicts_for_render(assets, store)
         except Exception:
             media_assets = []
         _photo_types = {"athlete_action", "athlete_headshot", "team_photo", "venue_photo", "other"}
@@ -34787,14 +35084,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return ""
         used = _runs_this_month()
         cap = _auth.FREE_TIER_RUNS_PER_MONTH
-        if used < cap:
+        # Quiet while comfortably under the cap; the "last free run" nudge
+        # shows at used == cap - 1, the over state at used >= cap.
+        if used < cap - 1:
             return ""
         over = used >= cap
         pricing_url = url_for("pricing_page")
         headline = (
-            "You&rsquo;ve used all 3 free runs this month."
+            f"You&rsquo;ve used all {cap} free runs this month."
             if over
-            else "You&rsquo;re on the last of your 3 free runs this month."
+            else f"You&rsquo;re on the last of your {cap} free runs this month."
         )
         accent = "var(--warn)"
         return (
@@ -34804,7 +35103,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "background:rgba(255,180,84,0.06);color:var(--ink);"
             'border-radius:var(--radius-sm);font-size:13px;line-height:1.5">'
             f"<strong>{headline}</strong> "
-            "Free includes 3 content runs a month and a single brand profile. "
+            f"Free includes {cap} content runs a month and a single brand profile. "
             "You can keep working &mdash; nothing is locked &mdash; but for "
             "unlimited runs and more brand profiles, "
             f'<a href="{pricing_url}" style="color:var(--accent);font-weight:600">'
@@ -34887,8 +35186,31 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     _auth_attempts_lock = threading.Lock()
 
     def _client_ip() -> str:
-        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        return fwd or (request.remote_addr or "unknown")
+        """Proxy-aware client IP for the rate limiters / throttles.
+
+        Behind Render's edge exactly ONE trusted reverse proxy APPENDS the
+        real client address as the LAST X-Forwarded-For hop; every earlier
+        hop is client-supplied. Trusting the FIRST hop hands an attacker a
+        fresh rate-limit bucket per request (rotate the header, dodge the
+        brake — ADR-0019 relies on this limiter). MEDIAHUB_TRUSTED_PROXY_HOPS
+        (default 1) counts the proxies in front of the app if the deployment
+        shape ever changes; 0 means no proxy — use the socket address.
+        """
+        try:
+            hops = int(os.environ.get("MEDIAHUB_TRUSTED_PROXY_HOPS", "1"))
+        except (TypeError, ValueError):
+            hops = 1
+        if hops > 0:
+            fwd = [
+                p.strip()
+                for p in (request.headers.get("X-Forwarded-For") or "").split(",")
+                if p.strip()
+            ]
+            if len(fwd) >= hops:
+                return fwd[-hops]
+            if fwd:
+                return fwd[0]
+        return request.remote_addr or "unknown"
 
     def _auth_rate_limited(bucket: str) -> bool:
         """Record an attempt; True when this IP exceeded the window budget."""
@@ -35335,18 +35657,29 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if user is not None:
                 token = _tokens.mint_reset_token(app.secret_key, user.email, user.hashed_password)
                 reset_url = url_for("password_reset", token=token, _external=True)
-                try:
-                    send_email(
-                        user.email,
-                        "Reset your MediaHub password",
-                        "Someone (hopefully you) asked to reset the password for "
-                        f"this MediaHub account.\n\nReset it here (link valid for "
-                        f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours, single use):\n"
-                        f"{reset_url}\n\nIf this wasn't you, ignore this email — "
-                        "your password is unchanged.",
-                    )
-                except EmailSendError:
-                    log.warning("password reset email failed", exc_info=True)
+                mail_text = (
+                    "Someone (hopefully you) asked to reset the password for "
+                    f"this MediaHub account.\n\nReset it here (link valid for "
+                    f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours, single use):\n"
+                    f"{reset_url}\n\nIf this wasn't you, ignore this email — "
+                    "your password is unchanged."
+                )
+
+                # Timing-oracle guard: the provider POST takes hundreds of ms,
+                # so a synchronous send would make known-account requests
+                # measurably slower than unknown ones even though the bodies
+                # are identical. Fire-and-forget from a thread (send failures
+                # were already log-only best-effort); the URL and text are
+                # built above, inside the request context.
+                def _send_reset_mail(to_email: str = user.email, text: str = mail_text) -> None:
+                    try:
+                        send_email(to_email, "Reset your MediaHub password", text)
+                    except EmailSendError:
+                        log.warning("password reset email failed", exc_info=True)
+
+                threading.Thread(
+                    target=_send_reset_mail, name="pwreset-mail", daemon=True
+                ).start()
             # Identical response whether or not the account exists — the
             # form must not be an email-enumeration oracle.
             body = _account_email_card(
@@ -35621,8 +35954,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if _auth.verify_dev_credentials(
             request.form.get("dev_user"), request.form.get("dev_password")
         ):
-            _auth.login_dev_operator()
+            # Session rotation on privilege change (the same order as
+            # login_post): read next from the request FIRST, drop everything
+            # the pre-auth session held, then grant the operator identity —
+            # the highest-privilege grant must not inherit pre-auth state.
             nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+            session.clear()
+            _auth.login_dev_operator()
             return redirect(nxt or url_for("make_page"))
         return _developer_login_page(error="Invalid username or password."), 401
 
@@ -36656,15 +36994,25 @@ what you're doing, what they should do.</p>
             )
         note_html = f'<p class="dim mh-price-note-banner">{note}</p>'
 
-        toggle = (
-            '<div class="mh-billing-toggle">'
-            '<div class="mh-segmented" role="group" aria-label="Billing period">'
-            '<button type="button" class="is-active" data-period="annual" '
-            'aria-pressed="true">Annually</button>'
-            '<button type="button" data-period="monthly" '
-            'aria-pressed="false">Monthly</button>'
-            "</div></div>"
-        )
+        # The Annually/Monthly segmented control only exists when a committed
+        # list price is live (PC.4): with no price, no tier emits the
+        # annual/monthly panes — every paid tier reads "Pricing TBC" — so the
+        # toggle would render and visibly do nothing. The container keeps its
+        # harmless data-period attribute either way.
+        if list_price is not None:
+            toggle = (
+                '<div class="mh-billing-toggle">'
+                '<div class="mh-segmented" role="group" aria-label="Billing period">'
+                '<button type="button" class="is-active" data-period="annual" '
+                'aria-pressed="true">Annually</button>'
+                '<button type="button" data-period="monthly" '
+                'aria-pressed="false">Monthly</button>'
+                "</div></div>"
+            )
+            period_js = _PRICING_JS
+        else:
+            toggle = ""
+            period_js = ""
 
         body = (
             _PRICING_CSS
@@ -36680,7 +37028,7 @@ what you're doing, what they should do.</p>
             f"{note_html}"
             '<h2 class="mh-compare-title">Compare every plan</h2>'
             f"{compare_table}"
-            "</div>" + _PRICING_JS
+            "</div>" + period_js
         )
         return _layout("Pricing", body, active="signin")
 
@@ -37676,7 +38024,14 @@ what you're doing, what they should do.</p>
             except _tenancy.TenancyError as exc:
                 error = str(exc)
 
-        rows = store.list_for_profile(pid)
+        # PII gate (ADR-0014 anti-enumeration): an unbound (open) workspace is
+        # pinnable by ANY anonymous visitor, so member/invite emails must only
+        # render for the operator, an active owner, or an active member —
+        # never for a stranger who merely pinned the open org.
+        _viewer_row = store.get(user_email, pid) if user_email else None
+        viewer_is_member = bool(_viewer_row and _viewer_row.status == _tenancy.STATUS_ACTIVE)
+        can_view_members = can_admin or viewer_is_member
+        rows = store.list_for_profile(pid) if can_view_members else []
         bound = store.is_bound(pid)
         prof = _active_profile()
         org_name = _h(prof.display_name if prof else pid)
@@ -37792,20 +38147,31 @@ what you're doing, what they should do.</p>
             flash_html = f'<p class="tag good" style="margin-bottom:16px">{_h(notice)}</p>'
         if error:
             flash_html += f'<p class="tag bad" style="margin-bottom:16px">{_h(error)}</p>'
+        if can_view_members:
+            members_html = (
+                '<div class="card" style="padding:0;overflow:hidden">'
+                '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
+                '<thead><tr style="text-align:left;border-bottom:1px solid '
+                'rgba(255,255,255,0.08)">'
+                '<th style="padding:10px 12px">Email</th>'
+                '<th style="padding:10px 12px">Role</th>'
+                '<th style="padding:10px 12px">Status</th>'
+                '<th style="padding:10px 12px">Invited by</th>'
+                "<th></th></tr></thead>"
+                f"<tbody>{rows_html}</tbody></table></div>"
+            )
+        else:
+            members_html = (
+                '<div class="card" style="padding:20px 24px">'
+                '<p class="dim" style="margin:0;font-size:13px">Member details are '
+                "hidden. Sign in as a workspace member or owner to see who has "
+                "access.</p></div>"
+            )
         body = (
             "<h1>Workspace members</h1>"
             + state_html
             + flash_html
-            + '<div class="card" style="padding:0;overflow:hidden">'
-            '<table class="mh-table-stack" style="width:100%;border-collapse:collapse;font-size:13px">'
-            '<thead><tr style="text-align:left;border-bottom:1px solid '
-            'rgba(255,255,255,0.08)">'
-            '<th style="padding:10px 12px">Email</th>'
-            '<th style="padding:10px 12px">Role</th>'
-            '<th style="padding:10px 12px">Status</th>'
-            '<th style="padding:10px 12px">Invited by</th>'
-            "<th></th></tr></thead>"
-            f"<tbody>{rows_html}</tbody></table></div>"
+            + members_html
             + add_form_html
             + f'<p style="margin-top:18px"><a class="btn secondary" '
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
@@ -38322,11 +38688,21 @@ what you're doing, what they should do.</p>
             ".then(function(d){var n=d.n_affected||0;"
             "out.textContent=n?(n+' card(s) would change'):'No cards would change';"
             "ap.style.display=n?'inline-block':'none';}).catch(function(){out.textContent='Preview failed.';});});"
-            "ap.addEventListener('click',function(){out.textContent='Re-rendering…';"
-            "ap.disabled=true;fetch(box.dataset.apply,{method:'POST'}).then(function(r){return r.json();})"
-            ".then(function(d){out.textContent='Re-rendered '+(d.n_rendered||0)+' card(s)'"
-            "+((d.remaining)?(', '+d.remaining+' left — apply again'):'')+' — re-queued for review.';"
-            "ap.disabled=false;}).catch(function(){out.textContent='Apply failed.';ap.disabled=false;});});"
+            # Chunked apply: each call renders at most a few cards (Playwright
+            # is seconds per card, and one big synchronous apply would blow the
+            # worker timeout), walking the offset cursor until remaining==0.
+            "ap.addEventListener('click',function(){"
+            "var total=0,off=0;ap.disabled=true;"
+            "function step(){out.textContent='Re-rendering…'+(total?(' ('+total+' done)'):'');"
+            "fetch(box.dataset.apply+'?limit=8&offset='+off,{method:'POST'})"
+            ".then(function(r){return r.json();})"
+            ".then(function(d){total+=(d.n_rendered||0);"
+            "off=(typeof d.next_offset==='number')?d.next_offset:(off+8);"
+            "if(d.remaining){out.textContent='Re-rendered '+total+' card(s), '+d.remaining+' left…';step();return;}"
+            "out.textContent='Re-rendered '+total+' card(s) — re-queued for review.';"
+            "ap.disabled=false;}).catch(function(){"
+            "out.textContent='Apply failed'+(total?(' after '+total+' card(s)'):'')+'.';ap.disabled=false;});}"
+            "step();});"
             "});})();</script>"
         )
         return _layout("Brand platform", body, active="settings")
@@ -38551,16 +38927,43 @@ what you're doing, what they should do.</p>
                 ws.set_status(run_id, card_id, CardStatus.EDITED)
             return True
 
-        # Cap the synchronous work so one apply can't tie up a worker for minutes.
+        # Cap the synchronous work so one apply can't tie up a worker past the
+        # gunicorn timeout: each affected card is a full Playwright render
+        # (seconds each), so the per-call ceiling is small and the page's
+        # apply JS walks the affected list in chunks. A re-render does NOT
+        # rewrite the stored brief, so the (deterministic) affected list is
+        # identical on every call — without the ``offset`` cursor each chunk
+        # would redo the same first cards and the backlog would never drain.
         try:
-            limit = int(request.args.get("limit", "20"))
+            limit = int(request.args.get("limit", "8"))
         except (TypeError, ValueError):
-            limit = 20
-        limit = max(1, min(limit, 50))
+            limit = 8
+        limit = max(1, min(limit, 10))
+        try:
+            offset = int(request.args.get("offset", "0"))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+
+        cursor = {"i": 0}
+
+        def _render_card_from(run_id: str, card_id: str, brief_dict: dict) -> bool:
+            cursor["i"] += 1
+            if cursor["i"] <= offset:
+                return False  # handled by an earlier chunk
+            return _render_card(run_id, card_id, brief_dict)
+
         summary = _resweep.apply_kit_change(
-            prof, kit, runs_dir=RUNS_DIR, render_card=_render_card, limit=limit
+            prof, kit, runs_dir=RUNS_DIR, render_card=_render_card_from, limit=offset + limit
         )
-        return jsonify(summary.to_dict())
+        d = summary.to_dict()
+        # Chunk-local numbers: the first ``offset`` iterations are cursor
+        # skips (earlier chunks' work), not real skips.
+        d["skipped"] = (d.get("skipped") or [])[offset:]
+        d["n_skipped"] = len(d["skipped"])
+        d["offset"] = offset
+        d["next_offset"] = offset + limit
+        return jsonify(d)
 
     # ---- 1.12 — Brand Check + Brand Assist, per card ----
 
@@ -38570,7 +38973,9 @@ what you're doing, what they should do.</p>
         if run_data is None:
             return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return None, (jsonify({"error": "forbidden"}), 403)
+            # Anti-IDOR house norm: a foreign run answers exactly like a
+            # missing one, so a probe can't confirm the run id exists.
+            return None, (jsonify({"error": "run_not_found"}), 404)
         brief_dict = _latest_brief_for_card(run_id, card_id)
         if not brief_dict:
             return None, (jsonify({"error": "no_brief"}), 404)
@@ -40829,7 +41234,14 @@ function mhSetupMode(mode) {{
                 resp.headers["Content-Type"] = (
                     "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
                 )
-                resp.headers["Cache-Control"] = "public, max-age=604800"
+                # Session-gated content: "private" keeps the (per-browser) perf win
+                # but forbids shared/CDN caches replaying it across sessions.
+                resp.headers["Cache-Control"] = "private, max-age=604800"
+                # An uploaded SVG can embed script; sandboxing the response
+                # neuters it on direct navigation (a plain <img>/CSS-mask
+                # consumer is unaffected — CSP sandbox only applies to
+                # document navigation).
+                resp.headers["Content-Security-Policy"] = "sandbox"
                 return resp
             # The logo can't be rasterised to a paintable silhouette (an exotic or
             # corrupt format). A chrome CHIP (?chip=1) wants a real 404 so its
@@ -40847,8 +41259,12 @@ function mhSetupMode(mode) {{
         if not path:
             return ("", 404)
         # send_from_directory is the safe primitive — it refuses path
-        # traversal automatically.
-        return send_from_directory(path.parent, path.name)
+        # traversal automatically. CSP sandbox: an uploaded SVG can embed
+        # script, and the global CSP allows 'unsafe-inline' — sandboxing
+        # neuters it on direct navigation without affecting <img> consumers.
+        resp = send_from_directory(path.parent, path.name)
+        resp.headers["Content-Security-Policy"] = "sandbox"
+        return resp
 
     @app.route("/organisation/<profile_id>/logo/<logo_id>", methods=["GET"])
     def organisation_logo_serve(profile_id, logo_id):
@@ -40882,7 +41298,14 @@ function mhSetupMode(mode) {{
                 resp.headers["Content-Type"] = (
                     "image/svg+xml" if sil.suffix.lower() == ".svg" else "image/png"
                 )
-                resp.headers["Cache-Control"] = "public, max-age=604800"
+                # Session-gated content: "private" keeps the (per-browser) perf win
+                # but forbids shared/CDN caches replaying it across sessions.
+                resp.headers["Cache-Control"] = "private, max-age=604800"
+                # An uploaded SVG can embed script; sandboxing the response
+                # neuters it on direct navigation (a plain <img>/CSS-mask
+                # consumer is unaffected — CSP sandbox only applies to
+                # document navigation).
+                resp.headers["Content-Security-Policy"] = "sandbox"
                 return resp
             if request.args.get("chip"):
                 return ("", 404)
@@ -40894,7 +41317,10 @@ function mhSetupMode(mode) {{
         path = resolve_logo_path(profile_id, logo_id)
         if not path:
             return ("", 404)
-        return send_from_directory(path.parent, path.name)
+        resp = send_from_directory(path.parent, path.name)
+        # Same SVG-script guard as the sibling routes.
+        resp.headers["Content-Security-Policy"] = "sandbox"
+        return resp
 
     @app.route("/organisation/<profile_id>/brand-logo", methods=["GET"])
     def organisation_logo_mirror(profile_id):
@@ -40936,7 +41362,14 @@ function mhSetupMode(mode) {{
             if sil:
                 resp = send_from_directory(sil.parent, sil.name)
                 resp.headers["Content-Type"] = mirror_content_type(sil)
-                resp.headers["Cache-Control"] = "public, max-age=604800"
+                # Session-gated content: "private" keeps the (per-browser) perf win
+                # but forbids shared/CDN caches replaying it across sessions.
+                resp.headers["Cache-Control"] = "private, max-age=604800"
+                # An uploaded SVG can embed script; sandboxing the response
+                # neuters it on direct navigation (a plain <img>/CSS-mask
+                # consumer is unaffected — CSP sandbox only applies to
+                # document navigation).
+                resp.headers["Content-Security-Policy"] = "sandbox"
                 return resp
             # Can't rasterise the mirrored logo. A chrome CHIP (?chip=1) wants a 404
             # so its <img> onerror falls back to the org initials; the backdrop
@@ -40957,17 +41390,21 @@ function mhSetupMode(mode) {{
         # extension Flask can't map (e.g. .avif) must not be left to guess.
         resp.headers["Content-Type"] = mirror_content_type(path)
         resp.headers["Cache-Control"] = "public, max-age=86400"
+        # Mirrored site logos can be SVG too — same script-neutering sandbox.
+        resp.headers["Content-Security-Policy"] = "sandbox"
         return resp
 
     @app.route("/organisation/setup/reread/<platform>", methods=["POST"])
     def organisation_setup_reread(platform):
         """M5 — Force the AI to re-read one link without resubmitting
         the whole form. Looks up the URL the user previously saved for
-        ``platform``, runs the matching handler with playbook drift
-        detection forced (force=True bypasses the social_dna cache),
-        merges the resulting per-link state back onto the profile, and
-        redirects back to the setup page so the new status chip is
-        visible.
+        ``platform``, runs the matching handler, merges the resulting
+        per-link state (status chip + voice digest) back onto the
+        profile, and invalidates the full-capture social_dna cache for
+        this link set — so the next setup save re-derives the combined
+        brand DNA from the fresh read instead of replaying the stale
+        cached result. Redirects back to the setup page so the new
+        status chip is visible.
         """
         prof = _active_profile()
         if not prof:
@@ -40997,6 +41434,20 @@ function mhSetupMode(mode) {{
                 }
                 prof.link_capture_state = state
                 save_profile(prof)
+                # The full-capture cache (no TTL) still holds the OLD combined
+                # DNA for this exact link set; without invalidation a later
+                # capture_from_socials(force=False) would replay it and the
+                # re-read would never reach captions. Drop the entry so the
+                # next setup save re-derives brand voice from fresh reads.
+                try:
+                    from mediahub.brand import social_dna as _sdna
+
+                    _sdna._cache_path(
+                        (prof.brand_source_url or "").strip(),
+                        dict(prof.social_links or {}),
+                    ).unlink(missing_ok=True)
+                except Exception:
+                    log.info("social-dna cache invalidation failed for %s", platform)
         except Exception as e:
             log.info("re-read for %s failed: %s", platform, e)
         return redirect(url_for("organisation_setup"))
@@ -41155,6 +41606,7 @@ function mhSetupMode(mode) {{
         _zip_url = url_for("content_pack_zip", run_id=run_id)
         _export_zip_url = url_for("pack_export_zip", run_id=run_id)
         _bulk_export_url = url_for("export_run_tool_page", run_id=run_id)
+        _print_tool_url = url_for("print_run_tool_page", run_id=run_id)
         _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _certs_print_url = url_for("pack_certificates_zip", run_id=run_id, print=1)
         _turn_into_html = _render_turn_into_card(run_id)
@@ -41295,6 +41747,8 @@ function mhSetupMode(mode) {{
   <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
   <a class="btn secondary" href="{_bulk_export_url}"
      title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
+  <a class="btn secondary" href="{_print_tool_url}"
+     title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
 
@@ -41591,7 +42045,21 @@ function mhSetupMode(mode) {{
         )
         msg = f"{verb} {n_ok} card{'' if n_ok == 1 else 's'}."
         if n_blocked:
-            msg += f" {n_blocked} blocked by the consent gate."
+            # Name the actual gate(s): n_blocked aggregates consent,
+            # brand-lock and open-task blocks — blaming the consent gate
+            # for all of them misdirects the fix.
+            _reason_labels = {
+                "consent_blocked": "consent",
+                "brand_locked": "brand lock",
+                "tasks_open": "open task",
+            }
+            _by_reason: dict[str, int] = {}
+            for r in results:
+                if not r.get("ok") and r.get("error") in _reason_labels:
+                    key = _reason_labels[r["error"]]
+                    _by_reason[key] = _by_reason.get(key, 0) + 1
+            detail = ", ".join(f"{n} {label}" for label, n in _by_reason.items())
+            msg += f" {n_blocked} blocked" + (f" ({detail})." if detail else " by review gates.")
         _flash_toast(msg, "success" if n_ok else "info")
         return redirect(url_for("review", run_id=run_id))
 
@@ -41686,6 +42154,11 @@ function mhSetupMode(mode) {{
         # value far longer than that is junk, so reject it rather than store it.
         if not card_id or len(card_id) > 256:
             return jsonify({"error": "invalid card_id"}), 400
+        # ... and it must actually be one of THIS run's cards — the run JSON
+        # is already loaded for the tenancy check, so an arbitrary made-up id
+        # can never accrete rows against the run.
+        if card_id not in _run_card_id_set(run_data):
+            return jsonify({"error": "invalid card_id"}), 400
 
         try:
             conn = _db()
@@ -41701,6 +42174,18 @@ function mhSetupMode(mode) {{
                     (run_id, card_id, emoji, reactor),
                 )
             else:
+                # Row-growth brake: reactor_id is client-minted, so cap the
+                # number of DISTINCT reactors per card. A reactor already on
+                # the card may keep toggling its other emoji freely.
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT reactor_id) AS n, "
+                    "MAX(CASE WHEN reactor_id=? THEN 1 ELSE 0 END) AS mine "
+                    "FROM card_reactions WHERE run_id=? AND card_id=?",
+                    (reactor, run_id, card_id),
+                ).fetchone()
+                if not row["mine"] and row["n"] >= REACTION_MAX_REACTORS_PER_CARD:
+                    conn.close()
+                    return jsonify({"error": "too_many_reactors"}), 429
                 conn.execute(
                     "INSERT OR IGNORE INTO card_reactions "
                     "(run_id, card_id, emoji, reactor_id, created_at) VALUES (?,?,?,?,?)",
@@ -41972,6 +42457,30 @@ function mhSetupMode(mode) {{
             return jsonify({"ok": False, "error": "empty_question"}), 400
         question = question[:500]
         pid = _active_profile_id()
+
+        # Bound concurrent research WORK (the max_size=32 cache only bounds
+        # records): each job holds a daemon thread through a 30-90s LLM +
+        # network loop, so unbounded submits mean provider spend and thread
+        # pile-up. Saturated callers get an honest 429 + Retry-After, the
+        # same posture as _render_busy_response.
+        n_running = sum(
+            1
+            for j in _research_jobs.values()
+            if isinstance(j, dict) and j.get("status") == "running"
+        )
+        if n_running >= _RESEARCH_MAX_INFLIGHT:
+            resp = jsonify(
+                {
+                    "ok": False,
+                    "error": "research_busy",
+                    "message": (
+                        "Research is already running — wait for it to finish, "
+                        "then ask again."
+                    ),
+                }
+            )
+            resp.headers["Retry-After"] = "30"
+            return resp, 429
 
         def _do_research(job_id: str, q: str) -> None:
             try:
@@ -43203,6 +43712,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
             _studio_url = url_for("image_studio_page", asset_id=ad.get("id", ""))
             _edit_url = url_for("photo_editor_page", asset_id=ad.get("id", ""))
+            _qa_url = url_for("api_media_library_quick_action", asset_id=ad.get("id", ""))
             # U.14 cursor-following preview: the row shows a 60px chip, so the
             # floating frame carries the full photo at a useful size plus a
             # caption (type + athlete/venue). Escaped — parsed metadata is
@@ -43249,6 +43759,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <a class="btn ghost" href="{_edit_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Filters, adjustments, crop, shapes, blur brush — non-destructive edits">&#9998; Edit</a>
     <a class="btn ghost" href="{_studio_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="Edit this photo with AI — fill, erase, expand, upscale, restyle">&#x2726; Studio</a>
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
+    <button class="btn ghost mh-ml-qa" type="button" data-qa-url="{_qa_url}"
+            style="font-size:11px;padding:3px 9px;margin-right:6px"
+            title="One-click convert — pick a format from the export engine and download the result">&#x21C4; Convert</button>
     <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
             style="font-size:11px;padding:3px 9px"
             onclick="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">Delete</button>
@@ -43418,7 +43931,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if gallery_items
             else ""
         }
-<div class="card">
+<div class="card" data-formats-url="{url_for("api_export_formats")}">
   <div class="strap" style="margin-bottom:var(--sp-3)"><span data-mh-asset-count>{
             len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"} in library</div>
   <form id="mh-ml-bulk" method="post">
@@ -43430,6 +43943,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         <button type="submit" class="btn secondary" data-mh-bulk="approve"
                 formaction="{url_for("api_media_library_bulk_approve")}"
                 data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
+        <span style="display:inline-flex;gap:6px;align-items:center">
+          <select id="mh-ml-collage-layout" name="layout" aria-label="Collage layout"
+                  style="font-size:12px;padding:5px 8px;min-height:0">
+            <option value="grid_2x2">Grid 2&times;2</option>
+            <option value="duo_v">Duo &mdash; side by side</option>
+            <option value="duo_h">Duo &mdash; stacked</option>
+            <option value="trio_strip">Trio strip</option>
+            <option value="trio_feature">Trio feature</option>
+            <option value="grid_3x3">Grid 3&times;3</option>
+          </select>
+          <button type="submit" class="btn secondary" data-mh-bulk="collage"
+                  formaction="{url_for("api_media_library_collage")}"
+                  title="Pick 2&ndash;9 photos, then compose them into one draft graphic">Make collage</button>
+        </span>
         <button type="submit" class="btn secondary" data-mh-bulk="export"
                 formaction="{url_for("api_media_library_bulk_export")}">Export ZIP</button>
         <button type="submit" class="btn danger" data-mh-bulk="delete"
@@ -43456,15 +43983,101 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
+<script>{_ML_QUICK_ACTION_JS}</script>
 <script src="{url_for("static", filename="js/mobile-capture.js")}"></script>
 """
         return _layout("Media library", body, active="media")
 
-    class _HeicUnsupportedError(Exception):
-        """A HEIC/HEIF upload couldn't be decoded on this deployment.
+    class _PhotoRejectedError(Exception):
+        """An uploaded photo can't be accepted — disallowed file type,
+        undecodable bytes, or a HEIC/HEIF this deployment can't convert.
 
-        Carries the caller's choice of whether to surface a 415 (the upload
-        form) or quietly skip the file (the bulk share-target receiver)."""
+        Carries a stable ``code`` plus the honest user-facing ``message``;
+        the caller decides whether to surface a 415 (the upload form) or
+        quietly skip the file (the bulk share-target receiver)."""
+
+        def __init__(self, code: str, message: str) -> None:
+            super().__init__(message)
+            self.code = code
+            self.message = message
+
+    # Photo-ingest allowlist: attacker-chosen suffixes (.svg, .html, …) must
+    # never be stored — library files are served back same-origin. HEIC/HEIF
+    # uploads are additionally accepted via ``heic.is_heic`` and normalised
+    # to JPEG on the way in.
+    _IMAGE_UPLOAD_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+    _HEIC_UNSUPPORTED_MSG = (
+        "HEIC/HEIF photos need conversion support that isn't installed on this "
+        "deployment. Re-save the photo as JPEG or PNG and upload again."
+    )
+    _PHOTO_TYPE_MSG = (
+        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, "
+        "GIF or HEIC."
+    )
+    _PHOTO_UNREADABLE_MSG = (
+        "That photo could not be read — the file appears corrupt or isn't "
+        "really an image. Re-export it and upload again."
+    )
+
+    def _unlink_quiet(p: Path) -> None:
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _verify_image_decodes(path: Path) -> bool:
+        """True when Pillow can actually decode ``path`` as an image."""
+        try:
+            from PIL import Image as _PILImage
+
+            with _PILImage.open(path) as im:
+                im.verify()
+            return True
+        except Exception:
+            return False
+
+    def _store_photo_upload(file_storage, profile_id: str) -> Path:
+        """Validate + persist one uploaded photo file into a profile's
+        media-library upload dir; returns the stored ``Path``.
+
+        The shared ingest gate for every photo upload path (library form,
+        share-target, per-card photo): extension allowlist, HEIC
+        normalisation to a web-safe JPEG, and a Pillow decode check so a
+        renamed non-image can never enter the library. Raises
+        ``_PhotoRejectedError`` on any rejection — nothing is left on disk.
+        """
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        import uuid as _uuid
+
+        from mediahub.media_library import heic as _heic
+
+        name = file_storage.filename or "upload.jpg"
+        ext = Path(name).suffix.lower() or ".jpg"
+        if ext not in _IMAGE_UPLOAD_EXTS and not _heic.is_heic(name):
+            raise _PhotoRejectedError("unsupported_type", _PHOTO_TYPE_MSG)
+        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
+        file_storage.save(str(dest))
+
+        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
+        # show — normalise it to a web-safe JPEG on the way in. Honest-error
+        # (never keep an unreadable asset): a missing decoder and corrupt
+        # bytes get distinct messages, and the temp file never lingers.
+        if _heic.is_heic(dest.name):
+            try:
+                dest, _converted = _heic.normalize_upload(dest)
+            except _heic.HeicUnsupported as exc:
+                _unlink_quiet(dest)
+                raise _PhotoRejectedError("heic_unsupported", _HEIC_UNSUPPORTED_MSG) from exc
+            except Exception as exc:  # UnidentifiedImageError / OSError / ValueError
+                _unlink_quiet(dest)
+                raise _PhotoRejectedError("unreadable_photo", _PHOTO_UNREADABLE_MSG) from exc
+
+        if not _verify_image_decodes(dest):
+            _unlink_quiet(dest)
+            raise _PhotoRejectedError("unreadable_photo", _PHOTO_UNREADABLE_MSG)
+        return dest
 
     def _save_library_photo(
         file_storage, profile_id, *, description="", asset_type="athlete_photo"
@@ -43472,33 +44085,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         """Persist one uploaded image into a profile's media library.
 
         Shared by the media-library upload form and the PWA share-target
-        receiver (roadmap 1.22) so both paths handle on-disk storage, HEIC
-        normalisation, and metadata parsing identically. Raises
-        ``_HeicUnsupportedError`` when a HEIC photo can't be decoded — the
-        caller decides whether to 415 or skip it.
+        receiver (roadmap 1.22) so both paths handle on-disk storage,
+        validation, HEIC normalisation, and metadata parsing identically.
+        Raises ``_PhotoRejectedError`` when the upload isn't an acceptable
+        image — the caller decides whether to 415 or skip it.
         """
-        upload_dir = UPLOADS_DIR / "media_library" / profile_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        import uuid as _uuid
-
-        ext = Path(file_storage.filename or "upload.jpg").suffix.lower() or ".jpg"
-        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
-        file_storage.save(str(dest))
-
-        # 1.3: iPhones save HEIC by default, which the browser/renderer can't
-        # show — normalise it to a web-safe JPEG on the way in. Honest-error
-        # (don't keep an unreadable asset) when the optional decoder is absent.
-        from mediahub.media_library import heic as _heic
-
-        if _heic.is_heic(dest.name):
-            try:
-                dest, _converted = _heic.normalize_upload(dest)
-            except _heic.HeicUnsupported as exc:
-                try:
-                    dest.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                raise _HeicUnsupportedError() from exc
+        dest = _store_photo_upload(file_storage, profile_id)
 
         meta = _v8_parse_description(description) if description else {}
         store = _v8_get_media_store()
@@ -43519,11 +44111,6 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             tags=meta.get("tags") or [],
         )
         return store.save(asset)
-
-    _HEIC_UNSUPPORTED_MSG = (
-        "HEIC/HEIF photos need conversion support that isn't installed on this "
-        "deployment. Re-save the photo as JPEG or PNG and upload again."
-    )
 
     @app.route("/api/media-library", methods=["POST"])
     def api_media_library_upload():
@@ -43550,8 +44137,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             asset = _save_library_photo(
                 f, profile_id, description=description, asset_type=asset_type
             )
-        except _HeicUnsupportedError:
-            return jsonify({"error": "heic_unsupported", "message": _HEIC_UNSUPPORTED_MSG}), 415
+        except _PhotoRejectedError as e:
+            return jsonify({"error": e.code, "message": e.message}), 415
 
         # AJAX callers get JSON; plain form submissions redirect back to the library.
         if (
@@ -43572,8 +44159,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         library — the single highest-value poolside mobile behaviour. The OS
         sends a top-level multipart navigation that can't carry a CSRF token
         (so the path is CSRF-exempt) and writes only to the *signed-in*
-        session's own library. Non-image attachments are ignored; HEIC photos
-        that can't be decoded are skipped and counted.
+        session's own library. Non-image, disallowed-type, and unreadable
+        attachments are skipped and counted.
         """
         if not _v8_ok:
             return redirect(url_for("media_library_page"))
@@ -43601,7 +44188,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             try:
                 _save_library_photo(f, profile_id, description="", asset_type="athlete_photo")
                 saved += 1
-            except _HeicUnsupportedError:
+            except _PhotoRejectedError:
                 skipped += 1
             except Exception:
                 log.exception("share-target: failed to save a shared photo")
@@ -43627,6 +44214,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return True
         return asset_profile_id == _active_profile_id()
 
+    # Suffix → served Content-Type for library files. Derived from the stored
+    # file, never the uploader's declared type: send_file's default guess
+    # would happily serve a legacy .svg as image/svg+xml (active content,
+    # same-origin) — anything outside this map downloads as a plain blob.
+    _IMAGE_SERVE_MIMES = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }
+
     @app.route("/api/media-library/file/<asset_id>")
     def api_media_library_file(asset_id: str):
         if not _v8_ok:
@@ -43639,10 +44238,25 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return "", 403
         from flask import send_file
 
+        suffix = re.sub(r"[^a-z0-9.]", "", Path(a.path).suffix.lower())
+        mime = _IMAGE_SERVE_MIMES.get(suffix)
         try:
-            return send_file(a.path)
+            if mime is None:
+                # Legacy/unknown type (pre-allowlist upload): never let the
+                # browser sniff or render it same-origin — download only.
+                resp = send_file(
+                    a.path,
+                    mimetype="application/octet-stream",
+                    as_attachment=True,
+                    download_name=f"{asset_id}{suffix}",
+                )
+            else:
+                resp = send_file(a.path, mimetype=mime)
+                resp.headers["Content-Disposition"] = f'inline; filename="{asset_id}{suffix}"'
         except Exception:
             return "", 404
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     @app.route("/api/media-library/<asset_id>/delete", methods=["POST"])
     def api_media_library_delete(asset_id: str):
@@ -44037,14 +44651,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"templates": []})
 
     def _profile_accent_hex():
-        """Best-effort brand accent for tinting mockup scenes (None if unknown)."""
+        """Best-effort brand accent for tinting mockup scenes (None if unknown).
+
+        Goes through ``get_brand_kit()`` so the manual/extracted palette
+        resolution applies — the raw ``brand_kit`` dict keys are
+        ``*_colour``, and reading them directly missed every profile.
+        """
         try:
             prof = _active_profile()
-            bk = getattr(prof, "brand_kit", None) or {}
-            if isinstance(bk, dict):
-                val = bk.get("accent") or bk.get("primary") or bk.get("secondary")
-                if isinstance(val, str) and val.strip():
-                    return val.strip()
+            if prof is None:
+                return None
+            kit = prof.get_brand_kit()
+            val = getattr(kit, "accent_colour", None) or getattr(kit, "primary_colour", None)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
         except Exception:
             pass
         return None
@@ -44840,23 +45460,33 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
     @app.route("/api/media-library/collage", methods=["POST"])
     def api_media_library_collage():
-        """Compose selected library photos into a collage saved as a new draft."""
+        """Compose selected library photos into a collage saved as a new draft.
+
+        Content-negotiated like the other library bulk actions: the bulk
+        bar's fetch() posts JSON, the no-JS form posts url-encoded ids —
+        both carry the selection + a layout, and success lands in the new
+        draft's photo editor.
+        """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
         from flask import request as _req
 
         try:
-            payload = _req.get_json(silent=True) or {}
+            payload = (_req.get_json(silent=True) or {}) if _req.is_json else {}
         except Exception:
             payload = {}
-        asset_ids = [str(x) for x in (payload.get("asset_ids") or []) if x]
-        layout = str(payload.get("layout") or "grid_2x2")
-        fmt_slug = str(payload.get("format") or "collage_square")
+        asset_ids = _bulk_ids_from_request(_req, "asset_ids", "ids")
+        layout = str(payload.get("layout") or _req.form.get("layout") or "grid_2x2")
+        fmt_slug = str(payload.get("format") or _req.form.get("format") or "collage_square")
+        wants_json = _req_wants_json(_req)
         active_pid = _active_profile_id() or ""
         if not active_pid:
             return jsonify({"error": "no_active_profile"}), 403
         if not asset_ids:
-            return jsonify({"error": "no_assets"}), 400
+            if wants_json:
+                return jsonify({"error": "no_assets"}), 400
+            _flash_toast("Select at least two photos to make a collage.", "info")
+            return redirect(url_for("media_library_page"))
 
         # Dimensions from the format catalogue (falls back to a square canvas).
         width = height = 1080
@@ -44876,7 +45506,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             asset_ids, store, profile_id=active_pid, layout=layout, width=width, height=height
         )
         if new is None:
-            return jsonify({"error": "need_two_photos"}), 400
+            if wants_json:
+                return jsonify({"error": "need_two_photos"}), 400
+            _flash_toast("A collage needs at least two of your own photos.", "info")
+            return redirect(url_for("media_library_page"))
+        if not wants_json:
+            return redirect(url_for("photo_editor_page", asset_id=new.id))
         return jsonify(
             {
                 "ok": True,
@@ -44945,11 +45580,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
 
-        upload_dir = UPLOADS_DIR / "media_library" / profile_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        ext = Path(f.filename).suffix.lower() or ".jpg"
-        dest = upload_dir / f"asset_{uuid.uuid4().hex[:12]}{ext}"
-        f.save(str(dest))
+        # Same ingest gate as the library form: extension allowlist, HEIC
+        # normalisation, and a real decode check — a renamed .svg/.html must
+        # never be stored (library files are served back same-origin).
+        try:
+            dest = _store_photo_upload(f, profile_id)
+        except _PhotoRejectedError as e:
+            return jsonify({"error": e.code, "message": e.message}), 415
 
         store = _v8_get_media_store()
         from mediahub.media_library.models import MediaAsset
@@ -45673,7 +46310,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if hook:
                 hooks.append(hook)
             # Cap at 12 entries — the AI / picker only ever looks at the
-            # most recent 6 so this gives a comfortable scheduler.
+            # most recent 6, so this gives comfortable headroom.
             sigs = sigs[-12:]
             hooks = hooks[-12:]
             p.write_text(json.dumps({"signatures": sigs, "hooks": hooks}), encoding="utf-8")
@@ -45840,9 +46477,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # Pull media library assets for this profile
         media_assets = []
         try:
+            from mediahub.media_library.photo_edit import asset_dicts_for_render
+
             store = _v8_get_media_store()
             assets = store.list(profile_id=profile_id)
-            media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
+            media_assets = asset_dicts_for_render(assets, store)
         except Exception:
             pass
 
@@ -45888,9 +46527,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # toggle). Persisted per-card in the workflow store under ``insp.*`` keys
         # (no new persistence layer — same edited_captions bag as captions), so
         # a tweak made before approval also re-applies on every later render
-        # (content builder included). An explicit value in *this* request wins
-        # over the stored one; both are honoured deterministically by
-        # ``create_visual_for_item`` (the AI director still picks the design).
+        # (content builder, regenerate-variants and the sponsor variant — which
+        # drops ``hide_sponsor``, its whole job being the sponsor slot — included).
+        # An explicit value in *this* request wins over the stored one; both are
+        # honoured deterministically by ``create_visual_for_item`` (the AI
+        # director still picks the design).
         _persisted_insp = _inspector_overrides_for_card(run_id, card_id)
         user_overrides = dict(_persisted_insp)
 
@@ -45931,7 +46572,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         choice_allowed_families = None
         if force_no_photo:
             chosen_asset_id = None
-            choice_allowed_families = ["text_led_recap", "weekend_numbers", "stat_line"]
+            # Single source of truth: the generator's text-led family set, so a
+            # new text-led family is honoured by this no-photo gate automatically.
+            from mediahub.creative_brief.generator import _TEXT_LED_FAMILIES
+
+            choice_allowed_families = sorted(_TEXT_LED_FAMILIES)
         elif chosen_asset_id:
             forced_hero_asset_id = chosen_asset_id
             # Constrain to photo-capable families so the chosen photo actually
@@ -46298,11 +46943,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
                 media_assets = []
                 try:
+                    from mediahub.media_library.photo_edit import asset_dicts_for_render
+
                     store = _v8_get_media_store()
                     assets = store.list(profile_id=resolved_pid)
-                    media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
+                    media_assets = asset_dicts_for_render(assets, store)
                 except Exception:
                     pass
+                # UI 1.18 — honour the card's persisted inspector overrides,
+                # minus hide_sponsor: this surface's whole job is showing
+                # the sponsor slot.
+                _insp = {
+                    k: v
+                    for k, v in _inspector_overrides_for_card(run_id, card_id).items()
+                    if k != "hide_sponsor"
+                }
                 res = _v8_create_visual_for_item(
                     item,
                     brand_kit,
@@ -46310,6 +46965,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     run_id=run_id,
                     media_assets=media_assets,
                     sponsor_name=sponsor_name,
+                    user_overrides=_insp,
                 )
                 visuals = res.get("visuals") or []
                 if visuals:
@@ -47018,10 +47674,6 @@ ever appear; queued, edited and rejected cards never do.</p>
     # (docs/compliance/CHILDRENS_CODE_PASS.md).
     _DEMO_SAMPLE_PATH = Path(__file__).resolve().parents[3] / "samples" / "demo-meet-results.pdf"
 
-    def _demo_client_ip() -> str:
-        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        return fwd or (request.remote_addr or "unknown")
-
     def _demo_session_runs() -> list[str]:
         v = session.get("demo_runs")
         return list(v) if isinstance(v, list) else []
@@ -47098,7 +47750,7 @@ ever appear; queued, edited and rejected cards never do.</p>
                 return _try_form_page("That file is empty.")
 
         # ---- caps: one claim per uploaded file ----
-        allowed, reason = _demo.claim_demo_slot(_demo_client_ip())
+        allowed, reason = _demo.claim_demo_slot(_client_ip())
         if not allowed:
             return _try_form_page(reason)
 
@@ -47460,6 +48112,7 @@ voice, and queues them for one-click approval.</p>
         run_data = _load_run(run_id)
         if not isinstance(run_data, dict):
             abort(404)
+        original_pid = run_data.get("profile_id") or ""
         run_data["profile_id"] = prof.profile_id
         try:
             (RUNS_DIR / f"{run_id}.json").write_text(
@@ -47467,6 +48120,11 @@ voice, and queues them for one-click approval.</p>
             )
         except OSError:
             abort(500)
+        # The DB row is what the demo sweep and the org's activity list read,
+        # so this UPDATE is required: leaving JSON and DB disagreeing about
+        # ownership would let sweep_demo_runs delete the claimed run within
+        # 24h while it never shows in the org's Activity. On failure, roll
+        # the JSON back and tell the user honestly instead of half-claiming.
         try:
             conn = _db()
             try:
@@ -47476,8 +48134,26 @@ voice, and queues them for one-click approval.</p>
                 conn.commit()
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("try-demo claim %s: DB update failed, rolling back JSON: %s", run_id, e)
+            run_data["profile_id"] = original_pid
+            try:
+                (RUNS_DIR / f"{run_id}.json").write_text(
+                    json.dumps(run_data, indent=2, default=str), encoding="utf-8"
+                )
+            except OSError:
+                log.error(
+                    "try-demo claim %s: rollback write failed — run JSON and DB "
+                    "disagree about ownership",
+                    run_id,
+                )
+            return _recovery_page(
+                "Claim didn't complete",
+                "Saving the claim hit a temporary database error, so the preview "
+                "is still in the demo sandbox. Try again in a moment.",
+                primary_cta=("Back to your preview", url_for("try_demo_run", run_id=run_id)),
+                code=500,
+            )
         session["demo_runs"] = [r for r in _demo_session_runs() if r != run_id]
         return redirect(url_for("review", run_id=run_id))
 
@@ -47551,9 +48227,11 @@ voice, and queues them for one-click approval.</p>
 
         media_assets = []
         try:
+            from mediahub.media_library.photo_edit import asset_dicts_for_render
+
             store = _v8_get_media_store()
             assets = store.list(profile_id=profile_id)
-            media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
+            media_assets = asset_dicts_for_render(assets, store)
         except Exception:
             pass
 
@@ -47567,10 +48245,18 @@ voice, and queues them for one-click approval.</p>
                 _nop = bool(request.json.get("no_photo"))
         except Exception:
             pass
+        # UI 1.18 — persisted inspector overrides (accent swatch / manual crop
+        # / sponsor toggle) apply to variant renders too, so a saved tweak
+        # doesn't silently vanish when the user asks for alternatives.
+        _persisted_insp = _inspector_overrides_for_card(run_id, card_id)
         _forced_asset = None
         _choice_families = None
         if _nop:
-            _choice_families = ["text_led_recap", "weekend_numbers", "stat_line"]
+            # Single source of truth: the generator's text-led family set (same
+            # gate as the create-graphic route's no-photo path).
+            from mediahub.creative_brief.generator import _TEXT_LED_FAMILIES
+
+            _choice_families = sorted(_TEXT_LED_FAMILIES)
         elif _chosen:
             _forced_asset = _chosen
             _choice_families = [
@@ -47707,6 +48393,7 @@ voice, and queues them for one-click approval.</p>
                                 recent_signatures=sigs_so_far,
                                 allowed_families=_choice_families,
                                 forced_hero_asset_id=_forced_asset,
+                                user_overrides=_persisted_insp,
                             )
                         visuals = res.get("visuals") or []
                         primary = next(
@@ -47858,6 +48545,26 @@ voice, and queues them for one-click approval.</p>
             return json.loads(candidates[0][1].read_text(encoding="utf-8"))
         except Exception:
             return None
+
+    def _brief_cache_sig(bdict: Optional[dict]) -> str:
+        """A short content digest of a persisted brief for render cache keys.
+
+        The reformat and print_art caches keyed only on (card, format, layout
+        template) — an edit that kept the layout (headline/text/palette edits,
+        copilot changes) served the stale pre-edit PNG. Folding the loaded
+        brief's content in means any persisted design change re-renders, while
+        an unchanged brief keeps its cache hit. Stable across calls (unlike a
+        transform's freshly-minted brief id, which would defeat caching).
+        """
+        if not bdict:
+            return "none"
+        import hashlib as _hl
+
+        try:
+            payload = json.dumps(bdict, sort_keys=True, default=str)
+        except Exception:
+            payload = repr(bdict)
+        return _hl.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
     def _motion_error_payload(e: Exception) -> dict:
         """Translate a raw motion render exception into a user-friendly JSON
@@ -48207,10 +48914,12 @@ voice, and queues them for one-click approval.</p>
         media_assets: list = []
         try:
             if _v8_get_media_store is not None:
-                media_assets = [
-                    a.to_dict() if hasattr(a, "to_dict") else a
-                    for a in _v8_get_media_store().list(profile_id=profile_id)
-                ]
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
+                _ml_store = _v8_get_media_store()
+                media_assets = asset_dicts_for_render(
+                    _ml_store.list(profile_id=profile_id), _ml_store
+                )
         except Exception:
             media_assets = []
 
@@ -48250,13 +48959,16 @@ voice, and queues them for one-click approval.</p>
                 return jsonify({"error": "transform_failed", "user_message": str(e)}), 400
             new_brief = tr.brief
 
-        # Deterministic renders cache on (card, format, chosen layout); the
-        # AI-directed path varies per call, so it skips the cache.
+        # Deterministic renders cache on (card, format, chosen layout, source
+        # brief content); the AI-directed path varies per call, so it skips the
+        # cache. The source-brief digest means a persisted edit (copilot or
+        # manual) re-renders instead of serving the pre-edit PNG.
         import hashlib as _hl
 
         key = _hl.sha256(
             f"{card_id}|{spec.slug}|{spec.width}x{spec.height}|"
-            f"{new_brief.layout_template}|{'blank' if blank else 'tx'}".encode("utf-8")
+            f"{new_brief.layout_template}|{'blank' if blank else 'tx'}|"
+            f"{_brief_cache_sig(None if blank else bdict)}".encode("utf-8")
         ).hexdigest()[:20]
         out_dir = RUNS_DIR / run_id / "reformat" / key
         cache_png = out_dir / f"{spec.render_name}.png"
@@ -48356,11 +49068,16 @@ voice, and queues them for one-click approval.</p>
                     return v.strip()
             return None
 
+        # Deliberately no "background": MediaHub cards are dark-first, so
+        # asserting white paper here made build_profile override the paper
+        # colour actually sampled from the rendered PNG — proofing "brand ink
+        # on white" gave wrong contrast/ink results. With no background the
+        # image sample wins; the palette-only preflight path honestly reports
+        # paper-unknown instead of assuming white.
         return {
             "primary": _hex("primary_colour", "primary", "brand_primary"),
             "secondary": _hex("secondary_colour", "secondary", "brand_secondary"),
             "accent": _hex("accent_colour", "accent", "brand_accent"),
-            "background": "#FFFFFF",
         }
 
     def _print_resolve(run_id: str):
@@ -48387,12 +49104,15 @@ voice, and queues them for one-click approval.</p>
         placement = product.placement(placement_slug or "") or product.primary_placement
         return product, placement, placement.format
 
-    def _print_card_png(run_id, run_data, card_id, spec, profile_id, brand_kit):
+    def _print_card_png(run_id, run_data, card_id, spec, profile_id, brand_kit, *, cached_only=False):
         """Re-lay card_id's approved design at ``spec`` and render a print PNG.
 
         Returns the PNG ``Path``, or ``None`` when the card has no design yet.
         Mirrors the reformat render path (deterministic transform + the existing
         graphic_renderer), cached under ``runs/<id>/print_art/<key>/``.
+        ``cached_only=True`` never renders: it returns the cached PNG if one
+        exists for the current design, else ``None`` (the preflight route's
+        no-render fast path).
         """
         import hashlib as _hl
 
@@ -48408,21 +49128,28 @@ voice, and queues them for one-click approval.</p>
             return None
         tr = transform_design(source_brief=src, target_format=spec, brand_kit=brand_kit)
         new_brief = tr.brief
+        # The source-brief digest keeps the print art honest: a design edit
+        # that keeps the layout template still re-renders (never prints the
+        # pre-edit artwork from cache).
         key = _hl.sha256(
             f"print|{card_id}|{spec.slug}|{spec.width}x{spec.height}|"
-            f"{new_brief.layout_template}".encode("utf-8")
+            f"{new_brief.layout_template}|{_brief_cache_sig(bdict)}".encode("utf-8")
         ).hexdigest()[:20]
         out_dir = RUNS_DIR / run_id / "print_art" / key
         cache_png = out_dir / f"{spec.render_name}.png"
         if cache_png.exists():
             return cache_png
+        if cached_only:
+            return None
         media_assets: list = []
         try:
             if _v8_get_media_store is not None:
-                media_assets = [
-                    a.to_dict() if hasattr(a, "to_dict") else a
-                    for a in _v8_get_media_store().list(profile_id=profile_id)
-                ]
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
+                _ml_store = _v8_get_media_store()
+                media_assets = asset_dicts_for_render(
+                    _ml_store.list(profile_id=profile_id), _ml_store
+                )
         except Exception:
             media_assets = []
         athlete_path = None
@@ -48487,9 +49214,11 @@ voice, and queues them for one-click approval.</p>
     def api_card_preflight(run_id: str, card_id: str):
         """Deterministically proof a card's design for a print product.
 
-        Proofs the brand palette at the product's print canvas (no render needed),
-        returning the explained pre-flight report — resolution, text size, bleed,
-        contrast on paper, CMYK gamut and ink coverage.
+        When this card's artwork has already been rendered for this product
+        (the print_art cache), the report proofs the actual PNG — the same
+        pixels ``api_card_print`` gates on. Before any render exists, it
+        proofs the brand palette at the product's print canvas (no render
+        triggered) and says so explicitly in the response.
         """
         run_data, profile_id, err = _print_resolve(run_id)
         if err:
@@ -48501,11 +49230,36 @@ voice, and queues them for one-click approval.</p>
         from mediahub.print_ready import proof as _proof
 
         brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
-        prof = _proof.profile_from_design(
-            _brand_palette(brand_kit), width_px=spec.width, height_px=spec.height, full_bleed=True
-        )
+        art_png = None
+        try:
+            art_png = _print_card_png(
+                run_id, run_data, card_id, spec, profile_id, brand_kit, cached_only=True
+            )
+        except Exception:
+            art_png = None  # any transform hiccup falls back to the palette check
+        if art_png is not None:
+            prof = _proof.profile_from_image(art_png)
+            checked = "artwork"
+            note = ""
+        else:
+            prof = _proof.profile_from_design(
+                _brand_palette(brand_kit),
+                width_px=spec.width,
+                height_px=spec.height,
+                full_bleed=True,
+            )
+            checked = "palette"
+            note = (
+                "Palette-only check — this card's artwork hasn't been rendered "
+                "for this product yet, so only the brand palette was proofed. "
+                "Export the print PDF for a full proof of the actual pixels."
+            )
         report = _proof.run_preflight(prof, product, placement)
-        return jsonify(report.to_dict())
+        out = report.to_dict()
+        out["checked"] = checked
+        if note:
+            out["note"] = note
+        return jsonify(out)
 
     @app.route("/api/runs/<run_id>/card/<card_id>/print", methods=["POST"])
     def api_card_print(run_id: str, card_id: str):
@@ -48568,12 +49322,28 @@ voice, and queues them for one-click approval.</p>
                     "user_message": "Fix the blocking issue(s), or export with force=1.",
                 }
             ), 422
-        return send_file(
-            str(res.pdf_path),
-            mimetype="application/pdf",
-            as_attachment=True,
-            download_name=f"{product.slug}-{card_id}-{colour}.pdf",
+        # Name the file for the colour mode actually ACHIEVED, not the one
+        # requested — a Ghostscript-less deployment downgrades cmyk/pdfx to RGB
+        # and a "…-cmyk.pdf" that is really RGB misleads the print shop. The
+        # headers carry the same facts for the JS to surface.
+        used = (res.colour_mode_used or colour or "rgb").strip().lower()
+        resp = make_response(
+            send_file(
+                str(res.pdf_path),
+                mimetype="application/pdf",
+                as_attachment=True,
+                download_name=f"{product.slug}-{card_id}-{used}.pdf",
+            )
         )
+        resp.headers["X-Print-Colour-Requested"] = colour
+        resp.headers["X-Print-Colour-Used"] = used
+        if res.note:
+            # Header values must be latin-1-safe single-line; the note is
+            # operator-written ASCII prose, but guard anyway.
+            resp.headers["X-Print-Note"] = res.note.replace("\n", " ").encode(
+                "latin-1", "replace"
+            ).decode("latin-1")
+        return resp
 
     @app.route("/api/runs/<run_id>/card/<card_id>/merch-mockup", methods=["POST", "GET"])
     def api_card_merch_mockup(run_id: str, card_id: str):
@@ -48627,10 +49397,19 @@ voice, and queues them for one-click approval.</p>
                 f'<div class="mh-chip-row">{chips}</div></section>'
             )
         ff = _ff.status()
+        # Name the piece that's actually missing: PDF/X-3 needs Ghostscript AND
+        # an ICC profile, so "needs an ICC profile" when Ghostscript itself is
+        # absent pointed the operator at the wrong fix.
+        if _pdfx.pdfx_available():
+            _pdfx_state = "ready"
+        elif not ghostscript_available():
+            _pdfx_state = "needs Ghostscript"
+        else:
+            _pdfx_state = "needs an ICC profile"
         caps = (
             f'<p class="muted">CMYK conversion (Ghostscript): '
             f"<strong>{'ready' if ghostscript_available() else 'not installed'}</strong> · "
-            f"PDF/X-3: <strong>{'ready' if _pdfx.pdfx_available() else 'needs an ICC profile'}"
+            f"PDF/X-3: <strong>{_pdfx_state}"
             f"</strong> · Fulfilment: <strong>{_h(ff['message'])}</strong></p>"
         )
         body = (
@@ -48706,8 +49485,9 @@ voice, and queues them for one-click approval.</p>
             '<button class="btn" id="pr-preflight">Run pre-flight</button>'
             '<button class="btn primary" id="pr-download">Download print-ready PDF</button>'
             '<button class="btn secondary" id="pr-mockup">Preview mockup</button>'
-            '<label class="mh-check"><input type="checkbox" id="pr-force"> '
-            "export despite warnings</label>"
+            '<label class="mh-check" title="Warnings never hold an export back — only a blocking pre-flight error does. Tick to export anyway.">'
+            '<input type="checkbox" id="pr-force"> '
+            "export despite blocking errors</label>"
             "</div>"
             '<div id="pr-report" style="margin-top:var(--sp-4)" role="status" '
             'aria-live="polite"></div>'
@@ -49015,6 +49795,7 @@ voice, and queues them for one-click approval.</p>
         # or "" when none is configured. Never fabricated — a club with no
         # sponsor simply gets the follow-the-club close.
         sponsor_name = ""
+        next_meet_label = ""
         try:
             prof = load_profile(profile_id)
             if prof is not None:
@@ -49025,8 +49806,29 @@ voice, and queues them for one-click approval.</p>
                     sponsor_name = str(actives[0].get("name") or "").strip()
                 if not sponsor_name:
                     sponsor_name = str(getattr(prof, "sponsor_name", "") or "").strip()
+                # R1.30 — honest next-meet label for the outro's "Next up"
+                # close, read from the profile the same way Turn-Into does
+                # (explicit next_meet dict or a "Next meet:" notes line).
+                # "" when none is configured — never fabricated. Sponsor still
+                # wins in the outro when both are set (outroCtaFor precedence).
+                try:
+                    from mediahub.turn_into.templates import _next_meet_from_profile
+
+                    nm = _next_meet_from_profile(prof)
+                except Exception:
+                    nm = None
+                if nm and nm.get("name"):
+                    next_meet_label = " · ".join(
+                        part
+                        for part in (
+                            str(nm.get("name") or "").strip(),
+                            str(nm.get("date") or "").strip(),
+                        )
+                        if part
+                    )
         except Exception:
             sponsor_name = ""
+            next_meet_label = ""
 
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -49041,9 +49843,13 @@ voice, and queues them for one-click approval.</p>
             _lang if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en") else ""
         )
         _lang_suffix = f"_{dub_language.split('-', 1)[0]}" if dub_language else ""
-        # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
-        _stem = f"reel_{n}" if fmt == "story" else f"reel_{n}_{fmt}"
-        out_path = out_dir / f"{_stem}{_lang_suffix}.mp4"
+        # One canonical naming shared by the single, job and batch routes (and
+        # matched by the reel-file route): the language suffix rides on the
+        # base stem (reel_<n>[_<lang>]); story keeps the bare stem and other
+        # cuts append the format — exactly reel_format_out_path's shape.
+        base_name = f"reel_{n}{_lang_suffix}"
+        _stem = base_name if fmt == "story" else f"{base_name}_{fmt}"
+        out_path = out_dir / f"{_stem}.mp4"
 
         # Look up the latest brief per card so every beat of the reel
         # carries its own AI-directed variation. Cards without a brief
@@ -49060,14 +49866,24 @@ voice, and queues them for one-click approval.</p>
                 "cards": cards,
                 "brand_kit": brand_kit,
                 "out_path": out_path,
+                "base_name": base_name,
                 "meet_name": meet_name,
                 "briefs": brief_list,
                 "rhythm": rhythm,
                 "sponsor": sponsor_name,
+                "next_meet": next_meet_label,
                 "dub_language": dub_language,
             },
             None,
         )
+
+    def _reel_file_url_kwargs(inputs: dict, run_id: str) -> dict:
+        """The reel-file route kwargs for these inputs (lang only when dubbed),
+        so a dubbed job/batch mints URLs that find the language-suffixed file."""
+        kwargs = {"run_id": run_id, "n": inputs["n"]}
+        if inputs.get("dub_language"):
+            kwargs["lang"] = inputs["dub_language"]
+        return kwargs
 
     @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
     def api_run_reel(run_id: str):
@@ -49098,6 +49914,7 @@ voice, and queues them for one-click approval.</p>
                     format_name=inputs["format"],
                     rhythm=inputs["rhythm"],
                     sponsor=inputs.get("sponsor", ""),
+                    next_meet=inputs.get("next_meet", ""),
                     dub_language=inputs.get("dub_language", ""),
                 )
         except _RenderBusy:
@@ -49461,7 +50278,7 @@ voice, and queues them for one-click approval.</p>
 
         # url_for needs the request context — resolve before the thread.
         file_url = url_for(
-            "api_run_reel_file", run_id=run_id, n=inputs["n"], format=inputs["format"]
+            "api_run_reel_file", format=inputs["format"], **_reel_file_url_kwargs(inputs, run_id)
         )
         job_id = uuid.uuid4().hex
         job: dict = {
@@ -49479,17 +50296,23 @@ voice, and queues them for one-click approval.</p>
 
         def _worker() -> None:
             try:
-                with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
-                    mp4 = _motion.render_meet_reel(
-                        inputs["cards"],
-                        inputs["brand_kit"],
-                        inputs["out_path"],
-                        meet_name=inputs["meet_name"],
-                        briefs=inputs["briefs"],
-                        format_name=inputs["format"],
-                        rhythm=inputs["rhythm"],
-                        sponsor=inputs.get("sponsor", ""),
-                    )
+                # Heartbeat: a cold render may legitimately run past the 5-min
+                # stall threshold (the subprocess timeout is 600s) — keep the
+                # job file fresh so the status route doesn't report job_lost.
+                with _job_heartbeat(job):
+                    with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
+                        mp4 = _motion.render_meet_reel(
+                            inputs["cards"],
+                            inputs["brand_kit"],
+                            inputs["out_path"],
+                            meet_name=inputs["meet_name"],
+                            briefs=inputs["briefs"],
+                            format_name=inputs["format"],
+                            rhythm=inputs["rhythm"],
+                            sponsor=inputs.get("sponsor", ""),
+                            next_meet=inputs.get("next_meet", ""),
+                            dub_language=inputs.get("dub_language", ""),
+                        )
                 if not Path(mp4).exists():
                     raise RuntimeError("mp4 missing after render")
                 job["status"] = "done"
@@ -49570,11 +50393,14 @@ voice, and queues them for one-click approval.</p>
 
         n = inputs["n"]
         out_dir = Path(inputs["out_path"]).parent
-        base_name = f"reel_{n}"
+        # Same lang-suffixed stem as the single route, so cuts land where the
+        # reel-file route (given the same lang) looks and cache reuse holds.
+        base_name = inputs["base_name"]
         # url_for needs the request context — resolve every cut's file URL now,
         # before the worker thread (which has none).
+        _file_kwargs = _reel_file_url_kwargs(inputs, run_id)
         file_urls = {
-            fmt: url_for("api_run_reel_file", run_id=run_id, n=n, format=fmt)
+            fmt: url_for("api_run_reel_file", format=fmt, **_file_kwargs)
             for fmt in _motion.MOTION_FORMATS
         }
 
@@ -49599,17 +50425,26 @@ voice, and queues them for one-click approval.</p>
                 # Per-cut render slot: a multi-minute batch on a single-slot box
                 # yields the render gate between cuts instead of hogging it for
                 # the whole run, so a foreground single render can interleave.
-                result = _motion.render_meet_reel_all_formats(
-                    inputs["cards"],
-                    inputs["brand_kit"],
-                    out_dir,
-                    meet_name=inputs["meet_name"],
-                    briefs=inputs["briefs"],
-                    base_name=base_name,
-                    render_slot=lambda fmt: _render_slot(
-                        "reel", f"{run_id}:{fmt}", timeout=_RENDER_QUEUE_TIMEOUT
-                    ),
-                )
+                # Sponsor/next-meet outro, rhythm and dub ride along exactly as
+                # on the single route, so the story cut's cache key matches and
+                # the documented cache reuse actually happens. The heartbeat
+                # keeps the job file fresh across a multi-minute batch.
+                with _job_heartbeat(job):
+                    result = _motion.render_meet_reel_all_formats(
+                        inputs["cards"],
+                        inputs["brand_kit"],
+                        out_dir,
+                        meet_name=inputs["meet_name"],
+                        briefs=inputs["briefs"],
+                        base_name=base_name,
+                        render_slot=lambda fmt: _render_slot(
+                            "reel", f"{run_id}:{fmt}", timeout=_RENDER_QUEUE_TIMEOUT
+                        ),
+                        rhythm=inputs["rhythm"],
+                        sponsor=inputs.get("sponsor", ""),
+                        next_meet=inputs.get("next_meet", ""),
+                        dub_language=inputs.get("dub_language", ""),
+                    )
                 rendered = result.get("rendered") or {}
                 errors = result.get("errors") or {}
                 if not rendered:
@@ -49731,7 +50566,19 @@ voice, and queues them for one-click approval.</p>
         fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
         if fmt not in _motion.MOTION_FORMATS:
             return jsonify({"error": "bad_format"}), 400
-        name = f"reel_{n}.mp4" if fmt == "story" else f"reel_{n}_{fmt}.mp4"
+        # ?lang= mirrors the render routes' 1.24 dub gate so a dubbed cut's
+        # language-suffixed file is findable; anything non-dubbable falls back
+        # to the original-language name.
+        from mediahub.visual import dub as _dub
+
+        _lang = (request.args.get("lang") or "").strip()
+        _suffix = (
+            f"_{_lang.split('-', 1)[0]}"
+            if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en")
+            else ""
+        )
+        base = f"reel_{n}{_suffix}"
+        name = f"{base}.mp4" if fmt == "story" else f"{base}_{fmt}.mp4"
         path = RUNS_DIR / run_id / "motion" / name
         if not path.exists():
             return jsonify({"error": "reel_not_rendered"}), 404
@@ -49846,7 +50693,10 @@ voice, and queues them for one-click approval.</p>
         from mediahub.export_engine import quick_actions as qa
         from mediahub.export_engine.options import ExportOptions
 
-        opts = ExportOptions.from_dict(body.get("options") or {})
+        # Non-dict options is malformed client JSON — fall back to defaults
+        # rather than 500ing inside from_dict.
+        raw_opts = body.get("options") or {}
+        opts = ExportOptions.from_dict(raw_opts if isinstance(raw_opts, dict) else {})
         cat = ee.source_category(src)
         stem = re.sub(r"[^A-Za-z0-9_-]+", "-", src.stem)[:50] or "asset"
 
@@ -49946,10 +50796,16 @@ voice, and queues them for one-click approval.</p>
         from mediahub.export_engine.bulk import BulkExportSpec, run_bulk_export
         from mediahub.export_engine.options import ExportOptions
 
-        formats = [ee.normalise_key(f) for f in raw_formats if ee.has_format(f)]
+        # Type-guard malformed client JSON into a 400, never a 500: a
+        # non-string format entry would AttributeError inside normalise_key,
+        # and a non-dict options blob inside ExportOptions.from_dict.
+        formats = [
+            ee.normalise_key(f) for f in raw_formats if isinstance(f, str) and ee.has_format(f)
+        ]
         if not formats:
             return jsonify({"error": "no_valid_formats"}), 400
-        opts = ExportOptions.from_dict(body.get("options") or {})
+        raw_opts = body.get("options") or {}
+        opts = ExportOptions.from_dict(raw_opts if isinstance(raw_opts, dict) else {})
 
         items = _bulk_items_for_run(run_id)
         if not items:
@@ -50055,7 +50911,13 @@ voice, and queues them for one-click approval.</p>
         token scoped to this run — the unified export download link."""
         # Access first (never leak even a 'bad request' to a foreign org): a
         # run-owning session, or a valid share token scoped to this run.
-        ok = _can_access_run(run_id, _load_run(run_id), _active_profile_id())
+        # This endpoint is exempt from the org-setup gate (a token recipient
+        # has no session), so real anonymous traffic reaches it — an anonymous
+        # session (no active profile) is NOT an owner here and must present a
+        # token, unlike gated routes where a None pid only occurs in
+        # no-org sandboxes.
+        _pid = _active_profile_id()
+        ok = _pid is not None and _can_access_run(run_id, _load_run(run_id), _pid)
         if not ok:
             token = (request.args.get("token") or "").strip()
             if token:
@@ -50063,7 +50925,10 @@ voice, and queues them for one-click approval.</p>
                     from mediahub.collab import share_tokens as _st
 
                     share = _st.resolve(token)
-                    ok = bool(share and share.run_id == run_id)
+                    # Run-wide tokens only: a card-scoped share exposes ONE
+                    # card, never the whole run's ZIP. api_run_export_share
+                    # mints run-wide tokens, so the intended flow is unchanged.
+                    ok = bool(share and share.run_id == run_id and not share.card_id)
                 except Exception:
                     ok = False
         if not ok:
@@ -50787,10 +51652,19 @@ voice, and queues them for one-click approval.</p>
         for c in cards:
             cid = c["card_id"]
             img = url_for("share_card_png", token=token, card_id=cid)
-            comments = _threads.list_for_card(share.run_id, cid, include_resolved=True)
+            # External-safe entries only. Internal committee comments and tasks
+            # carry the member's account email (api_collab_comments always sets
+            # author_email) and must never render to an unauthenticated link
+            # holder; share-posted comments (share_add_comment) never set an
+            # email, so they are the ones an external reviewer sees.
+            comments = [
+                cm
+                for cm in _threads.list_for_card(share.run_id, cid, include_resolved=True)
+                if cm.kind == "comment" and not (cm.author_email or "").strip()
+            ]
             cm_html = ""
             for cm in comments:
-                who = _h(cm.author_name or cm.author_email or "Reviewer")
+                who = _h(cm.author_name or "Reviewer")
                 cm_html += (
                     '<div style="padding:6px 0;border-top:1px solid var(--border);font-size:13px">'
                     f"<strong>{who}</strong>: {_h(cm.body)}</div>"
@@ -52384,6 +53258,10 @@ voice, and queues them for one-click approval.</p>
 
     _DH_IMPORT_EXTS = {".csv", ".xlsx", ".tsv"}
     _DH_MAX_UPLOAD = 12 * 1024 * 1024  # 12 MB — plenty for a club spreadsheet
+    # Row cap on spreadsheet imports: each row is persisted individually, so an
+    # uncapped 12 MB CSV (10^5+ rows) would turn the import into a multi-minute
+    # synchronous request. 20k rows is far beyond any club spreadsheet.
+    _DH_MAX_IMPORT_ROWS = 20_000
 
     def _dh_unavailable_page():
         return _layout(
@@ -52536,6 +53414,16 @@ voice, and queues them for one-click approval.</p>
         if result.table is None:
             reason = result.warnings[0].message if result.warnings else "Could not read that file."
             return redirect(url_for("data_hub_page", err=reason))
+        if len(result.table.rows) > _DH_MAX_IMPORT_ROWS:
+            return redirect(
+                url_for(
+                    "data_hub_page",
+                    err=(
+                        f"That file has {len(result.table.rows):,} rows — the import "
+                        f"limit is {_DH_MAX_IMPORT_ROWS:,}. Split it into smaller files."
+                    ),
+                )
+            )
         tid = _dh_store.create_table(pid, result.table.title, result.table.columns)
         for row in result.table.rows:
             _dh_store.upsert_row(pid, tid, row)
@@ -52617,6 +53505,18 @@ voice, and queues them for one-click approval.</p>
                 params["sep"] = specials["sep"]
 
         output_key = re.sub(r"[^a-z0-9]+", "_", output_title.lower()).strip("_") or "calc"
+        # Never silently overwrite a source column: only a derived column may be
+        # replaced in place (the recompute case). Anything else is data loss.
+        existing_col = table.column(output_key)
+        if existing_col is not None and not existing_col.derived:
+            return jsonify(
+                {
+                    "error": (
+                        f'A column named "{existing_col.title}" already exists — '
+                        "pick a different output title."
+                    )
+                }
+            ), 400
         try:
             _derive.apply_derivation(
                 table, output_key, output_title or output_key, derivation_id, params
@@ -53352,6 +54252,16 @@ voice, and queues them for one-click approval.</p>
         pid, site_id = ref
         pw = request.form.get("site_password", "")
         nxt = request.form.get("next", "")
+        # Same per-IP throttle as the sibling public form/vote routes — a page
+        # password must not be brute-forceable. HTML response (form post), not
+        # the JSON limiter body.
+        if _auth_rate_limited("site_unlock"):
+            return (
+                _site_password_prompt(
+                    token, nxt, error="Too many attempts — wait a few minutes and try again."
+                ),
+                429,
+            )
         if _ss.check_site_password(pid, site_id, pw):
             unlocked = list(session.get("site_unlocked") or [])
             if token not in unlocked:
@@ -54226,6 +55136,7 @@ voice, and queues them for one-click approval.</p>
 
         from mediahub.content_pack.builder import build_grouped_pack
         from mediahub.graphic_renderer.print_export import (
+            CmykUnavailable,
             build_certificate_html,
             export_certificate_print_pdf,
             ghostscript_available,
@@ -54282,6 +55193,7 @@ voice, and queues them for one-click approval.</p>
             )
         out_dir = DATA_DIR / "print_exports" / run_id
         out_dir.mkdir(parents=True, exist_ok=True)
+        rgb_fallbacks: list = []  # certs where gs failed mid-run and RGB shipped
         buf = _io.BytesIO()
         with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
             for i, item in enumerate(approved):
@@ -54300,20 +55212,33 @@ voice, and queues them for one-click approval.</p>
                     brand=brand,
                     detail_line=a.get("angle_hint", ""),
                 )
+                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
                 pdf_path = out_dir / f"cert-{i:02d}.pdf"
                 if print_mode:
-                    export_certificate_print_pdf(
-                        pdf_path,
-                        bleed_mm=bleed_mm,
-                        crop_marks=crop_marks,
-                        colour_bar=colour_bar,
-                        cmyk=do_cmyk,
-                        **cert_kwargs,
-                    )
+                    try:
+                        export_certificate_print_pdf(
+                            pdf_path,
+                            bleed_mm=bleed_mm,
+                            crop_marks=crop_marks,
+                            colour_bar=colour_bar,
+                            cmyk=do_cmyk,
+                            **cert_kwargs,
+                        )
+                    except CmykUnavailable as e:
+                        # Ghostscript failed mid-run: the RGB print PDF (bleed +
+                        # crop marks intact) is already rendered and print-ready
+                        # — ship it and say so, mirroring print_ready/engine.py.
+                        rgb_fallbacks.append(f"{i + 1:02d}-{safe_name}.pdf: {e}")
                 else:
                     render_html_to_pdf(build_certificate_html(**cert_kwargs), pdf_path)
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
                 zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+            if rgb_fallbacks:
+                cmyk_note = (cmyk_note or "") + (
+                    "CMYK conversion failed at run time for these certificates, so "
+                    "they are RGB (the bleed and crop marks are intact):\n"
+                    + "\n".join(rgb_fallbacks)
+                    + "\n"
+                )
             if cmyk_note:
                 zf.writestr("certificates/CMYK-NOTE.txt", cmyk_note)
         buf.seek(0)
@@ -54571,6 +55496,44 @@ voice, and queues them for one-click approval.</p>
                             p["src"] = url
         return NewsletterSpec.from_dict(data)
 
+    def _nl_card_refs(spec) -> set:
+        """The (run_id, card_id) pairs a newsletter spec's card blocks reference —
+        the only card images its token/preview may unlock (snapshot scoping)."""
+        refs: set = set()
+        for sec in spec.to_dict().get("sections", []):
+            for b in sec.get("blocks", []):
+                p = b.get("props", {})
+                if b.get("kind") == "card" and p.get("card_ref"):
+                    run_id, _, card_id = str(p["card_ref"]).partition("/")
+                    if run_id and card_id:
+                        refs.add((run_id, card_id))
+        return refs
+
+    def _nl_card_image_path(pid: str, run_id: str, card_id: str):
+        """Newsletter-scoped card image: approved + tenant + consent gated, but
+        WITHOUT the public wall's own exclusion/recency gates — a newsletter is
+        its own surface, so a wall-excluded or older-run card still renders."""
+        from mediahub.web import public_wall as _pw
+
+        if str(card_id) not in _pw._approved_card_ids(run_id):
+            return None
+        return _pw.rendered_card_png(pid, run_id, card_id)
+
+    def _nl_unavailable_src(reason: str) -> str:
+        """An inline SVG placeholder for the editor preview so an unavailable
+        card image is explained, never a silent blank."""
+        import base64 as _b64
+
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="120">'
+            '<rect width="100%" height="100%" fill="#1a1d21"/>'
+            '<text x="50%" y="45%" fill="#9aa3ab" font-family="sans-serif" font-size="16" '
+            'text-anchor="middle">Image unavailable</text>'
+            f'<text x="50%" y="72%" fill="#6d757d" font-family="sans-serif" font-size="13" '
+            f'text-anchor="middle">{reason}</text></svg>'
+        )
+        return "data:image/svg+xml;base64," + _b64.b64encode(svg.encode("utf-8")).decode("ascii")
+
     @app.route("/newsletters")
     def newsletters_home():
         if not _email_design_ok:
@@ -54649,6 +55612,53 @@ voice, and queues them for one-click approval.</p>
         )
         return _layout("Newsletters", body, active="create")
 
+    def _editorial_ai_gate(pid: str):
+        """1.23 governance for AI editorial drafting (newsletters/documents):
+        the same permission + quota pattern as captions, under the caption
+        feature key (editorial drafts are metered AI copy, like captions).
+        Returns an error response to send, or None when allowed. The signed-in
+        operator is exempt (no gate, no metering)."""
+        from mediahub.governance import (
+            features as _gov_features,
+            permissions as _gov_perms,
+            quota as _gov_quota,
+        )
+
+        org = "" if _auth.is_dev_operator() else (pid or "")
+        if not org:
+            return None
+        plan = _auth.current_plan()
+        if not _gov_perms.can_use_feature(
+            _active_role(org), _gov_features.FEATURE_CAPTION, plan=plan
+        ):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "forbidden",
+                    "message": _gov_perms.denial_reason(
+                        _active_role(org), _gov_features.FEATURE_CAPTION, plan=plan
+                    ),
+                }
+            ), 403
+        try:
+            _gov_quota.enforce(org, _gov_features.FEATURE_CAPTION, plan=plan)
+        except _gov_quota.QuotaExceeded as qe:
+            return jsonify({"ok": False, "error": "quota_reached", "message": str(qe)}), 429
+        return None
+
+    def _editorial_ai_record(pid: str, detail: str) -> None:
+        """Count one successful AI editorial draft toward the org's quota.
+        Best-effort; never affects the response."""
+        from mediahub.governance import features as _gov_features, quota as _gov_quota
+
+        org = "" if _auth.is_dev_operator() else (pid or "")
+        if not org:
+            return
+        try:
+            _gov_quota.record(org, _gov_features.FEATURE_CAPTION, ok=True, detail=detail)
+        except Exception:
+            pass
+
     @app.route("/api/newsletters/generate", methods=["POST"])
     def api_newsletters_generate():
         if not _email_design_ok:
@@ -54662,6 +55672,10 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "bad_format"}), 400
         preset = (body.get("range") or "this_month").strip()
         with_ai = bool(body.get("with_ai", True))
+        if with_ai:  # AI drafting is metered spend — permission + quota first
+            denied = _editorial_ai_gate(pid)
+            if denied is not None:
+                return denied
         start, end = _nl_range(preset, body)
         prof = load_profile(pid)
         tone = (getattr(prof, "tone", "") or "warm-club") if prof else "warm-club"
@@ -54686,6 +55700,8 @@ voice, and queues them for one-click approval.</p>
                 return jsonify({"ok": False, "error": "no_ai", "message": str(e)}), 200
             log.warning("newsletter generation failed", exc_info=True)
             return jsonify({"ok": False, "error": "generate_failed"}), 500
+        if with_ai:
+            _editorial_ai_record(pid, detail=f"newsletter={fmt}")
         _ns.save_newsletter(pid, spec)
         return jsonify(
             {
@@ -54781,12 +55797,20 @@ voice, and queues them for one-click approval.</p>
 
         prof = load_profile(pid)
         if preview:
-            spec = _nl_resolve_images(
-                spec,
-                lambda r, c: url_for(
+
+            def _preview_resolver(r, c):
+                from mediahub.web import public_wall as _pw
+
+                # Explain unavailability in the editor instead of a silent blank.
+                if str(c) not in _pw._approved_card_ids(r):
+                    return _nl_unavailable_src("card not approved yet")
+                if not _pw.rendered_card_png(pid, r, c):
+                    return _nl_unavailable_src("consent-blocked, wrong org or not rendered")
+                return url_for(
                     "newsletter_preview_card", newsletter_id=newsletter_id, run_id=r, card_id=c
-                ),
-            )
+                )
+
+            spec = _nl_resolve_images(spec, _preview_resolver)
         elif published_token:
             spec = _nl_resolve_images(
                 spec,
@@ -54906,13 +55930,12 @@ voice, and queues them for one-click approval.</p>
         pid, spec = _nl_load_owned(newsletter_id)
         if spec is None:
             abort(404)
+        if (run_id, card_id) not in _nl_card_refs(spec):
+            abort(404)  # draft-scoped: only cards the spec references
         run_data = _load_run(run_id)
         if run_data is None or not _can_access_run(run_id, run_data, pid):
             abort(404)
-        from mediahub.web import public_wall as _pw
-
-        prof = load_profile(pid)
-        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
+        path = _nl_card_image_path(pid, run_id, card_id)
         if not path:
             abort(404)
         resp = make_response(send_file(path, mimetype="image/png"))
@@ -54946,17 +55969,20 @@ voice, and queues them for one-click approval.</p>
         if not _email_design_ok:
             abort(404)
         from mediahub.email_design import store as _ns
-        from mediahub.web import public_wall as _pw
 
         ref = _ns.resolve_token(token)
         if not ref:
             abort(404)
-        pid, _newsletter_id = ref
+        pid, newsletter_id = ref
+        spec = _ns.load_published(pid, newsletter_id)
+        if spec is None:
+            abort(404)
+        if (run_id, card_id) not in _nl_card_refs(spec):
+            abort(404)  # snapshot-scoped: the token only unlocks referenced cards
         run_data = _load_run(run_id)
         if run_data is None or not _can_access_run(run_id, run_data, pid):
             abort(404)
-        prof = load_profile(pid)
-        path = _pw.wall_image_path(prof, run_id, card_id) if prof else None
+        path = _nl_card_image_path(pid, run_id, card_id)
         if not path:
             abort(404)
         resp = make_response(send_file(path, mimetype="image/png"))
@@ -55087,6 +56113,10 @@ voice, and queues them for one-click approval.</p>
             scope = "meet"
             if not run_id:
                 return jsonify({"ok": False, "error": "pick_a_meet"}), 400
+        if with_ai:  # AI drafting is metered spend — permission + quota first
+            denied = _editorial_ai_gate(pid)
+            if denied is not None:
+                return denied
 
         brand_kit = _doc_brand_kit(pid)
         facts = _doc_facts_for(pid, brand_kit, scope=scope, run_id=run_id)
@@ -55107,6 +56137,8 @@ voice, and queues them for one-click approval.</p>
                 return jsonify({"ok": False, "error": "no_ai", "message": str(e)}), 200
             log.warning("document generation failed", exc_info=True)
             return jsonify({"ok": False, "error": "generate_failed"}), 500
+        if with_ai:
+            _editorial_ai_record(pid, detail=f"document={fmt}")
         _docstore.save_document(pid, spec)
         return jsonify(
             {"ok": True, "doc_id": spec.doc_id, "url": url_for("document_view", doc_id=spec.doc_id)}
@@ -55186,17 +56218,28 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "not_found"}), 404
         from mediahub.documents.export import document_pptx
 
-        out = Path(tempfile.gettempdir()) / f"{spec.doc_id}.pptx"
+        # Per-request unique name (concurrent exports of the same doc must not
+        # race) + unlink after send_file (which opens the file at call time,
+        # so the streamed response survives the POSIX unlink).
+        out = Path(tempfile.gettempdir()) / f"doc_{secrets.token_hex(8)}.pptx"
         try:
-            document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
-        except Exception as e:
-            return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
-        return send_file(
-            out,
-            as_attachment=True,
-            download_name=_safe_filename(spec.title, "pptx"),
-            mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        )
+            try:
+                document_pptx(spec, out, brand_kit=_doc_brand_kit(pid))
+            except Exception as e:
+                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+            return send_file(
+                out,
+                as_attachment=True,
+                download_name=_safe_filename(spec.title, "pptx"),
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                ),
+            )
+        finally:
+            try:
+                out.unlink()
+            except OSError:
+                pass
 
     @app.route("/api/documents/<doc_id>/docx")
     def api_document_docx(doc_id: str):
@@ -55207,17 +56250,25 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "not_found"}), 404
         from mediahub.documents.export import document_docx
 
-        out = Path(tempfile.gettempdir()) / f"{spec.doc_id}.docx"
+        out = Path(tempfile.gettempdir()) / f"doc_{secrets.token_hex(8)}.docx"
         try:
-            document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
-        except Exception as e:
-            return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
-        return send_file(
-            out,
-            as_attachment=True,
-            download_name=_safe_filename(spec.title, "docx"),
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+            try:
+                document_docx(spec, out, brand_kit=_doc_brand_kit(pid))
+            except Exception as e:
+                return jsonify({"error": "export_failed", "detail": str(e)[:200]}), 503
+            return send_file(
+                out,
+                as_attachment=True,
+                download_name=_safe_filename(spec.title, "docx"),
+                mimetype=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+            )
+        finally:
+            try:
+                out.unlink()
+            except OSError:
+                pass
 
     @app.route("/api/documents/<doc_id>/video")
     def api_document_video(doc_id: str):
@@ -55326,18 +56377,24 @@ voice, and queues them for one-click approval.</p>
             paths.append(p)
         out = Path(tempfile.gettempdir()) / f"merged_{secrets.token_hex(5)}.pdf"
         try:
-            merge_pdfs(paths, out)
-        except Exception as e:
-            return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+            try:
+                merge_pdfs(paths, out)
+            except Exception as e:
+                return jsonify({"error": "merge_failed", "detail": str(e)[:200]}), 422
+            finally:
+                for p in paths:
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            return send_file(
+                out, mimetype="application/pdf", as_attachment=True, download_name="merged.pdf"
+            )
         finally:
-            for p in paths:
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
-        return send_file(
-            out, mimetype="application/pdf", as_attachment=True, download_name="merged.pdf"
-        )
+            try:
+                out.unlink()
+            except OSError:
+                pass
 
     @app.route("/api/documents/tools/images-to-pdf", methods=["POST"])
     def api_documents_tool_images_to_pdf():
@@ -55358,18 +56415,24 @@ voice, and queues them for one-click approval.</p>
             paths.append(p)
         out = Path(tempfile.gettempdir()) / f"images_{secrets.token_hex(5)}.pdf"
         try:
-            images_to_pdf(paths, out)
-        except Exception as e:
-            return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+            try:
+                images_to_pdf(paths, out)
+            except Exception as e:
+                return jsonify({"error": "convert_failed", "detail": str(e)[:200]}), 422
+            finally:
+                for p in paths:
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            return send_file(
+                out, mimetype="application/pdf", as_attachment=True, download_name="images.pdf"
+            )
         finally:
-            for p in paths:
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
-        return send_file(
-            out, mimetype="application/pdf", as_attachment=True, download_name="images.pdf"
-        )
+            try:
+                out.unlink()
+            except OSError:
+                pass
 
     # ---- Presenter surface (deck) -------------------------------------
     @app.route("/documents/<doc_id>/present")
@@ -55491,6 +56554,33 @@ voice, and queues them for one-click approval.</p>
         updated = _pres.apply_action(session_id, str(body.get("action", "")), body.get("value"))
         return jsonify({"ok": True, "state": updated.public_state() if updated else None})
 
+    # Per-IP budget on FAILED pairing-code lookups: the 6-char code drives a
+    # live presentation, so wrong-code guesses are throttled (presenter.py's
+    # documented guard). Successful lookups never count, so a presenter
+    # clicking through slides with the right code is unaffected.
+    _remote_code_attempts: dict = {}
+    _remote_code_lock = threading.Lock()
+    _REMOTE_CODE_MAX_FAILURES = 20
+    _REMOTE_CODE_WINDOW_S = 300
+
+    def _remote_code_limited() -> bool:
+        """True when this IP has exhausted its failed pairing-code budget."""
+        now = time.time()
+        key = _client_ip()
+        with _remote_code_lock:
+            window = [
+                t for t in _remote_code_attempts.get(key, []) if now - t < _REMOTE_CODE_WINDOW_S
+            ]
+            _remote_code_attempts[key] = window
+            if len(_remote_code_attempts) > 4096:  # opportunistic cleanup
+                for k in [k for k, v in _remote_code_attempts.items() if not v]:
+                    _remote_code_attempts.pop(k, None)
+            return len(window) >= _REMOTE_CODE_MAX_FAILURES
+
+    def _remote_code_failed() -> None:
+        with _remote_code_lock:
+            _remote_code_attempts.setdefault(_client_ip(), []).append(time.time())
+
     @app.route("/remote")
     def remote_landing():
         if not _documents_ok:
@@ -55518,8 +56608,15 @@ voice, and queues them for one-click approval.</p>
             )
         from mediahub.documents import presenter as _pres
 
+        if _remote_code_limited():
+            return _recovery_page(
+                "Too many attempts",
+                "Too many code attempts from your network — wait a few minutes.",
+                primary_cta=("Try again", url_for("remote_landing")),
+            )
         session = _pres.get_by_pairing_code(code)
         if session is None:
+            _remote_code_failed()
             return _recovery_page(
                 "Code not found",
                 "That code is wrong or the presentation has ended.",
@@ -55538,8 +56635,11 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"ok": False, "error": "unavailable"}), 503
         from mediahub.documents import presenter as _pres
 
+        if _remote_code_limited():
+            return jsonify({"ok": False, "error": "rate_limited"}), 429
         session = _pres.get_by_pairing_code(code)
         if session is None:
+            _remote_code_failed()
             return jsonify({"ok": False, "error": "no_session"}), 404
         body = request.get_json(silent=True) or {}
         updated = _pres.apply_action(
@@ -55583,6 +56683,9 @@ voice, and queues them for one-click approval.</p>
 
         def _demo_sweep_handler(params: dict) -> None:
             _sweep_demo_runs(_delete_run)
+            # Abandoned pre-run staging dirs (upload made, club never picked)
+            # are invisible to the DB-driven sweep above — clean them here.
+            _sweep_demo_staging_dirs()
 
         _register_task_type("demo_sweep", _demo_sweep_handler)
         if _demo_enabled():

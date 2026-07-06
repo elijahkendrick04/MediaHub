@@ -340,10 +340,19 @@ def _sanitize_untrusted(text: str, *, cap: int = 1500) -> str:
     if not text:
         return ""
     text = "".join(c for c in text if c in "\n\t" or ord(c) >= 32)
-    text = text.replace("`" * 3, "'" * 3).strip()      # can't break out of the fence
+    # No backticks at all: neutralises fence breakout AND code-span breakout
+    # (single backticks would let crawled text escape the caller's `...` spans).
+    text = text.replace("`", "'").strip()
     if len(text) > cap:
         text = text[:cap].rsplit(" ", 1)[0] + " ...(truncated)"
     return text
+
+
+def _inline_code(s: str) -> str:
+    """Render sanitised untrusted text as a single-line inline code span, so
+    any markdown it carries (links, bold, fake headings) reads as data to the
+    human approver, never as bot-authored prose."""
+    return "`" + " ".join(s.split()) + "`" if s else ""
 
 
 # Plain-English translations for the PR body (operator directive 2026-06-12:
@@ -437,9 +446,9 @@ def _pr_body(bug: dict, fp: str, reg_status: str, reg_detail: str) -> str:
         + _PLAIN_SEVERITY.get(severity, severity) + "**.",
     ]
     if exp:
-        parts += ["", "- **The check expected:** " + exp]
+        parts += ["", "- **The check expected:** " + _inline_code(exp)]
     if act:
-        parts += ["- **What it actually found:** " + act]
+        parts += ["- **What it actually found:** " + _inline_code(act)]
     parts += [
         "",
         "## How well is the fix proven?",
@@ -464,7 +473,7 @@ def _pr_body(bug: dict, fp: str, reg_status: str, reg_detail: str) -> str:
         "",
         "- Finding `" + fp + "` - category `" + category
         + "` - severity `" + severity + "`",
-        "- Route: " + route,
+        "- Route: " + _inline_code(route),
         "- Regression proof: `" + reg_status + "` - "
         + _sanitize_untrusted(reg_detail, cap=300),
         "- Reproduce the gate locally: `python -m pytest tests/ -q`",
@@ -515,12 +524,13 @@ def fix_one(bug: dict) -> dict:
         # ~900s/tick and retrying the SAME non-bug forever). Quarantine to
         # needs_disproof — surface the coder's own conclusion, drop it out of the fix
         # loop — instead of retrying. NOT wontfix: the accused coder does not get to
-        # self-acquit; a deterministic ground-truth repro must reopen or confirm it.
+        # self-acquit; a human audit must reopen or confirm it (no automatic
+        # transition out of quarantine exists — see report.FIX_OWNED_STATUSES).
         if info.startswith("coder-noedit-complete"):
             report.quarantine_needs_disproof(fp, conclusion=info, coder_attempts=attempts)
             return {"fp": fp, "result": "needs-disproof",
                     "detail": "coder completed cleanly with no edits — quarantined "
-                              "pending a ground-truth repro (not retried, not closed)"}
+                              "pending a human audit (not retried, not closed)"}
         return _give_up_or_retry(bug, attempts, info)
 
     committed, commit_err = gitops.commit_fix(

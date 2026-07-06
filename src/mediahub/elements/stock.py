@@ -125,8 +125,6 @@ def parse_licence(
         commercial_ok = False
     elif any(tok in norm for tok in ("cc0", "publicdomain", "pdm", "ccby")):
         commercial_ok = True
-    elif "publicdomain" in raw.lower():
-        commercial_ok = True
     else:
         commercial_ok = False  # unrecognised → honest no
 
@@ -517,6 +515,43 @@ def _thumb_cache_get(key: str) -> Optional[tuple[bytes, str]]:
     return None
 
 
+# The thumb cache is keyed by URL hash and any signed-in user can request
+# unlimited distinct allow-listed CDN URLs, so without a cap it grows without
+# bound on the hosted disk. Oldest-mtime entries are evicted first; the read
+# path already tolerates a missing file (returns None → refetch).
+_THUMB_CACHE_MAX_BYTES = 500 * 1024 * 1024
+_THUMB_CACHE_MAX_FILES = 2000
+
+
+def _thumb_cache_evict() -> None:
+    """Bound the thumb cache (size + entry caps); never raises."""
+    try:
+        entries: list[tuple[float, int, Path]] = []
+        for p in _thumb_cache_dir().iterdir():
+            if not p.is_file():
+                continue
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            entries.append((st.st_mtime, st.st_size, p))
+        total = sum(size for _, size, _ in entries)
+        if len(entries) <= _THUMB_CACHE_MAX_FILES and total <= _THUMB_CACHE_MAX_BYTES:
+            return
+        entries.sort()  # oldest mtime first
+        while entries and (
+            len(entries) > _THUMB_CACHE_MAX_FILES or total > _THUMB_CACHE_MAX_BYTES
+        ):
+            _, size, p = entries.pop(0)
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:  # pragma: no cover - disk
+                continue
+            total -= size
+    except Exception:  # pragma: no cover - eviction is best-effort
+        pass
+
+
 def _thumb_cache_put(key: str, data: bytes, ctype: str) -> None:
     ext = _THUMB_CT_TO_EXT.get(ctype)
     if not ext:
@@ -526,7 +561,8 @@ def _thumb_cache_put(key: str, data: bytes, ctype: str) -> None:
         tmp.write_bytes(data)
         tmp.replace(_thumb_cache_dir() / f"{key}.{ext}")  # atomic publish
     except OSError:  # pragma: no cover - disk
-        pass
+        return
+    _thumb_cache_evict()
 
 
 def fetch_thumb(url: str, *, timeout: int = _THUMB_TIMEOUT) -> tuple[Optional[bytes], str]:

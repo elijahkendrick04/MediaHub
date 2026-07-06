@@ -60,6 +60,48 @@ def test_media_ai_generate_routes_through_openai(openai_env):
     assert captured["model"] == "cheap-m"
 
 
+def test_generate_content_type_routes_hero_to_premium(openai_env):
+    """generate(content_type='caption') must reach select_model — hero
+    surfaces earn the premium model when one is configured."""
+    openai_env.setenv("MEDIAHUB_LLM_MODEL_PREMIUM", "prem-m")
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        captured["model"] = json["model"]
+        return _FakeResp(200, _chat("hero copy", model=json["model"]))
+
+    openai_env.setattr(requests, "post", fake_post)
+    out = media_ai_llm.generate("write the caption", content_type="caption")
+    assert out == "hero copy"
+    assert captured["model"] == "prem-m"
+
+
+def test_generate_content_type_honours_override(openai_env):
+    openai_env.setenv("MEDIAHUB_LLM_MODEL_OVERRIDES", "caption=special-m")
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        captured["model"] = json["model"]
+        return _FakeResp(200, _chat("hero copy", model=json["model"]))
+
+    openai_env.setattr(requests, "post", fake_post)
+    media_ai_llm.generate("write the caption", content_type="caption")
+    assert captured["model"] == "special-m"
+
+
+def test_generate_json_threads_content_type(openai_env):
+    openai_env.setenv("MEDIAHUB_LLM_MODEL_PREMIUM", "prem-m")
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None, **kw):
+        captured["model"] = json["model"]
+        return _FakeResp(200, _chat('{"k": "v"}'))
+
+    openai_env.setattr(requests, "post", fake_post)
+    assert media_ai_llm.generate_json("json please", content_type="brand_voice") == {"k": "v"}
+    assert captured["model"] == "prem-m"
+
+
 def test_media_ai_generate_json_through_openai(openai_env):
     def fake_post(url, json=None, headers=None, timeout=None, **kw):
         return _FakeResp(200, _chat('{"k": "v"}'))

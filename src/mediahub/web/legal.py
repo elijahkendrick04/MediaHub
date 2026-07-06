@@ -775,9 +775,8 @@ def privacy_html(
         the media library, with any athlete names you link to them.</li>
     <li><strong>Billing data:</strong> handled by Stripe; we store your plan and Stripe
         customer reference, never card numbers.</li>
-    <li><strong>Operational records:</strong> a log of publishing attempts (with a short
-        caption excerpt), AI-call metadata (provider, token counts &mdash; never the
-        prompt text), and run progress logs (no athlete names).</li>
+    <li><strong>Operational records:</strong> AI-call metadata (provider, token counts
+        &mdash; never the prompt text), and run progress logs (no athlete names).</li>
   </ul>
 </div>
 
@@ -889,9 +888,8 @@ def privacy_html(
     <tr><td>Try-it demo uploads</td><td>24 hours</td></tr>
     <tr><td>Caption memory (used to avoid repeating past captions)</td>
         <td>Until the run it came from is deleted, or the account/club is deleted</td></tr>
-    <tr><td>Publishing log / AI-usage metadata</td>
-        <td>Trimmed automatically (ring buffer); caption excerpts are removed when the
-            related run is erased</td></tr>
+    <tr><td>AI-usage metadata</td>
+        <td>Trimmed automatically (ring buffer)</td></tr>
     <tr><td>Account record</td><td>Until you delete your account</td></tr>
   </table>
 </div>

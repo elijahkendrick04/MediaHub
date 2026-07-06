@@ -337,6 +337,11 @@ def _gemini_generation_config(max_tokens: int) -> dict:
     # older model is rejected as an unknown field. Gate on the model
     # name so a downgrade via MEDIAHUB_GEMINI_MODEL still works.
     if "2.5" in _GEMINI_MODEL or "3." in _GEMINI_MODEL:
+        # Pro models cannot disable thinking — the API rejects budgets
+        # below 128 with 400 INVALID_ARGUMENT — so clamp to the Pro
+        # minimum there. Flash models keep 0 (thinking off).
+        if "pro" in _GEMINI_MODEL:
+            budget = max(128, budget)
         cfg["thinkingConfig"] = {"thinkingBudget": budget}
     return cfg
 
@@ -460,16 +465,19 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
+    # Key travels in the x-goog-api-key header, NOT the URL — a URL-borne
+    # key rides into every exception repr / access log that mentions the
+    # request URL. _redact_key stays as defence-in-depth.
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_GEMINI_MODEL}:generateContent?key={key}"
+        f"{_GEMINI_MODEL}:generateContent"
     )
     started = time.monotonic()
     try:
         r = requests.post(
             url,
             json=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "x-goog-api-key": key},
             timeout=_GEMINI_TIMEOUT,
         )
     except Exception as e:
@@ -483,6 +491,10 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
             error_kind="transport",
             error_message=safe_err,
         )
+        # A network-level outage (timeout / connection refused) is the
+        # breaker's most expensive case — each call eats the full request
+        # timeout — so it must count toward tripping like a 5xx does.
+        _gemini_breaker_record_failure()
         return None
     dur_ms = (time.monotonic() - started) * 1000.0
     if r.status_code in (401, 403):
@@ -609,6 +621,14 @@ def _call_gemini_vision(
     if not key:
         return None
     if _gemini_breaker_is_open():
+        _log_call(
+            provider="gemini-vision",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=0.0,
+            error_kind="breaker_open",
+            error_message="Gemini circuit breaker is open; skipping to next provider",
+        )
         return None
     try:
         import requests
@@ -627,35 +647,108 @@ def _call_gemini_vision(
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
+    # Key in the x-goog-api-key header, not the URL — see _call_gemini.
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_GEMINI_MODEL}:generateContent?key={key}"
+        f"{_GEMINI_MODEL}:generateContent"
     )
+    started = time.monotonic()
     try:
-        r = requests.post(url, json=payload, timeout=_GEMINI_TIMEOUT)
-    except Exception:
+        r = requests.post(
+            url,
+            json=payload,
+            headers={"x-goog-api-key": key},
+            timeout=_GEMINI_TIMEOUT,
+        )
+    except Exception as e:
+        safe_err = _redact_key(str(e), key)
+        log.warning("gemini vision transport failed: %s", safe_err)
+        _log_call(
+            provider="gemini-vision",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error_kind="transport",
+            error_message=safe_err,
+        )
+        _gemini_breaker_record_failure()
         return None
+    dur_ms = (time.monotonic() - started) * 1000.0
     if not r.ok:
+        body_safe = _redact_key((r.text or "")[:300], key)
+        log.warning("gemini vision non-ok (%s): %s", r.status_code, body_safe)
+        _log_call(
+            provider="gemini-vision",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind=f"http_{r.status_code}",
+            error_message=body_safe,
+        )
         if r.status_code >= 500:
             _gemini_breaker_record_failure()
         return None
     try:
         data = r.json()
     except ValueError:
+        _log_call(
+            provider="gemini-vision",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="parse",
+            error_message="response was not JSON",
+        )
         return None
     candidates = data.get("candidates") if isinstance(data, dict) else None
     if not candidates:
+        _log_call(
+            provider="gemini-vision",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="no_candidates",
+            error_message="response had no candidates",
+        )
         return None
     first = candidates[0] if isinstance(candidates, list) else None
     content = (first or {}).get("content") or {}
     parts = content.get("parts") if isinstance(content, dict) else None
     if not isinstance(parts, list):
+        _log_call(
+            provider="gemini-vision",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="malformed",
+            error_message="content.parts not a list",
+        )
         return None
     texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
     out = "".join(texts).strip()
     if out:
+        usage = data.get("usageMetadata") if isinstance(data, dict) else None
+        tin = (usage or {}).get("promptTokenCount") if isinstance(usage, dict) else None
+        tout = (usage or {}).get("candidatesTokenCount") if isinstance(usage, dict) else None
+        _log_call(
+            provider="gemini-vision",
+            ok=True,
+            model=_GEMINI_MODEL,
+            tokens_in=tin,
+            tokens_out=tout,
+            duration_ms=dur_ms,
+        )
         _gemini_breaker_record_success()
-    return out or None
+        return out
+    _log_call(
+        provider="gemini-vision",
+        ok=False,
+        model=_GEMINI_MODEL,
+        duration_ms=dur_ms,
+        error_kind="empty_response",
+        error_message="Gemini returned no text",
+    )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +796,7 @@ def _call_anthropic_vision(
             }
         )
     content_blocks.append({"type": "text", "text": prompt})
+    started = time.monotonic()
     try:
         kwargs: dict = {
             "model": DEFAULT_MODEL,
@@ -713,9 +807,31 @@ def _call_anthropic_vision(
             kwargs["system"] = system
         resp = client.messages.create(**kwargs)
         parts = [b.text for b in resp.content if hasattr(b, "text")]
-        return "".join(parts).strip() or None
+        text = "".join(parts).strip() or None
+        usage = getattr(resp, "usage", None)
+        tin = getattr(usage, "input_tokens", None) if usage else None
+        tout = getattr(usage, "output_tokens", None) if usage else None
+        _log_call(
+            provider="anthropic-vision",
+            ok=bool(text),
+            model=DEFAULT_MODEL,
+            tokens_in=tin,
+            tokens_out=tout,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error_kind=None if text else "empty_response",
+            error_message=None if text else "Anthropic returned no text",
+        )
+        return text
     except Exception as e:
-        log.debug("anthropic vision failed: %s", e)
+        log.warning("anthropic vision failed: %s", e)
+        _log_call(
+            provider="anthropic-vision",
+            ok=False,
+            model=DEFAULT_MODEL,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error_kind=type(e).__name__,
+            error_message=str(e),
+        )
         return None
 
 
@@ -750,12 +866,18 @@ def generate(
     system: Optional[str] = None,
     max_tokens: int = 1024,
     messages: Optional[list[dict]] = None,
+    content_type: Optional[str] = None,
 ) -> str:
     """Generate plain text via the configured LLM provider.
 
     Raises ClaudeUnavailableError when no provider is configured —
     callers must catch and surface to the user honestly. There is no
     hardcoded fallback output in MediaHub by design.
+
+    ``content_type`` labels the surface for per-type model routing
+    (see :mod:`mediahub.media_ai.model_select`): hero surfaces such as
+    ``"caption"`` / ``"spotlight"`` / ``"recap"`` earn the premium
+    model on the OpenAI-compatible path. Gemini/Anthropic ignore it.
     """
     msgs = messages if messages else [{"role": "user", "content": prompt}]
     for provider in _provider_order():
@@ -766,7 +888,7 @@ def generate(
         elif provider == "openai":
             from mediahub.media_ai.llm_providers import call_openai
 
-            out = call_openai(msgs, system, max_tokens)
+            out = call_openai(msgs, system, max_tokens, content_type=content_type)
         else:
             continue
         if out:
@@ -784,15 +906,20 @@ def generate_json(
     system: Optional[str] = None,
     max_tokens: int = 1024,
     fallback: Optional[dict] = None,
+    content_type: Optional[str] = None,
 ) -> dict:
     """Generate a JSON dict from a prompt.
 
     Raises ClaudeUnavailableError when no provider is reachable.
     ``fallback`` is used only when the provider DID answer but produced
     unparseable output (rare); never to mask a missing provider.
+    ``content_type`` threads through to :func:`generate` for per-type
+    model routing on the OpenAI-compatible path.
     """
     sys_with_json = (system or "") + ("\n\nReturn ONLY a JSON object. No prose, no fences.")
-    raw = generate(prompt, system=sys_with_json.strip(), max_tokens=max_tokens)
+    raw = generate(
+        prompt, system=sys_with_json.strip(), max_tokens=max_tokens, content_type=content_type
+    )
     parsed = _extract_json(raw)
     if parsed is not None:
         return parsed
@@ -807,17 +934,30 @@ def generate_vision(
     Provider order respects ``MEDIAHUB_LLM_PROVIDER`` the same way
     text generation does. Returns the model's text. Raises
     ``ClaudeUnavailableError`` when no vision-capable provider is
-    configured.
+    configured — or, honestly distinct, when configured providers were
+    attempted and every call failed.
     """
+    attempted: list[str] = []
     for provider in _provider_order():
         if provider == "anthropic" and _has_anthropic_key():
+            attempted.append(provider)
             out = _call_anthropic_vision(image_paths, prompt, system, max_tokens)
             if out:
                 return out
         elif provider == "gemini" and _has_gemini_key():
+            attempted.append(provider)
             out = _call_gemini_vision(image_paths, prompt, system, max_tokens)
             if out:
                 return out
+    if attempted:
+        # Keys exist and calls were made — saying "not configured" here
+        # would be a false reason (honest-error rule). Details are in the
+        # usage ledger / logs recorded by the vision helpers.
+        raise ClaudeUnavailableError(
+            "AI vision call failed (provider(s) attempted: "
+            f"{', '.join(attempted)}). See the LLM usage log for the "
+            "failure detail."
+        )
     raise ClaudeUnavailableError(
         "AI vision features are unavailable on this deployment. The "
         "operator has not configured a Gemini or Anthropic API key. "

@@ -176,37 +176,7 @@
     return el;
   };
 
-  /* --- Flapboard: split-flap settle to a target string ---------------- */
-  var FLAP_GLYPHS = "0123456789:.";
-  function runFlap(el) {
-    if (!once(el, "data-mh-flap-run")) return;
-    var target = el.getAttribute("data-mh-to");
-    if (target == null) target = el.textContent;
-    target = String(target);
-    el.textContent = "";
-    var flaps = [];
-    for (var i = 0; i < target.length; i++) {
-      var f = document.createElement("span");
-      f.className = "mh-flap";
-      f.textContent = target[i];
-      el.appendChild(f);
-      flaps.push(f);
-    }
-    if (REDUCE) return;
-    flaps.forEach(function (f, idx) {
-      var ch = f.textContent, ticks = 4 + idx;
-      var k = 0;
-      var iv = setInterval(function () {
-        k++;
-        f.classList.add("is-flipping");
-        f.textContent = (k >= ticks) ? ch : FLAP_GLYPHS[(Math.random() * FLAP_GLYPHS.length) | 0];
-        setTimeout(function () { f.classList.remove("is-flipping"); }, 80);
-        if (k >= ticks) clearInterval(iv);
-      }, 70);
-    });
-  }
-
-  /* --- IntersectionObserver: reveal / text-generate / count / flap ---- */
+  /* --- IntersectionObserver: reveal / text-generate ------------------- */
   var io = null;
   function observe(el) {
     if (!io) {
@@ -221,26 +191,6 @@
   }
   function fire(el) {
     el.classList.add("is-in"); // align to the existing Phase-10 reveal convention
-    if (el.classList.contains("mh-flapboard")) runFlap(el);
-  }
-
-  /* --- Flip-words: cycle the active child ----------------------------- */
-  function bindFlipWords(el) {
-    if (!once(el, "data-mh-flip-init")) return;
-    var words = el.querySelectorAll(".mh-fw");
-    if (words.length < 2) { if (words[0]) words[0].classList.add("is-active"); return; }
-    var i = 0;
-    words[0].classList.add("is-active");
-    if (REDUCE) return;
-    var interval = parseInt(el.getAttribute("data-mh-interval") || "2200", 10);
-    setInterval(function () {
-      var cur = words[i];
-      cur.classList.remove("is-active");
-      cur.classList.add("is-leaving");
-      setTimeout(function () { cur.classList.remove("is-leaving"); }, 260);
-      i = (i + 1) % words.length;
-      words[i].classList.add("is-active");
-    }, interval);
   }
 
   /* --- Tabs: slide the indicator under the active tab ----------------- */
@@ -482,21 +432,6 @@
     }
   }
 
-  /* --- Multi-step loader API (driven by the processing-screen poller) -- */
-  MH.steps = function (container, activeIndex) {
-    if (typeof container === "string") container = document.querySelector(container);
-    if (!container) return;
-    var steps = container.querySelectorAll(".mh-steploader__step");
-    for (var i = 0; i < steps.length; i++) {
-      steps[i].setAttribute("data-state", i < activeIndex ? "done" : i === activeIndex ? "active" : "pending");
-    }
-  };
-  MH.stepsComplete = function (container) {
-    if (typeof container === "string") container = document.querySelector(container);
-    if (!container) return;
-    each(container, ".mh-steploader__step", function (s) { s.setAttribute("data-state", "done"); });
-  };
-
   /* --- Stateful button helper ----------------------------------------- */
   MH.btnState = function (btn, state) {
     if (typeof btn === "string") btn = document.querySelector(btn);
@@ -549,8 +484,12 @@
       el = document.createElement("div");
       el.className = "mh-cursor-readout";
       if (opts.accent === "medal") el.setAttribute("data-accent", "medal");
-      el.setAttribute("role", "status");
-      el.setAttribute("aria-live", "polite");
+      // Purely a visual mirror: every caller (renderProgress, the ingest
+      // poll) keeps its own on-page aria-live readout, so the chip is
+      // hidden from the accessibility tree — a live region here would
+      // queue ~100 duplicate percent announcements per render. Standalone
+      // callers must provide their own announced region.
+      el.setAttribute("aria-hidden", "true");
       pctEl = document.createElement("span");
       pctEl.className = "mh-cursor-readout__pct display-num";
       labEl = document.createElement("span");
@@ -575,7 +514,15 @@
     }
     function onMove(ev) {
       x = ev.clientX; y = ev.clientY;
-      if (!tracking) { tracking = true; el.classList.add("is-in"); }
+      if (!tracking) {
+        tracking = true;
+        // If the 450ms fallback corner-pinned the chip before the first
+        // move, un-pin so it tracks the cursor again instead of doing
+        // dead rAF work against the pin's transform override. (REDUCE
+        // stays pinned — onMove is never bound there.)
+        el.classList.remove("is-pinned");
+        el.classList.add("is-in");
+      }
       if (!raf) raf = requestAnimationFrame(place);
     }
     if (pinned) {
@@ -631,12 +578,11 @@
 
   /* --- Init / re-init ------------------------------------------------- */
   function init(root) {
-    each(root, ".mh-spotlight-card, .mh-glow-border, .mh-glare", bindPointer);
+    each(root, ".mh-spotlight-card, .mh-glow-border", bindPointer);
     each(root, ".mh-lens", bindLens);
     each(root, ".mh-tilt", bindTilt);
     each(root, ".mh-text-generate", function (el) { splitWords(el); observe(el); });
-    each(root, ".mh-highlight, .mh-flapboard, .mh-shiny-text", observe);
-    each(root, ".mh-flip-words", bindFlipWords);
+    each(root, ".mh-highlight, .mh-shiny-text", observe);
     each(root, ".mh-tabs", bindTabs);
     each(root, ".mh-cs-copy", bindCopy);
     each(root, ".mh-compare", bindCompare);

@@ -129,6 +129,29 @@ class TestConvertFile:
         with pytest.raises(ExportError):
             convert_file(tmp_path / "ghost.png", "jpg")
 
+    def test_failed_dispatch_leaves_no_partial_cache_file(self, tmp_path, monkeypatch):
+        """A killed/failed encode must not poison the content-addressed cache:
+        the partial file is removed and the next identical call re-encodes."""
+        from mediahub.export_engine import engine as engine_mod
+
+        real_dispatch = engine_mod._dispatch
+
+        def _partial_then_die(src_path, key, scat, out_path, opts):
+            out_path.write_bytes(b"partial garbage")
+            raise RuntimeError("simulated killed encode")
+
+        monkeypatch.setattr(engine_mod, "_dispatch", _partial_then_die)
+        src = _png(tmp_path)
+        with pytest.raises(RuntimeError):
+            convert_file(src, "jpg")
+        leftovers = [p for p in ec.cache_dir().rglob("*") if p.is_file() and p.name != ".gc_stamp"]
+        assert leftovers == []
+
+        monkeypatch.setattr(engine_mod, "_dispatch", real_dispatch)
+        res = convert_file(src, "jpg")
+        assert res.from_cache is False  # re-encoded, not served from a poisoned slot
+        assert res.path.is_file() and res.size_bytes > 0
+
 
 class TestVideoToGifScaleLive:
     """Regression: convert_file video→GIF must honour the scale option, not

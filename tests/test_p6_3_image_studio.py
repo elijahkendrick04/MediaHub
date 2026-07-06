@@ -116,7 +116,9 @@ def test_style_options_sourced_from_the_seam():
 def test_honest_provider_off_note_is_present():
     # The note that explains *why* the AI tools may be off is always in the
     # markup (the JS hides it once a provider is confirmed) — honest, no fake.
-    body = _body()
+    # Env-var instructions only appear for the dev operator (customers can't
+    # set env vars on a hosted deployment).
+    body = _body(dev_operator=True)
     assert "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT" in body
     assert "No image generator is configured" in body
 
@@ -235,7 +237,10 @@ def test_studio_happy_render_without_provider(app_env):
     assert 'id="mh-st-overlay"' in html
     assert "/api/media-library/imagine/info" in html
     assert f"/api/media-library/file/{a.id}" in html
-    assert "No image generator is configured" in html
+    # Customer session: honest note, without operator env-var instructions.
+    assert 'id="mh-st-providernote"' in html
+    assert "aren&rsquo;t enabled on this deployment" in html
+    assert "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT" not in html
 
 
 def test_studio_renders_with_local_backend(app_env, monkeypatch):
@@ -333,3 +338,16 @@ def test_studio_remove_requires_no_instruction(app_env, monkeypatch):
     )
     assert r.status_code == 200, r.get_json()
     assert captured["json"].get("mask")
+
+
+def test_provider_note_hides_env_var_copy_from_customers():
+    """Hosted-SaaS customers cannot set env vars: the no-provider note must not
+    show operator instructions unless the session is the dev operator."""
+    customer = _body()
+    assert "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT" not in customer
+    assert "aren&rsquo;t enabled on this deployment" in customer
+
+    operator = _body(dev_operator=True)
+    assert "MEDIAHUB_IMAGINE_LOCAL_ENDPOINT" in operator
+    # On-server naming rule: the backend is never described as "local".
+    assert "in-house local model" not in operator

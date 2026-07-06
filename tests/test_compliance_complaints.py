@@ -17,7 +17,6 @@ import pytest
 @pytest.fixture
 def app(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     from mediahub.web.web import create_app
 
     application = create_app()
@@ -86,7 +85,6 @@ def test_admin_page_hidden_without_operator_session(client):
 @pytest.fixture
 def operator_client(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "test-operator-key")
     from mediahub.web.web import create_app
 
     application = create_app()

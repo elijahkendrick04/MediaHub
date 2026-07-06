@@ -50,6 +50,12 @@ PROTECTED = (
     # touching the oracle aborts the cycle, so the finding is surfaced to a human
     # instead of being silently rebaselined by the bot.
     "autotest/baseline/golden-baseline.json",
+    # The comparators that grade the engine AGAINST that oracle. Protecting the
+    # baseline JSON alone leaves the same cheat open one level up: weaken
+    # ground_truth.py / baseline.py (tolerances, dropped checks) and a real
+    # regression "passes" without touching the oracle at all. Same rationale,
+    # same rule: comparator edits go to a human, never the bot.
+    "autotest/ground_truth.py", "autotest/baseline.py",
 )
 
 # Self-governance ("constitution") set — the files that GOVERN the autonomous loop:

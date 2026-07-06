@@ -58,6 +58,12 @@ OP_KINDS: tuple[str, ...] = (
 _MAX_HEADLINE = 80
 _MAX_HOOK = 80
 
+# Bound on the ops list itself — apply_patch runs every op (set_colour_role
+# re-runs the APCA role resolver each time), so a runaway/adversarial model
+# returning thousands of ops would burn CPU in one turn. Far above any real
+# assistant patch; the tail past the cap is dropped at parse time.
+_MAX_OPS = 25
+
 # 1.18 — each op maps to the lockable element it would change, so a locked
 # element (collab.locks) refuses the matching op at patch time. Element keys
 # mirror collab.locks.LOCKABLE_ELEMENTS.
@@ -158,6 +164,9 @@ def parse_patch(raw: Any) -> SpecPatch:
     Accepts ``{"ops": [...]}`` or a bare list. Each op must have a known
     ``kind``; out-of-vocabulary kinds and malformed ops are dropped (the
     validator/applier is the second gate, but parse already refuses to invent).
+    The list itself is capped at ``_MAX_OPS`` valid ops — the "small, bounded"
+    contract — and anything past the cap is dropped, matching the module's
+    drop-never-guess parse behaviour.
     """
     if isinstance(raw, dict):
         items = raw.get("ops")
@@ -169,6 +178,8 @@ def parse_patch(raw: Any) -> SpecPatch:
         return SpecPatch()
     ops: list[PatchOp] = []
     for it in items:
+        if len(ops) >= _MAX_OPS:
+            break
         if not isinstance(it, dict):
             continue
         kind = str(it.get("kind") or "").strip()

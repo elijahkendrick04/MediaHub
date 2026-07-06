@@ -290,3 +290,44 @@ def test_transcribe_module_has_no_llm_dependency():
     src = Path(transcribe.__file__).read_text()
     for forbidden in ("media_ai", "ai_core", "anthropic", "import gemini"):
         assert forbidden not in src, f"transcribe.py must not reference {forbidden!r}"
+
+
+# ---------------------------------------------------------------------------
+# Backend model memoisation — weights load once per (provider, model, params)
+# ---------------------------------------------------------------------------
+
+
+def test_faster_whisper_model_loaded_once_across_transcriptions(monkeypatch):
+    """Two backend calls with the same env-derived params reuse one model."""
+    import sys
+    import types
+
+    instantiations = []
+
+    class _Info:
+        language = "en"
+        duration = 0.9
+
+    class _FakeWhisperModel:
+        def __init__(self, model, device=None, compute_type=None, download_root=None):
+            instantiations.append((model, device, compute_type, download_root))
+
+        def transcribe(self, path, language=None, word_timestamps=False, vad_filter=False):
+            seg = types.SimpleNamespace(start=0.0, end=0.9, text="New PB", words=None)
+            return [seg], _Info()
+
+    fake_pkg = types.SimpleNamespace(WhisperModel=_FakeWhisperModel)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_pkg)
+    monkeypatch.setattr(transcribe, "_MODEL_CACHE", {})
+
+    for _ in range(2):
+        t = transcribe._transcribe_faster_whisper(
+            b"clip", "base", "", False, "audio/wav", False
+        )
+        assert t.text == "New PB"
+    assert len(instantiations) == 1
+
+    # A different load parameter is a different cache entry.
+    monkeypatch.setenv("MEDIAHUB_WHISPER_DEVICE", "auto")
+    transcribe._transcribe_faster_whisper(b"clip", "base", "", False, "audio/wav", False)
+    assert len(instantiations) == 2

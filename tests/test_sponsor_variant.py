@@ -246,6 +246,42 @@ class TestSponsorVariantPage:
             resp = c.get("/runs/no-such-run/card/anything/sponsor-variant")
             assert resp.status_code == 404
 
+    def test_overrides_reach_render_minus_hide_sponsor(self, gated_app, monkeypatch):
+        """Persisted inspector overrides (UI 1.18) apply on the sponsor-variant
+        render too — except hide_sponsor, since this surface's whole job is
+        showing the sponsor slot."""
+        app, tmp = gated_app
+        import mediahub.web.web as wm
+        if not wm._v8_ok:
+            pytest.skip("v8 engine unavailable")
+        _seed_run(tmp, "run-ov", "city-aquatics", sponsor="Acme Sports")
+        ws = wm._get_wf_store()
+        ws.set_edits("run-ov", "swim-1", {
+            "insp.accent": "#C9A227", "insp.focus": "left top",
+            "insp.hideSponsor": "1",
+        })
+        captured = {}
+
+        def _fake(item, brand_kit, **kwargs):
+            captured.update(kwargs)
+            return {"visuals": [{"id": "vis1", "format_name": "feed_portrait"}],
+                    "errors": []}
+
+        monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake)
+        monkeypatch.setattr(
+            "mediahub.web.ai_caption.call_claude",
+            lambda system, user, max_tokens=400, **_: "Sponsor caption.",
+        )
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
+            resp = c.get("/runs/run-ov/card/swim-1/sponsor-variant")
+            assert resp.status_code == 200
+        ov = captured["user_overrides"]
+        assert ov["accent"] == "#C9A227"
+        assert ov["photo_pos"] == "left top"
+        assert "hide_sponsor" not in ov
+        assert captured["sponsor_name"] == "Acme Sports"
+
 
 # ---------------------------------------------------------------------------
 # 4. The grouped pack page surfaces the sponsor-variant button per card

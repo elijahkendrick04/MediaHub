@@ -25,6 +25,14 @@ from mediahub.pipeline.interpreter_bridge import _detect_final_round
         ("EVENT 101 Women's 50m Breaststroke", "", 0),
         ("EVENT 102 Men's 400m Freestyle", "", 0),
         ("", "", 0),
+        # A "Timed Final(s)" is the single all-in final (rank 0) and a
+        # semi-final is not a final at all — the bare FINAL token in these
+        # headers must not mislabel them as the A/main final.
+        ("Event 12 Women's 100m Freestyle Timed Finals", "", 0),
+        ("EVENT 20 Mixed 50m Butterfly Timed Final", "", 0),
+        ("EVENT 130 SEMI-FINAL OF EVENT 101 Women's 50m Breaststroke", "", 0),
+        ("EVENT 130 SEMI FINAL OF EVENT 101 Women's 50m Breaststroke", "", 0),
+        ("EVENT 130 Semifinals of Event 101 Women's 50m Breaststroke", "", 0),
     ],
 )
 def test_detect_final_round(header: str, label: str, rank: int) -> None:

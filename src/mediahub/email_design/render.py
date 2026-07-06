@@ -44,6 +44,48 @@ def _esc_attr(s: Any) -> str:
     return str(_escape("" if s is None else str(s)))
 
 
+_ALLOWED_SCHEMES = ("http://", "https://", "mailto:")
+
+
+def _safe_href(value: Any) -> str:
+    """URL-scheme whitelist for rendered hrefs (stored-XSS defence).
+
+    Attribute escaping alone keeps a ``javascript:`` URL intact — it executes
+    on click in the same-origin preview and on the public page. So, mirroring
+    the align/size enum whitelisting in :mod:`.models`, only ``http``/``https``
+    /``mailto`` URLs plus site-relative paths (``/…``) and fragments (``#…``)
+    survive; anything else renders as ``""`` (the block degrades to plain text
+    or an unlinked element).
+    """
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    # control chars can smuggle a scheme past a prefix check ("java\tscript:")
+    compact = "".join(ch for ch in s if ord(ch) > 32).lower()
+    if compact.startswith(("/", "#")) or compact.startswith(_ALLOWED_SCHEMES):
+        return s
+    return ""
+
+
+def _safe_src(value: Any) -> str:
+    """Like :func:`_safe_href` for image ``src``, additionally allowing inline
+    ``data:image/`` URIs (defence-in-depth for the ``<img>`` sink)."""
+    s = str(value or "").strip()
+    compact = "".join(ch for ch in s if ord(ch) > 32).lower()
+    if compact.startswith("data:image/"):
+        return s
+    return _safe_href(s)
+
+
+def _safe_int(value: Any, default: int) -> int:
+    """Coerce a saved prop to int; malformed values degrade to ``default``
+    instead of 500ing the html/text export (forward-compatible no-op stance)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _band_colors(pal: dict, background: str) -> dict:
     """Resolve the foreground colour set for one section band.
 
@@ -85,7 +127,7 @@ def _band_colors(pal: dict, background: str) -> dict:
 
 
 def _b_heading(p: dict, pal: dict, band: dict) -> str:
-    level = int(p.get("level") or 2)
+    level = min(3, max(1, _safe_int(p.get("level"), 2)))
     size = {1: 24, 2: 19, 3: 16}.get(level, 19)
     return (
         f'<h{level} class="mh-ink" style="margin:0 0 12px 0;font-family:{_FONT};'
@@ -119,7 +161,7 @@ def _b_list(p: dict, pal: dict, band: dict) -> str:
 
 def _b_button(p: dict, pal: dict, band: dict) -> str:
     label = p.get("label") or ""
-    href = p.get("href") or ""
+    href = _safe_href(p.get("href"))
     if not label:
         return ""
     align = p.get("align") if p.get("align") in ("left", "center", "right") else "left"
@@ -144,7 +186,7 @@ def _img_tag(src: str, alt: str, pal: dict, *, width: int = 0, radius: int = 0) 
     w = f' width="{int(width)}"' if width else ' width="100%"'
     rad = f"border-radius:{int(radius)}px;" if radius else ""
     return (
-        f'<img src="{_esc_attr(src)}" alt="{_esc_attr(alt)}"{w} '
+        f'<img src="{_esc_attr(_safe_src(src))}" alt="{_esc_attr(alt)}"{w} '
         f'style="display:block;border:0;outline:none;text-decoration:none;'
         f"max-width:100%;height:auto;{rad}"
         f'background:{pal["surface"]}"/>'
@@ -152,11 +194,11 @@ def _img_tag(src: str, alt: str, pal: dict, *, width: int = 0, radius: int = 0) 
 
 
 def _b_image(p: dict, pal: dict, band: dict) -> str:
-    src = p.get("src") or ""
+    src = _safe_src(p.get("src"))
     alt = p.get("alt") or ""
     caption = p.get("caption") or ""
-    href = p.get("href") or ""
-    width = int(p.get("width") or 0)
+    href = _safe_href(p.get("href"))
+    width = _safe_int(p.get("width"), 0)
     if not src:
         # Degrade to alt/caption text rather than emit a broken image.
         fallback = caption or alt
@@ -176,9 +218,9 @@ def _b_image(p: dict, pal: dict, band: dict) -> str:
 def _b_card(p: dict, pal: dict, band: dict) -> str:
     title = p.get("title") or ""
     body = p.get("body") or ""
-    src = p.get("src") or ""
+    src = _safe_src(p.get("src"))
     alt = p.get("alt") or ""
-    href = p.get("href") or ""
+    href = _safe_href(p.get("href"))
     cta = p.get("cta") or ""
     img_html = ""
     if src:
@@ -216,7 +258,11 @@ def _b_card(p: dict, pal: dict, band: dict) -> str:
 
 
 def _b_stat_row(p: dict, pal: dict, band: dict) -> str:
-    stats = [s for s in (p.get("stats") or []) if str(s.get("value", "")).strip()]
+    stats = [
+        s
+        for s in (p.get("stats") or [])
+        if isinstance(s, dict) and str(s.get("value", "")).strip()
+    ]
     if not stats:
         return ""
     cells = ""
@@ -260,7 +306,11 @@ def _b_quote(p: dict, pal: dict, band: dict) -> str:
 
 
 def _b_fixtures(p: dict, pal: dict, band: dict) -> str:
-    items = [it for it in (p.get("items") or []) if (it.get("name") or it.get("date"))]
+    items = [
+        it
+        for it in (p.get("items") or [])
+        if isinstance(it, dict) and (it.get("name") or it.get("date"))
+    ]
     if not items:
         return ""
     title = p.get("title") or ""
@@ -302,8 +352,8 @@ def _b_sponsor(p: dict, pal: dict, band: dict) -> str:
     if not name and not p.get("logo_src"):
         return ""
     label = p.get("label") or "In partnership with"
-    logo_src = p.get("logo_src") or ""
-    href = p.get("href") or ""
+    logo_src = _safe_src(p.get("logo_src"))
+    href = _safe_href(p.get("href"))
     logo_html = ""
     if logo_src:
         logo_html = _img_tag(logo_src, name or "Sponsor", pal, width=160)
@@ -579,7 +629,7 @@ def _plain_block(block: EmailBlock) -> str:
         bits = [
             f"{s.get('value', '')} {s.get('label', '')}".strip()
             for s in (p.get("stats") or [])
-            if str(s.get("value", "")).strip()
+            if isinstance(s, dict) and str(s.get("value", "")).strip()
         ]
         return "  |  ".join(bits)
     if k == "quote":
@@ -590,6 +640,8 @@ def _plain_block(block: EmailBlock) -> str:
         title = (p.get("title") or "").strip()
         lines = [title] if title else []
         for it in p.get("items") or []:
+            if not isinstance(it, dict):
+                continue
             date = (it.get("date") or "").strip()
             name = (it.get("name") or "").strip()
             venue = (it.get("venue") or "").strip()

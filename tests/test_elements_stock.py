@@ -627,3 +627,45 @@ def test_import_stock_requires_signin(app_env):
             json={"direct_url": "https://example.org/x.jpg", "licence": "CC0"},
         )
     assert resp.status_code == 403
+
+
+def test_thumb_cache_evicts_oldest_past_cap(monkeypatch):
+    """The thumb cache is bounded: past the entry/size cap, oldest-mtime
+    entries are evicted first and the newest survive."""
+    import os
+    import time
+
+    monkeypatch.setattr(stock, "_THUMB_CACHE_MAX_FILES", 3)
+    d = stock._thumb_cache_dir()
+    now = time.time()
+    for i in range(3):
+        p = d / f"old{i}.jpg"
+        p.write_bytes(b"x" * 10)
+        os.utime(p, (now - 3600 * (10 - i), now - 3600 * (10 - i)))
+
+    stock._thumb_cache_put(stock._thumb_cache_key("https://cdn/new.jpg"), b"NEW", "image/jpeg")
+
+    remaining = sorted(f.name for f in d.iterdir())
+    assert len(remaining) == 3  # cap held
+    assert "old0.jpg" not in remaining  # oldest evicted
+    assert any(f.endswith(".jpg") and "old" not in f for f in remaining)  # new entry kept
+
+
+def test_thumb_cache_evicts_on_total_size_cap(monkeypatch):
+    import os
+    import time
+
+    monkeypatch.setattr(stock, "_THUMB_CACHE_MAX_BYTES", 150)
+    d = stock._thumb_cache_dir()
+    now = time.time()
+    oldest = d / "a.jpg"
+    oldest.write_bytes(b"x" * 60)
+    os.utime(oldest, (now - 7200, now - 7200))
+    newer = d / "b.jpg"
+    newer.write_bytes(b"y" * 60)
+    os.utime(newer, (now - 3600, now - 3600))
+
+    stock._thumb_cache_put(stock._thumb_cache_key("https://cdn/c.jpg"), b"z" * 60, "image/jpeg")
+
+    assert not oldest.exists()  # oldest evicted to satisfy the byte cap
+    assert newer.exists()

@@ -132,6 +132,51 @@ class TestSSRF:
         assert fetch_image_bytes("http://127.0.0.1/logo.png") is None
         assert fetch_image_bytes("http://169.254.169.254/x.png") is None
 
+    def test_image_fetch_aborts_streaming_read_at_cap(self, monkeypatch):
+        """The 4MB cap applies WHILE streaming — a huge body is never fully
+        buffered in memory before the check."""
+        import requests
+
+        from mediahub.brand import palette_evidence
+        from mediahub.web_research import safe_fetch
+
+        yielded = {"n": 0}
+
+        class _Resp:
+            status_code = 200
+            headers = {"Content-Type": "image/png"}
+
+            def iter_content(self, size):
+                while True:  # endless body — must be cut off by the cap
+                    yielded["n"] += 1
+                    yield b"x" * size
+
+        monkeypatch.setattr(safe_fetch, "is_url_safe", lambda _u: True)
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp())
+        monkeypatch.setattr(palette_evidence, "_IMAGE_MAX_BYTES", 256 * 1024)
+
+        assert palette_evidence.fetch_image_bytes("https://club.example/huge.png") is None
+        # 64KB chunks against a 256KB cap: the read stopped after ~5 chunks.
+        assert yielded["n"] <= 6
+
+    def test_image_fetch_rejects_oversized_content_length(self, monkeypatch):
+        import requests
+
+        from mediahub.brand import palette_evidence
+        from mediahub.web_research import safe_fetch
+
+        class _Resp:
+            status_code = 200
+            headers = {"Content-Type": "image/png",
+                       "Content-Length": str(palette_evidence._IMAGE_MAX_BYTES + 1)}
+
+            def iter_content(self, size):  # must never be reached
+                raise AssertionError("body read despite oversized Content-Length")
+
+        monkeypatch.setattr(safe_fetch, "is_url_safe", lambda _u: True)
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp())
+        assert palette_evidence.fetch_image_bytes("https://club.example/huge.png") is None
+
 
 # ---------------------------------------------------------------------------
 # Local colour science — pixels → deterministic, provenance-carrying evidence

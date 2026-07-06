@@ -262,3 +262,73 @@ class TestBulkExport:
         c, wm, tmp = client
         _pin(c, "club-a")
         assert c.get("/api/export-jobs/" + "f" * 32).status_code == 404
+
+    def test_card_scoped_token_cannot_download_run_zip(self, client):
+        """A 1.18 share token minted for ONE card must not unlock the whole
+        run's export ZIP — only run-wide tokens (no card_id) may."""
+        c, wm, tmp = client
+        _seed_run(tmp / "runs_v4", "run-a1", "club-a")
+        _pin(c, "club-a")
+        kick = c.post("/api/runs/run-a1/bulk-export", json={"formats": ["jpg"]}).get_json()
+        done = _wait_done(c, kick["poll_url"])
+        assert done["status"] == "done"
+        from mediahub.collab import share_tokens as st
+
+        card_share = st.create_share(
+            run_id="run-a1", card_id="card-A", perm=st.PERM_VIEW, created_by="owner"
+        )
+        run_share = st.create_share(run_id="run-a1", perm=st.PERM_VIEW, created_by="owner")
+        anon = c.application.test_client()
+        url = f"/api/runs/run-a1/bulk-export/file?job={kick['job_id']}"
+        # anonymous with no token at all is refused (session OR token contract)
+        assert anon.get(url).status_code == 404
+        assert anon.get(f"{url}&token={card_share.token}").status_code == 404
+        ok = anon.get(f"{url}&token={run_share.token}")
+        assert ok.status_code == 200
+        assert ok.mimetype == "application/zip"
+
+    def test_malformed_formats_and_options_are_not_500(self, client):
+        """Junk client JSON must be a clean 4xx / defaulted request, never an
+        AttributeError 500 inside normalise_key / ExportOptions.from_dict."""
+        c, wm, tmp = client
+        _seed_run(tmp / "runs_v4", "run-a1", "club-a")
+        _pin(c, "club-a")
+        # non-string format entries → filtered out → honest 400
+        resp = c.post("/api/runs/run-a1/bulk-export", json={"formats": [5]})
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "no_valid_formats"
+        # a non-dict options blob falls back to defaults; the job still kicks
+        resp = c.post(
+            "/api/runs/run-a1/bulk-export", json={"formats": ["jpg"], "options": "junk"}
+        )
+        assert resp.status_code == 202
+        assert _wait_done(c, resp.get_json()["poll_url"])["status"] == "done"
+        # same guard on the quick-action route
+        aid = _add_asset(wm, tmp, "club-a")
+        r = c.post(
+            f"/api/media-library/{aid}/quick-action",
+            json={"action": "convert", "format": "png", "options": "junk"},
+        )
+        assert r.status_code == 200
+
+
+class TestUiEntryPoints:
+    """The 1.19 surfaces are reachable from the product (not API-only)."""
+
+    def test_media_library_rows_carry_quick_action_menu(self, client):
+        c, wm, tmp = client
+        _pin(c, "club-a")
+        _add_asset(wm, tmp, "club-a")
+        page = c.get("/media-library")
+        assert page.status_code == 200
+        body = page.get_data(as_text=True)
+        assert "mh-ml-qa" in body  # the per-row Convert control + its JS
+        assert "/quick-action" in body
+        assert 'data-formats-url="/api/export/formats"' in body
+
+    def test_help_page_links_export_and_print_centres(self, client):
+        c, wm, tmp = client
+        _pin(c, "club-a")
+        body = c.get("/help").get_data(as_text=True)
+        assert 'href="/export"' in body
+        assert 'href="/print"' in body

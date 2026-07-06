@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -261,6 +262,22 @@ def _gemini_model() -> str:
     return os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 
 
+def _redacted(text: str, key: Optional[str]) -> str:
+    """Strip the Gemini API key from error text before it rides a
+    ProviderError — messages are logged (ai_director) and surfaced to
+    users via ClaudeUnavailableError, and a requests exception repr
+    embeds the failing URL including its ``?key=…``. Reuses
+    ``media_ai.llm._redact_key``; the lazy import keeps ``ai_core``
+    independently importable.
+    """
+    try:
+        from mediahub.media_ai.llm import _redact_key
+
+        return _redact_key(text, key)
+    except Exception:
+        return text.replace(key, "***REDACTED***") if key and key in text else text
+
+
 def _gemini_thinking_budget() -> int:
     """See ``media_ai.llm._gemini_thinking_budget`` for context.
 
@@ -281,7 +298,12 @@ def _gemini_generation_config(max_tokens: int, *, temperature: float = 0.7) -> d
     cfg: dict = {"maxOutputTokens": int(max_tokens), "temperature": temperature}
     model = _gemini_model()
     if "2.5" in model or "3." in model:
-        cfg["thinkingConfig"] = {"thinkingBudget": _gemini_thinking_budget()}
+        budget = _gemini_thinking_budget()
+        # Pro models reject thinkingBudget < 128 (400 INVALID_ARGUMENT);
+        # clamp there. Flash models keep 0 (thinking off).
+        if "pro" in model:
+            budget = max(128, budget)
+        cfg["thinkingConfig"] = {"thinkingBudget": budget}
     return cfg
 
 
@@ -311,9 +333,9 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
             timeout=45,
         )
     except Exception as e:
-        raise ProviderError(f"Gemini HTTP error: {e}") from e
+        raise ProviderError(f"Gemini HTTP error: {_redacted(str(e), key)}") from e
     if r.status_code != 200:
-        raise ProviderError(f"Gemini HTTP {r.status_code}: {r.text[:240]}")
+        raise ProviderError(f"Gemini HTTP {r.status_code}: {_redacted(r.text[:240], key)}")
     try:
         data = r.json()
     except Exception as e:
@@ -374,9 +396,9 @@ def _ask_gemini_with_tools(
                 timeout=60,
             )
         except Exception as e:
-            raise ProviderError(f"Gemini tool HTTP error: {e}") from e
+            raise ProviderError(f"Gemini tool HTTP error: {_redacted(str(e), key)}") from e
         if r.status_code != 200:
-            raise ProviderError(f"Gemini tool HTTP {r.status_code}: {r.text[:240]}")
+            raise ProviderError(f"Gemini tool HTTP {r.status_code}: {_redacted(r.text[:240], key)}")
         data = r.json()
         cands = data.get("candidates") or []
         if not cands:
@@ -597,26 +619,27 @@ def _fallback_chain(primary: Optional[str]) -> list[str]:
     return chain
 
 
+# Word-bounded transient markers. Bare substrings misclassified permanent
+# errors: "rate" matched 'generateContent' (the Gemini 404 body for a bad
+# model name) and 'moderate'/'accurate'; "auth" matched 'author'. A permanent
+# config error must surface as-is, not get retried on the other provider.
+_TRANSIENT_RE = re.compile(
+    r"\b(429|401|403|50[0-4])\b"
+    r"|rate.?limit"
+    r"|quota"
+    r"|resource.?exhausted"
+    r"|unauthori[sz]ed"
+    r"|timed?.?out"
+    r"|overloaded"
+)
+
+
 def _is_transient(err_msg: str) -> bool:
     """Heuristic: should we retry on the next configured provider?
-    Auth errors, rate limits, and HTTP 5xx warrant trying another
-    provider; everything else is the model returning legit nonsense
-    and won't fix on a retry."""
-    s = err_msg.lower()
-    return (
-        "429" in s
-        or "rate" in s
-        or "401" in s
-        or "403" in s
-        or "auth" in s
-        or " 500" in s
-        or "502" in s
-        or "503" in s
-        or "504" in s
-        or "timeout" in s
-        or "timed out" in s
-        or "overloaded" in s
-    )
+    Auth errors, rate limits, timeouts, and HTTP 5xx warrant trying
+    another provider; everything else is the model returning legit
+    nonsense and won't fix on a retry."""
+    return bool(_TRANSIENT_RE.search(err_msg.lower()))
 
 
 def ask(system: str, user: str, *, max_tokens: int = 800, provider: Optional[str] = None) -> str:

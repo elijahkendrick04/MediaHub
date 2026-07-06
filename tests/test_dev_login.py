@@ -101,6 +101,23 @@ def test_correct_credentials_grant_unrestricted_session(client):
     assert "Operator mode" in page
 
 
+def test_operator_login_rotates_session(client):
+    """The highest-privilege grant must follow the same session-rotation
+    convention as login_post: pre-auth session state is dropped before the
+    operator identity is established."""
+    csrf = _csrf(client)
+    with client.session_transaction() as sess:
+        sess["pre_login_marker"] = "planted"
+    resp = client.post(
+        "/developer",
+        data={"dev_user": TEST_USER, "dev_password": TEST_PASSWORD, **csrf},
+    )
+    assert resp.status_code in (302, 303)
+    with client.session_transaction() as sess:
+        assert "pre_login_marker" not in sess  # pre-auth state dropped
+        assert sess.get("dev_operator") is True
+
+
 def test_wrong_password_rejected_and_grants_nothing(client):
     resp = client.post(
         "/developer",
@@ -116,6 +133,19 @@ def test_wrong_username_rejected(client):
     resp = client.post(
         "/developer",
         data={"dev_user": "someone-else", "dev_password": TEST_PASSWORD, **_csrf(client)},
+    )
+    assert resp.status_code == 401
+    with client.session_transaction() as sess:
+        assert sess.get("dev_operator") is None
+
+
+def test_non_ascii_username_rejected_not_500(client):
+    # hmac.compare_digest raises TypeError on non-ASCII str input; the
+    # comparison must run on UTF-8 bytes so this returns the 401 error
+    # page, not a 500.
+    resp = client.post(
+        "/developer",
+        data={"dev_user": "ékandani", "dev_password": TEST_PASSWORD, **_csrf(client)},
     )
     assert resp.status_code == 401
     with client.session_transaction() as sess:

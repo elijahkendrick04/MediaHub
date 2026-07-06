@@ -54,26 +54,6 @@ def load_baseline() -> dict:
         return {}
 
 
-def metrics_from_artifacts(artifacts: dict | None) -> dict | None:
-    """Extract the STABLE structural metrics from a finished sweep's artifacts.
-    Returns None when the primary-flow output isn't present, so the check no-ops
-    rather than false-firing."""
-    if not artifacts:
-        return None
-    export = artifacts.get("export_json")
-    if not isinstance(export, dict):
-        return None                     # no export captured -> nothing reliable
-    cards = export.get("cards")
-    if not isinstance(cards, (list, tuple)):
-        return None
-    m = {"cards": len(cards), "export_ok": True}
-    # achievements: prefer the recognition report, else leave unset.
-    rr = artifacts.get("recognition_report")
-    if isinstance(rr, dict) and rr.get("n_achievements") is not None:
-        m["achievements"] = int(rr["n_achievements"])
-    return m
-
-
 def check(metrics: dict | None, *, completed: bool, golden: bool) -> Finding | None:
     """Diff cold golden-input `metrics` against the COMMITTED baseline.
 

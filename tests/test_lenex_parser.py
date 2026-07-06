@@ -354,3 +354,45 @@ class TestRegistration:
     def test_sniff_format_random_xml_is_not_lenex(self) -> None:
         data = b'<?xml version="1.0"?><results><row place="1"/></results>'
         assert _sniff_format(data) != "lenex"
+
+
+# ---------------------------------------------------------------------------
+# XML entity-expansion guard — DOCTYPE-bearing payloads are rejected unparsed
+# ---------------------------------------------------------------------------
+
+
+class TestDoctypeGuard:
+    _BOMB = (
+        b'<?xml version="1.0"?>\n'
+        b"<!DOCTYPE lolz [\n"
+        b'  <!ENTITY a "aaaaaaaaaa">\n'
+        b'  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">\n'
+        b'  <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">\n'
+        b"]>\n"
+        b'<LENEX version="3.0"><MEETS><MEET name="&c;"/></MEETS></LENEX>'
+    )
+
+    def test_doctype_payload_is_rejected_not_parsed(self) -> None:
+        # A billion-laughs-class payload must yield an honest lenex-xml-unsafe
+        # flag, never an expanded parse (LENEX never carries a DTD).
+        meet = parse_lenex(self._BOMB)
+        assert meet.events == []
+        assert meet.overall_confidence == 0.0
+        reasons = [f["reason"] for f in meet.needs_review]
+        assert reasons == ["lenex-xml-unsafe"]
+
+    def test_lowercase_doctype_also_rejected(self) -> None:
+        payload = self._BOMB.replace(b"<!DOCTYPE", b"<!doctype")
+        meet = parse_lenex(payload)
+        assert [f["reason"] for f in meet.needs_review] == ["lenex-xml-unsafe"]
+
+    def test_utf16_doctype_also_rejected(self) -> None:
+        # Re-encoding the payload must not dodge the guard.
+        payload = self._BOMB.decode("utf-8").encode("utf-16-le")
+        meet = parse_lenex(payload)
+        assert [f["reason"] for f in meet.needs_review] == ["lenex-xml-unsafe"]
+
+    def test_clean_lenex_still_parses(self) -> None:
+        meet = parse_lenex(_fixture("mini_results.lef"))
+        assert meet.events, "a legitimate DOCTYPE-free LENEX file must still parse"
+        assert not any(f["reason"] == "lenex-xml-unsafe" for f in meet.needs_review)

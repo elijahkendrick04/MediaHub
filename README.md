@@ -1,6 +1,6 @@
 # MediaHub
 
-> A content-strategy brain for sports teams — it works out what a team should post, drafts it, brands it, and (where allowed) publishes it. Swimming results → content is the shipped wedge; multi-sport and autonomy-first are the direction (see the [roadmap](docs/ROADMAP.md)).
+> A content-strategy brain for sports teams — it works out what a team should post, drafts it, brands it, and readies it for posting (a human approves and posts every piece; MediaHub never publishes to a social account). Swimming results → content is the shipped wedge; multi-sport and autonomy-first are the direction (see the [roadmap](docs/ROADMAP.md)).
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-green.svg)](https://flask.palletsprojects.com/)

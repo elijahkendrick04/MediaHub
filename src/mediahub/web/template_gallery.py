@@ -892,6 +892,14 @@ _GALLERY_JS = """<script>
   var cards = grid.querySelectorAll('.mh-arch-card');
   function apply(cat){
     cat = cat || 'all';
+    /* Mirror valid_category() server-side: junk never empties the gallery. */
+    if(cat !== 'all'){
+      var known = false;
+      for(var v=0;v<chips.length;v++){
+        if(chips[v].getAttribute('data-cat') === cat){ known = true; break; }
+      }
+      if(!known) cat = 'all';
+    }
     var shown = 0;
     for(var i=0;i<cards.length;i++){
       var c = cards[i];

@@ -102,9 +102,12 @@ def draft_copy(facts: SiteFacts, archetype: str, *, tone: str = "editorial") -> 
     except Exception as e:
         raise ClaudeUnavailableError(f"Site copy drafting failed: {e}") from e
 
+    # A provider that answered but produced no parseable JSON must be an honest
+    # error, not silently-empty sections that look like a successful draft.
+    if not isinstance(raw, dict) or not raw:
+        raise ClaudeUnavailableError("Site copy drafting returned no parseable copy.")
+
     out: dict[str, str] = {}
-    if not isinstance(raw, dict):
-        return out
     for s in outline:
         key = s["key"]
         text = str(raw.get(key, "")).strip()

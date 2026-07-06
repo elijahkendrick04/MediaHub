@@ -257,6 +257,41 @@ class TestGroupedPack(unittest.TestCase):
         self.assertIn("main_feed", counts)
         self.assertGreaterEqual(counts["main_feed"], 0)
 
+    def test_runs_dir_fallback_is_data_dir_derived(self):
+        """runs_dir=None must resolve the sidecar under DATA_DIR/runs_v4
+        (env-derived, like the web layer) — not <repo>/src/runs_v4."""
+        import json as _json
+        from unittest import mock
+
+        from mediahub.content_pack.builder import build_grouped_pack
+
+        run_data = self._make_run_data()
+        run_data["recognition_report"]["ranked_achievements"][0]["achievement"][
+            "swim_id"
+        ] = "card1"
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td) / "runs_v4"
+            runs.mkdir()
+            (runs / "test-run__workflow.json").write_text(
+                _json.dumps(
+                    {
+                        "card1": {
+                            "card_id": "card1",
+                            "status": "approved",
+                            "last_changed_at": "2026-05-10T11:00:00Z",
+                        }
+                    }
+                )
+            )
+            with mock.patch.dict(os.environ, {"DATA_DIR": td}, clear=False):
+                os.environ.pop("RUNS_DIR", None)
+                grouped = build_grouped_pack(run_data, "test")
+        statuses = {
+            (item.get("achievement") or {}).get("swimmer_name", ""): item.get("wf_status")
+            for item in grouped["main_feed"]
+        }
+        self.assertEqual(statuses.get("Alice"), "approved")
+
 
 class TestVoiceProfile(unittest.TestCase):
     def test_create_default(self):

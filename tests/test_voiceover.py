@@ -311,6 +311,32 @@ def test_route_approved_card_synthesizes(app_env):
     assert audio.mimetype == "audio/mpeg"
 
 
+def test_toolbar_voiceover_control_gated_on_flag(app_env):
+    """The Content builder's per-card toolbar carries the Voiceover control
+    (audio + MP3/SRT downloads via api_card_voiceover) only when the operator
+    opted in with MEDIAHUB_VOICEOVER=1 — the route was otherwise unreachable
+    from the product (no url_for/fetch caller anywhere)."""
+    app, wm, tmp_path, monkeypatch = app_env  # fixture sets MEDIAHUB_VOICEOVER=1
+    with app.test_request_context("/"):
+        html = wm._render_card_creative_toolbar("runV", "c1")
+    assert "voiceoverToggle" in html
+    assert "voiceover-panel" in html
+    assert "/api/runs/runV/card/c1/voiceover" in html
+    monkeypatch.delenv("MEDIAHUB_VOICEOVER", raising=False)
+    with app.test_request_context("/"):
+        html_off = wm._render_card_creative_toolbar("runV", "c1")
+    assert "voiceoverToggle" not in html_off
+    assert "voiceover-panel" not in html_off
+
+
+def test_creative_js_ships_voiceover_toggle():
+    """The shared creative JS defines the client half of the control."""
+    import mediahub.web.web as wm
+
+    js = wm._card_creative_js()
+    assert "function voiceoverToggle" in js
+
+
 # ---------------------------------------------------------------------------
 # TTS provider seam (P0.4) — a local-capable slot for the speech surface
 # ---------------------------------------------------------------------------

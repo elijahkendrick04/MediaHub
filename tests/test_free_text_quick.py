@@ -46,6 +46,62 @@ def _patch_ask(monkeypatch, *, returns=None, raises=None):
 
 
 # ---------------------------------------------------------------------------
+# Chat session tenant scoping (workspace isolation)
+# ---------------------------------------------------------------------------
+
+
+def test_chat_sessions_are_profile_scoped(env):
+    from mediahub.free_text_chat.session import (
+        can_access_session,
+        create_session,
+        list_sessions,
+        load_session,
+    )
+
+    a = create_session(profile_id="org-a")
+    b = create_session(profile_id="org-b")
+
+    # Owner sees only their own chat in the listing.
+    ids_a = {r["chat_id"] for r in list_sessions(profile_id="org-a")}
+    assert a.chat_id in ids_a and b.chat_id not in ids_a
+
+    # Guard: the other org's chat is refused; own chat is allowed.
+    assert can_access_session(load_session(a.chat_id), "org-a") is True
+    assert can_access_session(load_session(a.chat_id), "org-b") is False
+    assert can_access_session(None, "org-a") is False
+
+
+def test_legacy_ownerless_chat_stays_accessible(env):
+    """Chats persisted before scoping existed carry no profile_id — they
+    must stay readable (mirrors _can_access_run's ownerless-run rule)."""
+    from mediahub.free_text_chat.session import (
+        can_access_session,
+        create_session,
+        list_sessions,
+        load_session,
+    )
+
+    legacy = create_session()  # no profile stamped
+    assert load_session(legacy.chat_id).profile_id == ""
+    assert can_access_session(load_session(legacy.chat_id), "org-a") is True
+    ids = {r["chat_id"] for r in list_sessions(profile_id="org-a")}
+    assert legacy.chat_id in ids
+    # No-orgs sandbox (active pid None) keeps everything reachable.
+    assert can_access_session(load_session(legacy.chat_id), None) is True
+
+
+def test_profile_id_survives_save_load_round_trip(env):
+    from mediahub.free_text_chat.session import create_session, load_session, save_session
+
+    s = create_session(profile_id="org-a")
+    s.add_user_message("make a sponsor thank-you")
+    save_session(s)
+    loaded = load_session(s.chat_id)
+    assert loaded.profile_id == "org-a"
+    assert loaded.messages[0]["content"] == "make a sponsor thank-you"
+
+
+# ---------------------------------------------------------------------------
 # build_brief_from_prompt — one-shot interpreter
 # ---------------------------------------------------------------------------
 

@@ -228,6 +228,19 @@ def test_render_body_escapes_inputs():
     assert "&#34;" in html or "&quot;" in html
 
 
+def test_gallery_js_mirrors_server_junk_category_fallback():
+    """apply() must collapse an unknown ?category= to 'all' client-side.
+
+    The server's valid_category() guarantees junk never empties the gallery;
+    the popstate/on-load JS path uses the raw URL param, so it needs the same
+    fallback or ?category=bogus hides every card.
+    """
+    js = G._GALLERY_JS
+    assert "if(!known) cat = 'all';" in js
+    # The fallback runs before any card is toggled.
+    assert js.find("if(!known)") < js.find("classList.toggle('is-hidden'")
+
+
 def test_heading_order_valid():
     """Hero h1 → section h2 → card h3 (axe heading-order)."""
     html = G.render_gallery_body(gallery_url="/templates", make_url="/make")

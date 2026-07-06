@@ -519,6 +519,66 @@ class TestArtefactsAreAIMade(unittest.TestCase):
         self.assertIn("parent-and-supporter newsletter", joined)
         self.assertIn("Thank the sponsor Acme Sports", joined)
 
+    def test_artefacts_carry_ai_source_marker(self):
+        from unittest import mock
+        os.environ["MEDIAHUB_TURNINTO_PARALLEL"] = "0"
+        try:
+            with mock.patch("mediahub.web.ai_caption.call_claude",
+                            return_value="AI-WRITTEN copy"), \
+                 mock.patch("mediahub.media_ai.llm.generate",
+                            return_value="AI-LONGFORM copy"), \
+                 mock.patch("mediahub.media_ai.llm.generate_json",
+                            return_value={"subject": "S", "preheader": "P"}):
+                from mediahub.turn_into import turn_meet_into_pack
+                pack = turn_meet_into_pack(
+                    _run_data(),
+                    _profile(sponsor="Acme Sports",
+                             notes="Next meet: Nationals — 2026-06-10"),
+                    deterministic=False,
+                )
+        finally:
+            os.environ.pop("MEDIAHUB_TURNINTO_PARALLEL", None)
+        for art in pack["artefacts"]:
+            self.assertEqual(art.get("source"), "ai", art["type"])
+
+    def test_llm_failure_marks_artefacts_fallback_not_silent(self):
+        """A transient provider error must not ship template copy that looks
+        AI-written: the artefact is marked source='fallback' and its notes say
+        why (the review UI badges these)."""
+        from unittest import mock
+        os.environ["MEDIAHUB_TURNINTO_PARALLEL"] = "0"
+        try:
+            boom = RuntimeError("provider down")
+            with mock.patch("mediahub.web.ai_caption.call_claude",
+                            side_effect=boom), \
+                 mock.patch("mediahub.media_ai.llm.generate",
+                            side_effect=boom), \
+                 mock.patch("mediahub.media_ai.llm.generate_json",
+                            side_effect=boom):
+                from mediahub.turn_into import turn_meet_into_pack
+                pack = turn_meet_into_pack(
+                    _run_data(),
+                    _profile(sponsor="Acme Sports",
+                             notes="Next meet: Nationals — 2026-06-10"),
+                    deterministic=False,
+                )
+        finally:
+            os.environ.pop("MEDIAHUB_TURNINTO_PARALLEL", None)
+        self.assertEqual(len(pack["artefacts"]), 8)
+        for art in pack["artefacts"]:
+            self.assertEqual(art.get("source"), "fallback", art["type"])
+            self.assertTrue(
+                any("template" in n and "not AI-written" in n for n in art["notes"]),
+                f"no honesty note on {art['type']}",
+            )
+
+    def test_deterministic_pack_is_marked_deterministic(self):
+        from mediahub.turn_into import turn_meet_into_pack
+
+        pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
+        for art in pack["artefacts"]:
+            self.assertEqual(art.get("source"), "deterministic", art["type"])
+
     def test_aggregate_briefs_are_non_empty(self):
         from mediahub.turn_into.templates import _narrate_brief
         cases = [

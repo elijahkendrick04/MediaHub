@@ -213,7 +213,7 @@ def _resolve_tirefs(
 
     events = sorted(_load_event_numbers().keys())
     if not events or not members:
-        return {}
+        return {}, {}
 
     rosters: dict[str, dict[str, dict]] = {}
     fetches = 0

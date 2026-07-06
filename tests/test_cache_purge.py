@@ -15,16 +15,11 @@ from pathlib import Path
 
 import pytest
 
-DEV_KEY = "operator-key-for-cache-tests"
 PASSWORD = "twelve-chars-long"
 
 
-def _make_app(monkeypatch, tmp_path, *, dev_key=DEV_KEY):
+def _make_app(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    if dev_key is None:
-        monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    else:
-        monkeypatch.setenv("MEDIAHUB_DEV_KEY", dev_key)
     from mediahub.web.web import create_app
 
     app = create_app()
@@ -77,7 +72,7 @@ def test_purge_all_caches_tolerates_empty_deployment(monkeypatch, tmp_path):
 
 
 def test_route_requires_operator(monkeypatch, tmp_path):
-    app = _make_app(monkeypatch, tmp_path, dev_key=None)
+    app = _make_app(monkeypatch, tmp_path)
     c = app.test_client()
 
     # Anonymous → bounced to developer sign-in, nothing purged.
@@ -130,6 +125,33 @@ def test_purge_clears_graphic_render_cache_on_disk(monkeypatch, tmp_path):
     assert "graphic_render_cache" in report["sections"]
     assert report["sections"]["graphic_render_cache"]["files_deleted"] >= 1
     assert not (render_cache / "deadbeef.png").exists()
+
+
+def test_purge_covers_newer_cache_roots(monkeypatch, tmp_path):
+    """document_cache, site_cache, asr_cache and stock_thumb_cache are all
+    re-derivable and must be enrolled in the site-wide purge.
+
+    Regression: these roots were added after the purge shipped and were
+    silently skipped (and under-counted on the settings card).
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from mediahub.privacy.cache_purge import cache_roots, purge_all_caches
+
+    labels = {label for label, _ in cache_roots()}
+    expected = {"document_cache", "site_cache", "asr_cache", "stock_thumb_cache"}
+    assert expected <= labels
+
+    for name in ("document_cache", "site_cache", "asr_cache", "stock_thumb_cache"):
+        d = tmp_path / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "entry.bin").write_bytes(b"cached")
+
+    report = purge_all_caches()
+
+    for name in expected:
+        assert name in report["sections"], name
+        assert report["sections"][name]["files_deleted"] >= 1, name
+        assert not (tmp_path / name / "entry.bin").exists()
 
 
 def test_purge_clears_in_process_module_caches(monkeypatch, tmp_path):

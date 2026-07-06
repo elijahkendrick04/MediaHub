@@ -140,6 +140,7 @@ def test_imagen_predict_request_shape(monkeypatch):
         import json
 
         captured["url"] = url
+        captured["headers"] = headers or {}
         captured["payload"] = json.loads(data)
         return _Resp()
 
@@ -153,8 +154,10 @@ def test_imagen_predict_request_shape(monkeypatch):
     assert params["sampleCount"] == 1
     assert params["personGeneration"] == "dont_allow"
     assert ":predict" in captured["url"]
-    # Key is on the query string, never echoed back to us in the manifest.
-    assert "key=test-key" in captured["url"]
+    # Key travels in the x-goog-api-key header, never the URL — a URL-borne
+    # key would ride into every exception repr / access log.
+    assert "test-key" not in captured["url"]
+    assert captured["headers"].get("x-goog-api-key") == "test-key"
 
 
 def test_imagen_predict_no_key_returns_empty(monkeypatch):

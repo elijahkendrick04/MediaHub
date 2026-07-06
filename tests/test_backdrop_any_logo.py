@@ -180,6 +180,40 @@ def test_svg_logo_serves_as_svg(client):
     assert "svg" in asset.headers["Content-Type"]
 
 
+def test_logo_serve_headers_private_and_sandboxed(client):
+    """Session-gated logo responses must never be shared-cacheable
+    ('private', not 'public'), and every logo/silhouette serve carries
+    CSP sandbox so a script-bearing uploaded SVG can't execute on direct
+    navigation (global CSP allows 'unsafe-inline')."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        "<script>alert(1)</script>"
+        '<circle cx="50" cy="50" r="40" fill="#1e63c8"/></svg>'
+    )
+    meta = _store_bytes("org-svgx", "l_svgx", "svg", svg.encode(), "image/svg+xml")
+    _make_org("org-svgx", [meta])
+    with client.session_transaction() as s:
+        s["active_profile_id"] = "org-svgx"
+
+    # ?bg silhouette: private cache + sandbox.
+    bg = client.get("/organisation/setup/logo/l_svgx?bg=1")
+    assert bg.status_code == 200
+    assert bg.headers.get("Cache-Control", "").startswith("private"), (
+        bg.headers.get("Cache-Control")
+    )
+    assert bg.headers.get("Content-Security-Policy") == "sandbox"
+
+    # Plain serve (SVG passthrough): sandbox present.
+    raw = client.get("/organisation/setup/logo/l_svgx")
+    assert raw.status_code == 200
+    assert raw.headers.get("Content-Security-Policy") == "sandbox"
+
+    # The sibling per-profile route too.
+    raw2 = client.get("/organisation/org-svgx/logo/l_svgx")
+    assert raw2.status_code == 200
+    assert raw2.headers.get("Content-Security-Policy") == "sandbox"
+
+
 # --------------------------------------------------------------------------- #
 # the never-break guarantee — unrenderable / corrupt → transparent pixel, 200
 # --------------------------------------------------------------------------- #

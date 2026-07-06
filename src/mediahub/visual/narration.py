@@ -16,7 +16,7 @@ them like a poolside announcer rather than a phone number:
     "DQ"       →  "DQ"            (non-times pass through verbatim)
 
 **Script-style templates.** The same facts can be spoken in different
-*registers*. Five are offered (``STYLES`` / ``STYLE_DESCRIPTIONS``):
+*registers*. Five are offered (``STYLES``):
 
     standard   balanced poolside-announcer phrasing (the default; byte-
                identical to the pre-style behaviour, so existing caches and
@@ -325,28 +325,9 @@ DEFAULT_STYLE = "standard"
 #: Selectable style names, in display order.
 STYLES: tuple[str, ...] = ("standard", "compact", "verbose", "poetic", "technical")
 
-#: One-line human description per style (for UI dropdowns / docs).
-STYLE_DESCRIPTIONS: dict[str, str] = {
-    "standard": "Balanced poolside-announcer phrasing (the default).",
-    "compact": "Tightest phrasing — clipped facts, abbreviated stats, bare sign-off.",
-    "verbose": "Fuller sentences with result-agnostic connective scaffolding.",
-    "poetic": "Flowing em-dash cadence — rhythm only, never an invented word.",
-    "technical": "Field-labelled, data-forward register (Event: / Result: / Totals:).",
-}
-
 
 def _normalise(name: str | None) -> str:
     return (name or "").strip().lower()
-
-
-def is_valid_style(name: str | None) -> bool:
-    """True when ``name`` selects a registered narration style."""
-    return _normalise(name) in _STYLES
-
-
-def available_styles() -> tuple[str, ...]:
-    """The selectable style names, in display order."""
-    return STYLES
 
 
 def style_from_env() -> str:
@@ -356,7 +337,7 @@ def style_from_env() -> str:
     the narration register is a presentation choice, so an honest fixed
     default is correct here (mirroring the fixed default TTS voice), and a
     typo can never kill a render. Callers that want to *reject* a bad value
-    can gate on ``is_valid_style`` first and surface their own error.
+    can check membership in ``STYLES`` first and surface their own error.
     """
     name = _normalise(os.environ.get(_ENV_VAR))
     return name if name in _STYLES else DEFAULT_STYLE
@@ -386,7 +367,7 @@ def _card_line(card_props: dict, spec: _Style) -> str:
 def story_script(card_props: dict, brand: dict, *, style: str | None = None) -> str:
     """Narration for a single story card: the card line, then the club.
 
-    ``style`` selects the register (see ``STYLES`` / ``STYLE_DESCRIPTIONS``);
+    ``style`` selects the register (see ``STYLES``);
     ``None`` honours ``MEDIAHUB_NARRATION_STYLE`` (default ``standard``, which
     is byte-identical to the pre-style behaviour). The script stays a fixed,
     fact-only template — the style changes only the phrasing, never the facts.
@@ -473,8 +454,5 @@ __all__ = [
     "reel_script",
     "STYLES",
     "DEFAULT_STYLE",
-    "STYLE_DESCRIPTIONS",
-    "available_styles",
     "style_from_env",
-    "is_valid_style",
 ]

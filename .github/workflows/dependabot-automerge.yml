@@ -51,12 +51,21 @@ jobs:
               # Every check run on the head commit must be completed and
               # green (success/neutral/skipped) — and there must be at least
               # one, so a PR whose checks haven't started yet is never merged.
+              # --paginate emits ONE array per page; jq -s 'add' folds them
+              # into a single array so the counts below stay single integers
+              # even when a head commit has >100 check runs.
               runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --paginate \
-                     --jq '[.check_runs[] | {s: .status, c: .conclusion}]')
+                     --jq '[.check_runs[] | {s: .status, c: .conclusion}]' \
+                     | jq -s 'add // []')
               total=$(jq 'length' <<<"$runs")
               not_green=$(jq '[.[] | select(.s != "completed"
                               or ((.c == "success" or .c == "neutral" or .c == "skipped") | not))]
                               | length' <<<"$runs")
+              # Fail safe: if either count is not a plain integer, never merge.
+              if ! [[ "$total" =~ ^[0-9]+$ && "$not_green" =~ ^[0-9]+$ ]]; then
+                echo "skip  #$num ($title): unparseable check-run counts (total=$total not_green=$not_green)"
+                continue
+              fi
               if [ "$total" -eq 0 ] || [ "$not_green" -ne 0 ]; then
                 echo "skip  #$num ($title): $total checks, $not_green not green"
                 continue

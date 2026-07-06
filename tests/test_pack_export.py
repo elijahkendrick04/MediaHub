@@ -315,6 +315,50 @@ class TestBuildPackExport:
         assert "content-pack-run-1/metadata.json" in zf.namelist()
         assert json.loads(zf.read("content-pack-run-1/metadata.json"))["cards"] == []
 
+    def test_svg_sidecar_bundled_and_in_manifest(self, tmp_path):
+        """An on-disk <format>.svg sidecar (MEDIAHUB_SVG_SIDECAR) rides into
+        the ZIP beside its PNG and is listed in the manifest entry."""
+        vdir = self._vdir(tmp_path)
+        (vdir / "brief_a" / "story.svg").write_text("<svg/>", encoding="utf-8")
+        res = pe.build_pack_export("run-1", visuals_dir=vdir)
+        zf = zipfile.ZipFile(io.BytesIO(res.zip_bytes))
+        names = set(zf.namelist())
+        svg_names = [n for n in names if n.endswith(".svg")]
+        assert len(svg_names) == 1
+        assert svg_names[0].endswith("/story.svg") and "/cards/01-" in svg_names[0]
+        by_cid = {c["content_item_id"]: c for c in res.manifest["cards"]}
+        fmts = {f["format"]: f for f in by_cid["card-A"]["formats"]}
+        assert fmts["story"]["svg_file"].endswith("/story.svg")
+        # Formats without a sidecar carry no svg_file key.
+        assert "svg_file" not in fmts["feed_square"]
+        assert "svg_file" not in {f["format"]: f for f in by_cid["card-B"]["formats"]}["feed_portrait"]
+
+    def test_rejected_card_excluded_from_zip_and_manifest(self, tmp_path):
+        """A human rejected card-B — its images and caption must not ship."""
+        res = pe.build_pack_export(
+            "run-1",
+            visuals_dir=self._vdir(tmp_path),
+            statuses={"card-A": "approved", "card-B": "rejected"},
+            captions={"card-B": "should not ship"},
+        )
+        assert res.card_count == 1
+        cids = [c["content_item_id"] for c in res.manifest["cards"]]
+        assert cids == ["card-A"]
+        zf = zipfile.ZipFile(io.BytesIO(res.zip_bytes))
+        # Only card-A's three formats made it in; no caption.txt for card-B.
+        assert sum(1 for n in zf.namelist() if n.endswith(".png")) == 3
+        assert not any(n.endswith("/caption.txt") for n in zf.namelist())
+
+    def test_pending_card_retained_with_status_in_manifest(self, tmp_path):
+        res = pe.build_pack_export(
+            "run-1",
+            visuals_dir=self._vdir(tmp_path),
+            statuses={"card-A": "approved", "card-B": "pending"},
+        )
+        assert res.card_count == 2
+        by_cid = {c["content_item_id"]: c for c in res.manifest["cards"]}
+        assert by_cid["card-B"]["status"] == "pending"
+
     def test_path_traversal_in_title_is_neutralised(self, tmp_path):
         vdir = tmp_path / "visuals"
         _write_card(vdir, "brief_evil", content_item_id="card-evil",

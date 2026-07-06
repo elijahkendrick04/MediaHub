@@ -148,6 +148,35 @@ def test_png_cache_key_no_dimension_html_collision():
     assert a != b
 
 
+def test_renderer_generation_salt_folds_into_key(monkeypatch):
+    # A renderer-environment change (font refresh / Chromium bump) must move
+    # every key, so persisted pre-upgrade PNGs stop being served as hits.
+    base = rc.png_cache_key("<html>card</html>", 1080, 1350, 2)
+    monkeypatch.setattr(rc, "_salt_cache", "deadbeefdeadbeef")
+    assert rc.png_cache_key("<html>card</html>", 1080, 1350, 2) != base
+
+
+def test_renderer_generation_is_cached_and_stable():
+    a = rc._renderer_generation()
+    b = rc._renderer_generation()
+    assert a == b
+    assert len(a) == 16
+
+
+def test_compute_renderer_generation_tracks_fonts(tmp_path):
+    d = tmp_path / "fonts"
+    d.mkdir()
+    empty = rc._compute_renderer_generation(d)
+    (d / "Anton.woff2").write_bytes(b"font-bytes-v1")
+    with_font = rc._compute_renderer_generation(d)
+    assert with_font != empty
+    # Unchanged environment → stable digest (keys keep hitting).
+    assert rc._compute_renderer_generation(d) == with_font
+    # A refreshed font file (new bytes → new size/mtime) changes the digest.
+    (d / "Anton.woff2").write_bytes(b"font-bytes-v2-longer")
+    assert rc._compute_renderer_generation(d) != with_font
+
+
 # ---------------------------------------------------------------------------
 # PNG-stage store / get
 # ---------------------------------------------------------------------------

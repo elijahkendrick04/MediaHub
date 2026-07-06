@@ -130,3 +130,64 @@ def test_payload_envelope_carries_delivery_id(env, monkeypatch):
     body = json.loads(sent[0]["body"])
     assert body["id"] == ids[0] and body["type"] == "card.approved"
     assert body["data"]["card_id"] == "c1"
+
+
+def _resolver(monkeypatch, mapping):
+    import socket
+
+    def fake_getaddrinfo(host, *a, **k):
+        ip = mapping.get(host)
+        if ip is None:
+            raise socket.gaierror(f"no such host: {host}")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+
+def test_http_post_refuses_internal_host(monkeypatch):
+    # Real _http_post (not the test double): a host resolving to a private IP
+    # is refused before any connection is attempted.
+    import urllib3
+
+    _resolver(monkeypatch, {"hook.test": "10.0.0.9"})
+
+    def _boom(*a, **k):
+        raise AssertionError("no connection may be made for a blocked host")
+
+    monkeypatch.setattr(urllib3, "HTTPSConnectionPool", _boom)
+    monkeypatch.setattr(urllib3, "HTTPConnectionPool", _boom)
+    code, err = delivery._http_post("https://hook.test/h", b"{}", {})
+    assert code is None
+    assert "SSRF" in err
+
+
+def test_http_post_pins_ip_and_never_follows_redirects(monkeypatch):
+    import urllib3
+
+    _resolver(monkeypatch, {"hook.test": "93.184.216.34"})
+    calls = []
+
+    class _Resp:
+        status = 302
+        headers = {"Location": "http://169.254.169.254/"}
+
+    class _Pool:
+        def __init__(self, host, port=None, server_hostname=None, **kw):
+            calls.append({"ip": host, "port": port, "sni": server_hostname})
+
+        def urlopen(self, method, path, body=None, headers=None, redirect=True, **kw):
+            calls[-1].update({"method": method, "path": path, "redirect": redirect,
+                              "host_header": (headers or {}).get("Host")})
+            return _Resp()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(urllib3, "HTTPSConnectionPool", _Pool)
+    code, err = delivery._http_post("https://hook.test/h", b"{}", {"X-MediaHub-Event": "e"})
+    assert code == 302 and err == "HTTP 302"  # redirect reported, not followed
+    assert len(calls) == 1
+    assert calls[0]["ip"] == "93.184.216.34"  # pinned to the validated IP
+    assert calls[0]["sni"] == "hook.test"
+    assert calls[0]["host_header"] == "hook.test"
+    assert calls[0]["redirect"] is False

@@ -130,3 +130,19 @@ def test_needs_disproof_is_excluded_from_the_fix_loop(temp_ledger):
     report.quarantine_needs_disproof("fp0001", conclusion="not a bug", coder_attempts=1)
     open_fps = [b["fingerprint"] for b in fix_loop._open_bugs(limit=10)]
     assert "fp0001" not in open_fps
+
+
+def test_bugs_md_surfaces_quarantine_age_and_human_audit_ownership(temp_ledger):
+    # Nothing transitions quarantined entries automatically (resolution is a
+    # human audit), so BUGS.md must surface the count AND the age of the
+    # backlog — quarantined date per entry, oldest in the summary — so entries
+    # cannot silently pile up forever.
+    report.quarantine_needs_disproof("fp0001", conclusion="not a bug", coder_attempts=2)
+    at = report.load_ledger()["bugs"]["fp0001"]["needs_disproof"]["at"][:10]
+    md = report.render_markdown({"run_id": "r1", "base_url": "http://x"})
+    assert "Needs-disproof (quarantined):** 1" in md
+    assert f"oldest quarantined `{at}`" in md
+    assert f"quarantined `{at}`, after 2 attempt(s)" in md
+    assert "HUMAN audit" in md
+    # honest about the manual queue — no phantom auto-reopen promise
+    assert "awaiting a ground-truth repro" not in md

@@ -143,7 +143,10 @@ def _resolve_club_filter(
     return ""
 
 
-def _v5_ranked_to_v3_stubs(ranked: list[dict]) -> list[ContentCard]:
+def _v5_ranked_to_v3_stubs(
+    ranked: list[dict],
+    meet_results: Optional[list] = None,
+) -> list[ContentCard]:
     """Convert V5 ranked achievements to minimal V3 ContentCard stubs.
 
     The V3 detector path is skipped for interpreter-parsed runs (no ASA IDs),
@@ -153,10 +156,36 @@ def _v5_ranked_to_v3_stubs(ranked: list[dict]) -> list[ContentCard]:
 
     Stubs carry no V3 claims (the trust evaluator defaults to medium/review).
     """
+    # Final-round provenance: map each result's detector swim-id prefix
+    # ("key:distStrokeCourse:round") to the header-derived final label so a
+    # B-final card honestly reads "B Final" on its subhead instead of being
+    # indistinguishable from the A-final win. final_rank-aware content
+    # ORDERING is deliberately deferred — reordering the pack is a
+    # ranker-adjacent change that needs its own review (see CLAUDE.md's
+    # deterministic-engine boundary); today rank rides only in the dedup
+    # identity and this label.
+    final_label_by_prefix: dict[str, str] = {}
+    for r in meet_results or []:
+        label = (getattr(r, "extra", None) or {}).get("final_label") or ""
+        if not label:
+            continue
+        prefix = f"{r.swimmer_key}:{r.distance}{r.stroke}{r.course}:{r.round}"
+        final_label_by_prefix.setdefault(prefix, str(label))
+
     stubs: list[ContentCard] = []
+    # One swim can yield several ranked achievements (PB + medal from the same
+    # race — rank_achievements does not dedupe), and workflow state is keyed
+    # per (run_id, card_id), so a duplicate card_id would make approve/reject/
+    # caption-edit on one card silently apply to its twin. First occurrence
+    # keeps the bare swim_id (back-compat with persisted workflow state);
+    # repeats get a deterministic counter suffix.
+    seen_ids: dict[str, int] = {}
     for ra in ranked:
         ach = ra.get("achievement") or {}
         swim_id = ach.get("swim_id") or f"v5-{ra.get('rank', len(stubs))}"
+        n = seen_ids.get(swim_id, 0) + 1
+        seen_ids[swim_id] = n
+        card_id = swim_id if n == 1 else f"{swim_id}~{n}"
         swimmer = ach.get("swimmer_name") or ""
         cap = ""
         for vc in (ra.get("voice_captions") or {}).values():
@@ -173,12 +202,19 @@ def _v5_ranked_to_v3_stubs(ranked: list[dict]) -> list[ContentCard]:
         headline = ach.get("headline") or ""
         if not cap:
             cap = headline
+        subhead = ach.get("event") or ""
+        sid = str(ach.get("swim_id") or "")
+        if sid and final_label_by_prefix:
+            for prefix, label in final_label_by_prefix.items():
+                if sid.startswith(prefix):
+                    subhead = f"{subhead} — {label}" if subhead else label
+                    break
         stubs.append(
             ContentCard(
-                card_id=swim_id,
+                card_id=card_id,
                 card_type=ach.get("type") or "standout_swim",
                 headline=headline,
-                subhead=ach.get("event") or "",
+                subhead=subhead,
                 swimmer_names=[swimmer] if swimmer else [],
                 claims=[],
                 bucket="queue",
@@ -304,6 +340,32 @@ def run_pipeline_v4(
 
     if effective_filter:
         our_results, our_keys = filter_meet_by_club_name(meet, effective_filter)
+        if not our_results and meet.results:
+            # The filter can only ever match on club codes/names. When the file
+            # carries NO club data at all (e.g. a distance-splits page), every
+            # typed club yields 0 swims and the review empty-state's "check the
+            # club name matches the file" advice can never succeed. Feature the
+            # whole meet honestly instead, with an explicit warning — the human
+            # review/approve gate decides what actually ships.
+            _has_club_data = any((r.club_code or "").strip() for r in meet.results) or any(
+                (getattr(sw, "club_name", "") or "").strip() for sw in meet.swimmers.values()
+            )
+            if not _has_club_data:
+                our_results = list(meet.results)
+                our_keys = {r.swimmer_key for r in our_results}
+                meet.add_warning(
+                    "no_club_data_whole_meet",
+                    f"This file carries no club information, so the club filter "
+                    f"'{effective_filter}' cannot match any swimmer. The whole "
+                    "meet is featured instead — review the cards and reject any "
+                    "swimmers who are not yours before approving.",
+                    severity="warn",
+                )
+                step(
+                    "File has no club data — featuring the whole meet "
+                    f"({len(our_results)} swims) instead of an impossible "
+                    f"'{effective_filter}' match."
+                )
     else:
         # No filter at all: include nothing — surface a warning so the UI
         # can prompt the user to pick a club.
@@ -589,7 +651,7 @@ def run_pipeline_v4(
     if not run.cards and run.recognition_report:
         _ranked = run.recognition_report.get("ranked_achievements") or []
         if _ranked:
-            run.cards = _v5_ranked_to_v3_stubs(_ranked)
+            run.cards = _v5_ranked_to_v3_stubs(_ranked, meet.results)
             run.trust = build_trust_report(
                 meet=meet,
                 profile=profile or _ephemeral_profile(effective_filter),

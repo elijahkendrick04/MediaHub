@@ -72,7 +72,6 @@ OWNER_EMAIL = "owner-a@cluba.org"
 STRANGER_EMAIL = "stranger@clubg.org"
 PILOT_EMAIL = "pilot@clubbeta.org"
 PASSWORD = "twelve-chars-long"
-DEV_KEY = "test-operator-key-for-invariant"
 
 
 def _seed_run(
@@ -129,7 +128,6 @@ def shared_instance(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
     monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", DEV_KEY)
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     for d in ("runs_v4", "uploads_v4", "club_profiles"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
@@ -219,7 +217,6 @@ def legacy_instance(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
     monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     for d in ("runs_v4", "uploads_v4", "club_profiles"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
 
@@ -631,6 +628,53 @@ class TestMembersPage:
         with shared_instance["app"].test_client() as c:
             r = c.get("/organisation/members")
             assert r.status_code in (302, 303)  # bounced to the picker
+
+    def test_anon_on_open_workspace_cannot_read_member_emails(self, shared_instance):
+        """Unbound (open) orgs are pinnable by any anonymous visitor, so a
+        pre-seeded pilot invite email (customer PII) must NOT render on GET —
+        only the operator, an active owner, or an active member sees rows."""
+        ms = shared_instance["memberships"]
+        # Operator pre-seeds a pilot invite on the OPEN org-beta (invited
+        # status does not bind the workspace).
+        from mediahub.web.tenancy import STATUS_INVITED
+
+        ms.add(
+            "pilot-contact@clubb.org",
+            "org-beta",
+            status=STATUS_INVITED,
+            invited_by="operator@host",
+        )
+        assert ms.is_bound("org-beta") is False
+        with shared_instance["app"].test_client() as c:
+            assert _pin(c, "org-beta").status_code == 200  # open org: anon pin ok
+            body = c.get("/organisation/members").get_data(as_text=True)
+        assert "pilot-contact@clubb.org" not in body
+        assert "operator@host" not in body
+        assert "Member details are hidden" in body
+
+    def test_signed_in_stranger_on_open_workspace_sees_no_emails(self, shared_instance):
+        ms = shared_instance["memberships"]
+        from mediahub.web.tenancy import STATUS_INVITED
+
+        ms.add(
+            "pilot-contact@clubb.org",
+            "org-beta",
+            status=STATUS_INVITED,
+            invited_by="operator@host",
+        )
+        with shared_instance["app"].test_client() as c:
+            _login(c, STRANGER_EMAIL)  # a real account, but no org-beta seat
+            assert _pin(c, "org-beta").status_code == 200
+            body = c.get("/organisation/members").get_data(as_text=True)
+        assert "pilot-contact@clubb.org" not in body
+        assert "Member details are hidden" in body
+
+    def test_owner_still_sees_member_emails(self, shared_instance):
+        with shared_instance["app"].test_client() as c:
+            _login(c, OWNER_EMAIL)
+            assert _pin(c, "org-alpha").status_code == 200
+            body = c.get("/organisation/members").get_data(as_text=True)
+        assert OWNER_EMAIL in body
 
 
 class TestLegacyModeUnchanged:

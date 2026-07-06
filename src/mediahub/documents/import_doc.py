@@ -12,6 +12,7 @@ gets a clear error.
 from __future__ import annotations
 
 import re
+import zipfile
 from pathlib import Path
 
 from . import models as m
@@ -22,6 +23,56 @@ FIDELITY_NOTE = (
     "Imported as editable text and tables (bounded fidelity): original layout, "
     "fonts, images and vector art are not preserved."
 )
+
+# Defensive caps for untrusted uploads (CLAUDE.md security focus: zip bombs).
+# docx/pptx are ZIP archives: only the 50 MB request cap bounds the *compressed*
+# input, so a tiny archive could still declare gigabytes uncompressed and OOM
+# the worker inside python-docx/pptx. These limits mirror the intent of
+# ``interpreter._zip_safety`` with caps generous enough for real office files
+# (a big deck holds thousands of members and tens of MB of XML/media).
+_MAX_ZIP_MEMBERS = 10_000
+_MAX_MEMBER_BYTES = 256 * 1024 * 1024
+_MAX_TOTAL_BYTES = 512 * 1024 * 1024
+_MAX_MEMBER_RATIO = 200  # checked only for members > 1 MB uncompressed
+_MAX_PDF_PAGES = 500
+
+
+def _check_office_zip(path: str | Path, kind: str) -> None:
+    """Reject a docx/pptx whose central directory declares a decompression bomb.
+
+    Inspects declared sizes only — no member bytes are decompressed. Raises
+    ``ValueError`` (the import route surfaces it as an honest 422)."""
+    try:
+        with zipfile.ZipFile(str(path)) as zf:
+            infos = zf.infolist()
+    except zipfile.BadZipFile as e:
+        raise ValueError(f"not a valid {kind} file: {e}") from e
+    if len(infos) > _MAX_ZIP_MEMBERS:
+        raise ValueError(
+            f"{kind} archive has {len(infos)} members (limit {_MAX_ZIP_MEMBERS}) — refusing import"
+        )
+    total = 0
+    for info in infos:
+        if info.is_dir():
+            continue
+        usize = int(info.file_size)
+        csize = max(1, int(info.compress_size or 1))
+        if usize > _MAX_MEMBER_BYTES:
+            raise ValueError(
+                f"{kind} member {info.filename!r} declares {usize} uncompressed bytes "
+                f"(limit {_MAX_MEMBER_BYTES}) — refusing import"
+            )
+        if usize > 1024 * 1024 and usize // csize > _MAX_MEMBER_RATIO:
+            raise ValueError(
+                f"{kind} member {info.filename!r} has compression ratio "
+                f"{usize // csize}:1 (limit {_MAX_MEMBER_RATIO}:1) — refusing import"
+            )
+        total += usize
+        if total > _MAX_TOTAL_BYTES:
+            raise ValueError(
+                f"{kind} archive declares over {_MAX_TOTAL_BYTES} total uncompressed bytes "
+                "— refusing import"
+            )
 
 
 def _heading_level(style_name: str) -> int:
@@ -40,6 +91,7 @@ def import_docx(path: str | Path) -> DocumentSpec:
     except Exception as e:  # pragma: no cover
         raise RuntimeError(f"DOCX import needs python-docx: {e}") from e
 
+    _check_office_zip(path, "DOCX")
     doc = docx.Document(str(path))
     blocks: list[m.Block] = []
     body = doc.element.body
@@ -84,6 +136,7 @@ def import_pptx(path: str | Path) -> DocumentSpec:
     except Exception as e:  # pragma: no cover
         raise RuntimeError(f"PPTX import needs python-pptx: {e}") from e
 
+    _check_office_zip(path, "PPTX")
     prs = Presentation(str(path))
     sections: list[Section] = []
     for slide in prs.slides:
@@ -133,6 +186,10 @@ def import_pdf(path: str | Path) -> DocumentSpec:
 
     sections: list[Section] = []
     with pdfplumber.open(str(path)) as pdf:
+        if len(pdf.pages) > _MAX_PDF_PAGES:
+            raise ValueError(
+                f"PDF has {len(pdf.pages)} pages (limit {_MAX_PDF_PAGES}) — refusing import"
+            )
         for page in pdf.pages:
             blocks: list[m.Block] = []
             try:

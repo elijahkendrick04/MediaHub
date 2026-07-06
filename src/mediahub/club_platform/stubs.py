@@ -622,7 +622,7 @@ def render_cards_html(
                 f'style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;'
                 f"font-size:11px;font-weight:600;background:{bg};color:{fg};"
                 f'font-family:inherit;margin-left:8px"'
-                f' title="Click: queue → approved → rejected → queue. Right-click to reset.">'
+                f' title="Click: queue ↔ approved. Right-click to reset to queue.">'
                 f"{_h(label)}</button>"
             )
 

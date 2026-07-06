@@ -263,6 +263,19 @@ def test_design_explainability_shape_and_values():
     assert layout["crop_box"] is None  # no image supplied
 
 
+def test_design_explainability_surfaces_mood_note():
+    from mediahub.graphic_renderer.style_packs import mood_preset_note
+
+    data = ins.design_explainability(SAMPLE_HTML, _ctx())
+    assert data["design"]["mood"] == "triumphant"
+    assert data["design"]["mood_note"] == mood_preset_note("triumphant")
+    assert data["design"]["mood_note"]  # the authored rationale actually surfaces
+
+    # An unknown / empty mood carries no note — never a guessed rationale.
+    no_mood = ins.design_explainability(SAMPLE_HTML, _ctx(brief=_brief(mood="")))
+    assert no_mood["design"]["mood_note"] == ""
+
+
 def test_design_explainability_includes_crop_box_with_image(tmp_path):
     img = _solid_image(tmp_path)
     data = ins.design_explainability(SAMPLE_HTML, _ctx(), image_path=img)
@@ -371,3 +384,38 @@ def test_write_sidecar_roundtrips(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert text.endswith("\n")
     assert json.loads(text) == data
+
+
+def _render_with_stub(monkeypatch, tmp_path, **render_kw):
+    import mediahub.graphic_renderer.render as R
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001 - signature match
+        from pathlib import Path
+
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    return R.render_brief(_brief(), output_dir=tmp_path, **render_kw)
+
+
+def test_inspect_enabled_render_writes_sidecar_beside_png(monkeypatch, tmp_path):
+    monkeypatch.setenv(ins.INSPECT_ENV, "1")
+    photo = _solid_image(tmp_path)
+    result = _render_with_stub(monkeypatch, tmp_path, athlete_path=photo, skip_cutout=True)
+    out = tmp_path / "feed_portrait.png"
+    assert out.exists()
+    sidecar = out.with_suffix(".json")
+    assert sidecar.exists(), "inspect-enabled render must drop <stem>.json beside the PNG"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert data["schema"] == ins.SCHEMA
+    assert data["card"]["format"] == "feed_portrait"
+    # A photo card records the deterministic saliency crop box.
+    assert data["layout"]["crop_box"] is not None
+    assert result.visual.file_path == str(out)
+
+
+def test_inspect_disabled_render_writes_no_sidecar(monkeypatch, tmp_path):
+    monkeypatch.delenv(ins.INSPECT_ENV, raising=False)
+    _render_with_stub(monkeypatch, tmp_path)
+    assert not (tmp_path / "feed_portrait.json").exists()

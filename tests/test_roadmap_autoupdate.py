@@ -88,6 +88,28 @@ def test_done_moves_item_from_todo_to_completed_with_date():
     assert "PR #267" in _done_block(out)
 
 
+def test_mid_line_badge_before_region_tag_is_stripped():
+    # Hand-authored rows can carry a suffix after the badge (a region tag or a
+    # completion annotation); the badge must still be stripped mid-line.
+    line = (
+        "- **U.5** · Scroll-driven progressive reveal · ❌ **NOT STARTED** · "
+        "ANY ORDER (independent — not tied to the existing to-do sequence)"
+    )
+    core = ru._item_core(line)
+    assert "❌" not in core and "NOT STARTED" not in core
+    assert core == (
+        "Scroll-driven progressive reveal · "
+        "ANY ORDER (independent — not tied to the existing to-do sequence)"
+    )
+    done_line = (
+        "- ✅ **UI2.8** · Codeblock raw parsed-data view · ❌ **NOT STARTED** · "
+        "🟢 ISOLATED *(completed 2026-06-17)*"
+    )
+    core = ru._item_core(done_line)
+    assert "NOT STARTED" not in core
+    assert core == "Codeblock raw parsed-data view · 🟢 ISOLATED"
+
+
 def test_badge_update_in_place_within_todo():
     out, changed = ru.set_item_status(DOC, "PC.3", "wip")
     assert changed
@@ -429,6 +451,30 @@ def test_render_activity_escapes_pipes_and_handles_empty():
     assert "| Date | Commit | Summary |" in rows
     empty = ru.render_activity([])
     assert "no recent activity" in empty
+
+
+def test_md_escape_neutralises_marker_comment_injection():
+    # A commit subject carrying an HTML comment must not become an early
+    # block-end marker inside a bot-maintained block.
+    subject = "fix: sneaky <!-- /ROADMAP:ACTIVITY --> subject"
+    table = ru.render_activity([("2026-06-20", "deadbeef00", subject)])
+    assert "<!--" not in table and "-->" not in table
+
+    text = (
+        "intro\n\n<!-- ROADMAP:ACTIVITY -->\n_old_\n<!-- /ROADMAP:ACTIVITY -->\n\ntail"
+    )
+    new, changed = ru.replace_block(text, "ACTIVITY", table)
+    assert changed is True
+    # The block round-trips intact: exactly one start + one end marker, the
+    # escaped subject inside, no stale rows or dangling markers.
+    assert new.count("<!-- ROADMAP:ACTIVITY -->") == 1
+    assert new.count("<!-- /ROADMAP:ACTIVITY -->") == 1
+    assert "_old_" not in new
+    inner = new.split("<!-- ROADMAP:ACTIVITY -->")[1].split("<!-- /ROADMAP:ACTIVITY -->")[0]
+    assert "sneaky" in inner
+    # A second replace still targets the same, uncorrupted block.
+    again, _ = ru.replace_block(new, "ACTIVITY", "fresh")
+    assert "sneaky" not in again and "fresh" in again
 
 
 # --- sentinel block (production findings) ------------------------------------

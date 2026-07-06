@@ -1,5 +1,4 @@
 """
-brand/voice_imitation.py — Analyse past social posts → structured voice profile.
 brand/voice_imitation.py — derive a structured voice profile from a club's
 past social captions.
 
@@ -28,8 +27,9 @@ analyse_examples(examples: list[str]) -> dict
     LLM-extracted qualitative patterns (openers, closers, forbidden phrases).
     Returns a dict suitable for ClubProfile.voice_profile.
 
-_redact_pii(texts: list[str]) -> list[str]
-    Strip obvious name-like tokens (Title Case pairs) before any storage.
+redact_pii(caption: str) -> str
+    Strip obvious name-like tokens (Title Case pairs, @handles) before any
+    LLM call or storage.
 
 Voice profile dict schema
 -------------------------
@@ -44,6 +44,8 @@ Voice profile dict schema
     "preferred_swimmer_address": str,        # first_name|last_name|surname_only|nickname
     "capitalisation_style": str,             # sentence|title|all_caps_emphasis
     "common_hashtags": list[str],
+    "qualitative_status": str,               # ok|no_provider|error — whether the
+                                             # LLM half of the analysis succeeded
 }
 """
 
@@ -54,20 +56,6 @@ import re
 from typing import Iterable, Optional
 
 log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# PII redaction — strip Title Case word pairs that look like personal names.
-# This runs on the raw examples BEFORE any analysis so names don't leak into
-# the saved voice_profile dict.
-# ---------------------------------------------------------------------------
-
-_NAME_RE = re.compile(r"\b[A-Z][a-z]{1,20}\s+[A-Z][a-z]{1,20}\b")
-
-
-def _redact_pii(texts: list[str]) -> list[str]:
-    """Replace 'First Last' name-like patterns with '[NAME]'."""
-    return [_NAME_RE.sub("[NAME]", t) for t in texts]
-
 
 # ---------------------------------------------------------------------------
 # Deterministic stat helpers — no LLM required.
@@ -331,9 +319,12 @@ def _normalise_qual(raw: dict) -> dict:
 def _qualitative_via_llm(redacted: list[str]) -> dict:
     """Ask the LLM for openers / closers / forbidden phrases / address style.
 
-    Returns a dict with the four qualitative keys, always. On any LLM
-    failure we fall back to empty lists and "first_name" — the numeric
-    portion of the profile is still useful on its own.
+    Returns a dict with the four qualitative keys plus a
+    ``qualitative_status`` of ``ok`` / ``no_provider`` / ``error``, always.
+    On any LLM failure the qualitative keys fall back to empty lists and
+    "first_name" — the numeric portion of the profile is still useful on
+    its own — but the status field tells the caller (and the UI) that the
+    AI half did NOT run, so the operator is never shown a silent success.
     """
     fallback = {
         "characteristic_openers": [],
@@ -342,12 +333,12 @@ def _qualitative_via_llm(redacted: list[str]) -> dict:
         "preferred_swimmer_address": "first_name",
     }
     if not redacted:
-        return fallback
+        return {**fallback, "qualitative_status": "ok"}
     try:
-        from mediahub.media_ai.llm import generate_json
+        from mediahub.media_ai.llm import ClaudeUnavailableError, generate_json
     except Exception as e:  # pragma: no cover — import guard
         log.debug("voice_imitation: generate_json import failed: %s", e)
-        return fallback
+        return {**fallback, "qualitative_status": "error"}
 
     user_msg = _QUAL_USER_TEMPLATE.format(captions="\n".join(f"- {c}" for c in redacted))
     try:
@@ -356,13 +347,17 @@ def _qualitative_via_llm(redacted: list[str]) -> dict:
             system=_QUAL_SYSTEM_PROMPT,
             max_tokens=600,
             fallback=fallback,
+            content_type="brand_voice",
         )
+    except ClaudeUnavailableError as e:
+        log.warning("voice_imitation: no LLM provider available: %s", e)
+        return {**fallback, "qualitative_status": "no_provider"}
     except Exception as e:
-        log.debug("voice_imitation: generate_json call failed: %s", e)
-        return fallback
+        log.warning("voice_imitation: generate_json call failed: %s", e)
+        return {**fallback, "qualitative_status": "error"}
     if not isinstance(raw, dict) or not raw:
-        return fallback
-    return _normalise_qual(raw)
+        return {**fallback, "qualitative_status": "error"}
+    return {**_normalise_qual(raw), "qualitative_status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +395,8 @@ def analyse_examples(
             "characteristic_closers": [],
             "forbidden_phrases": [],
             "preferred_swimmer_address": "first_name",
+            # Deterministic-only was explicitly requested — nothing failed.
+            "qualitative_status": "ok",
         }
     else:
         qual = _qualitative_via_llm(redacted)

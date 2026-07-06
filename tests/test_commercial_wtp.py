@@ -180,3 +180,15 @@ def test_ledger_is_append_only_and_owner_readable(store):
     lines = store.path.read_text().strip().splitlines()
     assert len(lines) == 2
     assert (store.path.stat().st_mode & 0o777) == 0o600
+
+
+def test_malformed_amount_pence_row_never_crashes_the_ledger_read(store):
+    """A non-numeric amount_pence in one line must not 500 the whole console."""
+    import json
+
+    q = store.create("Club A", 58800)
+    with store.path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"quote_id": "bad1", "club_name": "Club B", "amount_pence": "abc"}) + "\n")
+    quotes = {r.quote_id: r for r in store.list_all()}
+    assert quotes[q.quote_id].amount_pence == 58800
+    assert quotes["bad1"].amount_pence == 0  # coerced, not crashed

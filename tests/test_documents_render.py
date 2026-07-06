@@ -110,6 +110,41 @@ def test_self_hosted_fonts_only_no_google_cdn():
     assert "@font-face" in html
 
 
+def test_img_src_blocks_remote_and_out_of_root_paths(tmp_path, monkeypatch):
+    """Spec image srcs are tenant-editable: remote URLs (server-side Chromium
+    fetch → SSRF) and paths outside DATA_DIR (local file inclusion) must not
+    resolve; files under DATA_DIR and data: URIs still do."""
+    from mediahub.documents.render import _img_src
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    inside = tmp_path / "data" / "uploads_v4" / "media_library" / "pic.png"
+    inside.parent.mkdir(parents=True)
+    inside.write_bytes(b"\x89PNG")
+    outside = tmp_path / "elsewhere" / "secret.png"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"\x89PNG")
+
+    assert _img_src("http://169.254.169.254/latest/meta-data") == ""
+    assert _img_src("https://example.com/x.png") == ""
+    assert _img_src(str(outside)) == ""
+    assert _img_src(outside.as_uri()) == ""
+    assert _img_src(str(inside)) == inside.resolve().as_uri()
+    assert _img_src(inside.as_uri()) == inside.resolve().as_uri()
+    assert _img_src("data:image/png;base64,AAAA") == "data:image/png;base64,AAAA"
+    assert _img_src("") == ""
+
+
+def test_media_block_with_remote_src_renders_nothing(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    spec = DocumentSpec(
+        title="t",
+        sections=[Section(blocks=[m.media("http://169.254.169.254/x.png", alt="a")])],
+    )
+    html = render_document_html(spec, role_vars=_RV)
+    assert "169.254.169.254" not in html
+    assert "<img" not in html  # dropped, never a fabricated placeholder
+
+
 def test_brand_tokens_present():
     html = render_document_html(_report(), role_vars=_RV)
     assert "--doc-accent:#F2C14E" in html

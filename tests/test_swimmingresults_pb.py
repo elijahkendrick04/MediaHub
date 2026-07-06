@@ -448,3 +448,24 @@ def test_lookup_skips_when_club_not_found():
     # A club name not in the register -> no roster path, no snapshot, no crash.
     snaps = lookup_official_pbs(meet, {"s1"}, "Some Australian Club")
     assert snaps == {}
+
+
+def test_resolve_tirefs_empty_members_returns_two_empty_dicts():
+    """The no-work path must honour the (resolved, roster_by_tiref) 2-tuple
+    contract: it returned a bare {} which blew up the caller's unpacking
+    ('roster_tirefs, roster_by_tiref = _resolve_tirefs(...)' -> ValueError)
+    and killed the whole PB baseline as pb_enrichment_failed."""
+    from mediahub.swimmingresults.lookup import _resolve_tirefs
+
+    # All roster-needing swimmers are nameless -> members == [].
+    nameless = types.SimpleNamespace(first_name="", last_name="", gender="F")
+    result = _resolve_tirefs(
+        "TDOYEWAY",
+        [("club:row0", nameless, [])],
+        meet_year=2026,
+        force_refresh=False,
+        budget=5,
+    )
+    assert result == ({}, {})
+    resolved, roster_by_tiref = result  # unpacks exactly like the caller
+    assert resolved == {} and roster_by_tiref == {}

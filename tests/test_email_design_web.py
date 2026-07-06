@@ -208,6 +208,113 @@ def test_public_card_route_rejects_unknown_token(app_env):
     assert anon.get("/newsletter/not-a-token/card/r1/a1.png").status_code == 404
 
 
+def _seed_visual(tmp_path, run_id, card_id, brief):
+    vdir = tmp_path / "runs_v4" / run_id / "visuals" / brief
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "visual.json").write_text(json.dumps({"content_item_id": card_id, "id": brief}))
+    (vdir / "feed_portrait.png").write_bytes(b"\x89PNG fake")
+
+
+def _save_card_ref_spec(client, nid, card_refs):
+    from mediahub.email_design import store as ns
+
+    data = ns.load_newsletter("club-a", nid).to_dict()
+    data["sections"] = [
+        {
+            "blocks": [
+                {"kind": "card", "props": {"title": "T", "body": "b", "card_ref": ref}}
+                for ref in card_refs
+            ]
+        }
+    ]
+    r = client.post(f"/api/newsletters/{nid}/save", json={"spec": data})
+    assert r.get_json()["ok"] is True
+
+
+def test_published_card_images_are_snapshot_scoped(app_env):
+    """The public token only unlocks cards the published snapshot references —
+    never every wall-eligible card of the org."""
+    app, wm, tmp = app_env
+    c = app.test_client()
+    _login(c)
+    _seed_approved_run(tmp)  # a1 + a2 both approved
+    _seed_visual(tmp, "r1", "a1", "brief-a")
+    _seed_visual(tmp, "r1", "a2", "brief-b")
+    nid = _generate(c, fmt="blank").get_json()["newsletter_id"]
+    _save_card_ref_spec(c, nid, ["r1/a1"])
+    c.post(f"/api/newsletters/{nid}/publish")
+    from mediahub.email_design import store as ns
+
+    token = ns.newsletter_record("club-a", nid)["public_token"]
+    anon = app.test_client()
+    # the referenced approved card resolves…
+    assert anon.get(f"/newsletter/{token}/card/r1/a1.png").status_code == 200
+    # …but the token does NOT unlock other approved cards of the org
+    assert anon.get(f"/newsletter/{token}/card/r1/a2.png").status_code == 404
+    # the authenticated editor preview route is draft-scoped the same way
+    assert c.get(f"/newsletters/{nid}/card/r1/a1.png").status_code == 200
+    assert c.get(f"/newsletters/{nid}/card/r1/a2.png").status_code == 404
+
+
+def test_newsletter_images_ignore_wall_exclusion_but_keep_approval_gate(app_env):
+    """A wall-excluded approved card still renders in a newsletter (the wall is a
+    different surface); an unapproved card stays blocked, with an explained
+    placeholder in the editor preview."""
+    app, wm, tmp = app_env
+    c = app.test_client()
+    _login(c)
+    _seed_approved_run(tmp)  # a1 approved; a3 never approved
+    _seed_visual(tmp, "r1", "a1", "brief-a")
+    _seed_visual(tmp, "r1", "a3", "brief-c")
+    from mediahub.web.club_profile import load_profile, save_profile
+
+    prof = load_profile("club-a")
+    prof.public_wall_excluded_cards = ["r1::a1"]
+    save_profile(prof)
+    nid = _generate(c, fmt="blank").get_json()["newsletter_id"]
+    _save_card_ref_spec(c, nid, ["r1/a1", "r1/a3"])
+    c.post(f"/api/newsletters/{nid}/publish")
+    from mediahub.email_design import store as ns
+
+    token = ns.newsletter_record("club-a", nid)["public_token"]
+    anon = app.test_client()
+    assert anon.get(f"/newsletter/{token}/card/r1/a1.png").status_code == 200
+    assert anon.get(f"/newsletter/{token}/card/r1/a3.png").status_code == 404
+    # editor preview explains the unapproved card instead of a silent blank
+    prev = c.get(f"/api/newsletters/{nid}/html?preview=1").get_data(as_text=True)
+    assert "data:image/svg+xml;base64," in prev
+
+
+def test_ai_generation_is_governed_and_metered(app_env, monkeypatch):
+    """1.23 governance: an AI newsletter draft is metered against the org and
+    hard-blocked at the quota; data-only builds spend nothing."""
+    from unittest import mock
+
+    app, wm, tmp = app_env
+    c = app.test_client()
+    _login(c)
+    monkeypatch.setenv("MEDIAHUB_QUOTA_CAPTION", "1")
+    from mediahub.email_design.models import new_newsletter
+
+    spec = new_newsletter("AI draft", "monthly_roundup", brand_profile_id="club-a")
+    with mock.patch("mediahub.email_design.draft.generate_newsletter", return_value=spec):
+        r1 = _generate(c, with_ai=True)
+        assert r1.status_code == 200 and r1.get_json()["ok"] is True
+        from mediahub.observability import feature_quota
+
+        assert feature_quota.count_for_org("club-a", feature="caption") == 1
+        # over quota → honest block before any provider call
+        r2 = _generate(c, with_ai=True)
+        assert r2.status_code == 429
+        assert r2.get_json()["error"] == "quota_reached"
+    # a data-only build is not AI spend: never gated, never metered
+    r3 = _generate(c, with_ai=False)
+    assert r3.get_json()["ok"] is True
+    from mediahub.observability import feature_quota
+
+    assert feature_quota.count_for_org("club-a", feature="caption") == 1
+
+
 def test_create_hub_shows_newsletter_tile(app_env):
     app, wm, tmp = app_env
     c = app.test_client()

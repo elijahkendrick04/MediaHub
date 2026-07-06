@@ -6,8 +6,9 @@ This is the "constantly testing" driver. Each sweep runs the full finder
 contained and timed-out, never killing the loop), rotating the input file and
 varying parameters so it doesn't get complacent:
 
-  * input file rotates across the corpus + downloaded files every sweep
   * every Nth sweep injects an edge-case / fuzz upload (validation hardening)
+  * every Vth sweep (opt-in, AUTOTEST_VARIETY_EVERY) a variety pass rotates the
+    input across the corpus + downloaded pool instead of the bundled sample
   * every Mth sweep refreshes the input pool from the web (sources + discovery)
   * crawl breadth varies sweep-to-sweep
 
@@ -67,10 +68,20 @@ def _sweep_env(sweep: int) -> dict:
     env["AUTOTEST_MAX_PAGES"] = str(25 + (sweep * 7) % 36)
     # every 5th sweep: fuzz an edge-case upload instead of a real file
     fuzz_every = int(os.environ.get("AUTOTEST_FUZZ_EVERY", "5"))
+    # opt-in variety pass (off by default): rotate the primary-flow input across
+    # the corpus + downloaded pool instead of the bundled sample
+    variety_every = int(os.environ.get("AUTOTEST_VARIETY_EVERY", "0"))
     if fuzz_every and sweep % fuzz_every == 0 and sweep > 0:
         kind = acquire.FUZZ_KINDS[(sweep // fuzz_every) % len(acquire.FUZZ_KINDS)]
         env["AUTOTEST_INPUT"] = str(acquire.fuzz_input(kind, FUZZ_DIR))
         print(f"[loop] sweep {sweep}: fuzz input '{kind}'", flush=True)
+    elif variety_every and sweep % variety_every == 0 and sweep > 0:
+        rotated = acquire.next_input(sweep)
+        if rotated is not None:
+            env["AUTOTEST_INPUT"] = str(rotated)
+            print(f"[loop] sweep {sweep}: variety input '{rotated.name}'", flush=True)
+        else:
+            env.pop("AUTOTEST_INPUT", None)
     else:
         env.pop("AUTOTEST_INPUT", None)
     return env
@@ -80,9 +91,13 @@ def _maybe_refresh_pool(sweep: int) -> None:
     refresh_every = int(os.environ.get("AUTOTEST_REFRESH_EVERY", "10"))
     if refresh_every and sweep % refresh_every == 0:
         new = acquire.download_sources()
-        new += [Path(u) for u in acquire.discover_online()]
         if new:
             print(f"[loop] refreshed input pool (+{len(new)} files)", flush=True)
+        # discovery yields URLs, not files — they land in sources.txt and become
+        # files on the NEXT download_sources pass
+        urls = acquire.discover_online()
+        if urls:
+            print(f"[loop] discovered +{len(urls)} sources", flush=True)
 
 
 def main() -> int:

@@ -3,9 +3,14 @@
 This is the deployment-level "clear the cache for the entire site, for all
 runs" operation. It wipes every *performance* cache MediaHub writes under
 ``DATA_DIR``, for the whole deployment and across every organisation and run,
-**and** drops the matching in-process caches so the running worker stops
-serving them from memory — a disk-only purge would leave the cache effectively
-intact in RAM.
+**and** drops the matching in-process caches so the worker handling the purge
+stops serving them from memory — a disk-only purge would leave the cache
+effectively intact in RAM.
+
+Honest limit: the in-process drop reaches only the worker that runs the purge.
+Under a multi-worker server (gunicorn ``--workers 2`` in the reference deploy)
+sibling workers keep their in-memory entries until they next miss or restart;
+the on-disk roots, shared by all workers, are gone immediately.
 
 Nothing here is a source of truth: each directory is a cache the engine
 rebuilds on demand — re-fetched PB-lookup pages, re-rendered motion, re-shot
@@ -82,6 +87,35 @@ def cache_roots() -> List[Tuple[str, Path]]:
     except Exception:
         pass
 
+    # Rendered-document, microsite-asset, ASR-transcript and stock-thumbnail
+    # caches each keep their own resolver (which mkdirs — harmless here, the
+    # purge removes the tree anyway). Resolve through them so a path change is
+    # picked up for free; fall back to the conventional DATA_DIR locations.
+    try:
+        from mediahub.documents.cache import cache_dir as _doc_cache_dir
+
+        roots.append(("document_cache", _doc_cache_dir()))
+    except Exception:
+        roots.append(("document_cache", data / "document_cache"))
+    try:
+        from mediahub.sites.cache import cache_dir as _site_cache_dir
+
+        roots.append(("site_cache", _site_cache_dir()))
+    except Exception:
+        roots.append(("site_cache", data / "site_cache"))
+    try:
+        from mediahub.visual.transcribe import cache_dir as _asr_cache_dir
+
+        roots.append(("asr_cache", _asr_cache_dir()))
+    except Exception:
+        roots.append(("asr_cache", data / "asr_cache"))
+    try:
+        from mediahub.elements.stock import _thumb_cache_dir
+
+        roots.append(("stock_thumb_cache", _thumb_cache_dir()))
+    except Exception:
+        roots.append(("stock_thumb_cache", data / "stock_thumb_cache"))
+
     return roots
 
 
@@ -117,7 +151,8 @@ def purge_all_caches() -> dict:
     """Permanently delete every re-derivable cache, site-wide.
 
     Clears both the on-disk cache roots and the matching in-process module
-    caches (so the running worker stops serving them from memory).
+    caches in *this* worker (sibling workers drop theirs on their next miss
+    or restart — see the module docstring).
 
     Returns a report::
 

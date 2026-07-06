@@ -236,6 +236,15 @@ def _totp_code(secret: str, counter: int) -> str:
     return f"{code:06d}"
 
 
+# Replay guard (RFC 6238 §5.2): the verifier must not accept the same code
+# twice, so remember the last accepted counter per secret and reject any
+# counter at or below it. In-process, like the login-failure lockout above —
+# a worker restart forgets it, but the accepted window is only ±1 step
+# (~90s), so the residual exposure is small and there is no schema change.
+_TOTP_LOCK = threading.Lock()
+_totp_last_counter: dict[str, int] = {}
+
+
 def totp_verify(secret: str, code: str, *, at: Optional[float] = None) -> bool:
     if not secret or not code:
         return False
@@ -245,6 +254,12 @@ def totp_verify(secret: str, code: str, *, at: Optional[float] = None) -> bool:
     counter = int((at if at is not None else time.time()) // 30)
     for skew in (-1, 0, 1):
         if hmac.compare_digest(_totp_code(secret, counter + skew), cleaned):
+            matched = counter + skew
+            with _TOTP_LOCK:
+                last = _totp_last_counter.get(secret)
+                if last is not None and matched <= last:
+                    return False  # replayed (or older) code within the window
+                _totp_last_counter[secret] = matched
             return True
     return False
 
@@ -517,9 +532,14 @@ def verify_dev_credentials(username: object, password: object) -> bool:
     The username is compared with ``hmac.compare_digest`` and the password
     verified against the stored argon2id hash. Both are evaluated before being
     combined so a wrong username can't short-circuit (and time-leak) the slow
-    password check.
+    password check. Both sides are compared as UTF-8 bytes —
+    ``compare_digest`` raises ``TypeError`` on non-ASCII *str* input, which
+    would 500 the login instead of returning the 401 page.
     """
-    user_ok = hmac.compare_digest(_dev_username(), str(username or "").strip())
+    user_ok = hmac.compare_digest(
+        _dev_username().encode("utf-8"),
+        str(username or "").strip().encode("utf-8"),
+    )
     pass_ok = verify_password(str(password or ""), _dev_password_hash())
     return bool(user_ok and pass_ok)
 

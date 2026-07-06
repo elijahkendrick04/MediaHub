@@ -202,8 +202,16 @@ def convert_file(
             note="cache hit",
         )
 
-    note = _dispatch(src_path, key, scat, out_path, opts)
+    try:
+        note = _dispatch(src_path, key, scat, out_path, opts)
+    except BaseException:
+        # A killed/failed encode (FFmpeg timeout, OOM) must not leave a partial
+        # file in the content-addressed cache slot — the next identical request
+        # would pass the is_file()+size>0 check and serve the corrupt output.
+        out_path.unlink(missing_ok=True)
+        raise
     if not out_path.is_file() or out_path.stat().st_size == 0:
+        out_path.unlink(missing_ok=True)
         raise ExportError(f"conversion produced no output for {key!r}")
     return ExportResult(
         path=out_path,

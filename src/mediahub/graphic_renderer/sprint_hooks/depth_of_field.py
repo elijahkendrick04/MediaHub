@@ -18,8 +18,11 @@ Why a pure CSS-filter transform (no injected ``<div>``):
 Honesty & isolation guarantees:
     * **Opt-in only.** The brief requests it by setting ``photo_treatment`` (or
       ``background_style``) to a depth-of-field token (``depth_of_field`` /
-      ``dof`` / ``background_blur`` / …). Every other brief returns the HTML
-      untouched, so all existing renders stay byte-identical.
+      ``dof`` / ``background_blur`` / …), or by carrying a **bokeh-ground style
+      pack** while its photo grade is the untouched default (the deterministic
+      pack pick is the reachable emitter — same bridge shape as G1.8's
+      gradient-mesh ground). Every other brief returns the HTML untouched, so
+      all existing renders stay byte-identical.
     * **Real photos only.** The blur acts on layers that exist solely when a
       real image was supplied (``.bg-photo``, a non-empty ``--ai-bg`` URI) and
       the focus pop on the real athlete cutout — no pixels are generated.
@@ -75,14 +78,43 @@ def _brief_value(brief: object, name: str) -> str:
     return _norm(_brief_attr(brief, name))
 
 
+def _pack_ground(brief: object) -> str:
+    """The *ground* lever of the brief's selected style pack ('' when none)."""
+    pack_id = str(_brief_attr(brief, "style_pack", "") or "").strip()
+    if not pack_id:
+        return ""
+    try:
+        from .. import style_packs as _sp  # same-package; lazy keeps import stdlib-only
+
+        pack = _sp.style_pack_from_id(pack_id)
+        return pack.ground if pack is not None else ""
+    except Exception:
+        return ""
+
+
 def _wants_dof(brief: object) -> bool:
-    """True when the brief opts into the depth-of-field treatment."""
+    """True when the brief opts into the depth-of-field treatment.
+
+    Two deterministic emitters:
+
+    * an explicit ``photo_treatment`` / ``background_style`` dof token, or
+    * a **bokeh-ground style pack** — the pack's defocused-pools atmosphere is
+      the treatment's own look, so the deterministically-picked pack keys the
+      real blur engine (the same bridge shape as the G1.8 gradient-mesh ground
+      → ``gradient_mesh_bg`` hook). Conservative edge: only the untouched
+      default photo grade is bridged — an explicit duotone/halftone/vignette
+      choice is never compounded with a blur.
+    """
     if brief is None:
         return False
-    return (
+    if (
         _brief_value(brief, "photo_treatment") in _DOF_TOKENS
         or _brief_value(brief, "background_style") in _DOF_TOKENS
-    )
+    ):
+        return True
+    if _pack_ground(brief) == "bokeh":
+        return _brief_value(brief, "photo_treatment") in ("", "cutout")
+    return False
 
 
 def _clamp(value: float, low: float, high: float) -> float:

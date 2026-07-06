@@ -88,3 +88,40 @@ def test_fidelity_note_is_recorded(tmp_path):
     path = export.document_docx(_doc(), tmp_path / "r.docx")
     spec = import_doc.import_docx(path)
     assert "bounded fidelity" in spec.meta.get("fidelity", "").lower()
+
+
+def test_high_ratio_docx_zip_bomb_is_rejected(tmp_path):
+    """A tiny .docx that declares a huge, hyper-compressed member must be
+    rejected before python-docx decompresses it (zip-bomb guard)."""
+    import zipfile
+
+    path = tmp_path / "bomb.docx"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", b"0" * (8 * 1024 * 1024))  # ratio ≫ 200:1
+    with pytest.raises(ValueError, match="compression ratio"):
+        import_doc.import_docx(path)
+
+
+def test_oversize_total_pptx_is_rejected(tmp_path, monkeypatch):
+    import zipfile
+
+    monkeypatch.setattr(import_doc, "_MAX_TOTAL_BYTES", 1024)
+    path = tmp_path / "big.pptx"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("ppt/slides/slide1.xml", b"a" * 2048)
+    with pytest.raises(ValueError, match="total uncompressed"):
+        import_doc.import_pptx(path)
+
+
+def test_pdf_over_page_cap_is_rejected(tmp_path, monkeypatch):
+    from pypdf import PdfWriter
+
+    monkeypatch.setattr(import_doc, "_MAX_PDF_PAGES", 2)
+    path = tmp_path / "long.pdf"
+    w = PdfWriter()
+    for _ in range(3):
+        w.add_blank_page(width=200, height=200)
+    with open(path, "wb") as fh:
+        w.write(fh)
+    with pytest.raises(ValueError, match="pages"):
+        import_doc.import_pdf(path)

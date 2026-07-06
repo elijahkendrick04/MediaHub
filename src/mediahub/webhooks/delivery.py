@@ -52,12 +52,60 @@ def _iso(dt: datetime) -> str:
 
 
 def _http_post(url: str, body: bytes, headers: dict) -> tuple[Optional[int], Optional[str]]:
-    """POST a signed body. Returns (status_code, error). Isolated for testing."""
-    try:
-        import requests  # noqa: PLC0415
+    """POST a signed body. Returns (status_code, error). Isolated for testing.
 
-        r = requests.post(url, data=body, headers=headers, timeout=_timeout())
-        return r.status_code, (None if r.status_code < 300 else f"HTTP {r.status_code}")
+    SSRF-guarded at every attempt: the destination host is resolved, refused if
+    any resulting IP is internal/reserved, and the connection is pinned to the
+    validated IP (Host header + TLS SNI keep the original hostname) so a
+    rebinding resolver cannot swap in an internal address after the check.
+    Redirects are never followed.
+    """
+    try:
+        import urllib3  # noqa: PLC0415
+        from urllib.parse import urlparse  # noqa: PLC0415
+
+        from ..web_research.safe_fetch import resolve_safe_ip  # noqa: PLC0415
+
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return None, "refused: endpoint URL must be http(s)"
+        host = parsed.hostname or ""
+        ip_text = resolve_safe_ip(host)
+        if ip_text is None:
+            return None, "refused: endpoint host is not allowed (SSRF guard)"
+        default_port = 443 if parsed.scheme == "https" else 80
+        port = parsed.port or default_port
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        host_hdr = f"[{host}]" if ":" in host else host
+        if port != default_port:
+            host_hdr += f":{port}"
+        send_headers = dict(headers)
+        send_headers["Host"] = host_hdr
+        pool_timeout = urllib3.Timeout(connect=_timeout(), read=_timeout())
+        if parsed.scheme == "https":
+            pool = urllib3.HTTPSConnectionPool(
+                ip_text,
+                port=port,
+                timeout=pool_timeout,
+                server_hostname=host,  # SNI + certificate name for the real host
+                assert_hostname=host,
+                retries=False,
+            )
+        else:
+            pool = urllib3.HTTPConnectionPool(
+                ip_text, port=port, timeout=pool_timeout, retries=False
+            )
+        try:
+            r = pool.urlopen(
+                "POST", path, body=body, headers=send_headers,
+                redirect=False, retries=False,
+            )
+            status = int(r.status)
+            return status, (None if status < 300 else f"HTTP {status}")
+        finally:
+            pool.close()
     except Exception as e:  # network / DNS / TLS — a retryable transport error
         return None, str(e)[:300]
 

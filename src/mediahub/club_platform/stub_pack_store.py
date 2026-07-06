@@ -54,6 +54,18 @@ def _packs_dir() -> Path:
     return d
 
 
+def _atomic_write(path: Path, rec: dict) -> None:
+    """Write the pack JSON via a same-dir temp file + ``os.replace``.
+
+    A crash (or a concurrent pill click) mid-write can never leave a
+    truncated pack on disk — readers see either the old record or the new
+    one, matching the tmp+replace convention of the sibling stores.
+    """
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _derive_title(stub_type: str, form_data: dict) -> str:
     """Pick the most informative title from form input."""
     if stub_type == "free_text":
@@ -102,7 +114,7 @@ def save_pack(
         "cards": list(cards or []),
     }
     path = _packs_dir() / f"{pack_id}.json"
-    path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write(path, record)
     return record
 
 
@@ -129,7 +141,7 @@ def update_pack(
         fd.update({k: v for k, v in form_data_updates.items() if isinstance(v, (str, int, float))})
         rec["form_data"] = fd
     path = _packs_dir() / f"{pack_id}.json"
-    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write(path, rec)
     return rec
 
 
@@ -170,7 +182,7 @@ def set_planned_date(
         # An unscheduled draft carries no channel either.
         rec.pop("planned_channel", None)
     path = _packs_dir() / f"{pack_id}.json"
-    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write(path, rec)
     return rec
 
 
@@ -242,7 +254,7 @@ def update_card_status(pack_id: str, card_idx: int, status: str) -> Optional[dic
     card["status"] = status
     rec["cards"] = cards
     path = _packs_dir() / f"{pack_id}.json"
-    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write(path, rec)
     return rec
 
 
@@ -270,7 +282,7 @@ def replace_cards(pack_id: str, new_cards: list[dict]) -> Optional[dict]:
     rec["card_history"] = history[-24:]
     rec["cards"] = list(new_cards or [])
     path = _packs_dir() / f"{pack_id}.json"
-    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write(path, rec)
     return rec
 
 

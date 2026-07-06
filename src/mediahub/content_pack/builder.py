@@ -8,6 +8,7 @@ build_grouped_pack(run_data, profile_id) -> dict with 8 buckets:
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -155,25 +156,24 @@ def build_grouped_pack(
 
     Workflow state (the human approval status) is read from the sidecar JSON
     in ``runs_dir`` so the pill the pack template paints on reload reflects
-    the review decision. ``runs_dir`` falls back to the web layer's RUNS_DIR
-    (DATA_DIR-derived) so single-tenant deployments and test fixtures with a
-    custom DATA_DIR both resolve to the right sidecar location.
+    the review decision. ``runs_dir`` falls back to the env-derived RUNS_DIR
+    (RUNS_DIR, else DATA_DIR/runs_v4 — the same derivation the web layer
+    uses) so single-tenant deployments and test fixtures with a custom
+    DATA_DIR both resolve to the right sidecar location.
     """
     # Load workflow states if available. WorkflowStore requires runs_dir;
-    # honour an explicit override, otherwise resolve it the same way the
-    # rest of the web layer does (DATA_DIR-derived) so a sidecar written
-    # by the schedule endpoint is found by this reload path.
+    # honour an explicit override, otherwise resolve it from the environment
+    # exactly as the web layer does (RUNS_DIR, else DATA_DIR/runs_v4) so a
+    # sidecar written by the schedule endpoint is found by this reload path.
     wf_states = {}
     try:
         from mediahub.workflow.store import WorkflowStore
 
         if runs_dir is None:
-            try:
-                from mediahub.web.web import RUNS_DIR as _RUNS_DIR
-
-                resolved_runs_dir = Path(_RUNS_DIR)
-            except Exception:
-                resolved_runs_dir = Path(__file__).resolve().parents[2] / "runs_v4"
+            data_dir = Path(
+                os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1]))
+            )
+            resolved_runs_dir = Path(os.environ.get("RUNS_DIR", str(data_dir / "runs_v4")))
         else:
             resolved_runs_dir = Path(runs_dir)
         ws = WorkflowStore(resolved_runs_dir)

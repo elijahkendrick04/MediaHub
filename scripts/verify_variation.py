@@ -29,12 +29,13 @@ Usage
 
   --render          Also render each brief to a PNG (slow, ~30-60s).
   --count N         Generate N briefs instead of 10.
-  --output DIR      Where to write PNGs (default: data/verify_variation).
+  --output DIR      Where to write PNGs (default: $DATA_DIR/verify_variation).
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -216,7 +217,8 @@ def main() -> int:
     ap.add_argument("--render", action="store_true",
                     help="Also render PNGs and compare byte hashes")
     ap.add_argument("--output", type=Path,
-                    default=_REPO_ROOT / "data" / "verify_variation")
+                    default=Path(os.environ.get("DATA_DIR")
+                                 or (_REPO_ROOT / "data")) / "verify_variation")
     args = ap.parse_args()
 
     briefs = _generate_briefs(args.count)

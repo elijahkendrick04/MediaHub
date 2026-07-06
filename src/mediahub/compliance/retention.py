@@ -143,6 +143,7 @@ def run_purge(
         "ran_at": now.replace(microsecond=0).isoformat(),
         "runs_deleted": [],
         "upload_dirs_deleted": [],
+        "upload_files_deleted": 0,
         "pb_cache_files_deleted": 0,
         "security_log_lines_dropped": 0,
         "errors": [],
@@ -176,7 +177,21 @@ def run_purge(
     uploads = _uploads_dir()
     if uploads.exists():
         for d in sorted(uploads.iterdir()):
-            if not d.is_dir() or d.name == "media_library":
+            if d.name == "media_library":
+                continue
+            if not d.is_dir():
+                # Loose transient files written straight into uploads_v4
+                # (legacy path) carry no run or tenant hint — age them on
+                # the global raw-uploads window.
+                cutoff = _age_cutoff(global_days("raw_uploads"), now)
+                if cutoff is None:
+                    continue
+                try:
+                    if datetime.fromtimestamp(d.stat().st_mtime, tz=timezone.utc) < cutoff:
+                        d.unlink()
+                        report["upload_files_deleted"] += 1
+                except OSError as e:
+                    report["errors"].append(f"uploads {d.name}: {e}")
                 continue
             profile_id = ""
             run_path = _runs_dir() / f"{d.name}.json"

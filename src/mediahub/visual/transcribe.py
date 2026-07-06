@@ -50,6 +50,7 @@ import importlib.util
 import json
 import os
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -449,6 +450,22 @@ def _build_transcript(
 # live ONLY in this module; tests/test_local_provider_slots.py pins that).
 # ---------------------------------------------------------------------------
 
+# Loaded backend models, memoised for the worker's lifetime. Model load is the
+# expensive part (seconds of weight allocation on CPU); the key carries every
+# env-derived load parameter so an env change picks up a fresh instance.
+_MODEL_CACHE: dict[tuple, object] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+
+
+def _cached_model(key: tuple, loader):
+    """Return the memoised backend model for ``key``, loading it once."""
+    with _MODEL_CACHE_LOCK:
+        model = _MODEL_CACHE.get(key)
+        if model is None:
+            model = loader()
+            _MODEL_CACHE[key] = model
+        return model
+
 
 def _transcribe_faster_whisper(
     audio_bytes: bytes,
@@ -473,8 +490,11 @@ def _transcribe_faster_whisper(
     compute = os.environ.get("MEDIAHUB_WHISPER_COMPUTE", "int8").strip() or "int8"
     download_root = os.environ.get("MEDIAHUB_WHISPER_MODEL_DIR", "").strip() or None
     try:
-        whisper_model = WhisperModel(
-            model, device=device, compute_type=compute, download_root=download_root
+        whisper_model = _cached_model(
+            (_FASTER_WHISPER, model, device, compute, download_root),
+            lambda: WhisperModel(
+                model, device=device, compute_type=compute, download_root=download_root
+            ),
         )
     except Exception as exc:
         raise ASRUnavailable(
@@ -523,7 +543,7 @@ def _transcribe_whispercpp(
         tf.write(audio_bytes)
         tf.flush()
         try:
-            cpp_model = Model(model)
+            cpp_model = _cached_model((_WHISPER_CPP, model), lambda: Model(model))
             raw_segments = cpp_model.transcribe(tf.name)
         except Exception as exc:
             raise ASRUnavailable(f"whisper.cpp transcription failed: {exc}") from exc

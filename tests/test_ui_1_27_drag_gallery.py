@@ -21,7 +21,7 @@ tests/test_u16_card_tilt.py + tests/test_hover_preview.py):
        the in-feed frames) and on ``/media-library`` (one filmstrip card per
        asset above the table; parsed metadata HTML-escaped; empty library →
        no gallery).
-  4. Browser-side (Playwright, pinned chromium-1194, auto-skips if absent):
+  4. Browser-side (Playwright, prebaked Chromium, auto-skips if absent):
        a real mouse drag pans the row and toggles ``.is-dragging`` /
        cursor; the grab cursor + hint appear only while the row overflows; a
        drag swallows its click while a plain click passes; touch is left to
@@ -52,7 +52,9 @@ _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in (
     "true",
     "yes",
 )
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -344,7 +346,7 @@ class TestMediaLibraryGallery:
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestDragBrowser:
     """Drive the real ui-kit.js binder over the real CSS in Chromium. We mount
     the gallery (real classes) in a narrow harness so overflow is deterministic

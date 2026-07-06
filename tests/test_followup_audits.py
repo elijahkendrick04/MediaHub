@@ -369,6 +369,52 @@ class TestM5StatusAndReread:
         assert prof.link_capture_state["instagram"]["status"] == "real_content"
         assert prof.link_capture_state["instagram"]["voice_digest"] == "Fresh voice."
 
+    def test_reread_invalidates_social_dna_cache(self, iso_root, monkeypatch):
+        """A successful re-read must drop the full-capture social_dna cache
+        entry for this link set — otherwise the next capture (force=False)
+        replays the stale combined DNA and the re-read never reaches the
+        brand voice captions actually use."""
+        from mediahub.brand import social_dna
+        from mediahub.brand.link_handlers import instagram as ig_handler
+
+        monkeypatch.setattr(
+            ig_handler,
+            "process",
+            lambda url: {
+                "platform": "instagram",
+                "url": url,
+                "status": "real_content",
+                "playbook_age": 0,
+                "regenerated": True,
+                "dna": {"voice_summary": "Fresh voice."},
+            },
+        )
+        links = {"instagram": "https://instagram.com/x"}
+        _seed_profile(
+            profile_id="m5d",
+            social_links=dict(links),
+            link_capture_state={},
+        )
+        # Seed a stale full-capture cache entry for this exact link set.
+        social_dna._save_cache("", links, {"voice_summary": "STALE"})
+        cache_file = social_dna._cache_path("", links)
+        assert cache_file.exists()
+
+        from mediahub.web.web import create_app
+
+        app = create_app()
+        with app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["active_profile_id"] = "m5d"
+                sess["login_seen_at"] = int(time.time())
+                sess["_csrf"] = "audit-csrf-token-0123456789abcdef"
+            r = c.post(
+                "/organisation/setup/reread/instagram",
+                data={"csrf_token": "audit-csrf-token-0123456789abcdef"},
+            )
+            assert r.status_code in (302, 303)
+        assert not cache_file.exists(), "stale social_dna cache entry must be invalidated"
+
     def test_reread_endpoint_no_op_without_active_profile(self, iso_root):
         """Audit safety: re-read must redirect cleanly when there's no
         session profile (anyone hitting the URL directly)."""

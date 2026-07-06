@@ -156,6 +156,36 @@ def test_tenth_place_is_not_a_medal():
     assert io._medal_tier(b) is None
 
 
+def test_golden_hook_copy_is_not_a_medal():
+    # Free-form hook copy must never mint a medal badge — "a golden night"
+    # is marketing phrasing, not a factual gold-medal claim.
+    b = _brief(primary_hook="A GOLDEN NIGHT FOR THE SQUAD",
+               inspiration_pattern_id="recap_mention")
+    assert io._medal_tier(b) is None
+    assert _run(b) == CARD_HTML
+
+
+def test_gold_in_hook_copy_alone_is_not_a_medal():
+    # Even an exact "gold" token in the hook is copy, not a verified fact.
+    b = _brief(primary_hook="GOLD RUSH", confidence_label="RECAP",
+               inspiration_pattern_id="recap_mention")
+    assert io._medal_tier(b) is None
+
+
+def test_achievement_label_gold_still_mints_medal():
+    b = _brief(text_layers={"achievement_label": "GOLD"})
+    assert io._medal_tier(b) == "gold"
+    assert "medal-gold" in _badges(_run(b))
+
+
+def test_record_in_hook_copy_is_not_a_record():
+    # "record turnout" phrasing in the post angle must not stamp a record shield.
+    b = _brief(text_layers={"post_angle": "record turnout at the gala"},
+               inspiration_pattern_id="recap_mention")
+    assert io._record_kind(b) is None
+    assert _run(b) == CARD_HTML
+
+
 def test_medal_baked_families_suppress_medal_badge():
     for fam in ("medal_card", "centered_medal_spotlight"):
         b = _brief(confidence_label="GOLD", inspiration_pattern_id="medal_gold",

@@ -137,3 +137,101 @@ class TestSpec:
     def test_normalised_formats_dedup_and_alias(self, tmp_path):
         spec = BulkExportSpec(items=[], formats=["JPG", "jpeg", "png", "png"])
         assert spec.normalised_formats() == ["jpg", "png"]
+
+
+class TestAtomicZip:
+    def test_crash_mid_build_leaves_no_zip_or_tmp(self, tmp_path, monkeypatch):
+        """A crash while the archive is being written must not leave a truncated
+        ZIP at the served path (nor a stray .tmp sibling)."""
+        from mediahub.export_engine import bulk as bulk_mod
+
+        def _boom(label, manifest):
+            raise RuntimeError("simulated crash mid-build")
+
+        monkeypatch.setattr(bulk_mod, "_readme", _boom)
+        out = tmp_path / "exports" / "bulk_test.zip"
+        spec = BulkExportSpec(items=_items(tmp_path, ["Eira 200 Free"]), formats=["jpg"])
+        with pytest.raises(RuntimeError):
+            run_bulk_export(spec, out=out)
+        assert not out.exists()
+        assert list(out.parent.glob("*.tmp")) == []
+
+
+class TestMaybeGc:
+    def _backdate(self, path: Path, seconds: float) -> None:
+        import os
+        import time
+
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    def test_aged_artifacts_swept_fresh_kept(self, tmp_path):
+        from mediahub.export_engine import cache as ee_cache
+
+        quick = ee_cache.cache_dir() / "quick"
+        quick.mkdir(parents=True, exist_ok=True)
+        aged_quick = quick / "card-convert-deadbeef.png"
+        fresh_quick = quick / "card-resize-cafebabe.png"
+        aged_quick.write_bytes(b"x" * 10)
+        fresh_quick.write_bytes(b"y" * 10)
+        self._backdate(aged_quick, ee_cache._CACHE_MAX_AGE_S + 3600)
+
+        exports = ee_cache._runs_dir() / "run1" / "exports"
+        exports.mkdir(parents=True, exist_ok=True)
+        aged_zip = exports / "bulk_old.zip"
+        fresh_zip = exports / "bulk_new.zip"
+        aged_zip.write_bytes(b"z" * 10)
+        fresh_zip.write_bytes(b"w" * 10)
+        self._backdate(aged_zip, ee_cache._BULK_ZIP_MAX_AGE_S + 3600)
+
+        ee_cache.maybe_gc(force=True)
+
+        assert not aged_quick.exists()
+        assert fresh_quick.exists()
+        assert not aged_zip.exists()
+        assert fresh_zip.exists()
+
+    def test_size_cap_evicts_oldest_first(self, tmp_path, monkeypatch):
+        from mediahub.export_engine import cache as ee_cache
+
+        monkeypatch.setattr(ee_cache, "_CACHE_MAX_BYTES", 150)
+        d = ee_cache.cache_dir()
+        oldest = d / "aaa.png"
+        middle = d / "bbb.png"
+        newest = d / "ccc.png"
+        for i, f in enumerate((oldest, middle, newest)):
+            f.write_bytes(b"x" * 60)
+            self._backdate(f, 3600 * (3 - i))
+
+        ee_cache.maybe_gc(force=True)
+
+        assert not oldest.exists()  # evicted to bring 180 bytes under the cap
+        assert middle.exists()
+        assert newest.exists()
+
+    def test_throttled_run_is_a_noop(self, tmp_path):
+        from mediahub.export_engine import cache as ee_cache
+
+        ee_cache.maybe_gc(force=True)  # stamps the throttle marker
+        aged = ee_cache.cache_dir() / "quick-old.png"
+        aged.write_bytes(b"x")
+        self._backdate(aged, ee_cache._CACHE_MAX_AGE_S + 3600)
+        ee_cache.maybe_gc()  # throttled: must not sweep yet
+        assert aged.exists()
+        ee_cache.maybe_gc(force=True)
+        assert not aged.exists()
+
+
+def test_bulk_export_js_retries_poll_before_giving_up():
+    """A transient poll failure must not abandon a still-running export job:
+    the client retries with backoff before declaring the job lost."""
+    from pathlib import Path
+
+    import mediahub.web as web_pkg
+
+    js = (Path(web_pkg.__file__).parent / "static" / "js" / "bulk_export.js").read_text(
+        encoding="utf-8"
+    )
+    assert "POLL_MAX_RETRIES" in js
+    assert "pollRetries = 0" in js  # retry budget resets on a successful poll
+    assert "Lost contact with the export job" in js  # terminal copy kept

@@ -6,23 +6,27 @@
 // `graphic_renderer/render.py:_photo_treatment_css` — duotone / halftone /
 // vignette read on a card's video exactly as they read on its approved still.
 //
-// Two design rules make this a safe *additive overlay* (never an edit to a scene):
+// Two design rules keep this exactly still-parity (never a scene-wide wash):
 //
-//   1. In-place, never a repaint. The grade rides a `backdrop-filter` div, so it
-//      modifies the pixels the scene's PhotoLayer already painted rather than
-//      drawing a second copy of the photo. A repaint would sit on top of the
-//      scene's text and could occlude a fact; an in-place filter cannot. It is
-//      also masked to the photo's subject zone, so the bottom result/strip band
-//      and the top chrome (logo, label chip) keep their exact still-matched
-//      contrast — only the photo is graded. (If a headless renderer no-ops
-//      `backdrop-filter`, the grade simply doesn't apply: an honest, legible
-//      degradation, never a broken frame.)
+//   1. Photo-element-only. The grade is a CSS `filter` applied by the photo
+//      paint sites (`PhotoLayer` / the scene kit's `PhotoFill`) directly on
+//      their own `<img>` via `photoGradeFilterFor` — the same way the still
+//      applies `_photo_treatment_css` to the photo element alone. Scene text,
+//      chips and strips are never graded, whatever the layout puts mid-frame,
+//      so the resolved APCA-gated roles keep their exact still-matched
+//      contrast. (An earlier revision graded a fixed vertical band with a
+//      masked `backdrop-filter`, which also washed any copy inside the band —
+//      retired for this per-element parity.)
 //
-//   2. No-op unless the brief asked for a grade. The layer returns null when the
-//      card has no photo, or its `photo_treatment` is clean / structural
-//      (`cutout`, `frame`, `no-photo`), empty, or unknown. So every photo-less
-//      card and every legacy / default caller renders byte-identically to before
-//      this file existed — exactly the contract the sprint registry promises.
+//   2. No-op unless the brief asked for a grade. `photoGradeFilterFor` returns
+//      "" when the card has no photo, or its `photo_treatment` is clean /
+//      structural (`cutout`, `frame`, `no-photo`), empty, or unknown. So every
+//      photo-less card and every legacy / default caller renders
+//      byte-identically — exactly the contract the sprint registry promises.
+//
+// The default-exported Layer now carries only the vignette's radial
+// edge-darkening overlay (the one treatment whose character is a frame effect,
+// not a photo grade); it keeps the same registry drop-in contract.
 //
 // Pure function of the frame: the grade "develops" in over the first half second
 // and the focus-in blur resolves to 0, so the held frame is perfectly sharp (no
@@ -38,14 +42,6 @@ const DEVELOP_SEC = 0.5;
 const FOCUS_IN_BLUR_PX = 4;
 const FOCUS_IN_SEC = 0.6;
 const VIGNETTE_MAX_ALPHA = 0.4;
-
-// Confine the grade to the photo's subject zone (faces frame at ~center 28%, the
-// same default PhotoLayer uses). Transparent over the top chrome (≤9%) and over
-// the bottom hero/result/strip band (≥66%, where the scene's scrim has already
-// hidden the photo and the facts live), opaque across the subject in between.
-const PHOTO_ZONE_MASK =
-  "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 9%, " +
-  "rgba(0,0,0,1) 17%, rgba(0,0,0,1) 48%, rgba(0,0,0,0) 66%)";
 
 // The four held filter levers the roadmap names, plus the grayscale + sepia the
 // still's duotone/halftone parity needs. Identity is brightness/contrast/saturate
@@ -142,17 +138,25 @@ function cssFilter(s: FilterStack, blurPx: number): string {
   );
 }
 
-const Layer: SceneComponent = ({ ctx }) => {
-  const { card, frame, fps } = ctx;
-
+// The grade a card's photo holds at `frame`, as a CSS `filter` string — or ""
+// when the card asks for none (no photo / clean / structural / unknown
+// treatment), so ungraded cards stay byte-identical. Applied by the photo
+// paint sites (PhotoLayer / PhotoFill) on their own <img> element — exactly
+// the still renderer's photo-element-only `_photo_treatment_css` scope, so
+// scene text painted over the photo is never washed.
+export function photoGradeFilterFor(
+  card: { photoSrc?: string; photoTreatment?: string; mood?: string },
+  frame: number,
+  fps: number,
+): string {
   // Gate 1 — no photo means nothing to grade (photo-less cards stay identical).
   if (!card.photoSrc) {
-    return null;
+    return "";
   }
   // Gate 2 — a clean / structural / unknown treatment asks for no grade.
   const base = baseStackFor(card.photoTreatment || "");
   if (!base) {
-    return null;
+    return "";
   }
   const stack = applyMoodNuance(base, card.mood || "");
 
@@ -171,12 +175,25 @@ const Layer: SceneComponent = ({ ctx }) => {
       easing: Easing.out(Easing.cubic),
     },
   );
-  const filter = cssFilter(developStack(stack, dev), blurPx);
+  return cssFilter(developStack(stack, dev), blurPx);
+}
 
-  const isVignette = (card.photoTreatment || "").toLowerCase() === "vignette";
-  const vig = isVignette
-    ? interpolate(frame, [0, fps * DEVELOP_SEC], [0, VIGNETTE_MAX_ALPHA], clamp)
-    : 0;
+const Layer: SceneComponent = ({ ctx }) => {
+  const { card, frame, fps } = ctx;
+
+  // The overlay half of the treatment: only the vignette paints a frame
+  // effect (its radial edge-darkening). The photo grade itself rides the
+  // photo <img> via photoGradeFilterFor — see the header.
+  if (!card.photoSrc) {
+    return null;
+  }
+  if ((card.photoTreatment || "").toLowerCase() !== "vignette") {
+    return null;
+  }
+  const vig = interpolate(frame, [0, fps * DEVELOP_SEC], [0, VIGNETTE_MAX_ALPHA], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
 
   return (
     <div
@@ -187,16 +204,6 @@ const Layer: SceneComponent = ({ ctx }) => {
         overflow: "hidden",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backdropFilter: filter,
-          WebkitBackdropFilter: filter,
-          WebkitMaskImage: PHOTO_ZONE_MASK,
-          maskImage: PHOTO_ZONE_MASK,
-        }}
-      />
       {vig > 0 ? (
         <div
           style={{

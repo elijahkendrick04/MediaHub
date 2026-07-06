@@ -358,9 +358,12 @@ injection, recent-caption dedupe). v2 extends it inside the same architecture
   approved captions, which works for every club from the first approval.
 - **Generate-many-then-dedupe** — `generate_caption_candidates`: 4–6
   candidates, trigram de-dup against recent + each other, returned ranked
-  freshest-first.
+  freshest-first. The same quality gates (trigram near-dup collapse +
+  AI-tell drop) are packaged as `filter_caption_variants` for callers that
+  already hold a produced list — the live caption route's variants path.
 - **Per-platform variants** — `generate_platform_variants`: feed / story / X /
-  LinkedIn length + tone from one approved source caption.
+  LinkedIn length + tone from one approved source caption. Library seam
+  only for now — no route or UI surface calls it yet.
 - **Approval-loop store** — the content-pack approval seam
   (`workflow/pack.py`) appends each approved card's final caption (edits
   included) to the club's few-shot store, alongside Cap-2b semantic capture.
@@ -413,8 +416,9 @@ the number of ranked moments).
   seed), and a club outro scene.
 - **Reel beat-rhythm & duration customisation (R1.12)** — the beat skeleton is
   customisable: `reel_duration_for` / `normalise_reel_rhythm` accept optional
-  per-card beat weights and custom cover/outro seconds (`?cover=&outro=&weights=`
-  on the reel route), mirrored into the Remotion carve (`MeetReel.tsx`) and the
+  per-card beat weights, custom cover/outro seconds and a per-card base
+  (`?cover=&outro=&beat=&weights=` on the reel route), mirrored into the
+  Remotion carve (`MeetReel.tsx`) and the
   ffmpeg fallback (`reel_segment_durations`) and folded into the cache key. A
   weighted card earns proportionally more seconds (the reel lengthens honestly
   rather than squeezing the others), all inputs clamp to render-safe bounds, and

@@ -4,8 +4,8 @@ Design rules:
 
 - **Reach every store.** A "deleted" athlete must be gone from the run JSON,
   the rendered assets, the PB caches (warm + per-run), the research cache,
-  the caption memory, and the posting-log excerpts. Partial erasure is the
-  bug this module exists to fix (audit finding 1.6).
+  and the caption memory. Partial erasure is the bug this module exists to
+  fix (audit finding 1.6).
 - **Prefer over-removal.** When a card mentions the erased athlete, the whole
   card goes (with its rendered files); remaining multi-athlete text gets the
   name redacted. Better a club re-generates a card than a child's data
@@ -44,15 +44,24 @@ def _runs_dir() -> Path:
 
 def _delete_json_files_mentioning(directory: Path, needle: str, glob: str = "*.json") -> int:
     """Delete every JSON file under ``directory`` whose content mentions
-    ``needle`` (case-insensitive). Returns files removed. Tolerates missing
-    directories and unreadable files."""
+    ``needle`` (case-insensitive, whole-name). Returns files removed.
+    Tolerates missing directories and unreadable files.
+
+    Whole-name means the needle must not sit inside a longer alphanumeric
+    run: erasing 'Sam Lee' never deletes 'Sam Leeson' — these caches are
+    global (not tenant-scoped), so a substring match would erase another
+    subject's (or another club's) cache on a name-prefix collision."""
     if not directory.exists():
         return 0
-    frag = needle.lower()
+    frag = re.sub(r"\s+", " ", needle.strip().lower())
+    if not frag:
+        return 0
+    pattern = re.compile(r"(?<![a-z0-9])" + re.escape(frag) + r"(?![a-z0-9])")
     removed = 0
     for f in directory.rglob(glob):
         try:
-            if frag in f.read_text(encoding="utf-8", errors="ignore").lower():
+            text = re.sub(r"\s+", " ", f.read_text(encoding="utf-8", errors="ignore").lower())
+            if pattern.search(text):
                 f.unlink()
                 removed += 1
         except OSError:
@@ -336,7 +345,7 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
 
     Walks the org's runs (cards out, swims out, residual mentions redacted,
     rendered assets for removed cards deleted), then sweeps the PB caches,
-    research caches, caption memory and posting-log excerpts.
+    research caches and caption memory.
     """
     report = AthleteErasureReport(name=name, profile_id=profile_id)
     frag = (name or "").strip().lower()

@@ -239,6 +239,36 @@ def test_anniversary_signal_from_year_old_meet(tmp_path):
     assert ann[0].payload["years"] == 1
 
 
+def test_discovered_meet_signals_are_tenant_scoped(tmp_path):
+    """The discovery cache is shared and unattributed, so gather_external_signals
+    must only surface a discovered meet to an org whose own runs carry a
+    matching meet name — org B never sees (or gets a plan boost from) a meet
+    discovered off org A's runs."""
+    _seed_run(
+        tmp_path,
+        run_id="runA1",
+        profile_id=ORG_A,
+        meet_name="Spring Open",
+        finished=TODAY - timedelta(days=2),
+    )
+    _seed_run(
+        tmp_path,
+        run_id="runB1",
+        profile_id=ORG_B,
+        meet_name="Beta Gala",
+        finished=TODAY - timedelta(days=1),
+    )
+    # Discovered off org A's run; canonical_name carries the year suffix the
+    # identity engine appends.
+    _seed_discovered_meet(tmp_path, name="Spring Open 2026")
+
+    ext_a = gather_external_signals(ORG_A, data_dir=tmp_path, now=TODAY)
+    assert any(s.kind == "discovered_meet" for s in ext_a)
+
+    ext_b = gather_external_signals(ORG_B, data_dir=tmp_path, now=TODAY)
+    assert all(s.kind != "discovered_meet" for s in ext_b)
+
+
 # ---------------------------------------------------------------------------
 # The plan — ranked, explainable, ≥2 sport profiles, deterministic
 # ---------------------------------------------------------------------------

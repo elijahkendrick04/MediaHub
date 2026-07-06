@@ -493,8 +493,11 @@ def _embed_png_bytes(raw: bytes, meta: ImageMetadata) -> bytes:
         if ctype == b"IHDR" and not inserted:
             out.extend(new_chunks)
             inserted = True
-    if not inserted:  # pragma: no cover - malformed PNG without IHDR
-        out.extend(new_chunks)
+    if not inserted:
+        # No IHDR: not a real PNG stream. Refuse honestly rather than
+        # fabricate chunks around bytes we don't understand — the caller
+        # keeps the original file untouched.
+        raise UnsupportedImageFormat("malformed PNG (no IHDR chunk) — refusing to embed")
     out.append(iend if iend is not None else _png_chunk(b"IEND", b""))
     return b"".join(out)
 

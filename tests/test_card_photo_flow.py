@@ -20,8 +20,16 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-# Tiny valid JPEG header — enough for upload plumbing (no decode happens).
-_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00" + b"\x00" * 64
+def _tiny_jpeg() -> bytes:
+    """A real, decodable JPEG — ingest verifies uploads actually decode."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+_JPEG = _tiny_jpeg()
 
 
 @pytest.fixture

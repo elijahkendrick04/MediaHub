@@ -266,3 +266,51 @@ def test_resweep_apply_route_requeues_for_review(app_client, monkeypatch):
     ws = wm._get_wf_store()
     state = ws.load("run1").get("s1")
     assert state is not None and state.status == CardStatus.EDITED
+
+
+def test_resweep_apply_route_chunks_drain_the_backlog(app_client, monkeypatch):
+    """A re-render never rewrites the stored brief, so the affected list is
+    identical on every call — the offset cursor must make successive chunked
+    calls cover DIFFERENT cards with remaining decreasing to zero."""
+    client, cp, wm, tmp_path = app_client
+    prof = cp.ClubProfile(profile_id="sweepclub", display_name="Sweep Club")
+    cp.save_profile(prof)
+    from mediahub.brand.kits import BrandKitRef, upsert_kit
+
+    prof = cp.load_profile("sweepclub")
+    upsert_kit(
+        prof, BrandKitRef(kit_id="k1", name="Loud", role="event", palette={"primary": "#FF0000"})
+    )
+    cp.save_profile(prof)
+    for i in range(3):
+        _write_brief(
+            tmp_path / "runs_v4", "run1", f"s{i}", f"cb_{i}", {"primary": "#0E5BFF"}, "sweepclub"
+        )
+
+    rendered_tags: list[str] = []
+
+    def fake_render(brief, *a, **k):
+        return SimpleNamespace(visual=SimpleNamespace(id="v1", brief_id=brief.id))
+
+    monkeypatch.setattr("mediahub.graphic_renderer.render.render_brief", fake_render)
+    monkeypatch.setattr(
+        "mediahub.content_pack_visual.integration.persist_visual", lambda *a, **k: None
+    )
+
+    with client.session_transaction() as s:
+        s["active_profile_id"] = "sweepclub"
+
+    remainings = []
+    offset = 0
+    for _ in range(3):
+        r = client.post(f"/api/brand/kits/k1/resweep/apply?limit=1&offset={offset}")
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d["n_rendered"] == 1
+        assert d["n_skipped"] == 0  # cursor skips are not reported as skips
+        rendered_tags.extend(d["rendered"])
+        remainings.append(d["remaining"])
+        offset = d["next_offset"]
+    assert remainings == [2, 1, 0]
+    # Three different cards were rendered — the cursor made real progress.
+    assert len(set(rendered_tags)) == 3
