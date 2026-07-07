@@ -80,7 +80,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-07-07 · `aa0a33c41` · Merge pull request #1075 from elijahkendrick04/claude/wipe-all-runs-tool
+**Last updated:** 2026-07-07 · `665c3d8db` · Merge pull request #1078 from elijahkendrick04/claude/harden-wipe-runs
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1228,6 +1228,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-07-07 | `07b3f88d6` | fix(ops): wipe_all_runs pre-flight guard + honest failure reporting |
 | 2026-07-07 | `646b089aa` | feat(motion): per-card connective reel transitions + firmer on-video text/scrim + Video Maker rebran |
 | 2026-07-07 | `ac8c31ac9` | feat(ops): add guarded all-org run-data wipe maintenance script |
 | 2026-07-07 | `bf7f5f59d` | fix(ci): bandit B324 on selection markers + re-baseline reel frame for the paired-transition upgrade |
@@ -1239,5 +1240,4 @@ list and the auto table below, not here.
 | 2026-07-07 | `22422946a` | feat(quality): register the M12 layered archetypes in the template gallery |
 | 2026-07-07 | `bec48507a` | feat(quality): phase B — still-graphic craft (M7-M14) |
 | 2026-07-07 | `268bbef78` | feat(quality): phase C — motion/reel craft (M15-M22) |
-| 2026-07-07 | `383ef20bb` | build(deps): bump the python-deps group across 1 directory with 13 updates |
 <!-- /ROADMAP:ACTIVITY -->
