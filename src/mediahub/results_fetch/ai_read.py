@@ -305,20 +305,32 @@ def ai_read_candidates(
     max_reads: Optional[int] = None,
     generate: Optional[Callable] = None,
     model: str = "vision",
+    progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> list[AiExtraction]:
     """AI-read up to the per-crawl budget of candidate pages.
 
     Stops after ``max_reads`` actual reads (default from the env budget). Pages
     that yield no results don't count against nothing — every attempt that calls
     the model counts, so a hostile site can't burn unbounded vision calls.
+
+    ``progress_cb(read_number, total)`` is fired once per read (before the LLM
+    call), mirroring crawl's ``progress_cb`` convention, so a caller can refresh
+    a job heartbeat between the long sequential vision calls this makes. It is
+    best-effort — any exception it raises is swallowed — and inert when omitted.
     """
     budget = max_reads if max_reads is not None else max_ai_reads()
+    total = min(len(pages), budget)
     out: list[AiExtraction] = []
     reads = 0
     for page in pages:
         if reads >= budget:
             break
         reads += 1
+        if progress_cb is not None:
+            try:
+                progress_cb(reads, total)
+            except Exception:  # noqa: BLE001 — progress is best-effort, never fatal
+                log.debug("ai_read_candidates progress_cb failed", exc_info=True)
         extraction = ai_read_page(page, generate=generate, model=model)
         if extraction is not None:
             out.append(extraction)

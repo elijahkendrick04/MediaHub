@@ -272,6 +272,122 @@ def upsert_row(
     return rid
 
 
+def bulk_insert_rows(
+    profile_id: str,
+    table_id: str,
+    rows: list[dict],
+    *,
+    db_path: Optional[Path] = None,
+) -> list[str]:
+    """Insert many new rows in ONE connection + transaction; return their ids.
+
+    Batched sibling of :func:`upsert_row` for imports: it reads ``MAX(position)``
+    once, assigns sequential positions from there, normalises every cell exactly
+    like :func:`upsert_row` (``DataCell`` round-trip), and ``executemany``-inserts
+    them under a single commit — one fsync instead of one per row. The caller is
+    responsible for capping ``rows`` to a sane count before calling. Returns the
+    generated ``row_id`` list in the order supplied.
+    """
+    if not rows:
+        return []
+    now = _now()
+    conn = _connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM data_hub_rows "
+            "WHERE table_id=? AND profile_id=?",
+            (table_id, profile_id),
+        ).fetchone()
+        base = int(cur["pos"]) if cur else 0
+        params = []
+        row_ids: list[str] = []
+        for offset, cells in enumerate(rows):
+            payload = {
+                k: (v.to_dict() if isinstance(v, DataCell) else DataCell.from_dict(v).to_dict())
+                for k, v in cells.items()
+            }
+            rid = _new_id("row")
+            row_ids.append(rid)
+            params.append(
+                (table_id, profile_id, rid, base + offset, json.dumps(payload), now)
+            )
+        conn.executemany(
+            "INSERT INTO data_hub_rows "
+            "(table_id, profile_id, row_id, position, cells_json, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            params,
+        )
+        conn.execute(
+            "UPDATE data_hub_tables SET updated_at=? WHERE table_id=? AND profile_id=?",
+            (now, table_id, profile_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return row_ids
+
+
+def set_cells(
+    profile_id: str,
+    table_id: str,
+    updates: list[tuple[str, str, DataCell]],
+    *,
+    db_path: Optional[Path] = None,
+) -> int:
+    """Apply many single-cell edits in ONE connection + transaction.
+
+    Batched sibling of :func:`set_cell` for derive/backfill: each update is
+    ``(row_id, column_key, cell)``. Rows are read, their existing cells merged
+    (preserving the rest of the row, exactly like :func:`set_cell`), and written
+    back under a single commit. Missing rows are skipped. Returns the number of
+    rows actually updated.
+    """
+    if not updates:
+        return 0
+    # Collapse multiple edits to the same row so each row is written once.
+    by_row: dict[str, list[tuple[str, DataCell]]] = {}
+    order: list[str] = []
+    for row_id, column_key, cell in updates:
+        if row_id not in by_row:
+            by_row[row_id] = []
+            order.append(row_id)
+        by_row[row_id].append((column_key, cell))
+    now = _now()
+    n = 0
+    conn = _connect(db_path)
+    try:
+        write_params = []
+        for row_id in order:
+            r = conn.execute(
+                "SELECT cells_json FROM data_hub_rows WHERE table_id=? AND profile_id=? AND row_id=?",
+                (table_id, profile_id, row_id),
+            ).fetchone()
+            if not r:
+                continue
+            try:
+                cells = json.loads(r["cells_json"]) or {}
+            except ValueError:
+                cells = {}
+            for column_key, cell in by_row[row_id]:
+                cells[column_key] = cell.to_dict()
+            write_params.append((json.dumps(cells), now, table_id, profile_id, row_id))
+        if write_params:
+            conn.executemany(
+                "UPDATE data_hub_rows SET cells_json=?, updated_at=? "
+                "WHERE table_id=? AND profile_id=? AND row_id=?",
+                write_params,
+            )
+            conn.execute(
+                "UPDATE data_hub_tables SET updated_at=? WHERE table_id=? AND profile_id=?",
+                (now, table_id, profile_id),
+            )
+            conn.commit()
+            n = len(write_params)
+    finally:
+        conn.close()
+    return n
+
+
 def set_cell(
     profile_id: str,
     table_id: str,
@@ -388,6 +504,8 @@ __all__ = [
     "delete_table",
     "list_org_tables",
     "upsert_row",
+    "bulk_insert_rows",
+    "set_cells",
     "set_cell",
     "delete_row",
     "get_org_table",
