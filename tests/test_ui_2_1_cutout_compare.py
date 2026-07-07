@@ -129,14 +129,23 @@ class _FakeRemover:
         # the honest-error rule says we must not fake a cut-out.
         assert self._available, "remove() must never be called when unavailable"
         self.remove_calls += 1
-        from PIL import Image
+        from PIL import Image, ImageDraw
 
         img = Image.open(src_path).convert("RGBA")
-        # knock a transparent hole so the cut-out genuinely differs from src
-        px = img.load()
-        for y in range(min(40, img.height)):
-            for x in range(min(40, img.width)):
-                px[x, y] = (0, 0, 0, 0)
+        # A believable person matte: one bottom-anchored opaque silhouette on
+        # a transparent field, so the M14 matte-quality gate (coverage bounds,
+        # single component, limited border contact) accepts it like a real cut.
+        w, h = img.size
+        mask = Image.new("L", (w, h), 0)
+        draw = ImageDraw.Draw(mask)
+        # head + torso: covers roughly a third of the frame, touching only
+        # part of the bottom edge — the shape rembg gives for a swimmer.
+        draw.ellipse((w * 0.38, h * 0.10, w * 0.62, h * 0.32), fill=255)
+        draw.polygon(
+            [(w * 0.30, h * 0.30), (w * 0.70, h * 0.30), (w * 0.62, h - 1), (w * 0.38, h - 1)],
+            fill=255,
+        )
+        img.putalpha(mask)
         Path(dst_path).parent.mkdir(parents=True, exist_ok=True)
         img.save(dst_path, "PNG")
         return str(dst_path)

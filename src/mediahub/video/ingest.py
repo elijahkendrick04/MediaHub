@@ -24,13 +24,21 @@ measurement later rather than ingest guessing a duration.
 
 from __future__ import annotations
 
+import logging
+import subprocess
 from pathlib import Path
 from typing import BinaryIO, Callable, Optional
 
 from mediahub.media_library.models import MediaAsset
 
+log = logging.getLogger(__name__)
+
 # Container extensions we accept as footage (validated on the way in).
 VIDEO_EXTS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".3gp"})
+
+# M27 poster thumbnails: one deterministic frame at 10% of the clip's duration,
+# long edge capped so a grid of 200 tiles costs kilobytes, not media streams.
+POSTER_MAX_EDGE = 480
 
 
 def is_video_filename(filename: str) -> bool:
@@ -131,6 +139,65 @@ def _default_store():
     return get_store()
 
 
+def poster_path_for_blob(blob_path) -> Path:
+    """The deterministic poster sidecar path beside a footage blob."""
+    return Path(blob_path).with_suffix(".poster.png")
+
+
+def extract_poster(blob_path, *, duration_ms: int, width: int, height: int) -> Optional[str]:
+    """Extract one deterministic poster frame beside the blob (M27), or None.
+
+    The frame at 10% of the clip's duration (a fixed timestamp = reproducible),
+    long edge capped at ``POSTER_MAX_EDGE``. Honest fallback: no FFmpeg, an
+    unmeasured clip, or any extraction failure returns ``None`` and the grid
+    keeps its current ``<video>``-tile behaviour.
+    """
+    from mediahub.visual.reel_ffmpeg import ffmpeg_exe
+
+    exe = ffmpeg_exe()
+    if not exe or duration_ms <= 0 or width <= 0 or height <= 0:
+        return None
+    at_s = max(0.0, (duration_ms / 1000.0) * 0.10)
+    long_edge = max(width, height)
+    scale = min(1.0, POSTER_MAX_EDGE / long_edge)
+    w = max(2, round(width * scale))
+    h = max(2, round(height * scale))
+    w, h = w - (w % 2), h - (h % 2)
+    poster = poster_path_for_blob(blob_path)
+    try:
+        proc = subprocess.run(
+            [
+                exe,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                f"{at_s:.3f}",
+                "-i",
+                str(blob_path),
+                "-frames:v",
+                "1",
+                "-vf",
+                f"scale={w}:{h}",
+                str(poster),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0 or not poster.exists() or poster.stat().st_size == 0:
+            raise RuntimeError((proc.stderr or "poster frame empty").strip()[:200])
+        return poster.name
+    except Exception as e:
+        log.debug("footage poster extraction failed for %s: %s", blob_path, e)
+        try:
+            poster.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+
+
 def _finalise_footage_asset(
     store,
     blob_path,
@@ -146,7 +213,10 @@ def _finalise_footage_asset(
 
     Shared tail of both ingest paths. Probing needs FFmpeg; when it is
     unavailable the clip is still stored honestly (``media_meta={}``) rather than
-    rejected — Clip-Maker surfaces the missing measurement later.
+    rejected — Clip-Maker surfaces the missing measurement later. A measured
+    clip also gets a deterministic poster thumbnail beside the blob (M27),
+    recorded in ``media_meta["poster"]`` — absent when extraction wasn't
+    possible, and the UI then keeps its ``<video>``-tile behaviour.
     """
     if probe_fn is None:
         from mediahub.video.probe import probe_clip as probe_fn  # type: ignore[no-redef]
@@ -168,6 +238,9 @@ def _finalise_footage_asset(
             "audio_codec": probe.audio_codec,
             "rotation": probe.rotation,
         }
+        poster_name = extract_poster(blob_path, duration_ms=probe.duration_ms, width=dw, height=dh)
+        if poster_name:
+            media_meta["poster"] = poster_name
     except Exception:
         # FFmpeg unavailable / unprobeable → store honestly, unmeasured.
         media_meta = {}
@@ -190,4 +263,12 @@ def _finalise_footage_asset(
     return store.save(asset)
 
 
-__all__ = ["VIDEO_EXTS", "is_video_filename", "ingest_footage", "ingest_footage_stream"]
+__all__ = [
+    "VIDEO_EXTS",
+    "POSTER_MAX_EDGE",
+    "is_video_filename",
+    "ingest_footage",
+    "ingest_footage_stream",
+    "extract_poster",
+    "poster_path_for_blob",
+]

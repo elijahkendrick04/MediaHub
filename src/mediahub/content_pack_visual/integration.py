@@ -221,6 +221,177 @@ def _resolve_asset_paths(
     return athlete_path, venue_path, logo_path, bg_photo_path
 
 
+_PERSON_ASSET_TYPES = ("athlete_action", "athlete_headshot", "team_photo")
+
+
+def _photo_facts(
+    evaluation,
+    media_assets,
+    *,
+    athlete_path=None,
+    forced_hero_asset_id=None,
+) -> dict:
+    """What the art direction may honestly assume about this card's photo (M7).
+
+    Resolved BEFORE the brief is generated, from the evaluator's matches and
+    the already-resolved hero path — so the archetype choice (and the AI
+    director's prompt) knows whether a photo exists, what kind it is, and how
+    it is oriented, instead of choosing a photo stage blind.
+    """
+    hero: Optional[dict] = None
+    if forced_hero_asset_id:
+        for a in media_assets or []:
+            ad = _asset_as_dict(a)
+            if str(ad.get("id")) == str(forced_hero_asset_id):
+                hero = ad
+                break
+    if hero is None and hasattr(evaluation, "matched") and evaluation.matched:
+        for role, scored in evaluation.matched.items():
+            if role.startswith("hero") and scored:
+                top = scored[0]
+                hero = (top.get("asset") if isinstance(top, dict) else None) or None
+                break
+    person_count = sum(
+        1 for a in media_assets or [] if _asset_as_dict(a).get("type") in _PERSON_ASSET_TYPES
+    )
+    if not athlete_path or hero is None:
+        return {
+            "has_photo": bool(athlete_path),
+            "asset_type": "",
+            "orientation": "",
+            "person_photo_count": person_count,
+        }
+    return {
+        "has_photo": True,
+        "asset_type": str(hero.get("type") or ""),
+        "orientation": str(hero.get("orientation") or ""),
+        "person_photo_count": person_count,
+    }
+
+
+def _item_athlete_name(item: dict) -> str:
+    ach = item.get("achievement") or {}
+    return str(
+        item.get("swimmer_name")
+        or ach.get("swimmer_name")
+        or item.get("athlete_name")
+        or ach.get("athlete_name")
+        or ""
+    ).strip()
+
+
+def _asset_as_dict(a) -> dict:
+    if isinstance(a, dict):
+        return a
+    return a.to_dict() if hasattr(a, "to_dict") else {}
+
+
+def _photo_identity_note(
+    item: dict,
+    evaluation,
+    media_assets,
+    forced_hero_asset_id=None,
+) -> Optional[str]:
+    """STILLS-9: flag an unverified face landing on a named card.
+
+    When the card names an athlete and the hero photo about to render carries
+    no verified link to that athlete (no matching ``linked_athlete_ids`` /
+    ``linked_athlete_names``), return a reviewer-facing note for the visual's
+    safety_notes. A description mention is NOT verification — only an explicit
+    athlete link is. Returns None when there's no named subject, no hero
+    photo, or the link checks out.
+    """
+    name = _item_athlete_name(item)
+    if not name:
+        return None
+    ach = item.get("achievement") or {}
+    subject_id = str(
+        item.get("swimmer_id") or ach.get("swimmer_id") or item.get("athlete_id") or ""
+    ).strip()
+
+    hero: Optional[dict] = None
+    if forced_hero_asset_id:
+        for a in media_assets or []:
+            ad = _asset_as_dict(a)
+            if str(ad.get("id")) == str(forced_hero_asset_id):
+                hero = ad
+                break
+    elif hasattr(evaluation, "matched") and evaluation.matched:
+        for role, scored in evaluation.matched.items():
+            if role.startswith("hero") and scored:
+                top = scored[0]
+                hero = (top.get("asset") if isinstance(top, dict) else None) or None
+                break
+    if not hero:
+        return None
+
+    ids = [str(x) for x in (hero.get("linked_athlete_ids") or [])]
+    names = [str(n).lower() for n in (hero.get("linked_athlete_names") or [])]
+    needle = name.lower()
+    verified = bool(subject_id and subject_id in ids) or (
+        needle in names or any(needle in n or n in needle for n in names)
+    )
+    if verified:
+        return None
+    return f"photo identity unverified — check it's really {name}"
+
+
+def _record_asset_usage(visuals: list[dict], *, profile_id: str, store=None) -> int:
+    """PHOTOS-5: persist which visuals each source asset ended up in.
+
+    Appends every rendered visual id onto its source assets' ``used_in`` so
+    the selector's reuse-penalty axis finally has data — the same photo stops
+    landing on every card of a multi-PB weekend. Profile-scoped: an asset
+    belonging to a different organisation is never touched, even if its id
+    leaked into a brief. Returns the number of assets updated.
+    """
+    usage: dict[str, list[str]] = {}
+    for v in visuals or []:
+        vid = str(v.get("id") or "")
+        if not vid:
+            continue
+        for aid in v.get("sourced_asset_ids") or []:
+            if aid and aid != "_brand_logo_":
+                usage.setdefault(str(aid), []).append(vid)
+    if not usage:
+        return 0
+    if store is None:
+        from mediahub.media_library.store import get_store
+
+        store = get_store()
+    updated = 0
+    for aid, vids in usage.items():
+        try:
+            asset = store.get(aid)
+            if asset is None:
+                continue
+            if profile_id and asset.profile_id and asset.profile_id != profile_id:
+                continue
+            merged = list(asset.used_in or [])
+            fresh = [v for v in vids if v not in merged]
+            if not fresh:
+                continue
+            store.update_fields(aid, {"used_in": merged + fresh})
+            updated += 1
+        except Exception:
+            continue
+    return updated
+
+
+def _dhash_by_asset_id(media_assets) -> dict[str, str]:
+    """Index asset id → ingest dHash (burst-family key) for pack threading."""
+    out: dict[str, str] = {}
+    for a in media_assets or []:
+        ad = _asset_as_dict(a)
+        aid = str(ad.get("id") or "")
+        meta = ad.get("media_meta")
+        q = meta.get("quality") if isinstance(meta, dict) else None
+        dh = str(q.get("dhash") or "") if isinstance(q, dict) else ""
+        if aid and dh:
+            out[aid] = dh
+    return out
+
+
 def create_visual_for_item(
     item: dict,
     brand_kit,
@@ -243,11 +414,17 @@ def create_visual_for_item(
     forced_bg_asset_id: Optional[str] = None,
     design_spec=None,
     user_overrides: Optional[dict] = None,
+    recent_asset_families: Optional[list[str]] = None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
 
     The caller normally writes the returned ``visuals`` list back onto the item.
+
+    ``recent_asset_families``: dHash hex strings of photos already used earlier
+    in this pack (threaded by ``attach_visuals_to_pack`` the same way
+    ``recent_signatures`` is) — the selector drops near-frames of them so one
+    pack never features two shots from the same burst.
 
     ``design_spec``: a validated ``DesignSpec`` to apply onto the brief (the
     regenerate-variants worker pre-computes distinct specs in one batch call
@@ -296,6 +473,8 @@ def create_visual_for_item(
             library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
             exclude_athlete_photos=_exclude_photos,
+            run_id=run_id,
+            exclude_asset_families=recent_asset_families,
         )
         out["evaluation"] = (
             evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
@@ -309,7 +488,24 @@ def create_visual_for_item(
         out["skipped"] = "low_confidence"
         return out
 
-    # 2. Creative brief
+    # 2. Resolve photo/logo paths + photo facts BEFORE the brief (M7): the
+    # archetype choice and the AI director must know whether a photo exists —
+    # a photo-less card never lands on a photo-led stage, a good photo leads.
+    athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
+        evaluation,
+        media_assets,
+        brand_kit,
+        forced_hero_asset_id=forced_hero_asset_id,
+        forced_bg_asset_id=forced_bg_asset_id,
+    )
+    photo_facts = _photo_facts(
+        evaluation,
+        media_assets,
+        athlete_path=athlete_path,
+        forced_hero_asset_id=forced_hero_asset_id,
+    )
+
+    # 3. Creative brief
     try:
         from mediahub.creative_brief.generator import generate as gen_brief
 
@@ -328,6 +524,7 @@ def create_visual_for_item(
             recent_signatures=recent_signatures,
             recent_hooks=recent_hooks,
             allowed_families=allowed_families,
+            photo_facts=photo_facts,
         )
         if design_spec is not None:
             from mediahub.creative_brief.generator import apply_design_spec
@@ -365,15 +562,6 @@ def create_visual_for_item(
     except Exception as e:
         out["errors"].append(f"brief_persist_failed: {e}")
 
-    # 3. Resolve photo/logo paths from matched assets + user choices
-    athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
-        evaluation,
-        media_assets,
-        brand_kit,
-        forced_hero_asset_id=forced_hero_asset_id,
-        forced_bg_asset_id=forced_bg_asset_id,
-    )
-
     # 4. Render variants
     try:
         from mediahub.graphic_renderer.variants import render_all_formats
@@ -396,6 +584,19 @@ def create_visual_for_item(
         if forced_hero_asset_id and athlete_path:
             skip_cutout_for_render = False
         athlete_for_render = None if skip_cutout_for_render else athlete_path
+
+        # STILLS-9: an unverified face about to render beside the subject's
+        # name gets a reviewer-facing safety note (rides brief.safety_notes →
+        # GeneratedVisual.safety_notes → the review panel's trace).
+        if athlete_for_render:
+            _identity_note = _photo_identity_note(
+                item, evaluation, media_assets, forced_hero_asset_id
+            )
+            if _identity_note:
+                try:
+                    brief.safety_notes = list(brief.safety_notes or []) + [_identity_note]
+                except Exception:
+                    pass
 
         # UI 1.18 — element toggle: drop the sponsor strip for this render.
         _hide_sponsor = bool(overrides.get("hide_sponsor"))
@@ -445,6 +646,14 @@ def create_visual_for_item(
             }
         )
 
+    # PHOTOS-5: remember where each source photo landed so the reuse-penalty
+    # axis works across the pack and across weeks. Best-effort — a bookkeeping
+    # hiccup never sinks a successful render.
+    try:
+        _record_asset_usage(visuals_summary, profile_id=profile_id)
+    except Exception:
+        pass
+
     out["visuals"] = visuals_summary
     return out
 
@@ -471,14 +680,19 @@ def _archetype_sponsor_slot(name: str) -> bool:
         return False
 
 
-def _candidate_compliance(brief, brand_kit, spec, *, lockups, sponsor_name: str) -> dict:
+def _candidate_compliance(
+    brief, brand_kit, spec, *, lockups, sponsor_name: str, has_photo: Optional[bool] = None
+) -> dict:
     """The deterministic, explainable brand-compliance verdict for one candidate.
 
     APCA legibility over the exact ``--mh-*`` set the render paints
     (``resolved_role_vars_for_brief`` — including the gated colour-role
     assignment and medal tint), plus the logo-lockup fit for the resolved
     ground and, when a sponsor is in play, whether this archetype actually has
-    a sponsor slot. Everything here is evidence, never a guess.
+    a sponsor slot. ``has_photo`` (M7) adds the photo-fit term: 1.0 when the
+    archetype's photo appetite matches the card's real photo availability, 0.0
+    on a mismatch — so the pool prefers photo-using designs exactly when a
+    photo exists. Everything here is evidence, never a guess.
     """
     from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
     from mediahub.quality.compliance import check_roles
@@ -491,6 +705,14 @@ def _candidate_compliance(brief, brand_kit, spec, *, lockups, sponsor_name: str)
         "explain": report.explain(),
         "pairs": {k: round(v, 1) for k, v in report.pairs.items()},
     }
+    if has_photo is not None:
+        try:
+            from mediahub.graphic_renderer.archetypes import photo_archetypes
+
+            uses_photo = brief.layout_template in photo_archetypes()
+            out["photo_fit"] = 1.0 if uses_photo == bool(has_photo) else 0.0
+        except Exception:
+            pass
     if lockups:
         try:
             from mediahub.theming.logo_chip import select_logo_lockup
@@ -582,6 +804,7 @@ def create_candidate_pool_for_item(
             library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
             exclude_athlete_photos=_exclude_photos,
+            run_id=run_id,
         )
         out["evaluation"] = (
             evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
@@ -594,7 +817,25 @@ def create_candidate_pool_for_item(
         out["skipped"] = "low_confidence"
         return out
 
-    # 2. N candidate specs: one batch director call + the deterministic floor
+    # 2. Photo/logo paths + photo facts BEFORE direction (M7): the pool's
+    # specs and its deterministic floor must know whether a photo exists.
+    athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
+        evaluation, media_assets, brand_kit, forced_hero_asset_id=forced_hero_asset_id
+    )
+    photo_facts = _photo_facts(
+        evaluation,
+        media_assets,
+        athlete_path=athlete_path,
+        forced_hero_asset_id=forced_hero_asset_id,
+    )
+    has_photo = bool(photo_facts.get("has_photo"))
+    # The matching half of the library for the deterministic floor; the
+    # director keeps the full catalog when a photo exists (a type-led card is
+    # a legitimate directed choice) but is restricted when there is none.
+    pool_pick_names = sorted(_arch.photo_archetypes() if has_photo else _arch.type_archetypes())
+    director_names = names if has_photo else (pool_pick_names or names)
+
+    # 3. N candidate specs: one batch director call + the deterministic floor
     from mediahub.creative_brief.design_spec import normalise
     from mediahub.creative_brief.generator import (
         apply_design_spec,
@@ -613,11 +854,12 @@ def create_candidate_pool_for_item(
         ai_specs = ai_design_specs(
             content_item=item,
             brand_kit=brand_kit,
-            archetypes=names,
+            archetypes=director_names,
             token_roles=token_roles,
             angle=angle,
             recent_archetypes=recent_archetypes,
             count=n,
+            photo_facts=photo_facts,
         )
     except Exception as e:
         out["errors"].append(f"director_failed: {e}")
@@ -628,7 +870,9 @@ def create_candidate_pool_for_item(
     base_seed = auto_variation_seed_for(card_key or None)
     used = [s.archetype for s, _ in specs]
     while len(specs) < n:
-        arch_name = _arch.pick_archetype_avoiding(base_seed, used + recent_archetypes)
+        arch_name = _arch.pick_archetype_avoiding(
+            base_seed, used + recent_archetypes, pool_pick_names or None
+        )
         if arch_name is None:
             break
         specs.append(
@@ -645,13 +889,10 @@ def create_candidate_pool_for_item(
     except Exception:
         lockups = []
 
-    # 3. Brief + render + compliance per candidate
+    # 4. Brief + render + compliance per candidate
     from mediahub.graphic_renderer.variants import render_all_formats
     from mediahub.graphic_renderer.render import render_pool_session
 
-    athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
-        evaluation, media_assets, brand_kit, forced_hero_asset_id=forced_hero_asset_id
-    )
     pool_formats = list(formats) if formats else list(POOL_FORMATS)
     candidates: list[dict] = []
     png_paths: list[str] = []
@@ -732,7 +973,12 @@ def create_candidate_pool_for_item(
                         "brief": brief.to_dict(),
                         "visuals": visuals_summary,
                         "compliance": _candidate_compliance(
-                            brief, brand_kit, spec, lockups=lockups, sponsor_name=sponsor_name
+                            brief,
+                            brand_kit,
+                            spec,
+                            lockups=lockups,
+                            sponsor_name=sponsor_name,
+                            has_photo=has_photo,
                         ),
                     }
                 )
@@ -740,12 +986,17 @@ def create_candidate_pool_for_item(
                 out["errors"].append(f"candidate_failed_{idx}: {e}")
                 traceback.print_exc()
 
-    # 4. Rank: legibility first (gate pass, then score), stable on entry order.
+    # 5. Rank: legibility first (gate pass, then score + the M7 photo-fit
+    # term — a design that uses the photo the card really has outranks one
+    # that ignores/fakes it), stable on entry order.
     order = sorted(
         range(len(candidates)),
         key=lambda i: (
             not candidates[i]["compliance"]["passes"],
-            -candidates[i]["compliance"]["score"],
+            -(
+                candidates[i]["compliance"]["score"]
+                + 0.25 * candidates[i]["compliance"].get("photo_fit", 0.0)
+            ),
             i,
         ),
     )
@@ -753,7 +1004,7 @@ def create_candidate_pool_for_item(
     for rank, cand in enumerate(out["candidates"], start=1):
         cand["rank"] = rank
 
-    # 5. Pool metrics (§8C success measures) — deterministic, best-effort.
+    # 6. Pool metrics (§8C success measures) — deterministic, best-effort.
     metrics: dict[str, Any] = {"n": len(out["candidates"])}
     try:
         from mediahub.quality.variant_metrics import archetype_diversity, perceptual_spread
@@ -799,10 +1050,15 @@ def attach_visuals_to_pack(
     Each rendered brief's variation signature is threaded into the next item's
     ``recent_signatures``, so the deterministic archetype floor rotates past a
     seed collision instead of repeating a composition within the same pack —
-    the same dedupe the per-card route keeps in its variation history.
+    the same dedupe the per-card route keeps in its variation history. The
+    burst families (ingest dHashes) of each item's sourced photos thread the
+    same way into ``recent_asset_families``, so two cards in one pack never
+    carry near-identical frames from the same poolside burst.
     """
     only = set(only_buckets)
     recent_sigs: list[str] = []
+    recent_fams: list[str] = []
+    fam_by_asset = _dhash_by_asset_id(media_assets)
     for bucket_name, bucket in list(pack.items()):
         if bucket_name not in only:
             continue
@@ -825,6 +1081,7 @@ def attach_visuals_to_pack(
                 sponsor_name=sponsor_name,
                 formats=formats,
                 recent_signatures=recent_sigs[-6:],
+                recent_asset_families=recent_fams[-12:],
             )
             item["visuals"] = res.get("visuals", [])
             item["visual_brief"] = res.get("brief")
@@ -833,6 +1090,11 @@ def attach_visuals_to_pack(
             sig = (res.get("brief") or {}).get("variation_signature")
             if sig:
                 recent_sigs.append(sig)
+            for v in res.get("visuals") or []:
+                for aid in v.get("sourced_asset_ids") or []:
+                    fam = fam_by_asset.get(str(aid))
+                    if fam and fam not in recent_fams:
+                        recent_fams.append(fam)
             if res.get("visuals"):
                 rendered += 1
     return pack

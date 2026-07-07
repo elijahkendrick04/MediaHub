@@ -18,6 +18,7 @@ from mediahub.graphic_renderer.saliency import (
     crops_for,
     focus_position,
     focus_position_for_format,
+    focus_position_with_mask,
     ratio_for_format,
 )
 
@@ -316,3 +317,111 @@ def test_focus_position_for_format_is_deterministic(tmp_path):
     path = _save(_image_with_subject((900, 1600), (80, 80, 260, 320), seed=14), tmp_path, "det.png")
     for fmt in ("story", "portrait", "square", "landscape"):
         assert focus_position_for_format(path, fmt) == focus_position_for_format(path, fmt)
+
+
+# --------------------------------------------------------------------------- #
+# Head bias (PHOTOS-8) — alpha masks + portrait-ish ratios only
+# --------------------------------------------------------------------------- #
+
+# One tall standing-subject cutout used across the head-bias tests:
+# 100x300 canvas, opaque block spanning rows 100..260 (torso-centroid cy=0.6).
+_HB_SIZE = (100, 300)
+_HB_BOX = (30, 100, 70, 260)
+
+
+def test_head_bias_pulls_portrait_crop_toward_the_top(tmp_path):
+    cut = _save(_cutout_with_subject(_HB_SIZE, _HB_BOX), tmp_path, "hb.png")
+
+    x, y, w, h = best_crop(cut, "4:5")
+    assert (w, h) == (100, 125)
+    # Whole-mass centroid would centre the crop at y=118; the head-biased
+    # centroid (top 30% of the bbox blended at fixed weight 0.6) puts it
+    # near y=84 — the crop must sit clearly above the unbiased position.
+    assert y == pytest.approx(84, abs=6)
+    assert y < 110
+
+
+def test_head_bias_not_applied_at_square_or_wider(tmp_path):
+    cut = _save(_cutout_with_subject(_HB_SIZE, _HB_BOX), tmp_path, "hb1.png")
+    # ratio >= 1: whole-mass centroid, exactly the pre-head-bias behaviour.
+    x, y, w, h = best_crop(cut, "1:1")
+    assert (w, h) == (100, 100)
+    assert y == pytest.approx(130, abs=3)  # 0.6 * 300 - 50
+
+
+def test_gradient_images_never_head_biased(tmp_path):
+    # The same subject geometry WITHOUT alpha (RGB, gradient energy): the
+    # 4:5 crop stays centred on the whole-mass centroid — byte-identical
+    # behaviour for non-alpha images.
+    rgb = _save(_image_with_subject(_HB_SIZE, _HB_BOX, seed=21), tmp_path, "hbrgb.png")
+    x, y, w, h = best_crop(rgb, "4:5")
+    assert y == pytest.approx(118, abs=6)
+
+
+def test_head_bias_is_deterministic(tmp_path):
+    cut = _save(_cutout_with_subject(_HB_SIZE, _HB_BOX), tmp_path, "hb2.png")
+    assert best_crop(cut, "4:5") == best_crop(cut, "4:5")
+    assert crops_for(cut, ["4:5", "9:16", "1:1"]) == crops_for(cut, ["4:5", "9:16", "1:1"])
+
+
+# --------------------------------------------------------------------------- #
+# focus_position_with_mask (PHOTOS-8) — external cutout steers the original
+# --------------------------------------------------------------------------- #
+
+
+def test_mask_steers_focus_of_non_alpha_original(tmp_path):
+    size = (300, 100)
+    # Photo energy lives bottom-right; the cutout says the SUBJECT is left.
+    photo = _save(_image_with_subject(size, (240, 30, 280, 70), seed=22), tmp_path, "orig.png")
+    mask = _save(_cutout_with_subject(size, (20, 30, 60, 70)), tmp_path, "mask.png")
+
+    with_mask = focus_position_with_mask(photo, mask, "1:1")
+    without = focus_position(photo, "1:1")
+    assert with_mask != without
+    # Same-size mask → identical energy to reading the cutout directly.
+    assert with_mask == focus_position(mask, "1:1")
+    # Subject on the left pulls the focus x below centre.
+    x_pct = float(with_mask.split()[0].rstrip("%"))
+    assert x_pct < 50
+
+
+def test_mask_focus_carries_head_bias_for_portrait_ratios(tmp_path):
+    photo = _save(_image_with_subject(_HB_SIZE, _HB_BOX, seed=23), tmp_path, "orig2.png")
+    mask = _save(_cutout_with_subject(_HB_SIZE, _HB_BOX), tmp_path, "mask2.png")
+    # Equal to reading the cutout itself (which is head-biased at 4:5)…
+    assert focus_position_with_mask(photo, mask, "4:5") == focus_position(mask, "4:5")
+    # …and above the un-masked gradient focus of the original.
+    y_masked = float(focus_position_with_mask(photo, mask, "4:5").split()[1].rstrip("%"))
+    y_plain = float(focus_position(photo, "4:5").split()[1].rstrip("%"))
+    assert y_masked < y_plain
+
+
+def test_mask_at_different_resolution_still_tracks_subject(tmp_path):
+    photo = _save(_image_with_subject((600, 200), (480, 60, 560, 140), seed=24), tmp_path, "o3.png")
+    # Half-resolution cutout, subject on the left of the frame.
+    mask = _save(_cutout_with_subject((300, 100), (20, 30, 60, 70)), tmp_path, "m3.png")
+    pos = focus_position_with_mask(photo, mask, "1:1")
+    assert float(pos.split()[0].rstrip("%")) < 50
+
+
+def test_mask_fallbacks_match_plain_focus_position(tmp_path):
+    photo = _save(_image_with_subject((300, 100), (240, 30, 280, 70), seed=25), tmp_path, "o4.png")
+    plain = focus_position(photo, "1:1")
+    # Missing mask file → plain behaviour.
+    assert focus_position_with_mask(photo, str(tmp_path / "nope.png"), "1:1") == plain
+    # Fully-opaque mask (no alpha signal) → plain behaviour.
+    opaque = _save(Image.new("RGBA", (300, 100), (10, 10, 10, 255)), tmp_path, "op.png")
+    assert focus_position_with_mask(photo, opaque, "1:1") == plain
+    # Empty mask path → plain behaviour.
+    assert focus_position_with_mask(photo, "", "1:1") == plain
+    # Missing photo → the same safe default focus_position returns.
+    assert focus_position_with_mask("", opaque, "1:1") == "center 28%"
+
+
+def test_mask_focus_is_deterministic(tmp_path):
+    photo = _save(_image_with_subject(_HB_SIZE, _HB_BOX, seed=26), tmp_path, "o5.png")
+    mask = _save(_cutout_with_subject(_HB_SIZE, _HB_BOX), tmp_path, "m5.png")
+    for r in ("4:5", "9:16", "1:1", "16:9"):
+        assert focus_position_with_mask(photo, mask, r) == focus_position_with_mask(
+            photo, mask, r
+        )

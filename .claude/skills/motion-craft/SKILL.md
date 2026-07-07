@@ -29,7 +29,7 @@ for the Remotion stack and MediaHub's non-negotiables. Where this file and
   `heroStat`, `variationSeed`, and the APCA-gated colour roles
   `roleGround` / `roleSurface` / `roleAccent` / `roleOnGround`.
 - Reel duration is computed, never hardcoded:
-  `reel_duration_for(n) = 2.0 cover + 4.0 × cards + 1.0 outro` by default. The
+  `reel_duration_for(n) = 2.0 cover + 4.0 × cards + 2.5 outro` by default. The
   rhythm is caller-customisable (R1.12) — optional per-card beat weights +
   custom cover/outro seconds via `normalise_reel_rhythm`, mirrored into
   `MeetReel.tsx`'s carve and the ffmpeg fallback and folded into the cache key;

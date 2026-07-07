@@ -224,25 +224,46 @@ _PHOTO_MAX_EDGE = 1280
 _PHOTO_MAX_BYTES = 12_000_000  # refuse to embed originals beyond this raw size
 
 
-def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
-    """Resolve the on-disk path of the photo a brief sourced, or ``None``.
+def _effective_asset_path(asset: Any, store: Any) -> Path:
+    """The path the MP4 should read for ``asset`` — the materialised edit
+    (enhance / crop / safeguarding blur) when a recipe is stored, else the
+    original (M21 / PHOTOS-3). This is the same
+    ``photo_edit.effective_image_path`` the still pipeline reads, so a face a
+    volunteer blurred on the approved still can never ship unblurred in the
+    video. Never raises; falls back to the raw path on any miss.
+    """
+    raw = Path(getattr(asset, "path", "") or "")
+    try:
+        from mediahub.media_library import photo_edit
+
+        eff = Path(photo_edit.effective_image_path(asset, store))
+        if str(eff) and eff.exists():
+            return eff
+    except Exception:
+        pass
+    return raw
+
+
+def _photo_asset_for_brief(brief: Optional[dict]):
+    """Resolve the photo a brief sourced to ``(asset, effective_path)``.
 
     Mirrors the sourcing rules of the still renderer: skips "no-photo"
     treatments, the synthetic ``_brand_logo_`` id, missing files, and
-    oversized originals. Never raises.
+    oversized originals. The path is the EDIT-EFFECTIVE one (M21). Never
+    raises; ``(None, None)`` on any miss.
     """
     b = brief if isinstance(brief, dict) else {}
     if not b or str(b.get("photo_treatment") or "") == "no-photo":
-        return None
+        return None, None
     asset_ids = [str(a) for a in (b.get("sourced_asset_ids") or []) if a and a != "_brand_logo_"]
     if not asset_ids:
-        return None
+        return None, None
     try:
         from mediahub.media_library.store import get_store
 
         store = get_store()
     except Exception:
-        return None
+        return None, None
     for aid in asset_ids:
         try:
             asset = store.get(aid)
@@ -250,13 +271,63 @@ def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
             continue
         if asset is None:
             continue
-        p = Path(getattr(asset, "path", "") or "")
+        p = _effective_asset_path(asset, store)
         try:
             if p.exists() and p.stat().st_size <= _PHOTO_MAX_BYTES:
-                return p
+                return asset, p
         except OSError:
             continue
-    return None
+    return None, None
+
+
+def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
+    """The on-disk path of the photo a brief sourced (edit-effective), or
+    ``None``. Thin wrapper over :func:`_photo_asset_for_brief`."""
+    return _photo_asset_for_brief(brief)[1]
+
+
+def _photo_edit_signature_for_brief(brief: Optional[dict]) -> str:
+    """The sourced asset's edit-recipe signature, or ``""`` when the asset
+    carries no edit (M21). Folded into the motion cache key ONLY when a
+    recipe exists, so unedited assets keep byte-identical keys while an
+    edited photo re-renders instead of serving the stale pre-edit MP4.
+    """
+    asset, _ = _photo_asset_for_brief(brief)
+    if asset is None:
+        return ""
+    try:
+        from mediahub.media_library import photo_edit
+
+        recipe = photo_edit.recipe_for_asset(asset)
+        return "" if recipe.is_noop() else recipe.signature()
+    except Exception:
+        return ""
+
+
+def _photo_data_uri_for_path(p: Optional[Path]) -> str:
+    """Downscale + inline one photo file as a JPEG data URI, or ``""``.
+
+    Applies ``ImageOps.exif_transpose`` first (M21) so a phone-portrait
+    photo that displays upright on the still doesn't play sideways in the
+    video. Never raises — a missing photo must never fail a motion render.
+    """
+    if p is None:
+        return ""
+    try:
+        import base64
+        import io
+
+        from PIL import Image, ImageOps
+
+        with Image.open(p) as im:
+            im = ImageOps.exif_transpose(im)
+            im = im.convert("RGB")
+            im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=82)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
 
 
 def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
@@ -267,23 +338,7 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
     miss (no brief, "no-photo" treatment, asset gone, decode failure) —
     a missing photo must never fail a motion render.
     """
-    p = _photo_asset_path_for_brief(brief)
-    if p is None:
-        return ""
-    try:
-        import base64
-        import io
-
-        from PIL import Image
-
-        with Image.open(p) as im:
-            im = im.convert("RGB")
-            im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=82)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        return ""
+    return _photo_data_uri_for_path(_photo_asset_path_for_brief(brief))
 
 
 def _photo_focus_for_brief(brief: Optional[dict], format_name: str = DEFAULT_MOTION_FORMAT) -> str:
@@ -321,40 +376,59 @@ def _cutout_cache_dir() -> Path:
     return d
 
 
-def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
-    """Resolve the brief's sourced photo into an alpha-cutout PNG data URI (R1.9).
+def _cutout_for_brief(brief: Optional[dict]) -> tuple[str, Optional[Path]]:
+    """Resolve the brief's sourced photo into ``(alpha-cutout data URI, cut
+    path)`` — the R1.9 foreground plane, now matte-gated (parity pass).
 
     The motion render's foreground cutout layer (``sprint/layers/cutout.tsx``)
-    composites the athlete with their background removed as a parallax
-    foreground plane. The cut is produced by the same configured background
-    remover the still renderer uses (``media_ai.providers.get_bg_remover``), so
-    motion and still isolate the subject identically. The result is cached as a
-    PNG under ``motion_cache/cutouts/`` keyed by the source photo's identity, so
-    the (~300 ms+) remover runs at most once per photo, then is downscaled and
-    inlined — Remotion's headless Chromium only sees what the props carry.
+    and the layered-depth archetype scenes composite the athlete with their
+    background removed. The cut is produced by the same configured background
+    remover the still renderer uses (``media_ai.providers.get_bg_remover``) and
+    measured by the same M14 matte gate (``graphic_renderer.matte.assess_matte``)
+    — so when the still rejected the matte and fell back to the original
+    photograph, the motion render falls back identically instead of shipping a
+    shredded silhouette the customer never approved. A rejection is persisted
+    as a ``.rejected.json`` marker beside the would-be cut, so a bad matte is
+    measured once, not re-matted every render.
+
+    The accepted cut is cached as a PNG under ``motion_cache/cutouts/`` keyed
+    by the source photo's identity, so the (~300 ms+) remover runs at most once
+    per photo, then is downscaled and inlined — Remotion's headless Chromium
+    only sees what the props carry.
 
     Honest by construction: only a *real* remover is used (``is_available()``),
-    never rembg's passthrough alpha, so the foreground plane is never a flat
-    rectangular photo masquerading as a cutout. Empty string on any miss (no
-    brief, ``no-photo`` treatment, asset gone, no usable remover, decode or
-    synthesis failure) — a missing or failed cutout must never fail a motion
-    render; the TSX layer simply no-ops.
+    never rembg's passthrough alpha — and the matte gate would reject a
+    passthrough rectangle anyway. ``("", None)`` on any miss (no brief,
+    ``no-photo`` treatment, asset gone, no usable remover, gate rejection,
+    decode or synthesis failure) — a missing or failed cutout must never fail
+    a motion render; the TSX layer simply no-ops.
+
+    The returned ``cut_path`` (the full-resolution alpha PNG) feeds the
+    band_break placement maths (``render._band_top_fraction``) so both surfaces
+    break the band at identical pixels.
     """
     src = _photo_asset_path_for_brief(brief)
     if src is None:
-        return ""
+        return "", None
     try:
         import io
 
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         # Cache the alpha cut keyed by the source's identity (path/mtime/size)
         # so repeat renders of the same photo skip the remover entirely.
+        # (M21: `src` is already the edit-effective, content-addressed path,
+        # so an edited photo re-cuts instead of reusing the pre-edit alpha.)
         st = src.stat()
         key = hashlib.sha256(
             f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")
         ).hexdigest()[:24]
         cut_path = _cutout_cache_dir() / f"{key}.png"
+        reject_marker = cut_path.with_name(cut_path.name + ".rejected.json")
+        if reject_marker.exists():
+            # A previous render measured this photo's matte and rejected it —
+            # the still shipped the original photograph, so motion does too.
+            return "", None
         if not (cut_path.exists() and cut_path.stat().st_size > 1000):
             from mediahub.media_ai.providers import get_bg_remover
 
@@ -362,18 +436,51 @@ def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
             # Only composite a genuine cut — a provider that can't actually
             # remove the background would passthrough the whole rectangle.
             if remover is None or not remover.is_available():
-                return ""
+                return "", None
             remover.remove(str(src), str(cut_path))
+            if not (cut_path.exists() and cut_path.stat().st_size > 1000):
+                return "", None
+            # M14 matte-gate parity: measure the produced matte with the SAME
+            # pure image-maths gate the still runs before accepting it. Same
+            # file → same verdict, so still and motion can never disagree on
+            # whether a cutout was shippable.
+            verdict = None
+            try:
+                from mediahub.graphic_renderer.matte import assess_matte
+
+                verdict = assess_matte(cut_path)
+            except Exception:
+                verdict = None  # the gate itself must never sink a render
+            if verdict is not None and not verdict.ok:
+                with contextlib.suppress(OSError):
+                    cut_path.unlink()
+                with contextlib.suppress(OSError):
+                    reject_marker.write_text(
+                        json.dumps({"reason": verdict.reason, "metrics": verdict.metrics}),
+                        encoding="utf-8",
+                    )
+                return "", None
         if not (cut_path.exists() and cut_path.stat().st_size > 1000):
-            return ""
+            return "", None
         with Image.open(cut_path) as im:
+            # Belt-and-braces EXIF normalisation (M21): remover output should
+            # already be upright, but a passthrough of legacy EXIF must never
+            # rotate the cutout against its own background photo.
+            im = ImageOps.exif_transpose(im)
             im = im.convert("RGBA")
             im.thumbnail((_CUTOUT_MAX_EDGE, _CUTOUT_MAX_EDGE))
             buf = io.BytesIO()
             im.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        return uri, cut_path
     except Exception:
-        return ""
+        return "", None
+
+
+def _cutout_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """The brief's matte-gated alpha-cutout data URI, or ``""`` (see
+    :func:`_cutout_for_brief`)."""
+    return _cutout_for_brief(brief)[0]
 
 
 # The still hook's opt-in tokens for the G1.8 gradient-mesh ground (mirrors
@@ -429,15 +536,15 @@ def _mesh_bg_for_brief(brief: Optional[dict], brand_kit: Any, format_name: str) 
         return ""
 
 
-def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
-    """The exact colour roles the card's STILL graphic paints, for motion.
+def _resolved_root_vars(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
+    """The raw ``--mh-*`` vars the card's STILL graphic paints, for motion.
 
-    Rehydrates the persisted brief and runs the still renderer's single
-    role resolver (Tier A brand baseline → the director's APCA-gated
-    colour-role assignment → medal tint), then maps the ``--mh-*`` vars
-    onto the motion prop names. Empty dict on any miss — the TSX then
-    falls back to its seed-permutation roles, exactly the pre-parity
-    behaviour.
+    Rehydrates the persisted brief and runs the still renderer's single role
+    resolver (Tier A brand baseline → the director's APCA-gated colour-role
+    assignment → medal tint). Empty dict on any miss. This is the one shared
+    resolution pass; :func:`_motion_roles_from_vars` maps it onto the motion
+    prop names, and the M10/M11 parity props (duotone shadow, stat-chip ink)
+    read their exact hexes from it.
     """
     if not isinstance(brief, dict) or not brief:
         return {}
@@ -448,15 +555,375 @@ def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, s
         b = CreativeBrief.from_dict(brief)
         if b is None:
             return {}
-        root_vars = resolved_role_vars_for_brief(b, brand_kit)
-        return {
-            "roleGround": str(root_vars.get("--mh-primary") or ""),
-            "roleSurface": str(root_vars.get("--mh-surface") or ""),
-            "roleAccent": str(root_vars.get("--mh-accent") or ""),
-            "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
-        }
+        return {str(k): str(v) for k, v in resolved_role_vars_for_brief(b, brand_kit).items()}
     except Exception:
         return {}
+
+
+def _motion_roles_from_vars(root_vars: dict[str, str]) -> dict[str, str]:
+    """The resolved ``--mh-*`` vars mapped onto the motion prop names. Empty
+    dict on any miss — the TSX then falls back to its seed-permutation roles,
+    exactly the pre-parity behaviour."""
+    if not root_vars:
+        return {}
+    return {
+        "roleGround": str(root_vars.get("--mh-primary") or ""),
+        "roleSurface": str(root_vars.get("--mh-surface") or ""),
+        "roleAccent": str(root_vars.get("--mh-accent") or ""),
+        "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
+    }
+
+
+def _archetype_photo_mode(brief: Optional[dict]) -> str:
+    """``"photo"`` / ``"cutout"`` / ``""`` — how this card's archetype consumes
+    the athlete photo (STILLS-2 / M8), resolved exactly as the still does.
+
+    ``archetypes.photo_mode(layout_template)`` is the source of truth — it is
+    what decides which scene actually renders, and the still's render path
+    derives its mode from the template the same way, so a stale persisted
+    stamp (e.g. a brief whose archetype was later regenerated) can never make
+    motion composite a cutout the still doesn't show. The persisted
+    ``brief.photo_mode`` stamp is the fallback for briefs whose template can't
+    be resolved here. ``""`` for v1 families / brief-less callers — the legacy
+    cutout-compositing behaviour, byte-identical props.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    arch = str(b.get("layout_template") or "")
+    if arch:
+        try:
+            from mediahub.graphic_renderer import archetypes as _archetypes
+
+            if arch in _archetypes.list_archetypes():
+                return _archetypes.photo_mode(arch)
+        except Exception:
+            pass
+    mode = str(b.get("photo_mode") or "").strip().lower()
+    return mode if mode in ("photo", "cutout") else ""
+
+
+def _is_v2_archetype(name: str) -> bool:
+    """True when ``name`` is a Gen-v2 archetype (the M10/M11/M12 parity props
+    only apply to v2 renders, mirroring the still's fill path)."""
+    if not name:
+        return False
+    try:
+        from mediahub.graphic_renderer import archetypes as _archetypes
+
+        return name in _archetypes.list_archetypes()
+    except Exception:
+        return False
+
+
+# The v2 archetypes whose motion scenes paint the cutout as layered depth
+# planes themselves (M12 twins). They take the decoration-scaled depth
+# treatment and (band_break) the alpha-derived band placement props.
+_LAYERED_CUTOUT_ARCHETYPES = frozenset({"poster_name_behind", "band_break"})
+
+
+def _decoration_strength_of(brief: Optional[dict]) -> float:
+    """The brief's decoration strength with the still's exact fallback
+    semantics (``float(... or 0.5)`` — see render.py's M10/M12 call sites)."""
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        return float(b.get("decoration_strength") or 0.5)
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _photo_treatment_mirror_props(
+    brief: Optional[dict], root_vars: dict[str, str], has_photo: bool
+) -> dict[str, Any]:
+    """The exact-mirror photo-grade props for a v2 card (M10 parity).
+
+    duotone → ``duotoneShadow``/``duotoneHighlight``: the two ink hexes the
+    still's SVG filter ramps between, computed by the SAME maths
+    (``render.darken(--mh-primary, 0.30)`` shadow, resolved ``--mh-accent``
+    highlight — medal tints included) so the TSX filter's tableValues are
+    byte-identical to the still's ``_duotone_defs_svg``.
+
+    halftone → ``halftoneTile``: the mask tile px from ``decoration_strength``
+    (``round(14 + 18·clamp(s, 0, 1))`` — ``render._v2_photo_treatment_assets``).
+
+    Attached ONLY for a v2 archetype with a sourced photo and one of these two
+    treatments — every other card's props (and cache key) stay byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    if not has_photo or not root_vars:
+        return {}
+    if not _is_v2_archetype(str(b.get("layout_template") or "")):
+        return {}
+    treatment = str(b.get("photo_treatment") or "").strip().lower()
+    if treatment == "duotone":
+        try:
+            from mediahub.graphic_renderer.render import darken
+
+            shadow = darken(root_vars.get("--mh-primary", "#0A2540"), 0.30)
+        except Exception:
+            return {}
+        return {
+            "duotoneShadow": shadow,
+            "duotoneHighlight": root_vars.get("--mh-accent", "#FFFFFF"),
+        }
+    if treatment == "halftone":
+        strength = _decoration_strength_of(b)
+        return {"halftoneTile": int(round(14 + 18 * max(0.0, min(1.0, strength))))}
+    return {}
+
+
+def _stat_chips_for_brief(brief: Optional[dict]) -> list[dict[str, str]]:
+    """The card's secondary-stat chips for motion (M11 parity), as
+    ``[{"label": ..., "value": ...}, ...]``.
+
+    Exactly the still's selection (``render._stat_chips_html``): only the
+    data-led archetypes, only keys verified present in ``hero_stat_options``,
+    the hero line's own fact skipped, values label-trimmed, capped at 4.
+    ``[]`` for everything else — the prop is then never attached.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        from mediahub.graphic_renderer.render import (
+            _STAT_CHIP_ARCHETYPES,
+            _STAT_CHIP_LABELS,
+            _chip_value,
+        )
+    except Exception:
+        return []
+    if str(b.get("layout_template") or "") not in _STAT_CHIP_ARCHETYPES:
+        return []
+    keys = [k for k in (b.get("secondary_stats") or []) if k]
+    opts = b.get("hero_stat_options") if isinstance(b.get("hero_stat_options"), dict) else {}
+    layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+    hero_line = layers.get("hero_stat") or ""
+    hero_key = next((k for k, v in opts.items() if v == hero_line), None)
+    chips: list[dict[str, str]] = []
+    for key in keys:
+        if key == hero_key or key not in opts:
+            continue
+        label = _STAT_CHIP_LABELS.get(key)
+        if not label:
+            continue
+        chips.append({"label": label, "value": _chip_value(key, str(opts[key]))})
+        if len(chips) >= 4:
+            break
+    return chips
+
+
+def _pb_bars_for_brief(brief: Optional[dict]) -> Optional[dict]:
+    """The honest proportional PB-bar payload for motion (M11 parity), or None.
+
+    Exactly the still's gate (``render._pb_bars_html``): only the bar-bearing
+    archetypes, only when both the previous PB and the new time parse as race
+    times with the new one faster. ``nowPct`` is the mathematically
+    proportional width on the honest zero-based axis; the caption prepends the
+    delta only when it isn't already the hero line.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        from mediahub.graphic_renderer.render import (
+            _PB_BARS_ARCHETYPES,
+            _parse_time_seconds,
+        )
+    except Exception:
+        return None
+    if str(b.get("layout_template") or "") not in _PB_BARS_ARCHETYPES:
+        return None
+    layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+    prev_str = str(layers.get("prev_pb_time") or "").strip()
+    new_str = str(layers.get("result_value") or "").strip()
+    prev_s = _parse_time_seconds(prev_str)
+    new_s = _parse_time_seconds(new_str)
+    if prev_s is None or new_s is None or prev_s <= 0 or new_s >= prev_s:
+        return None
+    new_pct = max(1.0, min(100.0, new_s / prev_s * 100.0))
+    opts = b.get("hero_stat_options") if isinstance(b.get("hero_stat_options"), dict) else {}
+    drop = opts.get("pb_delta") or f"−{prev_s - new_s:.2f}s"
+    caption = (
+        "bars proportional to real times"
+        if str(drop) == str(layers.get("hero_stat") or "")
+        else f"{drop} · bars proportional to real times"
+    )
+    return {"prev": prev_str, "now": new_str, "nowPct": round(new_pct, 1), "caption": caption}
+
+
+def _stat_ink_for_brief(brief: Optional[dict], root_vars: dict[str, str]) -> str:
+    """The resolved hex of the ink var the still's chip row / PB bars use for
+    this archetype (``--mh-on-surface`` or ``--mh-on-primary``), or ``""``."""
+    b = brief if isinstance(brief, dict) else {}
+    try:
+        from mediahub.graphic_renderer.render import (
+            _PB_BARS_ARCHETYPES,
+            _STAT_CHIP_ARCHETYPES,
+        )
+    except Exception:
+        return ""
+    arch = str(b.get("layout_template") or "")
+    ink_var = _STAT_CHIP_ARCHETYPES.get(arch) or _PB_BARS_ARCHETYPES.get(arch) or ""
+    return str(root_vars.get(ink_var) or "") if ink_var else ""
+
+
+def _photo_crop_scale_for_brief(brief: Optional[dict], format_name: str) -> float:
+    """The still's ``--mh-photo-scale`` crop-intent zoom for this card (M10),
+    or ``0.0`` when the intent emits none.
+
+    Runs the still's own deterministic translation of the director's crop
+    intent (``render._crop_intent_vars`` — saliency/alpha-bbox maths, never
+    taste) against the sourced photo, using a previously-gated cutout as the
+    subject mask exactly like the still's photo-mode path. Only
+    ``tight_portrait`` currently emits a scale; every other card returns 0.0
+    so the prop is never attached and cache keys stay byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    intent = str(b.get("crop_intent") or "").strip()
+    if not intent or not _is_v2_archetype(str(b.get("layout_template") or "")):
+        return 0.0
+    p = _photo_asset_path_for_brief(b)
+    if p is None:
+        return 0.0
+    try:
+        from mediahub.graphic_renderer.render import _crop_intent_vars, _existing_cutout_for
+
+        width, height = motion_format_size(format_name)
+        mask = _existing_cutout_for(p, profile_id=str(b.get("profile_id") or "default"))
+        intent_vars = _crop_intent_vars(intent, p, mask, width, height)
+        scale = intent_vars.get("--mh-photo-scale", "")
+        return float(scale) if scale else 0.0
+    except Exception:
+        return 0.0
+
+
+# The archetypes whose motion scenes lay out MULTIPLE athlete panels (the
+# relay quartet, the duo split, the triptych progression). Only these earn the
+# extra photoSrcs lookup — everything else keeps the single-photo path.
+_MULTI_PHOTO_ARCHETYPES = frozenset({"relay_collage", "duo_athlete_split", "triptych_progression"})
+
+
+def _profile_id_of(brand_kit: Any) -> str:
+    """The brand kit's profile id, tolerant of dataclass / dict / None."""
+    if brand_kit is None:
+        return ""
+    if isinstance(brand_kit, dict):
+        return str(brand_kit.get("profile_id") or brand_kit.get("profileId") or "")
+    return str(getattr(brand_kit, "profile_id", "") or "")
+
+
+def _relay_athlete_names(card: Any, ach: Any) -> list[str]:
+    """The individual athlete names a relay/multi-athlete card carries.
+
+    Reads an explicit list field when the payload has one, else splits a
+    combined ``swimmer_name`` ("A, B & C") into its parts. Only ever returns
+    names the card itself supplied — never guesses a lineup. Empty when the
+    card names no individuals (e.g. "{club} relay").
+    """
+    import re as _re
+
+    for src in (ach, card):
+        if not isinstance(src, dict):
+            continue
+        for key in ("relay_swimmers", "relay_members", "swimmer_names", "athlete_names", "members"):
+            v = src.get(key)
+            if isinstance(v, (list, tuple)):
+                names = [str(x).strip() for x in v if str(x).strip()]
+                if names:
+                    return names
+    combined = ""
+    for src in (ach, card):
+        if isinstance(src, dict):
+            combined = str(src.get("swimmer_name") or src.get("athlete_name") or "")
+            if combined:
+                break
+    parts = [p.strip() for p in _re.split(r",|&|/|\band\b", combined) if p.strip()]
+    return parts if len(parts) >= 2 else []
+
+
+def _photo_srcs_for_card(card: Any, brief: Optional[dict], brand_kit: Any) -> list[str]:
+    """Extra athlete photos for a multi-panel archetype, as data URIs (M20).
+
+    Only for the relay/duo/triptych archetypes, and only when the card names
+    individual athletes: each linked athlete's best photo is resolved by the
+    deterministic media-library selector (``select_assets`` — fixed weights,
+    no LLM), materialised through the edit-effective path, downscaled and
+    inlined exactly like ``photoSrc``. Capped at 4 (a relay quartet), skips
+    the card's primary photo, and returns ``[]`` on any miss — an empty list
+    keeps the card's props (and cache key) byte-identical.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    if str(b.get("layout_template") or "") not in _MULTI_PHOTO_ARCHETYPES:
+        return []
+    ach = card.get("achievement") if isinstance(card, dict) else None
+    names = _relay_athlete_names(card, ach if isinstance(ach, dict) else {})
+    if not names:
+        return []
+    try:
+        from mediahub.media_library.selector import select_assets
+        from mediahub.media_library.store import get_store
+
+        store = get_store()
+        assets = store.list(profile_id=_profile_id_of(brand_kit) or None, limit=500)
+    except Exception:
+        return []
+    if not assets:
+        return []
+    out: list[str] = []
+    # Never duplicate the card's primary photo in a panel.
+    primary_asset, _ = _photo_asset_for_brief(b)
+    used: set[str] = {str(getattr(primary_asset, "id", "") or "")}
+    for name in names[:4]:
+        try:
+            picks = select_assets(
+                assets,
+                role="hero_athlete",
+                athlete_name=name,
+                preferred_orientation="portrait",
+                k=3,
+            )
+        except Exception:
+            continue
+        for pick in picks:
+            aid = str(pick.get("asset_id") or "")
+            if not aid or aid in used:
+                continue
+            try:
+                asset = store.get(aid)
+            except Exception:
+                continue
+            if asset is None:
+                continue
+            p = _effective_asset_path(asset, store)
+            try:
+                if not (p.exists() and p.stat().st_size <= _PHOTO_MAX_BYTES):
+                    continue
+            except OSError:
+                continue
+            uri = _photo_data_uri_for_path(p)
+            if uri:
+                out.append(uri)
+                used.add(aid)
+                break
+    return out
+
+
+def _footage_for_card(
+    card: Any, brief: Optional[dict], brand_kit: Any, *, beat_seconds: float
+) -> tuple[Optional[Any], str]:
+    """Resolve this card's footage beat (M23) — ``(resolution, reason)``.
+
+    Thin motion-side wrapper over :func:`mediahub.visual.footage.
+    resolve_card_footage`: it supplies the card's already-resolved still photo
+    (the brief's sourced asset) so the deterministic priority rule can score
+    photo vs footage without re-resolving. Never raises; ``(None, "")`` on a
+    quiet miss, ``(None, reason)`` when a candidate lost or failed — the
+    caller records the reason in the render manifest and the photo path
+    renders untouched.
+    """
+    try:
+        from mediahub.visual import footage as _footage
+
+        photo_asset, _ = _photo_asset_for_brief(brief)
+        return _footage.resolve_card_footage(
+            card, brief, brand_kit, beat_seconds=beat_seconds, photo_asset=photo_asset
+        )
+    except Exception:
+        return None, ""
 
 
 def _card_to_props(
@@ -466,6 +933,7 @@ def _card_to_props(
     brief: Optional[dict] = None,
     brand_kit: Any = None,
     format_name: str = DEFAULT_MOTION_FORMAT,
+    footage: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Coerce one content-pack card payload into the StoryCard props shape.
 
@@ -492,6 +960,15 @@ def _card_to_props(
     it steers the saliency ``photoPos`` so the photo's focal point is resolved
     for that frame's aspect ratio. The ``story`` default keeps ``photoPos``
     byte-identical to the pre-format behaviour.
+
+    ``footage`` (M23) is a pre-resolved
+    :class:`mediahub.visual.footage.FootageResolution` for this card's beat —
+    resolved by the caller via :func:`_footage_for_card` so the render path
+    owns the cache/manifest folds. When present, ``videoSrc`` /
+    ``videoStartSec`` / ``videoDurationSec`` attach and the crop-intent
+    ``photoScale`` is withheld (the video has real motion; the photo-derived
+    zoom must not double-apply). ``None`` — the default and every miss — keeps
+    the prop dict byte-identical to the photo-only behaviour.
     """
     ach = card.get("achievement") if isinstance(card, dict) else None
     if not isinstance(ach, dict):
@@ -551,10 +1028,24 @@ def _card_to_props(
     # engine produced the brief (a v1 family name otherwise — the TSX
     # treats unknown names as "no archetype treatment").
     brief_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
-    roles = _resolved_motion_roles(b, brand_kit)
+    root_vars = _resolved_root_vars(b, brand_kit)
+    roles = _motion_roles_from_vars(root_vars)
+    photo_srcs = _photo_srcs_for_card(card, b, brand_kit)
     # G1.8 mesh-ground parity: attached ONLY when the brief opted in, so every
     # other card's props (and cache key) stay byte-identical.
     mesh_bg = _mesh_bg_for_brief(b, brand_kit, format_name)
+    # STILLS-2 / M8 photo-mode parity: a "photo"-mode archetype shows the
+    # ORIGINAL photograph on the still (the template's scrims handle
+    # legibility) — its motion render must not composite a cutout plane the
+    # approved still never had. Cutout resolution (and the remover cost) is
+    # skipped entirely; "cutout"/legacy keeps the R1.9 behaviour untouched.
+    arch_name = str(b.get("layout_template") or "")
+    photo_mode = _archetype_photo_mode(b)
+    photo_uri = _photo_data_uri_for_brief(b)
+    if photo_mode == "photo":
+        cutout_uri, cutout_path = "", None
+    else:
+        cutout_uri, cutout_path = _cutout_for_brief(b)
     props = {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
@@ -571,12 +1062,13 @@ def _card_to_props(
         "accentStyle": str(b.get("accent_style") or ""),
         "mood": str(b.get("mood") or ""),
         "photoTreatment": str(b.get("photo_treatment") or ""),
-        "photoSrc": _photo_data_uri_for_brief(b),
+        "photoSrc": photo_uri,
         "photoPos": _photo_focus_for_brief(b, format_name),
         # R1.9: the athlete cut out to alpha, composited by the cutout sprint
-        # layer as a parallax foreground plane. "" = no prepared cut (no photo
-        # or no usable remover) and the layer no-ops.
-        "cutoutSrc": _cutout_data_uri_for_brief(b),
+        # layer (or a layered-depth archetype scene) as a foreground plane.
+        # "" = no prepared cut (no photo, no usable remover, matte-gate
+        # rejection, or a "photo"-mode archetype) and the consumers no-op.
+        "cutoutSrc": cutout_uri,
         "archetype": str(b.get("layout_template") or ""),
         # The still's style pack id (graphic_renderer.style_packs): the motion
         # render layers the same ground/texture/accent-geometry overlay so a
@@ -594,8 +1086,100 @@ def _card_to_props(
         "roleAccent": roles.get("roleAccent", ""),
         "roleOnGround": roles.get("roleOnGround", ""),
     }
+    # M20: extra linked-athlete photos for the multi-panel archetypes, only
+    # attached when at least one resolved — an empty list never touches the
+    # prop dict, so single-photo cards keep byte-identical cache keys.
+    if photo_srcs:
+        props["photoSrcs"] = photo_srcs
     if mesh_bg:
         props["meshBg"] = mesh_bg
+    # LEFTOVER-1 (UI 1.18 → motion): a manual crop persisted in the card's
+    # inspector overrides wins over the saliency focus — the same
+    # ``photo_pos`` value the still honours, validated by the still's own
+    # sanitiser so no unvetted CSS ever reaches the composition. The
+    # ``photoPosManual`` marker keeps the per-cut saliency re-resolve
+    # (``_apply_format_photo_focus``) from clobbering a human's crop. Only
+    # overridden cards attach it, so untouched cards stay byte-identical.
+    insp = card.get("inspector_overrides") if isinstance(card, dict) else None
+    manual_pos = ""
+    if isinstance(insp, dict) and insp.get("photo_pos"):
+        try:
+            from mediahub.graphic_renderer.render import _sanitise_photo_pos
+
+            manual_pos = _sanitise_photo_pos(str(insp.get("photo_pos") or ""))
+        except Exception:
+            manual_pos = ""
+    if manual_pos and photo_uri:
+        props["photoPos"] = manual_pos
+        props["photoPosManual"] = True
+    # M23: the card's resolved footage beat — the club's real race clip under
+    # the same scrim/treatment stack the photo path paints. Attached ONLY when
+    # the caller resolved a clip, so photo-only cards keep byte-identical
+    # props (and cache keys).
+    if footage is not None:
+        props["videoSrc"] = str(footage.video_src)
+        props["videoStartSec"] = float(footage.video_start_sec)
+        props["videoDurationSec"] = float(footage.video_duration_sec)
+    # Parity pass — every prop below is attached ONLY when it resolved, so a
+    # card it doesn't apply to keeps a byte-identical prop dict (and cache key).
+    if photo_mode == "photo" and photo_uri:
+        # Tells the TSX photo/cutout layers this archetype shows the ORIGINAL
+        # photograph (belt-and-braces beside the empty cutoutSrc).
+        props["photoMode"] = "photo"
+    # M10 crop-intent mirror: the still's --mh-photo-scale zoom, multiplied
+    # into the photo layer's cinematic push-in (transform-origin = photoPos).
+    # Withheld for a footage beat: the crop zoom is derived from the
+    # photograph's saliency and must not double-apply to real video motion.
+    crop_scale = 0.0 if footage is not None else _photo_crop_scale_for_brief(b, format_name)
+    if crop_scale > 1.0:
+        props["photoScale"] = crop_scale
+    # M10 true-brand duotone / real halftone parameters (exact still mirror).
+    props.update(_photo_treatment_mirror_props(b, root_vars, bool(photo_uri)))
+    # M11 data weight: secondary-stat chips + honest proportional PB bars for
+    # the data-led archetypes, with the exact ink hex the still's bay uses.
+    stat_chips = _stat_chips_for_brief(b)
+    if stat_chips:
+        props["statChips"] = stat_chips
+    pb_bars = _pb_bars_for_brief(b)
+    if pb_bars:
+        props["pbBars"] = pb_bars
+    if stat_chips or pb_bars:
+        stat_ink = _stat_ink_for_brief(b, root_vars)
+        if stat_ink:
+            props["statInk"] = stat_ink
+        if root_vars.get("--mh-outline"):
+            # The still's hairline outline (a translucent on-colour) for the
+            # chip boxes — passed, never re-derived, so no literal colour
+            # lives in the TSX (brand-locked rule).
+            props["roleOutline"] = str(root_vars["--mh-outline"])
+    # M12 layered-depth twins: decoration strength for the role-coloured depth
+    # filter (0.5 is the TSX default, so only a non-default value attaches),
+    # poster_name_behind's surface-band ink, and band_break's alpha-derived
+    # band placement — the SAME maths the still ran, so both surfaces break
+    # at identical pixels.
+    if arch_name in _LAYERED_CUTOUT_ARCHETYPES and cutout_uri:
+        strength = _decoration_strength_of(b)
+        if abs(strength - 0.5) > 1e-9:
+            props["decorationStrength"] = round(strength, 4)
+        if arch_name == "poster_name_behind" and root_vars.get("--mh-on-surface"):
+            props["roleOnSurface"] = str(root_vars["--mh-on-surface"])
+        if arch_name == "band_break" and root_vars.get("--mh-outline"):
+            # The band's 2px border-bottom paints the still's outline var.
+            props["roleOutline"] = str(root_vars["--mh-outline"])
+        if arch_name == "band_break" and cutout_path is not None:
+            try:
+                from mediahub.graphic_renderer.render import _band_top_fraction
+
+                width, height = motion_format_size(format_name)
+                band_top = _band_top_fraction(cutout_path, width, height)
+            except Exception:
+                band_top = None
+            if band_top is not None:
+                props["bandTopPct"] = round(band_top * 100, 1)
+                solid = max(0.0, min(0.97, (band_top + 0.015 - 0.14) / 0.86))
+                fade = min(0.99, solid + 0.055)
+                props["breakSolidPct"] = round(solid * 100, 1)
+                props["breakFadePct"] = round(fade * 100, 1)
     return props
 
 
@@ -652,8 +1236,12 @@ def _card_manifest_axes(card_props: dict) -> dict:
         else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
         "has_cutout": bool(card_props.get("cutoutSrc")),
+        "has_footage": bool(card_props.get("videoSrc")),
+        "photo_mode": card_props.get("photoMode") or "",
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",
+        "stat_chips": len(card_props.get("statChips") or []),
+        "has_pb_bars": bool(card_props.get("pbBars")),
     }
 
 
@@ -1182,12 +1770,22 @@ def render_story_card(
     size = motion_format_size(format_name)
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
+    # M23 — footage-backed story: resolve the card's race clip for this 6s
+    # beat. Remotion-only (the ffmpeg fallback renders pre-baked stills and
+    # cannot play a video plane — its manifest says so honestly); a miss of
+    # any kind keeps the photo path byte-identical, reason in the manifest.
+    foot, foot_reason = (None, "")
+    if engine != "ffmpeg":
+        foot, foot_reason = _footage_for_card(
+            card_payload, brief, brand_kit, beat_seconds=duration_sec
+        )
     card_dict = _card_to_props(
         card_payload,
         variation_seed=variation_seed,
         brief=brief,
         brand_kit=brand_kit,
         format_name=format_name,
+        footage=foot,
     )
     audio_plan = _story_audio_plan(
         card_dict, brand_dict, mix_profile=_card_mix_profile(card_payload, brief)
@@ -1218,9 +1816,21 @@ def render_story_card(
         "brand": brand_dict,
         "duration": duration_sec,
         "size": list(size),
+        "rev": STORY_COMPOSITION_REVISION,
     }
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # M21: an edited photo (safeguarding blur, crop, enhance) re-renders; the
+    # signature is attached ONLY when a recipe exists so unedited assets keep
+    # byte-identical keys.
+    edit_sig = _photo_edit_signature_for_brief(brief)
+    if edit_sig:
+        cache_payload["photo_edit"] = edit_sig
+    # M23: the footage beat's source fingerprint + trim window, folded ONLY
+    # when a clip resolved — replacing the source clip re-renders while every
+    # no-footage card keeps its byte-identical key.
+    if foot is not None:
+        cache_payload["footage"] = foot.cache_sig
     cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1250,32 +1860,42 @@ def render_story_card(
     poster_source = audio_rec.pop("poster_source", "")
     from mediahub.visual.audio_mux import poster_path_for
 
-    _write_render_manifest(
-        cached,
-        {
-            "kind": "story",
-            "engine": engine,
-            "format": format_name,
-            "size": list(size),
-            "duration_sec": duration_sec,
-            "card": _card_manifest_axes(card_dict),
-            "audio": audio_rec,
-            "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
-            "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
-            "poster_source": poster_source,
-        },
-    )
+    story_manifest = {
+        "kind": "story",
+        "engine": engine,
+        "format": format_name,
+        "size": list(size),
+        "duration_sec": duration_sec,
+        "card": _card_manifest_axes(card_dict),
+        "audio": audio_rec,
+        "captions": _caption_manifest(card_dict.get("captionsJson") or ""),
+        "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
+        "poster_source": poster_source,
+    }
+    # M23 explainability: full provenance when a clip plays; the honest
+    # fall-back reason when a candidate existed but the photo path won.
+    if foot is not None:
+        story_manifest["footage"] = foot.provenance
+    elif foot_reason:
+        story_manifest["footage"] = {"used": False, "reason": foot_reason}
+    _write_render_manifest(cached, story_manifest)
     published = _publish(cached, out_path)
     return published if published.exists() else cached
 
 
 # Data-driven reel allocation (SEQ-4): the reel's length follows the number
-# of ranked moments instead of a fixed 15s — a one-medal weekend is a tight
-# 7s, a five-PB weekend a 23s recap. Mirrors MeetReel.tsx's scene layout
-# (cover + N card scenes + outro beat).
+# of ranked moments instead of a fixed duration — a one-medal weekend is a
+# tight 8.5s, a five-PB weekend a 25s recap. Mirrors MeetReel.tsx's scene
+# layout (cover + N card scenes + outro beat).
 REEL_COVER_SEC = 2.0
 REEL_PER_CARD_SEC = 4.0
-REEL_OUTRO_SEC = 1.0
+# M17 (MOTION-4): 2.5s default outro — the old 1.0s meant the CTA close
+# (sponsor thank-you / next-up / follow) mathematically never reached full
+# opacity before its own fade began. 2.5s gives the retimed OutroScreen a
+# CTA fully readable by ~0.9s and a hold of ≥1.2s before the closing fade.
+# Mirrored into MeetReel.tsx's rhythm default and reel_ffmpeg's carve;
+# explicit rhythm.outro callers keep full control via REEL_OUTRO_RANGE.
+REEL_OUTRO_SEC = 2.5
 
 # Reel beat-rhythm & duration customisation (R1.12). The default skeleton above
 # stays the contract; these bounds keep a *customised* reel readable and the
@@ -1294,7 +1914,41 @@ REEL_TOTAL_RANGE = (3.0, 60.0)
 # separately and stay byte-identical, so this is reel-only.
 #   "2" — R1.14: expanded transition library (glitch / slide-stack /
 #         light-sweep) + per-card transition timing.
-REEL_COMPOSITION_REVISION = "2"
+#   "3" — Phase C (M15–M20): default photo camera moves, paired
+#         velocity-matched transitions (no mid-reel self-fades), legible
+#         2.5s outro retime, brand-true cover/outro roles + photo cover,
+#         beat-proportional choreography + resolve accents, reel chrome
+#         (progress rail + club mark).
+#   "4" — Still↔motion parity pass: photo-mode archetypes drop the cutout
+#         plane, exact M10 duotone/halftone mirrors replace the CSS
+#         approximation on beats, M11 stat chips + PB bars, and the M12
+#         layered-archetype scenes (poster_name_behind / band_break).
+#   (Phase D / M23 footage beats deliberately did NOT bump this: the video
+#   plane only activates on the new attach-only videoSrc props, so a reel
+#   with an unchanged payload renders byte-identically — the exact condition
+#   this revision lever exists to police. Footage reels re-key through the
+#   new props + the cache_payload["footage"] fold instead.)
+REEL_COMPOSITION_REVISION = "4"
+
+# Story composition revision — folded into the STORY cache key (M15). The
+# story payload historically had no revision field; introducing one both
+# retires every pre-Phase-C cached story (buying the photo-camera +
+# proportional-choreography upgrade on re-request) and gives future visual
+# upgrades a clean lever. Bump whenever StoryCard.tsx's deterministic output
+# changes for an unchanged payload.
+#   "1" — Phase C (M15/M19): seed-chosen photo camera moves on every intent,
+#         beat-proportional keyframes, resolve-phase micro-accent, ambient
+#         PEAK_ALPHA 0.14.
+#   "2" — Still↔motion parity pass: photo-mode archetypes show the original
+#         photograph (no cutout plane), exact M10 duotone/halftone mirrors
+#         replace the CSS approximation, M11 stat chips + PB bars, and the
+#         M12 layered-archetype scenes (poster_name_behind / band_break).
+#   (Phase D / M23 footage beats deliberately did NOT bump this: the video
+#   plane only activates on the new attach-only videoSrc props, so a story
+#   with an unchanged payload renders byte-identically — the exact condition
+#   this revision lever exists to police. Footage stories re-key through the
+#   new props + the cache_payload["footage"] fold instead.)
+STORY_COMPOSITION_REVISION = "2"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -1602,7 +2256,8 @@ def _assemble_reel_props(
     briefs: Optional[list[Optional[dict]]],
     rhythm: Optional[dict] = None,
     dub_language: str = "",
-) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict]]:
+    resolve_footage: bool = False,
+) -> tuple[list[dict], dict, str, float, Any, list, Optional[dict], Optional[dict], list]:
     """Format-independent prop assembly shared by the single and batch reel
     renders.
 
@@ -1620,14 +2275,35 @@ def _assemble_reel_props(
     its props + cache key. ``None`` or an effectively-default request keeps the
     historic skeleton and byte-identical cache key.
 
+    ``resolve_footage`` (M23) turns on per-beat race-clip resolution: each
+    card's clip is trimmed to ITS carved beat seconds (the exact MeetReel.tsx
+    allocation — rank-weighted / rhythm-custom), so an emphasised beat earns a
+    longer window. Off (the default, and always off for the ffmpeg engine),
+    every prop dict is byte-identical to the photo-only behaviour.
+
     Returns ``(cards_props, brand_dict, meet_name, duration_sec, audio_plan,
-    briefs_list, rhythm_norm, audio_notes)`` — ``audio_notes`` carries honest
-    manifest-only facts about the plan (e.g. a dropped dub's reason) and never
-    folds into any cache key.
+    briefs_list, rhythm_norm, audio_notes, footage_list)`` — ``audio_notes``
+    carries honest manifest-only facts about the plan (e.g. a dropped dub's
+    reason) and never folds into any cache key; ``footage_list`` is the
+    per-card ``(FootageResolution | None, reason)`` pairs for the cache fold
+    and the manifest.
     """
     brand_dict = _brand_to_dict(brand_kit)
 
+    # R1.12 — resolve the (optional) beat-rhythm customisation and the
+    # data-driven duration UP FRONT (they depend only on the card count), so
+    # the per-card beat carve is known before props are shaped and each
+    # footage window (M23) can be sized to its own beat. ``None`` for a
+    # default request, so the duration maths, cache key, and render props
+    # below all stay byte-identical to a reel rendered before this feature.
+    n_cards = len(top_cards or [])
+    rhythm_norm = normalise_reel_rhythm(rhythm, n_cards)
+    if duration_sec is None:
+        duration_sec = reel_duration_for(n_cards, **_reel_duration_kwargs(rhythm_norm))
+    beat_frames = reel_card_beat_frames(n_cards, duration_sec, rhythm_norm)
+
     cards_props: list[dict] = []
+    footage_list: list[tuple[Optional[Any], str]] = []
     briefs_list = list(briefs or [])
     for idx, c in enumerate(top_cards or []):
         # variation seed per card — caller may pass via {"variation_seed": N}
@@ -1654,10 +2330,19 @@ def _assemble_reel_props(
                     except Exception:
                         seed = 1
         brief = briefs_list[idx] if idx < len(briefs_list) else None
+        # M23 — this card's footage beat, trimmed to its OWN carved beat
+        # seconds. Only attempted when the engine can play it; any miss keeps
+        # the card's props byte-identical with the reason kept for the manifest.
+        foot, foot_reason = (None, "")
+        if resolve_footage and idx < len(beat_frames):
+            foot, foot_reason = _footage_for_card(
+                c, brief, brand_kit, beat_seconds=beat_frames[idx] / MOTION_FPS
+            )
+        footage_list.append((foot, foot_reason))
         # Format-independent base focus (story 9:16); the per-cut saliency
         # photoPos is re-resolved downstream in _render_reel_one_format (R1.7).
         cards_props.append(
-            _card_to_props(c, variation_seed=seed, brief=brief, brand_kit=brand_kit),
+            _card_to_props(c, variation_seed=seed, brief=brief, brand_kit=brand_kit, footage=foot),
         )
 
     if not meet_name:
@@ -1665,14 +2350,6 @@ def _assemble_reel_props(
             if cp.get("meetName"):
                 meet_name = cp["meetName"]
                 break
-
-    # R1.12 — resolve the (optional) beat-rhythm customisation. ``None`` for a
-    # default request, so the duration maths, cache key, and render props below
-    # all stay byte-identical to a reel rendered before this feature landed.
-    rhythm_norm = normalise_reel_rhythm(rhythm, len(cards_props))
-
-    if duration_sec is None:
-        duration_sec = reel_duration_for(len(cards_props), **_reel_duration_kwargs(rhythm_norm))
 
     # One reel, one mix (R1.19): the headline (first card to name one) drives
     # the voice/music balance; absent that, the operator env default decides.
@@ -1719,7 +2396,78 @@ def _assemble_reel_props(
         briefs_list,
         rhythm_norm,
         audio_notes,
+        footage_list,
     )
+
+
+def _cover_brand_roles(brand_dict: dict, brand_kit: Any) -> dict[str, str]:
+    """APCA-gated bookend roles for the reel cover/outro (M18 / MOTION-5).
+
+    Runs the SAME graphic_renderer role resolver the card beats use
+    (``resolved_role_vars_for_brief``) against the bare brand palette — Tier A
+    brand baseline, contrast-picked on-colours, no invented hex — so a club
+    whose accent fails contrast against its primary no longer gets an
+    illegible cover. Empty dict on any miss (the TSX then keeps the legacy
+    accent-on-primary pairing).
+    """
+    try:
+        from types import SimpleNamespace
+
+        from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+
+        shim = SimpleNamespace(
+            palette={
+                "primary": str(brand_dict.get("primary") or ""),
+                "secondary": str(brand_dict.get("secondary") or ""),
+                "accent": str(brand_dict.get("accent") or ""),
+            },
+            colour_role_assignment=None,
+            text_layers={},
+            inspiration_pattern_id="",
+        )
+        root_vars = resolved_role_vars_for_brief(shim, brand_kit)
+        roles = {
+            "ground": str(root_vars.get("--mh-primary") or ""),
+            "surface": str(root_vars.get("--mh-surface") or ""),
+            "accent": str(root_vars.get("--mh-accent") or ""),
+            "onGround": str(root_vars.get("--mh-on-primary") or ""),
+        }
+        return roles if roles["ground"] and roles["onGround"] else {}
+    except Exception:
+        return {}
+
+
+def _reel_cover_props(cards_props: list[dict], brand_dict: dict, brand_kit: Any) -> dict[str, str]:
+    """The reel's brand-true cover/outro props (M18), assembled Python-side:
+
+    * ``coverRole*`` — the APCA-gated bookend roles (see ``_cover_brand_roles``);
+    * ``coverTypography`` — the top card's typography pair, so the cover's
+      masthead face matches the club's approved cards;
+    * ``coverPhotoSrc``/``coverPhotoPos`` — the top photo-bearing card's photo,
+      feeding the pool-gated fifth "photo" cover variant.
+
+    Every key is attached ONLY when it resolved, and the dict is folded into
+    the render props + cache key only when non-empty — a reel with none of
+    them stays byte-identical.
+    """
+    out: dict[str, str] = {}
+    roles = _cover_brand_roles(brand_dict, brand_kit)
+    if roles:
+        out["coverRoleGround"] = roles["ground"]
+        out["coverRoleSurface"] = roles["surface"]
+        out["coverRoleAccent"] = roles["accent"]
+        out["coverRoleOnGround"] = roles["onGround"]
+    for cp in cards_props:
+        if cp.get("typographyPair"):
+            out["coverTypography"] = str(cp["typographyPair"])
+            break
+    for cp in cards_props:
+        if cp.get("photoSrc"):
+            out["coverPhotoSrc"] = str(cp["photoSrc"])
+            if cp.get("photoPos"):
+                out["coverPhotoPos"] = str(cp["photoPos"])
+            break
+    return out
 
 
 def _reel_cta_props(sponsor: str, next_meet: str) -> dict[str, str]:
@@ -1754,6 +2502,11 @@ def _apply_format_photo_focus(
         return cards_props
     out: list[dict] = []
     for idx, cp in enumerate(cards_props):
+        # LEFTOVER-1: a human's manual crop is format-agnostic and always
+        # wins — never clobber it with the recomputed saliency focus.
+        if cp.get("photoPosManual"):
+            out.append(cp)
+            continue
         brief = briefs_list[idx] if idx < len(briefs_list) else None
         pos = _photo_focus_for_brief(brief, format_name)
         if pos == cp.get("photoPos", ""):
@@ -1781,6 +2534,7 @@ def _render_reel_one_format(
     rhythm: Optional[dict] = None,
     audio_notes: Optional[dict] = None,
     stat_config: Optional[dict] = None,
+    footage_list: Optional[list] = None,
 ) -> Path:
     """Render (or serve cached) ONE reel cut from already-assembled props.
 
@@ -1803,6 +2557,11 @@ def _render_reel_one_format(
     # the story base). Folds into the cache key below, so each cut caches its own
     # focus and the story cut stays byte-identical.
     cards_props = _apply_format_photo_focus(cards_props, briefs_list, format_name)
+
+    # M18 — brand-true cover/outro props (APCA-gated roles, top card's
+    # typography, top photo for the pool-gated photo cover). Assembled per cut
+    # so the cover photo's saliency focus follows the format.
+    cover_props = _reel_cover_props(cards_props, brand_dict, brand_kit)
 
     if engine == "ffmpeg":
         from mediahub.visual import reel_ffmpeg
@@ -1835,8 +2594,22 @@ def _render_reel_one_format(
         cache_payload["reelStatConfig"] = stat_config
     if cta_props:
         cache_payload["cta"] = cta_props
+    if cover_props:
+        cache_payload["cover"] = cover_props
     if audio_plan:
         cache_payload["audio"] = audio_plan
+    # M21: per-card edit-recipe signatures, folded only when any card's photo
+    # actually carries an edit (unedited reels keep byte-identical keys).
+    edit_sigs = [_photo_edit_signature_for_brief(b) for b in briefs_list]
+    if any(edit_sigs):
+        cache_payload["photo_edits"] = edit_sigs
+    # M23: per-beat footage fingerprints + trim windows, folded ONLY when at
+    # least one beat resolved a clip (footage-free reels keep byte-identical keys).
+    footage_list = list(footage_list or [])
+    if any(f is not None for f, _ in footage_list):
+        cache_payload["footage"] = [
+            (f.cache_sig if f is not None else None) for f, _ in footage_list
+        ]
     cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
@@ -1863,6 +2636,7 @@ def _render_reel_one_format(
         "brand": brand_dict,
         "meetName": meet_name,
         **cta_props,
+        **cover_props,
     }
     if rhythm:
         reel_props["rhythm"] = rhythm
@@ -1901,6 +2675,12 @@ def _render_reel_one_format(
     poster_source = audio_rec.pop("poster_source", "")
     from mediahub.visual.audio_mux import poster_path_for
 
+    # M23 explainability: per-beat footage provenance / honest fall-back
+    # reasons, recorded only when there is something to say.
+    reel_footage_manifest = [
+        (f.provenance if f is not None else {"used": False, "reason": r or ""})
+        for f, r in footage_list
+    ]
     _write_render_manifest(
         cached,
         {
@@ -1914,12 +2694,28 @@ def _render_reel_one_format(
             "meet_name": meet_name,
             "rhythm": rhythm or "default",
             "cta": cta_props,
+            # M18 — the bookend treatment, without the photo bytes.
+            "cover": {
+                "roles_source": "brand-resolved"
+                if cover_props.get("coverRoleGround")
+                else "legacy-pairing",
+                "role_ground": cover_props.get("coverRoleGround", ""),
+                "role_accent": cover_props.get("coverRoleAccent", ""),
+                "role_on_ground": cover_props.get("coverRoleOnGround", ""),
+                "typography": cover_props.get("coverTypography", ""),
+                "has_photo": bool(cover_props.get("coverPhotoSrc")),
+            },
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
             "stat_config": stat_config or "default",
             "audio": audio_rec,
             "captions": _reel_caption_manifest(cards_props),
             "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
             "poster_source": poster_source,
+            **(
+                {"footage": reel_footage_manifest}
+                if any(entry.get("used") or entry.get("reason") for entry in reel_footage_manifest)
+                else {}
+            ),
         },
     )
     published = _publish(cached, out_path)
@@ -1998,6 +2794,7 @@ def render_meet_reel(
         briefs_list,
         rhythm_norm,
         audio_notes,
+        footage_list,
     ) = _assemble_reel_props(
         top_cards,
         brand_kit,
@@ -2006,6 +2803,7 @@ def render_meet_reel(
         briefs=briefs,
         rhythm=rhythm,
         dub_language=dub_language,
+        resolve_footage=engine != "ffmpeg",
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
     return _render_reel_one_format(
@@ -2023,6 +2821,7 @@ def render_meet_reel(
         rhythm=rhythm_norm,
         audio_notes=audio_notes,
         stat_config=stat_config,
+        footage_list=footage_list,
     )
 
 
@@ -2116,6 +2915,7 @@ def render_meet_reel_all_formats(
         briefs_list,
         rhythm_norm,
         audio_notes,
+        footage_list,
     ) = _assemble_reel_props(
         top_cards,
         brand_kit,
@@ -2124,6 +2924,7 @@ def render_meet_reel_all_formats(
         briefs=briefs,
         rhythm=rhythm,
         dub_language=dub_language,
+        resolve_footage=engine != "ffmpeg",
     )
     cta_props = _reel_cta_props(sponsor, next_meet)
 
@@ -2150,6 +2951,7 @@ def render_meet_reel_all_formats(
                     rhythm=rhythm_norm,
                     audio_notes=audio_notes,
                     stat_config=stat_config,
+                    footage_list=footage_list,
                 )
         except ReelEngineUnavailable as e:
             # Expected capability gap (e.g. ffmpeg can't do non-story) —

@@ -25,8 +25,17 @@
 import React from "react";
 import { Easing, interpolate, useVideoConfig } from "remotion";
 import type { SceneComponent } from "../registry";
+import {
+  PhotoFilterDefs,
+  photoExactGradeFor,
+  photoHalftoneMaskFor,
+} from "./photo_filters";
 
 type Placement = { side: "left" | "right"; widthPct: number; heightPct: number };
+
+// The layered-depth archetype scenes (M12 twins) paint the cutout themselves —
+// this generic side-standing plane would double the athlete on top of them.
+const SCENE_OWNED_ARCHETYPES = new Set(["poster_name_behind", "band_break"]);
 
 // Stand the subject opposite the scene's dominant text. text-right
 // compositions pull it left; a centred hero gets a shorter, low-corner figure
@@ -49,6 +58,19 @@ const Layer: SceneComponent = ({ ctx }) => {
   const cutout = card.cutoutSrc || "";
   if (!cutout) {
     // No prepared cutout → render nothing (byte-identical to pre-R1.9).
+    return null;
+  }
+  // STILLS-2 / M8 parity: a "photo"-mode archetype shows the ORIGINAL
+  // photograph on the still — never a composited cutout plane (belt-and-braces
+  // beside motion.py sending an empty cutoutSrc). The M12 layered archetypes
+  // own their cutout choreography in their scenes. M23: a footage beat plays
+  // real video — a frozen cutout plane over moving footage would read as a
+  // sticker, so footage implies no cutout, ever.
+  if (
+    card.photoMode === "photo" ||
+    card.videoSrc ||
+    SCENE_OWNED_ARCHETYPES.has(card.archetype || "")
+  ) {
     return null;
   }
 
@@ -90,6 +112,13 @@ const Layer: SceneComponent = ({ ctx }) => {
   const sideStyle: React.CSSProperties =
     side === "left" ? { left: "-4%" } : { right: "-4%" };
 
+  // M10 exact-mirror grade parity: the still applies its duotone SVG filter /
+  // halftone mask to the cutout img itself (img.athlete-cutout), REPLACING the
+  // depth shadow (CSS specificity). Mirror exactly; ungraded cards keep the
+  // grounded drop-shadow untouched.
+  const exactGrade = photoExactGradeFor(card);
+  const mask = photoHalftoneMaskFor(card);
+
   return (
     <div
       style={{
@@ -102,6 +131,7 @@ const Layer: SceneComponent = ({ ctx }) => {
         ...sideStyle,
       }}
     >
+      <PhotoFilterDefs card={card} />
       <img
         src={cutout}
         alt=""
@@ -114,7 +144,10 @@ const Layer: SceneComponent = ({ ctx }) => {
           transformOrigin: "bottom center",
           // Seat the subject on the scrimmed background with a grounded shadow
           // (the brand ground at alpha) — never recolours the photo itself.
-          filter: `drop-shadow(0 16px 28px ${ground}AA) drop-shadow(0 3px 7px ${ground}70)`,
+          filter:
+            exactGrade ||
+            `drop-shadow(0 16px 28px ${ground}AA) drop-shadow(0 3px 7px ${ground}70)`,
+          ...(mask ?? {}),
         }}
       />
     </div>

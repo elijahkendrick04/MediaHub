@@ -14,7 +14,9 @@ import pytest
 
 from mediahub.media_library.models import MediaAsset
 from mediahub.media_library.selector import (
+    BURST_HAMMING_MAX,
     ROLE_TYPE_MAP,
+    WRONG_ATHLETE_MULTIPLIER,
     score_asset,
     select_assets,
 )
@@ -250,6 +252,273 @@ class TestQuality:
         wide = _make_asset(width=1800, height=400)
         # Both should top the quality axis.
         assert score_asset(tall) == pytest.approx(score_asset(wide), abs=0.06)
+
+
+# ---------------------------------------------------------------------------
+# Quality axis with ingest metrics (M2)
+# ---------------------------------------------------------------------------
+
+
+def _quality(sharpness, clip_h=0.0, clip_s=0.0, dhash="0" * 16) -> dict:
+    return {
+        "sharpness": sharpness,
+        "clip_highlights": clip_h,
+        "clip_shadows": clip_s,
+        "entropy": 6.0,
+        "dhash": dhash,
+    }
+
+
+class TestQualityMetricsAxis:
+    def test_legacy_asset_scores_exactly_as_before(self) -> None:
+        """Regression pin: absent metrics → the historic resolution-only
+        weighted sum, to the last decimal place."""
+        uploaded = (datetime.now(timezone.utc) - timedelta(days=100)).isoformat()
+        asset = _make_asset(
+            type="athlete_action",
+            permission_status="unknown",
+            approval_status="draft",
+            width=900,
+            height=600,
+            orientation="unknown",
+            linked_athlete_ids=[],
+            linked_athlete_names=[],
+            uploaded_at=uploaded,
+            used_in=[],
+        )
+        fresh = 1.0 - (
+            (datetime.now(timezone.utc) - datetime.fromisoformat(uploaded)).days / 365.0
+        )
+        expected = (
+            0.30 * 0.0  # no athlete requested
+            + 0.18 * 1.0  # athlete_action is hero_athlete's primary type
+            + 0.14 * 0.5  # unknown permission
+            + 0.10 * 0.6  # draft
+            + 0.10 * 0.85  # 900px resolution tier
+            + 0.08 * 0.8  # no preferred orientation
+            + 0.05 * fresh
+            + 0.05 * 1.0  # unused
+        )
+        assert score_asset(asset, role="hero_athlete") == pytest.approx(expected, abs=1e-9)
+        # Empty / None quality metadata behaves identically to absent.
+        assert score_asset(
+            _make_asset(**{**asset.__dict__, "media_meta": {}}), role="hero_athlete"
+        ) == pytest.approx(expected, abs=1e-9)
+        assert score_asset(
+            _make_asset(**{**asset.__dict__, "media_meta": {"quality": None}}),
+            role="hero_athlete",
+        ) == pytest.approx(expected, abs=1e-9)
+
+    def test_sharpness_dominates_when_metrics_exist(self) -> None:
+        sharp = _make_asset(media_meta={"quality": _quality(400.0)})
+        blurry = _make_asset(media_meta={"quality": _quality(15.0)})
+        assert score_asset(sharp) > score_asset(blurry)
+
+    def test_sharp_photo_beats_blurry_higher_res(self) -> None:
+        sharp_med = _make_asset(
+            width=900, height=600, media_meta={"quality": _quality(400.0)}
+        )
+        blurry_hi = _make_asset(
+            width=4000, height=3000, media_meta={"quality": _quality(10.0)}
+        )
+        assert score_asset(sharp_med) > score_asset(blurry_hi)
+
+    def test_resolution_stays_the_ceiling(self) -> None:
+        # A razor-sharp thumbnail can't outscore its own resolution tier.
+        tiny_sharp = _make_asset(
+            width=200, height=150, media_meta={"quality": _quality(900.0)}
+        )
+        tiny_legacy = _make_asset(width=200, height=150)
+        assert score_asset(tiny_sharp) <= score_asset(tiny_legacy)
+
+    def test_clipping_penalised(self) -> None:
+        clean = _make_asset(media_meta={"quality": _quality(400.0)})
+        blown = _make_asset(media_meta={"quality": _quality(400.0, clip_h=0.4)})
+        assert score_asset(clean) > score_asset(blown)
+
+    def test_mild_clipping_tolerated(self) -> None:
+        clean = _make_asset(media_meta={"quality": _quality(400.0)})
+        mild = _make_asset(media_meta={"quality": _quality(400.0, clip_h=0.05)})
+        assert score_asset(mild) == pytest.approx(score_asset(clean), abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# has_face signal (M4)
+# ---------------------------------------------------------------------------
+
+
+class TestHasFace:
+    def test_true_boosts_headshot_and_hero_roles(self) -> None:
+        base = _make_asset(has_face=None)
+        face = _make_asset(has_face=True)
+        for role in ("headshot", "hero_athlete", "any_athlete"):
+            assert score_asset(face, role=role, athlete_id="ath-001") > score_asset(
+                base, role=role, athlete_id="ath-001"
+            )
+
+    def test_none_and_false_are_identical(self) -> None:
+        # No real signal recorded → no change; False (explicitly no face)
+        # carries no penalty either — absence of a face is not a defect.
+        unknown = _make_asset(has_face=None)
+        no_face = _make_asset(has_face=False)
+        assert score_asset(unknown, role="headshot") == score_asset(no_face, role="headshot")
+
+    def test_no_boost_outside_person_roles(self) -> None:
+        face = _make_asset(type="venue_photo", has_face=True)
+        plain = _make_asset(type="venue_photo", has_face=None)
+        assert score_asset(face, role="venue") == score_asset(plain, role="venue")
+
+
+# ---------------------------------------------------------------------------
+# Wrong-athlete guard (M3 / STILLS-9)
+# ---------------------------------------------------------------------------
+
+
+class TestWrongAthleteGuard:
+    def test_other_athlete_hard_demoted(self) -> None:
+        other = _make_asset(
+            linked_athlete_ids=[], linked_athlete_names=["Sam Powell"]
+        )
+        unlinked = _make_asset(linked_athlete_ids=[], linked_athlete_names=[])
+        s_other = score_asset(other, athlete_name="Jane Smith")
+        s_unlinked = score_asset(unlinked, athlete_name="Jane Smith")
+        # Only the linked-to-someone-else asset is demoted, by exactly ×0.15.
+        assert s_other == pytest.approx(s_unlinked * WRONG_ATHLETE_MULTIPLIER, abs=1e-9)
+
+    def test_wrong_id_link_demoted(self) -> None:
+        wrong = _make_asset(linked_athlete_ids=["ath-999"], linked_athlete_names=[])
+        s = score_asset(wrong, athlete_id="ath-001")
+        unlinked = _make_asset(linked_athlete_ids=[], linked_athlete_names=[])
+        assert s == pytest.approx(
+            score_asset(unlinked, athlete_id="ath-001") * WRONG_ATHLETE_MULTIPLIER, abs=1e-9
+        )
+
+    def test_no_subject_requested_no_demotion(self) -> None:
+        linked = _make_asset(linked_athlete_names=["Sam Powell"])
+        unlinked = _make_asset(linked_athlete_names=[])
+        assert score_asset(linked) == score_asset(unlinked)
+
+    def test_description_mention_counts_as_subject_evidence(self) -> None:
+        # Linked to someone else BUT the description names the subject —
+        # weak evidence, not a wrong-athlete case.
+        mixed = _make_asset(
+            linked_athlete_names=["Sam Powell"],
+            description_raw="Jane Smith and Sam Powell on the blocks",
+        )
+        s = score_asset(mixed, athlete_name="Jane Smith")
+        assert s > 0.3  # not demoted to the 0.15-multiplied floor
+
+    def test_wrong_athlete_filtered_at_default_min_score(self) -> None:
+        other = _make_asset(id="other", linked_athlete_names=["Sam Powell"])
+        out = select_assets([other], athlete_name="Jane Smith")
+        assert out == []
+
+    def test_unlinked_ranks_below_any_name_matched(self) -> None:
+        # A pristine unlinked photo vs a weaker but name-matched one: the
+        # name-matched asset must come first regardless of raw score.
+        pristine_unlinked = _make_asset(
+            id="unlinked",
+            linked_athlete_ids=[],
+            linked_athlete_names=[],
+            width=4000,
+            height=3000,
+            permission_status="user_owned",
+            approval_status="approved",
+        )
+        weak_matched = _make_asset(
+            id="matched",
+            linked_athlete_ids=[],
+            linked_athlete_names=["Jane Smith Jr"],  # substring match (am 0.6)
+            width=300,
+            height=200,
+            permission_status="needs_approval",
+            approval_status="draft",
+            uploaded_at=(datetime.now(timezone.utc) - timedelta(days=300)).isoformat(),
+        )
+        # Sanity: the unlinked one has the higher raw score.
+        assert score_asset(pristine_unlinked, athlete_name="Jane Smith") > score_asset(
+            weak_matched, athlete_name="Jane Smith"
+        )
+        out = select_assets(
+            [pristine_unlinked, weak_matched], athlete_name="Jane Smith", min_score=0.1
+        )
+        assert [e["asset_id"] for e in out] == ["matched", "unlinked"]
+
+    def test_reason_surfaces_identity_basis(self) -> None:
+        other = _make_asset(id="o", linked_athlete_names=["Sam Powell"])
+        unlinked = _make_asset(id="u", linked_athlete_ids=[], linked_athlete_names=[])
+        out = select_assets([other, unlinked], athlete_name="Jane Smith", min_score=0.0)
+        by_id = {e["asset_id"]: e["reason_summary"] for e in out}
+        assert "different athlete" in by_id["o"]
+        assert "identity unverified" in by_id["u"]
+
+    def test_score_order_unchanged_without_subject(self) -> None:
+        # Without a subject the sort is score-only, exactly as before.
+        a = _make_asset(id="a", type="athlete_action")
+        b = _make_asset(id="b", type="athlete_headshot")
+        out = select_assets([b, a], role="hero_athlete", min_score=0.0)
+        assert out[0]["asset_id"] == "a"
+
+
+# ---------------------------------------------------------------------------
+# Burst-family dedupe (M2)
+# ---------------------------------------------------------------------------
+
+
+class TestBurstDedupe:
+    def test_only_sharpest_of_a_burst_survives(self) -> None:
+        # Two near-frames (1 bit apart) + one distinct frame.
+        sharp = _make_asset(
+            id="sharp", media_meta={"quality": _quality(500.0, dhash="ff00ff00ff00ff00")}
+        )
+        soft = _make_asset(
+            id="soft", media_meta={"quality": _quality(80.0, dhash="ff00ff00ff00ff01")}
+        )
+        distinct = _make_asset(
+            id="distinct", media_meta={"quality": _quality(300.0, dhash="0123456789abcdef")}
+        )
+        out = select_assets([soft, sharp, distinct], min_score=0.0)
+        ids = [e["asset_id"] for e in out]
+        assert "sharp" in ids and "distinct" in ids
+        assert "soft" not in ids
+
+    def test_hamming_boundary(self) -> None:
+        # Exactly BURST_HAMMING_MAX bits apart → same family; one more → not.
+        base = int("ff00ff00ff00ff00", 16)
+        near = f"{base ^ ((1 << BURST_HAMMING_MAX) - 1):016x}"  # 6 bits flipped
+        far = f"{base ^ ((1 << (BURST_HAMMING_MAX + 1)) - 1):016x}"  # 7 bits
+        a = _make_asset(id="a", media_meta={"quality": _quality(500.0, dhash="ff00ff00ff00ff00")})
+        b = _make_asset(id="b", media_meta={"quality": _quality(100.0, dhash=near)})
+        c = _make_asset(id="c", media_meta={"quality": _quality(100.0, dhash=far)})
+        ids = [e["asset_id"] for e in select_assets([a, b, c], min_score=0.0)]
+        assert "b" not in ids
+        assert "a" in ids and "c" in ids
+
+    def test_assets_without_dhash_untouched(self) -> None:
+        legacy1 = _make_asset(id="l1")
+        legacy2 = _make_asset(id="l2")
+        ids = [e["asset_id"] for e in select_assets([legacy1, legacy2], min_score=0.0)]
+        assert set(ids) == {"l1", "l2"}
+
+    def test_exclude_families_drops_near_frames(self) -> None:
+        used = "ff00ff00ff00ff00"
+        near = _make_asset(
+            id="near", media_meta={"quality": _quality(500.0, dhash="ff00ff00ff00ff01")}
+        )
+        fresh = _make_asset(
+            id="fresh", media_meta={"quality": _quality(300.0, dhash="0123456789abcdef")}
+        )
+        legacy = _make_asset(id="legacy")  # no dhash → never excluded
+        out = select_assets([near, fresh, legacy], min_score=0.0, exclude_families=[used])
+        ids = [e["asset_id"] for e in out]
+        assert "near" not in ids
+        assert "fresh" in ids and "legacy" in ids
+
+    def test_no_exclusions_no_change(self) -> None:
+        a = _make_asset(id="a")
+        assert select_assets([a], min_score=0.0, exclude_families=[]) == select_assets(
+            [a], min_score=0.0
+        )
 
 
 # ---------------------------------------------------------------------------

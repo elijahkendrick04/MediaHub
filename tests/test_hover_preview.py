@@ -218,7 +218,9 @@ class TestMediaLibraryRows:
         )
         # caption surfaces the athlete + type
         assert "Eira Hughes" in body
-        assert "athlete photo" in body  # type, underscores prettified
+        # Legacy "athlete_photo" canonicalises to athlete_action on read
+        # (media_library.models.LEGACY_TYPE_ALIASES), then prettifies.
+        assert "athlete action" in body
 
     def test_metadata_is_html_escaped(self, hp_app):
         """A malicious athlete name / venue must never reach the page raw —

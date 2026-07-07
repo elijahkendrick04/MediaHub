@@ -193,7 +193,9 @@ def test_ambient_peak_alpha_is_capped_low(src: str):
     m = re.search(r"PEAK_ALPHA\s*=\s*([0-9.]+)", src)
     assert m, "ambient must declare a PEAK_ALPHA ceiling"
     peak = float(m.group(1))
-    assert 0 < peak <= 0.12, (
+    # M19 raised the ceiling to 0.14 (0.08 vanished after H.264) — still far
+    # under the still engine's 0.24–0.34 decorative grounds.
+    assert 0 < peak <= 0.16, (
         f"peak alpha {peak} too high — the wash must not break text contrast"
     )
 

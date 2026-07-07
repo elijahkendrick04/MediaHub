@@ -46,6 +46,13 @@ _ALLOWED_PLACEHOLDERS = {
     "PHOTO_ONLY_CLOSE",
     "TEXT_ONLY_OPEN",
     "TEXT_ONLY_CLOSE",
+    # M11 — data-led slots: the secondary-stat chip row and the honest
+    # before/after PB bars (both collapse to "" when the facts are absent).
+    "STAT_CHIPS",
+    "PB_BARS",
+    # M14 — matte-gate fallback marker for the layered cutout archetypes
+    # (" mh-photo-flat" when the original photo honestly ships instead).
+    "PHOTO_FLAT_CLASS",
 }
 
 

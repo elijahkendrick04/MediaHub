@@ -4,10 +4,18 @@ Draws the actual picture for each card. It takes an HTML/CSS layout and turns it
 into an Instagram-ready PNG image. The drawing is exact and repeatable — the same
 card always comes out the same way.
 
-`photo_adjust.py` is the optional photo touch-up step: before a real athlete or
-action photo gets baked into the card, it can sharpen it, lift the contrast,
-warm up the colour, and so on — using fixed, repeatable recipes (no AI). It is
-off unless asked for, and it never disturbs a cutout's see-through edges.
+`photo_adjust.py` is the photo touch-up step: before a real athlete or action
+photo gets baked into the card, it sharpens it, lifts the contrast, warms up
+the colour, and so on — using fixed, repeatable recipes (no AI). Every card's
+recipe is keyed to its mood (a celebratory card gets a punchier look than a
+calm one), and it never disturbs a cutout's see-through edges.
+
+`matte.py` is the cutout quality gate: before a background-removed athlete
+picture is allowed onto a card, it measures the see-through mask with plain
+image maths (how much of the frame the subject fills, whether it is one solid
+shape or shredded pieces, whether the background was really removed). A bad
+cutout is rejected and the card honestly uses the original photograph instead,
+with the reason recorded on the card's trace.
 
 ## SVG vector export (`svg_export.py`, roadmap G1.13)
 

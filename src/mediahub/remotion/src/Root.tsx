@@ -37,7 +37,27 @@ const defaultCard = {
   photoTreatment: "",
   photoSrc: "",
   photoPos: "",
+  // M23 footage beat (blank = photo path; production attaches a
+  // footage_cache trim via visual/footage.py).
+  videoSrc: "",
+  videoStartSec: 0,
+  videoDurationSec: 0,
+  photoSrcs: [] as string[],
   cutoutSrc: "",
+  photoMode: "",
+  photoScale: 0,
+  decorationStrength: 0.5,
+  duotoneShadow: "",
+  duotoneHighlight: "",
+  halftoneTile: 0,
+  statChips: [] as { label: string; value: string }[],
+  statInk: "",
+  pbBars: null as null | { prev: string; now: string; nowPct: number; caption: string },
+  bandTopPct: 62,
+  breakSolidPct: 58,
+  breakFadePct: 66,
+  roleOnSurface: "",
+  roleOutline: "",
   archetype: "",
   heroStat: "",
   // A valid sample pack so the studio preview demonstrates the style-pack
@@ -49,6 +69,7 @@ const defaultCard = {
   roleAccent: "",
   roleOnGround: "",
   captionsJson: "",
+  inReel: false,
   meshBg: "",
 };
 
@@ -82,6 +103,15 @@ export const RemotionRoot: React.FC = () => {
           // real sponsor / next-meet label when the club has one.
           sponsor: "",
           nextMeet: "",
+          // M18 brand-true cover/outro props. Blank by default → the legacy
+          // accent-on-primary pairing; production resolves them Python-side.
+          coverRoleGround: "",
+          coverRoleSurface: "",
+          coverRoleAccent: "",
+          coverRoleOnGround: "",
+          coverTypography: "",
+          coverPhotoSrc: "",
+          coverPhotoPos: "",
         }}
       />
     </>

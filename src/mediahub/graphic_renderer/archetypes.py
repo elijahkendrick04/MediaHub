@@ -83,39 +83,114 @@ def list_archetypes() -> list[str]:
     return list(_scan())
 
 
-def pick_archetype(seed: int) -> str | None:
+# The template tokens that mark an archetype as carrying the athlete photo.
+# ``ATHLETE_IMG_BLOCK`` is the standard <img> slot; ``ATHLETE_IMG_VAR`` is the
+# one-copy CSS custom-property carry (contact_sheet).
+_PHOTO_SLOT_TOKENS = ("{{ATHLETE_IMG_BLOCK}}", "{{ATHLETE_IMG_VAR}}")
+
+
+@lru_cache(maxsize=1)
+def photo_archetypes() -> frozenset[str]:
+    """The photo-led half of the library — archetypes with an athlete-photo slot.
+
+    Derived from the templates themselves (a scan for the photo-slot tokens) so
+    the partition can never drift from what the layouts actually render. Cached:
+    archetype files are static at runtime.
+    """
+    out = set()
+    for name in _scan():
+        try:
+            raw = (V2_DIR / f"{name}.html").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if any(tok in raw for tok in _PHOTO_SLOT_TOKENS):
+            out.add(name)
+    return frozenset(out)
+
+
+def type_archetypes() -> frozenset[str]:
+    """The type-led half of the library — archetypes with no photo slot."""
+    return frozenset(_scan()) - photo_archetypes()
+
+
+# STILLS-2 (M8): how a photo-led archetype consumes the athlete photo.
+#   "photo"  — the ORIGINAL photograph fills the slot (a rectangular
+#              object-fit:cover window / full-bleed stage; the archetype's own
+#              scrims handle legibility). Real pool photography, environment
+#              intact.
+#   "cutout" — the background-removed subject, for archetypes whose layering
+#              (discs, type-behind-athlete, band breaks, per-athlete collage
+#              frames) only works with a transparent silhouette.
+# Every rectangular-window archetype gets the original; the cutout list is the
+# explicit exception set.
+_CUTOUT_MODE_ARCHETYPES: frozenset[str] = frozenset(
+    {
+        "spotlight_disc",
+        "relay_collage",
+        "poster_name_behind",
+        "band_break",
+    }
+)
+
+
+def photo_mode(name: str) -> str:
+    """``"photo"`` or ``"cutout"`` — how ``name`` consumes the athlete photo.
+
+    Archetypes without a photo slot report ``"cutout"`` (the historic default;
+    the value is unused there since no photo renders).
+    """
+    if name in _CUTOUT_MODE_ARCHETYPES:
+        return "cutout"
+    return "photo" if name in photo_archetypes() else "cutout"
+
+
+def _pool(names: Iterable[str] | None) -> list[str]:
+    """The sorted pick pool: an explicit subset (photo-led / type-led) or the
+    full library. Sorting keeps the seeded modulo stable regardless of the
+    caller's iteration order."""
+    if names is None:
+        return list_archetypes()
+    return sorted(n for n in names if n)
+
+
+def pick_archetype(seed: int, names: Iterable[str] | None = None) -> str | None:
     """Deterministically pick one archetype for a card from its variation seed.
 
     Stable per card (same seed → same archetype) and well-spread across a pack
-    (distinct seeds map across the whole library by modulo). Returns ``None``
-    when no archetype files exist, so callers keep the legacy family.
+    (distinct seeds map across the whole pool by modulo). ``names`` optionally
+    restricts the pool (STILLS-1: the photo-led or type-led set) — omitted, the
+    full library is used, byte-identical to the historic picker. Returns
+    ``None`` when the pool is empty, so callers keep the legacy family.
     """
-    names = list_archetypes()
-    if not names:
+    pool = _pool(names)
+    if not pool:
         return None
-    return names[int(seed) % len(names)]
+    return pool[int(seed) % len(pool)]
 
 
-def pick_archetype_avoiding(seed: int, recent: Iterable[str]) -> str | None:
+def pick_archetype_avoiding(
+    seed: int, recent: Iterable[str], names: Iterable[str] | None = None
+) -> str | None:
     """Seeded pick that walks past recently-used archetypes.
 
     The deterministic no-LLM floor for "give me a *fresh* direction": start at
     the card's seeded archetype and step forward until one not in ``recent`` is
     found, so consecutive regenerates (and the 3-variant picker) walk the
     library instead of repeating one composition. Still fully deterministic —
-    same seed + same recent list → same pick. When every archetype is in
-    ``recent`` (or the library is empty) it degrades to :func:`pick_archetype`.
+    same seed + same recent list → same pick. ``names`` optionally restricts
+    the pool (photo-led / type-led). When every archetype is in ``recent`` (or
+    the pool is empty) it degrades to :func:`pick_archetype`.
     """
-    names = list_archetypes()
-    if not names:
+    pool = _pool(names)
+    if not pool:
         return None
     avoid = {r for r in recent if r}
-    start = int(seed) % len(names)
-    for offset in range(len(names)):
-        candidate = names[(start + offset) % len(names)]
+    start = int(seed) % len(pool)
+    for offset in range(len(pool)):
+        candidate = pool[(start + offset) % len(pool)]
         if candidate not in avoid:
             return candidate
-    return names[start]
+    return pool[start]
 
 
 # Marker introducing the when-to-pick passage in every <name>.notes.md. The

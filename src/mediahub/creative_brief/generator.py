@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json as _json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -49,6 +50,40 @@ _TREATMENT_PHRASES: dict[str, str] = {
     "duotone": "duotone-tinted cutout in brand colour",
     "halftone": "halftone-dot cutout treatment",
 }
+
+# M9 (STILLS-3): mood → server-side PhotoRecipe preset. Every brief carries a
+# deliberate grade — a keyed mood maps to its look, and the neutral default
+# resolves through the operator's MEDIAHUB_PHOTO_ADJUST preset (the historic
+# global control keeps meaning) before falling to "natural". The renderer's
+# ``recipe_for`` precedence (explicit brief value first) is unchanged; legacy
+# persisted briefs without the field still fall through to the env default.
+_MOOD_PHOTO_RECIPES: dict[str, str] = {
+    "celebratory": "punchy",
+    "explosive": "punchy",
+    "electric": "punchy",
+    "triumphant": "punchy",
+    "stoic": "editorial",
+    "precise": "editorial",
+    "minimal": "editorial",
+    "calm": "soft",
+    "warm": "soft",
+}
+_DEFAULT_PHOTO_RECIPE = "natural"
+
+
+def _photo_recipe_for_mood(mood: str) -> str:
+    keyed = _MOOD_PHOTO_RECIPES.get((mood or "").strip().lower())
+    if keyed:
+        return keyed
+    try:
+        from mediahub.graphic_renderer.photo_adjust import ENV_VAR, get_preset
+
+        env_name = os.environ.get(ENV_VAR, "").strip().lower()
+        if env_name and get_preset(env_name) is not None:
+            return env_name
+    except Exception:
+        pass
+    return _DEFAULT_PHOTO_RECIPE
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +199,24 @@ class CreativeBrief:
     # and recolours them to the card's own --mh-* roles. Empty (the default) →
     # the card renders byte-identically (the additive, opt-in sprint-hook contract).
     elements: list[dict] = field(default_factory=list)
+    # M9 (STILLS-3) — the server-side PhotoRecipe preset baked into this card's
+    # photo pixels (``graphic_renderer.photo_adjust.PRESETS``). Set from the
+    # card's mood by generate()/apply_design_spec; "" (legacy briefs) falls
+    # through to the operator env default, keeping old persisted briefs stable.
+    photo_adjust: str = ""
+    # M10 (STILLS-4b) — the director's crop intent (design_spec.CROP_INTENTS),
+    # executed deterministically by the renderer as --mh-photo-pos/scale
+    # adjustments. "" (the default) keeps the pure saliency crop.
+    crop_intent: str = ""
+    # M8 (STILLS-2) — how the chosen archetype consumes the athlete photo:
+    # "photo" (the original photograph) or "cutout" (background-removed
+    # subject). Stamped from graphic_renderer.archetypes.photo_mode() when a v2
+    # archetype is chosen, so the motion render can mirror the same source.
+    photo_mode: str = ""
+    # M11 (STILLS-5) — the director's validated secondary stats (STAT_KEY names,
+    # each verified present in hero_stat_options). The data-led archetypes
+    # render them as the {{STAT_CHIPS}} row; empty (the default) collapses.
+    secondary_stats: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 2
 
@@ -209,9 +262,18 @@ def generate(
     recent_signatures: Optional[list[str]] = None,
     recent_hooks: Optional[list[str]] = None,
     allowed_families: Optional[list[str]] = None,
+    photo_facts: Optional[dict] = None,
 ) -> CreativeBrief:
     """Build a CreativeBrief. Pure function — never reaches network unless
     LLM is available; falls back to deterministic defaults otherwise.
+
+    ``photo_facts`` (M7 / STILLS-1): what the caller resolved about this card's
+    photo BEFORE direction — ``{"has_photo": bool, "asset_type": str,
+    "orientation": str, "person_photo_count": int}``. When provided, the v2
+    archetype choice is photo-aware: a photo-less card picks from the type-led
+    set (never a photo stage), a photo-backed card from the photo-led set, and
+    the AI director's prompt carries the facts. ``None`` (every legacy caller)
+    keeps the photo-blind pick byte-identical.
 
     ``variation_seed`` controls deterministic perturbation of the layout,
     palette role mapping, image treatment, and headline phrasing. ``None``
@@ -412,6 +474,20 @@ def generate(
     _place_line = _place_display(place)
     if _place_line:
         hero_stat_options["placing"] = _place_line
+    # M11 (STILLS-5): every further emphasis fact the payload actually carries
+    # — verified facts only, read straight off the detector payload, never
+    # computed guesses. Each maps to a design_spec.STAT_KEY so the director's
+    # hero_stat / secondary_stats picks resolve against real data.
+    _more_stats = _payload_stat_options(ach, raw_facts)
+    for _k, _v in _more_stats.items():
+        hero_stat_options.setdefault(_k, _v)
+    # M11: the measured previous PB, carried for the renderer's honest
+    # before/after proportional bars (both endpoints must be real times).
+    _prev_pb = str(
+        raw_facts.get("prev_pb_time") or raw_facts.get("prev_pb_str") or ""
+    ).strip() or _cs_display(raw_facts.get("prev_pb_cs"))
+    if _prev_pb and str(result).strip():
+        layers["prev_pb_time"] = _prev_pb
     # Deterministic default: lead with the PB drop when measured; else the
     # placing — except on medal angles, where the label already carries it.
     if "pb_delta" in hero_stat_options:
@@ -634,6 +710,9 @@ def generate(
         mood=mood,
         ai_directed=ai_directed,
         hero_stat_options=hero_stat_options,
+        # M9: every card carries a deliberate grade keyed to its mood (natural
+        # for the neutral default) — the dead grading stack, wired.
+        photo_adjust=_photo_recipe_for_mood(mood),
     )
     # A caller that pins the multi-fact recap family (``allowed_families=
     # ["text_led_recap"]``) is asking for the v1 LIST layout: the card carries a
@@ -660,6 +739,22 @@ def generate(
     try:
         if _v2_on and _v2_archetypes is not None and not _pin_text_led_list:
             _names = _v2_archetypes.list_archetypes()
+            # M7 (STILLS-1): photo-aware art direction. With resolved photo
+            # facts, the deterministic pick pool is the matching half of the
+            # library — a photo-less card never lands on a photo stage, a
+            # photo-backed card leads with one — and the director's catalog is
+            # restricted to the type-led set when there is no photo (its "a
+            # great photo → full-bleed" guidance must have a photo to point at).
+            # photo_facts=None (legacy callers) keeps the photo-blind full pool.
+            _pick_pool = None
+            _director_names = _names
+            if photo_facts is not None and _names:
+                if photo_facts.get("has_photo"):
+                    _pick_pool = sorted(_v2_archetypes.photo_archetypes())
+                else:
+                    _pick_pool = sorted(_v2_archetypes.type_archetypes())
+                    _director_names = _pick_pool or _names
+                _pick_pool = _pick_pool or None
             _spec = None
             if _names and use_ai_director:
                 try:
@@ -668,12 +763,13 @@ def generate(
                     _spec = ai_design_spec(
                         content_item=content_item,
                         brand_kit=brand_kit,
-                        archetypes=_names,
+                        archetypes=_director_names,
                         token_roles=list(_v2_archetypes.TOKEN_ROLES),
                         angle=angle,
                         recent_archetypes=[
                             s.split("|", 1)[0] for s in (recent_signatures or []) if s
                         ],
+                        photo_facts=photo_facts,
                     )
                 except Exception:
                     _spec = None
@@ -683,7 +779,7 @@ def generate(
                 if variation_seed is not None:
                     # Explicit seed (incl. 0, ?stable / re-render): exact pick,
                     # so the same seed always reproduces the same archetype.
-                    _arch = _v2_archetypes.pick_archetype(variation_seed)
+                    _arch = _v2_archetypes.pick_archetype(variation_seed, _pick_pool)
                 else:
                     # No seed supplied (bulk pack render / fresh regenerate):
                     # the roadmap floor — seed from the card id so a pack
@@ -699,9 +795,14 @@ def generate(
                     _arch = _v2_archetypes.pick_archetype_avoiding(
                         auto_variation_seed_for(_card_key or None),
                         (s.split("|", 1)[0] for s in (recent_signatures or []) if s),
+                        _pick_pool,
                     )
                 if _arch:
                     brief.layout_template = _arch
+            # M8: stamp how the chosen archetype consumes the photo, so the
+            # persisted brief (and the motion render) mirror the still's source.
+            if brief.layout_template in _names:
+                brief.photo_mode = _v2_archetypes.photo_mode(brief.layout_template)
     except Exception:  # never break brief generation for an optional feature
         log.debug("gen-v2 archetype selection skipped", exc_info=True)
 
@@ -781,10 +882,25 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.primary_hook = spec.headline_hook
     if spec.mood:
         brief.mood = spec.mood
+        # M9: the director's mood re-keys the photo grade (celebratory →
+        # punchy, stoic → editorial, …) so pixels match the chosen feeling.
+        brief.photo_adjust = _photo_recipe_for_mood(spec.mood)
     if spec.rationale:
         brief.why_this_design = spec.rationale
     if spec.motion_intent:
         brief.motion_intent = spec.motion_intent
+    # M10: carry the director's per-card photo judgement — the renderer
+    # executes it as deterministic --mh-photo-pos/scale adjustments.
+    brief.crop_intent = spec.crop_intent or ""
+    # M8: record how the chosen archetype consumes the photo (photo vs cutout)
+    # so the persisted brief and the motion twin mirror the still's source.
+    try:
+        from mediahub.graphic_renderer import archetypes as _arch_mod
+
+        if spec.archetype in _arch_mod.list_archetypes():
+            brief.photo_mode = _arch_mod.photo_mode(spec.archetype)
+    except Exception:
+        pass
     # R1.5 — the director's accent treatment IS the brief's accent axis. Both
     # surfaces execute every ACCENT_TREATMENTS token (still:
     # render._accent_decoration_html; motion: StoryCard's accentDecoration +
@@ -807,6 +923,10 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
     opts = brief.hero_stat_options or {}
     if spec.hero_stat in opts:
         brief.text_layers["hero_stat"] = opts[spec.hero_stat]
+    # M11: the director's supporting facts — kept ONLY where the named fact was
+    # actually measured (present in hero_stat_options), so the {{STAT_CHIPS}}
+    # row can never carry an invented number.
+    brief.secondary_stats = [k for k in spec.secondary_stats if k in opts]
     try:
         brief.colour_role_assignment = dict(spec.colour_roles.to_dict())
     except Exception:
@@ -1165,6 +1285,56 @@ def auto_variation_seed_for(card_id: str | None) -> int:
 # Text-led families need no athlete photo — the renderer fills the canvas with
 # type. Kept as one constant so every photo/no-photo gate agrees on the set.
 _TEXT_LED_FAMILIES: frozenset[str] = frozenset({"text_led_recap", "weekend_numbers", "stat_line"})
+
+
+def _cs_display(cs) -> str:
+    """Centiseconds → display time ("1:02.34"), or "" for absent/junk input."""
+    try:
+        total = int(cs)
+    except (TypeError, ValueError):
+        return ""
+    if total <= 0:
+        return ""
+    mins, rem = divmod(total, 6000)
+    secs, frac = divmod(rem, 100)
+    return f"{mins}:{secs:02d}.{frac:02d}" if mins else f"{secs}.{frac:02d}"
+
+
+def _payload_stat_options(ach: dict, raw_facts: dict) -> dict[str, str]:
+    """Measured emphasis facts beyond pb_delta/placing (M11 / STILLS-5).
+
+    Reads only what the detector payload actually carries — the established
+    raw-facts keys the brand/caption surfaces already consume — and returns
+    ``STAT_KEY → display line`` entries. Absent facts are absent keys; nothing
+    is computed beyond formatting.
+    """
+    out: dict[str, str] = {}
+
+    def _fact(*keys: str) -> str:
+        for k in keys:
+            v = raw_facts.get(k)
+            if v in (None, ""):
+                v = ach.get(k)
+            if v not in (None, ""):
+                return str(v).strip()
+        return ""
+
+    split = _fact("split_time", "split")
+    if split:
+        out["split_time"] = f"split {split}"
+    relay_split = _fact("relay_split")
+    if relay_split:
+        out["relay_split"] = f"relay split {relay_split}"
+    season_best = _fact("season_best", "season_best_time")
+    if season_best:
+        out["season_best"] = f"season best {season_best}"
+    age_group = _fact("age_group")
+    if age_group and age_group.lower() not in ("open", "none"):
+        out["age_group"] = f"age group {age_group}"
+    points = _fact("points", "fina_points")
+    if points:
+        out["points"] = f"{points} pts"
+    return out
 
 
 def _is_medal_angle(angle: str) -> bool:

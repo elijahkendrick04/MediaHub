@@ -138,28 +138,31 @@ _asset_lock = threading.Lock()
 _asset_cache: "OrderedDict[tuple, str]" = OrderedDict()
 
 
-def _asset_key(path: Path) -> Optional[tuple]:
-    """Identity key for an on-disk asset: (resolved path, mtime_ns, size)."""
+def _asset_key(path: Path, salt: str = "") -> Optional[tuple]:
+    """Identity key for an on-disk asset: (resolved path, mtime_ns, size[, salt])."""
     try:
         st = path.stat()
     except OSError:
         return None
-    return (str(path.resolve()), st.st_mtime_ns, st.st_size)
+    return (str(path.resolve()), st.st_mtime_ns, st.st_size, salt)
 
 
-def asset_data_uri(path: str | Path, loader: Callable[[Path], str]) -> str:
+def asset_data_uri(path: str | Path, loader: Callable[[Path], str], *, salt: str = "") -> str:
     """Return ``loader(path)`` for an on-disk asset, memoised on path+mtime+size.
 
     ``loader`` does the actual read + base64 encode; the cache only elides repeat
-    work for an unchanged file and returns byte-identical text. Falls straight
-    through to ``loader`` when the cache is disabled or the file can't be
-    ``stat``-ed — so any genuine read error still surfaces exactly as it would
-    have without the cache.
+    work for an unchanged file and returns byte-identical text. ``salt``
+    domain-separates loaders that transform the same file differently — e.g. the
+    G1.25 photo-adjust path passes ``PhotoRecipe.signature()`` so a "punchy" and
+    an "editorial" grade of one photo never collide. Falls straight through to
+    ``loader`` when the cache is disabled or the file can't be ``stat``-ed — so
+    any genuine read error still surfaces exactly as it would have without the
+    cache.
     """
     p = Path(path)
     if not cache_enabled():
         return loader(p)
-    key = _asset_key(p)
+    key = _asset_key(p, salt)
     if key is None:
         # Unstattable: let the loader run so its real error (if any) propagates.
         return loader(p)

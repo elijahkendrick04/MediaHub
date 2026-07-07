@@ -25,6 +25,12 @@ const Scene: SceneComponent = ({ ctx }) => {
     0.5 - spread / 2 + (spread * i) / (PANELS - 1),
   );
   const heroIndex = Math.round(centre);
+  // M20 — real squad photos: when motion.py resolved the linked relay
+  // athletes' photos (card.photoSrcs, deterministic media-library selector),
+  // the non-hero panels fill with them instead of flat brand tints. Empty
+  // photoSrcs keeps the brand-tinted panels byte-identical to before.
+  const extras = (card.photoSrcs || []).filter(Boolean);
+  let extraCursor = 0;
 
   return (
     <>
@@ -50,6 +56,9 @@ const Scene: SceneComponent = ({ ctx }) => {
         );
         const stagger = card.motionIntent === "static" ? 1 : cascade;
         const isHero = i === heroIndex && !!card.photoSrc;
+        // Fill non-hero panels from the resolved relay-athlete photos, in
+        // lineup order — a panel without one keeps its brand tint.
+        const panelSrc = !isHero && extraCursor < extras.length ? extras[extraCursor++] : "";
         return (
           <div
             key={i}
@@ -80,6 +89,19 @@ const Scene: SceneComponent = ({ ctx }) => {
                   height: "100%",
                   objectFit: "cover",
                   objectPosition: card.photoPos || "center 28%",
+                  transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+                }}
+              />
+            )}
+            {panelSrc && (
+              <img
+                src={panelSrc}
+                alt=""
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  objectPosition: "center 28%",
                   transform: `scale(${anim.photoScale})`,
                 }}
               />

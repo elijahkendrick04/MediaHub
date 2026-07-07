@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import json
 import logging
 import os
 import queue
@@ -1045,47 +1046,140 @@ def _photo_treatment_css(treatment: str, palette: dict) -> str:
 # ----- Athlete cutout pipeline ---------------------------------------------
 
 
-def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default") -> Path:
-    """Run the configured background remover on the athlete photo if needed.
-
-    Caches results in ``<UPLOADS_DIR>/media_library/<profile_id>/cutouts/``
-    so we don't re-run rembg on the same photo every render. The cache
-    dir is DATA_DIR-derived so cutouts survive Render redeploys (the
-    persistent disk holds them); a previous version of this used a
-    relative path that mapped to /app/uploads_v4 and was wiped on every
-    container restart.
-    """
-    src = Path(src_path)
-    if not src.exists():
-        return src
-
-    # Already a cutout?
-    if "cutout" in src.stem.lower() or src.parent.name == "cutouts":
-        return src
-
+def _cutout_cache_dir(profile_id: str) -> Path:
     uploads_root = os.environ.get("UPLOADS_DIR") or str(
         Path(os.environ.get("DATA_DIR", "data")) / "uploads_v4"
     )
-    cache_dir = Path(uploads_root) / "media_library" / profile_id / "cutouts"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    out_path = cache_dir / f"{src.stem}__cutout.png"
-    if out_path.exists() and out_path.stat().st_size > 1000:
-        return out_path
+    d = Path(uploads_root) / "media_library" / profile_id / "cutouts"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cutout_model_tag(remover) -> str:
+    """Filesystem-safe tag naming the matting model/provider a cutout came from.
+
+    Folded into the cutout cache filename (PHOTOS-7) so switching models
+    (u2net → u2net_human_seg) or providers never serves a stale matte produced
+    by the previous one.
+    """
+    raw = str(getattr(remover, "model", "") or getattr(remover, "name", "") or "bg")
+    return "".join(ch if (ch.isalnum() or ch in "-_") else "_" for ch in raw) or "bg"
+
+
+def _athlete_cutout_with_note(
+    src_path: str | Path, *, profile_id: str = "default"
+) -> tuple[Path, Optional[str]]:
+    """Background-remove the athlete photo, with the M14 matte-quality gate.
+
+    Returns ``(path, note)``: ``path`` is the gated cutout on success, or the
+    ORIGINAL photo on any failure; ``note`` is a human-readable reason whenever
+    the cutout was rejected/unavailable and the original ships instead (rides
+    the visual's safety/explainability trace — the honest fallback is recorded,
+    never silent).
+
+    Caches results in ``<UPLOADS_DIR>/media_library/<profile_id>/cutouts/``
+    so we don't re-run rembg on the same photo every render. The cache dir is
+    DATA_DIR-derived so cutouts survive Render redeploys. The matting model's
+    name is part of the cache filename, and a gate rejection persists a
+    ``.rejected.json`` marker beside the would-be cutout so a bad matte is
+    measured once, not re-matted every render.
+    """
+    src = Path(src_path)
+    if not src.exists():
+        return src, None
+
+    # Already a cutout?
+    if "cutout" in src.stem.lower() or src.parent.name == "cutouts":
+        return src, None
 
     try:
         from mediahub.media_ai.providers import get_bg_remover  # type: ignore
 
         remover = get_bg_remover()
-        if remover is None:
-            log.warning("cutout: no bg remover provider available for %s", src.name)
-            return src
+    except Exception as exc:
+        log.warning("cutout: provider resolution raised for %s: %s", src.name, exc)
+        return src, "cutout unavailable (provider error) — using original photo"
+    if remover is None:
+        log.warning("cutout: no bg remover provider available for %s", src.name)
+        return src, "cutout unavailable (no provider) — using original photo"
+
+    cache_dir = _cutout_cache_dir(profile_id)
+    out_path = cache_dir / f"{src.stem}__cutout__{_cutout_model_tag(remover)}.png"
+    if out_path.exists() and out_path.stat().st_size > 1000:
+        return out_path, None
+    reject_marker = out_path.with_name(out_path.name + ".rejected.json")
+    if reject_marker.exists():
+        try:
+            reason = str(json.loads(reject_marker.read_text(encoding="utf-8")).get("reason", ""))
+        except Exception:
+            reason = ""
+        return src, f"cutout rejected ({reason or 'matte gate'}) — using original photo"
+
+    try:
         ok = remover.remove(src, out_path)
-        if ok and out_path.exists():
-            return out_path
-        log.warning("cutout: provider returned ok=%s for %s (out=%s)", ok, src.name, out_path)
+        if not (ok and out_path.exists() and out_path.stat().st_size > 1000):
+            log.warning("cutout: provider returned ok=%s for %s (out=%s)", ok, src.name, out_path)
+            return src, "cutout failed (provider produced no matte) — using original photo"
     except Exception as exc:
         log.warning("cutout: provider raised for %s: %s", src.name, exc)
-    return src
+        return src, "cutout failed (provider error) — using original photo"
+
+    # M14 matte gate: measure the produced matte before accepting it. On
+    # failure the broken cutout is removed, the verdict persisted, and the
+    # ORIGINAL photo ships (the scrim/full-bleed treatments render it well).
+    try:
+        from mediahub.graphic_renderer.matte import assess_matte
+
+        verdict = assess_matte(out_path)
+    except Exception as exc:  # gate itself must never sink a render
+        log.warning("cutout: matte gate errored for %s: %s (accepting matte)", src.name, exc)
+        return out_path, None
+    if verdict.ok:
+        return out_path, None
+    try:
+        out_path.unlink()
+    except OSError:
+        pass
+    try:
+        reject_marker.write_text(
+            json.dumps({"reason": verdict.reason, "metrics": verdict.metrics}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    log.info("cutout: matte rejected for %s: %s", src.name, verdict.reason)
+    return src, f"cutout rejected ({verdict.reason}) — using original photo"
+
+
+def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default") -> Path:
+    """Back-compat wrapper over :func:`_athlete_cutout_with_note` (path only)."""
+    return _athlete_cutout_with_note(src_path, profile_id=profile_id)[0]
+
+
+def _existing_cutout_for(src_path: str | Path, *, profile_id: str = "default") -> Optional[Path]:
+    """A previously-gated cutout of ``src_path`` if one is cached, else None.
+
+    Used by photo-mode renders (M8) as a *saliency mask only* — it never runs
+    the background remover, so displaying the original photograph costs no
+    matting work.
+    """
+    src = Path(src_path)
+    if not src.exists() or "cutout" in src.stem.lower() or src.parent.name == "cutouts":
+        return None
+    try:
+        from mediahub.media_ai.providers import get_bg_remover  # type: ignore
+
+        remover = get_bg_remover()
+        if remover is None:
+            return None
+        out_path = _cutout_cache_dir(profile_id) / (
+            f"{src.stem}__cutout__{_cutout_model_tag(remover)}.png"
+        )
+        if out_path.exists() and out_path.stat().st_size > 1000:
+            return out_path
+    except Exception:
+        return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1787,6 +1881,7 @@ def _common_replacements(
     theme_json: Optional[dict] = None,
     skip_ai_bg: bool = False,
     language: str = "",
+    skip_legacy_photo_css: bool = False,
 ) -> dict[str, str]:
     palette = dict(brief.palette or {})
 
@@ -1971,7 +2066,9 @@ def _common_replacements(
     comp_css = _composition_overrides_css(composition)
     if comp_css:
         variation_css_blocks.append(comp_css)
-    photo_css = _photo_treatment_css(photo_treatment, {"accent": accent})
+    photo_css = (
+        "" if skip_legacy_photo_css else _photo_treatment_css(photo_treatment, {"accent": accent})
+    )
     if photo_css:
         variation_css_blocks.append(photo_css)
 
@@ -3471,7 +3568,7 @@ def _fit_one_line_px(
 # split_diagonal_hero uses the surname box. Result slots: the two big-numeral
 # archetypes use the mega-result box.)
 _MULTILINE_SURNAME_ARCHETYPES = frozenset(
-    {"mega_surname_bleed", "minimal_type_poster", "split_diagonal_hero"}
+    {"mega_surname_bleed", "minimal_type_poster", "split_diagonal_hero", "poster_name_behind"}
 )
 _MULTILINE_RESULT_ARCHETYPES = frozenset({"big_number_dominant", "cornerstone_numeral"})
 
@@ -3577,19 +3674,449 @@ def _sanitise_photo_pos(value: str) -> str:
     return " ".join(clean)
 
 
-def _v2_photo_position(athlete_path) -> str:
+def _v2_photo_position(athlete_path, width: int = 1080, height: int = 1350, mask_path=None) -> str:
     """CSS ``object-position`` that keeps the saliency focus in frame.
 
-    Delegates to ``saliency.focus_position`` — the same deterministic helper
-    the motion compositions consume, so the still and the video steer a photo
-    identically. Safe default on any failure.
+    Delegates to the deterministic saliency helpers the motion compositions
+    consume, so the still and the video steer a photo identically:
+
+    * the crop is resolved for the render's REAL ``width:height`` ratio
+      (STILLS-4a) — a 9:16 story and a 1:1 square slide on different axes, so
+      each cut gets its own centroid. 1080×1350 parses to exactly the historic
+      4:5, so portrait outputs are byte-identical.
+    * when a cutout of the hero photo exists, its alpha channel steers the
+      ORIGINAL's crop (PHOTOS-8, ``focus_position_with_mask``) — face-accurate
+      focus (head-bias included) even for non-alpha originals.
+
+    Safe default on any failure.
     """
     try:
-        from mediahub.graphic_renderer.saliency import focus_position
+        from mediahub.graphic_renderer.saliency import focus_position, focus_position_with_mask
 
-        return focus_position(athlete_path, "4:5")
+        ratio = f"{int(width)}:{int(height)}"
+        if mask_path and str(mask_path) != str(athlete_path):
+            return focus_position_with_mask(athlete_path, mask_path, ratio)
+        return focus_position(athlete_path, ratio)
     except Exception:
         return "center 28%"
+
+
+# --------------------------------------------------------------------------- #
+# M10 — director's crop intent, executed deterministically
+# --------------------------------------------------------------------------- #
+
+# Intents that keep today's saliency framing untouched (no vars emitted).
+_CROP_INTENT_NOOPS = frozenset({"", "original", "full_bleed", "wide_action"})
+
+
+def _subject_bbox_fractions(mask_path) -> Optional[tuple[float, float, float, float]]:
+    """Subject bounding box as ``(left, top, w, h)`` fractions of the image,
+    from a cutout's alpha mask. None when there is no usable alpha."""
+    try:
+        import numpy as _np
+        from PIL import Image as _Image
+
+        with _Image.open(mask_path) as im:
+            im.load()
+            has_alpha = im.mode in ("RGBA", "LA", "PA") or (
+                im.mode == "P" and "transparency" in im.info
+            )
+            if not has_alpha:
+                return None
+            alpha = im.convert("RGBA").getchannel("A")
+            w, h = alpha.size
+            if max(w, h) > 256:
+                s = 256 / max(w, h)
+                alpha = alpha.resize((max(1, round(w * s)), max(1, round(h * s))), _Image.BILINEAR)
+        arr = _np.asarray(alpha) > 25
+        rows = _np.flatnonzero(arr.any(axis=1))
+        cols = _np.flatnonzero(arr.any(axis=0))
+        if rows.size == 0 or cols.size == 0:
+            return None
+        ah, aw = arr.shape
+        return (
+            cols[0] / aw,
+            rows[0] / ah,
+            (cols[-1] - cols[0] + 1) / aw,
+            (rows[-1] - rows[0] + 1) / ah,
+        )
+    except Exception:
+        return None
+
+
+def _crop_intent_vars(
+    intent: str, athlete_path, mask_path, width: int, height: int
+) -> dict[str, str]:
+    """The ``--mh-photo-*`` overrides that execute a director crop intent (M10).
+
+    Deterministic translations of the design-spec vocabulary into the photo
+    window's ``object-position`` / scale — derived from the same saliency maths
+    the default focus uses, never from taste:
+
+    * ``tight_portrait`` — head-accurate focus + a bounded scale-up derived
+      from the subject's alpha-bbox (shrink the crop toward the subject).
+    * ``centered``       — the geometric centre, exactly as named.
+    * ``rule_of_thirds_action`` — the saliency focus with its x snapped to the
+      nearer third, so the subject sits off-centre the way the intent asks.
+    * ``wide_action`` / ``full_bleed`` / ``original`` / "" — today's framing;
+      nothing is emitted, so undirected cards stay byte-identical.
+    """
+    intent = (intent or "").strip()
+    if intent in _CROP_INTENT_NOOPS or not athlete_path:
+        return {}
+    if intent == "centered":
+        return {"--mh-photo-pos": "50% 50%"}
+    base_pos = _v2_photo_position(athlete_path, width, height, mask_path)
+    if intent == "rule_of_thirds_action":
+        try:
+            x_str, y_str = base_pos.split()
+            x = float(x_str.rstrip("%"))
+            third = 33.0 if x <= 50.0 else 67.0
+            return {"--mh-photo-pos": f"{third:.0f}% {y_str}"}
+        except Exception:
+            return {}
+    if intent == "tight_portrait":
+        out = {"--mh-photo-pos": base_pos}
+        scale = 1.12  # honest fixed nudge when no alpha bbox is measurable
+        bbox = _subject_bbox_fractions(mask_path or athlete_path)
+        if bbox is not None:
+            _, _, bw, bh = bbox
+            # Scale so the subject's larger extent approaches ~82% of frame,
+            # clamped so a crop never degrades resolution past ~1.3x.
+            extent = max(bw, bh)
+            if extent > 0:
+                scale = max(1.06, min(1.30, 0.82 / extent))
+        out["--mh-photo-scale"] = f"{scale:.2f}"
+        return out
+    return {}
+
+
+# --------------------------------------------------------------------------- #
+# M10 — true brand duotone / halftone photo treatments (v2)
+# --------------------------------------------------------------------------- #
+
+
+def _duotone_defs_svg(shadow_hex: str, highlight_hex: str) -> str:
+    """A zero-size SVG carrying the real duotone filter for this card.
+
+    Grayscale via a luminance feColorMatrix, then feComponentTransfer table
+    ramps computed in Python from the card's RESOLVED role colours: shadows →
+    the deep brand primary, highlights → the accent (medal tints included) —
+    a designer's two-ink duotone, not a CSS sepia approximation.
+    """
+    sr, sg, sb = _hex_to_rgb(shadow_hex)
+    hr, hg, hb = _hex_to_rgb(highlight_hex)
+
+    def _t(lo: int, hi: int) -> str:
+        return f"{lo / 255:.4f} {hi / 255:.4f}"
+
+    return (
+        '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+        '<filter id="mh-duotone" color-interpolation-filters="sRGB">'
+        '<feColorMatrix type="matrix" values="0.2126 0.7152 0.0722 0 0 '
+        '0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0 0 0 1 0"/>'
+        "<feComponentTransfer>"
+        f'<feFuncR type="table" tableValues="{_t(sr, hr)}"/>'
+        f'<feFuncG type="table" tableValues="{_t(sg, hg)}"/>'
+        f'<feFuncB type="table" tableValues="{_t(sb, hb)}"/>'
+        "</feComponentTransfer></filter></svg>"
+    )
+
+
+def _halftone_mask_tile_uri(tile_px: int) -> str:
+    """The halftone mask tile as an SVG data URI.
+
+    Reuses the style-pack halftone dot geometry (two offset circles per tile —
+    ``style_packs._TEX_TILES['halftone']``) with the radii scaled up so the
+    mask keeps ~2/3 of the photo: a print-dot look, not a photo erased.
+    """
+    t = max(8, int(tile_px))
+    # Style-pack geometry: circles at (6,17)/22 of the tile; mask radii sized
+    # for coverage (the decorative overlay uses r 3.2/1.6 — too sparse to mask).
+    c1 = t * 6 / 22
+    c2 = t * 17 / 22
+    r1 = t * 0.42
+    r2 = t * 0.30
+    svg = (
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{t}' height='{t}'>"
+        f"<circle cx='{c1:.1f}' cy='{c1:.1f}' r='{r1:.1f}' fill='white'/>"
+        f"<circle cx='{c2:.1f}' cy='{c2:.1f}' r='{r2:.1f}' fill='white'/></svg>"
+    )
+    return "data:image/svg+xml;utf8," + svg
+
+
+def _v2_photo_treatment_assets(brief, root_vars: dict[str, str]) -> tuple[str, str]:
+    """``(css, defs_html)`` for the card's requested photo grade (M10).
+
+    Only ``duotone`` / ``halftone`` produce output — every other treatment
+    returns ``("", "")`` so untreated cards are byte-identical. Both grades are
+    parameterised by the card's resolved ``--mh-*`` roles so the same maths can
+    be mirrored 1:1 into the motion side's photo_filters.tsx.
+    """
+    treatment = (getattr(brief, "photo_treatment", "") or "").strip().lower()
+    if treatment == "duotone":
+        shadow = darken(root_vars.get("--mh-primary", "#0A2540"), 0.30)
+        highlight = root_vars.get("--mh-accent", "#FFFFFF")
+        css = (
+            "\n/* --- M10 true brand duotone --- */\n"
+            "img.athlete-cutout { filter: url(#mh-duotone); }\n"
+        )
+        return css, _duotone_defs_svg(shadow, highlight)
+    if treatment == "halftone":
+        strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+        tile = int(round(14 + 18 * max(0.0, min(1.0, strength))))  # 14–32px dots
+        uri = _halftone_mask_tile_uri(tile)
+        css = (
+            "\n/* --- M10 real halftone (style-pack dot geometry) --- */\n"
+            "img.athlete-cutout { filter: grayscale(1) contrast(1.18) brightness(0.98);\n"
+            f'  -webkit-mask-image: url("{uri}"); -webkit-mask-size: {tile}px {tile}px;\n'
+            f'  mask-image: url("{uri}"); mask-size: {tile}px {tile}px; }}\n'
+        )
+        return css, ""
+    return "", ""
+
+
+# --------------------------------------------------------------------------- #
+# M11 — stat chips + honest proportional PB bars
+# --------------------------------------------------------------------------- #
+
+# Chip labels per design-spec STAT_KEY (label register: Inter caps).
+_STAT_CHIP_LABELS: dict[str, str] = {
+    "final_time": "Time",
+    "pb_delta": "PB",
+    "placing": "Place",
+    "relay_split": "Relay split",
+    "event": "Event",
+    "split_time": "Split",
+    "season_best": "Season best",
+    "age_group": "Age group",
+    "points": "Points",
+}
+
+# Suffix/prefix trims so a chip VALUE doesn't repeat its own label — the
+# hero-line phrasing ("−0.42s on PB", "1st place") stays self-contained, the
+# chip pairs a label register with the bare value.
+_CHIP_VALUE_TRIMS: dict[str, tuple[str, str]] = {
+    "pb_delta": ("", " on PB"),
+    "placing": ("", " place"),
+    "split_time": ("split ", ""),
+    "relay_split": ("relay split ", ""),
+    "season_best": ("season best ", ""),
+    "age_group": ("age group ", ""),
+    "points": ("", " pts"),
+}
+
+
+def _chip_value(key: str, display: str) -> str:
+    prefix, suffix = _CHIP_VALUE_TRIMS.get(key, ("", ""))
+    v = display
+    if prefix and v.lower().startswith(prefix):
+        v = v[len(prefix) :]
+    if suffix and v.lower().endswith(suffix):
+        v = v[: -len(suffix)]
+    return v.strip() or display
+
+
+# The v2 archetypes that carry the {{STAT_CHIPS}} slot, mapped to the ink var
+# their chip row must use (the row sits on --mh-primary or --mh-surface ground).
+_STAT_CHIP_ARCHETYPES: dict[str, str] = {
+    "editorial_numbers_grid": "--mh-on-surface",
+    "stat_stack_sidebar": "--mh-on-primary",
+    "timeline_progression": "--mh-on-primary",
+    "triptych_progression": "--mh-on-surface",  # chips live in the surface context bay
+}
+
+
+def _stat_chips_html(brief, ink_var: str) -> str:
+    """The rendered secondary-stat chip row for a data-led archetype (M11).
+
+    One geometry across every archetype (visual continuity per the data-graphics
+    grammar): a hairline-ruled chip of label (Inter caps, accent) over value
+    (JetBrains Mono, tnum). Only verified facts appear — each chip's value comes
+    from ``hero_stat_options``, so a stat the detectors never measured cannot
+    render. Empty ``secondary_stats`` → ``""`` (the slot collapses).
+    """
+    keys = [k for k in (getattr(brief, "secondary_stats", None) or []) if k]
+    opts = getattr(brief, "hero_stat_options", None) or {}
+    hero_key = None  # never chip the fact already carried by the hero line
+    hero_line = (brief.text_layers or {}).get("hero_stat") or ""
+    for k, v in opts.items():
+        if v == hero_line:
+            hero_key = k
+            break
+    cells: list[str] = []
+    for key in keys:
+        if key == hero_key or key not in opts:
+            continue
+        label = _STAT_CHIP_LABELS.get(key)
+        if not label:
+            continue
+        value = _chip_value(key, str(opts[key]))
+        cells.append(
+            '<div style="border:1px solid var(--mh-outline);padding:18px 24px;min-width:0">'
+            "<div style=\"font-family:'Inter',sans-serif;font-weight:700;font-size:17px;"
+            "letter-spacing:0.22em;text-transform:uppercase;color:var(--mh-accent);"
+            'margin-bottom:8px">' + html_escape(label) + "</div>"
+            "<div style=\"font-family:'JetBrains Mono','Space Grotesk',monospace;"
+            "font-feature-settings:'tnum';font-weight:700;font-size:30px;line-height:1.05;"
+            f'color:var({ink_var});overflow-wrap:anywhere">' + html_escape(value) + "</div></div>"
+        )
+        if len(cells) >= 4:
+            break
+    if not cells:
+        return ""
+    return (
+        '<div class="mh-stat-chips" style="display:flex;flex-wrap:wrap;gap:14px;'
+        'margin-top:26px">' + "".join(cells) + "</div>"
+    )
+
+
+_TIME_RE = re.compile(r"^(?:(\d+):)?(\d{1,2})[.,](\d{1,2})$")
+
+
+def _parse_time_seconds(value: str) -> Optional[float]:
+    """Parse a swim-time display string ("59.21", "1:02.34") to seconds.
+
+    Deterministic and strict — anything that doesn't look like a race time
+    returns None so a proportional element is never built on a guess.
+    """
+    s = str(value or "").strip()
+    m = _TIME_RE.match(s)
+    if not m:
+        return None
+    mins = int(m.group(1) or 0)
+    secs = int(m.group(2))
+    frac_raw = m.group(3)
+    frac = int(frac_raw) / (10 ** len(frac_raw))
+    return mins * 60 + secs + frac
+
+
+# Archetypes that carry the {{PB_BARS}} before/after comparison, with the ink
+# var for the ground the bars sit on.
+_PB_BARS_ARCHETYPES: dict[str, str] = {
+    "editorial_numbers_grid": "--mh-on-surface",
+    "timeline_progression": "--mh-on-primary",
+}
+
+
+def _pb_bars_html(brief, ink_var: str) -> str:
+    """A true proportional before/after PB comparison (M11).
+
+    Rendered ONLY when the payload carries both the previous PB and the new
+    time as parseable race times with the new time faster — the two bar widths
+    are then mathematically proportional to the real seconds, on an honest
+    zero-based axis (a full-width bar IS the previous PB's duration). Anything
+    unverifiable → ``""``; never an invented comparison.
+    """
+    layers = brief.text_layers or {}
+    prev_str = str(layers.get("prev_pb_time") or "").strip()
+    new_str = str(layers.get("result_value") or "").strip()
+    prev_s = _parse_time_seconds(prev_str)
+    new_s = _parse_time_seconds(new_str)
+    if prev_s is None or new_s is None or prev_s <= 0 or new_s >= prev_s:
+        return ""
+    new_pct = max(1.0, min(100.0, new_s / prev_s * 100.0))
+    drop = (brief.hero_stat_options or {}).get("pb_delta") or f"−{prev_s - new_s:.2f}s"
+    # Don't repeat the delta the card's hero line already carries — the
+    # caption then reads as the honest-axis note alone.
+    caption = (
+        "bars proportional to real times"
+        if str(drop) == str(layers.get("hero_stat") or "")
+        else f"{drop} · bars proportional to real times"
+    )
+
+    def _bar(label: str, value: str, pct: float, fill: str, ink: str) -> str:
+        return (
+            '<div style="display:flex;align-items:center;gap:16px;min-width:0">'
+            "<div style=\"flex:0 0 108px;font-family:'Inter',sans-serif;font-weight:700;"
+            "font-size:15px;letter-spacing:0.18em;text-transform:uppercase;"
+            f'color:var({ink_var});opacity:0.78">' + html_escape(label) + "</div>"
+            f'<div style="flex:1 1 auto;min-width:0"><div style="width:{pct:.1f}%;height:26px;'
+            f'background:{fill};display:flex;align-items:center;justify-content:flex-end">'
+            "<span style=\"font-family:'JetBrains Mono',monospace;font-feature-settings:'tnum';"
+            f'font-weight:700;font-size:17px;color:{ink};padding:0 10px;white-space:nowrap">'
+            + html_escape(value)
+            + "</span></div></div></div>"
+        )
+
+    return (
+        '<div class="mh-pb-bars" style="display:flex;flex-direction:column;gap:10px;'
+        'margin-top:28px">'
+        + _bar(
+            "Previous",
+            prev_str,
+            100.0,
+            f"color-mix(in srgb, var({ink_var}) 26%, transparent)",
+            f"var({ink_var})",
+        )
+        + _bar("Now", new_str, new_pct, "var(--mh-accent)", "var(--mh-primary)")
+        + "<div style=\"font-family:'Inter',sans-serif;font-weight:600;font-size:15px;"
+        f'color:var(--mh-accent);letter-spacing:0.06em">' + html_escape(caption) + "</div></div>"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# M12 — layered-depth archetype helpers (cutout depth + safe band placement)
+# --------------------------------------------------------------------------- #
+
+# The v2 archetypes that layer the cutout as a depth plane and take the
+# decoration-scaled depth treatment + (band_break) the alpha-derived band top.
+_LAYERED_CUTOUT_ARCHETYPES = frozenset({"poster_name_behind", "band_break"})
+
+
+def _cutout_depth_filter(root_vars: dict[str, str], strength: float) -> str:
+    """The role-coloured depth treatment for a layered cutout (M12).
+
+    A soft dark drop shadow for lift plus a faint accent outer glow, both
+    scaled by ``decoration_strength`` — deterministic colour maths on the
+    card's own resolved roles, never a hardcoded hex.
+    """
+    s = max(0.0, min(1.0, strength))
+    accent = root_vars.get("--mh-accent", "#FFFFFF")
+    try:
+        ar, ag, ab = _hex_to_rgb(accent)
+    except Exception:
+        ar, ag, ab = (255, 255, 255)
+    dy = int(round(10 + 14 * s))
+    blur = int(round(24 + 30 * s))
+    glow = int(round(8 + 22 * s))
+    glow_a = 0.18 + 0.20 * s
+    return (
+        f"drop-shadow(0 {dy}px {blur}px rgba(0,0,0,0.45)) "
+        f"drop-shadow(0 0 {glow}px rgba({ar},{ag},{ab},{glow_a:.2f}))"
+    )
+
+
+def _band_top_fraction(mask_path, width: int, height: int) -> Optional[float]:
+    """Where band_break's band top edge can sit so the subject's head and
+    shoulders overlap it (M12).
+
+    The cutout renders bottom-anchored at ``contain`` inside a stage occupying
+    the bottom ~86% of the canvas; from the subject's alpha-bbox we project
+    the head's canvas y and drop the band ~22% of the subject's height below
+    it — head and shoulders break the band, the torso sits behind it. Clamped
+    to a sane range; None (template default) when no alpha is measurable.
+    """
+    bbox = _subject_bbox_fractions(mask_path) if mask_path else None
+    if bbox is None:
+        return None
+    try:
+        from PIL import Image as _Image
+
+        with _Image.open(mask_path) as im:
+            iw, ih = im.size
+    except Exception:
+        return None
+    if iw <= 0 or ih <= 0 or width <= 0 or height <= 0:
+        return None
+    _, top_f, _, h_f = bbox
+    stage_h = 0.86 * height  # .bb__stage inset (see band_break.html)
+    # object-fit: contain inside (width × stage_h), bottom-anchored.
+    disp_h = min(stage_h, width * ih / iw)
+    stage_top = height - disp_h
+    head_y = stage_top + top_f * disp_h
+    band_top = (head_y + 0.22 * (h_f * disp_h)) / height
+    return round(min(0.74, max(0.50, band_top)), 4)
 
 
 def _v2_hero_stat(brief) -> str:
@@ -3777,6 +4304,8 @@ def _fill_v2_archetype(
     athlete_path=None,
     brand_kit=None,
     photo_pos_override: str = "",
+    cutout_mask_path=None,
+    photo_flat: bool = False,
 ) -> dict:
     """Replacements for a ``layouts/v2`` archetype: roles + autofit + saliency.
 
@@ -3789,6 +4318,14 @@ def _fill_v2_archetype(
     given (the UI 1.18 inspector's manual crop, e.g. ``"left top"``), it
     replaces the deterministic saliency focus for ``--mh-photo-pos`` — an
     explicit human override on top of the automatic crop, never AI-chosen.
+
+    ``cutout_mask_path``: the hero photo's cutout, used as the alpha mask that
+    steers the ORIGINAL's saliency crop (PHOTOS-8) and the layered archetypes'
+    band placement — never displayed by this function.
+
+    ``photo_flat``: True when the matte gate rejected this card's cutout and a
+    cutout-mode archetype is honestly rendering the original photograph — the
+    template's ``mh-photo-flat`` styling (full-bleed + scrim) takes over.
     """
     repl = dict(base_repl)
     layers = brief.text_layers or {}
@@ -3797,6 +4334,8 @@ def _fill_v2_archetype(
     surname = (layers.get("athlete_surname") or "").upper()
     repl["RESULT_VALUE"] = html_escape(result)
     repl["HERO_STAT"] = html_escape(_v2_hero_stat(brief))
+    # M14 honest fallback marker for the layered cutout archetypes.
+    repl["PHOTO_FLAT_CLASS"] = " mh-photo-flat" if photo_flat else ""
     # The v1 accent-decoration overlay targets the v1 `.canvas` and would paint a
     # stray band on a v2 composition, so it stays suppressed. Instead the v2
     # ``{{ACCENT_DECORATION}}`` slot (the last child inside every archetype root)
@@ -3946,8 +4485,68 @@ def _fill_v2_archetype(
         if mega_result_axes.css:
             root_vars["--mh-axes-mega-result"] = mega_result_axes.css
     root_vars["--mh-photo-pos"] = _sanitise_photo_pos(photo_pos_override) or _v2_photo_position(
-        athlete_path
+        athlete_path, width, height, cutout_mask_path
     )
+
+    extra_css = ""
+
+    # M10 — execute the director's crop intent as deterministic photo-window
+    # adjustments. A manual crop (the inspector override) always wins; the
+    # scale rule is emitted ONLY when a scale applies, so every undirected /
+    # default-intent card keeps byte-identical HTML.
+    _intent = (getattr(brief, "crop_intent", "") or "").strip()
+    if _intent and athlete_path and not _sanitise_photo_pos(photo_pos_override):
+        intent_vars = _crop_intent_vars(_intent, athlete_path, cutout_mask_path, width, height)
+        root_vars.update(intent_vars)
+        if "--mh-photo-scale" in intent_vars:
+            extra_css += (
+                "\n/* --- M10 crop intent (%s) --- */\n"
+                "img.athlete-cutout { transform: scale(var(--mh-photo-scale, 1));"
+                " transform-origin: var(--mh-photo-pos, center 28%%); }\n" % _intent
+            )
+
+    # M10 — true brand duotone / real halftone. CSS rides BASE_CSS; the SVG
+    # filter defs ride the {{ACCENT_DECORATION}} slot (inside the archetype
+    # root, zero-size). Untreated cards emit neither.
+    treatment_css, treatment_defs = ("", "")
+    if athlete_path:
+        treatment_css, treatment_defs = _v2_photo_treatment_assets(brief, root_vars)
+    if treatment_css:
+        extra_css += treatment_css
+    if treatment_defs:
+        repl["ACCENT_DECORATION"] = treatment_defs + (repl.get("ACCENT_DECORATION") or "")
+
+    # M11 — data weight: the secondary-stat chip row and the honest
+    # before/after PB bars for the data-led archetypes. Both collapse to ""
+    # (and inject nothing) when the facts aren't there.
+    archetype_name = getattr(brief, "layout_template", "") or ""
+    chip_ink = _STAT_CHIP_ARCHETYPES.get(archetype_name)
+    repl["STAT_CHIPS"] = _stat_chips_html(brief, chip_ink) if chip_ink else ""
+    bars_ink = _PB_BARS_ARCHETYPES.get(archetype_name)
+    repl["PB_BARS"] = _pb_bars_html(brief, bars_ink) if bars_ink else ""
+
+    # M12 — layered-depth archetypes: decoration-scaled, role-coloured cutout
+    # depth + (band_break) the alpha-derived safe band top and the overlap
+    # fade stops. Vars are emitted only for these archetypes, so every other
+    # card is untouched.
+    if archetype_name in _LAYERED_CUTOUT_ARCHETYPES:
+        root_vars["--mh-cutout-depth"] = _cutout_depth_filter(
+            root_vars, float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+        )
+        if archetype_name == "band_break" and not photo_flat:
+            band_top = _band_top_fraction(cutout_mask_path, width, height)
+            if band_top is not None:
+                root_vars["--mh-band-top"] = f"{band_top * 100:.1f}%"
+                # Overlap fade stops for the head/shoulder plane, expressed in
+                # the STAGE's own coordinate space (the stage spans 14%→100%
+                # of the canvas — see band_break.html): the copy stays solid a
+                # touch past the band's top edge, then dissolves over ~5.5% of
+                # the stage, so the shoulders visibly cross the edge and melt
+                # into the band instead of cutting.
+                solid = max(0.0, min(0.97, (band_top + 0.015 - 0.14) / 0.86))
+                fade = min(0.99, solid + 0.055)
+                root_vars["--mh-break-solid"] = f"{solid * 100:.1f}%"
+                root_vars["--mh-break-fade"] = f"{fade * 100:.1f}%"
 
     # 1.9 — apply per-slot text effects to the finalised slot values (AFTER the
     # multi-line balancer has settled RESULT_VALUE / ATHLETE_SURNAME_DISPLAY).
@@ -3957,7 +4556,7 @@ def _fill_v2_archetype(
         _apply_text_effects_to_repl(repl, effects, root_vars)
 
     root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
-    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block
+    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block + extra_css
     return repl
 
 
@@ -4048,13 +4647,20 @@ def render_brief(
     def _inline_photo(path) -> str:
         """Inline a real photo, applying the resolved adjustment recipe if any.
 
-        Falls back to the plain (un-adjusted) inline on any error, so an
-        optional adjustment can never break a render.
+        The adjusted encode is memoised through the G1.24 asset cache with the
+        recipe's stable ``signature()`` as the key salt, so a graded photo is
+        baked once per (file, recipe) — and two different grades of one photo
+        can never collide. Falls back to the plain (un-adjusted) inline on any
+        error, so an optional adjustment can never break a render.
         """
         nonlocal _recipe_applied
-        if _photo_recipe is not None:
+        if _photo_recipe is not None and not _photo_recipe.is_noop():
             try:
-                uri = _photo_adjust.adjust_to_data_uri(path, _photo_recipe)
+                uri = _render_cache.asset_data_uri(
+                    path,
+                    loader=lambda p: _photo_adjust.adjust_to_data_uri(p, _photo_recipe),
+                    salt="recipe:" + _photo_recipe.signature(),
+                )
                 _recipe_applied = True
                 return uri
             except Exception as exc:
@@ -4066,16 +4672,40 @@ def render_brief(
                 )
         return _img_to_data_uri(path)
 
-    # Athlete cutout
+    # Athlete photo. STILLS-2 (M8): the archetype's photo MODE decides what
+    # fills the slot — "photo" archetypes (full-bleed stages, rectangular
+    # windows) receive the ORIGINAL photograph (real pool photography; the
+    # templates' scrims handle legibility), while "cutout" archetypes (discs,
+    # layered depth planes) get the background-removed subject, gated by the
+    # M14 matte check with an honest original-photo fallback.
     athlete_uri = None
+    _cutout_mask_path = None  # alpha mask steering the saliency crop (PHOTOS-8)
+    _cutout_note: Optional[str] = None  # matte-gate fallback reason for the trace
+    _photo_flat = False  # a cutout-mode archetype honestly rendering the original
+    _photo_mode = "cutout"
+    if _v2_archetype:
+        try:
+            _photo_mode = _archetypes.photo_mode(_v2_archetype)
+        except Exception:
+            _photo_mode = "cutout"
     if athlete_path:
         try:
-            cut_path = (
-                athlete_path
-                if skip_cutout
-                else _maybe_cut_out_athlete(athlete_path, profile_id=brief.profile_id or "default")
-            )
-            athlete_uri = _inline_photo(cut_path)
+            _pid = brief.profile_id or "default"
+            if skip_cutout:
+                photo_src = athlete_path
+            elif _photo_mode == "photo":
+                photo_src = athlete_path
+                # A previously-produced cutout still steers the crop —
+                # face-accurate focus without paying for a matte we won't show.
+                _cutout_mask_path = _existing_cutout_for(athlete_path, profile_id=_pid)
+            else:
+                cut_path, _cutout_note = _athlete_cutout_with_note(athlete_path, profile_id=_pid)
+                photo_src = cut_path
+                if str(cut_path) != str(athlete_path):
+                    _cutout_mask_path = cut_path
+                elif _cutout_note:
+                    _photo_flat = True  # gate fell back to the original photograph
+            athlete_uri = _inline_photo(photo_src)
         except Exception:
             athlete_uri = None
 
@@ -4140,6 +4770,11 @@ def render_brief(
         sponsor_block=_build_sponsor_block(sponsor_name, _sponsor_logo_uri) if sponsor_name else "",
         skip_ai_bg=bool(_v2_archetype),
         language=language or getattr(brief, "language", "") or "",
+        # M10: v2 cards execute duotone/halftone as REAL SVG-filter grades in
+        # _fill_v2_archetype — suppress the legacy CSS-approximation block so
+        # the two never stack.
+        skip_legacy_photo_css=bool(_v2_archetype)
+        and (getattr(brief, "photo_treatment", "") or "").lower() in ("duotone", "halftone"),
     )
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
 
@@ -4160,6 +4795,8 @@ def render_brief(
             athlete_path=athlete_path,
             brand_kit=brand_kit,
             photo_pos_override=photo_pos_override,
+            cutout_mask_path=_cutout_mask_path,
+            photo_flat=_photo_flat,
         )
     elif family == "meet_preview":
         repl = _fill_meet_preview(
@@ -4451,6 +5088,10 @@ def render_brief(
                 "; ".join(_photo_recipe.describe()),
             )
         )
+    # M14 explainability: a matte-gate fallback changed what the reviewer sees,
+    # so the reason rides the visual's trace — never a silent substitution.
+    if _cutout_note:
+        _safety_notes.append(_cutout_note)
 
     visual = GeneratedVisual(
         id=visual_id,

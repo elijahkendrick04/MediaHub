@@ -7,24 +7,41 @@ it has no per-image API spend. Customers never run this themselves; the
 processing always happens on the deployment side of the network.
 
 Lazy-imports rembg so the module loads even if rembg/onnxruntime are absent.
-First run downloads the u2net model (~170MB) into ~/.u2net/.
+First run downloads the model (~170MB) into ~/.u2net/.
+
+The default matting model is ``u2net_human_seg`` (PHOTOS-7): MediaHub's
+cutouts are overwhelmingly people — swimmers on a pool deck — and the
+human-segmentation variant mattes them markedly better than generic u2net.
+Override per deployment with ``MEDIAHUB_CUTOUT_MODEL``. The renderer folds the
+model name into its cutout cache filenames, so switching models never serves
+a stale matte from the previous model.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from .base import BackgroundRemover
 
 log = logging.getLogger(__name__)
 
+# Operator override for the rembg matting model; unset → human segmentation.
+MODEL_ENV_VAR = "MEDIAHUB_CUTOUT_MODEL"
+DEFAULT_MODEL = "u2net_human_seg"
+
+
+def default_model() -> str:
+    """The rembg model this deployment mattes with (env-overridable)."""
+    return os.environ.get(MODEL_ENV_VAR, "").strip() or DEFAULT_MODEL
+
 
 class RembgLocalRemover(BackgroundRemover):
     name = "rembg_local"
 
-    def __init__(self, model: str = "u2net"):
-        self.model = model
+    def __init__(self, model: str | None = None):
+        self.model = model or default_model()
         self._session = None
 
     def _get_session(self):

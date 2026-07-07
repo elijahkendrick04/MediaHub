@@ -6,8 +6,20 @@ Stores the photos and other media a user uploads, and remembers what's in each o
 ## What's in here
 
 - `models.py` / `store.py` — the `MediaAsset` record and its SQLite storage.
-- `describe.py` / `tagger.py` — AI-assisted "what's in this photo" tagging.
-- `selector.py` — the deterministic maths that scores which photo best fits a card.
+  `store.backfill_measurements()` is the on-demand one-shot that re-measures
+  assets saved before the ingest metadata spine existed (dimensions,
+  orientation, dominant colours + the quality metrics below).
+- `describe.py` — AI-assisted "what's in this photo" tagging (text side).
+- `tagger.py` — deterministic image measurement at ingest: EXIF-orientation
+  baking (`bake_exif_orientation`), dimensions / orientation / dominant
+  colours, and technical-quality metrics (Laplacian sharpness, highlight and
+  shadow clipping, luma entropy, 64-bit dHash for burst dedupe) stored in
+  `media_meta["quality"]`. Pure Pillow/numpy — no AI, no network.
+- `selector.py` — the deterministic maths that scores which photo best fits a
+  card: sharpness-aware quality axis, burst-family dedupe (dHash Hamming ≤ 6
+  keeps only the sharpest frame), and the wrong-athlete guard (a photo linked
+  to a different athlete is hard-demoted; unlinked photos rank below
+  name-matched ones and carry "identity unverified" in their reason).
 - `photo_ops.py` — the **photo editor engine**: a deterministic, non-destructive
   `EditRecipe` of bounded pixel operations (filters, adjustments, crop/rotate/
   flip/perspective, crop-to-shape, frames, blur brush, eraser, one-click

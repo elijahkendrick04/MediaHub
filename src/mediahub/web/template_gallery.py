@@ -71,6 +71,8 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "full_height_portrait_split": "photo",  # G1.1
     "contact_sheet": "photo",  # G1.1
     "vertical_split": "photo",  # R1.2 — identity over a photo field, result below
+    "poster_name_behind": "photo",  # M12 — cutout standing over a mega name plane
+    "band_break": "photo",  # M12 — cutout crossing the broadcast band
     # Data-led — the figures are the structural hero; no photo needed.
     "big_number_dominant": "data",
     "editorial_numbers_grid": "data",
@@ -138,6 +140,9 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "vertical_split",
     "radial_rings",
     "marquee_crawl",
+    # M12 — the layered-depth pair (cutout over type / cutout crossing the band).
+    "poster_name_behind",
+    "band_break",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -175,6 +180,8 @@ _TITLE: dict[str, str] = {
     "vertical_split": "Vertical Split",
     "radial_rings": "Radial Rings",
     "marquee_crawl": "Marquee Crawl",
+    "poster_name_behind": "Name Behind",
+    "band_break": "Band Break",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -213,6 +220,8 @@ _FALLBACK_SUMMARY: dict[str, str] = {
     "vertical_split": "Two solid colour fields split by an accent seam: identity above, result below.",
     "radial_rings": "Concentric accent rings ripple out from a bullseye that holds the result.",
     "marquee_crawl": "A wall of repeating-fact ribbons behind one pinned plate carrying name and result.",
+    "poster_name_behind": "A mega surname on the ground plane with the athlete cutout standing over it.",
+    "band_break": "A broadcast band crossed by the athlete — head and shoulders break its top edge.",
 }
 
 _CARD_SUMMARY_MAX = 180
@@ -686,6 +695,32 @@ _SVG: dict[str, str] = {
         '<rect class="ik" x="10" y="63" width="20" height="4" rx="1"/>'
         '<rect class="ik2" x="10" y="70" width="62" height="10" rx="1"/>'
         '<rect class="ac" x="10" y="84" width="40" height="8" rx="1"/>'
+    ),
+    # M12 — mega surname on the ground plane, the athlete cutout standing OVER
+    # it, a solid band over the cutout's lower body (paint order = the layers).
+    "poster_name_behind": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ac" x="10" y="14" width="26" height="8" rx="1"/>'
+        '<rect class="ik2" x="6" y="44" width="108" height="24" rx="1"/>'
+        '<circle class="ph" cx="60" cy="50" r="12"/>'
+        '<rect class="ph" x="42" y="61" width="36" height="57" rx="3"/>'
+        '<rect class="sf" x="0" y="112" width="120" height="38"/>'
+        '<rect class="ac" x="0" y="110" width="120" height="3"/>'
+        '<rect class="ik" x="10" y="120" width="42" height="6" rx="1"/>'
+        '<rect class="ac" x="10" y="131" width="30" height="12" rx="1"/>'
+    ),
+    # M12 — a broadcast band CROSSED by the athlete: full figure under the
+    # band, head + shoulders painted over its top edge, legs continuing below.
+    "band_break": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ik" x="24" y="14" width="72" height="8" rx="1"/>'
+        '<rect class="ph" x="46" y="48" width="28" height="94" rx="3"/>'
+        '<rect class="sf" x="0" y="80" width="120" height="42"/>'
+        '<rect class="ac" x="0" y="78" width="120" height="3"/>'
+        '<circle class="ph" cx="60" cy="62" r="13"/>'
+        '<rect class="ph" x="48" y="74" width="24" height="12" rx="2"/>'
+        '<rect class="ik2" x="10" y="88" width="56" height="9" rx="1"/>'
+        '<rect class="ac" x="82" y="100" width="28" height="14" rx="1"/>'
     ),
 }
 

@@ -14,9 +14,11 @@ import pytest
 from mediahub.media_library.models import (
     APPROVAL_STATUSES,
     ASSET_TYPES,
+    LEGACY_TYPE_ALIASES,
     ORIENTATIONS,
     PERMISSION_STATUSES,
     MediaAsset,
+    canonical_asset_type,
 )
 
 
@@ -190,6 +192,49 @@ class TestFromDictDefensive:
             "description_parsed": "not-json-at-all",
         })
         assert a.description_parsed == {}
+
+
+# ---------------------------------------------------------------------------
+# Legacy asset-type aliases (M1) — normalised at deserialise
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyTypeAliases:
+    @pytest.mark.parametrize(
+        "legacy,canonical",
+        [
+            ("athlete_photo", "athlete_action"),
+            ("venue", "venue_photo"),
+            ("podium", "athlete_action"),
+            ("team", "team_photo"),
+            ("action", "athlete_action"),
+        ],
+    )
+    def test_from_dict_maps_legacy_value(self, legacy: str, canonical: str) -> None:
+        a = MediaAsset.from_dict({"id": "x", "filename": "f.jpg", "path": "/p", "type": legacy})
+        assert a.type == canonical
+
+    def test_every_alias_targets_a_canonical_type(self) -> None:
+        for target in LEGACY_TYPE_ALIASES.values():
+            assert target in ASSET_TYPES
+
+    def test_canonical_values_pass_through(self) -> None:
+        for t in ASSET_TYPES:
+            assert canonical_asset_type(t) == t
+            a = MediaAsset.from_dict({"id": "x", "filename": "f", "path": "/p", "type": t})
+            assert a.type == t
+
+    def test_unknown_type_kept_as_is(self) -> None:
+        # from_dict has always tolerated arbitrary strings; only the known
+        # legacy aliases are rewritten.
+        a = MediaAsset.from_dict(
+            {"id": "x", "filename": "f", "path": "/p", "type": "something_custom"}
+        )
+        assert a.type == "something_custom"
+
+    def test_missing_type_keeps_default(self) -> None:
+        a = MediaAsset.from_dict({"id": "x", "filename": "f", "path": "/p"})
+        assert a.type == "other"
 
 
 # ---------------------------------------------------------------------------

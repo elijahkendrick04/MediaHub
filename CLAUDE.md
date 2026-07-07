@@ -284,14 +284,24 @@ MediaHub" path.
 MediaHub generates branded MP4 outputs via Remotion 4.x on the deployed
 server:
 - **Story cards** — 6 seconds, one card per swimmer/achievement
-- **Meet reels** — data-driven length (`reel_duration_for`: 1 card → 7s …
-  5 cards → 23s; 3 cards keep the historic 15s): branded cover with honest
-  label-derived stat chips → rank-weighted card beats → club outro. The beat
-  rhythm is customisable (R1.12): `reel_duration_for` / `normalise_reel_rhythm`
-  take optional per-card beat weights + custom cover/outro seconds (mirrored
-  into `MeetReel.tsx`'s carve and the ffmpeg fallback, folded into the cache
+- **Meet reels** — data-driven length (`reel_duration_for`: 2.0s cover +
+  4.0s per card + 2.5s outro by default, so 1 card → 8.5s … 5 cards → 24.5s;
+  the outro was extended from 1.0s to 2.5s so the sponsor/CTA close is
+  actually legible): branded cover with honest label-derived stat chips →
+  rank-weighted card beats → club outro. The beat rhythm is customisable
+  (R1.12): `reel_duration_for` / `normalise_reel_rhythm` take optional
+  per-card beat weights + custom cover/outro seconds (mirrored into
+  `MeetReel.tsx`'s carve and the ffmpeg fallback, folded into the cache
   key); a weighted card earns proportionally more seconds and an uncustomised
   reel stays byte-identical
+- **Footage-backed beats (M23)** — when the media library holds a usable,
+  consent-cleared race clip linked to a card's athlete/meet, the beat's
+  background becomes the real clip (`visual/footage.py`: deterministic
+  selector pick + `video/moments.py` trim window, muted/normalised into
+  `remotion/public/footage_cache/`, rendered via `<OffthreadVideo>` under the
+  same scrim/treatment stack as photos, provenance in the manifest). Cards
+  without footage are byte-identical to before; the ffmpeg fallback engine
+  honestly reports footage as unsupported
 - **Formats** — story 1080×1920 (default), portrait 1080×1350, square
   1080×1080, landscape 1920×1080 from the same compositions
   (`render.js --width/--height`)

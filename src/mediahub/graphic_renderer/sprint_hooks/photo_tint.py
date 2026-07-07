@@ -19,10 +19,12 @@ Two hard rules:
   contrast versus the untinted ground. If no step in the range is safe, the hook
   opts out and the card renders exactly as before.
 
-Opt-in: the hook is a no-op unless ``MEDIAHUB_PHOTO_TINT`` is truthy, so default
-renders stay byte-identical. It only touches v2 cards that actually carry a
-photo; everything else passes through untouched. Deterministic: same HTML in →
-same HTML out.
+Default ON (M9 / STILLS-3): the hook runs unless ``MEDIAHUB_PHOTO_TINT`` is
+explicitly falsy (``0``/``false``/``off``/``no``) — the tint is what makes a
+photo card read colour-connected instead of pasted-on, and both hard rules
+above keep it brand- and legibility-safe. It only touches v2 cards that
+actually carry a photo; everything else passes through untouched.
+Deterministic: same HTML in → same HTML out.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from . import RenderHookCtx
 # tint grades whatever ground is in place, but before a late desaturate/mono pass.
 ORDER = 40
 
-_FALSE = {"", "0", "false", "no", "off"}
+_FALSE = {"0", "false", "no", "off"}
 
 # The renderer's no-brand fallback ground (render._mh_role_vars). A ground equal
 # to this — with no brand primary on the brief — is the only ``--mh-primary`` we

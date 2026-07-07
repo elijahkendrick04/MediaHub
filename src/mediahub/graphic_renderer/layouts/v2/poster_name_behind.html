@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   poster_name_behind  (v2 archetype, M12 — layered depth)
+
+   The classic sports-poster three-plane sandwich: a MEGA autofit surname
+   sits on the ground plane as the artwork; the athlete CUTOUT stands OVER
+   it (so the name reads through and around the silhouette — real depth,
+   not a flat window); a solid lower-third band rides over the cutout's
+   lower body carrying the kicker, event, result chip and the club lockup.
+   The cutout takes the role-coloured depth treatment (--mh-cutout-depth:
+   soft lift shadow + a faint accent glow, decoration-strength-scaled).
+
+   Structural signature: type BEHIND the subject — the only archetype
+   where the athlete physically overlaps the headline plane. Distinct from
+   mega_surname_bleed (type only, no photo slot) and from every
+   object-fit:cover photo window.
+
+   No-photo grace: without a cutout the mega name is the artwork and the
+   band still anchors the facts — reads as a deliberate type poster.
+
+   Matte-gate grace (.mh-photo-flat): when the matte gate rejected the
+   cutout and the ORIGINAL photograph ships instead, the photo becomes a
+   full-bleed stage under a brand scrim and the name plane rides above it
+   (the full-bleed treatment path) — honest, never a broken silhouette.
+   =================================================================== */
+
+.pnb {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(115% 85% at 50% 10%, var(--mh-surface) 0%, var(--mh-primary) 76%);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.pnb *, .pnb *::before, .pnb *::after { box-sizing: border-box; }
+
+/* plane 1 — the mega name, the ground artwork */
+.pnb__name-plane {
+  position: absolute; left: 50%; top: 26%; transform: translateX(-50%);
+  z-index: 1; width: 96%;
+  text-align: center;
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: var(--mh-fit-mega-name-px, 280px);
+  line-height: 0.84; letter-spacing: -0.03em; text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap; opacity: 0.94;
+}
+
+/* plane 2 — the athlete cutout, standing over the name */
+.pnb__athlete {
+  position: absolute; left: 0; right: 0; bottom: 0; top: 16%;
+  z-index: 2; display: flex; align-items: flex-end; justify-content: center;
+}
+.pnb__athlete img {
+  max-width: 88%; max-height: 100%;
+  object-fit: contain; object-position: bottom center;
+  display: block;
+  filter: var(--mh-cutout-depth, drop-shadow(0 14px 34px rgba(0,0,0,0.45)));
+}
+
+/* plane 3 — the lower-third band over the cutout's lower body */
+.pnb__band {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  background: var(--mh-surface);
+  border-top: 5px solid var(--mh-accent);
+  padding: 34px 60px 42px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
+}
+.pnb__meta { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pnb__event {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 30px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mh-on-surface); overflow-wrap: anywhere;
+}
+.pnb__result {
+  display: inline-block; align-self: flex-start; padding: 14px 26px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 78px);
+  font-variation-settings: var(--mh-axes-result, normal); line-height: 0.9;
+}
+.pnb__stat { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 23px; color: var(--mh-on-surface); opacity: 0.84; }
+.pnb__brand { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; text-align: right; }
+.pnb__id { display: flex; align-items: center; gap: 14px; }
+.pnb__logo { height: 54px; width: auto; }
+.pnb__logo img, .pnb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.pnb__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px; text-transform: uppercase; color: var(--mh-on-surface); }
+.pnb__meet { font-family: 'Inter',sans-serif; font-weight: 500; font-size: 18px; color: var(--mh-on-surface); opacity: 0.72; overflow-wrap: anywhere; }
+.pnb__sponsor { flex: 0 0 auto; }
+
+/* kicker — top-left, over every plane */
+.pnb__kicker {
+  position: absolute; top: 64px; left: 60px; z-index: 4;
+  display: inline-flex; align-items: center;
+  padding: 14px 22px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'Space Grotesk','Inter',sans-serif;
+  font-weight: 800; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.pnb__kicker:empty { display: none; }
+.pnb__first {
+  position: absolute; top: 140px; left: 60px; z-index: 4;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 34px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+}
+
+/* matte-gate fallback: the original photograph as a full-bleed stage under
+   a brand scrim; the name plane rides ABOVE it, full-bleed style. */
+.pnb.mh-photo-flat .pnb__athlete { inset: 0; top: 0; z-index: 0; display: block; }
+.pnb.mh-photo-flat .pnb__athlete img {
+  width: 100%; height: 100%; max-width: none; max-height: none;
+  object-fit: cover; object-position: var(--mh-photo-pos, center 26%);
+  filter: none;
+}
+.pnb.mh-photo-flat .pnb__scrim {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--mh-primary) 34%, transparent) 0%,
+    rgba(0,0,0,0.10) 46%,
+    color-mix(in srgb, var(--mh-primary) 62%, transparent) 100%);
+}
+.pnb__scrim { display: none; }
+.pnb.mh-photo-flat .pnb__scrim { display: block; }
+.pnb.mh-photo-flat .pnb__name-plane { z-index: 2; opacity: 0.98; }
+</style>
+</head>
+<body>
+<div class="pnb{{PHOTO_FLAT_CLASS}}">
+
+  <div class="pnb__name-plane">{{ATHLETE_SURNAME_DISPLAY}}</div>
+
+  <div class="pnb__athlete">{{ATHLETE_IMG_BLOCK}}</div>
+  <div class="pnb__scrim"></div>
+
+  <div class="pnb__kicker">{{ACHIEVEMENT_LABEL}}</div>
+  <div class="pnb__first">{{ATHLETE_FIRST_NAME}}</div>
+
+  <div class="pnb__band">
+    <div class="pnb__meta">
+      <div class="pnb__event">{{EVENT_NAME}}</div>
+      <div class="pnb__result">{{RESULT_VALUE}}</div>
+      <div class="pnb__stat">{{HERO_STAT}}</div>
+    </div>
+    <div class="pnb__brand">
+      <div class="pnb__id">
+        <div class="pnb__logo">{{LOGO_BLOCK}}</div>
+        <div class="pnb__club">{{CLUB_FULL}}</div>
+      </div>
+      <div class="pnb__meet">{{MEET_NAME}}</div>
+      <div class="pnb__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

@@ -123,3 +123,7 @@ logs/
 # DATA_DIR normally; a standalone run with no DATA_DIR override falls back to
 # the repo root — this guards it from ever being committed.
 /export_cache/
+
+# M23 footage-beat trim cache — runtime MP4 trims served to Remotion via
+# staticFile(); count-capped (visual/footage.py prunes) and never committed.
+src/mediahub/remotion/public/footage_cache/

@@ -73,6 +73,9 @@ _ALLOWED_PLACEHOLDERS = {
     "WIDTH",
     "HEIGHT",
     "BASE_CSS",
+    # M11 — data-led slots (both collapse to "" when the facts are absent).
+    "STAT_CHIPS",
+    "PB_BARS",
 }
 
 _SCENES_DIR = motion.REMOTION_DIR / "src" / "compositions" / "sprint" / "scenes"

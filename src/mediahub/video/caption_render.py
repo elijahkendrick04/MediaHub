@@ -19,6 +19,7 @@ caller (``render.py``) writes it to disk and burns it via libass.
 
 from __future__ import annotations
 
+from mediahub.video.caption_fonts import ass_font_family
 from mediahub.visual.subtitle_burn import (
     FPS_DEFAULT,
     _ass_colour,
@@ -96,7 +97,11 @@ def karaoke_ass_document(track: dict, *, width: int, height: int, fps: int = FPS
             "Alignment, MarginL, MarginR, MarginV, Encoding"
         ),
         (
-            f"Style: Caption,Inter,{fontsize},{primary},{secondary},{box},{box},"
+            # M28: the family must be one of the six self-hosted brand faces —
+            # render.py provisions the ttf + FONTCONFIG_FILE so libass resolves
+            # it to the repo's own bytes, never a substituted system font.
+            f"Style: Caption,{ass_font_family(track.get('font_family'))},{fontsize},"
+            f"{primary},{secondary},{box},{box},"
             f"-1,0,0,0,100,100,0,0,4,0,0,2,{side},{side},{margin_v},1"
         ),
         "",

@@ -1036,7 +1036,7 @@ def _render_why_this_card(
     _open_attr = "" if lazy else " open"
     _summary_label = (
         'Why this card? <span class="why-peek">Show reasoning'
-        '<span class="why-chev" aria-hidden="true">&#9662;</span></span>'
+        '<span class="why-chev" aria-hidden="true">&#x25BE;</span></span>'
         if lazy
         else "Why this card?"
     )
@@ -1842,6 +1842,180 @@ def _inspector_overrides_for_card(run_id: str, card_id: str) -> dict:
         elif val:
             out[render_key] = str(val)
     return out
+
+
+_INSPECTOR_HEX_RE = re.compile(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})")
+
+
+def _apply_inspector_overrides_to_motion(
+    overrides: dict,
+    card_payload: dict,
+    brief_dict,
+    brand_kit,
+    *,
+    brand_copy: bool = True,
+):
+    """Translate a card's persisted inspector overrides for the motion engine (M36).
+
+    Mirrors the still create-graphic route's translation without touching
+    ``visual/motion.py``:
+
+    * ``accent`` — the same BrandKit-copy mechanism the still uses
+      (``dataclasses.replace(..., accent_colour=...)`` plus the brief-palette
+      accent), so ``_resolved_motion_roles`` resolves the SAME APCA-gated
+      ``roleAccent`` the tweaked still painted. ``brand_copy=False`` (the reel,
+      whose brand kit is shared across cards) applies the brief-palette half
+      only — per-card, still APCA-gated.
+    * ``no_photo`` — the brief copy gets ``photo_treatment="no-photo"``, the
+      exact signal the motion photo resolver honours, so photoSrc / cutout /
+      photoPos drop exactly as they do on the still.
+    * The full override dict is attached onto the card payload
+      (``inspector_overrides``) as the forward seam for the motion engine.
+      Note honestly: a ``photo_pos`` (crop) override has no motion-prop hook
+      in the current engine, so it does not alter the video — UI copy must
+      not promise it. ``hide_sponsor`` needs no translation: single-card
+      motion has no sponsor strip, and the reel outro sponsor is a club-level
+      close, not the per-card strip.
+
+    Because the accent/no-photo translations change the resolved props (and
+    the brand dict), tweaked cards fold into NEW motion cache keys while an
+    untouched card's inputs — and therefore its cache key — stay
+    byte-identical (empty overrides return the inputs unchanged).
+    """
+    if not overrides:
+        return card_payload, brief_dict, brand_kit
+    card_payload = dict(card_payload or {})
+    card_payload["inspector_overrides"] = dict(overrides)
+    accent = str(overrides.get("accent") or "").strip()
+    if accent and _INSPECTOR_HEX_RE.fullmatch(accent):
+        if brand_copy and brand_kit is not None:
+            try:
+                import dataclasses as _dc
+
+                brand_kit = _dc.replace(brand_kit, accent_colour=accent)
+            except Exception:
+                pass
+        if isinstance(brief_dict, dict):
+            brief_dict = {
+                **brief_dict,
+                "palette": {**(brief_dict.get("palette") or {}), "accent": accent},
+            }
+    if overrides.get("no_photo") and isinstance(brief_dict, dict):
+        brief_dict = {**brief_dict, "photo_treatment": "no-photo"}
+    return card_payload, brief_dict, brand_kit
+
+
+# Preferred still format for thumbnails / previews, in order.
+_THUMB_FORMAT_PREFERENCE = ("feed_portrait", "story", "feed_square")
+
+
+def _rendered_visuals_for_run(run_id: str) -> dict[str, dict]:
+    """Map each card id to its NEWEST persisted visual for a run (M29/M30).
+
+    Scans ``RUNS_DIR/<run>/visuals/<brief_id>/visual.json`` sidecars (written
+    by ``content_pack_visual.integration.persist_visual``) and keeps, per
+    ``content_item_id``, the most recently written brief dir that still has
+    PNGs on disk. Read-only — never renders. Returns::
+
+        {card_id: {brief_id, visual_id, mtime, png_paths {fmt: path},
+                   format_ids {fmt: per-format visual id}, layout_template,
+                   why_this_design, sourced_asset_ids}}
+    """
+    out: dict[str, dict] = {}
+    vdir = RUNS_DIR / run_id / "visuals"
+    try:
+        if not vdir.is_dir():
+            return out
+        subdirs = list(vdir.iterdir())
+    except OSError:
+        return out
+    for sub in subdirs:
+        if not sub.is_dir():
+            continue
+        sidecar = sub / "visual.json"
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            mtime = sidecar.stat().st_mtime
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        cid = str(payload.get("content_item_id") or "")
+        if not cid:
+            continue
+        try:
+            pngs = {p.stem: str(p) for p in sub.glob("*.png")}
+        except OSError:
+            pngs = {}
+        if not pngs:
+            continue
+        prev = out.get(cid)
+        if prev is not None and prev["mtime"] >= mtime:
+            continue
+        fmt_ids: dict[str, str] = {}
+        for vid_key, fmt in (payload.get("visual_ids") or {}).items():
+            fmt_ids.setdefault(str(fmt), str(vid_key))
+        out[cid] = {
+            "brief_id": sub.name,
+            "visual_id": str(payload.get("id") or ""),
+            "mtime": mtime,
+            "png_paths": pngs,
+            "format_ids": fmt_ids,
+            "layout_template": str(payload.get("layout_template") or ""),
+            "why_this_design": str(payload.get("why_this_design") or ""),
+            "sourced_asset_ids": [str(a) for a in (payload.get("sourced_asset_ids") or []) if a],
+        }
+    return out
+
+
+def _visual_thumb_path(info: Optional[dict]) -> Optional[str]:
+    """The best on-disk PNG for a rendered-visual entry, preferring the
+    portrait cut the review thumbs and pack wall use. ``None`` when absent."""
+    if not info:
+        return None
+    pngs = info.get("png_paths") or {}
+    for fmt in _THUMB_FORMAT_PREFERENCE:
+        p = pngs.get(fmt)
+        if p and Path(p).exists():
+            return p
+    for p in pngs.values():
+        if p and Path(p).exists():
+            return p
+    return None
+
+
+def _recent_asset_families_for_run(
+    run_id: str, exclude_card_id: str, media_assets: Optional[list]
+) -> list[str]:
+    """dHash burst families of photos already on OTHER cards' current renders.
+
+    The pack path threads ``recent_asset_families`` between items so two
+    cards never carry near-identical burst frames; this gives the PER-CARD
+    render routes the same avoid-list, derived from what is actually rendered
+    on the run right now (the card being re-rendered is excluded so its own
+    photo stays eligible for itself). Deterministic and read-only — same
+    library + same renders in, same families out. Empty on any miss.
+    """
+    fams: list[str] = []
+    try:
+        dhash_by_id: dict[str, str] = {}
+        for ad in media_assets or []:
+            d = ad if isinstance(ad, dict) else {}
+            q = (d.get("media_meta") or {}).get("quality") or {}
+            if d.get("id") and q.get("dhash"):
+                dhash_by_id[str(d["id"])] = str(q["dhash"])
+        if not dhash_by_id:
+            return []
+        for cid, info in _rendered_visuals_for_run(run_id).items():
+            if str(cid) == str(exclude_card_id):
+                continue
+            for aid in info.get("sourced_asset_ids") or []:
+                fam = dhash_by_id.get(str(aid))
+                if fam and fam not in fams:
+                    fams.append(fam)
+    except Exception:
+        return []
+    return fams[-12:]
 
 
 def _brand_swatches(brand_kit) -> list[dict]:
@@ -4391,10 +4565,10 @@ function _attrEsc(jsExpr) {
 // Upload a photo for ONE card: file dialog → POST to the card's /photo
 // endpoint (which links it to the athlete in the media library) → attach
 // the new asset to this graphic by re-rendering with it selected.
-function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
+function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt, accept) {
   var inp = document.createElement('input');
   inp.type = 'file';
-  inp.accept = 'image/*';
+  inp.accept = accept || 'image/*';
   inp.style.display = 'none';
   inp.onchange = function() {
     if (!inp.files || !inp.files.length) return;
@@ -4408,7 +4582,17 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
       .then(function(j) {
         btn.disabled = false; btn.textContent = orig;
         if (!j.ok || !j.asset) {
-          if (window.MH && MH.toast) MH.toast('Photo upload failed: ' + (j.error || 'unknown'), 'error', 4000);
+          if (window.MH && MH.toast) MH.toast('Upload failed: ' + (j.message || j.error || 'unknown'), 'error', 4000);
+          return;
+        }
+        if (j.asset.kind === 'clip') {
+          // M24 — a race clip: linked to this card's athlete + meet, so the
+          // motion render can back the card with real footage. The auto-
+          // extracted best frame (M25, when available) becomes the still's
+          // photo in the same breath.
+          var hasFrame = j.asset.frame_asset && j.asset.frame_asset.id;
+          if (window.MH && MH.toast) MH.toast('Race clip saved &amp; linked to this card' + (hasFrame ? ' — using its best frame as the photo' : ''), 'success', 3200);
+          createGraphic(btn, createUrl, cardId, fmt, hasFrame ? j.asset.frame_asset.id : '', false);
           return;
         }
         if (window.MH && MH.toast) MH.toast('Photo saved to your library — rendering with it now', 'success', 2500);
@@ -4416,12 +4600,43 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
       })
       .catch(function(e) {
         btn.disabled = false; btn.textContent = orig;
-        if (window.MH && MH.toast) MH.toast('Photo upload failed: ' + e, 'error', 4000);
+        if (window.MH && MH.toast) MH.toast('Upload failed: ' + e, 'error', 4000);
       });
   };
   document.body.appendChild(inp);
   inp.click();
   setTimeout(function(){ try { document.body.removeChild(inp); } catch(e) {} }, 60000);
+}
+
+// PHOTOS-6 / M4 write-back: confirm a meet-scoped candidate photo. One
+// click writes the athlete link back onto the library asset (so next meet
+// the picker suggests it automatically) and then renders this graphic with
+// the photo. The confirm is best-effort — a link hiccup never blocks the
+// render the user asked for.
+function mhConfirmCandidate(btn, confirmUrl, createUrl, cardId, fmt, assetId) {
+  fetch(confirmUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({asset_id: assetId})})
+    .then(function(r) { return r.json(); })
+    .catch(function() { return null; })
+    .then(function(j) {
+      if (j && j.ok && window.MH && MH.toast) {
+        MH.toast('Photo linked to ' + (j.athlete || 'this athlete') + ' — remembered for future meets', 'success', 2500);
+      }
+      createGraphic(btn, createUrl, cardId, fmt, assetId, false);
+    });
+}
+
+// M24 — detach a race clip from this card (the clip stays in the library;
+// only the card link is removed). Re-renders so the chip row refreshes.
+function mhClipUnlink(btn, unlinkUrl, assetId, createUrl, cardId, fmt) {
+  btn.disabled = true;
+  fetch(unlinkUrl, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({asset_id: assetId})})
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (window.MH && MH.toast) MH.toast(j.ok ? 'Race clip detached from this card' : ('Could not detach the clip: ' + (j.error || 'unknown')), j.ok ? 'success' : 'error', 2500);
+      if (j.ok) { createGraphic(btn, createUrl, cardId, fmt, '', false); }
+      else { btn.disabled = false; }
+    })
+    .catch(function() { btn.disabled = false; });
 }
 
 // Venue backdrops: CC-licensed public photos of the meet's pool/venue,
@@ -4526,6 +4741,30 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var photos = data.available_photos || [];
   var athlete = data.card_athlete || '';
   var photoUrl = createUrl.replace(/\/create-graphic$/, '/photo');
+  var confirmUrl = createUrl.replace(/\/create-graphic$/, '/photo-confirm');
+  // PHOTOS-6 handoff: the evaluator's meet-scoped candidates ({asset_id,
+  // score, reason_summary}) pre-sort the picker — photos uploaded for THIS
+  // meet come first, best match first — and picking one confirms the
+  // athlete link back onto the asset (the M4 write-back seam), so next
+  // meet the right face is automatic.
+  var evalR = data.evaluation || {};
+  var cands = evalR.candidates || [];
+  var candRank = {}, candReason = {};
+  cands.forEach(function(c, i) {
+    if (c && c.asset_id) { candRank[c.asset_id] = i + 1; candReason[c.asset_id] = c.reason_summary || ''; }
+  });
+  if (cands.length) {
+    photos = photos.slice().sort(function(a, b) {
+      var ra = candRank[a.id] || 999, rb = candRank[b.id] || 999;
+      if (ra !== rb) return ra - rb;
+      return (a.suggested === b.suggested) ? 0 : (a.suggested ? -1 : 1);
+    });
+  }
+  var pickNote = '';
+  if (cands.length && evalR.recommended_action && evalR.recommended_action.indexOf('Pick from') === 0) {
+    pickNote = '<div style="font-size:12px;color:var(--lane);margin-bottom:4px">&#x1F4F7; ' +
+      window.safeText(evalR.recommended_action) + ' Picking one links it to this swimmer for future meets.</div>';
+  }
   function _pchip(label, active, oc) {
     return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'color-mix(in oklab, var(--lane) 12%, transparent)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
   }
@@ -4533,15 +4772,43 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var noneOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", true)';
   var thumbs = photos.map(function(ph) {
     var on = (ph.id === chosen);
-    var oc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', ' + JSON.stringify(ph.id) + ', false)';
-    var ttl = (ph.suggested ? 'Remembered for ' + (ph.label || 'this athlete') + ' — click to use' : (ph.label || ''));
-    var star = ph.suggested ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#x2B50;</span>' : '';
+    var isCand = !!candRank[ph.id];
+    // A meet-scoped candidate click confirms the athlete link (write-back)
+    // before rendering; every other photo renders directly as before.
+    var oc = isCand
+      ? 'mhConfirmCandidate(this, ' + JSON.stringify(confirmUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', ' + JSON.stringify(ph.id) + ')'
+      : 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', ' + JSON.stringify(ph.id) + ', false)';
+    var ttl = isCand
+      ? ('Uploaded for this meet' + (candReason[ph.id] ? ' — ' + candReason[ph.id] : '') + '. Click to use & remember for ' + (athlete || 'this athlete'))
+      : (ph.suggested ? 'Remembered for ' + (ph.label || 'this athlete') + ' — click to use' : (ph.label || ''));
+    var star = ph.suggested ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#x2B50;</span>'
+      : (isCand ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#x1F4F7;</span>' : '');
     return '<span style="position:relative;display:inline-block;margin:0 4px 4px 0">' +
-      '<button type="button" title="' + ttl + '" onclick=' + _attrEsc(oc) + ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on ? 'var(--lane)' : (ph.suggested ? 'var(--medal)' : 'var(--border)')) + ';background:var(--bg);line-height:0"><img src="' + ph.url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>' + star + '</span>';
+      '<button type="button" title="' + ttl.replace(/"/g, '&quot;') + '" onclick=' + _attrEsc(oc) + ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on ? 'var(--lane)' : (isCand ? 'var(--lane)' : (ph.suggested ? 'var(--medal)' : 'var(--border)'))) + ';background:var(--bg);line-height:0"><img src="' + ph.url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>' + star + '</span>';
   }).join('');
   var firstName = athlete ? athlete.split(' ')[0] : '';
   var upOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var uploadBtn = '<button type="button" onclick=' + _attrEsc(upOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0">+ Add photo' + (firstName ? ' of ' + firstName : '') + '</button>';
+  // M24 — the card's race clips: the footage that can back this card's
+  // motion render (M23). Chip per linked clip (filename + duration +
+  // permission state) with a detach affordance, plus an add/replace upload.
+  var clips = data.race_clips || [];
+  var clipUnlinkUrl = createUrl.replace(/\/create-graphic$/, '/clip-unlink');
+  var clipChips = clips.map(function(c) {
+    var dur = c.duration_ms ? (' · ' + Math.round(c.duration_ms / 1000) + 's') : '';
+    var perm = c.usable ? '' : ' <span title="Blocked: ' + window.safeText((c.permission_status || '').replace(/_/g, ' ')) + '">&#9888;</span>';
+    var rmOc = 'mhClipUnlink(this, ' + JSON.stringify(clipUnlinkUrl) + ', ' + JSON.stringify(c.id) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
+    return '<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid ' + (c.usable ? 'var(--border)' : 'var(--bad)') + ';color:var(--ink-dim);margin:0 4px 4px 0">&#x1F3AC; ' +
+      window.safeText(c.filename) + dur + perm +
+      '<button type="button" title="Detach this clip from the card" onclick=' + _attrEsc(rmOc) + ' style="border:0;background:transparent;color:var(--ink-muted);cursor:pointer;padding:0;font-size:12px;line-height:1">&#10005;</button></span>';
+  }).join('');
+  var clipUpOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "video/*")';
+  var clipBtn = '<button type="button" onclick=' + _attrEsc(clipUpOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + (clips.length ? '&#x21BA; Replace race clip' : '+ Add race clip' + (firstName ? ' of ' + firstName : '')) + '</button>';
+  var clipRow =
+    '<div style="margin:2px 0 4px">' +
+      '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Race clip &middot; backs the motion video</div>' +
+      clipChips + clipBtn +
+    '</div>';
   var venueOc = 'mhVenueSearchOpen(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var venueBtn = '<button type="button" onclick=' + _attrEsc(venueOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">Venue backdrop&hellip;</button>';
   // Roadmap 1.2 — when a real library photo is on this graphic, deep-link it
@@ -4552,8 +4819,10 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var pickerHtml =
     '<div style="margin-bottom:8px">' +
       '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
+      pickNote +
       _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn + studioBtn + venueBtn +
       '<div class="mh-venue-results" data-card="' + cardId.replace(/"/g, '&quot;') + '" style="display:none;margin-top:6px"></div>' +
+      clipRow +
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
@@ -4576,10 +4845,9 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
     '</div>';
 }
 
-// Motion-graphic generation: lazy, cached server-side. Streams the resulting
-// MP4 into an inline <video> on the card panel. fmt picks the output cut
-// (story 9:16 default, portrait 4:5, square 1:1, landscape 16:9) \u2014 same
-// card facts, same brand, re-laid-out per platform.
+// Motion-graphic generation: async job + poll, cached server-side. fmt picks
+// the output cut (story 9:16 default, portrait 4:5, square 1:1, landscape
+// 16:9) \u2014 same card facts, same brand, re-laid-out per platform.
 var _motionCache = {};
 var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
 function _motionFmtChips(motionUrl, cardId, active) {
@@ -4596,6 +4864,11 @@ function _motionFmtChips(motionUrl, cardId, active) {
   });
   return out;
 }
+// M32 (UX-4): per-card motion now uses the same async job + poll pattern the
+// reel adopted — a cold Remotion render (30-90s) on a held connection gets
+// killed by front-line proxies as a bogus "Network error". The button kicks
+// a background job, polls, then streams the finished MP4 from the motion-file
+// route (a real URL that survives navigation, with a ?poster=1 sidecar).
 function generateMotion(btn, motionUrl, cardId, fmt) {
   fmt = fmt || 'story';
   var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
@@ -4603,66 +4876,82 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering motion\u2026';
-  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds \u2014 repeats are instant', expectedMs: 45000, accent: 'medal'});
-  var fetchUrl = motionUrl + (fmt !== 'story' ? (motionUrl.indexOf('?') === -1 ? '?' : '&') + 'format=' + encodeURIComponent(fmt) : '');
-  fetch(fetchUrl, {method:'POST'})
-    .then(function(r) {
-      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
-        return r.blob().then(function(b) { return {ok:true, blob:b}; });
-      }
-      return r.json().then(function(j){ return {ok:false, body:j}; });
-    })
+  btn.textContent = 'Rendering motion…';
+  var prog = MH.renderProgress(panel, {label: 'Rendering ' + fmt + ' motion', sub: 'First render can take up to 90 seconds — repeats are instant', expectedMs: 45000, accent: 'medal'});
+  var fail = function(msg) {
+    prog.stop();
+    btn.disabled = false; btn.textContent = origLabel;
+    // msg can be a raw str(e) detail (meet names, node stderr) — escape
+    // before it touches innerHTML.
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
+  };
+  var jobUrl = motionUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+  // JSON content-type: the CSRF layer exempts application/json fetches
+  // (a cross-site page can't send them without a CORS preflight).
+  fetch(jobUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res) {
-      if (!res.ok) {
-        // Prefer user_message (clean operator-written copy) over detail
-        // (raw stack trace). The backend Phase 1.5 mapping translates
-        // known infra failures into actionable copy; falls back to detail
-        // for anything unexpected.
-        prog.stop();
-        btn.disabled = false; btn.textContent = origLabel;
-        var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
-        // detail is a raw str(e) that can echo uploaded-file-derived content
-        // (meet names, node stderr) — escape before it touches innerHTML.
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + window.safeText(msg) + '</div>';
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
         return;
       }
-      prog.complete(function(){
-      btn.disabled = false; btn.textContent = origLabel;
-      var url = URL.createObjectURL(res.blob);
-      _motionCache[cardId + ':' + fmt] = url;
-      var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
-      panel.innerHTML =
-        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="' + vidCol + '">' +
-            '<video class="mh-motion-video" src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:min(200px,100%)">' +
-            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
-            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered via Remotion. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
-            '</div>' +
-            '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
-          '</div>' +
-        '</div>' +
-        '<div class="mh-reel-comments" style="margin-top:12px"></div>';
-      _loadMotionWhy(panel, motionUrl, fmt);
-      // UI 1.8 - pin timestamp comments to this card's motion clip too. The
-      // run-level comments endpoint sits at the path before '/card/'.
-      var _cmRoot = motionUrl.split('/card/')[0];
-      var _cmMount = panel.querySelector('.mh-reel-comments');
-      if (_cmMount && typeof mhReelComments === 'function') {
-        mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
-      }
-      });
+      var tries = 0;
+      var poll = function() {
+        tries++;
+        if (tries > 80) { fail('timed out waiting for the render — try again'); return; }
+        fetch(res.body.poll_url)
+          .then(function(r){ return r.json(); })
+          .then(function(j) {
+            if (j.status === 'done' && j.video_url) {
+              prog.complete(function(){
+                btn.disabled = false; btn.textContent = origLabel;
+                _motionCache[cardId + ':' + fmt] = j.video_url;
+                mhRenderMotion(panel, motionUrl, cardId, fmt, j.video_url);
+              });
+              return;
+            }
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {
+              fail(j.user_message || j.error || 'render failed'); return;
+            }
+            setTimeout(poll, 3000);
+          })
+          .catch(function() { setTimeout(poll, 3000); });
+      };
+      setTimeout(poll, 3000);
     })
-    .catch(function(err) {
-      prog.stop();
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    });
+    .catch(function(err) { fail('Network error: ' + err); });
+}
+
+// The finished per-card motion panel — used by generateMotion's success path
+// and the on-load "Rendered videos" restore. videoUrl is the persistent
+// motion-file route; its ?poster=1 sidecar becomes the <video> poster.
+function mhRenderMotion(panel, motionUrl, cardId, fmt, videoUrl) {
+  var poster = videoUrl + (videoUrl.indexOf('?') === -1 ? '?' : '&') + 'poster=1';
+  var vidCol = fmt === 'landscape' ? 'flex:0 0 min(300px,100%);max-width:320px' : 'flex:0 0 min(200px,100%);max-width:220px';
+  panel.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="' + vidCol + '">' +
+        '<video class="mh-motion-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+      '</div>' +
+      '<div style="flex:1;min-width:min(200px,100%)">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
+        '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4. Same archetype, colours, and seed as the static card &mdash; including your Inspector accent and photo on/off choices. An Inspector crop applies to stills only for now.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+        '</div>' +
+        '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mh-reel-comments" style="margin-top:12px"></div>';
+  _loadMotionWhy(panel, motionUrl, fmt);
+  // UI 1.8 - pin timestamp comments to this card's motion clip too. The
+  // run-level comments endpoint sits at the path before '/card/'.
+  var _cmRoot = motionUrl.split('/card/')[0];
+  var _cmMount = panel.querySelector('.mh-reel-comments');
+  if (_cmMount && typeof mhReelComments === 'function') {
+    mhReelComments({mount: _cmMount, video: panel.querySelector('video.mh-motion-video'), baseUrl: _cmRoot + '/reel/comments', target: 'card:' + cardId});
+  }
 }
 
 // "Why this motion design" \u2014 the render's explainability sidecar, fetched
@@ -4678,8 +4967,24 @@ function _loadMotionWhy(panel, motionUrl, fmt) {
     if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
     if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
     bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
-    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ');
+    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ') + mhEngineNoteHtml(m);
   }).catch(function(){});
+}
+
+// M22 handoff — honest engine disclosure. The manifest names the engine that
+// produced this video; the reduced-motion FFmpeg fallback writes plain-language
+// capability notes (no text choreography / count-up, static cover chips) that
+// the user deserves to see instead of silently wondering why the video looks
+// simpler. Manifest fields are engine-written but escaped anyway.
+function mhEngineNoteHtml(m) {
+  if (!m || m.engine !== 'ffmpeg') return '';
+  var notes = m.notes || {};
+  var line = notes.engine_note || 'Rendered by the reduced-motion FFmpeg engine.';
+  var extra = [];
+  if (notes.captions === 'unsupported-on-engine') extra.push('burned captions are unavailable on this engine');
+  if (notes.stat_chips === 'static-cover') extra.push('cover stats are static (no count-up)');
+  return '<div style="margin-top:4px;color:var(--ink-muted)">' + window.safeText(line) +
+    (extra.length ? ' (' + window.safeText(extra.join('; ')) + ')' : '') + '</div>';
 }
 
 // Voiceover (opt-in, MEDIAHUB_VOICEOVER=1): speak the human-approved caption.
@@ -4698,7 +5003,9 @@ function voiceoverToggle(btn, voUrl, cardId) {
   btn.disabled = true;
   btn.textContent = 'Preparing voiceover…';
   panel.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--ink-muted)">Synthesising the approved caption… the first run can take a few seconds.</div>';
-  fetch(voUrl + '?format=json', {method:'POST'})
+  // JSON content-type keeps this fetch inside the CSRF layer's JSON
+  // exemption (a bare POST is rejected outside test mode).
+  fetch(voUrl + '?format=json', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r){ return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res){
       btn.disabled = false; btn.textContent = origLabel;
@@ -4768,7 +5075,14 @@ function generateReel(btn, reelUrl, fmt) {
       mhRenderReel(panel, reelUrl, fmt, videoUrl);
     });
   };
-  fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {method:'POST'})
+  // M31: the reel composer's picks (cards / rhythm / mix) ride the job
+  // request. An untouched composer contributes NOTHING, so the default
+  // request — and therefore the default top-3 reel — stays byte-identical.
+  var _q = [];
+  if (fmt !== 'story') _q.push('format=' + encodeURIComponent(fmt));
+  var _extra = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
+  if (_extra) _q.push(_extra);
+  fetch(reelUrl + '-job' + (_q.length ? '?' + _q.join('&') : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res) {
       if (res.status !== 202 || !res.body || !res.body.poll_url) {
@@ -4818,7 +5132,9 @@ function generateReelBatch(btn, reelUrl) {
       mhRenderReelBatch(panel, reelUrl, videoUrls, failed);
     });
   };
-  fetch(reelUrl + '-batch', {method:'POST'})
+  // M31: the composer's picks apply to the all-formats batch too.
+  var _extraB = (typeof mhReelComposerQuery === 'function') ? mhReelComposerQuery() : '';
+  fetch(reelUrl + '-batch' + (_extraB ? '?' + _extraB : ''), {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
     .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res) {
       if (res.status !== 202 || !res.body || !res.body.poll_url) {
@@ -4895,24 +5211,113 @@ function mhRenderReelBatch(panel, reelUrl, videoUrls, failed) {
 // generateReel's success path and the on-load restore of a cached reel.
 function mhRenderReel(panel, reelUrl, fmt, videoUrl) {
   var vidCol = fmt === 'landscape' ? 'flex:0 0 min(340px,100%);max-width:360px' : 'flex:0 0 min(240px,100%);max-width:260px';
+  // M32: the reel-file route serves a poster-frame sidecar via ?poster=1.
+  var poster = videoUrl + (videoUrl.indexOf('?') === -1 ? '?' : '&') + 'poster=1';
   panel.innerHTML =
     '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="' + vidCol + '">' +
-        '<video class="mh-reel-video" src="' + videoUrl + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '<video class="mh-reel-video" src="' + videoUrl + '" poster="' + poster + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
       '</div>' +
       '<div style="flex:1;min-width:min(240px,100%)">' +
         '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
-        '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Scrub to a moment and pin a comment for your team.</div>' +
+        '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Your picked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Scrub to a moment and pin a comment for your team.</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
           '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
           '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' + _attrEsc('generateReelBatch(this, ' + JSON.stringify(reelUrl) + ')') + '>Render all formats</button>' +
         '</div>' +
+        '<div class="mh-reel-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
       '</div>' +
     '</div>' +
     '<div class="mh-reel-comments" style="margin-top:14px"></div>';
+  // M22 handoff — the reel's explainability manifest names the engine; the
+  // reduced-motion FFmpeg fallback's honest capability note is surfaced.
+  var whySlot = panel.querySelector('.mh-reel-why');
+  if (whySlot) {
+    var mUrl = videoUrl.replace('reel-file', 'reel-manifest').replace(/([?&])poster=1(&|$)/, '$1');
+    fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
+      if (!m) return;
+      var note = mhEngineNoteHtml(m);
+      if (note) whySlot.innerHTML = note;
+    }).catch(function(){});
+  }
   var mount = panel.querySelector('.mh-reel-comments');
   if (mount) mhReelComments({mount: mount, video: panel.querySelector('video.mh-reel-video'), baseUrl: reelUrl + '/comments', target: 'reel'});
+}
+
+// ---------------------------------------------------------------------------
+// M31 (UX-3) — reel composer. Reads the composer card's state (picked
+// moments, rhythm preset, audio mix) into query params for the reel job
+// routes. The three rhythm presets map onto the R1.12 rhythm request shape:
+//   Steady   — the default skeleton (no params at all);
+//   Punchy   — the top pick earns a heavier beat weight (1.5x);
+//   Showcase — longer cover + outro bookends (3.5s each).
+// An untouched composer (top-3 picked, Steady, default mix) returns '' so
+// the default request — and the default top-3 reel — stays byte-identical.
+// ---------------------------------------------------------------------------
+// Mirrors visual/motion.py reel maths: REEL_COVER_SEC=2, REEL_PER_CARD_SEC=4,
+// REEL_OUTRO_SEC=2.5, totals clamped to [3, 60]. 3 cards ≈ 16.5s.
+var MH_REEL_MATHS = {cover: 2.0, perCard: 4.0, outro: 2.5, totalMin: 3.0, totalMax: 60.0,
+                     showcaseCover: 3.5, showcaseOutro: 3.5, punchyTopWeight: 1.5};
+function mhReelComposerState() {
+  var comp = document.getElementById('mh-reel-composer');
+  if (!comp) return null;
+  var picks = Array.prototype.slice.call(comp.querySelectorAll('.mh-reel-pick:checked')).map(function(c){ return c.value; });
+  var defaults = (comp.getAttribute('data-default-cards') || '').split(',').filter(Boolean);
+  var rhythmSel = document.getElementById('mh-reel-rhythm');
+  var mixSel = document.getElementById('mh-reel-mix');
+  return {
+    comp: comp,
+    picks: picks,
+    defaults: defaults,
+    rhythm: rhythmSel ? rhythmSel.value : 'steady',
+    mix: mixSel ? mixSel.value : ''
+  };
+}
+function mhReelComposerQuery() {
+  var st = mhReelComposerState();
+  if (!st) return '';
+  var params = [];
+  var isDefaultSel = st.picks.length === st.defaults.length &&
+    st.picks.every(function(v, i) { return v === st.defaults[i]; });
+  if (st.picks.length && !isDefaultSel) {
+    params.push('cards=' + encodeURIComponent(st.picks.join(',')));
+  }
+  if (st.rhythm === 'punchy' && st.picks.length) {
+    var w = [String(MH_REEL_MATHS.punchyTopWeight)];
+    for (var i = 1; i < Math.min(st.picks.length, 5); i++) w.push('1');
+    params.push('weights=' + encodeURIComponent(w.join(',')));
+  } else if (st.rhythm === 'showcase') {
+    params.push('cover=' + MH_REEL_MATHS.showcaseCover);
+    params.push('outro=' + MH_REEL_MATHS.showcaseOutro);
+  }
+  if (st.mix) params.push('mix=' + encodeURIComponent(st.mix));
+  return params.join('&');
+}
+// Keep the readout + max-5 rule live as the user ticks moments.
+function mhReelComposerSync() {
+  var st = mhReelComposerState();
+  if (!st) return;
+  var boxes = Array.prototype.slice.call(st.comp.querySelectorAll('.mh-reel-pick'));
+  var n = st.picks.length;
+  boxes.forEach(function(b) {
+    b.disabled = (!b.checked && n >= 5);
+    var row = b.closest('label');
+    if (row) row.style.opacity = b.disabled ? '0.45' : '';
+  });
+  var cover = MH_REEL_MATHS.cover, outro = MH_REEL_MATHS.outro;
+  var weightSum = Math.min(n, 5);
+  if (st.rhythm === 'punchy' && n > 0) weightSum = MH_REEL_MATHS.punchyTopWeight + (Math.min(n, 5) - 1);
+  if (st.rhythm === 'showcase') { cover = MH_REEL_MATHS.showcaseCover; outro = MH_REEL_MATHS.showcaseOutro; }
+  var total = cover + MH_REEL_MATHS.perCard * weightSum + outro;
+  total = Math.max(MH_REEL_MATHS.totalMin, Math.min(MH_REEL_MATHS.totalMax, total));
+  var out = document.getElementById('mh-reel-duration');
+  if (out) {
+    out.textContent = n
+      ? (n + (n === 1 ? ' moment' : ' moments') + ' ≈ ' + (Math.round(total * 10) / 10) + 's')
+      : 'Pick at least one moment';
+  }
+  st.comp.querySelectorAll('.mh-reel-go').forEach(function(btn) { btn.disabled = (n === 0); });
 }
 
 // UI 1.8 - the comments persist even when the cached MP4 is gone (a fresh
@@ -5890,11 +6295,65 @@ def _caption_assist_buttons(card_uuid: str) -> str:
     return "".join(out)
 
 
-def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
-    """Per-card creative toolbar for the Content builder (post-approval):
-    live AI caption tone tabs (AI / Warm / Hype / Precise), Copy, Regenerate,
-    Create graphic, Generate motion, and Schedule. Pairs with
-    `_card_creative_js()` on the host page. `card_id_raw` is the swim_id."""
+# M35 (UX-6) — styling + behaviour for the per-card "More" overflow popover.
+# Emitted once per host page (the Content builder). Pure details/summary +
+# a click-outside closer: no new JS framework, dark-first via the existing
+# --panel/--border vars.
+_CARD_TOOLBAR_CSS = """
+.mh-card-more { position: relative; display: inline-block; }
+.mh-card-more > summary { list-style: none; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 4px; }
+.mh-card-more > summary::-webkit-details-marker { display: none; }
+.mh-card-more[open] > summary { border-color: var(--lane); color: var(--lane); }
+.mh-card-more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+  min-width: 190px; display: flex; flex-direction: column; gap: 4px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4); }
+.mh-card-more-menu .btn { width: 100%; text-align: left; justify-content: flex-start; }
+"""
+
+_CARD_TOOLBAR_JS = """
+<script>
+// M35 — close an open per-card "More" popover on outside click or Escape,
+// and after choosing an action inside it (the chosen panel opens below).
+document.addEventListener('click', function(e){
+  document.querySelectorAll('details.mh-card-more[open]').forEach(function(d){
+    if (!d.contains(e.target)) { d.open = false; return; }
+    if (e.target.closest('.mh-card-more-menu button, .mh-card-more-menu a')) {
+      setTimeout(function(){ d.open = false; }, 0);
+    }
+  });
+});
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') {
+    document.querySelectorAll('details.mh-card-more[open]').forEach(function(d){ d.open = false; });
+  }
+});
+</script>
+"""
+
+
+def _render_card_creative_toolbar(
+    run_id: str,
+    card_id_raw: str,
+    *,
+    initial_visual_html: str = "",
+    initial_motion_html: str = "",
+) -> str:
+    """Per-card creative toolbar for the Content builder (post-approval).
+
+    M35 (UX-6) layout: the two actions a volunteer actually needs — Create
+    graphic and Generate motion — stay primary-styled and inline with Copy
+    caption; the collaboration/power features (Reformat, Copilot, Comments,
+    History, Locks, Share, Schedule, Voiceover) live in one "More" overflow
+    (a ``<details>`` popover, no new JS framework), and the caption actions
+    (Regenerate, Assist) dock under the caption tone panel where the caption
+    lives. Same handlers, same panels — only the trigger layout changed.
+
+    ``initial_visual_html`` / ``initial_motion_html`` (M30/M32): server-
+    rendered content for the visual / motion panels so a page load shows the
+    run's already-rendered PNGs and MP4s without a re-render; empty keeps the
+    legacy hidden-empty panels. Pairs with `_card_creative_js()` on the host
+    page. `card_id_raw` is the swim_id."""
     card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
     _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
     _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
@@ -6005,25 +6464,44 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             f'border:1px solid var(--border);border-radius:8px"></div>'
         )
 
+    # M35: the overflow menu — collaboration/power features behind one trigger.
+    # The unresolved-comments badge (.comments-count) rides the More trigger so
+    # a pending task stays visible without thirteen equal-weight buttons.
+    _more_menu = (
+        f'<details class="mh-card-more" data-card="{card_uuid}">'
+        f'<summary class="btn secondary" style="font-size:11px;padding:4px 10px">'
+        f'More &#x25BE;<span class="comments-count" data-card="{card_uuid}"></span></summary>'
+        f'<div class="mh-card-more-menu">'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
+        f"{schedule_btn}"
+        f"{_voiceover_btn}"
+        f"</div></details>"
+    )
+    _visual_display = "" if initial_visual_html else "display:none;"
+    _motion_display = "" if initial_motion_html else "display:none;"
     return (
         f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">'
         f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
         f'<div style="margin-bottom:8px">{tabs_html}</div>'
         f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
-        f'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
+        # M35: caption actions dock under the tone panel, next to the caption
+        # they act on.
+        f'<div class="mh-caption-actions" style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
+        f"</div>"
+        # M35: the primary action row — the two things that matter, then Copy,
+        # then everything else behind More.
+        f'<div class="mh-card-actions" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
-        f"{_voiceover_btn}"
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="commentsToggle(this, \'{card_uuid}\')" title="Comments, @mentions and tasks. A task must be resolved before this card can be approved.">&#x1F4AC; Comments<span class="comments-count" data-card="{card_uuid}"></span></button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="historyToggle(this, \'{card_uuid}\')" title="Version history — see every design version of this card, compare them, and roll back.">&#x21BA; History</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="locksToggle(this, \'{card_uuid}\')" title="Lock elements (e.g. the sponsor strip) so a later edit — even the copilot — can\'t change them.">&#x1F512; Locks</button>'
-        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="shareToggle(this, \'{card_uuid}\')" title="Create an expiring link so someone outside the club (e.g. a parent) can view — or comment on — this card without an account.">&#x1F517; Share</button>'
-        f"{schedule_btn}"
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
+        f"{_more_menu}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
         f"</div>"
         f'<div class="assist-row" data-card="{card_uuid}" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px dashed var(--border);border-radius:6px">'
@@ -6035,8 +6513,8 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f"</div>"
         f'<div class="assist-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>'
         f"</div>"
-        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
-        f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="{_visual_display}margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px">{initial_visual_html}</div>'
+        f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="{_motion_display}margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px">{initial_motion_html}</div>'
         f"{_voiceover_panel}"
         f'<div class="reformat-panel" data-card="{card_uuid}" data-reformat-url="{_h(_reformat_url)}" data-formats-url="{_h(_formats_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 4%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="copilot-panel" data-card="{card_uuid}" data-assistant-url="{_h(_assistant_url)}" data-suggest-url="{_h(_assistant_suggest_url)}" data-memory-url="{_h(_assistant_memory_url)}" style="display:none;margin-top:10px;padding:12px;background:color-mix(in oklab, var(--lane) 5%, transparent);border:1px solid var(--border);border-radius:8px"></div>'
@@ -6231,9 +6709,24 @@ def _inspector_js() -> str:
     var capEl = $('mh-insp-caption');
     if (capEl) capEl.value = btn.getAttribute('data-insp-caption') || '';
     var capStatus = $('mh-insp-caption-status'); if (capStatus) capStatus.textContent = '';
-    // Reset preview to placeholder each open (a render is on-demand via Apply).
+    // M29: seed the preview with the card's current design (the same cached
+    // thumbnail the review row shows) so tweaks start from what exists. The
+    // placeholder only appears when no thumbnail is available yet.
     var prev = $('mh-insp-preview');
-    if (prev) prev.innerHTML = '<div class="mh-insp-preview-empty">Apply changes to render a preview.</div>';
+    if (prev) {
+      var thumbUrl = btn.getAttribute('data-thumb-url') || '';
+      if (thumbUrl) {
+        prev.innerHTML = '<div class="mh-insp-preview-empty mh-insp-loading">Loading current design&hellip;</div>';
+        var seed = new Image();
+        seed.alt = 'Current design for this card';
+        seed.className = 'mh-insp-preview-img';
+        seed.onload = function() { prev.innerHTML = ''; prev.appendChild(seed); };
+        seed.onerror = function() { prev.innerHTML = '<div class="mh-insp-preview-empty">Apply changes to render a preview.</div>'; };
+        seed.src = thumbUrl;
+      } else {
+        prev.innerHTML = '<div class="mh-insp-preview-empty">Apply changes to render a preview.</div>';
+      }
+    }
     syncControls();
     status('');
     lastFocus = btn;
@@ -11322,7 +11815,7 @@ _VIDEO_STUDIO_HTML = """
     <div id="vs-drop" class="vstudio-drop" tabindex="0" role="button"
          aria-label="Upload footage">
       <strong>Drop a clip here</strong>
-      <span class="muted">or click to choose &middot; MP4, MOV, WebM &middot; under 50&nbsp;MB</span>
+      <span class="muted">or click to choose &middot; MP4, MOV, WebM &middot; under __VIDEO_MAX_MB__&nbsp;MB</span>
       <input id="vs-file" type="file" accept="video/*" hidden>
     </div>
     <div class="vstudio-rec">
@@ -11424,7 +11917,16 @@ _VIDEO_STUDIO_HTML = """
   .vstudio-tile{border:1px solid var(--border,#26262c);border-radius:8px;overflow:hidden;cursor:pointer;background:#000;position:relative}
   .vstudio-tile.sel{outline:2px solid var(--accent,#22d3ee);outline-offset:-2px}
   .vstudio-tile video{display:block;width:100%;height:90px;object-fit:cover;background:#000}
+  .vstudio-thumb{position:relative;display:block;height:90px;background:#000}
+  .vstudio-thumb img{display:block;width:100%;height:90px;object-fit:cover}
+  .vstudio-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;text-shadow:0 1px 6px rgba(0,0,0,.7);pointer-events:none}
   .vstudio-tile .cap{padding:5px 7px;font-size:11px;color:var(--ink-dim,#b8b8c0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vs-tile-meta{display:flex;flex-direction:column;gap:4px;padding:0 7px 7px;font-size:10px}
+  .vs-perm-badge{font-size:10px;padding:1px 6px;align-self:flex-start}
+  .vstudio-badge.blocked{color:var(--bad,crimson);border-color:color-mix(in oklab, var(--bad,crimson) 35%, transparent)}
+  .vs-perm{background:var(--panel);border:1px solid var(--border);border-radius:5px;color:var(--ink);padding:2px 4px;font-size:10px;max-width:100%}
+  .vs-frame{font-size:10px;padding:2px 6px;align-self:flex-start}
+  .vs-frame-status{font-size:10px}
   .vstudio-controls{display:flex;flex-direction:column;gap:12px}
   .vstudio-controls label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-dim,#b8b8c0)}
   .vstudio-controls input[type=text],.vstudio-controls select{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:6px;color:var(--ink,#f0f0f2);padding:7px 9px;font-size:14px}
@@ -11474,6 +11976,8 @@ _VIDEO_STUDIO_HTML = """
   var CSRF = "__CSRF__";
   var FOOTAGE_URL = "__FOOTAGE_URL__";
   var FOOTAGE_LIST_URL = "__FOOTAGE_LIST_URL__";
+  var FOOTAGE_PERM_TMPL = "__FOOTAGE_PERM_TMPL__";
+  var FOOTAGE_FRAME_TMPL = "__FOOTAGE_FRAME_TMPL__";
   var CLIPMAKER_URL = "__CLIPMAKER_URL__";
   var PROJECTS_URL = "__PROJECTS_URL__";
   var RENDER_TMPL = "__PROJECT_RENDER_TMPL__";
@@ -11498,6 +12002,22 @@ _VIDEO_STUDIO_HTML = """
   function $(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('div'); d.textContent=(s==null?'':String(s)); return d.innerHTML; }
   function url(tmpl, id){ return tmpl.replace('__PID__', encodeURIComponent(id)); }
+  function aurl(tmpl, id){ return tmpl.replace('__AID__', encodeURIComponent(id)); }
+  // M26 — the media-library permission vocabulary, one-tap editable per tile.
+  var PERM_OPTIONS = [
+    ['needs_approval','Needs approval'],
+    ['approved_by_club','Approved by club'],
+    ['user_owned','User owned'],
+    ['approved_public','Approved (public)'],
+    ['approved_by_photographer','Approved by photographer'],
+    ['internal_only','Internal only'],
+    ['needs_parental_consent','Needs parental consent'],
+    ['do_not_use','Do not use']
+  ];
+  function permLabel(p){
+    for(var i=0;i<PERM_OPTIONS.length;i++){ if(PERM_OPTIONS[i][0]===p) return PERM_OPTIONS[i][1]; }
+    return p || 'unknown';
+  }
   function waveUrl(pid, idx){ return WAVEFORM_TMPL.replace('__PID__', encodeURIComponent(pid)).replace('__CIDX__', idx); }
   function fmtDur(ms){ if(!ms) return ''; var s=Math.round(ms/1000); return s+'s'; }
 
@@ -11558,28 +12078,74 @@ _VIDEO_STUDIO_HTML = """
       var wrap = $('vs-footage'); var items = (j && j.footage) || [];
       if(!items.length){ wrap.innerHTML = '<p class="muted">No footage yet. Upload or record a clip.</p>'; return; }
       wrap.innerHTML = items.map(function(a){
+        // M27 — poster thumbnails: an <img> + play glyph per tile (a real
+        // <video> element only appears once the clip is selected). Clips
+        // ingested before posters existed keep the <video> tile honestly.
+        var media = a.poster_url
+          ? '<span class="vstudio-thumb" data-file="'+esc(a.file_url)+'"><img src="'+esc(a.poster_url)+'" alt="" loading="lazy"><span class="vstudio-play" aria-hidden="true">&#9654;</span></span>'
+          : '<video src="'+esc(a.file_url)+'#t=0.1" preload="metadata" muted playsinline></video>';
+        // M26 — permission badge + one-tap editor on every tile.
+        var permOpts = PERM_OPTIONS.map(function(p){
+          return '<option value="'+p[0]+'"'+(p[0]===a.permission_status?' selected':'')+'>'+esc(p[1])+'</option>';
+        }).join('');
+        var badge = '<span class="vstudio-badge vs-perm-badge '+(a.usable?'approved':'blocked')+'" title="'+esc(permLabel(a.permission_status))+'">'
+          + (a.usable ? '&#10003; ' : '&#9888; ') + esc(permLabel(a.permission_status)) + '</span>';
         return '<figure class="vstudio-tile'+(a.id===selectedId?' sel':'')+'" data-id="'+esc(a.id)+'">'
-          + '<video src="'+esc(a.file_url)+'#t=0.1" preload="metadata" muted playsinline></video>'
+          + media
           + '<label class="vstudio-pick" title="Include in AI reel"><input type="checkbox" class="vs-reel-pick" data-id="'+esc(a.id)+'"'+(reelSet[a.id]?' checked':'')+'> reel</label>'
-          + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption></figure>';
+          + '<figcaption class="cap">'+esc(a.filename)+(a.duration_ms?(' &middot; '+fmtDur(a.duration_ms)):'')+'</figcaption>'
+          + '<div class="vs-tile-meta">'+badge
+          + '<select class="vs-perm" data-id="'+esc(a.id)+'" aria-label="Clip permission">'+permOpts+'</select>'
+          + '<button type="button" class="btn ghost vs-frame" data-id="'+esc(a.id)+'" title="Save the clip\\u2019s best moment as a photo in your library">Best frame &rarr; photo</button>'
+          + '<span class="muted vs-frame-status" data-id="'+esc(a.id)+'"></span></div>'
+          + '</figure>';
       }).join('');
       Array.prototype.forEach.call(wrap.querySelectorAll('.vstudio-tile'), function(el){
-        el.addEventListener('click', function(ev){ if(ev.target.closest('.vstudio-pick')) return; selectFootage(el.getAttribute('data-id'), items); });
+        el.addEventListener('click', function(ev){ if(ev.target.closest('.vstudio-pick')||ev.target.closest('.vs-tile-meta')) return; selectFootage(el.getAttribute('data-id'), items); });
       });
       Array.prototype.forEach.call(wrap.querySelectorAll('.vs-reel-pick'), function(cb){
         cb.addEventListener('click', function(ev){ ev.stopPropagation(); });
         cb.addEventListener('change', function(){ toggleReel(cb.getAttribute('data-id'), cb.checked); });
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-perm'), function(sel){
+        sel.addEventListener('click', function(ev){ ev.stopPropagation(); });
+        sel.addEventListener('change', function(){
+          jpost(aurl(FOOTAGE_PERM_TMPL, sel.getAttribute('data-id')), {permission_status: sel.value})
+            .then(function(j){ if(j.ok){ loadFootage(); } else { alert(j.message || j.error || 'Could not change the permission.'); } });
+        });
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.vs-frame'), function(b){
+        b.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          var st = wrap.querySelector('.vs-frame-status[data-id="'+b.getAttribute('data-id')+'"]');
+          b.disabled = true; if(st){ st.textContent = 'Extracting…'; }
+          jpost(aurl(FOOTAGE_FRAME_TMPL, b.getAttribute('data-id')), {}).then(function(j){
+            b.disabled = false;
+            if(st){ st.textContent = j.ok ? 'Saved to your photo library.' : ('Failed: '+(j.message||j.error||'error')); }
+          });
+        });
       });
     });
   }
   function selectFootage(id, items){
     selectedId = id;
     Array.prototype.forEach.call(document.querySelectorAll('.vstudio-tile'), function(el){
-      el.classList.toggle('sel', el.getAttribute('data-id')===id);
+      var sel = el.getAttribute('data-id')===id;
+      el.classList.toggle('sel', sel);
+      // M27 — the real <video> element is created only on selection; the
+      // grid itself stays <img> posters.
+      var thumb = el.querySelector('.vstudio-thumb');
+      if(sel && thumb){
+        var v = document.createElement('video');
+        v.src = thumb.getAttribute('data-file')+'#t=0.1';
+        v.muted = true; v.playsInline = true; v.preload = 'metadata'; v.controls = true;
+        thumb.replaceWith(v);
+      }
     });
     var a = (items||[]).filter(function(x){return x.id===id;})[0];
     $('vs-selected').innerHTML = 'Selected: <strong>'+esc(a?a.filename:id)+'</strong>'
-      + (a && !a.has_audio ? ' <span class="muted">(no audio &rarr; captions need sound)</span>' : '');
+      + (a && !a.has_audio ? ' <span class="muted">(no audio &rarr; captions need sound)</span>' : '')
+      + (a && !a.usable ? ' <span class="muted">&#9888; blocked: '+esc(permLabel(a.permission_status))+'</span>' : '');
     $('vs-controls').hidden = false;
   }
 
@@ -11684,7 +12250,25 @@ _VIDEO_STUDIO_HTML = """
     });
   }
   function approveProject(id){
-    jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+    // M26 — the approve dialog lists each source clip's permission state so
+    // the human gate is informed, not blind.
+    fetch(url(PROJECT_TMPL, id), {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        var srcs = (j && j.source_permissions) || [];
+        var lines = srcs.map(function(s){
+          return '\\u2022 ' + s.filename + ' \\u2014 ' + permLabel(s.permission_status) + (s.usable ? '' : '  (BLOCKED)');
+        });
+        var msg = 'Approve this clip for export?';
+        if(lines.length){ msg += '\\n\\nSource clip permissions:\\n' + lines.join('\\n'); }
+        if(!window.confirm(msg)) return;
+        jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+      })
+      .catch(function(){
+        if(window.confirm('Approve this clip for export?')){
+          jpost(url(APPROVE_TMPL, id), {status:'approved'}).then(function(){ loadProjects(); });
+        }
+      });
   }
 
   // ---- timeline editor (manual trim / speed / look / transition / grade / captions) ----
@@ -17261,7 +17845,10 @@ def create_app() -> Flask:
         # below (reading it is what enforces MAX_CONTENT_LENGTH). This is the first
         # before_request, so the larger limit is in place before anything touches
         # the body. endpoint is resolved by routing, which runs before this hook.
-        if request.endpoint == "api_video_footage_upload":
+        # M24: the per-card upload now accepts race clips (video/*) too, so it
+        # shares the raised cap — its image branch stays protected by the
+        # decode-validating _store_photo_upload gate regardless of body size.
+        if request.endpoint in ("api_video_footage_upload", "api_card_photo_upload"):
             request.max_content_length = _video_upload_max
         if not _csrf_enforced() or request.path in _CSRF_EXEMPT_PATHS:
             return None
@@ -21924,6 +22511,12 @@ def create_app() -> Flask:
             # per card beyond the button itself.
             _insp_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
             _insp_caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
+            # M29 (UX-1) — see before approve: a lazy, cached thumbnail of the
+            # card's actual graphic. The <img> stays empty until it scrolls
+            # into view (IntersectionObserver script below), then loads from
+            # the thumb route — an existing render is served as-is; a first
+            # render happens once and is cached per card.
+            _thumb_url = url_for("api_card_thumb", run_id=run_id, card_id=card_id_raw)
             # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
             # Decorative here — the row already shows the name/event/band as
             # text — so the chip stays aria-hidden and out of the tab order.
@@ -21941,6 +22534,10 @@ def create_app() -> Flask:
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
+    <div class="mh-thumb-wrap" style="flex:0 0 76px">
+      <img class="mh-card-thumb" data-thumb-src="{_h(_thumb_url)}" alt=""
+           style="width:76px;aspect-ratio:4/5;object-fit:cover;border-radius:8px;border:1px solid var(--border);background:color-mix(in oklab, var(--panel) 85%, transparent);display:block;opacity:0;transition:opacity 240ms ease"/>
+    </div>
     <div style="flex:1">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
         {_band_chip(band)}
@@ -21962,7 +22559,7 @@ def create_app() -> Flask:
         <button type="button" class="btn secondary mh-inspect-btn" style="font-size:11px;padding:4px 10px"
                 data-mh-inspect data-run-id="{_h(run_id)}" data-card-id="{_h(card_id_raw)}"
                 data-card-uuid="{_h(card_uuid)}" data-graphic-url="{_h(_insp_graphic_url)}"
-                data-caption-url="{_h(_insp_caption_url)}" data-card-title="{swimmer} &middot; {event}"{_inspector_state_attrs(wf_state)}
+                data-caption-url="{_h(_insp_caption_url)}" data-thumb-url="{_h(_thumb_url)}" data-card-title="{swimmer} &middot; {event}"{_inspector_state_attrs(wf_state)}
                 aria-haspopup="dialog" aria-controls="mh-inspector"
                 title="Tweak this card before approval — caption, palette, elements, crop">
           &#9881; Inspect
@@ -22499,6 +23096,65 @@ function copyWhyCard(btn, taId) {{
   }} else {{ init(); }}
 }})();
 
+</script>
+
+<!-- M29 (UX-1) — lazy card thumbnails: each review row shows the card's real
+     graphic. Loading waits for scroll-into-view, runs at most two renders at
+     a time (the server render gate is small), retries politely on the 429
+     "renderer busy" answer, and degrades to an honest placeholder. -->
+<script>
+(function() {{
+  var imgs = Array.prototype.slice.call(document.querySelectorAll('img.mh-card-thumb[data-thumb-src]'));
+  if (!imgs.length) {{ return; }}
+  var queue = [], inflight = 0, MAXC = 2;
+  function placeholder(img, msg) {{
+    var d = document.createElement('div');
+    d.className = 'mh-card-thumb-empty';
+    d.style.cssText = 'width:76px;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10px;line-height:1.35;color:var(--ink-muted);border:1px dashed var(--border);border-radius:8px;padding:4px';
+    d.textContent = msg;
+    img.replaceWith(d);
+  }}
+  function settle() {{ inflight--; pump(); }}
+  function attempt(img) {{
+    fetch(img.getAttribute('data-thumb-src'), {{cache: 'no-store'}})
+      .then(function(r) {{
+        if (r.status === 429) {{
+          var t = (parseInt(img.dataset.tries || '0', 10)) + 1;
+          img.dataset.tries = t;
+          if (t <= 6) {{ setTimeout(function() {{ inflight++; attempt(img); }}, 5000); return null; }}
+          placeholder(img, 'Renderer busy — refresh to retry');
+          return null;
+        }}
+        if (!r.ok) {{ placeholder(img, 'Preview appears after the first render'); return null; }}
+        return r.blob();
+      }})
+      .then(function(b) {{
+        if (b) {{
+          img.onload = function() {{ img.style.opacity = '1'; }};
+          img.src = URL.createObjectURL(b);
+        }}
+      }})
+      .catch(function() {{ placeholder(img, 'Preview unavailable'); }})
+      .then(settle, settle);
+  }}
+  function pump() {{
+    while (inflight < MAXC && queue.length) {{
+      inflight++;
+      attempt(queue.shift());
+    }}
+  }}
+  if ('IntersectionObserver' in window) {{
+    var obs = new IntersectionObserver(function(entries) {{
+      entries.forEach(function(e) {{
+        if (e.isIntersecting) {{ obs.unobserve(e.target); queue.push(e.target); pump(); }}
+      }});
+    }}, {{rootMargin: '250px 0px'}});
+    imgs.forEach(function(im) {{ obs.observe(im); }});
+  }} else {{
+    imgs.forEach(function(im) {{ queue.push(im); }});
+    pump();
+  }}
+}})();
 </script>
 
 <!-- Phase 6 — bulk approve + expand-all reasoning. (Keyboard navigation and the
@@ -32835,9 +33491,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         Delegates to ``_save_library_photo`` so quick-build uploads get the
         same ingest gate as every other path — extension allowlist, HEIC
         normalisation to a web-safe JPEG (iPhones save HEIC by default,
-        which the browser/renderer can't show), and the decode check. A
-        rejected photo is skipped (None) rather than stored unreadable —
-        an honest gap beats a broken graphic background.
+        which the browser/renderer can't show), EXIF baking, measurement,
+        and the decode check. A rejected photo is skipped (None) rather
+        than stored unreadable — an honest gap beats a broken graphic
+        background.
         """
         if not (_v8_ok and _v8_get_media_store is not None and profile_id):
             return None
@@ -42092,6 +42749,110 @@ function mhSetupMode(mode) {{
             }
         )
 
+    def _prefilled_visual_panel_html(run_id: str, card_id_raw: str, info: Optional[dict]) -> str:
+        """Server-rendered visual panel for a card whose graphic already exists
+        (M30). No re-render — the persisted PNG is shown straight from the
+        run's visuals dir, with a nudge that Create graphic redesigns it."""
+        if not info:
+            return ""
+        fmt = next(
+            (f for f in _THUMB_FORMAT_PREFERENCE if f in (info.get("png_paths") or {})),
+            None,
+        )
+        if fmt is None:
+            pngs = info.get("png_paths") or {}
+            fmt = next(iter(sorted(pngs)), None)
+        if fmt is None:
+            return ""
+        vid = (info.get("format_ids") or {}).get(fmt) or info.get("visual_id") or ""
+        if not vid:
+            return ""
+        png_url = url_for("api_visual_png", vid=vid, format_name="feed_portrait")
+        why = str(info.get("why_this_design") or "")
+        layout = str(info.get("layout_template") or "auto")
+        n_formats = len(info.get("png_paths") or {})
+        return (
+            '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">'
+            '<div style="flex:0 0 min(220px,100%);max-width:240px">'
+            f'<img src="{_h(png_url)}" alt="Generated graphic" loading="lazy" '
+            'style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/>'
+            "</div>"
+            '<div style="flex:1;min-width:min(200px,100%)">'
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);'
+            f'letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; {_h(layout)}'
+            f" &middot; {n_formats} format{'s' if n_formats != 1 else ''} rendered</div>"
+            + (
+                f'<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">{_h(why)}</div>'
+                if why
+                else ""
+            )
+            + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+            f'<a class="btn secondary" href="{_h(png_url)}" download style="font-size:11px;padding:4px 10px">Download PNG</a>'
+            "</div>"
+            '<div style="font-size:11px;color:var(--ink-muted);margin-top:8px">'
+            "Already rendered &mdash; use &#x2726; Create graphic to redesign, change "
+            "format, or pick a different photo.</div>"
+            "</div></div>"
+        )
+
+    def _rendered_motion_strip_html(run_id: str, card_id_raw: str) -> str:
+        """Server-rendered "Rendered videos" strip for a card (M32): every cut
+        already on disk under the run's motion dir, with poster, duration (from
+        the manifest sidecar) and a persistent download link. "" when none."""
+        motion_dir = RUNS_DIR / run_id / "motion"
+        if not motion_dir.is_dir():
+            return ""
+        cuts: list[tuple[str, Path]] = []
+        for fmt in ("story", "portrait", "square", "landscape"):
+            name = f"{card_id_raw}.mp4" if fmt == "story" else f"{card_id_raw}_{fmt}.mp4"
+            p = motion_dir / name
+            if p.exists():
+                cuts.append((fmt, p))
+        if not cuts:
+            return ""
+        tiles = ""
+        for fmt, p in cuts:
+            kwargs = {"run_id": run_id, "card_id": card_id_raw}
+            if fmt != "story":
+                kwargs["format"] = fmt
+            file_url = url_for("api_card_motion_file", **kwargs)
+            has_poster = p.with_suffix(".poster.png").exists()
+            poster_url = file_url + ("&" if "?" in file_url else "?") + "poster=1"
+            duration = ""
+            sidecar = p.with_suffix(".json")
+            try:
+                if sidecar.exists():
+                    _m = json.loads(sidecar.read_text(encoding="utf-8"))
+                    _d = float(_m.get("duration_sec") or 0)
+                    if _d:
+                        duration = f"{_d:g}s"
+            except Exception:
+                duration = ""
+            thumb = (
+                f'<img src="{_h(poster_url)}" alt="" loading="lazy" '
+                'style="width:64px;aspect-ratio:9/16;object-fit:cover;border-radius:6px;'
+                'border:1px solid var(--border);background:#000;display:block"/>'
+                if has_poster
+                else '<span style="width:64px;aspect-ratio:9/16;display:flex;align-items:center;'
+                "justify-content:center;border:1px solid var(--border);border-radius:6px;"
+                'background:#000;color:var(--ink-muted);font-size:18px">&#x25B6;</span>'
+            )
+            tiles += (
+                '<span style="display:inline-flex;flex-direction:column;gap:4px;align-items:center;'
+                'margin:0 10px 6px 0;font-size:10px;color:var(--ink-dim)">'
+                f'<a href="{_h(file_url)}" target="_blank" rel="noopener" title="Open the {_h(fmt)} MP4">{thumb}</a>'
+                f"<span>{_h(fmt)}{(' &middot; ' + _h(duration)) if duration else ''}</span>"
+                f'<a href="{_h(file_url)}" download style="color:var(--lane)">Download</a>'
+                "</span>"
+            )
+        return (
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);'
+            'letter-spacing:0.5px;margin-bottom:6px">Rendered videos &middot; saved on this run</div>'
+            f'<div style="display:flex;flex-wrap:wrap;align-items:flex-start">{tiles}</div>'
+            '<div style="font-size:11px;color:var(--ink-muted)">Use &#x25B6; Generate motion to '
+            "preview inline or render another format.</div>"
+        )
+
     # ---- /pack/<run_id> &mdash; content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
     @app.route("/pack/<run_id>")
     def content_pack(run_id):
@@ -42156,6 +42917,20 @@ function mhSetupMode(mode) {{
             )
             return _layout("Content builder", body, active="home")
 
+        # M30 — what's already rendered for this run (persisted visuals dir).
+        # Drives the pre-filled visual panels, the rendered-count annotation on
+        # the export buttons, the pack-preview wall, and the batch job's
+        # "only the missing ones" default.
+        _rendered = _rendered_visuals_for_run(run_id)
+        _approved_ids: list[str] = []
+        for card in approved:
+            _ach = card.get("achievement") or {}
+            _cid = str(card.get("_card_id") or _ach.get("swim_id") or "")
+            if _cid:
+                _approved_ids.append(_cid)
+        _rendered_ids = [cid for cid in _approved_ids if cid in _rendered]
+        rendered_n = len(_rendered_ids)
+
         # Per-card builder rows: header + the live creative toolbar (caption
         # tones, create graphic, motion) + a download for manual posting.
         cards_html = ""
@@ -42167,6 +42942,11 @@ function mhSetupMode(mode) {{
             card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
             _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
+            # M30/M32 — persisted renders show on page load, no re-render.
+            _initial_visual = _prefilled_visual_panel_html(
+                run_id, card_id_raw, _rendered.get(str(card_id_raw))
+            )
+            _initial_motion = _rendered_motion_strip_html(run_id, card_id_raw)
             cards_html += f"""
 <div class="card" id="pc-{_h(card_id_raw)}" style="margin-bottom:14px;page-break-inside:avoid">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
@@ -42178,7 +42958,14 @@ function mhSetupMode(mode) {{
       <span class="tag good">approved</span>
     </div>
   </div>
-  {_render_card_creative_toolbar(run_id, card_id_raw)}
+  {
+                _render_card_creative_toolbar(
+                    run_id,
+                    card_id_raw,
+                    initial_visual_html=_initial_visual,
+                    initial_motion_html=_initial_motion,
+                )
+            }
   {_render_stored_translations(card)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
@@ -42234,6 +43021,231 @@ function mhSetupMode(mode) {{
         # passes the shorter body copy.
         _ai_banner_html = _ai_unavailable_banner(_AI_UNAVAILABLE_DETAIL_PACK)
 
+        # ---- M31 (UX-3): the reel composer -----------------------------
+        # A rank-ordered checkbox list of approved cards (top 3 pre-checked,
+        # max 5), a live duration readout mirroring reel_duration_for's
+        # maths, rhythm presets mapping onto the R1.12 request shape, an
+        # audio-mix select when voiceover is enabled, and the existing
+        # format chips. Untouched defaults send NO extra params, so the
+        # default top-3 reel stays byte-identical.
+        _default_reel_ids = _approved_ids[:3]
+        _composer_rows = ""
+        for _idx, card in enumerate(approved[:10]):
+            _ach = card.get("achievement") or {}
+            _cid = str(card.get("_card_id") or _ach.get("swim_id") or "")
+            if not _cid:
+                continue
+            _label = " · ".join(
+                b
+                for b in (
+                    str(_ach.get("swimmer_name") or "").strip(),
+                    str(_ach.get("event") or "").strip(),
+                )
+                if b
+            )
+            _thumb = url_for("api_card_thumb", run_id=run_id, card_id=_cid)
+            _checked = "checked" if _cid in _default_reel_ids else ""
+            _composer_rows += (
+                '<label style="display:flex;align-items:center;gap:10px;padding:6px 8px;'
+                "border:1px solid var(--border);border-radius:8px;cursor:pointer;"
+                'background:color-mix(in oklab, var(--panel) 60%, transparent)">'
+                f'<input type="checkbox" class="mh-reel-pick" value="{_h(_cid)}" {_checked} '
+                'onchange="mhReelComposerSync()">'
+                f'<span style="color:var(--ink-muted);font-size:11px;min-width:22px">#{_idx + 1}</span>'
+                f'<img src="{_h(_thumb)}" alt="" loading="lazy" '
+                'style="width:34px;aspect-ratio:4/5;object-fit:cover;border-radius:4px;'
+                'border:1px solid var(--border);background:var(--panel)" onerror="this.style.visibility=\'hidden\'">'
+                f'<span style="font-size:12px;color:var(--ink)">{_h(_label) or _h(_cid)}</span>'
+                "</label>"
+            )
+        _mix_select = ""
+        if _voiceover_enabled():
+            _mix_select = (
+                '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;'
+                'color:var(--ink-dim)">Audio mix '
+                '<select id="mh-reel-mix" onchange="mhReelComposerSync()" '
+                'style="font-size:12px;padding:4px 8px;min-height:0">'
+                '<option value="">Default</option>'
+                '<option value="voice_lead">Voice-led</option>'
+                '<option value="balanced">Balanced</option>'
+                '<option value="music_forward">Music-forward</option>'
+                "</select></label>"
+            )
+        _reel_composer_html = f"""
+<div class="card no-print" id="mh-reel-composer" data-default-cards="{_h(",".join(_default_reel_ids))}" style="margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:13px;font-weight:700">Meet reel</div>
+      <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Tick up to 5 moments &mdash; the top 3 are picked for you. Rank order decides the running order.</div>
+    </div>
+    <div id="mh-reel-duration" style="font-size:13px;font-weight:700;color:var(--medal)"></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px;margin:10px 0">{_composer_rows}</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim)">Rhythm
+      <select id="mh-reel-rhythm" onchange="mhReelComposerSync()" style="font-size:12px;padding:4px 8px;min-height:0">
+        <option value="steady">Steady &mdash; even beats</option>
+        <option value="punchy">Punchy &mdash; lead moment holds longer</option>
+        <option value="showcase">Showcase &mdash; longer cover &amp; outro</option>
+      </select>
+    </label>
+    {_mix_select}
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn mh-reel-go" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
+            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel</button>
+    <button class="btn secondary mh-reel-go" style="font-size:12px;padding:6px 14px"
+            onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
+  </div>
+</div>"""
+
+        # ---- M30: Create-all-graphics + rendered-count + pack wall ------
+        _render_all_url = url_for("api_run_render_all_job", run_id=run_id)
+        _missing_n = len(approved) - rendered_n
+        _create_all_html = f"""
+<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Build the whole pack</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">
+      <span id="mh-renderall-count">{rendered_n} of {len(approved)}</span> approved cards have graphics.
+      One click renders the rest in the background &mdash; every card, every format.</div>
+    <div id="mh-renderall-status" class="dim" role="status" aria-live="polite" style="font-size:12px;margin-top:4px;min-height:1.2em"></div>
+  </div>
+  <button class="btn" id="mh-renderall-go" data-render-all-url="{_h(_render_all_url)}"
+          style="font-size:12px;padding:6px 14px;background:var(--lane);color:var(--lane-ink);border:none">
+    &#x2726; Create all graphics</button>
+</div>"""
+
+        _wall_tiles = ""
+        for _cid in _approved_ids:
+            _info = _rendered.get(_cid)
+            if not _info:
+                continue
+            _fmt = next(
+                (f for f in _THUMB_FORMAT_PREFERENCE if f in (_info.get("png_paths") or {})),
+                None,
+            )
+            if _fmt is None:
+                continue
+            _vid = (_info.get("format_ids") or {}).get(_fmt) or _info.get("visual_id") or ""
+            if not _vid:
+                continue
+            _png_url = url_for("api_visual_png", vid=_vid, format_name="feed_portrait")
+            _wall_tiles += (
+                f'<img src="{_h(_png_url)}" alt="" loading="lazy" '
+                'style="width:100%;aspect-ratio:4/5;object-fit:cover;display:block;'
+                'background:var(--panel)"/>'
+            )
+        _wall_html = ""
+        if _wall_tiles:
+            _wall_html = f"""
+<div class="card no-print" style="margin-bottom:14px">
+  <div style="font-size:13px;font-weight:700">Pack preview</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin:2px 0 10px">How this pack reads as a feed grid &mdash; if two cards look like twins here, regenerate one before exporting.</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;max-width:420px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--border)">{_wall_tiles}</div>
+</div>"""
+
+        # ---- M33: photo coverage — which swimmers still lack a photo ----
+        _coverage_html = ""
+        try:
+            _cov_profile_id = profile_id or run_data.get("club_filter") or "_run_" + run_id
+            _cov_profile_id = re.sub(r"[^a-z0-9_-]", "-", _cov_profile_id.lower()).strip("-") or (
+                "_run_" + run_id
+            )
+            _lib_names: list[str] = []
+            if _v8_ok and _v8_get_media_store is not None:
+                _photo_types = {"athlete_action", "athlete_headshot", "team_photo", "other"}
+                for _a in _v8_get_media_store().list(profile_id=_cov_profile_id):
+                    if _a.type in _photo_types:
+                        _lib_names.extend(
+                            str(n).strip().lower() for n in _a.linked_athlete_names if n
+                        )
+            _lib_name_set = set(_lib_names)
+
+            def _has_photo(name_lc: str) -> bool:
+                return any(name_lc == ln or name_lc in ln or ln in name_lc for ln in _lib_name_set)
+
+            _cov_athletes: list[tuple[str, str]] = []  # (athlete, first card id)
+            _cov_seen: set[str] = set()
+            for card in approved:
+                _ach = card.get("achievement") or {}
+                _nm = str(_ach.get("swimmer_name") or "").strip()
+                _cid = str(card.get("_card_id") or _ach.get("swim_id") or "")
+                if _nm and _cid and _nm.lower() not in _cov_seen:
+                    _cov_seen.add(_nm.lower())
+                    _cov_athletes.append((_nm, _cid))
+            if _cov_athletes:
+                _with_photo = [nm for nm, _ in _cov_athletes if _has_photo(nm.lower())]
+                _missing = [(nm, cid) for nm, cid in _cov_athletes if not _has_photo(nm.lower())]
+                _missing_btns = ""
+                for _nm, _cid in _missing[:12]:
+                    _first = _h(_nm.split(" ")[0])
+                    _cuid = str(_cid).replace(":", "_").replace(",", "_")
+                    _photo_url = url_for("api_card_photo_upload", run_id=run_id, card_id=_cid)
+                    _create_url = url_for("api_create_graphic", run_id=run_id, card_id=_cid)
+                    _oc = _h(
+                        "mhCardPhotoUpload(this, "
+                        + json.dumps(_photo_url)
+                        + ", "
+                        + json.dumps(_create_url)
+                        + ", "
+                        + json.dumps(_cuid)
+                        + ", 'feed_portrait')"
+                    )
+                    _missing_btns += (
+                        f'<button type="button" class="btn secondary" onclick="{_oc}" '
+                        'style="font-size:11px;padding:4px 10px;border-style:dashed" '
+                        f'title="Upload a photo of {_h(_nm)} — it links to them in your library and renders their card">'
+                        f"+ Add photo of {_first}</button>"
+                    )
+                if _missing:
+                    _cov_body = (
+                        f"<strong>{len(_with_photo)} of {len(_cov_athletes)}</strong> swimmers in "
+                        "this pack have a photo in your library. Add the missing ones and their "
+                        "cards switch from text-led to photo-led automatically."
+                    )
+                else:
+                    _cov_body = (
+                        f"<strong>All {len(_cov_athletes)}</strong> swimmers in this pack have a "
+                        "photo in your library — every card can render photo-led."
+                    )
+                _coverage_html = f"""
+<div class="card no-print" style="margin-bottom:14px;border-left:3px solid var(--lane)">
+  <div style="font-size:13px;font-weight:700">Photo coverage</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin:4px 0 8px">{_cov_body}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">{_missing_btns}</div>
+</div>"""
+        except Exception:
+            _coverage_html = ""
+
+        # M32 — restore the reel on revisit whenever its file exists (the old
+        # behaviour only restored when review comments happened to exist).
+        _reel_prerendered = (RUNS_DIR / run_id / "motion" / "reel_3.mp4").exists()
+
+        # M30 — honest export gating copy: the ZIPs bundle only what exists.
+        if not approved:
+            _export_note = ""
+        elif rendered_n == 0:
+            _export_note = (
+                "Nothing rendered yet — the ZIPs would be empty. "
+                "Use “Create all graphics” above first."
+            )
+        elif _missing_n > 0:
+            _export_note = (
+                f"{rendered_n} of {len(approved)} approved cards have graphics — "
+                f"the ZIPs include only those {rendered_n}. "
+                "Use “Create all graphics” to build the rest first."
+            )
+        else:
+            _export_note = f"All {len(approved)} approved cards are rendered and ready to export."
+        _export_disabled_attr = (
+            ' aria-disabled="true" onclick="return false" '
+            'style="pointer-events:none;opacity:0.45" '
+            'title="No graphics rendered yet — use Create all graphics first"'
+            if rendered_n == 0
+            else ""
+        )
+
         body = f"""
 <style>
 @media print {{
@@ -42259,21 +43271,11 @@ function mhSetupMode(mode) {{
   </div>
 </section>
 
-<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-  <div>
-    <div style="font-size:13px;font-weight:700">Meet reel</div>
-    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a branded MP4 reel — one format, or every cut in a single pass.</div>
-  </div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-            onclick="generateReel(this, {
-            repr(_reel_url)
-        })">&#x25B6; Generate reel from this meet</button>
-    <button class="btn secondary" style="font-size:12px;padding:6px 14px"
-            onclick="generateReelBatch(this, {repr(_reel_url)})">All 4 formats</button>
-  </div>
-</div>
+{_create_all_html}
+{_coverage_html}
+{_reel_composer_html}
 <div id="reel-panel" class="no-print" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
+{_wall_html}
 {
             (
                 '<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;'
@@ -42333,28 +43335,43 @@ function mhSetupMode(mode) {{
         }</span></h2>
 {cards_html}
 
-<div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
-  <a class="btn" href="{_export_zip_url}"
-     title="Every approved card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
-  <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
-  <a class="btn secondary" href="{_bulk_export_url}"
-     title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
-  <a class="btn secondary" href="{_print_tool_url}"
-     title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
-  <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
+<div class="no-print" style="margin-top:16px">
+  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin-bottom:8px">{
+            _export_note
+        }</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}
+       title="Every rendered card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
+    <a class="btn secondary" href="{_zip_url}"{
+            _export_disabled_attr
+        }>Download all visuals (.zip)</a>
+    <a class="btn secondary" href="{_bulk_export_url}"
+       title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
+    <a class="btn secondary" href="{_print_tool_url}"
+       title="Proof and export a print-ready PDF (posters, flyers, banners, merch) from this meet's cards — pre-flight checked before you send it to a printer">Print &amp; merch&hellip;</a>
+    <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
+  </div>
 </div>
 
+<style>{_CARD_TOOLBAR_CSS}</style>
+{_CARD_TOOLBAR_JS}
 <script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
 {_card_creative_js()}
 <script>
-// UI 1.8 - on load, if this run already has reel review comments, surface the
-// cached reel (or a comments-only view) so a returning reviewer sees their
-// pinned feedback without re-rendering.
+// UI 1.8 / M32 - on load, surface the cached reel whenever its rendered file
+// still exists on this run (not only when review comments happen to exist),
+// so a returning user finds their MP4 instead of a blank builder.
 (function(){{
   var reelUrl = {json.dumps(_reel_url)};
+  var prerendered = {json.dumps(_reel_prerendered)};
   var panel = document.getElementById('reel-panel');
   if (!panel || typeof mhReelComments !== 'function') return;
   var fileUrl = reelUrl + '-file?n=3&format=story';
+  if (prerendered) {{
+    panel.style.display = '';
+    mhRenderReel(panel, reelUrl, 'story', fileUrl);
+    return;
+  }}
   fetch(reelUrl + '/comments?target=reel', {{headers:{{'Accept':'application/json'}}}})
     .then(function(r){{ return r.json(); }})
     .then(function(j){{
@@ -42366,6 +43383,48 @@ function mhSetupMode(mode) {{
         .catch(function(){{ mhRenderReelCommentsOnly(panel, reelUrl, n); }});
     }})
     .catch(function(){{}});
+}})();
+
+// M31 - initialise the reel composer readout (duration + max-5 rule).
+if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
+
+// M30 - "Create all graphics": one background job over the approved cards
+// still missing a graphic, with honest per-card progress, then a reload so
+// the server-rendered panels + pack wall show everything.
+(function(){{
+  var go = document.getElementById('mh-renderall-go');
+  if (!go) return;
+  var status = document.getElementById('mh-renderall-status');
+  var say = function(m) {{ if (status) status.textContent = m; }};
+  go.addEventListener('click', function(){{
+    go.disabled = true;
+    say('Starting…');
+    fetch(go.dataset.renderAllUrl, {{method:'POST', headers:{{'Accept':'application/json', 'Content-Type':'application/json'}}, body:'{{}}'}})
+      .then(function(r){{ return r.json().then(function(j){{ return {{status: r.status, j: j}}; }}); }})
+      .then(function(res){{
+        var j = res.j || {{}};
+        if (res.status === 200 && j.status === 'done') {{ say(j.message || 'Everything is already rendered.'); go.disabled = false; return; }}
+        if (res.status !== 202 || !j.poll_url) {{
+          go.disabled = false;
+          say(j.user_message || j.error || 'Could not start the batch render.');
+          return;
+        }}
+        var poll = function(){{
+          fetch(j.poll_url).then(function(r){{ return r.json(); }}).then(function(s){{
+            if (s.status === 'done') {{ say('Done — reloading…'); location.reload(); return; }}
+            if (s.status === 'error') {{
+              go.disabled = false;
+              say(s.user_message || s.error || 'Batch render failed.');
+              return;
+            }}
+            say((s.done || 0) + ' of ' + (s.total || 0) + ' rendered' + (s.current ? (' — designing ' + s.current) : '') + '…');
+            setTimeout(poll, 3000);
+          }}).catch(function(){{ setTimeout(poll, 5000); }});
+        }};
+        setTimeout(poll, 2000);
+      }})
+      .catch(function(){{ go.disabled = false; say('Network error — try again.'); }});
+  }});
 }})();
 </script>
 """
@@ -43066,7 +44125,7 @@ function mhSetupMode(mode) {{
                     "ok": False,
                     "error": "research_busy",
                     "message": (
-                        "Research is already running — wait for it to finish, " "then ask again."
+                        "Research is already running — wait for it to finish, then ask again."
                     ),
                 }
             )
@@ -44311,9 +45370,36 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 )
         rows_html = ""
         gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
+        untagged_n = 0  # M34 — photos with no athlete link, tags, or vision record
+        _skip_tag_types = {"footage", "logo", "sponsor_logo", "brand_pattern"}
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
+            _parsed = ad.get("description_parsed") or {}
+            _has_vision = bool(isinstance(_parsed, dict) and _parsed.get("vision"))
+            _is_untagged = (
+                ad.get("type") not in _skip_tag_types
+                and not (ad.get("linked_athlete_names") or [])
+                and not (ad.get("tags") or [])
+                and not _has_vision
+            )
+            if _is_untagged:
+                untagged_n += 1
+            # M34 — honest tagging state per row: an "auto" marker on AI-linked
+            # athletes (reviewable metadata), an "untagged" badge when nothing
+            # has tagged the photo yet.
+            _tag_badges = ""
+            if _has_vision and athlete_names:
+                _tag_badges += (
+                    ' <span class="tag" style="font-size:9px" '
+                    'title="AI-tagged from the photo — review and edit anytime">&#10024; auto</span>'
+                )
+            if _is_untagged:
+                _tag_badges += (
+                    ' <span class="tag warn" style="font-size:10px" '
+                    'title="No athlete or scene tags yet — add a description with '
+                    "the swimmer's name, or run AI tagging below\">untagged</span>"
+                )
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
             _cutout_url = url_for("media_library_cutout_page", asset_id=ad.get("id", ""))
@@ -44358,7 +45444,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
   <td data-label="Preview"><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td data-label="Type">{_h(ad.get("type", ""))}</td>
-  <td data-label="Athlete">{_h(athlete_names)}</td>
+  <td data-label="Athlete">{_h(athlete_names)}{_tag_badges}</td>
   <td data-label="Venue / Event">{_h(ad.get("linked_venue") or ad.get("linked_event") or "")}</td>
   <td data-label="Permission">{_h(ad.get("permission_status", ""))}</td>
   <td data-label="ID"><code>{_h(ad.get("id", "")[:12])}</code></td>
@@ -44483,6 +45569,76 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f"{_sb_msg}</div>"
             )
 
+        # M34 — bulk vision tagging for the photos nothing has tagged yet.
+        # Honest availability: with no provider the button is disabled with
+        # plain copy (photos stay usable; the manual description flow works).
+        describe_panel = ""
+        if untagged_n > 0:
+            _vision_ok = _vision_tagging_available()
+            _describe_url = url_for("api_media_library_describe_job")
+            _btn_disabled = "" if _vision_ok else "disabled"
+            _note = (
+                "AI looks at each photo and fills in the swimmer (from your roster), "
+                "the shot type and scene tags &mdash; you can review or edit "
+                "everything afterwards. The automatic photo picker stays "
+                "deterministic; this only writes the metadata it reads from."
+                if _vision_ok
+                else "AI tagging needs a Gemini or Anthropic API key, which isn&rsquo;t "
+                "configured on this deployment. Your photos stay fully usable &mdash; "
+                "add the swimmer&rsquo;s name in each photo&rsquo;s description instead."
+            )
+            describe_panel = f"""
+<div class="card" id="mh-describe-panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-4);flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0 0 4px">Auto-tag your photos <span class="dim" style="font-weight:400">&middot; AI</span></h2>
+      <p class="dim" style="margin:0;max-width:560px">{_note}</p>
+    </div>
+    <div style="text-align:right">
+      <button type="button" class="btn" id="mh-describe-go" data-describe-url="{_h(_describe_url)}" {_btn_disabled}>
+        &#10024; Describe {untagged_n} untagged photo{"s" if untagged_n != 1 else ""}</button>
+      <div id="mh-describe-status" class="dim" role="status" aria-live="polite" style="margin-top:var(--sp-2);font-size:12px;min-height:1.2em"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {{
+  var go = document.getElementById('mh-describe-go');
+  if (!go || go.disabled) return;
+  var status = document.getElementById('mh-describe-status');
+  go.addEventListener('click', function() {{
+    go.disabled = true;
+    status.textContent = 'Starting…';
+    fetch(go.dataset.describeUrl, {{method: 'POST', headers: {{'Accept': 'application/json', 'Content-Type': 'application/json'}}, body: '{{}}'}})
+      .then(function(r) {{ return r.json().then(function(j) {{ return {{status: r.status, j: j}}; }}); }})
+      .then(function(res) {{
+        var j = res.j || {{}};
+        if (res.status === 200 && j.status === 'done') {{ status.textContent = j.message || 'Nothing to tag.'; return; }}
+        if (res.status !== 202 || !j.poll_url) {{
+          go.disabled = false;
+          status.textContent = j.user_message || j.error || 'Could not start tagging.';
+          return;
+        }}
+        var poll = function() {{
+          fetch(j.poll_url).then(function(r) {{ return r.json(); }}).then(function(s) {{
+            if (s.status === 'done') {{ status.textContent = 'Done — reloading…'; location.reload(); return; }}
+            if (s.status === 'error') {{
+              go.disabled = false;
+              status.textContent = s.user_message || s.error || 'Tagging failed.';
+              return;
+            }}
+            status.textContent = 'Tagging ' + (s.done || 0) + ' of ' + (s.total || 0) + (s.current ? (' — ' + s.current) : '') + '…';
+            setTimeout(poll, 2500);
+          }}).catch(function() {{ setTimeout(poll, 4000); }});
+        }};
+        setTimeout(poll, 1500);
+      }})
+      .catch(function() {{ go.disabled = false; status.textContent = 'Network error — try again.'; }});
+  }});
+}})();
+</script>
+"""
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Media library</span>
@@ -44496,24 +45652,24 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </section>
 {shared_banner}
 <div class="card">
-  <h2>Upload a photo</h2>
-  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
+  <h2>Upload photos</h2>
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Pick several at once &mdash; each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment. On a phone you can take a photo or share one straight from your camera roll into the library.</p>
   <form id="ml-upload-form" data-mh-capture-form method="POST" action="{
             url_for("api_media_library_upload")
-        }" enctype="multipart/form-data" data-loader-text="Uploading photo">
-    <label class="req" for="ml-file">File</label>
-    <input id="ml-file" type="file" name="file" accept="image/*" required>
+        }" enctype="multipart/form-data" data-loader-text="Uploading photos">
+    <label class="req" for="ml-file">Files</label>
+    <input id="ml-file" type="file" name="file" accept="image/*" multiple required>
     <input id="ml-capture" type="file" accept="image/*" capture="environment" hidden>
-    <label for="ml-desc">Description</label>
+    <label for="ml-desc">Description <span class="dim" style="font-weight:400">(applies to every photo in this batch)</span></label>
     <input id="ml-desc" type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
     <label for="ml-type">Type</label>
     <select id="ml-type" name="asset_type">
-      <option value="athlete_photo">Athlete photo</option>
-      <option value="venue">Venue</option>
-      <option value="team">Team</option>
-      <option value="action">Action</option>
-      <option value="podium">Podium</option>
+      <option value="athlete_action">Athlete / action photo</option>
+      <option value="athlete_headshot">Headshot</option>
+      <option value="team_photo">Team</option>
+      <option value="venue_photo">Venue</option>
       <option value="logo">Logo</option>
+      <option value="other">Other</option>
     </select>
     <input type="hidden" name="profile_id" value="{profile_id}">
     <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3);flex-wrap:wrap">
@@ -44523,6 +45679,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <div id="ml-capture-status" class="dim" role="status" aria-live="polite" style="margin-top:var(--sp-3);min-height:1.2em"></div>
   </form>
 </div>
+{describe_panel}
 {imagine_panel}
 {
             (
@@ -44582,7 +45739,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "Uploads above still work; if this persists, ask your operator to check the data volume."
                 "</td></tr>"
                 if store_failed
-                else '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+                else (
+                    '<tr><td colspan="8" style="padding:var(--sp-7)">'
+                    '<div style="max-width:520px;margin:0 auto;text-align:left">'
+                    '<div style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--ink)">'
+                    "Get your club&rsquo;s photos onto cards in three steps</div>"
+                    '<ol style="margin:0;padding-left:20px;font-size:13px;color:var(--ink-dim);line-height:1.7">'
+                    "<li><strong>Upload 10+ action and podium shots</strong> from your meets &mdash; you can pick them all in one go.</li>"
+                    "<li><strong>Put the swimmer&rsquo;s name in the description</strong> &mdash; or let AI auto-tagging do it for you.</li>"
+                    "<li><strong>Best shots are picked automatically</strong> for each card; you can override the photo on any card.</li>"
+                    "</ol></div></td></tr>"
+                )
             )
         }</tbody>
     </table>
@@ -44592,7 +45759,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
 <script>{_ML_QUICK_ACTION_JS}</script>
-<script src="{url_for("static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js"))}"></script>
+<script src="{
+            url_for(
+                "static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js")
+            )
+        }"></script>
 """
         return _layout("Media library", body, active="media")
 
@@ -44620,7 +45791,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         "deployment. Re-save the photo as JPEG or PNG and upload again."
     )
     _PHOTO_TYPE_MSG = (
-        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, " "GIF or HEIC."
+        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, GIF or HEIC."
     )
     _PHOTO_UNREADABLE_MSG = (
         "That photo could not be read — the file appears corrupt or isn't "
@@ -44686,47 +45857,212 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             raise _PhotoRejectedError("unreadable_photo", _PHOTO_UNREADABLE_MSG)
         return dest
 
+    # ------------------------------------------------------------------
+    # M34 (PHOTOS-2) — AI-vision auto-tagging at upload + bulk describe.
+    # AI writes metadata once (reviewable, additive); the deterministic
+    # selector still makes every actual photo pick. Honest failure: no
+    # provider → no thread, no fake tag — the library shows an "untagged"
+    # badge and the manual description flow still works.
+    # ------------------------------------------------------------------
+
+    def _vision_tagging_available() -> bool:
+        """True when a vision-capable cloud provider is configured."""
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available
+
+            return bool(_llm_available())
+        except Exception:
+            return False
+
+    def _vision_roster_for(profile_id: str, run_id: Optional[str] = None) -> list[str]:
+        """The ONLY athlete names the vision pass may assign (roster anchor).
+
+        Union of the linked run's parsed swimmers (when the upload happened in
+        a run context) and every athlete the org's library already knows —
+        recorded names only, never guessed. Capped for prompt size.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+
+        def _add(raw) -> None:
+            v = str(raw or "").strip()
+            if v and v.lower() not in seen:
+                seen.add(v.lower())
+                names.append(v)
+
+        if run_id:
+            try:
+                run_data = _load_run(run_id) or {}
+                for ra in (run_data.get("recognition_report") or {}).get(
+                    "ranked_achievements"
+                ) or []:
+                    _add((ra.get("achievement") or {}).get("swimmer_name"))
+            except Exception:
+                pass
+        try:
+            store = _v8_get_media_store()
+            for a in store.list(profile_id=profile_id):
+                for nm in a.linked_athlete_names or []:
+                    _add(nm)
+        except Exception:
+            pass
+        return names[:60]
+
+    def _apply_vision_result(store, asset_id: str, vision: dict) -> None:
+        """Write one vision pass onto an asset — additive, reviewable.
+
+        Athlete names / scene tags merge via ``merge_links`` (human-entered
+        values always survive); ``has_face`` is set from the model's explicit
+        boolean; the asset TYPE is only refined when the upload left it as
+        ``other`` — a user's explicit form choice is never overwritten. The
+        full result (confidence included) lands under
+        ``description_parsed["vision"]`` so the pass is auditable.
+        """
+        asset = store.get(asset_id)
+        if asset is None:
+            return
+        fields: dict = {}
+        parsed = dict(asset.description_parsed or {})
+        parsed["vision"] = vision
+        fields["description_parsed"] = parsed
+        if vision.get("has_face") is not None:
+            fields["has_face"] = bool(vision["has_face"])
+        if (
+            vision.get("asset_type")
+            and vision["asset_type"] != "other"
+            and (asset.type or "other") == "other"
+        ):
+            fields["type"] = vision["asset_type"]
+        store.update_fields(asset_id, fields)
+        store.merge_links(
+            asset_id,
+            athlete_names=vision.get("athletes") or [],
+            tags=vision.get("scene_tags") or [],
+        )
+
+    def _autotag_asset_async(asset_id: str, profile_id: str, run_id: Optional[str] = None) -> bool:
+        """Vision-tag one freshly-uploaded photo in a background thread.
+
+        Returns True when a tagging thread was started; False when no
+        vision provider is configured (the photo stays fully usable —
+        "untagged" badge, manual description flow — never a fabricated tag).
+        The roster is resolved on the request thread; the provider call runs
+        in a daemon thread so the upload response never waits on the model.
+        """
+        if not asset_id or not _vision_tagging_available():
+            return False
+        roster = _vision_roster_for(profile_id, run_id)
+
+        def _work() -> None:
+            try:
+                from mediahub.media_library.describe import describe_photo_vision
+
+                store = _v8_get_media_store()
+                asset = store.get(asset_id)
+                if asset is None or not asset.path or not os.path.exists(asset.path):
+                    return
+                vision = describe_photo_vision(asset.path, roster=roster)
+                _apply_vision_result(store, asset_id, vision)
+            except Exception as e:
+                from mediahub.media_ai.llm import ClaudeUnavailableError as _CUE
+
+                if isinstance(e, _CUE):
+                    # Honest: the provider was attempted and failed — the photo
+                    # simply stays untagged (badge + manual flow), never fabricated.
+                    log.info("autotag %s: provider unavailable: %s", asset_id[:8], e)
+                else:
+                    log.exception("autotag %s: vision pass failed", asset_id[:8])
+
+        threading.Thread(target=_work, name=f"autotag-{asset_id[:8]}", daemon=True).start()
+        return True
+
     def _save_library_photo(
-        file_storage, profile_id, *, description="", asset_type="athlete_photo"
+        file_storage, profile_id, *, description="", asset_type="athlete_action", run_id=None
     ):
         """Persist one uploaded image into a profile's media library.
 
-        Shared by the media-library upload form and the PWA share-target
-        receiver (roadmap 1.22) so both paths handle on-disk storage,
-        validation, HEIC normalisation, and metadata parsing identically.
-        Raises ``_PhotoRejectedError`` when the upload isn't an acceptable
-        image — the caller decides whether to 415 or skip it.
+        Shared by the media-library upload form, the PWA share-target
+        receiver (roadmap 1.22) and the free-text quick-build so every path
+        handles on-disk storage, validation, HEIC normalisation, EXIF
+        orientation baking, metadata parsing and measurement identically.
+        ``run_id`` (already validated by the caller) stamps
+        ``linked_meet_ids`` so the evaluator can surface "photos uploaded
+        for this meet". Raises ``_PhotoRejectedError`` when the upload isn't
+        an acceptable image — the caller decides whether to 415 or skip it.
         """
         dest = _store_photo_upload(file_storage, profile_id)
 
+        # PHOTOS-1: bake the EXIF orientation into the pixels once, so Pillow
+        # (saliency, edits) and Chromium (the still render) see the same
+        # upright grid, then measure dimensions / orientation / dominant
+        # colours / technical quality so the selector's axes have real data.
+        from mediahub.media_library import tagger as _ml_tagger
+        from mediahub.media_library.models import MediaAsset, canonical_asset_type
+
+        _ml_tagger.bake_exif_orientation(dest)
+
         meta = _v8_parse_description(description) if description else {}
         store = _v8_get_media_store()
-        from mediahub.media_library.models import MediaAsset
 
         athlete_names = list(meta.get("athletes") or [])
         asset = MediaAsset(
             id="",
             filename=Path(file_storage.filename or dest.name).name,
             path=str(dest),
-            type=asset_type,
+            type=canonical_asset_type(asset_type) or "other",
             description_raw=description,
             description_parsed=meta,
             profile_id=profile_id,
             linked_athlete_names=athlete_names,
+            linked_meet_ids=[run_id] if run_id else [],
             linked_venue=meta.get("venue"),
             linked_event=meta.get("event"),
             tags=meta.get("tags") or [],
         )
-        return store.save(asset)
+        _ml_tagger.measure_asset(asset)
+        saved = store.save(asset)
+        # M34 — vision-tag the fresh upload in the background so bulk drops
+        # (which carry no typed description) still get athlete/scene metadata.
+        # Provider-gated inside; a no-provider deployment changes nothing.
+        _autotag_asset_async(saved.id, profile_id, run_id=run_id)
+        return saved
+
+    def _run_id_for_upload_stamp(raw_run_id) -> Optional[str]:
+        """Validate an upload's optional run-context id.
+
+        Only a run the *current session* can access may be stamped onto an
+        asset's ``linked_meet_ids`` — otherwise a crafted form post could
+        associate photos with another organisation's meet. Invalid or foreign
+        ids are dropped (the upload itself still succeeds, just unstamped).
+        """
+        rid = str(raw_run_id or "").strip()
+        if not rid or not re.fullmatch(r"[A-Za-z0-9_.-]+", rid):
+            return None
+        try:
+            run_data = _load_run(rid)
+            if run_data is None:
+                return None
+            if not _can_access_run(rid, run_data, _active_profile_id()):
+                return None
+        except Exception:
+            return None
+        return rid
 
     @app.route("/api/media-library", methods=["POST"])
     def api_media_library_upload():
+        """Save one or MANY photos into the org's library (M33 multi-upload).
+
+        The form input carries ``multiple``, so 40 gala photos are one submit
+        instead of 40 round-trips. The typed description / type apply to every
+        file in the batch; rejected files are skipped and counted (the whole
+        batch only errors when nothing could be saved).
+        """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
         from flask import request as _req
 
-        f = _req.files.get("file")
-        if not f:
+        files = [f for f in _req.files.getlist("file") if f and (f.filename or "").strip()]
+        if not files:
             return jsonify({"error": "no_file"}), 400
         profile_id = (_req.form.get("profile_id") or "").strip()
         if not profile_id:
@@ -44738,24 +46074,56 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if profile_id != active_pid and not profile_id.startswith("_run_"):
             return jsonify({"error": "forbidden"}), 403
         description = _req.form.get("description", "").strip()
-        asset_type = _req.form.get("asset_type", "athlete_photo").strip()
+        asset_type = _req.form.get("asset_type", "athlete_action").strip()
+        # PHOTOS-6: uploads made from a run context stamp the run onto the
+        # asset so the evaluator can offer "photos uploaded for this meet".
+        run_id = _run_id_for_upload_stamp(_req.form.get("run_id"))
 
-        try:
-            asset = _save_library_photo(
-                f, profile_id, description=description, asset_type=asset_type
-            )
-        except _PhotoRejectedError as e:
-            return jsonify({"error": e.code, "message": e.message}), 415
+        saved_assets: list = []
+        skipped = 0
+        first_error: Optional[_PhotoRejectedError] = None
+        for f in files:
+            try:
+                saved_assets.append(
+                    _save_library_photo(
+                        f,
+                        profile_id,
+                        description=description,
+                        asset_type=asset_type,
+                        run_id=run_id,
+                    )
+                )
+            except _PhotoRejectedError as e:
+                skipped += 1
+                if first_error is None:
+                    first_error = e
+        if not saved_assets:
+            # Nothing usable in the batch — same honest 415 the single-file
+            # contract always returned.
+            err = first_error or _PhotoRejectedError("unreadable_photo", _PHOTO_UNREADABLE_MSG)
+            return jsonify({"error": err.code, "message": err.message}), 415
 
         # AJAX callers get JSON; plain form submissions redirect back to the library.
         if (
             _req.headers.get("Accept", "").find("application/json") != -1
             or _req.headers.get("X-Requested-With") == "XMLHttpRequest"
         ):
+            first = saved_assets[0]
             return jsonify(
-                {"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset}
+                {
+                    "ok": True,
+                    # Back-compat single-asset field + the full batch.
+                    "asset": first.to_dict() if hasattr(first, "to_dict") else first,
+                    "assets": [a.to_dict() if hasattr(a, "to_dict") else a for a in saved_assets],
+                    "saved": len(saved_assets),
+                    "skipped": skipped,
+                }
             )
-        return redirect(url_for("media_library_page", profile_id=profile_id))
+        # The library page's ?shared banner tells the user what landed.
+        args = {"profile_id": profile_id, "shared": len(saved_assets)}
+        if skipped:
+            args["skipped"] = skipped
+        return redirect(url_for("media_library_page", **args))
 
     @app.route("/share-target", methods=["POST"])
     def share_target_receiver():
@@ -44783,6 +46151,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # Browsers post shared files under the manifest-declared "photos" field;
         # accept "file" too for resilience across share-sheet implementations.
         files = _req.files.getlist("photos") + _req.files.getlist("file")
+        # OS share sheets can't carry a run id, but a future share URL might —
+        # accept and validate it the same way the library upload does.
+        run_id = _run_id_for_upload_stamp(_req.form.get("run_id"))
         saved = 0
         skipped = 0
         for f in files:
@@ -44793,7 +46164,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 skipped += 1  # the OS bundled a non-image attachment — ignore it
                 continue
             try:
-                _save_library_photo(f, profile_id, description="", asset_type="athlete_photo")
+                _save_library_photo(
+                    f, profile_id, description="", asset_type="athlete_action", run_id=run_id
+                )
                 saved += 1
             except _PhotoRejectedError:
                 skipped += 1
@@ -44805,6 +46178,130 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if skipped:
             args["skipped"] = skipped
         return redirect(url_for("media_library_page", **args))
+
+    @app.route("/api/media-library/describe-job", methods=["POST"])
+    def api_media_library_describe_job():
+        """M34 — bulk "Describe N untagged photos" as one background job.
+
+        Runs the same roster-anchored vision pass the per-upload hook uses
+        over every untagged photo in the active org's library, with per-photo
+        progress via ``api_reel_job_status``. Honest by construction: no
+        provider configured → 503 with plain copy (photos stay usable, the
+        badge stays); a provider error on a photo lands in the job's
+        per-photo ``errors`` — never a fabricated tag. Three consecutive
+        provider failures abort the pass instead of hammering a dead key.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        profile_id = _active_profile_id() or ""
+        if not profile_id:
+            return jsonify({"error": "no_active_profile"}), 403
+        if not _vision_tagging_available():
+            return jsonify(
+                {
+                    "error": "ai_unavailable",
+                    "user_message": (
+                        "AI photo tagging needs a Gemini or Anthropic API key, "
+                        "which isn't configured on this deployment. Your photos "
+                        "stay fully usable — add the swimmer's name in each "
+                        "photo's description instead."
+                    ),
+                }
+            ), 503
+        store = _v8_get_media_store()
+        untagged = store.list_untagged(profile_id=profile_id)
+        if not untagged:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": "done",
+                    "total": 0,
+                    "message": "Every photo in this library already has tags.",
+                }
+            )
+        roster = _vision_roster_for(profile_id)
+        targets = [(a.id, a.path, a.filename or a.id) for a in untagged]
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "describe",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "total": len(targets),
+            "done": 0,
+            "current": "",
+            "tagged": [],
+            "errors": {},
+            "created_at": time.time(),
+            "owner_pid": profile_id,
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            from mediahub.media_library.describe import describe_photo_vision
+
+            consecutive_provider_failures = 0
+            try:
+                with _job_heartbeat(job):
+                    for idx, (aid, path, label) in enumerate(targets, start=1):
+                        job["current"] = str(label)
+                        _variant_job_save(job)
+                        try:
+                            if not path or not os.path.exists(path):
+                                job["errors"][aid] = "file missing on disk"
+                            else:
+                                vision = describe_photo_vision(path, roster=roster)
+                                _apply_vision_result(store, aid, vision)
+                                job["tagged"].append(aid)
+                                consecutive_provider_failures = 0
+                        except Exception as e:
+                            from mediahub.media_ai.llm import (
+                                ClaudeUnavailableError as _CUE,
+                            )
+
+                            job["errors"][aid] = str(e)
+                            if isinstance(e, _CUE):
+                                consecutive_provider_failures += 1
+                                if consecutive_provider_failures >= 3:
+                                    job["done"] = idx
+                                    job["status"] = "error"
+                                    job["error"] = str(e)
+                                    job["user_message"] = (
+                                        "The AI provider kept failing, so tagging "
+                                        "stopped early. Photos already tagged are "
+                                        "saved; try again later."
+                                    )
+                                    _variant_job_save(job)
+                                    return
+                        job["done"] = idx
+                        _variant_job_save(job)
+                if job["tagged"]:
+                    job["status"] = "done"
+                else:
+                    job["status"] = "error"
+                    job["error"] = "; ".join(list(job["errors"].values())[:3]) or "no photos tagged"
+                    job["user_message"] = "No photos could be tagged — see the per-photo errors."
+            except Exception as e:
+                job["status"] = "error"
+                job["error"] = str(e)
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"describe-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "total": len(targets),
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
 
     def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
         """Profile-scoped access guard for media-library files.
@@ -44844,6 +46341,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _session_can_access_profile(a.profile_id):
             return "", 403
         from flask import send_file
+
+        # M27 — ?poster=1 serves the deterministic poster frame extracted at
+        # footage ingest (mirrors the project-file route's pattern). Honest
+        # 404 when no poster was recorded (no FFmpeg at upload time) — the
+        # caller keeps its current <video>-tile behaviour.
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            meta = a.media_meta if isinstance(a.media_meta, dict) else {}
+            # basename only — the sidecar always sits beside the blob, and a
+            # tampered meta value must never traverse out of the blob dir.
+            poster_name = Path(str(meta.get("poster") or "")).name
+            poster = Path(a.path).parent / poster_name if poster_name else None
+            if not poster_name or poster is None or not poster.exists():
+                return "", 404
+            resp = send_file(str(poster), mimetype="image/png")
+            resp.headers["X-Content-Type-Options"] = "nosniff"
+            return resp
 
         suffix = re.sub(r"[^a-z0-9.]", "", Path(a.path).suffix.lower())
         mime = _IMAGE_SERVE_MIMES.get(suffix)
@@ -46179,7 +47692,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         f = _req.files.get("photo")
         if not f or not f.filename:
             return jsonify({"error": "no_file"}), 400
-        if not (f.mimetype or "").startswith("image/"):
+        # M24 — the per-card upload accepts race clips (video/*) too: a coach
+        # on the card-review page can finally say "here's the video of this
+        # race". Clips route through the footage ingest spine (probe + M27
+        # poster + the review-first needs_approval permission default).
+        from mediahub.video.ingest import is_video_filename as _is_video_name
+
+        _is_clip = (f.mimetype or "").startswith("video/") or _is_video_name(f.filename or "")
+        if not _is_clip and not (f.mimetype or "").startswith("image/"):
             return jsonify({"error": "not_an_image"}), 400
 
         # Photos live under the ORGANISATION's library (not a per-run
@@ -46191,6 +47711,80 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
 
+        if _is_clip:
+            from mediahub.video.ingest import ingest_footage_stream
+
+            meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+            try:
+                clip_asset = ingest_footage_stream(
+                    f.stream,
+                    f.filename or "clip.mp4",
+                    profile_id=profile_id,
+                    description=(
+                        f"Race clip of {athlete} — uploaded on the card for {meet_name}".strip(" —")
+                    ),
+                    uploaded_by=_active_profile_id(),
+                    # permission default needs_approval preserved (review-first).
+                )
+            except ValueError as e:
+                return jsonify({"error": "bad_footage", "message": str(e)}), 400
+            except OSError:
+                log.exception("card race-clip upload could not be stored")
+                return jsonify(
+                    {
+                        "error": "storage_failed",
+                        "message": "The clip couldn't be saved on the server — its "
+                        "storage is full or unavailable. Please try again.",
+                    }
+                ), 500
+            store = _v8_get_media_store()
+            # Link the clip to THIS card's athlete + meet so M23's footage
+            # sourcing (and the picker's memory) can find it.
+            store.merge_links(
+                clip_asset.id,
+                athlete_names=[athlete] if athlete else [],
+                meet_ids=[run_id],
+            )
+            clip_asset = store.get(clip_asset.id) or clip_asset
+            # M25 — auto best-frame: the clip's top moment becomes a linked
+            # photo asset (permission INHERITED, never wider) so the still
+            # card lights up too. Best-effort: a frame miss never fails the
+            # clip upload.
+            frame_info = None
+            try:
+                from mediahub.video.best_frame import extract_best_frame
+
+                frame = extract_best_frame(clip_asset, store=store)
+                frame_info = {
+                    "id": frame.id,
+                    "url": url_for("api_media_library_file", asset_id=frame.id),
+                    "label": athlete or "best frame",
+                    "permission_status": frame.permission_status,
+                }
+            except Exception as e:
+                log.info("card clip best-frame extraction skipped: %s", e)
+            meta = clip_asset.media_meta if isinstance(clip_asset.media_meta, dict) else {}
+            return jsonify(
+                {
+                    "ok": True,
+                    "asset": {
+                        "kind": "clip",
+                        "id": clip_asset.id,
+                        "url": url_for("api_media_library_file", asset_id=clip_asset.id),
+                        "poster_url": (
+                            url_for("api_media_library_file", asset_id=clip_asset.id, poster=1)
+                            if meta.get("poster")
+                            else ""
+                        ),
+                        "label": athlete or "race clip",
+                        "filename": clip_asset.filename,
+                        "duration_ms": meta.get("duration_ms", 0),
+                        "permission_status": clip_asset.permission_status,
+                        "frame_asset": frame_info,
+                    },
+                }
+            )
+
         # Same ingest gate as the library form: extension allowlist, HEIC
         # normalisation, and a real decode check — a renamed .svg/.html must
         # never be stored (library files are served back same-origin).
@@ -46200,7 +47794,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": e.code, "message": e.message}), 415
 
         store = _v8_get_media_store()
+        from mediahub.media_library import tagger as _ml_tagger
         from mediahub.media_library.models import MediaAsset
+
+        # Same ingest spine as the library upload: upright pixels + measured
+        # dimensions/orientation/quality so the selector can rank this photo.
+        _ml_tagger.bake_exif_orientation(dest)
 
         meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
         asset = MediaAsset(
@@ -46217,7 +47816,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             permission_status="user_owned",
             approval_status="approved",
         )
+        _ml_tagger.measure_asset(asset)
         asset = store.save(asset)
+        # M34 — vision-tag the fresh upload in the background (provider-gated;
+        # a no-provider deployment simply keeps the human-entered athlete link).
+        _autotag_asset_async(asset.id, profile_id, run_id=run_id)
         return jsonify(
             {
                 "ok": True,
@@ -46229,6 +47832,82 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 },
             }
         )
+
+    @app.route("/api/runs/<run_id>/cards/<card_id>/photo-confirm", methods=["POST"])
+    def api_card_photo_confirm(run_id: str, card_id: str):
+        """Confirm a picker photo as being OF this card's athlete (M4 seam).
+
+        The PHOTOS-6 evaluator surfaces "photos uploaded for this meet" as
+        pick-from candidates; a human click here is the confirmation that
+        writes the athlete link (and the meet link) back onto the asset via
+        the store's additive ``merge_links`` — never auto-matched, never
+        overwriting human-entered links. Next meet, the picker suggests the
+        right face automatically.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+        athlete = str((target.get("achievement") or {}).get("swimmer_name") or "").strip()
+        body = request.get_json(silent=True) or {}
+        asset_id = str(body.get("asset_id") or "").strip()
+        if not asset_id:
+            return jsonify({"error": "asset_id_required"}), 400
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None:
+            return jsonify({"error": "asset_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        store.merge_links(
+            asset_id,
+            athlete_names=[athlete] if athlete else [],
+            meet_ids=[run_id],
+        )
+        return jsonify({"ok": True, "asset_id": asset_id, "athlete": athlete})
+
+    @app.route("/api/runs/<run_id>/cards/<card_id>/clip-unlink", methods=["POST"])
+    def api_card_clip_unlink(run_id: str, card_id: str):
+        """Detach a race clip from this card (M24's remove affordance).
+
+        Removes THIS run's meet link (and this card's athlete link) from the
+        footage asset so it no longer backs the card — the clip itself stays
+        in the club's library. Never deletes footage.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+        athlete = str((target.get("achievement") or {}).get("swimmer_name") or "").strip()
+        body = request.get_json(silent=True) or {}
+        asset_id = str(body.get("asset_id") or "").strip()
+        if not asset_id:
+            return jsonify({"error": "asset_id_required"}), 400
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if asset is None or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        athlete_lc = athlete.lower()
+        store.update_fields(
+            asset_id,
+            {
+                "linked_meet_ids": [m for m in (asset.linked_meet_ids or []) if m != run_id],
+                "linked_athlete_names": [
+                    n
+                    for n in (asset.linked_athlete_names or [])
+                    if str(n).strip().lower() != athlete_lc
+                ],
+            },
+        )
+        return jsonify({"ok": True, "asset_id": asset_id})
 
     @app.route("/api/runs/<run_id>/venue-import", methods=["POST"])
     def api_venue_import(run_id: str):
@@ -47212,14 +48891,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # library remembers as being OF this card's athlete (linked when
         # they were uploaded on an earlier card/meet) are flagged and
         # sorted first, so next meet the right face is one click away.
+        # Canonical types only — legacy values ("athlete_photo", "action",
+        # "podium", …) are alias-mapped at deserialise (MediaAsset.from_dict),
+        # so store-read assets never carry them.
         _photo_types = {
             "athlete_action",
             "athlete_headshot",
-            "athlete_photo",
             "team_photo",
             "venue_photo",
-            "action",
-            "podium",
             "other",
         }
         _card_athlete = str(ach.get("swimmer_name") or "").strip()
@@ -47251,6 +48930,40 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     }
                 )
         available_photos.sort(key=lambda p: (not p["suggested"], p["label"]))
+
+        # M24 — race clips linked to THIS card (this run + this athlete),
+        # surfaced as a 'race clip' chip beside the photo picker. Read fresh
+        # from the store so duration / permission / poster reflect ingest's
+        # media_meta rather than the render-shaped asset dicts.
+        race_clips = []
+        try:
+            _store_rc = _v8_get_media_store()
+            for _fa in _store_rc.list(profile_id=profile_id, asset_type="footage", limit=100):
+                if run_id not in (_fa.linked_meet_ids or []):
+                    continue
+                _fnames = [str(n).strip().lower() for n in (_fa.linked_athlete_names or [])]
+                if _card_athlete_lc and not any(
+                    _card_athlete_lc == n or _card_athlete_lc in n or n in _card_athlete_lc
+                    for n in _fnames
+                ):
+                    continue
+                _fmeta = _fa.media_meta if isinstance(_fa.media_meta, dict) else {}
+                race_clips.append(
+                    {
+                        "id": _fa.id,
+                        "filename": _fa.filename,
+                        "duration_ms": _fmeta.get("duration_ms", 0),
+                        "permission_status": _fa.permission_status,
+                        "usable": _fa.is_usable_for_post(),
+                        "poster_url": (
+                            url_for("api_media_library_file", asset_id=_fa.id, poster=1)
+                            if _fmeta.get("poster")
+                            else ""
+                        ),
+                    }
+                )
+        except Exception:
+            race_clips = []
 
         # Gen v2 Tier B: ``?candidates=N`` (or JSON ``{"candidates": N}``)
         # renders a ranked candidate POOL — N design-spec-directed
@@ -47313,6 +49026,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "variation_signature": new_sig,
                     "explanation": _build_card_explanation(target),
                     "available_photos": available_photos,
+                    "race_clips": race_clips,
                     "chosen_asset_id": chosen_asset_id,
                     "no_photo": force_no_photo,
                     "card_athlete": _card_athlete,
@@ -47392,6 +49106,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     sponsor_name=rotated_sponsor_name,
                     sponsor_logo_path=rotated_sponsor_logo_path,
                     user_overrides=user_overrides,
+                    # M2 handoff — the pack path's burst-family threading, now on
+                    # the per-card route too: this render avoids near-frames of
+                    # photos already used by the run's OTHER rendered cards.
+                    recent_asset_families=_recent_asset_families_for_run(
+                        run_id, card_id, media_assets
+                    ),
                 )
         except _RenderBusy:
             return _render_busy_response("graphic")
@@ -47419,6 +49139,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "explanation": explanation,
                 # Per-graphic photo picker state.
                 "available_photos": available_photos,
+                "race_clips": race_clips,
                 "chosen_asset_id": chosen_asset_id,
                 "no_photo": force_no_photo,
                 "card_athlete": _card_athlete,
@@ -49259,33 +50980,27 @@ voice, and queues them for one-click approval.</p>
             ),
         }
 
-    @app.route("/api/runs/<run_id>/card/<card_id>/motion", methods=["POST", "GET"])
-    def api_card_motion(run_id: str, card_id: str):
-        """Render (or serve cached) MP4 story for a single card.
+    def _assemble_card_motion_inputs(run_id: str, card_id: str):
+        """Shared validation + payload assembly for the per-card motion routes.
 
-        Lazy: returns the cached file on cache hit; renders via Remotion on
-        cache miss. Always serves the MP4 with the correct mime type so the
-        UI can use <video src=&hellip;> or a direct download.
-
-        ``?format=story|square|landscape`` picks the output cut (default
-        story, 1080×1920).
+        Returns ``(inputs_dict, None)`` on success or ``(None, (response,
+        status))`` — the same contract as ``_assemble_reel_inputs`` — so the
+        sync route and the M32 async job route stay behaviourally identical.
         """
-        from flask import send_file
-
-        try:
-            from mediahub.visual import motion as _motion
-        except Exception as e:
-            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+        from mediahub.visual import motion as _motion
 
         fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
         if fmt not in _motion.MOTION_FORMATS:
-            return jsonify(
-                {
-                    "error": "bad_format",
-                    "detail": f"unknown motion format {fmt!r}",
-                    "valid_formats": sorted(_motion.MOTION_FORMATS),
-                }
-            ), 400
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_format",
+                        "detail": f"unknown motion format {fmt!r}",
+                        "valid_formats": sorted(_motion.MOTION_FORMATS),
+                    }
+                ),
+                400,
+            )
 
         run_data = _load_run(run_id)
         if run_data is None:
@@ -49295,11 +51010,11 @@ voice, and queues them for one-click approval.</p>
                 try:
                     run_data = json.loads(run_json.read_text())
                 except Exception as e:
-                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+                    return None, (jsonify({"error": f"run_load_failed: {e}"}), 500)
             else:
-                return jsonify({"error": "run_not_found"}), 404
+                return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
+            return None, (jsonify({"error": "run_not_found"}), 404)
 
         rr = run_data.get("recognition_report") or {}
         ranked = rr.get("ranked_achievements") or []
@@ -49315,7 +51030,7 @@ voice, and queues them for one-click approval.</p>
                     target = {"achievement": c}
                     break
         if target is None:
-            return jsonify({"error": "card_not_found"}), 404
+            return None, (jsonify({"error": "card_not_found"}), 404)
 
         # R1.19 — optional per-card audio-mix profile (?mix=voice_lead|balanced|
         # music_forward), a deterministic operator knob folded into the card
@@ -49325,13 +51040,16 @@ voice, and queues them for one-click approval.</p>
 
         mix_profile = (request.args.get("mix") or "").strip().lower()
         if mix_profile and mix_profile not in _audio_mux.AUDIO_MIX_PROFILES:
-            return jsonify(
-                {
-                    "error": "bad_mix",
-                    "detail": f"unknown audio mix profile {mix_profile!r}",
-                    "valid_mix": sorted(_audio_mux.AUDIO_MIX_PROFILES),
-                }
-            ), 400
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_mix",
+                        "detail": f"unknown audio mix profile {mix_profile!r}",
+                        "valid_mix": sorted(_audio_mux.AUDIO_MIX_PROFILES),
+                    }
+                ),
+                400,
+            )
 
         ach = target.get("achievement") or {}
         meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
@@ -49376,15 +51094,63 @@ voice, and queues them for one-click approval.</p>
         # brief exists (e.g. legacy runs from before the director landed).
         brief_dict = _latest_brief_for_card(run_id, card_id)
 
+        # M36 (UX-7) — the user's persisted Inspector tweaks follow the card
+        # into motion exactly as the still create-graphic route honours them:
+        # accent via the BrandKit-copy mechanism (+ brief palette, so the
+        # APCA-gated roleAccent matches the tweaked still), no-photo via the
+        # brief's photo treatment. Untouched cards pass through unchanged, so
+        # their motion cache keys stay byte-identical.
+        overrides = _inspector_overrides_for_card(run_id, card_id)
+        card_payload, brief_dict, brand_kit = _apply_inspector_overrides_to_motion(
+            overrides, card_payload, brief_dict, brand_kit
+        )
+
+        return (
+            {
+                "format": fmt,
+                "card": card_payload,
+                "brand_kit": brand_kit,
+                "out_path": out_path,
+                "out_name": out_name,
+                "variation_seed": variation_seed,
+                "brief": brief_dict,
+            },
+            None,
+        )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion", methods=["POST", "GET"])
+    def api_card_motion(run_id: str, card_id: str):
+        """Render (or serve cached) MP4 story for a single card.
+
+        Lazy: returns the cached file on cache hit; renders via Remotion on
+        cache miss. Always serves the MP4 with the correct mime type so the
+        UI can use <video src=&hellip;> or a direct download.
+
+        ``?format=story|square|landscape`` picks the output cut (default
+        story, 1080×1920). Synchronous — the UI now prefers the async
+        ``motion-job`` route (M32), which survives proxy timeouts on cold
+        renders; this route remains for API callers and cache-hit fetches.
+        """
+        from flask import send_file
+
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_card_motion_inputs(run_id, card_id)
+        if err is not None:
+            return err
+
         try:
             with _render_slot("motion", card_id, timeout=_RENDER_TRY_TIMEOUT):
                 mp4 = _motion.render_story_card(
-                    card_payload,
-                    brand_kit,
-                    out_path,
-                    variation_seed=variation_seed,
-                    brief=brief_dict,
-                    format_name=fmt,
+                    inputs["card"],
+                    inputs["brand_kit"],
+                    inputs["out_path"],
+                    variation_seed=inputs["variation_seed"],
+                    brief=inputs["brief"],
+                    format_name=inputs["format"],
                 )
         except _RenderBusy:
             return _render_busy_response("motion")
@@ -49408,8 +51174,165 @@ voice, and queues them for one-click approval.</p>
                 }
             ), 500
         return send_file(
-            str(mp4), mimetype="video/mp4", as_attachment=False, download_name=out_name
+            str(mp4),
+            mimetype="video/mp4",
+            as_attachment=False,
+            download_name=inputs["out_name"],
         )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion-job", methods=["POST"])
+    def api_card_motion_job(run_id: str, card_id: str):
+        """Kick off a background per-card motion render (M32); ``202`` +
+        ``{job_id, poll_url}``.
+
+        The synchronous ``/motion`` route holds the HTTP connection for the
+        whole 30–90s cold render — the exact proxy-timeout failure the reel
+        already fixed with ``/reel-job``. Same cure, same disk-backed job
+        store: render in a daemon thread, poll ``api_reel_job_status``, then
+        stream the finished MP4 from ``motion-file``.
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_card_motion_inputs(run_id, card_id)
+        if err is not None:
+            return err
+
+        # url_for needs the request context — resolve before the thread.
+        _file_kwargs = {"run_id": run_id, "card_id": card_id}
+        if inputs["format"] != _motion.DEFAULT_MOTION_FORMAT:
+            _file_kwargs["format"] = inputs["format"]
+        file_url = url_for("api_card_motion_file", **_file_kwargs)
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "motion",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _job_heartbeat(job):
+                    with _render_slot("motion", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                        mp4 = _motion.render_story_card(
+                            inputs["card"],
+                            inputs["brand_kit"],
+                            inputs["out_path"],
+                            variation_seed=inputs["variation_seed"],
+                            brief=inputs["brief"],
+                            format_name=inputs["format"],
+                        )
+                if not Path(mp4).exists():
+                    raise RuntimeError("mp4 missing after render")
+                job["status"] = "done"
+                job["video_url"] = file_url
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="motion"
+                    )
+                except Exception:
+                    pass
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Motion render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"motion-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion-file", methods=["GET"])
+    def api_card_motion_file(run_id: str, card_id: str):
+        """Serve an already-rendered per-card MP4 — never triggers a render.
+
+        The persistent counterpart of the blob URLs the old sync flow lost on
+        navigation (M32). ``?format=`` picks the cut; ``?poster=1`` serves the
+        poster-frame PNG sidecar written beside every rendered MP4.
+        """
+        from flask import send_file
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        try:
+            from mediahub.visual import motion as _motion
+
+            fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+            valid = fmt in _motion.MOTION_FORMATS
+        except Exception:
+            fmt, valid = "story", True
+        if not valid:
+            return jsonify({"error": "bad_format"}), 400
+        motion_dir = RUNS_DIR / run_id / "motion"
+        name = f"{card_id}.mp4" if fmt == "story" else f"{card_id}_{fmt}.mp4"
+        path = motion_dir / name
+        # Defence-in-depth: the card id is a single URL segment, but never let
+        # a crafted id escape the run's motion dir.
+        try:
+            if motion_dir.resolve() not in path.resolve().parents:
+                return jsonify({"error": "motion_not_rendered"}), 404
+        except OSError:
+            return jsonify({"error": "motion_not_rendered"}), 404
+        if not path.exists():
+            return jsonify({"error": "motion_not_rendered"}), 404
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            poster = path.with_suffix(".poster.png")
+            if not poster.exists():
+                return jsonify({"error": "poster_not_rendered"}), 404
+            return send_file(
+                str(poster),
+                mimetype="image/png",
+                as_attachment=False,
+                download_name=poster.name,
+            )
+        return send_file(str(path), mimetype="video/mp4", as_attachment=False, download_name=name)
 
     @app.route("/api/runs/<run_id>/card/<card_id>/motion/manifest", methods=["GET"])
     def api_card_motion_manifest(run_id: str, card_id: str):
@@ -49435,6 +51358,132 @@ voice, and queues them for one-click approval.</p>
             return jsonify(json.loads(sidecar.read_text(encoding="utf-8")))
         except Exception as e:
             return jsonify({"error": f"manifest_unreadable: {e}"}), 500
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/thumb.png")
+    def api_card_thumb(run_id: str, card_id: str):
+        """A lazy, cached thumbnail of the card's real graphic (M29 / UX-1).
+
+        The review page approves what will actually be posted, so each row
+        shows the card's design instead of text-only triage. Resolution
+        order — cheapest first, never a duplicate render:
+
+        1. the per-run thumb manifest (``card_thumbs.json``, the /try demo's
+           lazy render+cache pattern);
+        2. any visual already persisted for this card under the run's
+           ``visuals`` dir (served as-is, byte-identical);
+        3. one ``feed_portrait`` render through the normal pipeline — stable
+           per-card seed, the card's persisted Inspector overrides honoured —
+           inside the existing ``_render_slot('graphic', …)`` gate. A
+           saturated gate answers the standard 429 renderer-busy payload so
+           the row can retry politely instead of hanging.
+        """
+        from flask import send_file
+
+        if not _v8_ok or _v8_create_visual_for_item is None:
+            return jsonify({"error": "v8_unavailable"}), 503
+
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+
+        def _send_thumb(path: str):
+            resp = send_file(str(path), mimetype="image/png")
+            # Session-gated content — cacheable per browser, never shared.
+            resp.headers["Cache-Control"] = "private, max-age=120"
+            return resp
+
+        # 1. Cached in the per-run thumb manifest?
+        manifest_path = RUNS_DIR / run_id / "card_thumbs.json"
+        manifest: dict = {}
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                manifest = {}
+        cached = manifest.get(str(card_id))
+        if cached and Path(cached).exists():
+            return _send_thumb(cached)
+
+        def _remember(path: str):
+            manifest[str(card_id)] = str(path)
+            try:
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            except OSError:
+                pass
+
+        # 2. Already rendered for this card? Serve the existing PNG as-is.
+        existing = _visual_thumb_path(_rendered_visuals_for_run(run_id).get(str(card_id)))
+        if existing:
+            _remember(existing)
+            return _send_thumb(existing)
+
+        # 3. First render — once, cached, deterministic (stable per-card seed;
+        # the AI director is deliberately NOT engaged for a triage thumbnail).
+        ach = target.get("achievement") or {}
+        item = {
+            "id": ach.get("swim_id") or card_id,
+            "swim_id": ach.get("swim_id") or card_id,
+            "achievement": ach,
+            "post_angle": ach.get("post_angle"),
+            "meet_name": (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", ""),
+            "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
+        }
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        try:
+            brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
+        except Exception:
+            brand_kit = None
+        media_assets: list = []
+        try:
+            if _v8_get_media_store is not None:
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
+                _ml_store = _v8_get_media_store()
+                media_assets = asset_dicts_for_render(
+                    _ml_store.list(profile_id=profile_id), _ml_store
+                )
+        except Exception:
+            media_assets = []
+        try:
+            from mediahub.creative_brief.generator import auto_variation_seed_for
+
+            seed = auto_variation_seed_for(str(card_id))
+        except Exception:
+            seed = 1
+        try:
+            with _render_slot("graphic", f"thumb:{card_id}", timeout=_RENDER_TRY_TIMEOUT):
+                res = _v8_create_visual_for_item(
+                    item,
+                    brand_kit,
+                    profile_id=profile_id,
+                    run_id=run_id,
+                    media_assets=media_assets,
+                    formats=["feed_portrait"],
+                    variation_seed=seed,
+                    use_ai_director=False,
+                    user_overrides=_inspector_overrides_for_card(run_id, card_id),
+                )
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception as e:
+            return jsonify({"error": f"render_failed: {e}"}), 503
+        visuals = res.get("visuals") or []
+        path = visuals[0].get("file_path") if visuals else None
+        if not path or not Path(path).exists():
+            return jsonify(
+                {
+                    "error": "no_thumbnail",
+                    "detail": (res.get("errors") or ["no visual produced"])[:2],
+                }
+            ), 503
+        _remember(path)
+        return _send_thumb(path)
 
     _FORMAT_CATEGORY_LABELS = {
         "social_size": "Social sizes",
@@ -50339,11 +52388,37 @@ voice, and queues them for one-click approval.</p>
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             return None, (jsonify({"error": "run_not_found"}), 404)
 
+        # M31 (UX-3) — explicit moment selection: ?cards=<id1>,<id2>,… names
+        # the exact cards for this reel (validated below; assembled in RANK
+        # order regardless of request order; max 5). Absent keeps the classic
+        # top-N behaviour byte-identical.
+        _cards_arg = (request.args.get("cards") or "").strip()
+        selected_ids: list[str] = []
+        if _cards_arg:
+            seen_sel: set[str] = set()
+            for part in _cards_arg.split(","):
+                cid = part.strip()
+                if cid and cid not in seen_sel:
+                    seen_sel.add(cid)
+                    selected_ids.append(cid)
+            if not selected_ids or len(selected_ids) > 5:
+                return None, (
+                    jsonify(
+                        {
+                            "error": "bad_cards",
+                            "detail": "pick between 1 and 5 card ids",
+                        }
+                    ),
+                    400,
+                )
+
         try:
             n = int(request.args.get("n", "3"))
         except (TypeError, ValueError):
             n = 3
         n = max(1, min(5, n))
+        if selected_ids:
+            n = len(selected_ids)
 
         fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
         if fmt not in _motion.MOTION_FORMATS:
@@ -50433,10 +52508,62 @@ voice, and queues them for one-click approval.</p>
             key=lambda r: float(r.get("priority", 0.0) or 0.0),
             reverse=True,
         )
-        top = ranked_sorted[:n]
-        if not top:
-            # Fall back to the cards array if no recognition report.
-            top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]
+
+        def _ra_ids(ra: dict) -> set[str]:
+            ach = ra.get("achievement") or {}
+            return {str(v) for v in (ach.get("swim_id"), ra.get("id")) if v}
+
+        sel_suffix = ""
+        if selected_ids:
+            known: set[str] = set()
+            for ra in ranked_sorted:
+                known |= _ra_ids(ra)
+            for c in run_data.get("cards") or []:
+                known |= {str(v) for v in (c.get("swim_id"), c.get("id")) if v}
+            unknown = [cid for cid in selected_ids if cid not in known]
+            if unknown:
+                return None, (
+                    jsonify(
+                        {
+                            "error": "bad_cards",
+                            "detail": f"unknown card id(s): {', '.join(unknown[:5])}",
+                        }
+                    ),
+                    400,
+                )
+            sel_set = set(selected_ids)
+            top = [ra for ra in ranked_sorted if _ra_ids(ra) & sel_set][:5]
+            if not top:
+                top = [
+                    {"achievement": c}
+                    for c in (run_data.get("cards") or [])
+                    if str(c.get("swim_id") or c.get("id") or "") in sel_set
+                ][:5]
+            if not top:
+                return None, (jsonify({"error": "no_cards_for_reel"}), 404)
+            n = len(top)
+            # An explicit selection that IS the top-n default keeps the
+            # default naming (and therefore the default reel file + cache
+            # reuse) — only a genuinely custom pick earns a selection suffix.
+            if top == ranked_sorted[:n]:
+                sel_suffix = ""
+            else:
+                ordered_ids: list[str] = []
+                for ra in top:
+                    ids = _ra_ids(ra)
+                    pick = next((cid for cid in selected_ids if cid in ids), "")
+                    ordered_ids.append(pick or (sorted(ids)[0] if ids else ""))
+                sel_suffix = (
+                    "_sel"
+                    + hashlib.sha1(
+                        ",".join(ordered_ids).encode("utf-8"), usedforsecurity=False
+                    ).hexdigest()[:8]
+                )
+        else:
+            top = ranked_sorted[:n]
+            if not top:
+                # Fall back to the cards array if no recognition report.
+                top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]
         if not top:
             return None, (jsonify({"error": "no_cards_for_reel"}), 404)
 
@@ -50537,20 +52664,36 @@ voice, and queues them for one-click approval.</p>
                 )
         _lang_suffix = f"_{dub_language.split('-', 1)[0]}" if dub_language else ""
         # One canonical naming shared by the single, job and batch routes (and
-        # matched by the reel-file route): the language suffix rides on the
-        # base stem (reel_<n>[_<lang>]); story keeps the bare stem and other
-        # cuts append the format — exactly reel_format_out_path's shape.
-        base_name = f"reel_{n}{_lang_suffix}"
+        # matched by the reel-file route): a custom M31 selection earns a
+        # deterministic ``_sel<hash8>`` marker so it never clobbers the
+        # default reel's published file, then the language suffix rides on
+        # the base stem (reel_<n>[_sel…][_<lang>]); story keeps the bare stem
+        # and other cuts append the format — exactly reel_format_out_path's
+        # shape.
+        base_name = f"reel_{n}{sel_suffix}{_lang_suffix}"
         _stem = base_name if fmt == "story" else f"{base_name}_{fmt}"
         out_path = out_dir / f"{_stem}.mp4"
 
         # Look up the latest brief per card so every beat of the reel
         # carries its own AI-directed variation. Cards without a brief
         # produce a None entry — render_meet_reel handles that.
+        # M36 (UX-7) — each card's persisted Inspector overrides ride into
+        # the reel exactly as into single-card motion: accent via the
+        # brief-palette half of the still's translation (the reel's brand kit
+        # is shared across all cards, so the per-card BrandKit copy is
+        # deliberately not applied), no-photo via the brief's photo
+        # treatment. Untouched cards pass through unchanged, keeping the
+        # default reel byte-identical.
         brief_list: list = []
-        for c in cards:
+        for idx, c in enumerate(cards):
             cid = c.get("id") or c.get("swim_id") or ""
-            brief_list.append(_latest_brief_for_card(run_id, cid) if cid else None)
+            brief = _latest_brief_for_card(run_id, cid) if cid else None
+            overrides = _inspector_overrides_for_card(run_id, cid) if cid else {}
+            card_payload, brief, _ = _apply_inspector_overrides_to_motion(
+                overrides, c, brief, None, brand_copy=False
+            )
+            cards[idx] = card_payload
+            brief_list.append(brief)
 
         return (
             {
@@ -50567,16 +52710,23 @@ voice, and queues them for one-click approval.</p>
                 "next_meet": next_meet_label,
                 "dub_language": dub_language,
                 "reel_stat_config": reel_stat_config,
+                # "" for the default top-n pick; the final rank-ordered id list
+                # for a custom M31 selection (threaded into the file URL so the
+                # reel-file route re-derives the same _sel suffix).
+                "cards_param": ",".join(ordered_ids) if sel_suffix else "",
             },
             None,
         )
 
     def _reel_file_url_kwargs(inputs: dict, run_id: str) -> dict:
-        """The reel-file route kwargs for these inputs (lang only when dubbed),
-        so a dubbed job/batch mints URLs that find the language-suffixed file."""
+        """The reel-file route kwargs for these inputs (lang only when dubbed,
+        cards only when a custom M31 selection), so a job/batch mints URLs
+        that find the suffixed file."""
         kwargs = {"run_id": run_id, "n": inputs["n"]}
         if inputs.get("dub_language"):
             kwargs["lang"] = inputs["dub_language"]
+        if inputs.get("cards_param"):
+            kwargs["cards"] = inputs["cards_param"]
         return kwargs
 
     @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
@@ -51202,17 +53352,29 @@ voice, and queues them for one-click approval.</p>
 
     @app.route("/api/reel-jobs/<job_id>", methods=["GET"])
     def api_reel_job_status(job_id: str):
-        """Progress + outcome for a background reel job (same gating as variants).
+        """Progress + outcome for a background render job (same gating as
+        variants).
 
-        Serves both the single-format ``reel`` job and the multi-format
-        ``reel-batch`` job (R1.15). For a batch, ``video_urls`` maps each
-        produced cut to its ``reel-file`` URL and ``formats_failed`` carries
-        the honest reason for any cut the active engine couldn't produce;
-        ``video_url`` stays populated (the story cut) so single-format
-        pollers keep working unchanged.
+        The generalised status face of the disk-backed job store: the
+        single-format ``reel`` job, the multi-format ``reel-batch`` job
+        (R1.15), the per-card ``motion`` job (M32), the whole-pack
+        ``render-all`` graphics job (M30) and the media-library ``describe``
+        vision-tagging job (M34) all poll here. For a batch, ``video_urls``
+        maps each produced cut to its ``reel-file`` URL and
+        ``formats_failed`` carries the honest reason for any cut the active
+        engine couldn't produce; ``video_url`` stays populated (the story
+        cut) so single-format pollers keep working unchanged. Jobs with
+        per-item progress additionally carry ``total`` / ``done`` /
+        ``current`` / ``errors``.
         """
         job = _variant_job_load(job_id)
-        if job is None or job.get("kind") not in ("reel", "reel-batch"):
+        if job is None or job.get("kind") not in (
+            "reel",
+            "reel-batch",
+            "motion",
+            "render-all",
+            "describe",
+        ):
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
             return jsonify({"error": "job_not_found"}), 404
@@ -51223,18 +53385,24 @@ voice, and queues them for one-click approval.</p>
         ):
             status = "error"
             error = "job_lost: the render worker restarted mid-job — try again"
-        return jsonify(
-            {
-                "ok": True,
-                "job_id": job_id,
-                "status": status,
-                "video_url": job.get("video_url") or "",
-                "video_urls": job.get("video_urls") or {},
-                "formats_failed": job.get("formats_failed") or {},
-                "error": error,
-                "user_message": job.get("user_message") or "",
-            }
-        )
+        payload = {
+            "ok": True,
+            "job_id": job_id,
+            "kind": job.get("kind") or "",
+            "status": status,
+            "video_url": job.get("video_url") or "",
+            "video_urls": job.get("video_urls") or {},
+            "formats_failed": job.get("formats_failed") or {},
+            "error": error,
+            "user_message": job.get("user_message") or "",
+        }
+        # Per-item progress for the batch-shaped kinds (render-all / describe).
+        if job.get("total") is not None:
+            payload["total"] = int(job.get("total") or 0)
+            payload["done"] = int(job.get("done") or 0)
+            payload["current"] = str(job.get("current") or "")
+            payload["errors"] = job.get("errors") or {}
+        return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
     def api_run_reel_file(run_id: str):
@@ -51274,7 +53442,16 @@ voice, and queues them for one-click approval.</p>
             if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en")
             else ""
         )
-        base = f"reel_{n}{_suffix}"
+        # M31 — a custom selection's file carries the same deterministic
+        # _sel<hash8> marker the assembly derived from the final rank-ordered
+        # id list (the job threads that exact list into this URL's ?cards=).
+        _cards_arg = (request.args.get("cards") or "").strip()
+        _sel = (
+            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+            if _cards_arg
+            else ""
+        )
+        base = f"reel_{n}{_sel}{_suffix}"
         name = f"{base}.mp4" if fmt == "story" else f"{base}_{fmt}.mp4"
         path = RUNS_DIR / run_id / "motion" / name
         if not path.exists():
@@ -51300,6 +53477,295 @@ voice, and queues them for one-click approval.</p>
             download_name=f"meet_reel_{run_id}_{fmt}.mp4"
             if fmt != "story"
             else f"meet_reel_{run_id}.mp4",
+        )
+
+    @app.route("/api/runs/<run_id>/reel-manifest", methods=["GET"])
+    def api_run_reel_manifest(run_id: str):
+        """The reel's explainability manifest (M22 handoff) — engine, beats,
+        rhythm, honest capability notes — written as a JSON sidecar beside the
+        rendered MP4 by BOTH engines. Same ``n``/``format``/``lang``/``cards``
+        resolution as ``reel-file``; 404 until that cut has been rendered."""
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        from mediahub.visual import dub as _dub
+        from mediahub.visual import motion as _motion
+
+        try:
+            n = int(request.args.get("n", "3"))
+        except (TypeError, ValueError):
+            n = 3
+        n = max(1, min(5, n))
+        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+        if fmt not in _motion.MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        _lang = (request.args.get("lang") or "").strip()
+        _suffix = (
+            f"_{_lang.split('-', 1)[0]}"
+            if (_lang and _dub.is_dubbable(_lang) and _lang.split("-", 1)[0] != "en")
+            else ""
+        )
+        _cards_arg = (request.args.get("cards") or "").strip()
+        _sel = (
+            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+            if _cards_arg
+            else ""
+        )
+        base = f"reel_{n}{_sel}{_suffix}"
+        name = f"{base}.json" if fmt == "story" else f"{base}_{fmt}.json"
+        sidecar = RUNS_DIR / run_id / "motion" / name
+        if not sidecar.exists():
+            return jsonify({"error": "manifest_not_found", "detail": "render this cut first"}), 404
+        try:
+            return jsonify(json.loads(sidecar.read_text(encoding="utf-8")))
+        except Exception as e:
+            return jsonify({"error": f"manifest_unreadable: {e}"}), 500
+
+    @app.route("/api/runs/<run_id>/render-all-job", methods=["POST"])
+    def api_run_render_all_job(run_id: str):
+        """M30 (UX-2) — "Create all graphics" in one background job.
+
+        Ten approved cards used to mean ten clicks and ten held-open waits.
+        This kicks ONE disk-backed job (the V10 variant-job store) that walks
+        every approved card still missing a graphic and renders it through
+        the exact same pipeline as the per-card button — AI-directed brief,
+        persisted Inspector overrides, per-card sponsor rotation, and the
+        pack path's ``recent_signatures`` / ``recent_asset_families``
+        threading so ten cards don't come out samey or share burst frames.
+        Per-card progress ("3 of 10 rendered") streams through
+        ``api_reel_job_status``. ``?force=1`` re-renders cards that already
+        have a graphic; the default renders only the missing ones.
+        """
+        if not _v8_ok or _v8_create_visual_for_item is None:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        raw_profile_id = (run_data or {}).get("profile_id", "")
+        try:
+            from mediahub.workflow.pack import build_content_pack as _bcp
+
+            approved = _bcp(run_id, raw_profile_id, RUNS_DIR)
+        except Exception:
+            approved = []
+        if not approved:
+            return jsonify(
+                {
+                    "error": "no_approved_cards",
+                    "user_message": (
+                        "Nothing is approved yet — approve cards on the review "
+                        "page first, then build their graphics here."
+                    ),
+                }
+            ), 400
+
+        force = (request.args.get("force") or "").strip().lower() in ("1", "true", "yes")
+        already = _rendered_visuals_for_run(run_id)
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        todo: list[tuple[str, dict, str]] = []
+        for card in approved:
+            ach = card.get("achievement") or {}
+            cid = str(card.get("_card_id") or ach.get("swim_id") or "")
+            if not cid or (not force and cid in already):
+                continue
+            item = {
+                "id": cid,
+                "swim_id": ach.get("swim_id") or cid,
+                "achievement": ach,
+                "post_angle": ach.get("post_angle"),
+                "meet_name": meet_name,
+                "safe_to_post": card.get("safe_to_post") or {"level": "safe"},
+            }
+            todo.append((cid, item, str(ach.get("swimmer_name") or cid)))
+        if not todo:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": "done",
+                    "total": 0,
+                    "rendered_already": len(already),
+                    "message": (
+                        f"All {len(approved)} approved card"
+                        f"{'s' if len(approved) != 1 else ''} already have graphics."
+                    ),
+                }
+            )
+
+        # Resolve everything that needs the request context BEFORE the thread.
+        norm_profile_id = raw_profile_id or run_data.get("club_filter") or "_run_" + run_id
+        norm_profile_id = re.sub(r"[^a-z0-9_-]", "-", norm_profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        brand_kit = _resolve_run_brand_kit(norm_profile_id, run_id, run_data)
+        media_assets: list = []
+        try:
+            if _v8_get_media_store is not None:
+                from mediahub.media_library.photo_edit import asset_dicts_for_render
+
+                _ml_store = _v8_get_media_store()
+                media_assets = asset_dicts_for_render(
+                    _ml_store.list(profile_id=norm_profile_id), _ml_store
+                )
+        except Exception:
+            media_assets = []
+        try:
+            sponsor_profile = load_profile(norm_profile_id)
+        except Exception:
+            sponsor_profile = None
+        # PHOTOS-4/M2: dHash burst families for the anti-samey threading.
+        dhash_by_id: dict[str, str] = {}
+        for _ad in media_assets:
+            _d = _ad if isinstance(_ad, dict) else {}
+            _q = (_d.get("media_meta") or {}).get("quality") or {}
+            if _d.get("id") and _q.get("dhash"):
+                dhash_by_id[str(_d["id"])] = str(_q["dhash"])
+        card_overrides = {cid: _inspector_overrides_for_card(run_id, cid) for cid, _, _ in todo}
+
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "render-all",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "total": len(todo),
+            "done": 0,
+            "current": "",
+            "rendered": [],
+            "errors": {},
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                job_sigs: list[str] = []
+                recent_fams: list[str] = []
+                # Seed the burst-family avoid-list from what's already rendered
+                # so a fresh batch doesn't reuse an earlier card's exact frame.
+                for _info in already.values():
+                    for _aid in _info.get("sourced_asset_ids") or []:
+                        _fam = dhash_by_id.get(str(_aid))
+                        if _fam and _fam not in recent_fams:
+                            recent_fams.append(_fam)
+                with _job_heartbeat(job):
+                    for idx, (cid, item, label) in enumerate(todo, start=1):
+                        job["current"] = label
+                        _variant_job_save(job)
+                        try:
+                            history = _v9_load_variation_history(run_id, cid)
+                            recent_sigs = (history.get("signatures", []) + job_sigs)[-6:]
+                            rotated = None
+                            try:
+                                from mediahub.club_platform.sponsors import (
+                                    sponsor_for_card as _sponsor_for_card,
+                                )
+
+                                if sponsor_profile is not None:
+                                    rotated = _sponsor_for_card(
+                                        sponsor_profile, run_id, cid, include_legacy=False
+                                    )
+                            except Exception:
+                                rotated = None
+                            rotated_logo = None
+                            if rotated and rotated.get("logo_asset_id"):
+                                for _a in media_assets:
+                                    _adx = _a if isinstance(_a, dict) else {}
+                                    if str(_adx.get("id")) == str(rotated["logo_asset_id"]):
+                                        rotated_logo = _adx.get("path") or _adx.get("file_path")
+                                        break
+                            with _render_slot(
+                                "graphic", f"pack:{cid}", timeout=_RENDER_QUEUE_TIMEOUT
+                            ):
+                                res = _v8_create_visual_for_item(
+                                    item,
+                                    brand_kit,
+                                    profile_id=norm_profile_id,
+                                    run_id=run_id,
+                                    media_assets=media_assets,
+                                    use_ai_director=True,
+                                    recent_signatures=recent_sigs,
+                                    recent_hooks=history.get("hooks", [])[-6:],
+                                    sponsor_name=(rotated or {}).get("name", ""),
+                                    sponsor_logo_path=rotated_logo,
+                                    user_overrides=card_overrides.get(cid) or {},
+                                    recent_asset_families=recent_fams[-12:],
+                                )
+                            visuals = res.get("visuals") or []
+                            if visuals:
+                                job["rendered"].append(cid)
+                                brief_d = res.get("brief") or {}
+                                sig = brief_d.get("variation_signature") or ""
+                                if sig:
+                                    job_sigs.append(sig)
+                                    _v9_save_variation_history(
+                                        run_id, cid, sig, brief_d.get("primary_hook") or ""
+                                    )
+                                for v in visuals:
+                                    for aid in v.get("sourced_asset_ids") or []:
+                                        fam = dhash_by_id.get(str(aid))
+                                        if fam and fam not in recent_fams:
+                                            recent_fams.append(fam)
+                            else:
+                                job["errors"][cid] = (
+                                    "; ".join(str(e) for e in (res.get("errors") or [])[:2])
+                                    or "no visual produced"
+                                )
+                        except _RenderBusy:
+                            job["errors"][cid] = "renderer busy — re-run to finish this card"
+                        except Exception as e:
+                            job["errors"][cid] = str(e)
+                        job["done"] = idx
+                        _variant_job_save(job)
+                if job["rendered"]:
+                    job["status"] = "done"
+                    try:
+                        from mediahub.notify import inbox as _inbox
+
+                        _inbox.record_render_complete(
+                            job.get("owner_pid") or "",
+                            run_id=run_id,
+                            label=f"graphics ({len(job['rendered'])} cards)",
+                        )
+                    except Exception:
+                        pass
+                else:
+                    job["status"] = "error"
+                    job["error"] = (
+                        "; ".join(list(job["errors"].values())[:3]) or "no cards rendered"
+                    )
+                    job["user_message"] = (
+                        "No graphics could be rendered — see the per-card errors, then try again."
+                    )
+            except Exception as e:
+                job["status"] = "error"
+                job["error"] = str(e)
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"renderall-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "total": len(todo),
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
         )
 
     # ====================================================================
@@ -52669,13 +55135,49 @@ voice, and queues them for one-click approval.</p>
     def _video_render_dir(project_id: str) -> Path:
         return DATA_DIR / "video_projects" / project_id
 
+    def _video_brand_kit():
+        """The active profile's BrandKit for the footage path, or None."""
+        pid = _active_profile_id()
+        if not pid or not _v8_ok:
+            return None
+        try:
+            return _v8_brand_kit_for(pid)
+        except Exception:
+            return None
+
     def _video_brand_colours():
-        """Best-effort brand colours for caption styling (defaults are legible)."""
+        """Brand colours for caption/pad styling — the SAME resolved role set
+        the motion path paints (M28).
+
+        Runs the motion engine's APCA-gated bookend resolver
+        (``motion._cover_brand_roles`` — the graphic_renderer's single role
+        resolver over the brand palette: Tier A baseline, contrast-picked
+        on-colours, no invented hex) so the Video Studio's captions and pad
+        colour can never disagree with the club's approved cards. Falls back
+        to the legacy accent-only pairing when no brand resolves — defaults
+        stay legible either way.
+        """
         from mediahub.video.clip_maker import BrandColours
 
+        background = "#0A0A0A"
+        brand_kit = _video_brand_kit()
+        if brand_kit is not None:
+            try:
+                from mediahub.visual.motion import _brand_to_dict, _cover_brand_roles
+
+                brand_dict = _brand_to_dict(brand_kit)
+                roles = _cover_brand_roles(brand_dict, brand_kit)
+                if roles.get("ground") and roles.get("onGround"):
+                    return BrandColours(
+                        ground=roles["ground"],
+                        onground=roles["onGround"],
+                        accent=roles.get("accent") or "",
+                        background=roles["ground"],
+                    )
+            except Exception:
+                pass
         prof = _active_profile()
         accent = ""
-        background = "#0A0A0A"
         for attr in ("accent_colour", "accent", "primary_colour", "primary"):
             val = getattr(prof, attr, "") if prof else ""
             if isinstance(val, str) and val.startswith("#"):
@@ -52689,6 +55191,112 @@ voice, and queues them for one-click approval.</p>
 
         name = str(raw or "none").strip().lower()
         return name if name in LOOKS else "none"
+
+    def _footage_permission_error(asset) -> Optional[dict]:
+        """Plain-language block reason when a clip may not be used (M26), or None.
+
+        The MediaAsset.is_usable_for_post() consent gate, surfaced with an
+        actionable message per status — footage of minors under a consent hold
+        must be blocked everywhere content is made, not just in the photo
+        selector.
+        """
+        name = str(getattr(asset, "filename", "") or "this clip")
+        status = str(getattr(asset, "permission_status", "") or "")
+        if status == "do_not_use":
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” is marked “do not use”, so it can't "
+                    "appear in content. Pick another clip — or, if that marking is "
+                    "wrong, change its permission on the footage tile first."
+                ),
+            }
+        if status == "needs_parental_consent":
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” needs parental consent before it can appear "
+                    "in content. Record the consent and set its permission to "
+                    "“approved by club” on the footage tile, or pick "
+                    "another clip."
+                ),
+            }
+        if str(getattr(asset, "approval_status", "") or "") == "rejected":
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” was rejected in review, so it can't appear "
+                    "in content. Re-approve it in the media library, or pick "
+                    "another clip."
+                ),
+            }
+        if not asset.is_usable_for_post():
+            return {
+                "error": "footage_blocked",
+                "permission_status": status,
+                "message": (
+                    f"“{name}” isn't cleared for public use yet — check its "
+                    "permission on the footage tile."
+                ),
+            }
+        return None
+
+    def _project_source_states(proj) -> list[dict]:
+        """Each EDL clip source's library permission state, for the approve
+        dialog and the export gate (M26). Re-resolved from the store at call
+        time, so a permission regression AFTER project creation still shows/
+        blocks. Sources that aren't library assets (e.g. stabilised copies
+        under the project's render dir) can't be resolved and are skipped."""
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(
+                profile_id=getattr(proj, "profile_id", None), asset_type="footage", limit=500
+            )
+        except Exception:
+            return []
+        by_path = {str(Path(a.path)): a for a in assets if a.path}
+        out: list[dict] = []
+        seen: set[str] = set()
+        for clip in getattr(proj.edl, "clips", None) or []:
+            src = str(Path(clip.source)) if clip.source else ""
+            if not src or src in seen:
+                continue
+            seen.add(src)
+            asset = by_path.get(src)
+            if asset is None:
+                continue
+            out.append(
+                {
+                    "asset_id": asset.id,
+                    "filename": asset.filename,
+                    "permission_status": asset.permission_status,
+                    "approval_status": asset.approval_status,
+                    "usable": asset.is_usable_for_post(),
+                }
+            )
+        return out
+
+    def _project_blocked_source(proj) -> Optional[dict]:
+        """The first EDL source whose library asset fails the consent gate."""
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(
+                profile_id=getattr(proj, "profile_id", None), asset_type="footage", limit=500
+            )
+        except Exception:
+            return None
+        by_path = {str(Path(a.path)): a for a in assets if a.path}
+        for clip in getattr(proj.edl, "clips", None) or []:
+            asset = by_path.get(str(Path(clip.source)) if clip.source else "")
+            if asset is None:
+                continue
+            blocked = _footage_permission_error(asset)
+            if blocked:
+                return blocked
+        return None
 
     @app.route("/video")
     def video_studio_page():
@@ -52725,7 +55333,7 @@ voice, and queues them for one-click approval.</p>
         engine_note = (
             ""
             if engine_ready
-            else '<p class="muted" style="margin-top:6px">&#9888; The render engine '
+            else '<p class="muted" style="margin-top:6px">&#x26A0; The render engine '
             "(FFmpeg) isn't available on this deployment yet, so clips can be "
             "planned but not yet rendered. Captions also need server speech-to-text "
             "(<code>MEDIAHUB_ASR_PROVIDER</code>).</p>"
@@ -52739,6 +55347,14 @@ voice, and queues them for one-click approval.</p>
             _VIDEO_STUDIO_HTML.replace("__CSRF__", _h(_csrf_token()))
             .replace("__FOOTAGE_URL__", url_for("api_video_footage_upload"))
             .replace("__FOOTAGE_LIST_URL__", url_for("api_video_footage_list"))
+            .replace(
+                "__FOOTAGE_PERM_TMPL__",
+                url_for("api_video_footage_permission", asset_id="__AID__"),
+            )
+            .replace(
+                "__FOOTAGE_FRAME_TMPL__",
+                url_for("api_video_footage_best_frame", asset_id="__AID__"),
+            )
             .replace("__CLIPMAKER_URL__", url_for("api_video_clip_maker"))
             .replace("__REEL_URL__", url_for("api_video_reel"))
             .replace("__PROJECTS_URL__", url_for("api_video_projects_list"))
@@ -52842,16 +55458,100 @@ voice, and queues them for one-click approval.</p>
     def _video_footage_summary(asset) -> dict:
         ad = asset.to_dict() if hasattr(asset, "to_dict") else dict(asset)
         meta = ad.get("media_meta") or {}
+        usable = (
+            asset.is_usable_for_post()
+            if hasattr(asset, "is_usable_for_post")
+            else ad.get("permission_status") not in ("do_not_use", "needs_parental_consent")
+        )
         return {
             "id": ad.get("id", ""),
             "filename": ad.get("filename", ""),
             "file_url": url_for("api_media_library_file", asset_id=ad.get("id", "")),
+            # M27 — poster thumbnail recorded at ingest; "" when extraction
+            # wasn't possible (the tile then keeps its <video> behaviour).
+            "poster_url": (
+                url_for("api_media_library_file", asset_id=ad.get("id", ""), poster=1)
+                if meta.get("poster")
+                else ""
+            ),
             "duration_ms": meta.get("duration_ms", 0),
             "has_audio": meta.get("has_audio", False),
             "orientation": ad.get("orientation", "unknown"),
             "permission_status": ad.get("permission_status", ""),
+            # M26 — badge + gate signal for the tiles.
+            "usable": bool(usable),
             "uploaded_at": ad.get("uploaded_at", ""),
         }
+
+    @app.route("/api/video/footage/<asset_id>/permission", methods=["POST"])
+    def api_video_footage_permission(asset_id: str):
+        """One-tap permission editor for a footage tile (M26).
+
+        Sets the clip's ``permission_status`` using the existing media-library
+        permission vocabulary — the same statuses the consent gate enforces —
+        so a volunteer can record consent (or a do-not-use hold) without
+        leaving the studio.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if not asset or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        from mediahub.media_library.models import PERMISSION_STATUSES
+
+        payload = request.get_json(silent=True) or {}
+        status = str(payload.get("permission_status") or "").strip()
+        if status not in PERMISSION_STATUSES:
+            return jsonify(
+                {
+                    "error": "bad_permission",
+                    "message": f"permission_status must be one of: "
+                    f"{', '.join(PERMISSION_STATUSES)}",
+                }
+            ), 400
+        asset = store.update_fields(asset_id, {"permission_status": status})
+        return jsonify({"ok": True, "asset": _video_footage_summary(asset)})
+
+    @app.route("/api/video/footage/<asset_id>/best-frame", methods=["POST"])
+    def api_video_footage_best_frame(asset_id: str):
+        """Extract the clip's best frame as a linked photo asset (M25).
+
+        Deterministic: the top detected moment's centre frame, saved as an
+        ``athlete_action`` MediaAsset with the clip's links AND permission
+        inherited (never wider). One click on a Video Studio footage tile;
+        the same extraction runs automatically on card-linked clip uploads.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        asset = store.get(asset_id)
+        if not asset or asset.type != "footage":
+            return jsonify({"error": "footage_not_found"}), 404
+        if not _session_can_access_profile(asset.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        from mediahub.video.best_frame import BestFrameUnavailable, extract_best_frame
+
+        try:
+            frame = extract_best_frame(asset, store=store)
+        except BestFrameUnavailable as e:
+            return jsonify({"error": "best_frame_unavailable", "message": str(e)}), 503
+        except Exception as e:
+            log.warning("best-frame extraction failed for %s: %s", asset_id, e)
+            return jsonify({"error": "best_frame_failed", "message": str(e)[:200]}), 500
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": frame.id,
+                    "url": url_for("api_media_library_file", asset_id=frame.id),
+                    "label": frame.description_raw,
+                    "permission_status": frame.permission_status,
+                },
+            }
+        )
 
     @app.route("/api/video/footage")
     def api_video_footage_list():
@@ -52886,6 +55586,11 @@ voice, and queues them for one-click approval.</p>
             return jsonify({"error": "forbidden"}), 403
         if not Path(asset.path).exists():
             return jsonify({"error": "footage_missing_on_disk"}), 410
+        # M26 — consent gate: a do_not_use / needs-parental-consent clip can't
+        # even be clip-made, with a plain-language, actionable reason.
+        _blocked = _footage_permission_error(asset)
+        if _blocked:
+            return jsonify(_blocked), 403
 
         fmt = (payload.get("format") or "story").strip().lower()
         from mediahub.visual.motion import MOTION_FORMATS
@@ -52984,6 +55689,10 @@ voice, and queues them for one-click approval.</p>
                 return jsonify({"error": "forbidden"}), 403
             if not Path(asset.path).exists():
                 return jsonify({"error": "footage_missing_on_disk", "asset_id": aid}), 410
+            # M26 — consent gate on every clip the reel would consume.
+            _blocked = _footage_permission_error(asset)
+            if _blocked:
+                return jsonify({**_blocked, "asset_id": aid}), 403
             paths.append(asset.path)
             profile_id = asset.profile_id
 
@@ -53218,7 +55927,15 @@ voice, and queues them for one-click approval.</p>
         if not _video_can_access_project(proj):
             return jsonify({"error": "not_found"}), 404
         if request.method == "GET":
-            return jsonify({"ok": True, "project": proj.to_dict()})
+            # M26 — the approve dialog lists each source clip's permission
+            # state so the human gate is informed, not blind.
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": proj.to_dict(),
+                    "source_permissions": _project_source_states(proj),
+                }
+            )
         payload = request.get_json(silent=True) or {}
         if "name" in payload:
             proj.name = str(payload["name"])[:120]
@@ -53292,6 +56009,12 @@ voice, and queues them for one-click approval.</p>
         from mediahub.video.render import available as _render_available
         from mediahub.video.render import render_edl
 
+        # M26 — consent gate at render time, re-resolving each EDL clip's
+        # source: a permission regression AFTER project creation still blocks
+        # (checked before the engine so the block is honest on any deployment).
+        _blocked = _project_blocked_source(proj)
+        if _blocked:
+            return jsonify(_blocked), 403
         if not _render_available():
             return jsonify(
                 {
@@ -53300,16 +56023,30 @@ voice, and queues them for one-click approval.</p>
                     "available on this deployment.",
                 }
             ), 503
+        # M28 — close the render on the branded club end-card (a dissolve into
+        # the club outro rendered by the existing still renderer). Appended at
+        # render time on a COPY of the timeline (the saved project is never
+        # mutated); the end-card MP4 is an ordinary clip source, so the render
+        # cache key folds its fingerprint exactly like music beds. Honest
+        # fallback: no brand/renderer/FFmpeg → the timeline renders unchanged.
+        from mediahub.video.end_card import append_end_card
+
+        render_edl_input, end_card_note = append_end_card(proj.edl, _video_brand_kit())
         out_path = _video_render_dir(project_id) / f"{proj.format_name}.mp4"
         try:
-            render_edl(proj.edl, out_path)
+            render_edl(render_edl_input, out_path)
         except VideoEngineUnavailable as e:
             return jsonify({"error": "engine_unavailable", "message": str(e)}), 503
         except Exception as e:
             log.warning("video render failed for %s: %s", project_id, e)
             return jsonify({"error": "render_failed", "message": str(e)[:200]}), 500
         return jsonify(
-            {"ok": True, "file_url": url_for("api_video_project_file", project_id=project_id)}
+            {
+                "ok": True,
+                "file_url": url_for("api_video_project_file", project_id=project_id),
+                "end_card": "appended" if not end_card_note else "skipped",
+                **({"end_card_note": end_card_note} if end_card_note else {}),
+            }
         )
 
     @app.route("/api/video/projects/<project_id>/approve", methods=["POST"])
@@ -53354,6 +56091,12 @@ voice, and queues them for one-click approval.</p>
                     "message": "Approve this clip before exporting it.",
                 }
             ), 403
+        # M26 — consent gate at export, re-resolving each EDL clip's source:
+        # a permission regression after approval still blocks the download.
+        if download:
+            _blocked = _project_blocked_source(proj)
+            if _blocked:
+                return jsonify(_blocked), 403
         return send_file(
             str(path),
             mimetype="video/mp4",
@@ -53647,20 +56390,22 @@ voice, and queues them for one-click approval.</p>
         """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
+        # M30 — honest, current copy: graphics are built on the Content
+        # builder (post-approval), not the old recognition page.
+        _no_visuals_html = (
+            '<div class="empty">No graphics have been generated for this run yet. '
+            f'Open the <a href="{url_for("content_pack", run_id=run_id)}">Content builder</a> '
+            "and use &ldquo;Create graphic&rdquo; on a card &mdash; or &ldquo;Create all "
+            "graphics&rdquo; to build the whole pack.</div>"
+        )
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return _layout(
-                "No visuals",
-                '<div class="empty">No graphics have been generated for this run yet. Open the recognition page and use "Create graphic" on cards to add some.</div>',
-            ), 404
+            return _layout("No visuals", _no_visuals_html), 404
         from flask import send_file
         import io, zipfile
 
         vdir = RUNS_DIR / run_id / "visuals"
         if not vdir.is_dir():
-            return _layout(
-                "No visuals",
-                '<div class="empty">No graphics have been generated for this run yet. Open the recognition page and use "Create graphic" on cards to add some.</div>',
-            ), 404
+            return _layout("No visuals", _no_visuals_html), 404
 
         buf = io.BytesIO()
         approval = []
@@ -53850,23 +56595,22 @@ voice, and queues them for one-click approval.</p>
         """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
+        # M30 — honest, current copy (see content_pack_zip's twin note).
+        _no_visuals_html = (
+            '<div class="empty">No graphics have been generated for this run yet. '
+            f'Open the <a href="{url_for("content_pack", run_id=run_id)}">Content builder</a> '
+            "and use &ldquo;Create graphic&rdquo; on a card &mdash; or &ldquo;Create all "
+            "graphics&rdquo; to build the whole pack.</div>"
+        )
         run_data = _load_run(run_id)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return _layout(
-                "No visuals",
-                '<div class="empty">No graphics have been generated for this run yet. '
-                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
-            ), 404
+            return _layout("No visuals", _no_visuals_html), 404
 
         profile_id = run_data.get("profile_id") if run_data else None
         profile_id = profile_id or _active_profile_id() or ""
         zip_bytes = _build_run_pack_zip(run_id, run_data or {}, profile_id)
         if zip_bytes is None:
-            return _layout(
-                "No visuals",
-                '<div class="empty">No graphics have been generated for this run yet. '
-                'Open the recognition page and use "Create graphic" on cards to add some.</div>',
-            ), 404
+            return _layout("No visuals", _no_visuals_html), 404
 
         from flask import send_file
         import io as _io
