@@ -43336,11 +43336,15 @@ function mhSetupMode(mode) {{
 {cards_html}
 
 <div class="no-print" style="margin-top:16px">
-  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin-bottom:8px">{_export_note}</div>
+  <div id="mh-export-note" style="font-size:12px;color:var(--ink-dim);margin-bottom:8px">{
+            _export_note
+        }</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
     <a class="btn" href="{_export_zip_url}"{_export_disabled_attr}
        title="Every rendered card at every size (square, portrait, story), grouped per card, plus a metadata.json manifest">Download every format + manifest (.zip)</a>
-    <a class="btn secondary" href="{_zip_url}"{_export_disabled_attr}>Download all visuals (.zip)</a>
+    <a class="btn secondary" href="{_zip_url}"{
+            _export_disabled_attr
+        }>Download all visuals (.zip)</a>
     <a class="btn secondary" href="{_bulk_export_url}"
        title="Convert this pack to JPG / WebP / AVIF / PNG with quality options, bundled into one ZIP">Bulk export &amp; convert&hellip;</a>
     <a class="btn secondary" href="{_print_tool_url}"
@@ -44121,7 +44125,7 @@ if (typeof mhReelComposerSync === 'function') mhReelComposerSync();
                     "ok": False,
                     "error": "research_busy",
                     "message": (
-                        "Research is already running — wait for it to finish, " "then ask again."
+                        "Research is already running — wait for it to finish, then ask again."
                     ),
                 }
             )
@@ -45755,7 +45759,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <style>{_BULK_ACTIONS_CSS}</style>
 <script>{_BULK_ACTIONS_JS}</script>
 <script>{_ML_QUICK_ACTION_JS}</script>
-<script src="{url_for("static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js"))}"></script>
+<script src="{
+            url_for(
+                "static", filename="js/mobile-capture.js", v=_static_ver("js/mobile-capture.js")
+            )
+        }"></script>
 """
         return _layout("Media library", body, active="media")
 
@@ -45783,7 +45791,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         "deployment. Re-save the photo as JPEG or PNG and upload again."
     )
     _PHOTO_TYPE_MSG = (
-        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, " "GIF or HEIC."
+        "That file type can't be uploaded as a photo. Use JPEG, PNG, WebP, GIF or HEIC."
     )
     _PHOTO_UNREADABLE_MSG = (
         "That photo could not be read — the file appears corrupt or isn't "
@@ -52546,7 +52554,10 @@ voice, and queues them for one-click approval.</p>
                     pick = next((cid for cid in selected_ids if cid in ids), "")
                     ordered_ids.append(pick or (sorted(ids)[0] if ids else ""))
                 sel_suffix = (
-                    "_sel" + hashlib.sha1(",".join(ordered_ids).encode("utf-8")).hexdigest()[:8]
+                    "_sel"
+                    + hashlib.sha1(
+                        ",".join(ordered_ids).encode("utf-8"), usedforsecurity=False
+                    ).hexdigest()[:8]
                 )
         else:
             top = ranked_sorted[:n]
@@ -53436,7 +53447,9 @@ voice, and queues them for one-click approval.</p>
         # id list (the job threads that exact list into this URL's ?cards=).
         _cards_arg = (request.args.get("cards") or "").strip()
         _sel = (
-            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8")).hexdigest()[:8] if _cards_arg else ""
+            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+            if _cards_arg
+            else ""
         )
         base = f"reel_{n}{_sel}{_suffix}"
         name = f"{base}.mp4" if fmt == "story" else f"{base}_{fmt}.mp4"
@@ -53503,7 +53516,9 @@ voice, and queues them for one-click approval.</p>
         )
         _cards_arg = (request.args.get("cards") or "").strip()
         _sel = (
-            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8")).hexdigest()[:8] if _cards_arg else ""
+            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+            if _cards_arg
+            else ""
         )
         base = f"reel_{n}{_sel}{_suffix}"
         name = f"{base}.json" if fmt == "story" else f"{base}_{fmt}.json"
@@ -53733,8 +53748,7 @@ voice, and queues them for one-click approval.</p>
                         "; ".join(list(job["errors"].values())[:3]) or "no cards rendered"
                     )
                     job["user_message"] = (
-                        "No graphics could be rendered — see the per-card errors, "
-                        "then try again."
+                        "No graphics could be rendered — see the per-card errors, then try again."
                     )
             except Exception as e:
                 job["status"] = "error"
