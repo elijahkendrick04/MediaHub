@@ -308,9 +308,7 @@ def bulk_insert_rows(
             }
             rid = _new_id("row")
             row_ids.append(rid)
-            params.append(
-                (table_id, profile_id, rid, base + offset, json.dumps(payload), now)
-            )
+            params.append((table_id, profile_id, rid, base + offset, json.dumps(payload), now))
         conn.executemany(
             "INSERT INTO data_hub_rows "
             "(table_id, profile_id, row_id, position, cells_json, updated_at) "

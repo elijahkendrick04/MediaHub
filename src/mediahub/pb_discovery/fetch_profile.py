@@ -52,8 +52,7 @@ _MAX_REDIRECT_HOPS = 5
 
 _FETCH_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; SwimPBDiscovery/7.5; "
-        "+https://github.com/swim-media-hub)"
+        "Mozilla/5.0 (compatible; SwimPBDiscovery/7.5; " "+https://github.com/swim-media-hub)"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.9",

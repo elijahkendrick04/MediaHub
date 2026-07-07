@@ -170,9 +170,7 @@ def build_grouped_pack(
         from mediahub.workflow.store import WorkflowStore
 
         if runs_dir is None:
-            data_dir = Path(
-                os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1]))
-            )
+            data_dir = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
             resolved_runs_dir = Path(os.environ.get("RUNS_DIR", str(data_dir / "runs_v4")))
         else:
             resolved_runs_dir = Path(runs_dir)

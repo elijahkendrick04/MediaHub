@@ -104,8 +104,12 @@ def _http_post(url: str, body: bytes, headers: dict) -> tuple[Optional[int], Opt
             )
         try:
             r = pool.urlopen(
-                "POST", path, body=body, headers=send_headers,
-                redirect=False, retries=False,
+                "POST",
+                path,
+                body=body,
+                headers=send_headers,
+                redirect=False,
+                retries=False,
             )
             status = int(r.status)
             return status, (None if status < 300 else f"HTTP {status}")

@@ -164,5 +164,3 @@ def test_returns_none_for_too_short_response(isolated_cache, fake_photo):
                 str(fake_photo), asset_id="a", brand_id="b",
             )
     assert out is None
-
-

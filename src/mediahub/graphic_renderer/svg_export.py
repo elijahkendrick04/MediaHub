@@ -725,8 +725,9 @@ def _emit_text_object(obj_raw, char_indices, ctx: "_Ctx") -> str:
             "(%d shaped-script chars, %d failed glyph lookups) — %s",
             shaped,
             failed,
-            "raster-embedding its footprint" if ctx.embed_images else
-            "keeping degraded outline (strict no-raster export)",
+            "raster-embedding its footprint"
+            if ctx.embed_images
+            else "keeping degraded outline (strict no-raster export)",
         )
         if ctx.embed_images:
             el = _raster_text_footprint(char_indices, ctx)

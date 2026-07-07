@@ -325,9 +325,7 @@ def _resolve_music_path(plan: dict) -> Optional[Path]:
     return p if p.is_file() else None
 
 
-def card_cut_times(
-    duration_sec: float, n_cards: int, rhythm: Optional[dict] = None
-) -> list[float]:
+def card_cut_times(duration_sec: float, n_cards: int, rhythm: Optional[dict] = None) -> list[float]:
     """Timestamps where a reel cuts to a new card scene — the beat grid the
     music accents align to.
 

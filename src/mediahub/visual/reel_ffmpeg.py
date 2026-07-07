@@ -793,7 +793,9 @@ def reel_ffmpeg_args(
     total = sum(segment_durations) - CROSSFADE_SEC * (len(stills) - 1)
     chains: list[str] = []
     for i, dur in enumerate(segment_durations):
-        kb = _beat_motion_filter(dur, variant=kb_variants[i], tag=str(i), width=width, height=height)
+        kb = _beat_motion_filter(
+            dur, variant=kb_variants[i], tag=str(i), width=width, height=height
+        )
         chains.append(f"[{i}:v]{kb},setsar=1[v{i}]")
     last = "v0"
     elapsed = 0.0
