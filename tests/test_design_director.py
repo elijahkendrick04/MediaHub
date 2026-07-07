@@ -212,7 +212,7 @@ def test_brand_context_surfaces_logo_inventory(monkeypatch):
     """The director picks a logo_lockup, so its brand context must actually name
     which logo variants exist (the include_logos=True inventory), loaded from the
     kit's owning profile — otherwise the model chooses a lockup blindly."""
-    import mediahub.web.club_profile as club_profile
+    import sys
 
     fake_profile = {
         "brand_logos": [
@@ -220,6 +220,14 @@ def test_brand_context_surfaces_logo_inventory(monkeypatch):
             {"label": "White mono mark", "mime": "image/png"},
         ]
     }
+    # Patch the sys.modules entry, not `import … as` (which binds the parent
+    # package's attribute): a prior test that replaced the module in
+    # sys.modules would otherwise leave production's call-time
+    # `from mediahub.web.club_profile import load_profile` reading an
+    # unpatched object.
+    import mediahub.web.club_profile  # noqa: F401 - ensure registered
+
+    club_profile = sys.modules["mediahub.web.club_profile"]
     monkeypatch.setattr(club_profile, "load_profile", lambda pid: fake_profile)
 
     ctx = ai_director._brand_context(_brand())
@@ -232,8 +240,11 @@ def test_brand_context_surfaces_logo_inventory(monkeypatch):
 
 def test_brand_context_omits_logos_when_none_uploaded(monkeypatch):
     """No uploaded logos → no fabricated inventory line; brand context is unchanged."""
-    import mediahub.web.club_profile as club_profile
+    import sys
 
+    import mediahub.web.club_profile  # noqa: F401 - ensure registered
+
+    club_profile = sys.modules["mediahub.web.club_profile"]
     monkeypatch.setattr(club_profile, "load_profile", lambda pid: {"brand_logos": []})
     ctx = ai_director._brand_context(_brand())
     assert "logo variant" not in ctx
