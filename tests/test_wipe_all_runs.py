@@ -95,5 +95,47 @@ def test_keep_uploads_flag(tmp_path, monkeypatch):
     assert list((data / "runs_v4").glob("*")) == []  # runs still gone
 
 
+def test_preflight_refuses_wrong_data_dir(tmp_path, monkeypatch, capsys):
+    # Reproduce the real footgun: DATA_DIR points somewhere with no data.db,
+    # while RUNS_DIR still points at the disk that holds the runs. The wipe
+    # must REFUSE rather than delete the run files and orphan the DB.
+    real = tmp_path / "real"
+    _seed(real)  # data.db + runs live here
+    wrong = tmp_path / "wrong"
+    wrong.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(wrong))  # no data.db here
+    monkeypatch.setenv("RUNS_DIR", str(real / "runs_v4"))  # runs still reachable
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    rc = _load().main(["--yes"])
+    assert rc == 2, "must refuse a DATA_DIR with no data.db"
+    assert "Refusing to run" in capsys.readouterr().out
+    # Nothing deleted: the real run files survive the refusal.
+    assert (real / "runs_v4" / "r1.json").exists()
+
+
+def test_force_overrides_preflight(tmp_path, monkeypatch):
+    real = tmp_path / "real"
+    _seed(real)
+    wrong = tmp_path / "wrong"
+    wrong.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(wrong))
+    monkeypatch.setenv("RUNS_DIR", str(real / "runs_v4"))
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    # --force overrides the refusal and proceeds (exit is not the refuse-2),
+    # deleting the reachable run files.
+    rc = _load().main(["--yes", "--force"])
+    assert rc != 2
+    assert not (real / "runs_v4" / "r1.json").exists()
+
+
+def test_dry_run_flags_preflight_issue(tmp_path, monkeypatch):
+    wrong = tmp_path / "wrong"
+    wrong.mkdir()  # writable but no data.db
+    monkeypatch.setenv("DATA_DIR", str(wrong))
+    monkeypatch.setenv("RUNS_DIR", str(wrong / "runs_v4"))
+    monkeypatch.delenv("UPLOADS_DIR", raising=False)
+    assert _load().main([]) == 2  # dry run surfaces the blocking issue
+
+
 if str(_REPO / "src") not in sys.path:
     sys.path.insert(0, str(_REPO / "src"))
