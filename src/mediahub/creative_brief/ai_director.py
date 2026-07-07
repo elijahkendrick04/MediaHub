@@ -282,10 +282,7 @@ def _photo_context(photo_facts: Optional[dict]) -> str:
     if not isinstance(photo_facts, dict):
         return ""
     if not photo_facts.get("has_photo"):
-        return (
-            "PHOTO: none available — pick a type-led composition; "
-            "never a photo-led stage."
-        )
+        return "PHOTO: none available — pick a type-led composition; " "never a photo-led stage."
     bits = []
     asset_type = str(photo_facts.get("asset_type") or "").strip()
     orientation = str(photo_facts.get("orientation") or "").strip()

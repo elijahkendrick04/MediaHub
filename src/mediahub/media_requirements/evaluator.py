@@ -298,10 +298,7 @@ def evaluate(
                 )
             if candidates:
                 _n = _meet_total or len(candidates)
-                action = (
-                    f"Pick from {_n} photo{'s' if _n != 1 else ''} "
-                    "uploaded for this meet."
-                )
+                action = f"Pick from {_n} photo{'s' if _n != 1 else ''} " "uploaded for this meet."
             elif "hero_athlete" in missing_required and athlete_name:
                 action = f"Upload a real photo of {athlete_name} to render this post."
             elif "venue" in missing_required:

@@ -202,16 +202,16 @@ class MediaLibraryStore:
             return out
 
         if athlete_names:
-            asset.linked_athlete_names = _merge(
-                asset.linked_athlete_names, athlete_names, ci=True
-            )
+            asset.linked_athlete_names = _merge(asset.linked_athlete_names, athlete_names, ci=True)
         if meet_ids:
             asset.linked_meet_ids = _merge(asset.linked_meet_ids, meet_ids, ci=False)
         if tags:
             asset.tags = _merge(asset.tags, [str(t).lower() for t in tags], ci=False)
         return self.save(asset)
 
-    def list_untagged(self, *, profile_id: Optional[str] = None, limit: int = 500) -> list[MediaAsset]:
+    def list_untagged(
+        self, *, profile_id: Optional[str] = None, limit: int = 500
+    ) -> list[MediaAsset]:
         """Photo assets with no athlete link, no tags, and no vision record.
 
         The M34 bulk "Describe N untagged photos" pass targets exactly these:

@@ -37,10 +37,12 @@ the photo path with the reason recorded in the manifest.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
@@ -126,27 +128,85 @@ def pick_trim_window(moments: list, *, beat_ms: int) -> tuple[Optional[Any], str
 
 
 def prune_footage_cache(*, keep: int = CACHE_MAX_CLIPS) -> int:
-    """Drop the oldest trimmed clips beyond the count cap. Returns pruned count."""
+    """Drop the oldest trimmed clips beyond the count cap. Returns pruned count.
+
+    Moments memos (``*.moments.json``) are capped with the same budget — they
+    are tiny, but a busy library would otherwise grow them without bound.
+    """
+    pruned = 0
     try:
         d = footage_cache_dir()
-        clips = sorted(
-            (p for p in d.glob("*.mp4") if p.is_file()),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
     except OSError:
         return 0
-    pruned = 0
-    for stale in clips[max(0, int(keep)):]:
+    for pattern in ("*.mp4", "*.moments.json"):
         try:
-            stale.unlink()
-            pruned += 1
+            files = sorted(
+                (p for p in d.glob(pattern) if p.is_file()),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
         except OSError:
-            pass
+            continue
+        for stale in files[max(0, int(keep)) :]:
+            try:
+                stale.unlink()
+                pruned += 1
+            except OSError:
+                pass
     return pruned
 
 
-def _normalise_clip(src: Path, out_path: Path, *, in_ms: int, out_ms: int, dims: tuple[int, int]) -> bool:
+def _cached_trim_window(
+    src: Path, fingerprint: str, *, duration_ms: int, beat_ms: int
+) -> tuple[Optional[Any], str]:
+    """Memoised detect-and-pick of a clip's trim window for one beat length.
+
+    Moment analysis is two full FFmpeg passes over the source, so warm
+    renders re-paid ~1s+ per request even when the trimmed clip itself was
+    cached. The picked window (or the honest negative outcome) is memoised
+    per ``(source fingerprint, beat_ms)`` beside the trimmed clips; the
+    fingerprint covers mtime/size, so a replaced clip re-analyses.
+    ``MomentsUnavailable`` (missing FFmpeg) is deliberately never cached —
+    the environment can gain FFmpeg between requests.
+    """
+    memo_path = footage_cache_dir() / f"{fingerprint}-{beat_ms}.moments.json"
+    try:
+        memo = json.loads(memo_path.read_text(encoding="utf-8"))
+        if isinstance(memo, dict) and memo.get("v") == 1:
+            if memo.get("window") is None:
+                return None, str(memo.get("why") or "no-moment-detected")
+            return SimpleNamespace(**memo["window"]), ""
+    except (OSError, ValueError):
+        pass
+
+    from mediahub.video.moments import MomentsUnavailable, detect_moments
+
+    try:
+        moments = detect_moments(src, duration_ms=duration_ms, target_len_ms=beat_ms, max_moments=3)
+    except MomentsUnavailable as e:
+        return None, f"moments-unavailable: {e}"
+    best, why = pick_trim_window(moments, beat_ms=beat_ms)
+    memo_payload: dict[str, Any] = {"v": 1, "window": None, "why": why}
+    if best is not None:
+        memo_payload["window"] = {
+            "start_ms": int(best.start_ms),
+            "end_ms": int(best.end_ms),
+            "score": float(best.score),
+            "kind": str(best.kind),
+            "reason": str(best.reason),
+        }
+    try:
+        memo_path.write_text(json.dumps(memo_payload), encoding="utf-8")
+    except OSError:
+        pass  # memo is an optimisation — never fail the render over it
+    if best is None:
+        return None, why
+    return SimpleNamespace(**memo_payload["window"]), ""
+
+
+def _normalise_clip(
+    src: Path, out_path: Path, *, in_ms: int, out_ms: int, dims: tuple[int, int]
+) -> bool:
     """FFmpeg-trim ``src`` [in_ms, out_ms) into a normalised beat clip.
 
     Muted (``-an``), H.264 yuv420p at the bounded dims, 30fps (the composition
@@ -340,9 +400,7 @@ def _resolve_card_footage(
             continue
         footage_score = float(pick.get("score") or 0.0)
         if footage_score < photo_score:
-            return None, (
-                f"photo-outscores-footage ({photo_score:.3f} > {footage_score:.3f})"
-            )
+            return None, (f"photo-outscores-footage ({photo_score:.3f} > {footage_score:.3f})")
         src = Path(str(asset.path or ""))
         if not src.exists():
             continue
@@ -354,20 +412,12 @@ def _resolve_card_footage(
         if duration_ms + _WINDOW_SHORTFALL_TOLERANCE_MS < beat_ms:
             return None, "clip-shorter-than-beat"
 
-        from mediahub.video.moments import MomentsUnavailable, detect_moments
-
-        try:
-            moments = detect_moments(
-                src, duration_ms=duration_ms, target_len_ms=beat_ms, max_moments=3
-            )
-        except MomentsUnavailable as e:
-            return None, f"moments-unavailable: {e}"
-        best, why = pick_trim_window(moments, beat_ms=beat_ms)
+        fingerprint = source_fingerprint(src)
+        best, why = _cached_trim_window(src, fingerprint, duration_ms=duration_ms, beat_ms=beat_ms)
         if best is None:
             return None, why
 
         dims = clip_scale_dims(asset.width or 1280, asset.height or 720)
-        fingerprint = source_fingerprint(src)
         clip_name = f"{fingerprint}-{best.start_ms}-{best.end_ms}.mp4"
         clip_path = footage_cache_dir() / clip_name
         if not (clip_path.exists() and clip_path.stat().st_size > 1024):

@@ -243,9 +243,7 @@ def score_asset(
         quality = res_score
     else:
         sharp_norm = min(1.0, float(qmeta["sharpness"]) / 250.0)
-        clip = float(qmeta.get("clip_highlights") or 0.0) + float(
-            qmeta.get("clip_shadows") or 0.0
-        )
+        clip = float(qmeta.get("clip_highlights") or 0.0) + float(qmeta.get("clip_shadows") or 0.0)
         # Up to 10% combined clipped pixels is normal (specular water, dark
         # lanes); beyond that each extra point of clipping costs 1.5×.
         clip_penalty = min(0.3, max(0.0, clip - 0.10) * 1.5)
@@ -377,9 +375,7 @@ def _dedupe_burst_families(scored: list[dict]) -> list[dict]:
         return scored
     reps: list[str] = []
     dropped: set[str] = set()
-    for entry in sorted(
-        with_hash, key=lambda e: (-e["_sharpness"], -e["score"], e["asset_id"])
-    ):
+    for entry in sorted(with_hash, key=lambda e: (-e["_sharpness"], -e["score"], e["asset_id"])):
         if any(dhash_hamming(entry["_dhash"], r) <= BURST_HAMMING_MAX for r in reps):
             dropped.add(entry["asset_id"])
         else:

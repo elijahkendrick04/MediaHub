@@ -2342,9 +2342,7 @@ def _assemble_reel_props(
         # Format-independent base focus (story 9:16); the per-cut saliency
         # photoPos is re-resolved downstream in _render_reel_one_format (R1.7).
         cards_props.append(
-            _card_to_props(
-                c, variation_seed=seed, brief=brief, brand_kit=brand_kit, footage=foot
-            ),
+            _card_to_props(c, variation_seed=seed, brief=brief, brand_kit=brand_kit, footage=foot),
         )
 
     if not meet_name:

@@ -1036,7 +1036,7 @@ def _render_why_this_card(
     _open_attr = "" if lazy else " open"
     _summary_label = (
         'Why this card? <span class="why-peek">Show reasoning'
-        '<span class="why-chev" aria-hidden="true">&#9662;</span></span>'
+        '<span class="why-chev" aria-hidden="true">&#x25BE;</span></span>'
         if lazy
         else "Why this card?"
     )
@@ -4762,7 +4762,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   }
   var pickNote = '';
   if (cands.length && evalR.recommended_action && evalR.recommended_action.indexOf('Pick from') === 0) {
-    pickNote = '<div style="font-size:12px;color:var(--lane);margin-bottom:4px">&#128247; ' +
+    pickNote = '<div style="font-size:12px;color:var(--lane);margin-bottom:4px">&#x1F4F7; ' +
       window.safeText(evalR.recommended_action) + ' Picking one links it to this swimmer for future meets.</div>';
   }
   function _pchip(label, active, oc) {
@@ -4782,7 +4782,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
       ? ('Uploaded for this meet' + (candReason[ph.id] ? ' — ' + candReason[ph.id] : '') + '. Click to use & remember for ' + (athlete || 'this athlete'))
       : (ph.suggested ? 'Remembered for ' + (ph.label || 'this athlete') + ' — click to use' : (ph.label || ''));
     var star = ph.suggested ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#x2B50;</span>'
-      : (isCand ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#128247;</span>' : '');
+      : (isCand ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#x1F4F7;</span>' : '');
     return '<span style="position:relative;display:inline-block;margin:0 4px 4px 0">' +
       '<button type="button" title="' + ttl.replace(/"/g, '&quot;') + '" onclick=' + _attrEsc(oc) + ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on ? 'var(--lane)' : (isCand ? 'var(--lane)' : (ph.suggested ? 'var(--medal)' : 'var(--border)'))) + ';background:var(--bg);line-height:0"><img src="' + ph.url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>' + star + '</span>';
   }).join('');
@@ -6470,7 +6470,7 @@ def _render_card_creative_toolbar(
     _more_menu = (
         f'<details class="mh-card-more" data-card="{card_uuid}">'
         f'<summary class="btn secondary" style="font-size:11px;padding:4px 10px">'
-        f'More &#9662;<span class="comments-count" data-card="{card_uuid}"></span></summary>'
+        f'More &#x25BE;<span class="comments-count" data-card="{card_uuid}"></span></summary>'
         f'<div class="mh-card-more-menu">'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="reformatToggle(this, \'{card_uuid}\')" title="Re-target this approved design to another size or format — story, square, poster, certificate, YouTube thumbnail…">&#x21C4; Reformat&hellip;</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copilotToggle(this, \'{card_uuid}\')" title="Ask the copilot to edit this design in plain words — &lsquo;make the headline punchier, more navy&rsquo;. It proposes safe, on-brand changes; you approve.">&#10024; Copilot&hellip;</button>'
@@ -11924,7 +11924,7 @@ _VIDEO_STUDIO_HTML = """
   .vs-tile-meta{display:flex;flex-direction:column;gap:4px;padding:0 7px 7px;font-size:10px}
   .vs-perm-badge{font-size:10px;padding:1px 6px;align-self:flex-start}
   .vstudio-badge.blocked{color:var(--bad,crimson);border-color:color-mix(in oklab, var(--bad,crimson) 35%, transparent)}
-  .vs-perm{background:#0a0a0c;border:1px solid var(--border,#33333a);border-radius:5px;color:var(--ink,#f0f0f2);padding:2px 4px;font-size:10px;max-width:100%}
+  .vs-perm{background:var(--panel);border:1px solid var(--border);border-radius:5px;color:var(--ink);padding:2px 4px;font-size:10px;max-width:100%}
   .vs-frame{font-size:10px;padding:2px 6px;align-self:flex-start}
   .vs-frame-status{font-size:10px}
   .vstudio-controls{display:flex;flex-direction:column;gap:12px}
@@ -42834,7 +42834,7 @@ function mhSetupMode(mode) {{
                 'border:1px solid var(--border);background:#000;display:block"/>'
                 if has_poster
                 else '<span style="width:64px;aspect-ratio:9/16;display:flex;align-items:center;'
-                'justify-content:center;border:1px solid var(--border);border-radius:6px;'
+                "justify-content:center;border:1px solid var(--border);border-radius:6px;"
                 'background:#000;color:var(--ink-muted);font-size:18px">&#x25B6;</span>'
             )
             tiles += (
@@ -43047,7 +43047,7 @@ function mhSetupMode(mode) {{
             _checked = "checked" if _cid in _default_reel_ids else ""
             _composer_rows += (
                 '<label style="display:flex;align-items:center;gap:10px;padding:6px 8px;'
-                'border:1px solid var(--border);border-radius:8px;cursor:pointer;'
+                "border:1px solid var(--border);border-radius:8px;cursor:pointer;"
                 'background:color-mix(in oklab, var(--panel) 60%, transparent)">'
                 f'<input type="checkbox" class="mh-reel-pick" value="{_h(_cid)}" {_checked} '
                 'onchange="mhReelComposerSync()">'
@@ -43149,9 +43149,9 @@ function mhSetupMode(mode) {{
         _coverage_html = ""
         try:
             _cov_profile_id = profile_id or run_data.get("club_filter") or "_run_" + run_id
-            _cov_profile_id = re.sub(
-                r"[^a-z0-9_-]", "-", _cov_profile_id.lower()
-            ).strip("-") or ("_run_" + run_id)
+            _cov_profile_id = re.sub(r"[^a-z0-9_-]", "-", _cov_profile_id.lower()).strip("-") or (
+                "_run_" + run_id
+            )
             _lib_names: list[str] = []
             if _v8_ok and _v8_get_media_store is not None:
                 _photo_types = {"athlete_action", "athlete_headshot", "team_photo", "other"}
@@ -43163,9 +43163,7 @@ function mhSetupMode(mode) {{
             _lib_name_set = set(_lib_names)
 
             def _has_photo(name_lc: str) -> bool:
-                return any(
-                    name_lc == ln or name_lc in ln or ln in name_lc for ln in _lib_name_set
-                )
+                return any(name_lc == ln or name_lc in ln or ln in name_lc for ln in _lib_name_set)
 
             _cov_athletes: list[tuple[str, str]] = []  # (athlete, first card id)
             _cov_seen: set[str] = set()
@@ -46108,9 +46106,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "ok": True,
                     # Back-compat single-asset field + the full batch.
                     "asset": first.to_dict() if hasattr(first, "to_dict") else first,
-                    "assets": [
-                        a.to_dict() if hasattr(a, "to_dict") else a for a in saved_assets
-                    ],
+                    "assets": [a.to_dict() if hasattr(a, "to_dict") else a for a in saved_assets],
                     "saved": len(saved_assets),
                     "skipped": skipped,
                 }
@@ -46279,12 +46275,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     job["status"] = "done"
                 else:
                     job["status"] = "error"
-                    job["error"] = (
-                        "; ".join(list(job["errors"].values())[:3]) or "no photos tagged"
-                    )
-                    job["user_message"] = (
-                        "No photos could be tagged — see the per-photo errors."
-                    )
+                    job["error"] = "; ".join(list(job["errors"].values())[:3]) or "no photos tagged"
+                    job["user_message"] = "No photos could be tagged — see the per-photo errors."
             except Exception as e:
                 job["status"] = "error"
                 job["error"] = str(e)
@@ -47721,9 +47713,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     f.filename or "clip.mp4",
                     profile_id=profile_id,
                     description=(
-                        f"Race clip of {athlete} — uploaded on the card for {meet_name}".strip(
-                            " —"
-                        )
+                        f"Race clip of {athlete} — uploaded on the card for {meet_name}".strip(" —")
                     ),
                     uploaded_by=_active_profile_id(),
                     # permission default needs_approval preserved (review-first).
@@ -47774,9 +47764,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         "id": clip_asset.id,
                         "url": url_for("api_media_library_file", asset_id=clip_asset.id),
                         "poster_url": (
-                            url_for(
-                                "api_media_library_file", asset_id=clip_asset.id, poster=1
-                            )
+                            url_for("api_media_library_file", asset_id=clip_asset.id, poster=1)
                             if meta.get("poster")
                             else ""
                         ),
@@ -51336,9 +51324,7 @@ voice, and queues them for one-click approval.</p>
                 as_attachment=False,
                 download_name=poster.name,
             )
-        return send_file(
-            str(path), mimetype="video/mp4", as_attachment=False, download_name=name
-        )
+        return send_file(str(path), mimetype="video/mp4", as_attachment=False, download_name=name)
 
     @app.route("/api/runs/<run_id>/card/<card_id>/motion/manifest", methods=["GET"])
     def api_card_motion_manifest(run_id: str, card_id: str):
@@ -51434,8 +51420,7 @@ voice, and queues them for one-click approval.</p>
             "swim_id": ach.get("swim_id") or card_id,
             "achievement": ach,
             "post_angle": ach.get("post_angle"),
-            "meet_name": (run_data.get("meet") or {}).get("name")
-            or run_data.get("meet_name", ""),
+            "meet_name": (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", ""),
             "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
         }
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
@@ -52560,9 +52545,9 @@ voice, and queues them for one-click approval.</p>
                     ids = _ra_ids(ra)
                     pick = next((cid for cid in selected_ids if cid in ids), "")
                     ordered_ids.append(pick or (sorted(ids)[0] if ids else ""))
-                sel_suffix = "_sel" + hashlib.sha1(
-                    ",".join(ordered_ids).encode("utf-8")
-                ).hexdigest()[:8]
+                sel_suffix = (
+                    "_sel" + hashlib.sha1(",".join(ordered_ids).encode("utf-8")).hexdigest()[:8]
+                )
         else:
             top = ranked_sorted[:n]
             if not top:
@@ -53451,9 +53436,7 @@ voice, and queues them for one-click approval.</p>
         # id list (the job threads that exact list into this URL's ?cards=).
         _cards_arg = (request.args.get("cards") or "").strip()
         _sel = (
-            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8")).hexdigest()[:8]
-            if _cards_arg
-            else ""
+            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8")).hexdigest()[:8] if _cards_arg else ""
         )
         base = f"reel_{n}{_sel}{_suffix}"
         name = f"{base}.mp4" if fmt == "story" else f"{base}_{fmt}.mp4"
@@ -53520,9 +53503,7 @@ voice, and queues them for one-click approval.</p>
         )
         _cards_arg = (request.args.get("cards") or "").strip()
         _sel = (
-            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8")).hexdigest()[:8]
-            if _cards_arg
-            else ""
+            "_sel" + hashlib.sha1(_cards_arg.encode("utf-8")).hexdigest()[:8] if _cards_arg else ""
         )
         base = f"reel_{n}{_sel}{_suffix}"
         name = f"{base}.json" if fmt == "story" else f"{base}_{fmt}.json"
@@ -55338,7 +55319,7 @@ voice, and queues them for one-click approval.</p>
         engine_note = (
             ""
             if engine_ready
-            else '<p class="muted" style="margin-top:6px">&#9888; The render engine '
+            else '<p class="muted" style="margin-top:6px">&#x26A0; The render engine '
             "(FFmpeg) isn't available on this deployment yet, so clips can be "
             "planned but not yet rendered. Captions also need server speech-to-text "
             "(<code>MEDIAHUB_ASR_PROVIDER</code>).</p>"

@@ -195,7 +195,9 @@ def footage_env(tmp_path, monkeypatch):
     monkeypatch.setattr(footage_mod, "_normalise_clip", fake_trim)
     # Point the footage cache into the tmp tree so tests never touch the repo.
     cache = tmp_path / "footage_cache"
-    monkeypatch.setattr(footage_mod, "footage_cache_dir", lambda: (cache.mkdir(exist_ok=True) or cache))
+    monkeypatch.setattr(
+        footage_mod, "footage_cache_dir", lambda: cache.mkdir(exist_ok=True) or cache
+    )
     return {"tmp": tmp_path, "trims": trims, "cache": cache}
 
 
@@ -284,7 +286,9 @@ class TestFootageMaths:
         assert best2.start_ms == 0
 
     def test_pick_trim_window_rejects_short_clip(self):
-        best, why = footage_mod.pick_trim_window([Moment(0, 3000, 0.9, "energy", "x")], beat_ms=6000)
+        best, why = footage_mod.pick_trim_window(
+            [Moment(0, 3000, 0.9, "energy", "x")], beat_ms=6000
+        )
         assert best is None and why == "clip-shorter-than-beat"
         assert footage_mod.pick_trim_window([], beat_ms=6000) == (None, "no-moment-detected")
 
@@ -421,17 +425,28 @@ class TestMotionFootageFold:
             video_src="footage_cache/abc-0-6000.mp4",
             video_start_sec=0.0,
             video_duration_sec=6.0,
-            cache_sig={"src": "footage_cache/abc-0-6000.mp4", "fingerprint": "abc", "in_ms": 0, "out_ms": 6000},
+            cache_sig={
+                "src": "footage_cache/abc-0-6000.mp4",
+                "fingerprint": "abc",
+                "in_ms": 0,
+                "out_ms": 6000,
+            },
             provenance={"used": True},
         )
         d2 = self._props(footage=res)
         assert d2["videoSrc"] == "footage_cache/abc-0-6000.mp4"
         assert d2["videoDurationSec"] == 6.0
         # Everything else byte-identical — the no-footage card is untouched.
-        d2_minus = {k: v for k, v in d2.items() if k not in ("videoSrc", "videoStartSec", "videoDurationSec")}
+        d2_minus = {
+            k: v
+            for k, v in d2.items()
+            if k not in ("videoSrc", "videoStartSec", "videoDurationSec")
+        }
         assert d2_minus == d1
 
-    def test_story_cache_key_folds_footage_only_when_present(self, footage_env, monkeypatch, tmp_path):
+    def test_story_cache_key_folds_footage_only_when_present(
+        self, footage_env, monkeypatch, tmp_path
+    ):
         from mediahub.visual import motion
 
         keys: list[str] = []
@@ -451,9 +466,7 @@ class TestMotionFootageFold:
         # A real store singleton scoped to this test.
         from mediahub.media_library import store as store_mod
 
-        real = store_mod.MediaLibraryStore(
-            db_path=tmp / "data.db", uploads_dir=tmp / "uploads"
-        )
+        real = store_mod.MediaLibraryStore(db_path=tmp / "data.db", uploads_dir=tmp / "uploads")
         monkeypatch.setattr(store_mod, "_default_store", real)
         real.save(ph)
 
@@ -653,9 +666,20 @@ class TestIngestPoster:
 
         src = tmp_path / "real.mp4"
         subprocess.run(
-            [exe, "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:duration=2",
-             "-pix_fmt", "yuv420p", str(src)],
-            check=True, capture_output=True, timeout=120,
+            [
+                exe,
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x360:rate=30:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                str(src),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
         )
         from mediahub.video import ingest
 
@@ -738,7 +762,9 @@ class TestEndCard:
     def _edl(self, src: Path):
         from mediahub.video.edl import EDL, Clip
 
-        return EDL(width=1080, height=1920, fps=30, clips=[Clip(source=str(src), in_ms=0, out_ms=4000)])
+        return EDL(
+            width=1080, height=1920, fps=30, clips=[Clip(source=str(src), in_ms=0, out_ms=4000)]
+        )
 
     def test_no_brand_kit_keeps_timeline_unchanged(self, tmp_path):
         from mediahub.video.end_card import append_end_card
@@ -779,10 +805,71 @@ class TestEndCard:
 
         a = _brand_fingerprint(
             {"primary": "#111111", "accent": "#FFD86E", "displayName": "Alpha SC"},
-            width=1080, height=1920, fps=30,
+            width=1080,
+            height=1920,
+            fps=30,
         )
         b = _brand_fingerprint(
             {"primary": "#222222", "accent": "#FFD86E", "displayName": "Alpha SC"},
-            width=1080, height=1920, fps=30,
+            width=1080,
+            height=1920,
+            fps=30,
         )
         assert a != b
+
+
+# ---------------------------------------------------------------------------
+# Moments memo: warm renders skip the FFmpeg analysis passes (sweep follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestMomentMemo:
+    def test_trim_window_memoised_per_fingerprint_and_beat(
+        self, footage_env, tmp_path, monkeypatch
+    ):
+        import mediahub.video.moments as moments_mod
+
+        src = tmp_path / "race.mp4"
+        src.write_bytes(b"x" * 4096)
+        inner = moments_mod.detect_moments
+        calls = {"n": 0}
+
+        def counting(path, **kw):
+            calls["n"] += 1
+            return inner(path, **kw)
+
+        monkeypatch.setattr(moments_mod, "detect_moments", counting)
+        fp = footage_mod.source_fingerprint(src)
+
+        first, why = footage_mod._cached_trim_window(src, fp, duration_ms=10000, beat_ms=6000)
+        again, _ = footage_mod._cached_trim_window(src, fp, duration_ms=10000, beat_ms=6000)
+        assert why == "" and calls["n"] == 1, "second identical request must hit the memo"
+        assert (first.start_ms, first.end_ms, first.score, first.kind, first.reason) == (
+            again.start_ms,
+            again.end_ms,
+            again.score,
+            again.kind,
+            again.reason,
+        )
+        assert list(footage_env["cache"].glob("*.moments.json")), "memo persisted beside clips"
+
+        # A different beat length is a different memo (window is beat-sized).
+        footage_mod._cached_trim_window(src, fp, duration_ms=10000, beat_ms=4000)
+        assert calls["n"] == 2
+
+        # Honest negative outcomes are memoised too.
+        none1, reason1 = footage_mod._cached_trim_window(src, fp, duration_ms=8000, beat_ms=20000)
+        none2, reason2 = footage_mod._cached_trim_window(src, fp, duration_ms=8000, beat_ms=20000)
+        assert none1 is None and none2 is None and reason1 == reason2 == "clip-shorter-than-beat"
+        assert calls["n"] == 3
+
+    def test_memo_pruned_with_clip_budget(self, footage_env):
+        cache = footage_env["cache"]
+        cache.mkdir(exist_ok=True)
+        for i in range(15):
+            (cache / f"aa{i:02d}-0-6000.mp4").write_bytes(b"clip")
+            (cache / f"aa{i:02d}-6000.moments.json").write_text("{}")
+        pruned = footage_mod.prune_footage_cache(keep=12)
+        assert pruned == 6, "3 clips + 3 memos beyond the budget"
+        assert len(list(cache.glob("*.mp4"))) == 12
+        assert len(list(cache.glob("*.moments.json"))) == 12

@@ -144,9 +144,7 @@ def poster_path_for_blob(blob_path) -> Path:
     return Path(blob_path).with_suffix(".poster.png")
 
 
-def extract_poster(
-    blob_path, *, duration_ms: int, width: int, height: int
-) -> Optional[str]:
+def extract_poster(blob_path, *, duration_ms: int, width: int, height: int) -> Optional[str]:
     """Extract one deterministic poster frame beside the blob (M27), or None.
 
     The frame at 10% of the clip's duration (a fixed timestamp = reproducible),
@@ -240,9 +238,7 @@ def _finalise_footage_asset(
             "audio_codec": probe.audio_codec,
             "rotation": probe.rotation,
         }
-        poster_name = extract_poster(
-            blob_path, duration_ms=probe.duration_ms, width=dw, height=dh
-        )
+        poster_name = extract_poster(blob_path, duration_ms=probe.duration_ms, width=dw, height=dh)
         if poster_name:
             media_meta["poster"] = poster_name
     except Exception:

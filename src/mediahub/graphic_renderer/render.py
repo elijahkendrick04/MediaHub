@@ -3814,7 +3814,7 @@ def _duotone_defs_svg(shadow_hex: str, highlight_hex: str) -> str:
         '<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
         '<filter id="mh-duotone" color-interpolation-filters="sRGB">'
         '<feColorMatrix type="matrix" values="0.2126 0.7152 0.0722 0 0 '
-        "0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0 0 0 1 0\"/>"
+        '0.2126 0.7152 0.0722 0 0 0.2126 0.7152 0.0722 0 0 0 0 0 1 0"/>'
         "<feComponentTransfer>"
         f'<feFuncR type="table" tableValues="{_t(sr, hr)}"/>'
         f'<feFuncG type="table" tableValues="{_t(sg, hg)}"/>'
@@ -3954,10 +3954,10 @@ def _stat_chips_html(brief, ink_var: str) -> str:
         value = _chip_value(key, str(opts[key]))
         cells.append(
             '<div style="border:1px solid var(--mh-outline);padding:18px 24px;min-width:0">'
-            '<div style="font-family:\'Inter\',sans-serif;font-weight:700;font-size:17px;'
+            "<div style=\"font-family:'Inter',sans-serif;font-weight:700;font-size:17px;"
             "letter-spacing:0.22em;text-transform:uppercase;color:var(--mh-accent);"
             'margin-bottom:8px">' + html_escape(label) + "</div>"
-            '<div style="font-family:\'JetBrains Mono\',\'Space Grotesk\',monospace;'
+            "<div style=\"font-family:'JetBrains Mono','Space Grotesk',monospace;"
             "font-feature-settings:'tnum';font-weight:700;font-size:30px;line-height:1.05;"
             f'color:var({ink_var});overflow-wrap:anywhere">' + html_escape(value) + "</div></div>"
         )
@@ -4028,13 +4028,13 @@ def _pb_bars_html(brief, ink_var: str) -> str:
     def _bar(label: str, value: str, pct: float, fill: str, ink: str) -> str:
         return (
             '<div style="display:flex;align-items:center;gap:16px;min-width:0">'
-            '<div style="flex:0 0 108px;font-family:\'Inter\',sans-serif;font-weight:700;'
+            "<div style=\"flex:0 0 108px;font-family:'Inter',sans-serif;font-weight:700;"
             "font-size:15px;letter-spacing:0.18em;text-transform:uppercase;"
             f'color:var({ink_var});opacity:0.78">' + html_escape(label) + "</div>"
             f'<div style="flex:1 1 auto;min-width:0"><div style="width:{pct:.1f}%;height:26px;'
             f'background:{fill};display:flex;align-items:center;justify-content:flex-end">'
-            '<span style="font-family:\'JetBrains Mono\',monospace;font-feature-settings:\'tnum\';'
-            f"font-weight:700;font-size:17px;color:{ink};padding:0 10px;white-space:nowrap\">"
+            "<span style=\"font-family:'JetBrains Mono',monospace;font-feature-settings:'tnum';"
+            f'font-weight:700;font-size:17px;color:{ink};padding:0 10px;white-space:nowrap">'
             + html_escape(value)
             + "</span></div></div></div>"
         )
@@ -4042,12 +4042,16 @@ def _pb_bars_html(brief, ink_var: str) -> str:
     return (
         '<div class="mh-pb-bars" style="display:flex;flex-direction:column;gap:10px;'
         'margin-top:28px">'
-        + _bar("Previous", prev_str, 100.0, f"color-mix(in srgb, var({ink_var}) 26%, transparent)", f"var({ink_var})")
+        + _bar(
+            "Previous",
+            prev_str,
+            100.0,
+            f"color-mix(in srgb, var({ink_var}) 26%, transparent)",
+            f"var({ink_var})",
+        )
         + _bar("Now", new_str, new_pct, "var(--mh-accent)", "var(--mh-primary)")
-        + '<div style="font-family:\'Inter\',sans-serif;font-weight:600;font-size:15px;'
-        f'color:var(--mh-accent);letter-spacing:0.06em">'
-        + html_escape(caption)
-        + "</div></div>"
+        + "<div style=\"font-family:'Inter',sans-serif;font-weight:600;font-size:15px;"
+        f'color:var(--mh-accent);letter-spacing:0.06em">' + html_escape(caption) + "</div></div>"
     )
 
 

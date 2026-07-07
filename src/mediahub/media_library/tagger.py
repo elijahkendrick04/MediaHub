@@ -187,19 +187,13 @@ def _quality_metrics(img: Image.Image) -> dict:
     longest = max(w, h)
     if longest > _QUALITY_WORK_MAX:
         scale = _QUALITY_WORK_MAX / longest
-        grey = grey.resize(
-            (max(1, round(w * scale)), max(1, round(h * scale))), Image.BILINEAR
-        )
+        grey = grey.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.BILINEAR)
     arr = np.asarray(grey, dtype=np.float32)
 
     sharpness = 0.0
     if arr.shape[0] >= 3 and arr.shape[1] >= 3:
         lap = (
-            4.0 * arr[1:-1, 1:-1]
-            - arr[:-2, 1:-1]
-            - arr[2:, 1:-1]
-            - arr[1:-1, :-2]
-            - arr[1:-1, 2:]
+            4.0 * arr[1:-1, 1:-1] - arr[:-2, 1:-1] - arr[2:, 1:-1] - arr[1:-1, :-2] - arr[1:-1, 2:]
         )
         sharpness = float(lap.var())
 

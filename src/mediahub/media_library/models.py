@@ -46,6 +46,7 @@ def canonical_asset_type(value) -> str:
     s = str(value or "").strip()
     return LEGACY_TYPE_ALIASES.get(s, s)
 
+
 PERMISSION_STATUSES = (
     "user_owned",
     "approved_public",
