@@ -91,6 +91,10 @@ CATEGORY_BY_ARCHETYPE: dict[str, str] = {
     "three_card_editorial_grid": "editorial",  # G1.1
     "staggered_diagonal_offset": "editorial",  # G1.1
     "ribbon_banner": "editorial",  # G1.1
+    # sub_16-3 — the R1.2 motion-trio stills.
+    "marquee_crawl": "editorial",  # repeating type-ribbon wall is the hero
+    "radial_rings": "data",  # the verified result sits at the bullseye
+    "vertical_split": "editorial",  # identity-led colour fields; photo optional
 }
 
 # Default for any future archetype with no explicit mapping yet (a test guards
@@ -131,6 +135,10 @@ _DISPLAY_ORDER: tuple[str, ...] = (
     "contact_sheet",
     "vertical_stat_tower",
     "ribbon_banner",
+    # sub_16-3 — the R1.2 motion-trio stills, interleaved by category.
+    "vertical_split",
+    "radial_rings",
+    "marquee_crawl",
 )
 
 # Friendly card titles (the snake_case slug is shown separately for
@@ -165,6 +173,9 @@ _TITLE: dict[str, str] = {
     "full_height_portrait_split": "Portrait Split",
     "ribbon_banner": "Ribbon Banner",
     "contact_sheet": "Contact Sheet",
+    "marquee_crawl": "Marquee Crawl",
+    "radial_rings": "Radial Rings",
+    "vertical_split": "Vertical Split",
 }
 
 # Short fallback "what it is" blurb, used only if an archetype's notes file is
@@ -625,6 +636,46 @@ _SVG: dict[str, str] = {
         '<rect class="ik" x="16" y="120" width="18" height="4" rx="1"/>'
         '<rect class="ik2" x="16" y="127" width="42" height="9" rx="1"/>'
         '<rect class="ac" x="90" y="120" width="14" height="6" rx="1"/>'
+    ),
+    # sub_16-3 — the R1.2 motion-trio stills.
+    # Editorial — full-height ribbon-band wall punctuated by one pinned plate.
+    "marquee_crawl": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="ik" x="0" y="8" width="120" height="7"/>'
+        '<rect class="ik2" x="0" y="21" width="120" height="7"/>'
+        '<rect class="ik" x="0" y="34" width="120" height="7"/>'
+        '<rect class="ik2" x="0" y="47" width="120" height="7"/>'
+        '<rect class="sf" x="0" y="58" width="120" height="42"/>'
+        '<line class="acln" x1="0" y1="58" x2="120" y2="58"/>'
+        '<line class="acln" x1="0" y1="100" x2="120" y2="100"/>'
+        '<rect class="ac" x="12" y="64" width="22" height="5" rx="1"/>'
+        '<rect class="ik2" x="12" y="74" width="74" height="12" rx="1"/>'
+        '<rect class="ik" x="12" y="90" width="44" height="5" rx="1"/>'
+        '<rect class="ik2" x="0" y="106" width="120" height="7"/>'
+        '<rect class="ik" x="0" y="119" width="120" height="7"/>'
+        '<rect class="ik2" x="0" y="132" width="120" height="7"/>'
+    ),
+    # Data-led — concentric ripple with the result at the bullseye.
+    "radial_rings": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<circle class="acln" cx="60" cy="60" r="42"/>'
+        '<circle class="acln" cx="60" cy="60" r="31"/>'
+        '<circle class="acln" cx="60" cy="60" r="21"/>'
+        '<circle class="ac" cx="60" cy="60" r="12"/>'
+        '<rect class="ik2" x="40" y="112" width="40" height="8" rx="1"/>'
+        '<rect class="ik" x="48" y="125" width="24" height="4" rx="1"/>'
+        '<rect class="ik" x="12" y="138" width="30" height="4" rx="1"/>'
+    ),
+    # Editorial — two solid colour fields meeting at one lit accent seam.
+    "vertical_split": (
+        '<rect class="gd" x="0" y="0" width="120" height="150" rx="3"/>'
+        '<rect class="sf" x="0" y="88" width="120" height="62"/>'
+        '<line class="acln" x1="0" y1="88" x2="120" y2="88"/>'
+        '<rect class="ac" x="12" y="14" width="24" height="5" rx="1"/>'
+        '<rect class="ik" x="12" y="26" width="30" height="4" rx="1"/>'
+        '<rect class="ik2" x="12" y="62" width="84" height="16" rx="1"/>'
+        '<rect class="ik2" x="12" y="102" width="64" height="14" rx="1"/>'
+        '<rect class="ik" x="12" y="124" width="40" height="4" rx="1"/>'
     ),
 }
 
