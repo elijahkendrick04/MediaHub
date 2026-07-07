@@ -31,11 +31,21 @@ _ALLOWED_PLACEHOLDERS = {
     "HERO_STAT",
     "LOGO_BLOCK",
     "ATHLETE_IMG_BLOCK",
+    # Per-frame cutout custom property (--mh-athlete-img) for contact_sheet,
+    # filled by render.py.
+    "ATHLETE_IMG_VAR",
     "ACCENT_DECORATION",
     "SPONSOR_BLOCK",
     "WIDTH",
     "HEIGHT",
     "BASE_CSS",
+    # Conditional photo/text wrappers filled by render.py (they comment out the
+    # block on the path that shouldn't render) — used by contact_sheet's per-frame
+    # cutouts so an empty frame never emits a broken <img>.
+    "PHOTO_ONLY_OPEN",
+    "PHOTO_ONLY_CLOSE",
+    "TEXT_ONLY_OPEN",
+    "TEXT_ONLY_CLOSE",
 }
 
 

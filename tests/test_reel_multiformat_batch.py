@@ -418,6 +418,7 @@ def _fake_all_formats_writing(rendered_formats, errors=None, captured=None):
         next_meet="",
         rhythm=None,
         dub_language="",
+        reel_stat_config=None,
     ):
         if captured is not None:
             captured.update(
@@ -427,6 +428,7 @@ def _fake_all_formats_writing(rendered_formats, errors=None, captured=None):
                     "next_meet": next_meet,
                     "rhythm": rhythm,
                     "dub_language": dub_language,
+                    "reel_stat_config": reel_stat_config,
                 }
             )
         rendered: dict[str, Path] = {}
