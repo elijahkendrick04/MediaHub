@@ -34,7 +34,9 @@ _SKIP_BROWSER = (
     os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower()
     in ("1", "true", "yes")
 )
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 _THEME_CSS = _ROOT / "src" / "mediahub" / "web" / "static" / "theme" / "theme-components.css"
 
 
@@ -260,7 +262,7 @@ class TestOdometerAssetsPresent:
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestOdometerBrowser:
     # Reading the landed digit from each reel's inline transform needs no CSS,
     # but we inject theme-components.css so the clip/layout matches production

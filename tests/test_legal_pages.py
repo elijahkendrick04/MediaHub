@@ -152,3 +152,14 @@ def test_acceptance_ledger_file_permissions(monkeypatch, tmp_path):
     store.record("a@club.org", legal.DOC_TERMS, legal.TERMS_VERSION)
     mode = store.path.stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_privacy_has_no_publishing_log_claims():
+    """The publishing-attempts store was removed (PR 779): the privacy notice
+    must not describe a publishing log or caption-excerpt erasure any more."""
+    from mediahub.web.legal import privacy_html
+
+    html = privacy_html(terms_url="/legal/terms", cookies_url="/legal/cookies", dpa_url="/legal/dpa")
+    assert "Publishing log" not in html
+    assert "publishing attempts" not in html
+    assert "caption excerpt" not in html

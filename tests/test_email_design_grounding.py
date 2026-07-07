@@ -170,6 +170,30 @@ def test_allowed_numbers_includes_stats_and_years(tmp_path):
     assert 12.0 in allowed and 3.0 in allowed and 2026.0 in allowed
 
 
+def test_consent_blocked_swimmer_dropped_from_facts(tmp_path, monkeypatch):
+    rd = _make_run(
+        tmp_path, "run1", "club-a", "2026-06-12",
+        [_ach("s1", "Maya", "100 Free", "pb_confirmed"),
+         _ach("s2", "Tom", "50 Back", "medal_gold"),
+         _ach("s3", "Tom", "100 Back", "pb_confirmed")],
+    )
+    _approve(rd, "run1", "s1", "s2", "s3")
+    import mediahub.compliance.gate as gate
+
+    monkeypatch.setattr(
+        gate, "consent_block_reason",
+        lambda profile_id, name, **kw: "no consent on file" if name == "Tom" else None,
+    )
+    from datetime import date
+
+    facts = gather_facts("club-a", start=date(2026, 6, 1), end=date(2026, 6, 30), runs_dir=rd)
+    blob = json.dumps(facts.recaps) + json.dumps(facts.spotlights) + facts.facts_block()
+    assert "Tom" not in blob  # blocked athlete's name never ships in public text
+    assert any("Maya" in r["title"] for r in facts.recaps)
+    labels = {s["label"]: s["value"] for s in facts.stats}
+    assert labels.get("Swimmers") == "1"  # only Maya counted
+
+
 def test_card_image_resolver_is_used(tmp_path):
     rd = _make_run(tmp_path, "run1", "club-a", "2026-06-12", [_ach("s1", "Maya", "100 Free", "pb_confirmed")])
     _approve(rd, "run1", "s1")

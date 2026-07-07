@@ -1,7 +1,7 @@
 """Roadmap 1.20 Build A — print profiles & the print/merch product registry.
 
 Pins two things:
-- the physical-dimension helpers added to ``FormatSpec`` (mm / in / effective dpi);
+- the physical-dimension helpers added to ``FormatSpec`` (mm / in);
 - the ``print_ready.products`` registry's integrity and public API.
 
 Pure data, no rendering — fast and deterministic.
@@ -26,7 +26,6 @@ def test_screen_native_format_has_no_physical_size():
     assert ig.width_mm == 0.0 and ig.height_mm == 0.0
     assert ig.width_in == 0.0 and ig.height_in == 0.0
     assert ig.physical_label == ""
-    assert ig.effective_dpi(1000) == 0.0
 
 
 def test_print_format_physical_size_matches_dpi_maths():
@@ -37,15 +36,6 @@ def test_print_format_physical_size_matches_dpi_maths():
     assert round(a3.height_mm) == 420
     assert round(a3.width_in, 1) == 11.7
     assert "mm" in a3.physical_label
-
-
-def test_effective_dpi_catches_the_low_resolution_trap():
-    a2 = fc.format_for("print_poster_a2")
-    # A small social image stretched onto an A2 poster is nowhere near print res.
-    assert a2.effective_dpi(1000, axis="width") < 100
-    # Artwork rendered at the canvas size lands exactly on the target dpi.
-    assert a2.effective_dpi(a2.width, axis="width") == pytest.approx(150.0, abs=0.5)
-    assert a2.effective_dpi(a2.height, axis="height") == pytest.approx(150.0, abs=0.5)
 
 
 def test_to_dict_carries_physical_fields():

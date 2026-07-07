@@ -16,11 +16,14 @@ or if its output doesn't contain structured PB data.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from .fetch_profile import ProfilePage
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -227,6 +230,14 @@ def _interpreter_extract_pbs(page: ProfilePage) -> tuple[list[PBRow], float]:
                 )
         return pb_rows, float(result.overall_confidence)
     except Exception:
+        # Never crash the discovery flow — but a silently-swallowed interpreter
+        # failure degrades every page to the low-confidence heuristic and is
+        # undiagnosable in production, so log it with the page URL first.
+        log.warning(
+            "interpreter PB extraction failed for %s — falling back to heuristic",
+            page.url,
+            exc_info=True,
+        )
         return [], 0.0
 
 
@@ -258,7 +269,11 @@ def parse_pbs_from_page(
         except ImportError:
             pass  # interpreter not built yet, fall through to heuristic
         except Exception:
-            pass
+            log.warning(
+                "interpreter PB parse failed for %s — using heuristic extraction",
+                page.url,
+                exc_info=True,
+            )
 
     # Heuristic fallback
     rows = _heuristic_extract_pbs(page)

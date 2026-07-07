@@ -180,6 +180,40 @@ def test_svg_logo_serves_as_svg(client):
     assert "svg" in asset.headers["Content-Type"]
 
 
+def test_logo_serve_headers_private_and_sandboxed(client):
+    """Session-gated logo responses must never be shared-cacheable
+    ('private', not 'public'), and every logo/silhouette serve carries
+    CSP sandbox so a script-bearing uploaded SVG can't execute on direct
+    navigation (global CSP allows 'unsafe-inline')."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        "<script>alert(1)</script>"
+        '<circle cx="50" cy="50" r="40" fill="#1e63c8"/></svg>'
+    )
+    meta = _store_bytes("org-svgx", "l_svgx", "svg", svg.encode(), "image/svg+xml")
+    _make_org("org-svgx", [meta])
+    with client.session_transaction() as s:
+        s["active_profile_id"] = "org-svgx"
+
+    # ?bg silhouette: private cache + sandbox.
+    bg = client.get("/organisation/setup/logo/l_svgx?bg=1")
+    assert bg.status_code == 200
+    assert bg.headers.get("Cache-Control", "").startswith("private"), (
+        bg.headers.get("Cache-Control")
+    )
+    assert bg.headers.get("Content-Security-Policy") == "sandbox"
+
+    # Plain serve (SVG passthrough): sandbox present.
+    raw = client.get("/organisation/setup/logo/l_svgx")
+    assert raw.status_code == 200
+    assert raw.headers.get("Content-Security-Policy") == "sandbox"
+
+    # The sibling per-profile route too.
+    raw2 = client.get("/organisation/org-svgx/logo/l_svgx")
+    assert raw2.status_code == 200
+    assert raw2.headers.get("Content-Security-Policy") == "sandbox"
+
+
 # --------------------------------------------------------------------------- #
 # the never-break guarantee — unrenderable / corrupt → transparent pixel, 200
 # --------------------------------------------------------------------------- #
@@ -313,3 +347,33 @@ def test_one_pixel_tall_silhouette_does_not_raise(tmp_path):
     im.save(sil)
     t = L._treatment_for_silhouette(sil)
     _valid_treatment(t)
+
+
+def test_bg_fit_pil_open_is_memoised_across_renders(client, monkeypatch):
+    """The backdrop pick must not re-open every uploaded logo with PIL on every
+    signed-in render. Two renders of the same profile should open each raster
+    logo at most once (the second render is served from the mtime-keyed cache)."""
+    import PIL.Image as _PILImage
+
+    logos = [
+        _store_img("org-memo", f"l{i}", "png", _img(200, 200), "image/png", "PNG")
+        for i in range(4)
+    ]
+    _make_org("org-memo", logos)
+
+    webmod._bg_fit_cache.clear()
+    real_open = _PILImage.open
+    calls = {"n": 0}
+
+    def _counting_open(*a, **k):
+        calls["n"] += 1
+        return real_open(*a, **k)
+
+    monkeypatch.setattr(_PILImage, "open", _counting_open)
+
+    _home(client, "org-memo")
+    first = calls["n"]
+    assert first >= 1, "first render should open at least one logo"
+    _home(client, "org-memo")
+    # Second render adds no new PIL opens for the same, unchanged logos.
+    assert calls["n"] == first, f"second render re-opened logos: {calls['n']} > {first}"

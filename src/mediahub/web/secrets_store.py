@@ -3,23 +3,13 @@
 Post-rewrite: all credentials are **operator-controlled via env vars**
 at deploy time. The settings page is gone. The user never sees a key.
 
-This module remains as a thin facade with the same public API the rest
-of the codebase imports, so callers don't break. Its job is now:
+This module remains as a thin facade. Its job is now:
 
-  • `get_*` / `get_secret(key)` reads from the relevant env var first;
-    falls back to the on-disk `secrets.json` for ONE release so that
-    self-hosted installs that pre-date this rewrite don't lose their
-    keys overnight. A startup-time warning is logged when the disk
-    fallback fires, telling the operator to migrate to env vars.
-
-  • `set_*` / `set_secret(key, value)` are now no-ops that log a
-    warning. They exist so that any stragglers in the codebase that
-    still call them don't error out — but they never persist anything
-    new. The settings page that used to call them is gone.
-
-  • `save_secrets(...)` was the disk-writing back-compat shim and is
-    DEPRECATED — kept only as a no-op stub to be deleted in the next
-    release once we've confirmed no callers remain.
+  • `get_secret(key)` reads from the relevant env var first; falls back
+    to the on-disk `secrets.json` for ONE release so that deployments
+    that pre-date this rewrite don't lose their keys overnight. A
+    startup-time warning is logged when the disk fallback fires,
+    telling the operator to migrate to env vars.
 
   • `_load_secrets_legacy()` (formerly `load_secrets`) is a private
     helper used internally by `get_secret` for the one-release disk-
@@ -55,11 +45,6 @@ def _resolve_secrets_path() -> Path:
 
 
 _SECRETS_PATH = _resolve_secrets_path()
-
-
-def secrets_path() -> Path:
-    """Return the legacy fallback path (still consulted for reads)."""
-    return _SECRETS_PATH
 
 
 # Env-var mapping for every credential the codebase currently reads via
@@ -100,24 +85,6 @@ def _load_secrets_legacy() -> dict:
         return {}
 
 
-def save_secrets(secrets: dict) -> None:
-    """DEPRECATED no-op back-compat shim — scheduled for removal.
-
-    Operator credentials are env-var-only now. This function previously
-    persisted the settings-page form submissions to `secrets.json`; the
-    settings page is gone, so this is a no-op. Logs a warning so any
-    surviving caller surfaces in operator logs and can be removed.
-    Will be deleted in the next major release.
-    """
-    log.warning(
-        "secrets_store.save_secrets() is a deprecated no-op — operator "
-        "credentials are env-var-only since the settings-page removal. "
-        "The attempted save has been discarded. Configure credentials "
-        "via env vars at deploy time. This shim will be removed in the "
-        "next major release."
-    )
-
-
 # ---------------------------------------------------------------------------
 # Public read API
 # ---------------------------------------------------------------------------
@@ -155,44 +122,4 @@ def get_secret(key: str) -> Optional[str]:
     return None
 
 
-def set_secret(key: str, value: Optional[str]) -> None:
-    """NO-OP. See module docstring.
-
-    Logs a one-time warning the first time it's called with a non-None
-    value, pointing the operator at the env-var path.
-    """
-    if value is not None and str(value).strip():
-        if key not in _WARNED_FOR:
-            _WARNED_FOR.add(key)
-            env_names = _SECRET_ENV_NAMES.get(key, ())
-            log.warning(
-                "secrets_store.set_secret(%r) is a no-op — operator "
-                "credentials are env-var-only since the settings-page "
-                "removal. Configure %s in the deployment environment "
-                "instead.",
-                key,
-                "/".join(env_names) or "the relevant env var",
-            )
-
-
-# ---------------------------------------------------------------------------
-# Typed helpers (back-compat — kept for callers across the codebase)
-# ---------------------------------------------------------------------------
-
-
-def get_anthropic_key() -> Optional[str]:
-    return get_secret("anthropic_api_key")
-
-
-def has_anthropic_key() -> bool:
-    return bool(get_anthropic_key())
-
-
-__all__ = [
-    "save_secrets",
-    "get_secret",
-    "set_secret",
-    "get_anthropic_key",
-    "has_anthropic_key",
-    "secrets_path",
-]
+__all__ = ["get_secret"]

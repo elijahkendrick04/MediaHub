@@ -111,6 +111,34 @@ def test_fetch_script_default_voice_is_in_the_cleared_map():
         assert len(meta) == 4 and meta[3].strip(), f"{key} missing a licence note"
 
 
+def test_fetch_script_pins_commit_and_hashes_with_verified_tls():
+    """Integrity: the download URL is pinned to an exact upstream commit, every
+    fetched file has a pinned SHA-256, and TLS verification is never disabled
+    (the retry loop + hash pins handle CDN flakiness instead)."""
+    assert "CERT_NONE" not in FETCH and "check_hostname = False" not in FETCH
+    assert "/resolve/main" not in FETCH, "voice URL must pin a commit, not main"
+    mod = _load_fetch_module()
+    for voice in mod.VOICES:
+        for suffix in (".onnx", ".onnx.json", ".MODEL_CARD"):
+            assert f"{voice}{suffix}" in mod.SHA256, (
+                f"{voice}{suffix} has no pinned SHA-256 — every shipped voice "
+                "file must be integrity-verified after download"
+            )
+    for digest in mod.SHA256.values():
+        assert re.fullmatch(r"[0-9a-f]{64}", digest)
+
+
+def test_verify_sha256_accepts_match_and_hard_fails_mismatch(tmp_path):
+    import hashlib
+
+    mod = _load_fetch_module()
+    f = tmp_path / "voice.onnx"
+    f.write_bytes(b"voice-bytes")
+    mod.verify_sha256(f, hashlib.sha256(b"voice-bytes").hexdigest())  # no raise
+    with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+        mod.verify_sha256(f, "0" * 64)
+
+
 # --- Build resilience: the download must survive a transient CDN/TLS blip ----
 # Regression guard for the 2026-06-22 deploy, which died at the Piper-voice
 # build step on a single `SSL: UNEXPECTED_EOF_WHILE_READING` from HuggingFace's

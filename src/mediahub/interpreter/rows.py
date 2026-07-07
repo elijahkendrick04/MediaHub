@@ -141,9 +141,12 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
     cleaned = _CLUB_SEED_NOTIME_SUFFIX.sub("", cleaned).strip()
     # Para-classification suffix: a results "Class" column ("14" = S14/SM14) sits
     # between the club and the time and gets absorbed into the club cell
-    # ("Co Cardiff 14"). Strip the trailing 1-2 digit class so a club's para
-    # swimmers fold into the parent club instead of becoming a separate club.
-    cleaned = re.sub(r"\s+\d{1,2}$", "", cleaned).strip()
+    # ("Co Cardiff 14"). Strip the trailing class so a club's para swimmers fold
+    # into the parent club instead of becoming a separate club. Para classes
+    # only run 1-15 (S1-S14, SB1-SB14, SM1-SM15), so the strip is bounded to
+    # that range: a club legitimately named with a trailing number outside it
+    # ("Otter 79", "SV Neptun 08") survives intact.
+    cleaned = re.sub(r"\s+(?:1[0-5]|[1-9])$", "", cleaned).strip()
     # Collapsed "Name AaD Club" row (e.g. relay/AaD-format events) where the
     # whole row landed in the club cell: the actual club is the text AFTER the
     # age number. "Dion Edwards 19 Swansea Uni" -> "Swansea Uni".
@@ -229,6 +232,23 @@ def _extract_swim_from_cells(
             field_conf["time"] = max(field_conf.get("time", 0.0), 0.85)
             break
 
+    # QA-012: a finals-qualification marker ("q"/"Q"/"q430") on the row means it
+    # is a heat/preliminary swim that advanced to a final — NOT a final-round
+    # result. The token path (_record_to_swim) already sets round_hint="prelim"
+    # for this; mirror it here so a structured-table prelim row can never
+    # surface as a fabricated final/medal. Match a standalone qualifier cell, or
+    # a qualifier token trailing a time-shaped token inside a cell (anchored so
+    # ordinary words are never mistaken for a marker).
+    qualified = False
+    for cell in cells:
+        toks = cell.strip().split()
+        if len(toks) == 1 and _is_qualifier(toks[0]):
+            qualified = True
+            break
+        if len(toks) >= 2 and _is_qualifier(toks[-1]) and _is_time_like(toks[-2]):
+            qualified = True
+            break
+
     # A competition result must identify a competitor. A row with a time but no
     # name is a split/continuation line (cumulative lap times listed under a
     # swimmer on a distance event), not a result — dropping it keeps overall
@@ -250,6 +270,7 @@ def _extract_swim_from_cells(
         confidence=round(min(row_conf, 1.0), 4),
         raw_row="\t".join(cells),
         field_confidence=field_conf,
+        round_hint="prelim" if qualified else None,
     )
 
 
@@ -485,11 +506,22 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     if place_val is not None:
         field_conf["place"] = 0.90
 
+    # The parens are the disambiguation signal between age and year-of-birth:
+    # British results print YOB parenthesised ("(04)"), while the Hy-Tek AaD
+    # column prints a bare 1-2 digit AGE ("… Arthur, Andrew 23 UoAPS 28.73").
+    # Only a parenthesised or 4-digit token is a YOB; a bare 2-digit token is
+    # the swimmer's age at the meet and must never be stored as a 20xx year.
     yob_val: int | None = None
+    age_val: int | None = None
     if age_tok is not None:
-        yob_val, yconf = _normalise_yob(age_tok.strip("()"))
-        if yob_val is not None:
-            field_conf["yob"] = yconf
+        bare = age_tok.strip("()")
+        if age_tok != bare or len(bare) == 4:
+            yob_val, yconf = _normalise_yob(bare)
+            if yob_val is not None:
+                field_conf["yob"] = yconf
+        elif re.match(r"^\d{2}$", bare):
+            age_val = int(bare)
+            field_conf["age"] = 0.70
 
     club_val: str | None = None
     if club_toks:
@@ -504,6 +536,7 @@ def _record_to_swim(rec: list[tuple[str, bool]]) -> InterpretedSwim | None:
     return InterpretedSwim(
         swimmer_name=name,
         yob=yob_val,
+        age=age_val,
         club=club_val,
         place=place_val,
         time=time_val,

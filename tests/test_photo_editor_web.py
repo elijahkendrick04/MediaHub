@@ -301,6 +301,40 @@ def test_collage_needs_two(app_ctx):
     assert r.status_code == 400
 
 
+def test_library_page_offers_collage_bulk_action(app_ctx):
+    """The collage capability must be reachable from the UI: the media
+    library's bulk bar carries a 'Make collage' action + layout picker
+    posting to the collage endpoint."""
+    app, tmp_path = app_ctx
+    with app.test_client() as c:
+        _activate(c, "alpha")
+        _seed_png(tmp_path, "alpha", name="ui1.png")
+        r = c.get("/media-library")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert 'data-mh-bulk="collage"' in body
+    assert "/api/media-library/collage" in body
+    assert 'id="mh-ml-collage-layout"' in body
+    for slug in ("grid_2x2", "duo_v", "duo_h", "trio_strip", "trio_feature", "grid_3x3"):
+        assert f'value="{slug}"' in body, slug
+
+
+def test_collage_form_post_redirects_to_editor(app_ctx):
+    """The no-JS form path: url-encoded asset_ids + layout → 302 to the new
+    draft's photo editor."""
+    app, tmp_path = app_ctx
+    with app.test_client() as c:
+        _activate(c, "alpha")
+        a1 = _seed_png(tmp_path, "alpha", name="f1.png", rgb=(200, 0, 0))
+        a2 = _seed_png(tmp_path, "alpha", name="f2.png", rgb=(0, 200, 0))
+        r = c.post(
+            "/api/media-library/collage",
+            data={"asset_ids": [a1, a2], "layout": "grid_2x2"},
+        )
+    assert r.status_code == 302
+    assert "/edit" in r.headers["Location"]
+
+
 def _has_heif_writer() -> bool:
     try:
         import pillow_heif
@@ -339,3 +373,10 @@ def test_heic_upload_is_normalised_to_jpeg(app_ctx):
     with Image.open(body["asset"]["path"]) as im:
         im.load()
         assert (im.format or "").upper() == "JPEG"
+
+
+def test_reset_button_posts_to_reset_endpoint():
+    """Reset must persist: the handler POSTs cfg.resetUrl (clearing the saved
+    recipe server-side), not just clear the local controls."""
+    b = _body()
+    assert "fetch(cfg.resetUrl,{method:'POST'" in b

@@ -189,8 +189,6 @@ FORMATS: dict[str, ExportFormat] = {
 _ALIASES: dict[str, str] = {
     "jpeg": "jpg",
     "jpe": "jpg",
-    "tif": "tiff",
-    "htm": "html",
     "mpeg4": "mp4",
     "m4v": "mp4",
     "wave": "wav",

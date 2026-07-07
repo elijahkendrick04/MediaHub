@@ -75,6 +75,35 @@ def test_parses_visual_defects_into_findings(monkeypatch, tmp_path):
     assert captured["paths"] == [str(shot)]
 
 
+def test_generate_vision_failure_message_is_honest(monkeypatch):
+    """Keys ARE configured but both vision calls fail → the error must say
+    the call failed, not falsely claim no key is configured."""
+    from mediahub.media_ai import llm
+
+    monkeypatch.setattr(llm, "_has_gemini_key", lambda: True)
+    monkeypatch.setattr(llm, "_has_anthropic_key", lambda: True)
+    monkeypatch.setattr(llm, "_call_gemini_vision", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "_call_anthropic_vision", lambda *a, **k: None)
+
+    with pytest.raises(llm.ClaudeUnavailableError) as ei:
+        llm.generate_vision(["x.png"], "describe")
+    msg = str(ei.value)
+    assert "attempted" in msg
+    assert "gemini" in msg and "anthropic" in msg
+    assert "has not configured" not in msg
+
+
+def test_generate_vision_unconfigured_message_kept(monkeypatch):
+    from mediahub.media_ai import llm
+
+    monkeypatch.setattr(llm, "_has_gemini_key", lambda: False)
+    monkeypatch.setattr(llm, "_has_anthropic_key", lambda: False)
+
+    with pytest.raises(llm.ClaudeUnavailableError) as ei:
+        llm.generate_vision(["x.png"], "describe")
+    assert "has not configured" in str(ei.value)
+
+
 def test_never_raises_when_provider_errors(monkeypatch, tmp_path):
     from mediahub.media_ai import llm
     monkeypatch.setattr(llm, "is_available", lambda: True)

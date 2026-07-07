@@ -33,6 +33,7 @@ voices are non-commercial or all-rights-reserved (see DEPENDENCY_LICENSING.md).
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import ssl
 import sys
@@ -42,12 +43,32 @@ import urllib.request
 from pathlib import Path
 
 # rhasspy/piper-voices layout: en/en_GB/alba/medium/en_GB-alba-medium.onnx[.json]
-_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+# Pinned to an exact upstream commit (not the moving `main` branch) so the
+# bytes the build fetches can never drift under the SHA256 pins below. Bump
+# the commit + hashes together when intentionally updating a voice.
+_COMMIT = "e21c7de8d4eab79b902f0d61e662b3f21664b8d2"
+_BASE = f"https://huggingface.co/rhasspy/piper-voices/resolve/{_COMMIT}"
 
 # voice key -> (lang_dir, speaker, quality, licence note). Only licence-clean,
 # commercially-usable voices belong here.
 VOICES: dict[str, tuple[str, str, str, str]] = {
     "en_GB-alba-medium": ("en/en_GB", "alba", "medium", "CC BY 4.0"),
+}
+
+# Known-good SHA-256 per fetched file (keyed by the on-disk filename). The
+# model is executed in the production container, so every downloaded file is
+# verified against these and a mismatch hard-fails the build — an integrity
+# guard the transport alone can't give us.
+SHA256: dict[str, str] = {
+    "en_GB-alba-medium.onnx": (
+        "401369c4a81d09fdd86c32c5c864440811dbdcc66466cde2d64f7133a66ad03b"
+    ),
+    "en_GB-alba-medium.onnx.json": (
+        "aa965a2f02ecced632c2694e1fc72bbff6d65f265fab567ca945918c73dd89f4"
+    ),
+    "en_GB-alba-medium.MODEL_CARD": (
+        "fa166b1779404c470b0b6b4ba0238bc4a35bf89d2cd130c6788f697188b737d6"
+    ),
 }
 
 DEFAULT_VOICE = "en_GB-alba-medium"
@@ -56,9 +77,29 @@ UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 )
+# Default *verified* TLS. Transient CDN handshake drops are handled by the
+# retry loop in _get, and file integrity by the SHA256 pins — never by
+# disabling certificate verification.
 _ctx = ssl.create_default_context()
-_ctx.check_hostname = False
-_ctx.verify_mode = ssl.CERT_NONE
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def verify_sha256(path: Path, expected: str) -> None:
+    """Hard-fail unless ``path``'s SHA-256 matches ``expected``.
+
+    Loud by design: a mismatched voice file must fail the Docker build rather
+    than ship unverified model bytes into the production container.
+    """
+    got = _sha256(path)
+    if got != expected:
+        raise RuntimeError(
+            f"SHA-256 mismatch for {path.name}: expected {expected}, got {got} "
+            "— refusing to ship an unverified voice file. If the upstream "
+            "voice was intentionally updated, bump _COMMIT and SHA256 together."
+        )
 
 
 def _get(url: str, *, attempts: int = 4, timeout: int = 120) -> bytes:
@@ -132,19 +173,24 @@ def main() -> int:
     card = target / f"{voice}.MODEL_CARD"
     base = f"{_BASE}/{lang_dir}/{speaker}/{quality}"
 
-    # Idempotent: skip the big model download if it is already present.
-    if onnx.exists() and onnx.stat().st_size > 0:
-        print(f"  {onnx.name} already present ({onnx.stat().st_size} bytes) — skipping model.")
+    # Idempotent: skip the big model download only if the present file also
+    # passes integrity verification (a stale/corrupt file is re-fetched).
+    if onnx.exists() and _sha256(onnx) == SHA256[onnx.name]:
+        print(f"  {onnx.name} already present and verified ({onnx.stat().st_size} bytes) — skipping model.")
     else:
         print(f"  downloading {voice}.onnx ...")
         onnx.write_bytes(_get(f"{base}/{voice}.onnx"))
-        print(f"    -> {onnx} ({onnx.stat().st_size} bytes)")
+        verify_sha256(onnx, SHA256[onnx.name])
+        print(f"    -> {onnx} ({onnx.stat().st_size} bytes, sha256 verified)")
     cfg.write_bytes(_get(f"{base}/{voice}.onnx.json"))
+    verify_sha256(cfg, SHA256[cfg.name])
     print(f"    -> {cfg}")
     try:
         card.write_bytes(_get(f"{base}/MODEL_CARD"))
+        verify_sha256(card, SHA256[card.name])
         print(f"    -> {card}")
     except Exception as exc:  # the card is attribution-nice-to-have, not fatal
+        card.unlink(missing_ok=True)
         print(f"    (MODEL_CARD not fetched: {exc})")
 
     (target / "ATTRIBUTION.txt").write_text(

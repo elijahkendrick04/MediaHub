@@ -234,3 +234,55 @@ def test_prelim_heat_place_one_never_medals():
         prelim, ctx, history, all_results=[prelim], extra={"swimmer_name": "Birdy Raleigh"}
     )
     assert medals == []
+
+
+# ---------------------------------------------------------------------------
+# Layer 1b — structured-table (cell) path: the "q" marker marks a prelim too
+# ---------------------------------------------------------------------------
+
+
+def _prelim_schemas():
+    from mediahub.interpreter.schema_dataclasses import ColumnSchema
+
+    return [
+        ColumnSchema(name="place", col_type="place", confidence=0.9, col_index=0),
+        ColumnSchema(name="name", col_type="name", confidence=0.9, col_index=1),
+        ColumnSchema(name="club", col_type="club", confidence=0.9, col_index=3),
+        ColumnSchema(name="seed_time", col_type="seed_time", confidence=0.9, col_index=4),
+        ColumnSchema(name="time", col_type="time", confidence=0.9, col_index=5),
+    ]
+
+
+def test_cell_path_prelim_row_with_qualifier_cell_is_marked_prelim():
+    """QA-012, cell path: a structured-table prelim row whose qualifier marker
+    ("q430") lands in its own cell must set round_hint='prelim' — exactly as
+    the token path does — so the bridge maps it to a heat and it can never
+    surface as a fabricated final/medal."""
+    from mediahub.interpreter.rows import _extract_swim_from_cells
+
+    cells = ["1", "Raleigh, Birdy", "13", "City of Brighton & Hove", "32.60", "32.36", "q430"]
+    swim = _extract_swim_from_cells(cells, _prelim_schemas())
+    assert swim is not None
+    assert swim.time == "32.36"
+    assert swim.round_hint == "prelim"
+
+
+def test_cell_path_qualifier_trailing_time_cell_is_marked_prelim():
+    """The marker can also trail the time inside the time cell ("32.36 q")."""
+    from mediahub.interpreter.rows import _extract_swim_from_cells
+
+    cells = ["1", "Raleigh, Birdy", "13", "City of Brighton & Hove", "32.60", "32.36 q"]
+    swim = _extract_swim_from_cells(cells, _prelim_schemas())
+    assert swim is not None
+    assert swim.round_hint == "prelim"
+
+
+def test_cell_path_final_row_without_qualifier_has_no_round_hint():
+    """A finals row (no "q" marker) stays medal-eligible: round_hint is None so
+    the bridge treats it as a timed final."""
+    from mediahub.interpreter.rows import _extract_swim_from_cells
+
+    cells = ["2", "Raleigh, Birdy", "13", "City of Brighton & Hove", "32.36", "31.86"]
+    swim = _extract_swim_from_cells(cells, _prelim_schemas())
+    assert swim is not None
+    assert swim.round_hint is None

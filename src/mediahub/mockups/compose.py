@@ -222,7 +222,8 @@ def _place_poster(canvas: Image.Image, art: Image.Image, box, accent) -> None:
     fr = ImageDraw.Draw(canvas)
     pad = max(8, int(w * 0.03))
     fr.rectangle([x - pad, y - pad, x + w + pad, y + h + pad], fill=frame)
-    canvas.paste(_fit_contain(art, w, h), (x, y), _fit_contain(art, w, h))
+    tile = _fit_contain(art, w, h)
+    canvas.paste(tile, (x, y), tile)
 
 
 def _place_frame(canvas: Image.Image, art: Image.Image, box, accent) -> None:

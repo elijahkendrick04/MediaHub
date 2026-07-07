@@ -97,7 +97,8 @@ def test_primitive_defined_once_in_uikit():
 
 
 def test_primitive_api_surface_and_safety():
-    js = _slice(_uikit(), "MH.cursorReadout = function")
+    # 4000-char window: the un-pin + a11y-mirror comments grew the function.
+    js = _slice(_uikit(), "MH.cursorReadout = function", n=4000)
     # The controller exposes the documented imperative surface.
     for member in ("set:", "status:", "done:", "remove:"):
         assert member in js, f"missing controller member {member!r}"
@@ -347,7 +348,12 @@ _CURSOR_HARNESS = _PREAMBLE + textwrap.dedent(
     const el = body.children[0];
     assert(/mh-cursor-readout/.test(el.className), 'has the chip class');
     assert(el.getAttribute('data-accent') === 'medal', 'medal accent attr');
-    assert(el.getAttribute('role') === 'status', 'role=status');
+    // A pure visual mirror: the callers own the announced readout, so the
+    // chip must be hidden from the accessibility tree (no live region —
+    // otherwise SRs queue ~100 duplicate percent announcements per render).
+    assert(el.getAttribute('aria-hidden') === 'true', 'chip is aria-hidden');
+    assert(el.getAttribute('aria-live') === null, 'no live region on the chip');
+    assert(el.getAttribute('role') === null, 'no status role on the chip');
     assert(el.children.length === 2, 'pct + label spans');
     const pct = el.children[0], lab = el.children[1];
     assert(/mh-cursor-readout__pct/.test(pct.className), 'pct span class');
@@ -387,6 +393,17 @@ _CURSOR_HARNESS = _PREAMBLE + textwrap.dedent(
       assert(pointerCount() === 0, 'pointermove listener cleaned up');
       // idempotent + safe after removal
       r.done(); r.set(50); r.status('x');
+
+      // ---- fallback pin resumes tracking on the first pointer move ----
+      const r3 = window.MH.cursorReadout({ label: 'Pinned', percent: 10 });
+      const el3 = body.children[0];
+      flushTimeouts();               // 450ms fallback: no move yet -> pinned
+      assert(el3._cls['is-pinned'], 'fallback-pinned when the pointer never moved');
+      fireMove(200, 200); step();
+      assert(!el3._cls['is-pinned'], 'first move after a fallback pin un-pins');
+      assert(/translate\(/.test(el3.style.transform || ''), 'tracking resumed after un-pin');
+      r3.remove();
+      assert(pointerCount() === 0, 'r3 listener cleaned up');
 
       // ---- null-safe with no body to attach to ----
       const saved = document.body; document.body = null;

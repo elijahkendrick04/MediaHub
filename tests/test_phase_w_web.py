@@ -359,6 +359,39 @@ class TestCaptionBundleEndpoint:
         assert body["secondary_rtl"] is True
         assert body["language"] == "en+ur"
 
+    def test_bundle_translation_is_persisted_on_the_card(self, env, monkeypatch):
+        """The bilingual bundle's side-by-side translation must be SAVED on the
+        card (like /translate does), so approving the card approves the pair and
+        it rides into exports — not dropped after the review render."""
+        import mediahub.web.web as webmod
+        from mediahub.workflow.status import CardStatus
+
+        c = env["client"]
+        _pin(c, "org-alpha")
+        self._set_language("en+cy")
+        self._arm(
+            monkeypatch,
+            {
+                "caption": "Record smashed by Maya!",
+                "alt_text": "Maya Patel, 100m Freestyle, 1:01.50.",
+                "caption_secondary": "Record y clwb wedi'i chwalu gan Maya!",
+            },
+        )
+        r = c.post(f"/api/runs/{env['run_id']}/swim/swim-1/caption?tone=ai")
+        assert r.status_code == 200, r.get_json()
+
+        ws = webmod._get_wf_store()
+        states = ws.load(env["run_id"])
+        state = states.get("swim-1")
+        assert state is not None and state.translations, "translation not persisted"
+        variant = state.translations.get("cy")
+        assert variant is not None, state.translations
+        assert variant["slots"]["caption"].startswith("Record y clwb")
+        assert variant["language_label"] == "Cymraeg"
+        assert variant["rtl"] is False
+        # Persisting a translation must not flip the card's status.
+        assert state.status == CardStatus.QUEUE
+
 
 # ---------------------------------------------------------------------------
 # W.4/W.13 — organisation form saves language + standards picks

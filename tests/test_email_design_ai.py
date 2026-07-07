@@ -65,6 +65,26 @@ def test_draft_editorial_provider_failure_is_honest(monkeypatch):
         draft_editorial(_facts(), "monthly_roundup")
 
 
+def test_numbers_grounded_requires_exact_matches():
+    from mediahub.email_design.draft import _numbers_grounded
+
+    # near-miss floats must not pass (no ±0.6 window, no int truncation)
+    assert not _numbers_grounded("we saw 3.9 medals", {3.0})
+    # integer display of a float stat still passes
+    assert _numbers_grounded("12 PBs this month", {12.0})
+    # a fabricated time must not pass against nearby stats
+    assert not _numbers_grounded("Maya swam 1:02.45", {1.0, 2.0, 3.0, 12.0})
+
+
+def test_draft_editorial_unparseable_reply_is_honest_error(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    # generate_json returns its ``fallback`` object when the provider answered
+    # but produced unparseable JSON — that must surface, not silently downgrade
+    monkeypatch.setattr(llm, "generate_json", lambda *a, **k: k.get("fallback"))
+    with pytest.raises(llm.ClaudeUnavailableError, match="unparseable"):
+        draft_editorial(_facts(), "monthly_roundup")
+
+
 def test_generate_newsletter_without_ai_needs_no_provider(monkeypatch, tmp_path):
     # with_ai=False → deterministic intro, no provider required, no error
     monkeypatch.setattr(llm, "is_available", lambda: False)

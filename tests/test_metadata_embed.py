@@ -547,3 +547,97 @@ def test_integration_malicious_caption_is_safe(tmp_path):
     start = xmp.find("<x:xmpmeta")
     minidom.parseString(xmp[start : xmp.rfind("</x:xmpmeta>") + len("</x:xmpmeta>")])
     assert read_metadata(p).description == evil
+
+
+# ---------------------------------------------------------------------------
+# G1.16 wiring — render_brief stamps every exported card (product reachability)
+# ---------------------------------------------------------------------------
+
+
+def _render_card(monkeypatch, tmp_path, *, asset=None):
+    from mediahub.brand.kit import BrandKit
+    from mediahub.creative_brief.generator import CreativeBrief
+    import mediahub.graphic_renderer.render as R
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001 - signature match
+        Image.new("RGB", (64, 80), (10, 37, 64)).save(output_path, "PNG")
+        return 1
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    if asset is not None:
+        import mediahub.media_library.store as _mls
+
+        class _StubStore:
+            def get(self, asset_id):
+                return asset if asset_id == "ma_1" else None
+
+        monkeypatch.setattr(_mls, "get_store", lambda: _StubStore())
+
+    brief = CreativeBrief(
+        id="cb_g116",
+        content_item_id="ci-g116",
+        profile_id="g116-club",
+        achievement_summary="Eira Hughes — 200m Freestyle — 2:08.41",
+        objective="celebrate",
+        primary_hook="NEW PB",
+        confidence_label="NEW PB",
+        tone="hype",
+        layout_template="individual_hero",
+        inspiration_pattern_id="p1",
+        image_treatment="cutout",
+        text_hierarchy=[],
+        brand_instructions="",
+        sponsor_instructions=None,
+        sourced_asset_ids=(["ma_1"] if asset is not None else []),
+        safety_notes=[],
+        why_this_design="",
+        text_layers={"athlete_name": "Eira Hughes", "event_name": "200m Freestyle"},
+        palette={"primary": "#0A2540"},
+        format_priority=["feed_portrait"],
+    )
+    brand = BrandKit(
+        profile_id="g116-club",
+        display_name="Riverside Swim Club",
+        primary_colour="#0A2540",
+        secondary_colour="#C9A227",
+        short_name="RSC",
+    )
+    res = R.render_brief(brief, output_dir=tmp_path, brand_kit=brand)
+    return tmp_path / "feed_portrait.png", res
+
+
+def test_rendered_card_carries_credit_fields(monkeypatch, tmp_path):
+    out, _res = _render_card(monkeypatch, tmp_path)
+    got = read_metadata(out)
+    assert got.credit == "Riverside Swim Club"
+    assert got.copyright == "© Riverside Swim Club"
+    assert got.title == "NEW PB"
+    assert "Eira Hughes" in got.keywords
+    # Still a valid PNG after the splice.
+    with Image.open(out) as im:
+        im.verify()
+
+
+def test_rendered_card_carries_photographer_from_sourced_asset(monkeypatch, tmp_path):
+    class _Asset:
+        photographer = "Sam Rivers"
+        source_attribution = "Riverside Gala Media"
+        source_licence = "CC BY-SA 4.0"
+        source_url = ""
+        linked_athlete_names = ["Eira Hughes"]
+
+    out, _res = _render_card(monkeypatch, tmp_path, asset=_Asset())
+    got = read_metadata(out)
+    assert got.creator == "Sam Rivers"
+    assert got.licence == "CC BY-SA 4.0"
+    assert got.source == "Riverside Gala Media"
+
+
+def test_malformed_png_without_ihdr_is_refused(tmp_path):
+    """Signature-only / chunk-less bytes must be refused, never 'repaired'."""
+    p = tmp_path / "stub.png"
+    original = b"\x89PNG\r\n\x1a\n" + b"studio-stub"
+    p.write_bytes(original)
+    with pytest.raises(UnsupportedImageFormat):
+        embed_metadata(p, ImageMetadata(creator="C"))
+    assert p.read_bytes() == original  # untouched on refusal

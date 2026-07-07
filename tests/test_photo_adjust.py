@@ -446,6 +446,83 @@ def test_render_brief_resolves_no_recipe_for_default_brief(monkeypatch):
     assert pa.recipe_for(explicit="", treatment="cutout") is None
 
 
+def _stub_brief(**over):
+    from mediahub.creative_brief.generator import CreativeBrief
+
+    base = dict(
+        id="cb_pa",
+        content_item_id="ci-pa",
+        profile_id="pa-club",
+        achievement_summary="",
+        objective="celebrate",
+        primary_hook="",
+        confidence_label="NEW PB",
+        tone="hype",
+        layout_template="individual_hero",
+        inspiration_pattern_id="",
+        image_treatment="cutout",
+        text_hierarchy=[],
+        brand_instructions="",
+        sponsor_instructions=None,
+        sourced_asset_ids=[],
+        safety_notes=[],
+        why_this_design="",
+        text_layers={"result_value": "1:02.34"},
+        palette={"primary": "#0E2A47", "secondary": "#C9A227", "accent": "#C9A227"},
+        format_priority=[],
+    )
+    base.update(over)
+    return CreativeBrief(**base)
+
+
+def _render_stubbed(monkeypatch, tmp_path, out_sub, athlete_path):
+    import mediahub.graphic_renderer.render as R
+
+    def _fake_png(html, output_path, size):  # noqa: ARG001 - signature match
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    return R.render_brief(
+        _stub_brief(),
+        output_dir=tmp_path / out_sub,
+        athlete_path=athlete_path,
+        skip_cutout=True,
+    )
+
+
+def test_applied_recipe_is_recorded_on_the_visual(monkeypatch, tmp_path):
+    """G1.25 explainability: a baked-in recipe must show up on the visual."""
+    photo = tmp_path / "athlete.png"
+    _gradient_rgb().save(photo)
+
+    monkeypatch.setenv(pa.ENV_VAR, "punchy")
+    res = _render_stubbed(monkeypatch, tmp_path, "adjusted", photo)
+    notes = [n for n in res.visual.safety_notes if n.startswith("photo adjusted")]
+    assert len(notes) == 1
+    assert "punchy" in notes[0]
+    for step in pa.PRESETS["punchy"].describe():
+        assert step in notes[0]
+
+    # No recipe → no note (default renders keep their exact safety_notes).
+    monkeypatch.delenv(pa.ENV_VAR, raising=False)
+    res2 = _render_stubbed(monkeypatch, tmp_path, "plain", photo)
+    assert not any(n.startswith("photo adjusted") for n in res2.visual.safety_notes)
+
+
+def test_recipe_fallback_logs_instead_of_silent_pass(monkeypatch, tmp_path, caplog):
+    """A photo the recipe can't process falls back un-adjusted WITH a log line."""
+    bad = tmp_path / "corrupt.png"
+    bad.write_bytes(b"not an image at all")
+
+    monkeypatch.setenv(pa.ENV_VAR, "punchy")
+    with caplog.at_level("DEBUG", logger="mediahub.graphic_renderer.render"):
+        res = _render_stubbed(monkeypatch, tmp_path, "fallback", bad)
+    assert any("photo adjust" in r.message for r in caplog.records)
+    # The failed adjustment never claims a recipe was applied.
+    assert not any(n.startswith("photo adjusted") for n in res.visual.safety_notes)
+
+
 def test_end_to_end_determinism_bytes(monkeypatch):
     raw = _png_bytes(_gradient_rgb())
     assert pa.adjust_bytes(raw, "punchy") == pa.adjust_bytes(raw, "punchy")

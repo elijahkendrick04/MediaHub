@@ -1,7 +1,7 @@
 """UI 1.17 — Content-cadence heatmap.
 
 Pins the GitHub-contribution-graph-style year grid on the Activity page
-(server-rendered inline SVG from run history + the posting log; no JS library):
+(server-rendered inline SVG from run history; no JS library):
 
   * pure transforms — ``level_for`` thresholds, ``window_start`` Monday-anchoring,
     ``build_grid`` shape / counting / stats / streaks / month labels / future days
@@ -11,8 +11,8 @@ Pins the GitHub-contribution-graph-style year grid on the Activity page
     active and the empty-history variants
   * CSS — brace balance, the lane-yellow heat ramp, brand rules (no medal-gold,
     no Google-Fonts CDN), and the no-animation rule
-  * the ``_cadence_activity_counts`` DB reader — per-day generate/post buckets,
-    multi-tenant scoping, the success-only posting filter, the one-year window
+  * the ``_cadence_activity_counts`` DB reader — per-day generated buckets,
+    multi-tenant scoping, the one-year window
   * end-to-end on /activity — the panel renders for an org with runs, carries the
     injected CSS before the guardrails layer, stays scoped to the pinned org, and
     is absent for a club with no runs
@@ -118,24 +118,22 @@ class TestBuildGrid:
         for cell in future:
             assert cell.day > end
             assert cell.count == 0 and cell.level == 0
-            assert cell.generated == 0 and cell.posted == 0
 
-    def test_counts_generated_and_posted_separately_then_combined(self):
+    def test_counts_single_generated_lane(self):
         end = date(2026, 6, 14)
         day = (end - timedelta(days=2)).isoformat()
-        grid = ch.build_grid({day: 3}, {day: 2}, end=end)
+        grid = ch.build_grid({day: 5}, end=end)
         cell = next(c for col in grid.weeks for c in col if c.day.isoformat() == day)
-        assert cell.generated == 3
-        assert cell.posted == 2
         assert cell.count == 5
         assert cell.level == ch.level_for(5)
 
     def test_accepts_date_object_and_string_keys(self):
         end = date(2026, 6, 14)
         d = end - timedelta(days=3)
-        grid = ch.build_grid({d: 4}, {d.isoformat(): 1}, end=end)
-        assert grid.total_generated == 4
-        assert grid.total_posted == 1
+        e = end - timedelta(days=4)
+        grid = ch.build_grid({d: 4, e.isoformat(): 1}, end=end)
+        assert grid.total == 5
+        assert grid.active_days == 2
 
     def test_ignores_garbage_and_nonpositive_counts(self):
         end = date(2026, 6, 14)
@@ -145,7 +143,7 @@ class TestBuildGrid:
              (end - timedelta(days=3)).isoformat(): -2},
             end=end,
         )
-        assert grid.total_generated == 0
+        assert grid.total == 0
         assert grid.active_days == 0
 
     def test_data_outside_the_window_is_excluded(self):
@@ -154,7 +152,7 @@ class TestBuildGrid:
             {(end - timedelta(days=400)).isoformat(): 7, end.isoformat(): 2},
             end=end,
         )
-        assert grid.total_generated == 2  # the 400-day-old run is out of range
+        assert grid.total == 2  # the 400-day-old run is out of range
 
     def test_summary_statistics(self):
         end = date(2026, 6, 14)  # Sunday
@@ -164,13 +162,12 @@ class TestBuildGrid:
         for i in range(5, 10):  # 5 consecutive earlier days, count 2
             gen[(end - timedelta(days=i)).isoformat()] = 2
         grid = ch.build_grid(gen, end=end)
-        assert grid.total_generated == 3 * 1 + 5 * 2
+        assert grid.total == 3 * 1 + 5 * 2
         assert grid.active_days == 8
         assert grid.current_streak == 3
         assert grid.longest_streak == 5
         assert grid.busiest_count == 2
         assert grid.max_count == 2
-        assert grid.total == grid.total_generated + grid.total_posted
 
     def test_current_streak_zero_when_today_idle(self):
         end = date(2026, 6, 14)
@@ -195,8 +192,9 @@ class TestRenderSvg:
     def grid(self):
         end = date(2026, 6, 14)
         gen = {(end - timedelta(days=i)).isoformat(): (i % 8) for i in range(0, 60)}
-        post = {end.isoformat(): 3, (end - timedelta(days=1)).isoformat(): 1}
-        return ch.build_grid(gen, post, end=end)
+        gen[end.isoformat()] += 3
+        gen[(end - timedelta(days=1)).isoformat()] += 1
+        return ch.build_grid(gen, end=end)
 
     def test_is_well_formed_xml(self, grid):
         ET.fromstring(ch.render_svg(grid))
@@ -236,9 +234,9 @@ class TestRenderSvg:
     def test_titles_describe_activity(self):
         end = date(2026, 6, 14)
         d = (end - timedelta(days=2))
-        svg = ch.render_svg(ch.build_grid({d: 3}, {d: 2}, end=end))
+        svg = ch.render_svg(ch.build_grid({d: 3}, end=end))
         assert "3 generated" in svg
-        assert "2 posted" in svg
+        assert "posted" not in svg  # MediaHub never posts — no phantom lane
         assert "no activity" in svg  # the many empty days
 
     def test_all_heat_levels_present_with_rich_data(self, grid):
@@ -282,11 +280,27 @@ class TestCadencePanel:
 
     def test_panel_has_accessible_text_alternative(self):
         end = date(2026, 6, 14)
-        html = ch.cadence_panel_html({end.isoformat(): 5}, {end.isoformat(): 1}, end=end)
+        html = ch.cadence_panel_html({end.isoformat(): 5}, end=end)
         assert 'class="mh-visually-hidden"' in html
         summary = html.split('class="mh-visually-hidden">', 1)[1].split("</p>", 1)[0]
-        assert "generated" in summary and "posted" in summary
+        assert "generated" in summary
+        # MediaHub never posts: screen readers must not hear a permanently
+        # empty "0 posted" lane.
+        assert "posted" not in summary
         assert "active" in summary and "streak" in summary
+
+    def test_aria_summary_never_mentions_posting(self):
+        end = date(2026, 6, 14)
+        grid = ch.build_grid({end.isoformat(): 2}, end=end)
+        assert "posted" not in ch.aria_summary(grid)
+
+    def test_transitional_posted_arg_merges_into_the_single_lane(self):
+        # The web.py caller still passes its (always-empty) posted dict
+        # positionally; any counts are folded into the one generated lane.
+        end = date(2026, 6, 14)
+        merged = ch.cadence_panel_html({end.isoformat(): 2}, {end.isoformat(): 3}, end=end)
+        single = ch.cadence_panel_html({end.isoformat(): 5}, end=end)
+        assert merged == single
 
     def test_panel_shows_metrics_and_legend(self):
         end = date(2026, 6, 14)

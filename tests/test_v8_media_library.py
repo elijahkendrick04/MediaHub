@@ -35,6 +35,30 @@ def test_store_blob_stream_writes_same_as_bytes():
     assert by_stream.parent == by_bytes.parent and by_stream.name != by_bytes.name
 
 
+def test_store_blob_stream_cleans_up_partial_file_on_failure():
+    """A mid-copy failure (disk full, I/O error) must not leave an orphaned
+    partial blob under uploads/ that no DB row references."""
+    import pytest
+
+    store = _tmp_store()
+
+    class _Boom:
+        def __init__(self):
+            self.calls = 0
+
+        def read(self, size=-1):
+            self.calls += 1
+            if self.calls > 1:
+                raise OSError("simulated I/O failure mid-copy")
+            return b"x" * 1024
+
+    with pytest.raises(OSError, match="mid-copy"):
+        store.store_blob_stream(_Boom(), "c.mp4", "club_a")
+    profile_dir = store.uploads_dir / "club_a"
+    leftovers = list(profile_dir.glob("*")) if profile_dir.exists() else []
+    assert leftovers == []
+
+
 def test_save_get_list_round_trip():
     store = _tmp_store()
     a = MediaAsset(

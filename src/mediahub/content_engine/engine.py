@@ -271,6 +271,11 @@ def _tone_descriptor(tone: str) -> str:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+# §8C flag threshold: two captions sharing half their trigram phrasing
+# (Jaccard ≥ 0.5) read as rewrites of each other — the set's worst pair is
+# surfaced in the returned metrics so the review surface can show it.
+_CAPTION_REPEAT_FLAG = 0.5
+
 
 def generate_content(
     *,
@@ -284,9 +289,14 @@ def generate_content(
 ) -> dict:
     """Generate a set of platform-ready content cards for one brief.
 
-    Returns ``{"cards": [...], "direction": [...]}``. ``cards`` is a list of
-    ``{platform, caption, hashtags, confidence, notes}`` dicts; ``direction``
-    is the AI Director's plan (for explainability / audit).
+    Returns ``{"cards": [...], "direction": [...], "metrics": {...}}``.
+    ``cards`` is a list of ``{platform, caption, hashtags, notes}`` dicts —
+    brief-led cards carry **no** ``confidence`` key: the writer has no
+    calibrated score, and a constant would be a fake signal on a review
+    surface built around honest confidence displays (only ranker-scored
+    cards carry a real value). ``direction`` is the AI Director's plan and
+    ``metrics`` the deterministic §8C caption-repetition summary (both for
+    explainability / audit).
 
     Raises ``ai_core.ProviderNotConfigured`` / ``ProviderError`` when no
     provider can answer — there is no template fallback.
@@ -321,6 +331,9 @@ def generate_content(
         notes = (inp.get("notes") or "").strip()
         if not caption:
             return json.dumps({"ok": False, "reason": "empty caption — skipped"})
+        # No "confidence" key on purpose: the writer produces no calibrated
+        # score, so absent means "unscored" — never a constant dressed up as
+        # model confidence (ranker-scored cards keep their real value).
         cards.append(
             {
                 "platform": platform,
@@ -328,7 +341,6 @@ def generate_content(
                 "hashtags": [
                     str(h).lstrip("#").strip() for h in list(hashtags)[:6] if str(h).strip()
                 ],
-                "confidence": 0.8,
                 "notes": notes,
             }
         )
@@ -354,7 +366,31 @@ def generate_content(
         max_tokens=1600,
         max_rounds=8,
     )
-    return {"cards": cards, "direction": directions}
+
+    # 3. §8C caption non-repetition — deterministic metric over the set just
+    # written (worst-case trigram overlap between any two cards), recorded
+    # alongside the cards like the visual pool's pool_metrics. Metric-only,
+    # best-effort: a repeated pair above the flag threshold is surfaced for
+    # the QA/review surface, never silently gated or censored.
+    result: dict = {"cards": cards, "direction": directions}
+    try:
+        from mediahub.quality.variant_metrics import caption_repetition
+
+        caps = [c["caption"] for c in cards]
+        rep = caption_repetition(caps)
+        metrics: dict = {"caption_repetition": round(rep, 3)}
+        if rep >= _CAPTION_REPEAT_FLAG:
+            worst, pair = 0.0, [0, 1]
+            for i in range(len(caps)):
+                for j in range(i + 1, len(caps)):
+                    v = caption_repetition([caps[i], caps[j]])
+                    if v > worst:
+                        worst, pair = v, [i, j]
+            metrics["repeated_pair"] = pair
+        result["metrics"] = metrics
+    except Exception:
+        pass
+    return result
 
 
 def generate_caption(

@@ -224,3 +224,49 @@ def test_photo_treatment_flows_into_card_props(treatment):
     brief["photo_treatment"] = treatment
     props = motion._card_to_props(_card(1), variation_seed=1, brief=brief)
     assert props["photoTreatment"] == treatment
+
+
+# ---------------------------------------------------------------------------
+# Photo-element-only scope: the grade rides the photo <img>, never scene text
+# ---------------------------------------------------------------------------
+
+
+def test_grade_is_exported_as_a_photo_element_filter_helper():
+    """The grade is applied per photo element via photoGradeFilterFor — the
+    exact scope of the still's _photo_treatment_css — not a scene-wide wash."""
+    src = _src()
+    assert "export function photoGradeFilterFor" in src
+    # The gates return "" so ungraded cards stay byte-identical.
+    assert re.search(r"if\s*\(!card\.photoSrc\)\s*\{?\s*return \"\"", src)
+
+
+def test_banded_backdrop_filter_is_retired():
+    """The old fixed-band backdrop-filter washed any copy inside 17–48% of the
+    frame — it must stay gone; only the vignette radial overlay may remain."""
+    src = _src()
+    assert "backdropFilter" not in src and "WebkitBackdropFilter" not in src
+    assert "PHOTO_ZONE_MASK" not in src
+    # The Layer half only paints the vignette's radial edge-darkening.
+    layer_block = src.split("const Layer: SceneComponent", 1)[1]
+    assert '!== "vignette"' in layer_block and "radial-gradient" in layer_block
+    assert "cssFilter(" not in layer_block, "the Layer must not apply the photo grade itself"
+
+
+@pytest.mark.parametrize(
+    "path,component",
+    [
+        ("StoryCard.tsx", "const PhotoLayer"),
+        ("sprint/sceneKit.tsx", "export const PhotoFill"),
+    ],
+)
+def test_photo_paint_sites_apply_the_grade_on_their_img(path, component):
+    """Both shared photo paint sites thread photoGradeFilterFor into their own
+    <img> style.filter (and only when a grade is active, so clean cards keep a
+    byte-identical style object)."""
+    src = (motion.REMOTION_DIR / "src" / "compositions" / path).read_text()
+    assert "photoGradeFilterFor" in src, f"{path} must import the grade helper"
+    block = src.split(component, 1)[1]
+    img = block.split("<img", 1)[1].split("/>", 1)[0]
+    assert "grade ? { filter: grade }" in img, (
+        f"{component} must apply the grade on its own <img> element"
+    )

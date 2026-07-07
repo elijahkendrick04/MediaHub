@@ -224,24 +224,6 @@
 }
 .mh-tilt:hover { transition-duration: var(--dur-fast); }
 
-/* --- Glare: holographic sheen for one featured/hero card -------------- */
-.mh-glare { position: relative; overflow: hidden; }
-.mh-glare::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--dur-med) var(--ease-out-quick);
-  background:
-    radial-gradient(40% 50% at var(--mh-x) var(--mh-y), rgba(255,255,255,0.22), transparent 60%),
-    conic-gradient(from 210deg at var(--mh-x) var(--mh-y),
-      transparent, color-mix(in oklch, var(--mh-info) 30%, transparent),
-      color-mix(in oklch, var(--mh-primary) 30%, transparent), transparent 60%);
-}
-.mh-glare:hover::after { opacity: 1; }
-
 /* --- Card hover group: highlight slides to the hovered sibling -------- */
 .mh-hover-group > * { position: relative; }
 .mh-hover-group > *::before {
@@ -397,21 +379,6 @@
   to { opacity: 1; filter: blur(0); transform: translateY(0); }
 }
 
-/* Flip-words: JS swaps the active word; CSS animates the swap. */
-.mh-flip-words { display: inline-grid; vertical-align: bottom; }
-.mh-flip-words > .mh-fw {
-  grid-area: 1 / 1;
-  opacity: 0;
-  transform: translateY(0.4em) rotateX(-40deg);
-  transition: opacity var(--dur-med) var(--ease-out),
-              transform var(--dur-med) var(--ease-out);
-  color: var(--mh-primary);
-}
-.mh-flip-words > .mh-fw.is-active { opacity: 1; transform: none; }
-.mh-flip-words > .mh-fw.is-leaving {
-  opacity: 0; transform: translateY(-0.4em) rotateX(40deg);
-}
-
 /* Hero-highlight: a marker sweep behind a phrase on reveal. */
 .mh-highlight {
   background-image: linear-gradient(120deg,
@@ -425,23 +392,6 @@
 }
 .mh-highlight.is-in,
 .is-in .mh-highlight { background-size: 100% 42%; }
-
-/* Flapboard / scoreboard digits — split-flap aesthetic for times & stats */
-.mh-flapboard { display: inline-flex; gap: 2px; font-family: var(--font-mono); }
-.mh-flapboard .mh-flap {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 0.72em; padding: 0.08em 0.12em;
-  background: var(--mh-surface-deep);
-  border: 1px solid var(--mh-outline-rule);
-  border-radius: 3px;
-  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.5);
-}
-.mh-flapboard .mh-flap.is-flipping { animation: mh-flap 90ms var(--ease-in-out); }
-@keyframes mh-flap {
-  0%   { transform: rotateX(0); }
-  50%  { transform: rotateX(-90deg); opacity: 0.5; }
-  100% { transform: rotateX(0); }
-}
 
 /* Gradient-text — the "single chromatic accent as a gradient on a key word"
    move distilled from Refero (Apple / Mercury / Auros product-gradient idea).
@@ -496,8 +446,8 @@
    6. SCROLL REVEAL — uses MediaHub's existing Phase-10 system.
    Add `.mh-reveal` (or `.mh-reveal-group`); the inline bindReveals()
    observer adds `.is-in` and animates any nested `[data-mh-count]`. The
-   kit's text-generate / flapboard / highlight effects hook the same
-   `.is-in` flip via ui-kit.js, so there's one reveal convention, not two.
+   kit's text-generate / highlight effects hook the same `.is-in` flip
+   via ui-kit.js, so there's one reveal convention, not two.
    ===================================================================== */
 
 /* =====================================================================
@@ -810,11 +760,6 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
    effect absent (no-JS, reduced-motion, old engine).
    ===================================================================== */
 
-/* A stack of avatars that overlap like the Aceternity roster; the active
-   chip lifts above its neighbours. Drop on a flex wrapper of .mh-tooltip. */
-.mh-tooltip-row { display: inline-flex; align-items: center; padding-left: 6px; }
-.mh-tooltip-row > .mh-tooltip { margin-left: -6px; }
-
 .mh-tooltip { position: relative; display: inline-flex; vertical-align: middle; }
 
 .mh-tooltip__avatar {
@@ -1084,7 +1029,6 @@ body.mh-has-dock .mh-cursor-readout.is-pinned {
   .mh-drag-scroll:not(.is-dragging) .mh-ds-card:hover { transform: none; }
   .mh-spotlight::before { animation: none; opacity: 1; }
   .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
-  .mh-flip-words > .mh-fw { transition: none; }
   .mh-highlight { transition: none; background-size: 100% 42%; }
   /* Shiny-text: no sweep — rest at position 0% is pure inherited colour. */
   .mh-shiny-text.is-in { animation: none; }

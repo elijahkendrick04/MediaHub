@@ -144,14 +144,6 @@ def _cached(key: str) -> Optional[bytes]:
             return p.read_bytes()
         except Exception:
             return None
-    # Backwards compatibility: jpeg cached from the previous SDXL provider
-    # is still a valid image source; serve it if present.
-    p_jpg = _cache_dir() / f"{key}.jpg"
-    if p_jpg.exists():
-        try:
-            return p_jpg.read_bytes()
-        except Exception:
-            return None
     return None
 
 
@@ -229,9 +221,6 @@ def background_data_uri_for(brief, *, format_name: str = "feed_portrait") -> Opt
     cached = _cached(key)
     if cached:
         b64 = base64.b64encode(cached).decode("ascii")
-        # Cache may hold legacy .jpg from the previous SDXL provider;
-        # we still return image/png because most browsers handle the
-        # mismatch fine and downstream HTML doesn't introspect mime.
         return f"data:image/png;base64,{b64}"
 
     aspect = _FORMAT_ASPECT.get(format_name, "3:4")

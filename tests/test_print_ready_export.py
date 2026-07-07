@@ -279,6 +279,37 @@ def test_prepare_print_caches_identical_requests(tmp_path, stub_render):
     assert stub_render["n"] == 1  # second served from cache, not re-rendered
 
 
+def test_cache_hit_reports_recorded_downgrade_not_requested_mode(tmp_path, stub_render, monkeypatch):
+    """CMYK unavailable → the cold render honestly downgrades to RGB with a
+    note. A later identical request must never claim colour_mode_used='cmyk'
+    for that RGB file: the recorded downgrade is treated as a miss (so a
+    later-installed toolchain re-converts) and the result stays honest."""
+
+    def _no_cmyk(*a, **k):
+        raise ENG.CmykUnavailable("no ghostscript")
+
+    monkeypatch.setattr(ENG, "cmyk_convert_pdf", _no_cmyk)
+    poster = P.product_for("poster_a3")
+    spec = poster.primary_placement.format
+    req = PrintRequest(
+        artwork=_png(spec.width, spec.height, (10, 37, 64)),
+        product_slug="poster_a3",
+        full_bleed=True,
+        min_text_px=400,
+        colour_mode="cmyk",
+    )
+    first = ENG.prepare_print(req, out_dir=tmp_path)
+    assert first.colour_mode_used == "rgb"
+    assert "CMYK unavailable" in first.note
+
+    second = ENG.prepare_print(req, out_dir=tmp_path)
+    assert second.colour_mode_used == "rgb"  # never 'cmyk' for an RGB file
+    assert "CMYK unavailable" in second.note
+    assert second.manifest["colour_mode_used"] == "rgb"
+    assert second.from_cache is False  # downgrade recorded → honest re-render
+    assert stub_render["n"] == 2
+
+
 def test_prepare_print_unknown_product_and_mode_raise(tmp_path):
     with pytest.raises(ValueError):
         ENG.prepare_print(PrintRequest(artwork=_png(10, 10), product_slug="nope"), out_dir=tmp_path)

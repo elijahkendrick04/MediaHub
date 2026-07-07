@@ -25,6 +25,7 @@ from .registry import (
     normalise_name,
     record_run_swims,
     resolve,
+    resolve_and_swims_bulk,
     set_details,
     sync_run_payload,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "normalise_name",
     "record_run_swims",
     "resolve",
+    "resolve_and_swims_bulk",
     "set_details",
     "sync_run_payload",
 ]

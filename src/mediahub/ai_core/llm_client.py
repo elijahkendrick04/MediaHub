@@ -20,6 +20,14 @@ Configuration is env-only (see :func:`endpoints_from_env` /
     MEDIAHUB_LLM_API_KEY     bearer token; optional — keyless local servers
                              (Ollama / llama.cpp) need no key.
     MEDIAHUB_LLM_TIMEOUT     per-request timeout in seconds (default 45).
+    MEDIAHUB_LLM_TOKEN_PARAM which output-cap field(s) to send: ``both``
+                             (default — ``max_tokens`` + the newer
+                             ``max_completion_tokens``, so servers that only
+                             know one name still honour the cap), ``completion``
+                             (only ``max_completion_tokens``, for strict
+                             endpoints such as OpenAI reasoning models that
+                             reject the deprecated name), or ``legacy``
+                             (only ``max_tokens``).
 
 When ``MEDIAHUB_LLM_ENDPOINTS`` is unset the feature is inert:
 :func:`client_from_env` returns ``None`` and the ``openai`` provider is never
@@ -102,6 +110,25 @@ def _host(url: str) -> str:
         return url
 
 
+def _token_cap_fields(max_completion_tokens) -> dict:
+    """Return the output-cap payload field(s) per ``MEDIAHUB_LLM_TOKEN_PARAM``.
+
+    Several advertised targets (OpenRouter / Together / llama.cpp) document
+    only the legacy ``max_tokens`` and silently ignore unknown params, so
+    sending only ``max_completion_tokens`` leaves the cap unapplied there.
+    Default ``both`` covers old and new servers; ``completion`` is for strict
+    endpoints that reject the deprecated name (OpenAI reasoning models);
+    ``legacy`` sends only ``max_tokens``.
+    """
+    n = max(16, int(max_completion_tokens))
+    mode = (os.environ.get("MEDIAHUB_LLM_TOKEN_PARAM") or "both").strip().lower()
+    if mode == "completion":
+        return {"max_completion_tokens": n}
+    if mode == "legacy":
+        return {"max_tokens": n}
+    return {"max_completion_tokens": n, "max_tokens": n}
+
+
 class OpenAICompatClient:
     """Minimal OpenAI-compatible client with multi-endpoint failover.
 
@@ -178,7 +205,7 @@ class OpenAICompatClient:
         payload: dict = {
             "model": use_model,
             "messages": self._build_messages(messages, system),
-            "max_completion_tokens": max(16, int(max_completion_tokens)),
+            **_token_cap_fields(max_completion_tokens),
             "temperature": temperature,
         }
         if tools:
@@ -239,7 +266,7 @@ class OpenAICompatClient:
         payload: dict = {
             "model": use_model,
             "messages": self._build_messages(messages, system),
-            "max_completion_tokens": max(16, int(max_completion_tokens)),
+            **_token_cap_fields(max_completion_tokens),
             "temperature": temperature,
             "stream": True,
         }

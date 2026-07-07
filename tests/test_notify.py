@@ -119,7 +119,8 @@ def test_webhook_send_payload(monkeypatch):
     assert args[0] == "https://hook.test/x"
     body = kw["json"]
     assert body["title"] == "T" and body["message"] == "M"
-    assert "T\nM" in body["text"]  # Slack/Discord-friendly field
+    assert "T\nM" in body["text"]  # Slack renders this key
+    assert body["content"] == body["text"][:2000]  # Discord requires 'content'
 
 
 def test_both_channels_fire(monkeypatch):

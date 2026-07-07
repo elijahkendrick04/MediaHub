@@ -7,9 +7,11 @@ uses, and how much it's allowed to post on its own. The files themselves live in
 [`data/sport_profiles/`](../../../data/sport_profiles/) (one `.yaml` per sport);
 the code here just loads and checks them.
 
-This package is **new scaffolding** from the roadmap rebuild. It is deliberately
-**not plugged into the live app yet** — importing it does nothing on its own.
-Later roadmap phases will use it.
+The live app uses this package: the content-engine planner
+(`content_engine/planner.py`), the per-sport post types and format catalog
+(`club_platform/post_types.py`, `club_platform/format_catalog.py`), and the web
+routes (sport selection, goals, calendar) all load profiles through it.
+Importing it does nothing on its own.
 
 ## What's inside
 

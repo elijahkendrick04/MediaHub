@@ -32,6 +32,33 @@ def test_sanitize_empty():
     assert fix_loop._sanitize_untrusted("") == ""
 
 
+def test_sanitize_neutralises_single_backticks():
+    # Single backticks would let crawled text escape the caller's inline code
+    # spans, so they become plain quotes.
+    assert "`" not in fix_loop._sanitize_untrusted("break `out` of a span")
+
+
+def test_body_renders_expected_actual_route_as_data_not_markdown():
+    """Finder-authored expected/actual/route come from crawled page content;
+    markdown in them must render as inline code (data), never as bot-authored
+    prose or a span/fence breakout."""
+    body = fix_loop._pr_body(
+        _bug(
+            expected="**MERGE THIS** [click](https://example.test) ` now",
+            actual="`; # Fake heading\ninject",
+            route="/review` [x](https://example.test)",
+        ),
+        "fp", "proven", "ok",
+    )
+    # exp/act live inside inline code spans, single-line, backtick-free payloads.
+    assert "- **The check expected:** `**MERGE THIS** [click](https://example.test) ' now`" in body
+    assert "- **What it actually found:** `'; # Fake heading inject`" in body
+    # route is span-wrapped everywhere and cannot break out of it.
+    assert "- Route: `/review' [x](https://example.test)`" in body
+    # no unbalanced/fabricated fences beyond the rationale's own.
+    assert body.count("```") % 2 == 0
+
+
 # --- PR body ---------------------------------------------------------------
 def _bug(**kw):
     b = {"category": "semantic:flow", "severity": "high", "route": "/review",

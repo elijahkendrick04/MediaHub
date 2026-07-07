@@ -155,3 +155,103 @@ def test_v5_stubs_have_non_empty_captions():
         assert d["caption"] == ach["headline"], (
             f"Expected headline as fallback caption but got: {d['caption']!r}"
         )
+
+
+def test_stub_card_ids_unique_when_one_swim_yields_multiple_achievements():
+    """Two ranked achievements sharing a swim_id must yield DISTINCT card_ids.
+
+    Workflow state is keyed per (run_id, card_id), so duplicate ids made
+    approve/reject/caption-edit on one card silently apply to its twin. The
+    first occurrence keeps the bare swim_id (back-compat with persisted
+    workflow state); repeats get a deterministic counter suffix.
+    """
+    from mediahub.pipeline.pipeline_v4 import _v5_ranked_to_v3_stubs
+
+    shared = "club:Smith,Jane:100FRLC:timed_final"
+    ranked = [
+        {
+            "rank": 1,
+            "achievement": {
+                "swim_id": shared,
+                "swimmer_name": "Jane Smith",
+                "type": "pb_confirmed",
+                "headline": "Jane Smith sets a new PB",
+                "event": "100m Freestyle (LC)",
+            },
+        },
+        {
+            "rank": 2,
+            "achievement": {
+                "swim_id": shared,
+                "swimmer_name": "Jane Smith",
+                "type": "medal_gold",
+                "headline": "Gold for Jane Smith",
+                "event": "100m Freestyle (LC)",
+            },
+        },
+    ]
+    stubs = _v5_ranked_to_v3_stubs(ranked)
+    ids = [s.card_id for s in stubs]
+    assert ids[0] == shared, "first occurrence must keep the bare swim_id"
+    assert ids[1] == f"{shared}~2", "repeat must get a deterministic counter suffix"
+    assert len(set(ids)) == len(ids)
+
+
+def test_b_final_provenance_rides_on_the_stub_subhead():
+    """A B-final result must read as 'B Final' on the card subhead — honest
+    provenance so it is never indistinguishable from the A-final win."""
+    from types import SimpleNamespace
+
+    from mediahub.pipeline.pipeline_v4 import _v5_ranked_to_v3_stubs
+
+    result = SimpleNamespace(
+        swimmer_key="club:Smith,Jane",
+        distance=50,
+        stroke="BR",
+        course="LC",
+        round="timed_final",
+        extra={"final_label": "B Final", "final_rank": 2},
+    )
+    ranked = [
+        {
+            "rank": 1,
+            "achievement": {
+                "swim_id": "club:Smith,Jane:50BRLC:timed_final:gold",
+                "swimmer_name": "Jane Smith",
+                "type": "medal_gold",
+                "headline": "Gold for Jane Smith in the B final",
+                "event": "50m Breaststroke (LC)",
+            },
+        },
+    ]
+    (stub,) = _v5_ranked_to_v3_stubs(ranked, [result])
+    assert stub.subhead == "50m Breaststroke (LC) — B Final"
+
+
+def test_no_final_label_leaves_subhead_unchanged():
+    from types import SimpleNamespace
+
+    from mediahub.pipeline.pipeline_v4 import _v5_ranked_to_v3_stubs
+
+    result = SimpleNamespace(
+        swimmer_key="club:Smith,Jane",
+        distance=50,
+        stroke="BR",
+        course="LC",
+        round="timed_final",
+        extra={"final_label": "", "final_rank": 0},
+    )
+    ranked = [
+        {
+            "rank": 1,
+            "achievement": {
+                "swim_id": "club:Smith,Jane:50BRLC:timed_final:gold",
+                "swimmer_name": "Jane Smith",
+                "type": "medal_gold",
+                "headline": "Gold for Jane Smith",
+                "event": "50m Breaststroke (LC)",
+            },
+        },
+    ]
+    (stub,) = _v5_ranked_to_v3_stubs(ranked, [result])
+    assert stub.subhead == "50m Breaststroke (LC)"

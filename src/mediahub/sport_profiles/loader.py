@@ -11,18 +11,26 @@ the read-only seed-voice directory.
 YAML (not JSON) is used for these files on purpose: profiles are authored and
 reviewed by humans — including non-coders — so comments and readability matter.
 
-Inert scaffolding: nothing in the running product calls this yet.
+Consumed by the running product: the web routes (sport selection),
+``content_engine/planner.py``, ``club_platform/post_types.py`` and
+``format_catalog.py`` all load profiles through this module.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
 from .schema import SportProfile
+
+# Sport slugs are simple identifiers ("swimming", "water_polo"). The slug is
+# interpolated into a filesystem path and can arrive from request JSON, so
+# anything else (path separators, dots, ..) is rejected before touching disk.
+_SPORT_SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 
 # Repo layout: this file is src/mediahub/sport_profiles/loader.py, so the repo
 # root is parents[3] and the shipped profiles live at data/sport_profiles/.
@@ -47,8 +55,12 @@ def load_sport_profile(sport: str, base_dir: Optional[os.PathLike | str] = None)
     """Load and parse the profile for ``sport`` (e.g. ``"swimming"``).
 
     Raises ``FileNotFoundError`` if no ``<sport>.yaml`` exists — an honest error,
-    never a fabricated default profile.
+    never a fabricated default profile — and ``ValueError`` for a malformed slug
+    (the value can come from request JSON and is used in a filesystem path, so
+    traversal-shaped input never reaches the disk).
     """
+    if not _SPORT_SLUG_RE.match(sport or ""):
+        raise ValueError(f"invalid sport slug: {sport!r}")
     path = _profiles_dir(base_dir) / f"{sport}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"no sport profile for {sport!r} at {path}")

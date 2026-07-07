@@ -93,6 +93,26 @@ def test_submit_empty_question_is_rejected(client, monkeypatch):
     assert r.get_json()["error"] == "empty_question"
 
 
+def test_submit_capped_while_running(client, monkeypatch):
+    """The console bounds in-flight research WORK (not just records): with
+    the cap's worth of running jobs, another submit gets an honest 429 +
+    Retry-After instead of spawning one more 30-90s LLM thread."""
+    _enable(monkeypatch)
+    from mediahub.web import web as wm
+
+    for i in range(wm._RESEARCH_MAX_INFLIGHT):
+        wm._research_jobs[f"fake-running-{i}"] = {"status": "running", "profile_id": None}
+    try:
+        r = client.post("/api/web-research", json={"question": "q"})
+        assert r.status_code == 429
+        j = r.get_json()
+        assert j["ok"] is False and j["error"] == "research_busy"
+        assert r.headers.get("Retry-After")
+    finally:
+        for i in range(wm._RESEARCH_MAX_INFLIGHT):
+            wm._research_jobs.pop(f"fake-running-{i}", None)
+
+
 def test_submit_then_poll_completes(client, monkeypatch):
     _enable(monkeypatch)
     monkeypatch.setattr("mediahub.web_research.deep_research.deep_research", _fake_research())

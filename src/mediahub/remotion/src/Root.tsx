@@ -49,6 +49,7 @@ const defaultCard = {
   roleAccent: "",
   roleOnGround: "",
   captionsJson: "",
+  meshBg: "",
 };
 
 export const RemotionRoot: React.FC = () => {

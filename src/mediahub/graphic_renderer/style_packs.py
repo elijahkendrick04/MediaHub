@@ -11,8 +11,9 @@ A *style pack* is four independent levers — a ground (atmospheric) treatment, 
 surface texture, an accent geometry, and an intensity (density) tier — each a
 small **closed vocabulary** the renderer knows how to execute. Their pruned,
 de-duplicated product is the pack catalog; crossed with the archetype library it
-yields the **template catalog**: thousands of stable, addressable, brand-safe,
-explainable templates, every one reproducible from its id.
+yields the **template catalog**: thousands of stable, brand-safe, explainable
+templates. Product surfaces address the pack (``style_pack_from_id``) and the
+archetype directly — every look is reproducible from that pair.
 
 Design rules this module keeps (so it never crosses the deterministic-engine or
 legibility lines):
@@ -44,7 +45,7 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import product
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Optional
 
 # ---------------------------------------------------------------------------
 # Closed lever vocabularies. Order is fixed — the seeded picker indexes into
@@ -650,63 +651,6 @@ def pick_mood_pack_for_card(
 
 
 # ---------------------------------------------------------------------------
-# Template = archetype × style pack (the addressable unit).
-# ---------------------------------------------------------------------------
-
-_TEMPLATE_SEP = "/"
-
-
-@dataclass(frozen=True)
-class Template:
-    """A concrete, renderable template: a structural archetype + a style pack."""
-
-    archetype: str
-    pack: StylePack
-
-    @property
-    def id(self) -> str:
-        return f"{self.archetype}{_TEMPLATE_SEP}{self.pack.id}"
-
-    def name(self) -> str:
-        return f"{self.archetype} — {self.pack.name()}"
-
-
-def list_templates(archetypes: Sequence[str]) -> list[Template]:
-    """The full template catalog for a given archetype library.
-
-    ``archetypes`` is injected (owned by :mod:`graphic_renderer.archetypes`) so
-    this module never has to scan the layouts dir. Ordered archetype-major then
-    pack order, so it reads as a catalog grouped by structure.
-    """
-    packs = list_style_packs()
-    return [Template(a, p) for a in archetypes for p in packs]
-
-
-def template_count(archetypes: Sequence[str]) -> int:
-    return len(archetypes) * style_pack_count()
-
-
-def template_from_id(template_id: str, archetypes: Sequence[str]) -> Optional[Template]:
-    """Parse ``"<archetype>/<pack-id>"`` into a :class:`Template`, or ``None``."""
-    raw = str(template_id or "")
-    if _TEMPLATE_SEP not in raw:
-        return None
-    archetype, pack_id = raw.split(_TEMPLATE_SEP, 1)
-    if archetype not in set(archetypes):
-        return None
-    pack = style_pack_from_id(pack_id)
-    return Template(archetype, pack) if pack else None
-
-
-def pick_template(seed: int, archetypes: Sequence[str]) -> Optional[Template]:
-    """Deterministically pick one template (archetype × pack) from a seed."""
-    if not archetypes:
-        return None
-    templates = list_templates(archetypes)
-    return templates[int(seed) % len(templates)]
-
-
-# ---------------------------------------------------------------------------
 # Render application — the injected CSS/markup for a pack.
 #
 # Everything here is one self-contained overlay string dropped into a v2
@@ -1250,7 +1194,6 @@ __all__ = [
     "DENSITIES",
     "texture_stack",
     "StylePack",
-    "Template",
     "normalise_pack",
     "list_style_packs",
     "style_pack_count",
@@ -1265,9 +1208,5 @@ __all__ = [
     "pick_mood_pack",
     "pick_mood_pack_avoiding",
     "pick_mood_pack_for_card",
-    "list_templates",
-    "template_count",
-    "template_from_id",
-    "pick_template",
     "pack_overlay_html",
 ]

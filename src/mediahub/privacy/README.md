@@ -5,13 +5,11 @@ cascades, and account export.
 
 - **`erasure.py`** — the cascades.
   - *Run cascade* (used by run deletion in `web.py`): per-run PB cache,
-    caption-memory rows for the run, posting-log caption excerpts, motion
-    cache entries for the run.
+    caption-memory rows for the run, motion cache entries for the run.
   - *Athlete cascade* (`erase_athlete`): removes one named athlete from an
     organisation's runs (cards, swims, recognition entries, rendered assets),
-    the PB warm + per-run caches, the research cache, the caption memory and
-    the posting-log excerpts — and redacts remaining mentions inside
-    multi-athlete content.
+    the PB warm + per-run caches, the research cache and the caption memory
+    — and redacts remaining mentions inside multi-athlete content.
   - *Account cascade* (`erase_account`): users ledger row, legal-acceptance
     rows, workspace memberships, session-independent.
 - **`export.py`** — `account_export()`: the Art. 15/20 JSON bundle for one
@@ -20,7 +18,7 @@ cascades, and account export.
 - **`org_lifecycle.py`** (PC.13) — the whole-workspace versions of both:
   `delete_org()` cascades an organisation out of every store under
   `DATA_DIR` (runs through the run cascade, media, logos, consent +
-  athletes registries, records, corrections, posting/telemetry logs,
+  athletes registries, records, corrections, approval telemetry,
   caption memory, sponsor + audit ledgers, memberships, the profile — which
   kills the public-wall link), keeping the Stripe customer and acceptance
   evidence per the DPA and saying so; `org_export_zip()` is the one-ZIP

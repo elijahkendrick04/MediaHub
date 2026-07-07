@@ -22,8 +22,10 @@ from mediahub.athletes.registry import (
     purge_run,
     record_run_swims,
     resolve,
+    resolve_and_swims_bulk,
     sync_run_payload,
 )
+from mediahub.athletes.registry import athlete_swims as _athlete_swims
 from mediahub.club_records.store import (
     apply_approved_card,
     format_time_cs,
@@ -189,6 +191,34 @@ class TestRegistry:
     def test_purge_run_noop_for_unknown(self, db):
         assert purge_run(ORG, "nope", db_path=db) == {"swims": 0, "athletes_deactivated": 0}
         assert purge_run("", "run1", db_path=db) == {"swims": 0, "athletes_deactivated": 0}
+
+    def test_resolve_and_swims_bulk_parity(self, db):
+        # Two swimmers with alias variants, plus an unknown name. The bulk
+        # helper must return exactly what per-name resolve()+athlete_swims()
+        # would, keyed by the ORIGINAL names passed in.
+        maya = get_or_create(ORG, "Maya Patel", db_path=db)
+        get_or_create(ORG, "M. Patel", db_path=db)  # separate alias/athlete
+        record_run_swims(
+            ORG, "run1", [{"name": "Maya Patel", "event": "100FRLC", "time_cs": 6532}], db_path=db
+        )
+        record_run_swims(
+            ORG, "run2", [{"name": "Maya Patel", "event": "50FRLC", "time_cs": 3001}], db_path=db
+        )
+        names = ["Maya Patel", "Nobody Here"]
+        bulk = resolve_and_swims_bulk(ORG, names, db_path=db)
+        # Parity with the per-name path for every requested name.
+        for name in names:
+            hit = resolve(ORG, name, db_path=db)
+            expected = _athlete_swims(ORG, hit.athlete_id, db_path=db) if hit else []
+            assert bulk[name] == expected
+        assert len(bulk["Maya Patel"]) == 2
+        assert bulk["Nobody Here"] == []
+        # A one-connection call and the per-name calls agree on ordering.
+        assert bulk["Maya Patel"] == _athlete_swims(ORG, maya.athlete_id, db_path=db)
+
+    def test_resolve_and_swims_bulk_empty_and_failsoft(self, db):
+        assert resolve_and_swims_bulk(ORG, [], db_path=db) == {}
+        assert resolve_and_swims_bulk("", ["Maya"], db_path=db) == {"Maya": []}
 
     def test_merge_moves_swims_and_aliases_and_persists(self, db):
         a = get_or_create(ORG, "Maya Patel", db_path=db)

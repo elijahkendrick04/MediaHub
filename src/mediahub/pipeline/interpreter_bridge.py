@@ -176,6 +176,10 @@ def _slugify(value: str) -> str:
 # a result came from, and rank the A-final above the B/C-final for posting.
 _FINAL_LETTER_RE = re.compile(r"\b([ABC])\s+FINAL\b", re.IGNORECASE)
 _FINAL_OF_RE = re.compile(r"\bFINAL\s+OF\s+EVENT\b|\bFINAL\b", re.IGNORECASE)
+# Headers whose FINAL token does NOT mean the A/main final: a "Timed Final(s)"
+# is the single all-in final (rank 0, per the docstring below) and a
+# "Semi-Final" is not a final at all — neither may be mislabelled "A Final".
+_NOT_A_FINAL_RE = re.compile(r"\bSEMI[- ]?FINALS?\b|\bTIMED\s+FINALS?\b", re.IGNORECASE)
 
 # Meet event number from a header line, e.g. "Event 202  Female 10-13 200 LC
 # Meter Freestyle" → "202". HY-TEK reprints the same physical swim under several
@@ -208,6 +212,10 @@ def _detect_final_round(raw_header: Optional[str]) -> tuple[str, int]:
     if m:
         letter = m.group(1).upper()
         return f"{letter} Final", {"A": 1, "B": 2, "C": 3}[letter]
+    if _NOT_A_FINAL_RE.search(h):
+        # "Timed Final(s)" / "Semi-Final" carry the FINAL token but are not the
+        # A/main final — they keep the single-timed-final reading (rank 0).
+        return "", 0
     if _FINAL_OF_RE.search(h):
         # "FINAL OF EVENT …" with no A/B/C qualifier is the main (A) final.
         return "A Final", 1
@@ -581,7 +589,12 @@ def _name_tokens_match(target: str, candidate: str) -> bool:
         return False
     if a == b:
         return True
-    if a.issubset(b) or b.issubset(a):
+    # Subset match — but only when the smaller set carries at least one
+    # NON-generic identity token. A candidate normalising to only org-type
+    # words ("Co" → {city}, "Co Aq" → {city, aquatics}) is a subset of nearly
+    # every club name and would leak the wrong club's swimmers in.
+    subset = a if a.issubset(b) else (b if b.issubset(a) else None)
+    if subset is not None and any(t not in _GENERIC_CLUB_TOKENS for t in subset):
         return True
     # Identity tokens: significant (length ≥ 4) AND not a generic org-type word,
     # so the match turns on the distinctive place name, not "city"/"swimming".

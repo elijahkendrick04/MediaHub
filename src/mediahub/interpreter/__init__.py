@@ -136,7 +136,12 @@ def _extract_meet_metadata(
             return False
         if _looks_like_software_banner(ln):
             return False
-        if _EVENT_HEADER_HINT_RE.search(ln) or _RACE_TIME_TOKEN_RE.search(ln):
+        # Run the race-time check on the CLEANED line: a title like
+        # "Winter Open Meet - 14.02.2026" carries a dotted date whose dd.mm
+        # token is race-time-shaped, but _clean_meet_name strips the date tail
+        # first — so only a genuine result row (whose ss.cc token survives
+        # cleaning) is rejected here.
+        if _EVENT_HEADER_HINT_RE.search(ln) or _RACE_TIME_TOKEN_RE.search(_clean_meet_name(ln)):
             return False
         return True
 

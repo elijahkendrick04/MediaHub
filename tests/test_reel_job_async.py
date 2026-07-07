@@ -136,6 +136,40 @@ class TestReelJob:
             assert other.post("/api/runs/r1/reel-job").status_code == 404
             assert other.get("/api/runs/r1/reel-file").status_code == 404
 
+    def test_heartbeat_keeps_a_slow_render_reported_running(self, app_env):
+        """A legitimately slow render past the 5-min stall threshold must not
+        be reported job_lost while the worker is alive: the worker heartbeat
+        re-saves the job file, refreshing updated_at. A dead worker stops
+        heartbeating, so honest job-lost reports still happen."""
+        app, wm, _ = app_env
+        job = {
+            "id": "a" * 32,
+            "kind": "reel",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "created_at": time.time(),
+            "owner_pid": "alpha",
+        }
+        wm._variant_job_save(job)
+        # Backdate the persisted snapshot past the stall threshold — without a
+        # heartbeat the status route reports it lost.
+        path = wm._variant_jobs_dir() / f"{job['id']}.json"
+        stale = json.loads(path.read_text())
+        stale["updated_at"] = time.time() - (wm._VARIANT_JOB_STALL_S + 60)
+        path.write_text(json.dumps(stale))
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            lost = c.get(f"/api/reel-jobs/{job['id']}").get_json()
+            assert lost["status"] == "error" and "job_lost" in (lost["error"] or "")
+            # …but with the worker's heartbeat running, the file stays fresh.
+            with wm._job_heartbeat(job, interval_s=0.05):
+                time.sleep(0.2)
+            alive = c.get(f"/api/reel-jobs/{job['id']}").get_json()
+        assert alive["status"] == "running"
+        assert not alive["error"]
+
     def test_reel_file_never_renders(self, app_env):
         app, wm, _ = app_env
         with app.test_client() as c:
@@ -143,6 +177,44 @@ class TestReelJob:
             resp = c.get("/api/runs/r1/reel-file")
         assert resp.status_code == 404
         assert resp.get_json()["error"] == "reel_not_rendered"
+
+    def test_job_forwards_dub_and_next_meet_to_render(self, app_env):
+        """The async job route passes the same 1.24 dub_language and R1.30
+        next_meet inputs the sync route resolves, and mints a lang-aware file
+        URL so the dubbed MP4 is actually streamable."""
+        app, wm, _ = app_env
+        from mediahub.web.club_profile import ClubProfile, save_profile
+
+        save_profile(
+            ClubProfile(
+                profile_id="alpha",
+                display_name="Alpha SC",
+                notes="Next meet: County Champs — 12 Jul",
+            )
+        )
+        import mediahub.visual.motion as motion
+
+        captured = {}
+
+        def _fake_render(cards, brand_kit, out_path, **kw):
+            captured.update(kw)
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_bytes(b"0" * 2048)
+            return Path(out_path)
+
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            with mock.patch.object(motion, "render_meet_reel", _fake_render):
+                resp = c.post("/api/runs/r1/reel-job?lang=es")
+                assert resp.status_code == 202
+                j = _poll_until_settled(c, resp.get_json()["poll_url"])
+            assert j["status"] == "done", j
+            assert captured["dub_language"] == "es"
+            assert captured["next_meet"].startswith("County Champs")
+            assert "lang=es" in j["video_url"]
+            f = c.get(j["video_url"])
+            assert f.status_code == 200
+            assert "video/mp4" in (f.headers.get("Content-Type") or "")
 
     def test_reel_file_serves_poster_sidecar(self, app_env):
         """?poster=1 streams the poster PNG written beside the rendered MP4,

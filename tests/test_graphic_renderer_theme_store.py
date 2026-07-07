@@ -276,4 +276,6 @@ class TestConfirmedBrandColoursWinAcrossSurfaces:
         # Motion must render the confirmed brand primary so a reel aligns
         # with its still (CLAUDE.md), not the dark-scheme tonal variant.
         assert motion["primary"] == "#003C71"
-        assert motion["themeSource"] == "brand-kit"
+        # The kit supplied primary+secondary but the seeded theme fills the
+        # accent, so the exact-explainability label is "mixed".
+        assert motion["themeSource"] == "mixed"

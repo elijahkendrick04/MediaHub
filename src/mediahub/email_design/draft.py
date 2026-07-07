@@ -46,14 +46,23 @@ _TONE_DESC = {
 
 
 def _numbers_grounded(text: str, allowed: set[float]) -> bool:
-    """True iff every numeric token in ``text`` matches an allowed fact number."""
+    """True iff every numeric token in ``text`` matches an allowed fact number.
+
+    Exact matches only: a token passes when it equals an allowed value, or when
+    it is an integer token that is the rounded display of an allowed float. No
+    tolerance window and no int-truncation — '3.9' must not pass against 3, and
+    the tokens of an invented '1:02.45' must not pass against nearby stats.
+    """
     for tok in re.findall(r"\d+(?:\.\d+)?", text):
         try:
             n = float(tok)
         except ValueError:
             return False
-        if not any(abs(n - a) < 0.6 or round(a) == n or int(a) == int(n) for a in allowed):
-            return False
+        if n in allowed:
+            continue
+        if "." not in tok and any(round(a) == n for a in allowed):
+            continue
+        return False
     return True
 
 
@@ -83,12 +92,22 @@ def draft_editorial(
         'Return JSON: {"intro": "...", "subject": "...", "preheader": "..."}.'
     )
 
+    # Identity sentinel: generate_json returns ``fallback`` itself only when the
+    # provider DID answer but produced unparseable JSON — the operator chose an
+    # AI draft, so that failure must surface honestly, not silently downgrade
+    # to the fact-only intro.
+    unparseable: dict = {"_unparseable": True}
     try:
-        raw = generate_json(prompt, system=_SYSTEM, max_tokens=400, fallback={})
+        raw = generate_json(prompt, system=_SYSTEM, max_tokens=400, fallback=unparseable)
     except ClaudeUnavailableError:
         raise
     except Exception as e:  # provider answered but failed — surface honestly
         raise ClaudeUnavailableError(f"Newsletter editorial drafting failed: {e}") from e
+    if raw is unparseable:
+        raise ClaudeUnavailableError(
+            "The AI provider answered but returned unparseable editorial; "
+            "try again, or draft without AI for a fact-only intro."
+        )
 
     out: dict[str, str] = {}
     if not isinstance(raw, dict):

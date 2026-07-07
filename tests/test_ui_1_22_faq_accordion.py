@@ -57,7 +57,9 @@ _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in (
     "true",
     "yes",
 )
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -254,6 +256,14 @@ class TestFaqContent:
         for _question, answer_phrase in FAQ_EXPECTATIONS:
             assert answer_phrase in body, f"missing grounded answer: {answer_phrase!r}"
 
+    def test_privacy_answer_uses_hosted_not_self_host_framing(self, app):
+        # ADR-0011 / CLAUDE.md: MediaHub is operator-hosted SaaS with no
+        # self-host framing. The old "deployment you control" copy implied a
+        # customer-controlled deployment and must be gone.
+        body = _home(app)
+        assert "deployment you control" not in body
+        assert "private workspace on our hosted platform" in body
+
     def test_human_in_the_loop_is_answered_first(self, app):
         # The single most important objection (does it auto-post?) leads.
         sec = _faq_section(_home(app))
@@ -384,7 +394,7 @@ class TestFaqCss:
 # =========================================================================== #
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestFaqBrowser:
     def _launch(self):
         from playwright.sync_api import sync_playwright

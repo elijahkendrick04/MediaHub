@@ -78,8 +78,11 @@ def _consent_block_reason(profile_id: str, swimmer_name: str) -> Optional[str]:
     (``compliance.gate.consent_block_reason``), which consults BOTH consent
     systems: the W.2 safeguarding levels (do_not_feature / no consent on
     file under an active regime) and the compliance ledger (opt-outs,
-    Art 18 restriction, opt-in mode). A wholly failed lookup returns
-    ``None`` so a public page never 500s.
+    Art 18 restriction, opt-in mode). A wholly failed lookup FAILS CLOSED —
+    it returns a synthetic block reason so the card is dropped rather than
+    shown: consent may only ever tighten this children's-data surface, and
+    a corrupt registry must not widen it. The page itself still renders 200
+    (the card is simply excluded), so the public wall never 500s.
     """
     name = (swimmer_name or "").strip()
     if not profile_id or not name:
@@ -89,7 +92,7 @@ def _consent_block_reason(profile_id: str, swimmer_name: str) -> Optional[str]:
 
         return consent_block_reason(profile_id, name)
     except Exception:
-        return None
+        return "consent lookup failed — hidden as a precaution"
 
 
 def _consent_display_policy(profile_id: str, swimmer_name: str):

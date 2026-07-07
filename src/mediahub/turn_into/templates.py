@@ -286,6 +286,37 @@ def _narrate_brief(payload: dict) -> str:
     return ""
 
 
+def _note_source(meta: Optional[dict], source: str, error: str = "") -> None:
+    """Record where a text came from (``ai`` | ``fallback`` | ``deterministic``).
+
+    ``meta`` is an optional caller-owned dict; ``error`` carries the exception
+    class name on a fallback so the pack can say *why* the copy is templated."""
+    if meta is None:
+        return
+    meta["source"] = source
+    if error:
+        meta["error"] = error
+
+
+def _pack_source(metas: list[dict]) -> tuple[str, Optional[str]]:
+    """Aggregate per-text sources → (artefact ``source``, optional honesty note).
+
+    An artefact is ``fallback`` when any of its texts silently dropped to the
+    deterministic template after an LLM failure — the review UI badges those so
+    template copy is never indistinguishable from AI-written copy."""
+    fb = [m for m in metas if m.get("source") == "fallback"]
+    if fb:
+        errs = sorted({str(m.get("error") or "") for m in fb} - {""})
+        detail = f" (LLM failure: {', '.join(errs)})" if errs else ""
+        return "fallback", (
+            f"{len(fb)} of {len(metas)} texts used the deterministic template "
+            f"fallback{detail} — not AI-written."
+        )
+    if metas and all(m.get("source") == "ai" for m in metas):
+        return "ai", None
+    return "deterministic", None
+
+
 def _gen_caption(
     payload: dict,
     club_brand: dict,
@@ -295,12 +326,14 @@ def _gen_caption(
     deterministic: bool,
     fallback_text: str,
     profile=None,
+    meta: Optional[dict] = None,
 ) -> str:
     """Generate one caption via the existing primitive, or return fallback.
 
     The function is deliberately defensive — any exception falls back to
     the deterministic text, so the pipeline never crashes if the LLM is
-    flaky.
+    flaky. ``meta`` (when given) records the outcome via :func:`_note_source`
+    so a fallback is visible in the pack, never silent.
 
     The artefact intent is resolved through ``brand.derived`` so a
     derived operating profile can override the hardcoded default with
@@ -308,10 +341,12 @@ def _gen_caption(
     default when no derived intent exists.
     """
     if deterministic:
+        _note_source(meta, "deterministic")
         return fallback_text
     try:
         from mediahub.web.ai_caption import generate_caption_for_tone
-    except Exception:
+    except Exception as e:
+        _note_source(meta, "fallback", type(e).__name__)
         return fallback_text
     default_intent = _ARTEFACT_INTENTS.get(intent_key, "")
     try:
@@ -346,10 +381,15 @@ def _gen_caption(
             club_profile=profile,
             brief_prose=brief_prose,
         )
-    except Exception:
+    except Exception as e:
+        _note_source(meta, "fallback", type(e).__name__)
         return fallback_text
     text = (text or "").strip()
-    return text or fallback_text
+    if not text:
+        _note_source(meta, "fallback", "EmptyCompletion")
+        return fallback_text
+    _note_source(meta, "ai")
+    return text
 
 
 def _gen_longform(
@@ -362,6 +402,7 @@ def _gen_longform(
     fallback_text: str,
     profile=None,
     max_tokens: int = 1400,
+    meta: Optional[dict] = None,
 ) -> str:
     """Generate one long-form artefact body via the cloud LLM, or fallback.
 
@@ -369,9 +410,11 @@ def _gen_longform(
     so artefacts that need real word count (the club website report) go
     straight to ``media_ai.generate`` with the same brand briefing the
     caption path uses. Defensive like :func:`_gen_caption` — any failure
-    returns the deterministic fallback so the pack never crashes.
+    returns the deterministic fallback (recorded in ``meta``) so the pack
+    never crashes but a templated body is never silent.
     """
     if deterministic:
+        _note_source(meta, "deterministic")
         return fallback_text
     default_intent = _ARTEFACT_INTENTS.get(intent_key, "")
     try:
@@ -411,10 +454,15 @@ def _gen_longform(
         text = generate(
             brief, system="\n\n".join(p for p in system_parts if p), max_tokens=max_tokens
         )
-    except Exception:
+    except Exception as e:
+        _note_source(meta, "fallback", type(e).__name__)
         return fallback_text
     text = (text or "").strip()
-    return text or fallback_text
+    if not text:
+        _note_source(meta, "fallback", "EmptyCompletion")
+        return fallback_text
+    _note_source(meta, "ai")
+    return text
 
 
 def _format_name(voice_profile, swimmer_first: str, swimmer_last: str) -> str:
@@ -492,6 +540,7 @@ def build_meet_recap(
         "course": meet_summary.get("course", ""),
         "headliners": [_ach_payload(ra) for ra in top_achievements[:5]],
     }
+    meta_default: dict = {}
     default_caption = _gen_caption(
         payload,
         club_brand,
@@ -500,6 +549,7 @@ def build_meet_recap(
         deterministic=deterministic,
         fallback_text=fallback_default,
         profile=profile,
+        meta=meta_default,
     )
     default_caption = _apply_sign_off(voice_profile, default_caption)
 
@@ -509,6 +559,7 @@ def build_meet_recap(
         f"{fallback_default}\n\n"
         f"Proud of everyone who raced. More results in the comments."
     )
+    meta_ig: dict = {}
     ig_caption = _gen_caption(
         payload,
         club_brand,
@@ -517,6 +568,7 @@ def build_meet_recap(
         deterministic=deterministic,
         fallback_text=fallback_ig,
         profile=profile,
+        meta=meta_ig,
     )
     ig_caption = _apply_sign_off(voice_profile, ig_caption)
     if len(ig_caption) > 2200:
@@ -533,22 +585,28 @@ def build_meet_recap(
         "body": (headline_ach.get("achievement", {}) if headline_ach else {}).get("headline", ""),
     }
 
+    source, source_note = _pack_source([meta_default, meta_ig])
+    notes = [
+        "Built from top achievement: "
+        + (
+            (headline_ach.get("achievement", {}) if headline_ach else {}).get(
+                "headline", "no achievement available"
+            )
+        )
+    ]
+    if source_note:
+        notes.append(source_note)
+
     return {
         "type": "meet_recap",
         "title": f"Meet recap — {meet_summary.get('name', 'Meet')}",
+        "source": source,
         "captions": {
             "default": default_caption,
             "instagram": ig_caption,
         },
         "cards": [card],
-        "notes": [
-            "Built from top achievement: "
-            + (
-                (headline_ach.get("achievement", {}) if headline_ach else {}).get(
-                    "headline", "no achievement available"
-                )
-            )
-        ],
+        "notes": notes,
     }
 
 
@@ -573,6 +631,7 @@ def build_swimmer_spotlights(
     cards: list[dict] = []
     captions: dict[str, str] = {}
     notes: list[str] = []
+    gen_metas: list[dict] = []
 
     for idx, ra in enumerate(picks, start=1):
         a = ra.get("achievement") or {}
@@ -585,6 +644,7 @@ def build_swimmer_spotlights(
             f"{('(' + payload['time'] + ')') if payload.get('time') else ''} "
             f"{payload.get('headline', '')}"
         ).strip()[:280]
+        gen_meta: dict = {}
         caption = _gen_caption(
             payload,
             club_brand,
@@ -593,7 +653,9 @@ def build_swimmer_spotlights(
             deterministic=deterministic,
             fallback_text=fallback,
             profile=profile,
+            meta=gen_meta,
         )
+        gen_metas.append(gen_meta)
         caption = _apply_sign_off(voice_profile, caption)
         key = f"swimmer_{idx}"
         captions[key] = caption
@@ -614,9 +676,14 @@ def build_swimmer_spotlights(
     if not cards:
         notes.append("No swimmers available to spotlight from this meet.")
 
+    source, source_note = _pack_source(gen_metas)
+    if source_note:
+        notes.append(source_note)
+
     return {
         "type": "swimmer_spotlight",
         "title": "Swimmer spotlight series",
+        "source": source,
         "captions": captions,
         "cards": cards,
         "notes": notes,
@@ -644,12 +711,14 @@ def build_data_thread(
     n_posts = max(3, min(5, 1 + len(intros)))  # always 3-5
 
     posts: list[str] = []
+    gen_metas: list[dict] = []
 
     # Post 1 — intro / header
     intro_fallback = (
         f"{meet_summary.get('name', 'Meet')} by the numbers — "
         f"{len(top_achievements)} ranked moments. Thread ↓"
     )[:280]
+    intro_meta: dict = {}
     intro = _gen_caption(
         {
             "kind": "thread_intro",
@@ -662,7 +731,9 @@ def build_data_thread(
         deterministic=deterministic,
         fallback_text=intro_fallback,
         profile=profile,
+        meta=intro_meta,
     )
+    gen_metas.append(intro_meta)
     posts.append(_truncate(intro, 280))
 
     for i, ra in enumerate(intros, start=2):
@@ -672,6 +743,7 @@ def build_data_thread(
             f"{i-1}/ {payload['swimmer_name']} · {payload['event']} · "
             f"{payload.get('time','')} — {payload.get('headline','')}".strip()
         )
+        post_meta: dict = {}
         post = _gen_caption(
             payload,
             club_brand,
@@ -680,7 +752,9 @@ def build_data_thread(
             deterministic=deterministic,
             fallback_text=fb,
             profile=profile,
+            meta=post_meta,
         )
+        gen_metas.append(post_meta)
         # Always prepend numbering so threading is unambiguous even when LLM
         # forgets it.
         post = _ensure_numbered(post, i - 1)
@@ -703,6 +777,7 @@ def build_data_thread(
         + "\n".join(f"• {p}" for p in posts[1:])
         + "\n\nThanks to everyone who raced and supported the club."
     )
+    li_meta: dict = {}
     li_caption = _gen_caption(
         {
             "kind": "thread_linkedin",
@@ -715,11 +790,22 @@ def build_data_thread(
         deterministic=deterministic,
         fallback_text=li_fallback,
         profile=profile,
+        meta=li_meta,
     )
+    gen_metas.append(li_meta)
+
+    source, source_note = _pack_source(gen_metas)
+    notes = [
+        f"Generated {len(posts)} X-thread posts (≤280 chars each).",
+        f"LinkedIn variant: {len(li_caption)} chars.",
+    ]
+    if source_note:
+        notes.append(source_note)
 
     return {
         "type": "data_thread",
         "title": "Data-led thread (X / LinkedIn)",
+        "source": source,
         "captions": {
             "x_thread": posts,
             "linkedin": li_caption,
@@ -728,10 +814,7 @@ def build_data_thread(
         "cards": [
             {"index": i, "post": p, "char_count": len(p)} for i, p in enumerate(posts, start=1)
         ],
-        "notes": [
-            f"Generated {len(posts)} X-thread posts (≤280 chars each).",
-            f"LinkedIn variant: {len(li_caption)} chars.",
-        ],
+        "notes": notes,
     }
 
 
@@ -768,6 +851,7 @@ def build_parent_newsletter(
         + "Thank you to everyone who travelled, cheered, and supported the swimmers. "
         + "Please reach out if you'd like more detail on individual swims."
     )
+    plain_meta: dict = {}
     plain = _gen_caption(
         {
             "kind": "newsletter",
@@ -781,6 +865,7 @@ def build_parent_newsletter(
         deterministic=deterministic,
         fallback_text=fallback_plain,
         profile=profile,
+        meta=plain_meta,
     )
     plain = _apply_sign_off(voice_profile, plain)
 
@@ -800,6 +885,7 @@ def build_parent_newsletter(
     fb_subject = _truncate(f"{club_name} at {meet_name} — meet update", 55)
     fb_preheader = _truncate(plain.split(". ")[0].strip(), 90)
     subject, preheader = fb_subject, fb_preheader
+    subject_meta: dict = {"source": "deterministic"}
     if not deterministic:
         try:
             from mediahub.media_ai.llm import generate_json
@@ -812,12 +898,24 @@ def build_parent_newsletter(
             )
             subject = _truncate(str(d.get("subject") or "").strip() or fb_subject, 60)
             preheader = _truncate(str(d.get("preheader") or "").strip() or fb_preheader, 100)
-        except Exception:
+            _note_source(subject_meta, "ai")
+        except Exception as e:
             subject, preheader = fb_subject, fb_preheader
+            _note_source(subject_meta, "fallback", type(e).__name__)
+
+    source, source_note = _pack_source([plain_meta, subject_meta])
+    notes = [
+        f"Plain-text word count: ~{len(plain.split())} words.",
+        f"Mentions {len(bullets)} headline swimmers.",
+        "Email-ready: subject (≤60 chars) and preheader (≤100 chars) included.",
+    ]
+    if source_note:
+        notes.append(source_note)
 
     return {
         "type": "parent_newsletter",
         "title": f"Parent newsletter — {meet_name}",
+        "source": source,
         "captions": {
             "subject": subject,
             "preheader": preheader,
@@ -826,11 +924,7 @@ def build_parent_newsletter(
         },
         "cards": [{"swimmer": "", "event": "", "headline": meet_name, "body": plain}],
         "html": html,
-        "notes": [
-            f"Plain-text word count: ~{len(plain.split())} words.",
-            f"Mentions {len(bullets)} headline swimmers.",
-            "Email-ready: subject (≤60 chars) and preheader (≤100 chars) included.",
-        ],
+        "notes": notes,
     }
 
 
@@ -879,6 +973,7 @@ def build_club_report(
     )
     fallback_report = "\n\n".join(fallback_paras)
 
+    report_meta: dict = {}
     report = _gen_longform(
         {
             "kind": "club_report",
@@ -895,6 +990,7 @@ def build_club_report(
         deterministic=deterministic,
         fallback_text=fallback_report,
         profile=profile,
+        meta=report_meta,
     )
 
     paras = [p.strip() for p in report.split("\n\n") if p.strip()]
@@ -906,17 +1002,23 @@ def build_club_report(
         f"</article>"
     )
 
+    source, source_note = _pack_source([report_meta])
+    notes = [
+        f"Word count: ~{len(report.split())} words.",
+        f"Grounded in {len(facts)} ranked results — no invented facts.",
+        "Long-form copy for the club website news page or programme notes.",
+    ]
+    if source_note:
+        notes.append(source_note)
+
     return {
         "type": "club_report",
         "title": f"Club website report — {meet_name}",
+        "source": source,
         "captions": {"default": report},
         "cards": [],
         "html": html,
-        "notes": [
-            f"Word count: ~{len(report.split())} words.",
-            f"Grounded in {len(facts)} ranked results — no invented facts.",
-            "Long-form copy for the club website news page or programme notes.",
-        ],
+        "notes": notes,
     }
 
 
@@ -944,6 +1046,7 @@ def build_sponsor_thank_you(
         f"Huge thank you to {sponsor} for backing us at {meet_name}. "
         f"Your support makes weekends like this possible."
     )[:280]
+    gen_meta: dict = {}
     caption = _gen_caption(
         {
             "kind": "sponsor_thank_you",
@@ -957,17 +1060,24 @@ def build_sponsor_thank_you(
         deterministic=deterministic,
         fallback_text=fallback,
         profile=profile,
+        meta=gen_meta,
     )
     caption = _apply_sign_off(voice_profile, caption)
+
+    source, source_note = _pack_source([gen_meta])
+    notes = [f"Sponsor: {sponsor}"]
+    if source_note:
+        notes.append(source_note)
 
     return {
         "type": "sponsor_thank_you",
         "title": f"Sponsor thank-you — {sponsor}",
+        "source": source,
         "captions": {"default": caption},
         "cards": [
             {"swimmer": "", "event": "", "headline": f"Thank you, {sponsor}", "body": caption}
         ],
-        "notes": [f"Sponsor: {sponsor}"],
+        "notes": notes,
     }
 
 
@@ -1004,6 +1114,7 @@ def build_coach_quote(
             f'the squad keeps doing the work." — Head Coach'
         )
 
+    gen_meta: dict = {}
     quote = _gen_caption(
         {
             "kind": "coach_quote",
@@ -1016,14 +1127,24 @@ def build_coach_quote(
         deterministic=deterministic,
         fallback_text=fallback_quote,
         profile=profile,
+        meta=gen_meta,
     )
 
     flag = "DRAFT — review with coach before publishing"
     caption = f"[{flag}]\n\n{quote}"
 
+    source, source_note = _pack_source([gen_meta])
+    notes = [
+        "This quote is synthesised from the meet narrative and is NOT a real coach statement.",
+        "Get coach sign-off before publishing.",
+    ]
+    if source_note:
+        notes.append(source_note)
+
     return {
         "type": "coach_quote",
         "title": "Coach quote (DRAFT)",
+        "source": source,
         "captions": {"default": caption, "quote_only": quote},
         "cards": [
             {
@@ -1034,10 +1155,7 @@ def build_coach_quote(
             }
         ],
         "draft_flag": flag,
-        "notes": [
-            "This quote is synthesised from the meet narrative and is NOT a real coach statement.",
-            "Get coach sign-off before publishing.",
-        ],
+        "notes": notes,
     }
 
 
@@ -1097,6 +1215,7 @@ def build_next_meet_preview(
         + (f" ({nm['date']})" if nm.get("date") else "")
         + ". Eyes forward — see you on the blocks."
     )[:280]
+    gen_meta: dict = {}
     caption = _gen_caption(
         {
             "kind": "next_meet_preview",
@@ -1109,12 +1228,21 @@ def build_next_meet_preview(
         deterministic=deterministic,
         fallback_text=fallback,
         profile=profile,
+        meta=gen_meta,
     )
     caption = _apply_sign_off(voice_profile, caption)
+
+    source, source_note = _pack_source([gen_meta])
+    notes = [
+        f"Next meet: {nm.get('name','')}" + (f" — {nm.get('date','')}" if nm.get("date") else "")
+    ]
+    if source_note:
+        notes.append(source_note)
 
     return {
         "type": "next_meet_preview",
         "title": f"Next-meet preview — {nm['name']}",
+        "source": source,
         "captions": {"default": caption},
         "cards": [
             {
@@ -1124,10 +1252,7 @@ def build_next_meet_preview(
                 "body": caption,
             }
         ],
-        "notes": [
-            f"Next meet: {nm.get('name','')}"
-            + (f" — {nm.get('date','')}" if nm.get("date") else "")
-        ],
+        "notes": notes,
     }
 
 

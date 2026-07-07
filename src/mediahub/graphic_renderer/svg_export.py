@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import hashlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -586,9 +587,93 @@ def _emit_path(obj_raw, eff: tuple, ctx: _Ctx, is_top_overlay: bool = False) -> 
     return f'<path {" ".join(a for a in attrs if a)} d="{d}"/>'
 
 
-def _emit_text_object(obj_raw, char_indices, textpage, to_svg) -> str:
-    """A text object → one ``<path>`` of outlined glyphs (no font dependency)."""
+def _needs_shaping(u: int) -> bool:
+    """Scripts Chromium shapes contextually (Arabic joining forms, Indic
+    conjuncts, …). ``FPDFFont_GetGlyphPath`` looks a glyph up by its *unicode
+    codepoint*, so these would outline as isolated/default forms — silently
+    wrong. Such runs get the raster fallback instead."""
+    return (
+        0x0590 <= u <= 0x08FF  # Hebrew, Arabic, Syriac, Thaana, NKo, Arabic Extended
+        or 0x0900 <= u <= 0x0DFF  # Indic scripts (Devanagari … Sinhala)
+        or 0x0E00 <= u <= 0x0EFF  # Thai, Lao
+        or 0x0F00 <= u <= 0x0FFF  # Tibetan
+        or 0x1000 <= u <= 0x109F  # Myanmar
+        or 0x1780 <= u <= 0x17FF  # Khmer
+        or 0xFB50 <= u <= 0xFDFF  # Arabic presentation forms A
+        or 0xFE70 <= u <= 0xFEFF  # Arabic presentation forms B
+    )
+
+
+def _raster_text_footprint(char_indices, ctx: "_Ctx") -> str:
+    """Fidelity fallback: embed the text run's rendered footprint as pixels.
+
+    Used when glyph outlining can't be faithful (shaped script, or a glyph the
+    by-unicode lookup can't find). The rendered page already shows the text
+    exactly as Chromium shaped it, so cropping the union of the run's char
+    boxes — like ``_emit_image`` does for photos — keeps the SVG honest at the
+    cost of editability for that one run. Empty string when no usable box.
+    """
     import pypdfium2.raw as C
+
+    xs: list[float] = []
+    ys: list[float] = []
+    left = ctypes.c_double()
+    right = ctypes.c_double()
+    bottom = ctypes.c_double()
+    top = ctypes.c_double()
+    for ci in char_indices:
+        if not C.FPDFText_GetCharBox(
+            ctx.textpage,
+            ci,
+            ctypes.byref(left),
+            ctypes.byref(right),
+            ctypes.byref(bottom),
+            ctypes.byref(top),
+        ):
+            continue
+        for px, py in (
+            (left.value, bottom.value),
+            (right.value, top.value),
+        ):
+            sx, sy = ctx.to_svg(px, py)
+            xs.append(sx)
+            ys.append(sy)
+    if not xs:
+        return ""
+    W, H = ctx.pil.size
+    cx0, cy0 = max(0, int(min(xs)) - 1), max(0, int(min(ys)) - 1)
+    cx1, cy1 = min(W, int(round(max(xs))) + 1), min(H, int(round(max(ys))) + 1)
+    if cx1 - cx0 < 1 or cy1 - cy0 < 1:
+        return ""
+    try:
+        crop = ctx.pil.crop((cx0, cy0, cx1, cy1))
+        buf = BytesIO()
+        crop.save(buf, format="PNG", optimize=True)
+    except Exception as ex:  # pragma: no cover - defensive
+        log.warning("svg export: could not crop text footprint (%s)", ex)
+        return ""
+    href = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    return (
+        f'<image class="mh-text-raster" x="{cx0}" y="{cy0}" '
+        f'width="{cx1 - cx0}" height="{cy1 - cy0}" '
+        f'preserveAspectRatio="none" href="{href}"/>'
+    )
+
+
+def _emit_text_object(obj_raw, char_indices, ctx: "_Ctx") -> str:
+    """A text object → one ``<path>`` of outlined glyphs (no font dependency).
+
+    When the run can't be outlined faithfully — a shaped script (Arabic, Indic,
+    Thai, …) whose contextual forms a by-unicode lookup would flatten, or a
+    printable glyph the font lookup fails on — the whole run falls back to a
+    raster embed of its rendered footprint (never a silent glyph drop), with a
+    warning logged. Strict no-raster exports keep the degraded outline but log
+    the fidelity warning.
+    """
+    import pypdfium2.raw as C
+
+    textpage = ctx.textpage
+    to_svg = ctx.to_svg
 
     # Skip the invisible OCR text layer if one is ever present.
     if C.FPDFTextObj_GetTextRenderMode(obj_raw) == C.FPDF_TEXTRENDERMODE_INVISIBLE:
@@ -598,15 +683,24 @@ def _emit_text_object(obj_raw, char_indices, textpage, to_svg) -> str:
         return ""
 
     d_parts: list[str] = []
+    shaped = 0
+    failed = 0
     for ci in char_indices:
         u = C.FPDFText_GetUnicode(textpage, ci)
         if u in (0, 0xFFFE, 0xFFFF) or u < 0x20:
             continue  # control / non-printable: nothing to outline
+        if _needs_shaping(u):
+            shaped += 1
+        is_space = chr(u).isspace()
         gp = C.FPDFFont_GetGlyphPath(font, u, 1.0)
         if not gp:
+            if not is_space:
+                failed += 1  # a visible glyph the lookup couldn't find
             continue  # space glyph etc. — advances only, no outline
         gn = C.FPDFGlyphPath_CountGlyphSegments(gp)
         if gn <= 0:
+            if not is_space:
+                failed += 1
             continue
         segs = _read_segments(gn, lambda i: C.FPDFGlyphPath_GetGlyphPathSegment(gp, i))
 
@@ -622,6 +716,23 @@ def _emit_text_object(obj_raw, char_indices, textpage, to_svg) -> str:
             return to_svg(m.a * tx + m.c * ty + m.e, m.b * tx + m.d * ty + m.f)
 
         d_parts.append(_segments_to_d(segs, point))
+
+    if shaped or failed:
+        # Outlining would be unfaithful (shaped forms) or lossy (dropped
+        # glyphs). Raster-embed the run's rendered footprint instead.
+        log.warning(
+            "svg export: text run not faithfully outlineable "
+            "(%d shaped-script chars, %d failed glyph lookups) — %s",
+            shaped,
+            failed,
+            "raster-embedding its footprint"
+            if ctx.embed_images
+            else "keeping degraded outline (strict no-raster export)",
+        )
+        if ctx.embed_images:
+            el = _raster_text_footprint(char_indices, ctx)
+            if el:
+                return el
 
     d = "".join(p for p in d_parts if p)
     if not d:
@@ -773,7 +884,7 @@ def _walk(count: int, get_obj: Callable[[int], object], ctx: _Ctx, defs: list[st
     for idx, (otype, raw, eff) in enumerate(flat):
         if otype == C.FPDF_PAGEOBJ_TEXT:
             key = ctypes.cast(raw, ctypes.c_void_p).value
-            el = _emit_text_object(raw, ctx.obj_chars.get(key, []), ctx.textpage, ctx.to_svg)
+            el = _emit_text_object(raw, ctx.obj_chars.get(key, []), ctx)
             if el:
                 ctx.content_drawn = True
         elif otype == C.FPDF_PAGEOBJ_PATH:
@@ -967,6 +1078,52 @@ def svg_sidecar_path(image_path: str | Path) -> Path:
     return Path(image_path).with_suffix(".svg")
 
 
+# The sidecar's freshness marker: an XML comment stamped after the declaration
+# carrying a content hash of everything that shapes the output. When the
+# on-disk SVG already carries the same key, the (expensive) cold-Chromium
+# print-to-PDF + PDFium pass is skipped — a PNG cache hit stays cheap.
+_SIDECAR_KEY_MARK = "mh:svg-key="
+
+
+def _sidecar_key(
+    html: str,
+    size: tuple[int, int],
+    *,
+    embed_images: bool,
+    clip: bool,
+    background: Optional[str],
+    title: Optional[str],
+) -> str:
+    """Content key for a sidecar: the exact final HTML + every output-shaping input.
+
+    Folds in the same renderer-generation salt as the PNG cache key: the SVG
+    is shaped by the same font files and Chromium build (print-to-PDF + PDFium
+    glyph outlining), so a font refresh or Playwright bump must re-export the
+    sidecar too, not just the PNG.
+    """
+    from .render_cache import _renderer_generation
+
+    h = hashlib.sha256()
+    h.update(_renderer_generation().encode("utf-8"))
+    h.update(
+        repr(
+            (int(size[0]), int(size[1]), bool(embed_images), bool(clip), background, title)
+        ).encode("utf-8")
+    )
+    h.update(html.encode("utf-8"))
+    return h.hexdigest()
+
+
+def _sidecar_is_fresh(path: Path, key: str) -> bool:
+    """True when ``path`` exists and its head carries this exact content key."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            head = f.read(512)
+    except OSError:
+        return False
+    return f"{_SIDECAR_KEY_MARK}{key}" in head
+
+
 def export_svg_alongside(
     image_path: str | Path,
     html: str,
@@ -978,10 +1135,21 @@ def export_svg_alongside(
     title: Optional[str] = None,
     allow_net: bool = False,
 ) -> Path:
-    """Write ``<stem>.svg`` next to a rendered PNG (the "alongside each PNG" path)."""
-    return render_html_to_svg(
+    """Write ``<stem>.svg`` next to a rendered PNG (the "alongside each PNG" path).
+
+    Keyed on the exact final HTML + size (+ export options): when the existing
+    ``<stem>.svg`` already carries the same key it is fresh and returned as-is,
+    skipping the Chromium + PDFium pass entirely (the common case on a PNG
+    cache hit). Any input change produces a new key and a full re-export.
+    """
+    out = svg_sidecar_path(image_path)
+    key = _sidecar_key(
+        html, size, embed_images=embed_images, clip=clip, background=background, title=title
+    )
+    if _sidecar_is_fresh(out, key):
+        return out
+    svg = html_to_svg(
         html,
-        svg_sidecar_path(image_path),
         size,
         embed_images=embed_images,
         clip=clip,
@@ -989,6 +1157,12 @@ def export_svg_alongside(
         title=title,
         allow_net=allow_net,
     )
+    # Stamp the key just after the XML declaration (still a valid SVG document).
+    decl, sep, rest = svg.partition("\n")
+    svg = f"{decl}{sep}<!-- {_SIDECAR_KEY_MARK}{key} -->{rest}"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(svg, encoding="utf-8")
+    return out
 
 
 __all__ = [

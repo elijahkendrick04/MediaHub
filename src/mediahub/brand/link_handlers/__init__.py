@@ -43,33 +43,63 @@ log = logging.getLogger(__name__)
 # we don't duplicate the UA / timeout / size-cap config.
 # ---------------------------------------------------------------------------
 
+_FETCH_MAX_HOPS = 4
+
 
 def _fetch_with_strategy(url: str, strat: dict) -> tuple[Optional[str], int, dict]:
     """Issue one fetch with the given strategy.
 
     Returns ``(body_text_or_None, status_code, response_headers)``.
-    Status 0 == connection failure. Response headers are best-effort.
+    Status 0 == connection failure or SSRF refusal. Response headers are
+    best-effort.
+
+    SSRF-safe: the URL is tenant-controlled (social_links /
+    brand_source_url), so the host is validated via
+    ``web_research.safe_fetch.is_url_safe`` before the first request AND
+    on every redirect hop — matching the sibling fetchers in
+    ``dna_capture`` and ``logos.mirror_external_logo`` — so a public URL
+    can never 302 the crawl onto a private/loopback/metadata address.
     """
     try:
         import requests
     except Exception:
         return None, 0, {}
-    headers = strat.get("headers") if isinstance(strat.get("headers"), dict) else {}
     try:
-        r = requests.get(
-            url,
-            headers=headers or {},
-            timeout=15,
-            allow_redirects=True,
-        )
-    except Exception as e:
-        log.debug("strategy fetch failed for %s: %s", url, e)
+        from mediahub.web_research.safe_fetch import is_url_safe
+    except Exception:  # pragma: no cover - safe_fetch is a core module
         return None, 0, {}
-    body = r.text or ""
-    if len(body) > 2_000_000:
-        body = body[:2_000_000]
-    resp_headers = {k: v for k, v in r.headers.items()}
-    return body, r.status_code, resp_headers
+    from urllib.parse import urljoin
+
+    headers = strat.get("headers") if isinstance(strat.get("headers"), dict) else {}
+    current = url
+    for _ in range(_FETCH_MAX_HOPS):
+        if not is_url_safe(current):
+            log.debug("strategy fetch blocked (unsafe host): %s", current)
+            return None, 0, {}
+        try:
+            r = requests.get(
+                current,
+                headers=headers or {},
+                timeout=15,
+                allow_redirects=False,
+            )
+        except Exception as e:
+            log.debug("strategy fetch failed for %s: %s", current, e)
+            return None, 0, {}
+        if r.status_code in (301, 302, 303, 307, 308):
+            nxt = r.headers.get("Location", "")
+            if nxt:
+                current = urljoin(current, nxt)
+                continue
+            # Redirect with no target — fall through and report it as the
+            # final response so block_detector can classify honestly.
+        body = r.text or ""
+        if len(body) > 2_000_000:
+            body = body[:2_000_000]
+        resp_headers = {k: v for k, v in r.headers.items()}
+        return body, r.status_code, resp_headers
+    log.debug("strategy fetch exceeded %d redirect hops for %s", _FETCH_MAX_HOPS, url)
+    return None, 0, {}
 
 
 # ---------------------------------------------------------------------------

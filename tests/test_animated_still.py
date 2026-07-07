@@ -390,3 +390,72 @@ def _plan(loop):
         frames=6,
         fps=12,
     )
+
+
+# ---------------------------------------------------------------------------
+# Product reachability — render_brief exports the loop from a real trigger
+# ---------------------------------------------------------------------------
+class TestRenderBriefReachability:
+    """G1.29 must be reachable from the product render path: the operator env
+    flag (MEDIAHUB_ANIMATED_STILL=1) or the brief's own opt-in drives
+    ``export_animated_still`` beside the rendered still — no test-only calls."""
+
+    @staticmethod
+    def _stub_brief(**over):
+        from mediahub.creative_brief.generator import CreativeBrief
+
+        base = dict(
+            id="cb_g129",
+            content_item_id="ci-g129",
+            profile_id="g129-club",
+            achievement_summary="",
+            objective="celebrate",
+            primary_hook="NEW PB",
+            confidence_label="NEW PB",
+            tone="hype",
+            layout_template="individual_hero",
+            inspiration_pattern_id="",
+            image_treatment="cutout",
+            text_hierarchy=[],
+            brand_instructions="",
+            sponsor_instructions=None,
+            sourced_asset_ids=[],
+            safety_notes=[],
+            why_this_design="",
+            text_layers={"result_value": "1:02.34"},
+            palette={"primary": "#0E1726", "secondary": "#1E6FB8", "accent": "#FFB703"},
+            format_priority=[],
+        )
+        base.update(over)
+        return CreativeBrief(**base)
+
+    def _render(self, monkeypatch, tmp_path, brief):
+        import mediahub.graphic_renderer.render as R
+
+        def _fake_png(html, output_path, size):  # noqa: ARG001 - signature match
+            Image.new("RGB", (64, 80), (24, 32, 48)).save(output_path, "PNG")
+            return Path(output_path).stat().st_size
+
+        monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+        return R.render_brief(brief, output_dir=tmp_path)
+
+    def test_env_flag_exports_apng_beside_the_still(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MEDIAHUB_ANIMATED_STILL", "1")
+        self._render(monkeypatch, tmp_path, self._stub_brief())
+        apng = tmp_path / "feed_portrait.apng"
+        assert apng.exists(), "env-flag trigger must export the animated still"
+        manifest = json.loads((tmp_path / "feed_portrait.apng.json").read_text())
+        assert manifest["loop"] in A.LOOPS
+
+    def test_brief_opt_in_exports_without_env_flag(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("MEDIAHUB_ANIMATED_STILL", raising=False)
+        brief = self._stub_brief()
+        brief.animate_still = True  # duck-typed opt-in, same gate as the hook
+        self._render(monkeypatch, tmp_path, brief)
+        assert (tmp_path / "feed_portrait.apng").exists()
+
+    def test_default_render_exports_nothing(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("MEDIAHUB_ANIMATED_STILL", raising=False)
+        self._render(monkeypatch, tmp_path, self._stub_brief())
+        assert not list(tmp_path.glob("*.apng"))
+        assert not list(tmp_path.glob("*.apng.json"))

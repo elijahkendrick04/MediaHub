@@ -44,7 +44,6 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     for d in ("runs_v4", "club_profiles"):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
 

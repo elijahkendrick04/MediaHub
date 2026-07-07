@@ -26,8 +26,8 @@ from typing import Any, Callable, Optional
 
 from markupsafe import escape as _h
 
-# Reuse the document block renderers + image-source resolver for shared kinds.
-from mediahub.documents.render import _img_src, _render_block
+# Reuse the document block renderers for shared kinds.
+from mediahub.documents.render import _render_block
 
 from .models import Block, SitePage, SiteSection, SiteSpec, slugify
 from .theme import resolve_role_vars, site_style
@@ -56,17 +56,23 @@ def _ctx(
         "kind": "document",  # so reused document renderers treat embeds as paper
         "nonce": nonce,
         "page_url": page_url or (lambda slug: "./" if not slug else f"./{slug}"),
-        "asset_url": asset_url or _img_src,
+        # Site srcs are served URLs the *visitor's* browser fetches (never a
+        # server-side fetch), so the default resolver is a plain pass-through.
+        "asset_url": asset_url or _default_asset_url,
         "render_form": render_form,
         "render_widget": render_widget,
     }
+
+
+def _default_asset_url(src: str) -> str:
+    return str(src or "").strip()
 
 
 def _asset(ctx: dict, src: str) -> str:
     try:
         return ctx["asset_url"](src) or ""
     except Exception:
-        return _img_src(src)
+        return _default_asset_url(src)
 
 
 # ---------------------------------------------------------------------------

@@ -124,6 +124,17 @@ class TestSignInPage:
         # The pinned-state CTA wording.
         assert "Switch organisation" in body
 
+    def test_header_dropdowns_are_mutually_exclusive(self, app_two_profiles):
+        """The notifications and org-menu dropdowns each stopPropagation on their
+        toggle, so opening one must actively close the other via the shared
+        mh:dropdown-open event — otherwise both overlap on the same right edge."""
+        c, _, _ = app_two_profiles
+        c.post("/sign-in", data={"profile_id": "wycombe"})
+        body = c.get("/").get_data(as_text=True)
+        # Both panels announce their open and both listen to close the sibling.
+        assert body.count("mh:dropdown-open") >= 4
+        assert "detail:'notif'" in body and "detail:'orgmenu'" in body
+
     def test_delete_removes_profile_json(self, app_two_profiles):
         c, _, tmp_path = app_two_profiles
         json_path = tmp_path / "club_profiles" / "other.json"

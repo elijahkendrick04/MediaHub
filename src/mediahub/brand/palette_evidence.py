@@ -14,10 +14,11 @@ the deterministic half of that flow, all local and free of paid APIs:
   uses (``theming/seed_extract.py``) — yielding ranked, deterministic
   brand-colour candidates with population shares.
 
-Division of labour (the standing doctrine, see ``brand/bootstrap_extract``):
-extracting candidates is mechanical colour science and lives here; deciding
-*which* candidate is primary vs accent is a judgement call that stays with
-``media_ai.llm`` — this module never assigns semantic roles.
+Division of labour (the standing doctrine): extracting candidates is
+mechanical colour science and lives here; deciding *which* candidate is
+primary vs accent is a judgement call that stays with ``media_ai.llm`` —
+this module never assigns semantic roles, and when no provider is
+configured nothing fabricates a guess.
 """
 
 from __future__ import annotations
@@ -91,8 +92,28 @@ def fetch_image_bytes(url: str) -> Optional[bytes]:
         if ctype and not (ctype.startswith("image/") or "svg" in ctype):
             log.debug("image fetch skipped non-image content-type %r for %s", ctype, current)
             return None
-        data = r.content or b""
-        if not data or len(data) > _IMAGE_MAX_BYTES:
+        # Enforce the size cap while streaming — never buffer an unbounded
+        # body just to measure it afterwards.
+        clen = r.headers.get("Content-Length", "")
+        if clen.isdigit() and int(clen) > _IMAGE_MAX_BYTES:
+            log.debug("image fetch skipped oversized body (%s bytes) for %s", clen, current)
+            return None
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            for chunk in r.iter_content(64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > _IMAGE_MAX_BYTES:
+                    log.debug("image fetch exceeded %d-byte cap for %s", _IMAGE_MAX_BYTES, current)
+                    return None
+                chunks.append(chunk)
+        except Exception as e:
+            log.debug("image fetch read failed for %s: %s", current, e)
+            return None
+        data = b"".join(chunks)
+        if not data:
             return None
         return data
     return None

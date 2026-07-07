@@ -100,3 +100,29 @@ def test_chromium_engine_does_not_tag():
                 expected="e", actual="a", evidence="boom")
     t._add(f, shoot=False)
     assert "[engine=" not in t.findings[0].evidence
+
+
+def _finding(**kw):
+    base = dict(category="http_5xx", severity="high", title="t", route="/x",
+                expected="e", actual="a", evidence="boom")
+    base.update(kw)
+    return Finding(**base)
+
+
+def test_engine_tag_changes_fingerprint_even_with_suspect():
+    """The tag must reach the fingerprint basis: a finding WITH a suspect (or
+    long evidence) previously collapsed with the chromium run's because the
+    tag sat at the evidence tail, outside suspect/evidence[:200]."""
+    for kw in (
+        {"suspect": "axe:color-contrast"},          # suspect wins the basis
+        {"evidence": "x" * 300},                    # >200 chars: tail was invisible
+        {},                                         # short evidence
+    ):
+        chromium, webkit = _tester("chromium"), _tester("webkit")
+        chromium._add(_finding(**kw), shoot=False)
+        webkit._add(_finding(**kw), shoot=False)
+        fp_c = chromium.findings[0].fingerprint()
+        fp_w = webkit.findings[0].fingerprint()
+        assert fp_c != fp_w, f"webkit finding collapsed with chromium for {kw}"
+        # chromium fingerprints are unchanged by the tagging logic
+        assert fp_c == _finding(**kw).fingerprint()

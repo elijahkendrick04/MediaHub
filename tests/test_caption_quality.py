@@ -111,6 +111,46 @@ class TestNgramSimilarity:
 
 
 # ---------------------------------------------------------------------------
+# 2b. filter_caption_variants — shared post-filter for produced variant lists
+# ---------------------------------------------------------------------------
+
+class TestFilterCaptionVariants:
+    def test_collapses_exact_and_near_duplicates(self):
+        from mediahub.web.ai_caption import filter_caption_variants
+        a = "Alex smashed his 100m PB with a 58.12 time tonight."
+        a_near = "Alex smashed his 100m PB with a 58.12 time this evening."
+        b = "What a race — personal best for Alex in the 100m!"
+        result = filter_caption_variants([a, a, a_near, b], dedupe_threshold=0.5)
+        assert result == [a, b]
+
+    def test_drops_ai_tells(self):
+        from mediahub.web.ai_caption import filter_caption_variants
+        bad = "Let us delve into Alex's brilliant swim tonight."
+        good = "Alex goes 58.12 for a club PB in the 100m!"
+        assert filter_caption_variants([bad, good]) == [good]
+
+    def test_filters_against_recent_captions(self):
+        from mediahub.web.ai_caption import filter_caption_variants
+        recent = "Alex smashed his 100m PB with a 58.12 time tonight."
+        rerun = "Alex smashed his 100m PB with a 58.12 time this evening."
+        fresh = "What a race — personal best for Alex in the 100m!"
+        result = filter_caption_variants(
+            [rerun, fresh], recent_captions=[recent], dedupe_threshold=0.5
+        )
+        assert result == [fresh]
+
+    def test_fail_open_keeps_first_when_everything_filtered(self):
+        from mediahub.web.ai_caption import filter_caption_variants
+        bad = "Let us delve into Alex's brilliant swim tonight."
+        assert filter_caption_variants([bad]) == [bad]
+
+    def test_empty_input_returns_empty(self):
+        from mediahub.web.ai_caption import filter_caption_variants
+        assert filter_caption_variants([]) == []
+        assert filter_caption_variants(["", "   "]) == []
+
+
+# ---------------------------------------------------------------------------
 # 3. generate_caption_candidates — filtering behaviour
 # ---------------------------------------------------------------------------
 

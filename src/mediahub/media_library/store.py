@@ -259,8 +259,14 @@ class MediaLibraryStore:
         is a bounded disk→disk copy.
         """
         target = self._new_blob_path(original_filename, profile_id)
-        with open(target, "wb") as dst:
-            shutil.copyfileobj(fileobj, dst)
+        try:
+            with open(target, "wb") as dst:
+                shutil.copyfileobj(fileobj, dst)
+        except BaseException:
+            # A mid-copy failure (disk full, I/O error) must not leave an
+            # orphaned partial blob no DB row references.
+            target.unlink(missing_ok=True)
+            raise
         return target
 
     def _new_blob_path(self, original_filename: str, profile_id: Optional[str]) -> Path:

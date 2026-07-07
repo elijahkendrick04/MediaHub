@@ -116,6 +116,9 @@ class TestCascadeJSHandler:
         (the click handler is global; only [data-mh-cascade] elements
         actually trigger it)."""
         client, _, _ = app_client
+        # /healthz/usage is operator-only; sign in so its full template renders.
+        with client.session_transaction() as sess:
+            sess["dev_operator"] = True
         for route in ("/status", "/healthz/usage"):
             body = client.get(route).get_data(as_text=True)
             assert "data-mh-cascade" in body, f"{route}: cascade handler not embedded"

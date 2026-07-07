@@ -15,8 +15,8 @@ theming engine uses), and the one judgement step rides ``media_ai.llm`` —
 which serves local OpenAI-compatible endpoints (Ollama, llama.cpp, vLLM via
 ``MEDIAHUB_LLM_ENDPOINTS``) exactly like the hosted providers. The LLM's
 palette picks are validated against the gathered evidence universe — a hex
-the site never exhibited is dropped, never trusted (the anti-hallucination
-guard ``brand/bootstrap_extract`` established).
+the site never exhibited is dropped, never trusted (the standing
+anti-hallucination guard for brand-from-URL extraction).
 
 Public surface:
     capture_brand_dna(website_url: str, *, force: bool = False) -> dict
@@ -129,12 +129,60 @@ def _url_is_safe(url: str) -> bool:
         return False
 
 
+def _read_text_capped(r, cap: int) -> Optional[str]:
+    """Stream a response body up to ``cap`` bytes, then decode.
+
+    The cap is enforced WHILE downloading (``iter_content``), so a huge
+    or decompression-bomb body from a user-supplied URL never fully
+    buffers in worker memory — the old ``r.text``-then-truncate approach
+    materialised the whole response first. Charset: the header-declared
+    encoding wins; otherwise the capped bytes are sniffed locally
+    (``r.apparent_encoding`` is avoided on purpose — it reads
+    ``r.content`` and would consume the rest of the stream).
+    """
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in r.iter_content(64 * 1024):
+            if not chunk:
+                continue
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= cap:
+                break
+    except Exception as e:
+        log.debug("capped body read failed: %s", e)
+        return None
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
+    data = b"".join(chunks)[:cap]
+    if not data:
+        return ""
+    enc = r.encoding
+    if not enc:
+        try:  # requests' own charset detector, run on the capped bytes only
+            from charset_normalizer import from_bytes
+
+            best = from_bytes(data).best()
+            enc = best.encoding if best else None
+        except Exception:
+            enc = None
+    try:
+        return data.decode(enc or "utf-8", errors="replace")
+    except (LookupError, TypeError):
+        return data.decode("utf-8", errors="replace")
+
+
 def _fetch(url: str) -> Optional[str]:
     """Fetch a URL with a sane UA, size cap, and timeout. Returns text or None.
 
     SSRF-safe: the host must resolve to public IPs, and redirects are
     followed manually so every hop is re-validated — a public URL can never
-    302 the capture into a private/loopback address.
+    302 the capture into a private/loopback address. The body is streamed
+    against the byte cap, never fully buffered.
     """
     try:
         import requests  # already a project dep
@@ -152,11 +200,16 @@ def _fetch(url: str) -> Optional[str]:
                 headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*;q=0.8"},
                 timeout=_FETCH_TIMEOUT,
                 allow_redirects=False,
+                stream=True,
             )
         except Exception as e:
             log.debug("brand-dna fetch failed for %s: %s", current, e)
             return None
         if r.status_code in (301, 302, 303, 307, 308):
+            try:
+                r.close()
+            except Exception:
+                pass
             nxt = r.headers.get("Location", "")
             if not nxt:
                 return None
@@ -164,11 +217,12 @@ def _fetch(url: str) -> Optional[str]:
             continue
         if r.status_code != 200:
             log.debug("brand-dna non-200 (%s) for %s", r.status_code, current)
+            try:
+                r.close()
+            except Exception:
+                pass
             return None
-        text = r.text or ""
-        if len(text) > _MAX_HTML_BYTES:
-            text = text[:_MAX_HTML_BYTES]
-        return text
+        return _read_text_capped(r, _MAX_HTML_BYTES)
     return None
 
 
@@ -318,17 +372,18 @@ def _default_css_fetcher(css_url: str) -> Optional[str]:
             headers={"User-Agent": _USER_AGENT, "Accept": "text/css,*/*;q=0.1"},
             timeout=_CSS_FETCH_TIMEOUT,
             allow_redirects=False,
-            stream=False,
+            stream=True,
         )
     except Exception as e:
         log.debug("css fetch failed for %s: %s", css_url, e)
         return None
     if r.status_code != 200:
+        try:
+            r.close()
+        except Exception:
+            pass
         return None
-    text = r.text or ""
-    if len(text) > _CSS_FETCH_BYTES:
-        text = text[:_CSS_FETCH_BYTES]
-    return text
+    return _read_text_capped(r, _CSS_FETCH_BYTES)
 
 
 def fetch_linked_css(

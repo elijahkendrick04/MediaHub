@@ -204,6 +204,20 @@ def test_home_fresh_visitor_shows_demo_in_its_own_section(app):
     assert body.index('id="mh-see-it-work"') < body.index(el), "demo is in the See-it-work section"
 
 
+def test_demo_omnibox_uses_request_host_not_hardcoded_render(app):
+    """The decorative Chrome omnibox shows the LIVE host, so a custom domain no
+    longer advertises the internal Render hostname. A local/empty host falls
+    back to the canonical Render host so dev screenshots stay clean."""
+    with app.test_client() as c:
+        # A custom domain shows through into the omnibox…
+        body = c.get("/", headers={"Host": "clubs.example.com"}).get_data(as_text=True)
+        assert '<span class="mh-demo-url">clubs.example.com</span>' in body
+        assert "mediahub-gzwc.onrender.com" not in body
+        # …but the default local test host falls back to the canonical host.
+        body_local = c.get("/").get_data(as_text=True)
+        assert '<span class="mh-demo-url">mediahub-gzwc.onrender.com</span>' in body_local
+
+
 def test_home_still_renders_the_rest_of_the_landing(app):
     """Regression: inserting the demo didn't break the existing sections."""
     with app.test_client() as c:

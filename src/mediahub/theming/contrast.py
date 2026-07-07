@@ -78,9 +78,10 @@ _SA98G = {
     "scaleBoW": 1.14,
     "scaleWoB": 1.14,
     # Low-contrast clip (output rounded to 0 when below this magnitude).
+    # The reference's deltaYmin abs(Ybg-Ytxt) early-zero check is omitted:
+    # the loClip clamp below subsumes it.
     "loBoWoffset": 0.027,
     "loWoBoffset": 0.027,
-    "deltaYmin": 0.0005,
     "loClip": 0.1,
 }
 

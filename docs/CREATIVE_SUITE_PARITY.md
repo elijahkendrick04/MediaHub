@@ -986,7 +986,7 @@ evidence-grounded pipeline).
 | C9 | Brand Assist (real-time on-brand suggestions + auto-fix for colours/fonts/logos/photos/icons) | 🆕 1.12 `brand/check.py` + auto-fix spec patches |
 | C9 | Brand folders / linked folders | ↗ 1.18 folders (kit-scoped views) |
 | C9 | Color themes / palettes | ✅ shipped — theming engine (DTCG palette, MD3 roles) |
-| C9 | Approval workflows (group approvers, approval rules) | 🔵 per-card approval + publish gate shipped → 🆕 group-approver rules ↗ 1.18 |
+| C9 | Approval workflows (group approvers, approval rules) | 🔵 per-card approval shipped (human approval + export-only; no publish path) → 🆕 group-approver rules ↗ 1.18 |
 | C9 | Team-level brand sharing (kits/templates to specific teams) | 🆕 1.12 kit sharing across workspaces (org → section) |
 | C9 | Personal Brand Kits | 🆕 1.12 personal kits (e.g. a coach's own side projects) — low priority, same schema |
 | C9 | Role-based permissions for AI/brand features | 🆕 1.12 role flags (consumed by 1.23 governance) |
@@ -1169,8 +1169,9 @@ the editor.
 newsletter formats), deterministic auto-assembly from the period's approved
 content + planner fixtures + sponsor, the fact-grounded AI editorial pass, and
 the web surface (generate / edit / preview, HTML + plaintext export, copy, and a
-token-gated hosted view) are all live. Direct send stays out of scope (a
-provider adapter behind the publish gate is a later, flagged build).
+token-gated hosted view) are all live. Direct send stays out of scope —
+MediaHub has no machine path that sends or publishes content; any future
+provider adapter is a later, flagged build requiring explicit sign-off.
 
 **What Canva/Adobe have.** Canva Email Design — branded email campaigns,
 exportable as HTML; newsletters as a design type.
@@ -1184,8 +1185,8 @@ period's approved content (results recaps, spotlights, upcoming fixtures
 from the planner, sponsor slot) with an AI editorial pass in the club's
 voice. Export = paste-ready HTML for the club's existing list tool
 (Mailchimp-class) + a hosted web version (1.16 page); direct sending stays
-out of scope until P4-class adapters exist for an email provider (then it
-inherits the publish gate like any channel).
+out of scope until P4-class adapters exist for an email provider (and any
+such adapter would still require human approval before anything is sent).
 
 **Build sketch.** (1) `email_design/` package: email-safe block renderer
 (subset of document blocks compiled to table HTML; snapshot-tested across
@@ -1388,7 +1389,7 @@ context the assistant already reads — surfaced to humans too.
 | C16 | Group/role-based permissions (Editors, Viewers, Commenters; enterprise groups) | 🆕 1.18 roles on the membership ledger |
 | C16 | Team Context (surfaces brand-relevant content) | 🆕 1.18 org context panel (same context the AI reads) |
 | C16 | Ask @Canva (collaborative AI in comments) | 🆕 1.18 tag the P6.2 assistant in threads |
-| C9 | Approval workflows (group approvers, approval rules) | 🔵 per-card approval + publish gate shipped → 🆕 1.18 group-approver rules |
+| C9 | Approval workflows (group approvers, approval rules) | 🔵 per-card approval shipped (human approval + export-only; no publish path) → 🆕 1.18 group-approver rules |
 | C9 | Brand folders / linked folders | 🆕 1.18 kit-scoped collections |
 | C15 | Share links (view/edit/comment); template links | 🆕 1.18 scoped share tokens; "template link" = share a saved `FormatSpec` |
 | A15 | Real-time co-editing; invite collaborators | 🆕 1.18 (invites ✅ shipped in PC.3 membership invites) |

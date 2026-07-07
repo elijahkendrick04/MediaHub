@@ -199,6 +199,49 @@ def test_light_sweep_glints_the_brand_accent_not_an_invented_colour():
 
 
 # --------------------------------------------------------------------------- #
+# FFmpeg engine parity — _transition_kind_for mirrors transitionFor exactly
+# --------------------------------------------------------------------------- #
+
+
+def test_ffmpeg_picker_matches_the_tsx_alternation_per_mood_and_seed():
+    """The free engine's `_transition_kind_for` must cut the peak beat the way
+    `transitionFor` does — including the seed alternation between the two cuts
+    that share a mood's character (odd seeds take the alternate)."""
+    from mediahub.visual.reel_ffmpeg import _transition_kind_for
+
+    expected = {
+        # (mood, even-seed kind, odd-seed kind) — straight from the tsx picker.
+        ("calm focus", "blur", "blur"),
+        ("explosive start", "whip", "glitch"),
+        ("electric", "whip", "glitch"),
+        ("celebratory gold medal", "iris", "light-sweep"),
+        ("triumph", "iris", "light-sweep"),
+        ("determined", "zoom", "slide-stack"),
+        ("", "zoom", "slide-stack"),
+    }
+    for mood, even_kind, odd_kind in expected:
+        assert _transition_kind_for(0, peak=True, mood=mood) == even_kind, mood
+        assert _transition_kind_for(2, peak=True, mood=mood) == even_kind, mood
+        assert _transition_kind_for(1, peak=True, mood=mood) == odd_kind, mood
+        assert _transition_kind_for(7, peak=True, mood=mood) == odd_kind, mood
+    # Connective beats keep the quiet three, seed-rotated as before.
+    assert [_transition_kind_for(s) for s in (0, 1, 2)] == ["crossfade", "push", "wipe"]
+
+
+def test_every_tsx_transition_kind_has_an_xfade_mapping():
+    """Vocabulary parity: every kind the tsx duration table declares must map
+    to a concrete FFmpeg xfade (no silent 'fade' fallback for a real kind)."""
+    from mediahub.visual.reel_ffmpeg import _XFADE_FOR_KIND
+
+    src = _reel_src()
+    table = src.split("const TRANSITION_SECONDS", 1)[1].split("};", 1)[0]
+    kinds = set(re.findall(r'^\s*"?([a-z-]+)"?:\s*[\d.]+,', table, re.M))
+    assert kinds, "failed to parse the tsx TRANSITION_SECONDS table"
+    missing = kinds - set(_XFADE_FOR_KIND)
+    assert not missing, f"tsx kinds without an FFmpeg xfade mapping: {sorted(missing)}"
+
+
+# --------------------------------------------------------------------------- #
 # Real compile gate — the TSX actually type-checks (when Node + deps present)
 # --------------------------------------------------------------------------- #
 

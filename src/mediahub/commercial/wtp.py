@@ -93,7 +93,7 @@ class Quote:
             quote_id=str(d.get("quote_id", "") or "").strip(),
             club_name=str(d.get("club_name", "") or "").strip(),
             contact_email=str(d.get("contact_email", "") or "").strip().lower(),
-            amount_pence=int(d.get("amount_pence") or 0),
+            amount_pence=_int_or_none(d.get("amount_pence")) or 0,
             currency=str(d.get("currency", "gbp") or "gbp").lower(),
             billing_interval=str(d.get("billing_interval", "year") or "year").lower(),
             status=_coerce_status(d.get("status")),

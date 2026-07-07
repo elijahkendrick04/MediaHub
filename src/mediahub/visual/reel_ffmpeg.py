@@ -122,6 +122,10 @@ _XFADE_FOR_KIND: dict[str, str] = {
     "zoom": "zoomin",
     "whip": "slideleft",
     "iris": "circleopen",
+    # R1.14 seed-alternated peak cuts (odd seeds) — closest frame-pure xfades.
+    "glitch": "pixelize",
+    "light-sweep": "radial",
+    "slide-stack": "smoothup",
 }
 
 
@@ -522,6 +526,54 @@ def _ken_burns_variant_for(seed: int, *, motion_intent: str = "") -> str:
     return KEN_BURNS_VARIANTS[int(seed or 0) % len(KEN_BURNS_VARIANTS)]
 
 
+# The vocabulary preset behind each shipped Ken Burns variant — the reverse of
+# ``motion.vocabulary.KEN_BURNS_ALIASES``. Engine-only programmes (the corner
+# zooms, the 2.5D parallax composite, the honest ``hold``) have no tokenised
+# preset and keep the direct recipe.
+_PRESET_FOR_KB_VARIANT: dict[str, str] = {
+    "zoom_in": "ken_burns_in",
+    "zoom_out": "ken_burns_out",
+    "pan_left": "pan_left",
+    "pan_right": "pan_right",
+    "pan_up": "pan_up",
+    "pan_down": "pan_down",
+}
+
+
+def _beat_motion_filter(
+    duration_sec: float,
+    *,
+    variant: str,
+    tag: str,
+    width: int = WIDTH,
+    height: int = HEIGHT,
+) -> str:
+    """One beat's motion fragment, compiled from the brand motion vocabulary.
+
+    When ``variant`` is a tokenised photo preset (``mediahub.motion`` — the
+    same tokens the Remotion and CSS surfaces compile), the fragment comes via
+    ``motion.compile_ffmpeg`` so the ffmpeg engine genuinely compiles the
+    shared vocabulary (the ``/motion/vocabulary`` gallery's promise). The
+    compiler delegates photo presets straight back to ``_ken_burns_filter``,
+    so the fragment — and therefore every cache key — is byte-identical to the
+    direct call; the tokens are simply the authoritative source. Engine-only
+    variants (corner zooms / parallax / hold) keep the direct recipe.
+    """
+    preset_name = _PRESET_FOR_KB_VARIANT.get(variant)
+    if preset_name:
+        from mediahub.motion import vocabulary
+        from mediahub.motion.compile_ffmpeg import compile_ffmpeg
+
+        return compile_ffmpeg(
+            vocabulary.get(preset_name),
+            duration_sec=duration_sec,
+            width=width,
+            height=height,
+            tag=tag,
+        )
+    return _ken_burns_filter(duration_sec, variant=variant, tag=tag, width=width, height=height)
+
+
 def _transition_kind_for(seed: int, *, peak: bool = False, mood: str = "") -> str:
     """Port of ``MeetReel.tsx::transitionFor`` — the reel's deterministic cut
     picker, kept in lock-step so the FFmpeg engine cuts the way the Remotion
@@ -530,13 +582,16 @@ def _transition_kind_for(seed: int, *, peak: bool = False, mood: str = "") -> st
     """
     if peak:
         m = (mood or "").lower()
+        # Mirror the tsx's seed alternation between the two cuts that share a
+        # mood's character, so both engines pick the same peak cut per seed.
+        alt = ((int(seed or 0) % 2) + 2) % 2 == 1
         if any(k in m for k in ("calm", "stoic", "precise", "warm", "minimal")):
             return "blur"
         if any(k in m for k in ("explosive", "electric", "fierce")):
-            return "whip"
+            return "glitch" if alt else "whip"
         if any(k in m for k in ("celebratory", "triumph", "medal")):
-            return "iris"
-        return "zoom"
+            return "light-sweep" if alt else "iris"
+        return "slide-stack" if alt else "zoom"
     mode = (int(seed or 0) % 3 + 3) % 3
     if mode == 1:
         return "push"
@@ -604,7 +659,7 @@ def story_ffmpeg_args(
     """
     fade_out = max(0.0, duration_sec - 0.6)
     vf = (
-        f"{_ken_burns_filter(duration_sec, variant=variant, tag='s', width=width, height=height)},"
+        f"{_beat_motion_filter(duration_sec, variant=variant, tag='s', width=width, height=height)},"
         f"fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=0.6,"
         f"format=yuv420p,setsar=1"
     )
@@ -738,7 +793,9 @@ def reel_ffmpeg_args(
     total = sum(segment_durations) - CROSSFADE_SEC * (len(stills) - 1)
     chains: list[str] = []
     for i, dur in enumerate(segment_durations):
-        kb = _ken_burns_filter(dur, variant=kb_variants[i], tag=str(i), width=width, height=height)
+        kb = _beat_motion_filter(
+            dur, variant=kb_variants[i], tag=str(i), width=width, height=height
+        )
         chains.append(f"[{i}:v]{kb},setsar=1[v{i}]")
     last = "v0"
     elapsed = 0.0
@@ -794,7 +851,15 @@ def media_duration_seconds(path: Path) -> Optional[float]:
     exe = ffmpeg_exe()
     if not exe:
         return None
-    proc = subprocess.run([exe, "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    try:
+        proc = subprocess.run(
+            [exe, "-hide_banner", "-i", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return None  # wedged probe on a malformed container — duration unknown
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", proc.stderr or "")
     if not m:
         return None
@@ -816,17 +881,26 @@ def _finalise(
     duration_sec: float = 6.0,
     audio_plan: Optional[dict] = None,
     n_cards: int = 0,
+    rhythm: Optional[dict] = None,
+    audio_notes: Optional[dict] = None,
 ) -> Path:
     if not tmp_mp4.exists() or tmp_mp4.stat().st_size < 1024:
         raise RuntimeError("FFmpeg reported success but the MP4 is missing or empty")
     cached.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(tmp_mp4), str(cached))
     # Same finishing pass as the Remotion engine: planned audio (honest
-    # silent fallback) + the poster-frame sidecar, then publish.
+    # silent fallback, beat grid moved by any custom rhythm) + the
+    # poster-frame sidecar, then publish.
     from mediahub.visual.motion import _finish_cached_video, _publish
 
     _finish_cached_video(
-        cached, kind=kind, plan=audio_plan, duration_sec=duration_sec, n_cards=n_cards
+        cached,
+        kind=kind,
+        plan=audio_plan,
+        duration_sec=duration_sec,
+        n_cards=n_cards,
+        rhythm=rhythm,
+        audio_notes=audio_notes,
     )
     return _publish(cached, out_path)
 
@@ -936,6 +1010,7 @@ def render_meet_reel_from_props(
     audio_plan: Optional[dict] = None,
     format_name: str = "story",
     rhythm: Optional[dict] = None,
+    audio_notes: Optional[dict] = None,
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
@@ -991,6 +1066,8 @@ def render_meet_reel_from_props(
             plan=audio_plan,
             duration_sec=duration_sec,
             n_cards=len(cards_props),
+            rhythm=rhythm,
+            audio_notes=audio_notes,
         )
         return _publish(cached, out_path)
 
@@ -1068,6 +1145,8 @@ def render_meet_reel_from_props(
             duration_sec=duration_sec,
             audio_plan=audio_plan,
             n_cards=len(cards_props),
+            rhythm=rhythm,
+            audio_notes=audio_notes,
         )
 
 

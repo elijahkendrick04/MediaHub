@@ -40,6 +40,25 @@ def test_media_ai_generation_config_honours_env_override(monkeypatch):
     assert cfg["thinkingConfig"] == {"thinkingBudget": 1024}
 
 
+def test_media_ai_generation_config_clamps_pro_to_minimum(monkeypatch):
+    """Gemini 2.5 Pro cannot disable thinking — the API rejects
+    thinkingBudget below 128 with 400 INVALID_ARGUMENT — so a Pro
+    override must clamp to the minimum instead of breaking every call."""
+    from mediahub.media_ai import llm as media_ai_llm
+    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-pro")
+    monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
+    cfg = media_ai_llm._gemini_generation_config(600)
+    assert cfg["thinkingConfig"] == {"thinkingBudget": 128}
+
+
+def test_media_ai_generation_config_pro_keeps_larger_budget(monkeypatch):
+    from mediahub.media_ai import llm as media_ai_llm
+    monkeypatch.setattr(media_ai_llm, "_GEMINI_MODEL", "gemini-2.5-pro")
+    monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "1024")
+    cfg = media_ai_llm._gemini_generation_config(600)
+    assert cfg["thinkingConfig"] == {"thinkingBudget": 1024}
+
+
 def test_media_ai_generation_config_skips_thinking_on_older_models(monkeypatch):
     """``thinkingConfig`` is a 2.5+ field — older models reject the
     payload as an unknown field. Gate on the model name."""
@@ -113,6 +132,22 @@ def test_ai_core_generation_config_honours_env_override(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "256")
     cfg = ai_core_llm._gemini_generation_config(600)
     assert cfg["thinkingConfig"] == {"thinkingBudget": 256}
+
+
+def test_ai_core_generation_config_clamps_pro_to_minimum(monkeypatch):
+    from mediahub.ai_core import llm as ai_core_llm
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-pro")
+    monkeypatch.delenv("MEDIAHUB_GEMINI_THINKING_BUDGET", raising=False)
+    cfg = ai_core_llm._gemini_generation_config(600)
+    assert cfg["thinkingConfig"] == {"thinkingBudget": 128}
+
+
+def test_ai_core_generation_config_pro_keeps_larger_budget(monkeypatch):
+    from mediahub.ai_core import llm as ai_core_llm
+    monkeypatch.setenv("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-pro")
+    monkeypatch.setenv("MEDIAHUB_GEMINI_THINKING_BUDGET", "512")
+    cfg = ai_core_llm._gemini_generation_config(600)
+    assert cfg["thinkingConfig"] == {"thinkingBudget": 512}
 
 
 def test_ai_core_generation_config_skips_thinking_on_older_models(monkeypatch):

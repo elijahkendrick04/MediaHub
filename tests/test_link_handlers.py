@@ -271,3 +271,83 @@ def test_process_links_empty_input(iso_root):
     assert out["any_real"] is False
     assert out["state"] == {}
     assert out["merged_dna"] == {}
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard on the shared fetcher
+# ---------------------------------------------------------------------------
+
+class _RedirectResp:
+    def __init__(self, status_code, headers=None, text=""):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.text = text
+
+
+def test_fetch_refuses_unsafe_host_before_any_request(monkeypatch):
+    """A tenant-entered loopback/metadata URL is refused with status 0 —
+    no HTTP request is ever attempted (defensive validation only)."""
+    import requests
+
+    def boom(*a, **k):  # must never be reached
+        raise AssertionError("network attempted despite SSRF block")
+
+    monkeypatch.setattr(requests, "get", boom)
+    for bad in ("http://127.0.0.1/admin", "http://169.254.169.254/latest/meta-data/"):
+        body, code, hdrs = link_handlers._fetch_with_strategy(bad, {})
+        assert (body, code, hdrs) == (None, 0, {})
+
+
+def test_fetch_refuses_redirect_to_private_host_mid_chain(monkeypatch):
+    """A public URL that 302s onto a private host is refused at the hop —
+    each redirect target is re-validated before it is fetched."""
+    import requests
+
+    import mediahub.web_research.safe_fetch as sf
+
+    monkeypatch.setattr(sf, "is_url_safe", lambda u: "127.0.0.1" not in u)
+    calls: list[str] = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+        assert kw.get("allow_redirects") is False
+        return _RedirectResp(302, headers={"Location": "http://127.0.0.1/internal"})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    body, code, hdrs = link_handlers._fetch_with_strategy("https://club.example/", {})
+    assert (body, code, hdrs) == (None, 0, {})
+    # The private hop was refused BEFORE any request reached it.
+    assert all("127.0.0.1" not in u for u in calls)
+
+
+def test_fetch_follows_safe_redirects_and_returns_final_body(monkeypatch):
+    import requests
+
+    import mediahub.web_research.safe_fetch as sf
+
+    monkeypatch.setattr(sf, "is_url_safe", lambda _u: True)
+
+    def fake_get(url, **kw):
+        if url.endswith("/start"):
+            return _RedirectResp(301, headers={"Location": "https://cdn.example/final"})
+        return _RedirectResp(200, headers={"X-Test": "1"}, text="<html>real content</html>")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    body, code, hdrs = link_handlers._fetch_with_strategy("https://club.example/start", {})
+    assert code == 200
+    assert "real content" in body
+    assert hdrs.get("X-Test") == "1"
+
+
+def test_fetch_gives_up_after_max_hops(monkeypatch):
+    import requests
+
+    import mediahub.web_research.safe_fetch as sf
+
+    monkeypatch.setattr(sf, "is_url_safe", lambda _u: True)
+    monkeypatch.setattr(
+        requests, "get",
+        lambda url, **kw: _RedirectResp(302, headers={"Location": url + "x"}),
+    )
+    body, code, hdrs = link_handlers._fetch_with_strategy("https://club.example/loop", {})
+    assert (body, code, hdrs) == (None, 0, {})

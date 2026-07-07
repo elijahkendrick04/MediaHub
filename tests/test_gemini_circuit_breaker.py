@@ -94,6 +94,43 @@ def test_call_gemini_short_circuits_when_breaker_open(monkeypatch):
     assert called["count"] == 0
 
 
+def test_breaker_trips_on_transport_timeouts(monkeypatch):
+    """Transport failures (timeout / connection refused) are the breaker's
+    most expensive case — each one eats the full request timeout — so
+    consecutive timeouts must trip it just like 5xx responses do."""
+    import requests
+
+    monkeypatch.setattr(media_ai_llm, "_GEMINI_BREAKER_THRESHOLD", 3)
+    monkeypatch.setattr(media_ai_llm, "_resolve_gemini_key", lambda: "fake-key")
+
+    def timeout_post(*a, **k):
+        raise requests.exceptions.Timeout("timed out")
+
+    monkeypatch.setattr(requests, "post", timeout_post)
+    for _ in range(3):
+        out = media_ai_llm._call_gemini(
+            [{"role": "user", "content": "hi"}], system=None, max_tokens=10
+        )
+        assert out is None
+    assert media_ai_llm._gemini_breaker_is_open() is True
+
+
+def test_breaker_trips_on_vision_transport_failures(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(media_ai_llm, "_GEMINI_BREAKER_THRESHOLD", 3)
+    monkeypatch.setattr(media_ai_llm, "_resolve_gemini_key", lambda: "fake-key")
+
+    def refuse_post(*a, **k):
+        raise requests.exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "post", refuse_post)
+    for _ in range(3):
+        out = media_ai_llm._call_gemini_vision([], "describe", system=None, max_tokens=10)
+        assert out is None
+    assert media_ai_llm._gemini_breaker_is_open() is True
+
+
 def test_ai_core_demotes_gemini_when_breaker_open(monkeypatch):
     """``ai_core.llm._fallback_chain`` must move Gemini to the tail
     so Anthropic (or whatever else is configured) gets first shot

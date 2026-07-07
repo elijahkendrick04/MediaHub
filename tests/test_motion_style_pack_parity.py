@@ -92,6 +92,20 @@ def test_cache_key_varies_with_style_pack(monkeypatch):
     assert k_base == k_same, "the same pack must hit the same cache key"
 
 
+def _lever_executed(src: str, token: str) -> bool:
+    """True when the token has a real dispatch site in the TSX — a switch label
+    (``case "<tok>":``) or a lookup-table key (``"<tok>": value``). Membership in
+    the PACK_* Set literals alone (``"<tok>",``) does NOT count: a lever added to
+    the Sets but never rendered must fail the guard."""
+    import re
+
+    escaped = re.escape(token)
+    return bool(
+        re.search(rf'case\s+"{escaped}"\s*:', src)
+        or re.search(rf'"{escaped}"\s*:', src)
+    )
+
+
 def test_tsx_executes_every_style_pack_lever():
     """Drift guard: StoryCard.tsx must render the pack overlay and handle every
     lever the catalog can emit — a picked-but-ignored lever is exactly the
@@ -102,15 +116,38 @@ def test_tsx_executes_every_style_pack_lever():
     for ground in sp.GROUNDS:
         if ground == "flat":
             continue
-        assert f'"{ground}"' in src, f"ground {ground!r} not executed in StoryCard.tsx"
+        assert _lever_executed(src, ground), \
+            f"ground {ground!r} not executed in StoryCard.tsx"
     for texture in sp.TEXTURES:
         if texture == "none":
             continue
-        assert f'"{texture}"' in src, f"texture {texture!r} not executed in StoryCard.tsx"
+        assert _lever_executed(src, texture), \
+            f"texture {texture!r} not executed in StoryCard.tsx"
     for geo in sp.ACCENT_GEOS:
         if geo == "none":
             continue
-        assert f'"{geo}"' in src, f"accent geometry {geo!r} not executed in StoryCard.tsx"
+        assert _lever_executed(src, geo), \
+            f"accent geometry {geo!r} not executed in StoryCard.tsx"
+
+
+def test_pack_ground_paints_beneath_scene_content_like_the_still():
+    """z-order parity: the still injects the pack ground at z-index 1 (under
+    archetype copy at z2–3) and texture/geometry at z6/z8 (above). The motion
+    side must mount the ground layer BEFORE <Scene> and keep texture/geometry
+    in the after-Scene overlay — otherwise a top_fade/vignette darkens copy on
+    the video that the still leaves unshaded."""
+    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    assert "StylePackGroundLayer" in src
+    # The ground component paints the ground; the overlay component must not.
+    ground_block = src.split("const StylePackGroundLayer", 1)[1].split("const StylePackLayer", 1)[0]
+    assert "packGroundGradient" in ground_block
+    overlay_block = src.split("const StylePackLayer", 1)[1].split("const LogoChip", 1)[0]
+    assert "packGroundGradient" not in overlay_block
+    assert "packTextureImage" in overlay_block and "packAccentGeometry" in overlay_block
+    # Mount order: ground → Scene → texture/geometry overlay.
+    mount = src.split("<Scene ctx={ctx} />", 1)
+    assert "<StylePackGroundLayer ctx={ctx} />" in mount[0]
+    assert "<StylePackLayer ctx={ctx} />" in mount[1]
 
 
 def test_reel_beats_inherit_packs_via_storycard():

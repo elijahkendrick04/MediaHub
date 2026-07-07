@@ -176,10 +176,20 @@ class TestMakeCta:
         html = self._render()
         assert "setState('loading')" in html
         assert "setState('success')" in html
-        # The bespoke textContent/disabled spinner is gone — the kit helper
-        # owns the visual state now, so nothing nukes the stateful spans.
+        # The bespoke textContent spinner is gone — the kit helper owns the
+        # visual state now, so nothing nukes the stateful spans.
         assert "btn.textContent" not in html
-        assert "btn.disabled" not in html
+
+    def test_action_guards_against_double_fire(self):
+        # MH.btnState('loading') only sets pointer-events:none, which a keyboard
+        # re-activation (or a missing ui-kit.js) bypasses. A disabled re-entry
+        # guard stops a second LLM-heavy pack job; textContent is still untouched
+        # so the stateful spans survive.
+        html = self._render()
+        assert "if (btn.disabled) return;" in html
+        assert "btn.disabled = true;" in html
+        assert "btn.disabled = false;" in html  # cleared on failure so retry works
+        assert "btn.textContent" not in html
 
     def test_inline_style_keeps_the_borderless_host(self):
         # An inline `border:none` would override the variant's transparent

@@ -127,6 +127,27 @@ def test_purge_raw_uploads_earlier_than_runs(data_dir):
     assert not (data_dir / "uploads_v4" / "mid-run").exists()
 
 
+def test_purge_ages_out_loose_upload_files(data_dir):
+    """Loose files written straight into uploads_v4 (legacy transient path)
+    have no run dir or tenant hint — they age on the global raw-uploads
+    window. Ported from the retired privacy.retention sweep."""
+    from mediahub.compliance.retention import run_purge
+
+    uploads = data_dir / "uploads_v4"
+    uploads.mkdir(parents=True, exist_ok=True)
+    stale = uploads / "stale.hy3"
+    stale.write_bytes(b"x")
+    old = time.time() - 300 * 86400  # > 180-day raw_uploads default
+    os.utime(stale, (old, old))
+    fresh = uploads / "fresh.hy3"
+    fresh.write_bytes(b"x")
+
+    report = run_purge()
+    assert report["upload_files_deleted"] == 1
+    assert not stale.exists()
+    assert fresh.exists()
+
+
 def test_purge_pb_caches_and_security_log(data_dir):
     from mediahub.compliance.retention import run_purge
     from mediahub.compliance.security_log import record_event, read_events

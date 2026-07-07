@@ -169,6 +169,31 @@ def test_answer_collects_provenance_and_passes_tools(monkeypatch, env):
     assert "unknown tool" in transcript["unknown"]
 
 
+def test_runs_dir_is_scanned_once_per_answer(monkeypatch, env):
+    """The tool loop must not re-parse every run JSON on each tool call."""
+    import mediahub.club_qa.agent as agent_mod
+
+    real = agent_mod._owned_runs
+    calls = {"n": 0}
+
+    def counting(e):
+        calls["n"] += 1
+        return real(e)
+
+    monkeypatch.setattr(agent_mod, "_owned_runs", counting)
+
+    def fake_ask_with_tools(system, user, *, tools, on_tool_call, **kw):
+        on_tool_call("list_recent_runs", {})
+        on_tool_call("get_run_details", {"run_id": "r1"})
+        on_tool_call("get_run_details", {"run_id": "r2"})
+        on_tool_call("get_athlete_history", {"name": "Alice Lee"})
+        return _FakeConvo(text="done", tool_calls=[1, 2, 3, 4])
+
+    monkeypatch.setattr("mediahub.ai_core.ask_with_tools", fake_ask_with_tools)
+    answer_club_question("How many meets?", env)
+    assert calls["n"] == 1
+
+
 def test_provider_not_configured_propagates(monkeypatch, env):
     from mediahub.ai_core import ProviderNotConfigured
 

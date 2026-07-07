@@ -127,7 +127,7 @@ def test_ffmpeg_fallback_failure_reports_no_poster(tmp_path, monkeypatch):
 
 def test_finish_cached_video_skips_ffmpeg_when_in_render_poster_present(tmp_path, monkeypatch):
     """End-to-end through _finish_cached_video: an in-render poster means the
-    ffmpeg write_poster is never called, and the audio record is unchanged."""
+    ffmpeg write_poster is never called, and the record reports the provenance."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     cached = _seed_cached_mp4(tmp_path / "motion_cache")
     audio_mux.poster_path_for(cached).write_bytes(b"\x89PNG\r\n\x1a\n in-render frame")
@@ -140,7 +140,7 @@ def test_finish_cached_video_skips_ffmpeg_when_in_render_poster_present(tmp_path
     )
 
     assert calls == [], "the in-render poster must skip the ffmpeg extraction"
-    assert audio_rec == {"status": "off"}
+    assert audio_rec == {"status": "off", "poster_source": "in-render"}
 
 
 def test_cold_render_skips_ffmpeg_when_render_js_wrote_poster(tmp_path, monkeypatch):
@@ -178,10 +178,13 @@ def test_cold_render_skips_ffmpeg_when_render_js_wrote_poster(tmp_path, monkeypa
     with mock.patch.object(
         motion, "_run_remotion", side_effect=_fake_run_with_in_render_poster
     ):
-        motion.render_story_card(card, brand, out)
+        result = motion.render_story_card(card, brand, out)
 
     assert ffmpeg_calls == [], "the in-render poster must skip the ffmpeg extraction"
     assert audio_mux.poster_path_for(out).exists(), "the poster must ship beside the MP4"
+    # The explainability manifest records how the poster was produced.
+    manifest = json.loads(Path(result).with_suffix(".json").read_text(encoding="utf-8"))
+    assert manifest["poster_source"] == "in-render"
 
 
 def test_cold_render_without_in_render_poster_uses_ffmpeg(tmp_path, monkeypatch):
@@ -211,9 +214,11 @@ def test_cold_render_without_in_render_poster_uses_ffmpeg(tmp_path, monkeypatch)
     brand = BrandKit(profile_id="x", display_name="Poster Club")
     card = {"id": "p2", "achievement": {"swimmer_name": "No Poster", "event_name": "50m"}}
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run_no_poster):
-        motion.render_story_card(card, brand, tmp_path / "out" / "s.mp4")
+        result = motion.render_story_card(card, brand, tmp_path / "out" / "s.mp4")
 
     assert ffmpeg_calls, "without an in-render poster the ffmpeg fallback must run"
+    manifest = json.loads(Path(result).with_suffix(".json").read_text(encoding="utf-8"))
+    assert manifest["poster_source"] == "ffmpeg"
 
 
 # ---------------------------------------------------------------------------

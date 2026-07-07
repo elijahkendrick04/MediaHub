@@ -247,3 +247,63 @@ def test_research_tier_proposes_urls_when_enabled(tmp_path, monkeypatch):
     assert len(res.pbs) == 1
     assert res.pbs[0].time_canonical == "58.21"
     assert all(pb.time_canonical != "9.99" for pb in res.pbs)
+
+
+def test_fetcher_fails_closed_when_guard_errors(monkeypatch):
+    """If the SSRF guard itself raises, the fetch must be refused — never
+    performed unchecked (the guard previously failed open via except: pass)."""
+    import urllib.request
+
+    from mediahub.pb_discovery import fetch_profile as fp
+    import mediahub.web_research.safe_fetch as sf
+
+    def _guard_boom(url):
+        raise RuntimeError("guard exploded")
+
+    monkeypatch.setattr(sf, "is_url_safe", _guard_boom)
+
+    opened = []
+
+    def _no_network(*handlers):
+        opener = MagicMock()
+        opener.open.side_effect = lambda *a, **k: opened.append(a) or None
+        return opener
+
+    monkeypatch.setattr(urllib.request, "build_opener", _no_network)
+    assert fp._fetch_raw("https://results.example/profile") is None
+    assert not opened, "no connection may be opened when the guard errors"
+
+
+def test_fetcher_revalidates_every_redirect_hop(monkeypatch):
+    """A public host 302-ing to a cloud-metadata address must be refused: each
+    redirect hop goes back through the SSRF guard (urllib's default auto-follow
+    bypassed it)."""
+    import email.message
+    import urllib.error
+    import urllib.request
+
+    from mediahub.pb_discovery import fetch_profile as fp
+    import mediahub.web_research.safe_fetch as sf
+
+    checked = []
+
+    def _guard(url):
+        checked.append(url)
+        return "169.254.169.254" not in url
+
+    monkeypatch.setattr(sf, "is_url_safe", _guard)
+
+    hdrs = email.message.Message()
+    hdrs["Location"] = "http://169.254.169.254/latest/meta-data/"
+    redirect = urllib.error.HTTPError(
+        "https://results.example/profile", 302, "Found", hdrs, None
+    )
+
+    opener = MagicMock()
+    opener.open.side_effect = redirect
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *h: opener)
+    assert fp._fetch_raw("https://results.example/profile") is None
+    # The metadata hop was validated (and refused) — not silently followed.
+    assert any("169.254.169.254" in u for u in checked)
+    assert opener.open.call_count == 1

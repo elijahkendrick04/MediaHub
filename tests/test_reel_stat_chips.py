@@ -339,3 +339,102 @@ def test_default_cap_holds_even_with_richer_facts(harness):
     [chips] = _run(harness, [{"cards": cards}])  # no config
     assert [c["id"] for c in chips] == ["swims", "pbs", "medals"]
     assert len(chips) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Producer side — the config actually reaches the Remotion props + cache key
+# --------------------------------------------------------------------------- #
+
+BRAND = {
+    "profile_id": "chips",
+    "display_name": "Chips SC",
+    "primary_colour": "#0E2A47",
+    "secondary_colour": "#C9A227",
+}
+
+
+def _reel_card(i: int) -> dict:
+    return {
+        "id": f"swim-chip-{i}",
+        "swim_id": f"swim-chip-{i}",
+        "achievement": {
+            "swim_id": f"swim-chip-{i}",
+            "swimmer_name": f"Swimmer {i}",
+            "event_name": "100m Freestyle",
+            "result_time": f"1:0{i}.00",
+        },
+        "meet_name": "Chip Invitational",
+    }
+
+
+def _render_capture(tmp_path, monkeypatch, **kwargs):
+    from pathlib import Path
+    from unittest import mock
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    captured: dict = {}
+
+    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
+        captured["props"] = props
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"0" * 2048)
+        return out
+
+    with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
+        motion.render_meet_reel(
+            [_reel_card(1), _reel_card(2)], BRAND, tmp_path / "out" / "reel.mp4", **kwargs
+        )
+    return captured
+
+
+def test_normalise_reel_stat_config_validates_and_canonicalises():
+    assert motion.normalise_reel_stat_config(None) is None
+    assert motion.normalise_reel_stat_config({}) is None
+    assert motion.normalise_reel_stat_config({"include": [], "labels": {}}) is None
+    cfg = motion.normalise_reel_stat_config(
+        {"include": ["records", "relayWins"], "max": 2, "labels": {"records": "{n} NEW RECORDS"}}
+    )
+    assert cfg == {
+        "include": ["records", "relayWins"],
+        "max": 2,
+        "labels": {"records": "{n} NEW RECORDS"},
+    }
+    with pytest.raises(ValueError):
+        motion.normalise_reel_stat_config({"include": ["podiums"]})  # unknown id
+    with pytest.raises(ValueError):
+        motion.normalise_reel_stat_config({"labels": {"podiums": "x"}})
+    with pytest.raises(ValueError):
+        motion.normalise_reel_stat_config({"max": "lots"})
+    with pytest.raises(ValueError):
+        motion.normalise_reel_stat_config({"max": -1})
+    with pytest.raises(ValueError):
+        motion.normalise_reel_stat_config("include=records")
+
+
+def test_vocabulary_matches_the_tsx_counts_table():
+    """REEL_STAT_IDS must be the exact keys of reelStats' counts record."""
+    src = _reel_src()
+    table = src.split("const counts: Record<string, number> = {", 1)[1].split("};", 1)[0]
+    tsx_ids = set(re.findall(r"^\s*([A-Za-z]+):", table, re.M))
+    assert tsx_ids == set(motion.REEL_STAT_IDS)
+
+
+def test_stat_config_reaches_props_and_shifts_the_cache_key(tmp_path, monkeypatch):
+    cfg = {"include": ["records", "pbs"], "max": 2}
+    cap = _render_capture(tmp_path, monkeypatch, reel_stat_config=cfg)
+    assert cap["props"]["reelStatConfig"] == {"include": ["records", "pbs"], "max": 2}
+    keys_after_first = {p.stem for p in motion._cache_dir().glob("*.mp4")}
+    # A different config renders (and caches) separately.
+    _render_capture(tmp_path, monkeypatch, reel_stat_config={"max": 1})
+    keys_after_second = {p.stem for p in motion._cache_dir().glob("*.mp4")}
+    assert len(keys_after_second) == len(keys_after_first) + 1
+
+
+def test_no_stat_config_keeps_props_and_cache_key_byte_identical(tmp_path, monkeypatch):
+    cap = _render_capture(tmp_path, monkeypatch)
+    assert "reelStatConfig" not in cap["props"], "an unconfigured reel must not carry the prop"
+    keys = {p.stem for p in motion._cache_dir().glob("*.mp4")}
+    # An explicit empty config is the same render — same key, cache hit.
+    _render_capture(tmp_path, monkeypatch, reel_stat_config={})
+    assert {p.stem for p in motion._cache_dir().glob("*.mp4")} == keys

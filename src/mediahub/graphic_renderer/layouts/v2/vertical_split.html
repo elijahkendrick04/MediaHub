@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   vertical_split  (v2 archetype, PAR-7 — G1.1)
+
+   The WHOLE frame is cut top/bottom into TWO solid colour fields that
+   meet at a horizontal seam a touch above centre (~0.54h). The athlete
+   identity — achievement chip, first name, oversized surname — lives in
+   the UPPER field (laid over the athlete photo when one is supplied,
+   scrimmed to its lower edge so the name stays legible), and the verified
+   RESULT owns the LOWER field on the surface colour. A lit accent seam
+   rule fences the two fields.
+
+   Structural signature: two full-bleed SOLID colour fields (brand ground
+   above, surface below) meeting at one horizontal accent seam, with WHO
+   above the seam and WHAT below it. This is distinct from horizon_band
+   (a thin accent band riding on ONE ground) — here both halves are their
+   own solid colour field — and from the lower-third band pinned to the
+   floor. Mirrors the R1.2 `vertical_split` motion scene (the lower field
+   rises from the seam) so the still ↔ motion pair share one geometry.
+
+   Photo/no-photo: the upper field carries the athlete cutout via the
+   ATHLETE_IMG_BLOCK slot when a photo exists; a bottom scrim + the
+   PHOTO_ONLY wrapper only paint over an actual photo. With no photo the
+   upper field simply stays its solid brand colour and the card still
+   reads. Overflow safety: the surname band spans the full canvas width so
+   it uses the renderer's full-canvas autofit var directly (nowrap); the
+   result uses the full-canvas result var. Holds at 1080x1350 and
+   1080x1920 — the fields flex to absorb the extra height while the seam
+   stays a touch above centre.
+   =================================================================== */
+
+.vs {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.vs *, .vs *::before, .vs *::after { box-sizing: border-box; }
+
+/* ---- upper field: identity (over photo when present) ---- */
+.vs__top {
+  position: relative;
+  flex: 0 0 54%;
+  overflow: hidden;
+  background: var(--mh-primary);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 84px 76px 40px;
+}
+.vs__photo { position: absolute; inset: 0; z-index: 0; }
+.vs__photo img {
+  width: 100%; height: 100%; object-fit: cover;
+  object-position: var(--mh-photo-pos, center 30%);
+  display: block;
+}
+.vs__scrim {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.10) 40%, rgba(0,0,0,0.62) 100%);
+}
+.vs__top > .vs__chip, .vs__top > .vs__id { position: relative; z-index: 2; }
+
+.vs__chip {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 14px;
+  padding: 13px 26px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 800; font-size: 25px; letter-spacing: 0.14em; text-transform: uppercase;
+  border-radius: 6px; max-width: 100%; overflow: hidden;
+}
+.vs__id { display: flex; flex-direction: column; gap: 4px; }
+.vs__first {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 40px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
+}
+.vs__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: var(--mh-fit-surname-px, 132px);
+  line-height: 0.86; letter-spacing: -0.02em; text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap;
+}
+
+/* ---- accent seam rule fencing the two fields ---- */
+.vs__seam {
+  flex: 0 0 auto; height: 12px;
+  background: var(--mh-accent);
+  box-shadow: 0 0 40px rgba(0,0,0,0.35);
+  position: relative; z-index: 3;
+}
+
+/* ---- lower field: the verified result ---- */
+.vs__bottom {
+  position: relative;
+  flex: 1 1 auto;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  padding: 56px 76px 84px;
+  display: flex; flex-direction: column; justify-content: space-between;
+}
+.vs__result-wrap { display: flex; flex-direction: column; gap: 14px; }
+.vs__event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 36px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mh-on-surface); opacity: 0.9;
+  overflow-wrap: anywhere;
+}
+.vs__result {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 132px);
+  font-variation-settings: var(--mh-axes-result, normal);
+  line-height: 0.92; letter-spacing: -0.02em; color: var(--mh-on-surface);
+  white-space: nowrap;
+}
+.vs__stat {
+  font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 800;
+  font-size: 30px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--mh-accent);
+}
+.vs__stat:empty { display: none; }
+
+.vs__foot {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+}
+.vs__brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.vs__logo { height: 56px; width: auto; flex: 0 0 auto; }
+.vs__logo img, .vs__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.vs__brand-text { display: flex; flex-direction: column; line-height: 1.14; min-width: 0; }
+.vs__club {
+  font-family: 'Inter', sans-serif; font-weight: 800; font-size: 22px;
+  text-transform: uppercase; color: var(--mh-on-surface); overflow-wrap: anywhere;
+}
+.vs__meet {
+  font-family: 'Inter', sans-serif; font-weight: 500; font-size: 18px;
+  color: var(--mh-on-surface); opacity: 0.72; margin-top: 4px; overflow-wrap: anywhere;
+}
+.vs__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="vs">
+
+  <div class="vs__top">
+    <div class="vs__photo">{{ATHLETE_IMG_BLOCK}}</div>
+    {{PHOTO_ONLY_OPEN}}<div class="vs__scrim"></div>{{PHOTO_ONLY_CLOSE}}
+    <div class="vs__chip">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="vs__id">
+      <div class="vs__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="vs__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    </div>
+  </div>
+
+  <div class="vs__seam"></div>
+
+  <div class="vs__bottom">
+    <div class="vs__result-wrap">
+      <div class="vs__event">{{EVENT_NAME}}</div>
+      <div class="vs__result">{{RESULT_VALUE}}</div>
+      <div class="vs__stat">{{HERO_STAT}}</div>
+    </div>
+    <div class="vs__foot">
+      <div class="vs__brand">
+        <div class="vs__logo">{{LOGO_BLOCK}}</div>
+        <div class="vs__brand-text">
+          <div class="vs__club">{{CLUB_FULL}}</div>
+          <div class="vs__meet">{{MEET_NAME}}</div>
+        </div>
+      </div>
+      <div class="vs__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

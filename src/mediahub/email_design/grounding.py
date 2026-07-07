@@ -304,6 +304,26 @@ def _attr(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
+def _consent_block_reason(profile_id: str, swimmer_name: str) -> Optional[str]:
+    """Why this athlete must not appear in newsletter text at all — or ``None``.
+
+    Same unified check the public wall applies (``compliance.gate.
+    consent_block_reason``): a newsletter published at ``/newsletter/<token>``
+    is public content, so a consent-blocked athlete's name must not ship in
+    its recaps, spotlights or fact sheet. A wholly failed lookup returns
+    ``None`` so gathering never 500s.
+    """
+    name = (swimmer_name or "").strip()
+    if not profile_id or not name:
+        return None
+    try:
+        from mediahub.compliance.gate import consent_block_reason
+
+        return consent_block_reason(profile_id, name)
+    except Exception:
+        return None
+
+
 def gather_facts(
     profile_id: str,
     *,
@@ -344,6 +364,8 @@ def gather_facts(
     swimmers: set[str] = set()
     by_swimmer: dict[str, list[dict]] = {}
 
+    consent_cache: dict[str, Optional[str]] = {}
+
     runs = _runs_in_window(profile_id, start, end, rd)
     for run_id, _run_data, _md in runs:
         try:
@@ -358,6 +380,11 @@ def gather_facts(
             ach = card.get("achievement") or {}
             atype = str(ach.get("type") or "").lower()
             name = str(ach.get("swimmer_name") or "").strip()
+            if name:
+                if name not in consent_cache:
+                    consent_cache[name] = _consent_block_reason(profile_id, name)
+                if consent_cache[name]:
+                    continue  # consent always wins — drop the card entirely
             if "pb" in atype:
                 n_pb += 1
             if "medal" in atype or atype in ("medal_gold", "medal_silver", "medal_bronze"):

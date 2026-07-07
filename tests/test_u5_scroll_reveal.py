@@ -51,7 +51,9 @@ _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in (
     "true",
     "yes",
 )
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -334,7 +336,7 @@ _LINE_STATES = """() => {
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestRevealLinesBrowser:
     def test_reduced_motion_shows_every_line_immediately(self, app):
         body = _home(app)
@@ -423,18 +425,21 @@ class TestRevealLinesBrowser:
         )
 
     def test_nothing_stays_stuck_hidden(self, app):
-        # Even with NO scroll, the 1.5 s safety net must reveal everything —
-        # content can never be permanently hidden.
+        # Even with NO scroll, content can never be permanently hidden. The
+        # 1.5 s sweep reveals only what's in/above the fold (so below-fold lines
+        # still play the scroll cascade), and a 10 s long-tail net reveals
+        # anything the observer never fired on — so past that net, with no
+        # scroll at all, EVERY reveal line must be visible.
         body = _home(app)
         pw, browser = _launch_browser()
         try:
             page = browser.new_page(viewport={"width": 1100, "height": 560})
             page.set_content(body)
             page.wait_for_load_state("domcontentloaded")
-            # Safety net adds .is-in at 1500 ms, then each line fades over
-            # 600 ms (+ up to a 90 ms per-line delay). Wait past all of it so
-            # the opacity transition has fully settled to 1.
-            page.wait_for_timeout(2500)
+            # Wait past the 10 s long-tail net + the 600 ms fade (+ per-line
+            # delay) so the opacity transition has fully settled to 1 for every
+            # line, including below-fold ones that were never scrolled into view.
+            page.wait_for_timeout(11200)
             states = page.evaluate(_LINE_STATES)
         finally:
             browser.close()

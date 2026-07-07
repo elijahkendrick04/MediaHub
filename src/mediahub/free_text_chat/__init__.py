@@ -2,6 +2,7 @@
 
 from .session import (
     ChatSession,
+    can_access_session,
     create_session,
     load_session,
     list_sessions,
@@ -12,6 +13,7 @@ from .agent import next_assistant_turn
 
 __all__ = [
     "ChatSession",
+    "can_access_session",
     "create_session",
     "load_session",
     "list_sessions",

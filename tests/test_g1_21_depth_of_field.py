@@ -238,6 +238,44 @@ def test_dict_brief_supported():
 
 
 # --------------------------------------------------------------------------- #
+# Bokeh-pack bridge — the deterministic reachable emitter (G1.21)             #
+# --------------------------------------------------------------------------- #
+
+
+def _pack_brief(pack_id: str, **kw) -> _Brief:
+    brief = _Brief(**kw)
+    brief.style_pack = pack_id
+    return brief
+
+
+def test_bokeh_ground_pack_triggers_dof():
+    out = dof.apply(CARD_HTML, _ctx(_pack_brief("bokeh-none-none-standard")))
+    assert MARKER in out and "blur(" in out
+
+
+def test_bokeh_pack_bridge_never_compounds_explicit_photo_grade():
+    # An explicit duotone/halftone/vignette choice is never stacked with blur.
+    for grade in ("duotone", "halftone", "vignette"):
+        brief = _pack_brief("bokeh-none-none-standard", photo_treatment=grade)
+        assert dof.apply(CARD_HTML, _ctx(brief)) == CARD_HTML
+
+
+def test_non_bokeh_pack_stays_byte_identical():
+    assert dof.apply(CARD_HTML, _ctx(_pack_brief("flat-none-none-standard"))) == CARD_HTML
+
+
+def test_bogus_pack_id_stays_byte_identical():
+    assert dof.apply(CARD_HTML, _ctx(_pack_brief("zzz-bogus-pack"))) == CARD_HTML
+
+
+def test_registry_reaches_blur_from_bokeh_pack():
+    # End-to-end reachability: the deterministic pack pick alone (no explicit
+    # token anywhere on the brief) drives the injected blur layer.
+    out = apply_render_hooks(CARD_HTML, _ctx(_pack_brief("bokeh-grain-none-standard")))
+    assert MARKER in out
+
+
+# --------------------------------------------------------------------------- #
 # Seam — auto-discovery registry                                              #
 # --------------------------------------------------------------------------- #
 

@@ -222,7 +222,14 @@ def parse_color_json(text: str) -> list[str]:
         if not out:
             raise PaletteFileError("no colours found in file")
         return out
-    out = _dedupe(_colours_from_obj(obj))
+    except RecursionError:
+        # Pathologically nested input ("[[[[…") — treat as unparseable.
+        raise PaletteFileError("no colours found in JSON")
+    try:
+        colours = _colours_from_obj(obj)
+    except RecursionError:
+        raise PaletteFileError("no colours found in JSON")
+    out = _dedupe(colours)
     if not out:
         raise PaletteFileError("no colours found in JSON")
     return out

@@ -38,7 +38,9 @@ sys.path.insert(0, str(_ROOT))
 _SKIP_BROWSER = (
     os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in ("1", "true", "yes")
 )
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 # Every id the HUD strip and its JS depend on.
 _HUD_IDS = (
@@ -258,7 +260,7 @@ class TestHudWiring:
 
 @pytest.mark.skipif(_SKIP_BROWSER, reason="MEDIAHUB_SKIP_BROWSER_TESTS set")
 @pytest.mark.skipif(not _playwright_available(), reason="playwright not installed")
-@pytest.mark.skipif(not _chromium_available(), reason="chromium-1194 not at pinned path")
+@pytest.mark.skipif(not _chromium_available(), reason="prebaked chromium not found")
 class TestHudBrowserBehaviour:
     def _read_hud(self, page):
         return page.evaluate(

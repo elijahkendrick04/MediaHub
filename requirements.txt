@@ -4,9 +4,11 @@ requests>=2.34.2
 beautifulsoup4>=4.15.0
 lxml>=6.1.1
 pypdf>=6.13.3
-# Floor must stay <= the exact pdfminer.six that pdfplumber pins (0.11.9 pins
-# ==20251230); dependabot's >=20260107 bump made the pair unresolvable and
-# broke pip-audit (ResolutionImpossible).
+# The pdfminer.six floor must equal the exact version the current pdfplumber
+# floor pins (0.11.10 pins ==20260107) — always bump the pair together. A lone
+# pdfminer.six bump past pdfplumber's pin makes the pair unresolvable and
+# breaks pip-audit (ResolutionImpossible), as happened when dependabot pushed
+# >=20260107 while pdfplumber 0.11.9 still pinned ==20251230.
 pdfminer.six>=20260107
 pdfplumber>=0.11.10
 # Document engine (roadmap 1.15) — deterministic PPTX/DOCX round-trip so a

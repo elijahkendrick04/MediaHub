@@ -324,6 +324,56 @@ def test_claim_signed_out_redirects_to_signup(demo_world):
     assert "/signup" in r.headers["Location"]
 
 
+def test_claim_db_failure_rolls_back_and_errors(demo_world, monkeypatch):
+    """A failed DB re-stamp must not half-claim: the run JSON rolls back to
+    the demo org (JSON and DB agree, so the sweep can't eat a claimed run)
+    and the user sees an honest error instead of a silent success."""
+    from mediahub.web.club_profile import ClubProfile, save_profile
+
+    _seed_demo_run(demo_world, "runclaim0003")
+    save_profile(ClubProfile(profile_id="my-club", display_name="My Club"))
+
+    app = demo_world["app"]
+    wm = demo_world["wm"]
+    dt = demo_world["dt"]
+    c = app.test_client()
+    assert c.post("/api/organisation/active", data={"profile_id": "my-club"}).status_code == 200
+    with c.session_transaction() as sess:
+        sess["demo_runs"] = ["runclaim0003"]
+
+    real_db = wm._db
+
+    class _FlakyConn:
+        """Delegates everything except the ownership UPDATE, which fails."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, *a, **kw):
+            if sql.lstrip().upper().startswith("UPDATE RUNS SET PROFILE_ID"):
+                raise RuntimeError("db down")
+            return self._real.execute(sql, *a, **kw)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    monkeypatch.setattr(wm, "_db", lambda: _FlakyConn(real_db()))
+    r = c.post("/try/runclaim0003/claim")
+    assert r.status_code == 500
+    monkeypatch.setattr(wm, "_db", real_db)
+
+    # JSON rolled back — still the demo org's run, matching the DB row.
+    data = json.loads((demo_world["tmp"] / "runs_v4" / "runclaim0003.json").read_text())
+    assert data["profile_id"] == dt.DEMO_PROFILE_ID
+    conn = wm._db()
+    row = conn.execute("SELECT profile_id FROM runs WHERE id='runclaim0003'").fetchone()
+    conn.close()
+    assert row[0] == dt.DEMO_PROFILE_ID
+    # Still in the session's demo list, so the user can retry the claim.
+    with c.session_transaction() as sess:
+        assert "runclaim0003" in sess.get("demo_runs", [])
+
+
 # ---- sweep ---------------------------------------------------------------------
 
 
@@ -342,6 +392,41 @@ def test_sweep_deletes_only_stale_demo_runs(demo_world):
     n = sweep_demo_runs(fake_delete, older_than_hours=24)
     assert n == 1
     assert deleted == ["runold000001"]
+
+
+def test_sweep_removes_abandoned_staging_dirs(demo_world):
+    """Staging dirs (upload made, club never picked) are pre-run only —
+    the DB-driven sweep can't see them, so _sweep_demo_staging_dirs must:
+    old marker dirs go, fresh ones and real run sidecar dirs stay."""
+    import os
+
+    wm = demo_world["wm"]
+    runs_dir = demo_world["tmp"] / "runs_v4"
+
+    old_stage = runs_dir / "aaaaaaaaaaaa"
+    old_stage.mkdir(parents=True)
+    (old_stage / "input.bin").write_bytes(b"x")
+    (old_stage / "demo_meta.json").write_text("{}")
+    stale = 1_577_836_800  # 2020-01-01 — well past 24h
+    os.utime(old_stage / "demo_meta.json", (stale, stale))
+
+    fresh_stage = runs_dir / "bbbbbbbbbbbb"
+    fresh_stage.mkdir(parents=True)
+    (fresh_stage / "input.bin").write_bytes(b"x")
+    (fresh_stage / "demo_meta.json").write_text("{}")
+
+    # A real run sidecar dir (no demo_meta.json) must never be touched,
+    # however old.
+    sidecar = runs_dir / "runreal00001"
+    sidecar.mkdir(parents=True)
+    (sidecar / "demo_cards.json").write_text("{}")
+    os.utime(sidecar / "demo_cards.json", (stale, stale))
+
+    n = wm._sweep_demo_staging_dirs(older_than_hours=24)
+    assert n == 1
+    assert not old_stage.exists()
+    assert fresh_stage.exists()
+    assert sidecar.exists()
 
 
 def test_sweep_with_real_delete_run(demo_world):

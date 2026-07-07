@@ -579,16 +579,21 @@ def render_cards_html(
         platform = str(card.get("platform", "Post") or "Post")
         caption = str(card.get("caption", "") or "").strip()
         hashtags = card.get("hashtags") or []
-        confidence = card.get("confidence", 0.6)
+        confidence = card.get("confidence")
         notes = str(card.get("notes", "") or "").strip()
         status = str(card.get("status") or "queue").lower()
         if status not in _PILL_STYLE:
             status = "queue"
 
-        try:
-            conf_pct = max(0, min(100, int(round(float(confidence) * 100))))
-        except (TypeError, ValueError):
-            conf_pct = 60
+        # Brief-led cards deliberately carry no confidence (the engine refuses
+        # to fabricate one) — show the badge only when a real value exists.
+        conf_html = ""
+        if confidence is not None:
+            try:
+                conf_pct = max(0, min(100, int(round(float(confidence) * 100))))
+                conf_html = f'<span title="Model confidence">{conf_pct}% conf</span>'
+            except (TypeError, ValueError):
+                conf_html = ""
 
         tag_chips = ""
         for tag in hashtags[:8]:
@@ -622,7 +627,7 @@ def render_cards_html(
                 f'style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;'
                 f"font-size:11px;font-weight:600;background:{bg};color:{fg};"
                 f'font-family:inherit;margin-left:8px"'
-                f' title="Click: queue → approved → rejected → queue. Right-click to reset.">'
+                f' title="Click: queue ↔ approved. Right-click to reset to queue.">'
                 f"{_h(label)}</button>"
             )
 
@@ -654,7 +659,7 @@ def render_cards_html(
 
         cards_html += f"""
 <div class="mh-content-card" id="stub-card-{idx}" data-interactive data-card-status="{_h(status)}">
-  <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf{pill_html}</div>
+  <div class="mh-card-confidence">{conf_html}{pill_html}</div>
   <div class="mh-card-platform">{_platform_icon(platform)} {_h(platform)}</div>
   <div class="mh-card-caption">{_h(caption)}</div>
   {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ""}

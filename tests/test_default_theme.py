@@ -128,7 +128,9 @@ class TestUnconfiguredCascade:
         renders — that's the Stage J2 contract."""
         app, _wm, _ = fresh_app
         with app.test_client() as c:
-            # No session pin — explicitly unconfigured
+            # No active *profile* — but the usage dashboard is operator-only.
+            with c.session_transaction() as s:
+                s["dev_operator"] = True
             body = c.get("/healthz/usage").get_data(as_text=True)
         assert 'id="mh-theme-seed"' in body
 

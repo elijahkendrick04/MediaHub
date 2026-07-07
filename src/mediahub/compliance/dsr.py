@@ -248,13 +248,59 @@ def _redact_text_deep(node: object, raw_name: str) -> int:
     return _walk(node) if raw_name.strip() else 0
 
 
+def _name_pattern(key: str) -> re.Pattern:
+    """Whole-name matcher for a normalised athlete key.
+
+    The key must not sit inside a longer alphanumeric run on either side, so
+    'sam lee' matches 'Sam Lee' but never 'Sam Leeson'. The discovered/*
+    caches are global (not tenant-scoped), so a bare substring scan would
+    cross data subjects — and tenants — on a name-prefix collision.
+    """
+    return re.compile(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])")
+
+
 def _file_mentions(path: Path, key: str) -> bool:
     """Case-insensitive whole-name scan of a cache file's raw text."""
+    if not key:
+        return False
     try:
         text = path.read_text(errors="ignore").lower()
     except OSError:
         return False
-    return key in re.sub(r"\s+", " ", text)
+    return _name_pattern(key).search(re.sub(r"\s+", " ", text)) is not None
+
+
+def _redact_rows_for_subject(node: object, pattern: re.Pattern) -> tuple[object, int]:
+    """Drop list rows that carry no whole-name mention of the subject.
+
+    A cache file matched on the subject's name can also hold rows about
+    other swimmers (other clubs included — the cache is global). A SAR
+    export must not disclose those, so every list element without the
+    subject's name is dropped; returns ``(filtered_node, rows_dropped)``.
+    """
+    dropped = 0
+    if isinstance(node, list):
+        kept = []
+        for item in node:
+            try:
+                blob = json.dumps(item, default=str).lower()
+            except Exception:
+                blob = str(item).lower()
+            if pattern.search(re.sub(r"\s+", " ", blob)):
+                sub, d = _redact_rows_for_subject(item, pattern)
+                kept.append(sub)
+                dropped += d
+            else:
+                dropped += 1
+        return kept, dropped
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            sub, d = _redact_rows_for_subject(v, pattern)
+            out[k] = sub
+            dropped += d
+        return out, dropped
+    return node, 0
 
 
 # --------------------------------------------------------------------------
@@ -325,9 +371,14 @@ def export_athlete(profile_id: str, athlete_name: str) -> dict:
             for f in d.rglob("*.json"):
                 if _file_mentions(f, key):
                     try:
-                        report["pb_caches"].append(
-                            {"path": str(f), "content": json.loads(f.read_text())}
+                        content, dropped = _redact_rows_for_subject(
+                            json.loads(f.read_text()), _name_pattern(key)
                         )
+                        entry: dict = {"path": str(f), "content": content}
+                        if dropped:
+                            # Rows about other data subjects removed before export.
+                            entry["rows_redacted"] = dropped
+                        report["pb_caches"].append(entry)
                     except Exception:
                         report["pb_caches"].append({"path": str(f), "content": "unparseable"})
 
@@ -385,7 +436,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
 
     ONE erasure engine, two layers: the UK-legal cascade
     (``mediahub.privacy.erasure`` — runs/cards/rendered assets, PB caches,
-    research caches, caption memory, posting-log excerpts) runs first, then
+    research caches, caption memory) runs first, then
     this module's extras (media library photos, club-profile text, workflow
     sidecars, turn-into packs, legacy unowned runs, the consent suppression
     record, and the W.2 level set to do_not_feature). Both the Privacy-page
@@ -503,7 +554,7 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
     # 1e. UK-legal cascade (privacy.erasure) AFTER the name-keyed walkers
     # above — the cascade redacts residual mentions to "[removed]", which
     # would defeat name matching if it ran first. It adds the stores this
-    # module doesn't walk: research caches, posting-log excerpts, motion
+    # module doesn't walk: research caches, motion
     # cache, plus a second sweep of runs/caches/caption memory.
     try:
         from mediahub.privacy import erase_athlete as _cascade_erase

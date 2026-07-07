@@ -44,6 +44,38 @@ def _safe_get(obj: Any, *keys: str, default: Any = None) -> Any:
     return cur if cur is not None else default
 
 
+def _logo_inventory(brand_kit) -> str:
+    """The uploaded-logo inventory for the brand kit's profile, if any.
+
+    The art director picks a ``logo_lockup`` but was previously blind to which
+    logo variants actually exist. Surface the brand-context builder's
+    ``include_logos=True`` inventory (names + availability), loaded from the
+    kit's owning ClubProfile, so the model chooses a lockup that maps to a
+    real asset. The director is deliberately the only consumer: caption/text
+    generators keep the default logo-free context so logo filenames can never
+    leak into copy (guarded by test_caption_no_logo_leak). Best-effort: any
+    load/import failure yields ""; the director never crashes on brand
+    context.
+    """
+    profile_id = _safe_get(brand_kit, "profile_id", default="") or ""
+    if not profile_id:
+        return ""
+    try:
+        from mediahub.web.club_profile import load_profile
+
+        # The single source of the include_logos=True inventory prose
+        # (humanised names + dark-vs-mono guidance).
+        from mediahub.brand.context import _logos_prose
+
+        profile = load_profile(profile_id)
+        if profile is None:
+            return ""
+        return (_logos_prose(profile) or "").strip()
+    except Exception as e:  # pragma: no cover - defensive; never break the director
+        log.debug("_logo_inventory: %s", e)
+        return ""
+
+
 def _brand_context(brand_kit) -> str:
     """One-paragraph brand context for the system prompt."""
     if brand_kit is None:
@@ -62,6 +94,9 @@ def _brand_context(brand_kit) -> str:
             + ", ".join(cols)
             + "."
         )
+    logos = _logo_inventory(brand_kit)
+    if logos:
+        bits.append(logos)
     return " ".join(bits)
 
 

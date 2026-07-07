@@ -61,6 +61,17 @@ def test_ungrounded_number_dropped(monkeypatch):
     assert draft.draft_copy(_facts(), "club_home") == {}  # dropped
 
 
+def test_unparseable_ai_copy_is_an_honest_error(monkeypatch):
+    """A provider that answers but yields no parseable JSON must raise, not
+    silently return empty sections that look like a successful draft."""
+    from mediahub.media_ai import llm as _llm
+
+    monkeypatch.setattr(_llm, "is_available", lambda: True)
+    monkeypatch.setattr(_llm, "generate_json", lambda *a, **k: k.get("fallback", {}))
+    with pytest.raises(_llm.ClaudeUnavailableError):
+        draft.draft_copy(_facts(), "club_home")
+
+
 def test_seo_and_alt_text(monkeypatch):
     from mediahub.media_ai import llm as _llm
 

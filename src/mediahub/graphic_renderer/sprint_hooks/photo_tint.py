@@ -58,6 +58,13 @@ _CUTOUT_IMG_RE = re.compile(
     r'<img\b[^>]*\bclass="[^"]*\bathlete-cutout\b[^"]*"[^>]*>', re.IGNORECASE
 )
 _DATA_URI_RE = re.compile(r'src="data:image/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=]+)"', re.IGNORECASE)
+# The one-copy carry (contact_sheet): the same cutout inlined once as a CSS
+# custom property and referenced per frame via content: var(--mh-athlete-img).
+_VAR_URI_RE = re.compile(
+    r"--mh-athlete-img\s*:\s*url\(\s*['\"]?data:image/[a-z0-9.+-]+;base64,"
+    r"([A-Za-z0-9+/=]+)['\"]?\s*\)",
+    re.IGNORECASE,
+)
 
 
 def _enabled() -> bool:
@@ -102,6 +109,9 @@ def _hero_photo_bytes(html: str) -> bytes | None:
     for tag in _CUTOUT_IMG_RE.findall(html):
         m = _DATA_URI_RE.search(tag)
         if m and (best is None or len(m.group(1)) > len(best)):
+            best = m.group(1)
+    for m in _VAR_URI_RE.finditer(html):
+        if best is None or len(m.group(1)) > len(best):
             best = m.group(1)
     if not best:
         return None

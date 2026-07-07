@@ -82,15 +82,3 @@ def test_missing_metrics_never_fires(base_file):
     _seed(base_file, cards=12, achievements=8, export_ok=True)
     assert _check(None) is None
     assert _check({}) is None
-
-
-def test_metrics_from_artifacts():
-    arts = {"export_json": {"cards": [1, 2, 3]}, "recognition_report": {"n_achievements": 5}}
-    m = baseline.metrics_from_artifacts(arts)
-    assert m == {"cards": 3, "export_ok": True, "achievements": 5}
-
-
-def test_metrics_from_artifacts_missing_is_none():
-    assert baseline.metrics_from_artifacts(None) is None
-    assert baseline.metrics_from_artifacts({"home_text": "x"}) is None   # no export_json
-    assert baseline.metrics_from_artifacts({"export_json": {}}) is None  # no cards list

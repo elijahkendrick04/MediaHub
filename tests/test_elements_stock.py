@@ -567,20 +567,25 @@ def test_stock_thumb_route_404_on_miss(app_env, monkeypatch):
 def test_import_stock_creates_asset_and_rights(app_env, monkeypatch):
     app, _wm, tmp_path = app_env
 
+    # Fake the pinned transport seam (urllib3-shaped response + pool) that
+    # _ssrf_safe_stream_get now fetches through.
     class _Resp:
+        status = 200
         headers = {"Content-Type": "image/jpeg"}
-
-        def raise_for_status(self):
-            pass
-
-        @property
-        def raw(self):
-            return self
 
         def read(self, n, decode_content=True):
             return b"\xff\xd8\xff" + b"0" * 100  # tiny fake jpeg
 
-    monkeypatch.setattr("requests.get", lambda *a, **k: _Resp())
+        def close(self):
+            pass
+
+    class _Pool:
+        def close(self):
+            pass
+
+    import mediahub.web_research.safe_fetch as _sf
+
+    monkeypatch.setattr(_sf, "pinned_stream_get", lambda url, **kw: (_Resp(), _Pool()))
 
     with app.test_client() as c:
         _signin(c)
@@ -619,6 +624,25 @@ def test_import_stock_rejects_non_commercial(app_env, monkeypatch):
     assert resp.get_json()["error"] == "licence_not_clear"
 
 
+def test_import_stock_rejects_ssrf_url(app_env, monkeypatch):
+    """A commercially-clean licence must NOT let an authed tenant point the
+    import at a private / metadata address: is_url_safe gates the fetch, so the
+    route answers 400 bad_media_url and never downloads."""
+    app, _wm, _ = app_env
+    import mediahub.web_research.safe_fetch as _sf
+
+    monkeypatch.setattr(_sf, "is_url_safe", lambda u: False)
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail("must not fetch unsafe host"))
+    with app.test_client() as c:
+        _signin(c)
+        resp = c.post(
+            "/api/media-library/import-stock",
+            json={"direct_url": "http://169.254.169.254/latest/meta-data/", "licence": "CC0"},
+        )
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "bad_media_url"
+
+
 def test_import_stock_requires_signin(app_env):
     app, _wm, _ = app_env
     with app.test_client() as c:
@@ -627,3 +651,45 @@ def test_import_stock_requires_signin(app_env):
             json={"direct_url": "https://example.org/x.jpg", "licence": "CC0"},
         )
     assert resp.status_code == 403
+
+
+def test_thumb_cache_evicts_oldest_past_cap(monkeypatch):
+    """The thumb cache is bounded: past the entry/size cap, oldest-mtime
+    entries are evicted first and the newest survive."""
+    import os
+    import time
+
+    monkeypatch.setattr(stock, "_THUMB_CACHE_MAX_FILES", 3)
+    d = stock._thumb_cache_dir()
+    now = time.time()
+    for i in range(3):
+        p = d / f"old{i}.jpg"
+        p.write_bytes(b"x" * 10)
+        os.utime(p, (now - 3600 * (10 - i), now - 3600 * (10 - i)))
+
+    stock._thumb_cache_put(stock._thumb_cache_key("https://cdn/new.jpg"), b"NEW", "image/jpeg")
+
+    remaining = sorted(f.name for f in d.iterdir())
+    assert len(remaining) == 3  # cap held
+    assert "old0.jpg" not in remaining  # oldest evicted
+    assert any(f.endswith(".jpg") and "old" not in f for f in remaining)  # new entry kept
+
+
+def test_thumb_cache_evicts_on_total_size_cap(monkeypatch):
+    import os
+    import time
+
+    monkeypatch.setattr(stock, "_THUMB_CACHE_MAX_BYTES", 150)
+    d = stock._thumb_cache_dir()
+    now = time.time()
+    oldest = d / "a.jpg"
+    oldest.write_bytes(b"x" * 60)
+    os.utime(oldest, (now - 7200, now - 7200))
+    newer = d / "b.jpg"
+    newer.write_bytes(b"y" * 60)
+    os.utime(newer, (now - 3600, now - 3600))
+
+    stock._thumb_cache_put(stock._thumb_cache_key("https://cdn/c.jpg"), b"z" * 60, "image/jpeg")
+
+    assert not oldest.exists()  # oldest evicted to satisfy the byte cap
+    assert newer.exists()

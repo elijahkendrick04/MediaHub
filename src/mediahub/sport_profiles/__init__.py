@@ -5,9 +5,10 @@ A *sport profile* says what a given sport should post: per post type, whether it
 is enabled, what data feeds it, which template set renders it, and how autonomous
 it may be by default. See ``docs/SPORT_PROFILES.md`` and ``docs/POST_TYPE_TAXONOMY.md``.
 
-This package is **non-breaking scaffolding** introduced by the roadmap rebuild
-(Phase 1 groundwork). It is intentionally NOT wired into the running pipeline
-yet — later roadmap phases consume it. Importing it has no runtime side effects.
+Consumed by the running product: ``content_engine/planner.py`` (plan builds),
+``club_platform/post_types.py`` and ``club_platform/format_catalog.py`` (per-sport
+post types / formats), and the web routes (sport selection, goals, calendar).
+Importing it has no runtime side effects.
 """
 
 from __future__ import annotations

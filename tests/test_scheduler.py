@@ -195,6 +195,24 @@ def test_interrupted_marking_does_not_refire(tmp_path):
     assert s.claim_run("t1", slot, "wC", db_path=db) is None
 
 
+# --- DATA_DIR resolution -----------------------------------------------------
+
+
+def test_default_db_path_follows_data_dir_set_after_import(tmp_path, monkeypatch):
+    """The default db path is resolved from DATA_DIR per call, never frozen at
+    import — a DATA_DIR exported after this module loads is still honoured."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    assert s._db_path() == tmp_path / "data.db"
+    task = s.create_task("late-env", "noop", "daily", "06:00")  # no db_path
+    assert (tmp_path / "data.db").exists()
+    assert any(t.id == task.id for t in s.list_tasks())
+
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(other))
+    assert s._db_path() == other / "data.db"
+
+
 # --- production wiring is inert under pytest --------------------------------
 
 

@@ -115,6 +115,22 @@ def test_successful_login_clears_failure_count(client):
 # ------------------------------------------------------ session rotation
 
 
+def test_rotating_xff_first_hop_cannot_dodge_rate_limit(client):
+    """Behind one trusted proxy the real client is the LAST X-Forwarded-For
+    hop — the first hop is attacker-supplied. Rotating it must land every
+    request in the SAME bucket and still 429 (ADR-0019's brute-force brake)."""
+    last = None
+    for i in range(12):
+        last = client.post(
+            "/login",
+            data={"email": f"u{i}@club.org", "password": "wrong-pass"},
+            # Attacker rotates the client-supplied hop; the proxy-appended
+            # (trusted, rightmost) hop stays the same real address.
+            headers={"X-Forwarded-For": f"10.0.{i}.{i}, 198.51.100.7"},
+        )
+    assert last.status_code == 429
+
+
 def test_session_rotated_on_login(client):
     _signup(client)
     client.get("/logout")
@@ -137,10 +153,30 @@ def test_totp_roundtrip_unit():
     now = time.time()
     code = _totp_code(secret, int(now // 30))
     assert totp_verify(secret, code, at=now)
-    assert totp_verify(secret, code, at=now + 29)  # ±1 step skew
     assert not totp_verify(secret, "000000", at=now) or code == "000000"
     assert not totp_verify(secret, "12345", at=now)  # wrong length
     assert not totp_verify("", code, at=now)
+    # ±1 step skew still honoured (fresh secret so the replay guard is cold).
+    secret2 = totp_generate_secret()
+    code2 = _totp_code(secret2, int(now // 30))
+    assert totp_verify(secret2, code2, at=now + 29)
+
+
+def test_totp_replay_within_window_rejected():
+    """RFC 6238 §5.2: the same code must never be accepted twice."""
+    from mediahub.web.auth import totp_generate_secret, totp_verify, _totp_code
+
+    secret = totp_generate_secret()
+    now = time.time()
+    counter = int(now // 30)
+    code = _totp_code(secret, counter)
+    assert totp_verify(secret, code, at=now)  # first use accepted
+    assert not totp_verify(secret, code, at=now)  # immediate replay rejected
+    assert not totp_verify(secret, code, at=now + 29)  # replay via skew rejected
+    # An older (previous-step) code is also refused once a newer one landed.
+    assert not totp_verify(secret, _totp_code(secret, counter - 1), at=now)
+    # The next time-step's code is still accepted.
+    assert totp_verify(secret, _totp_code(secret, counter + 1), at=now + 30)
 
 
 def test_totp_rfc6238_vector():
@@ -175,7 +211,9 @@ def test_2fa_enable_and_login_flow(client, tmp_path):
 
     r = client.post("/login/2fa", data={"totp": "000000"})
     assert r.status_code in (401, 429)
-    code = _totp_code(secret, int(time.time() // 30))
+    # Next-step code: the enable step consumed the current counter, and the
+    # replay guard (RFC 6238 §5.2) never accepts a counter twice.
+    code = _totp_code(secret, int(time.time() // 30) + 1)
     r = client.post("/login/2fa", data={"totp": code})
     assert r.status_code == 302
     with client.session_transaction() as sess:
@@ -195,8 +233,9 @@ def test_2fa_disable_requires_valid_code(client):
     )
     r = client.post("/account/2fa", data={"action": "disable", "totp": "999999"})
     assert r.status_code == 400
+    # Next-step code — the enable step consumed the current counter (replay guard).
     r = client.post(
         "/account/2fa",
-        data={"action": "disable", "totp": _totp_code(secret, int(time.time() // 30))},
+        data={"action": "disable", "totp": _totp_code(secret, int(time.time() // 30) + 1)},
     )
     assert r.status_code == 302

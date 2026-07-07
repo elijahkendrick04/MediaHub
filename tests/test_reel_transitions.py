@@ -101,7 +101,7 @@ def test_new_levers_are_in_the_vocabularies():
 def test_catalog_grew_well_past_the_thousand_floor():
     # The widened levers multiply the deterministic template catalog.
     assert sp.style_pack_count() > 1000
-    assert sp.template_count(A.list_archetypes()) > 10000
+    assert len(A.list_archetypes()) * sp.style_pack_count() > 10000
 
 
 def test_every_new_lever_renders_legibility_safe_and_brand_only():

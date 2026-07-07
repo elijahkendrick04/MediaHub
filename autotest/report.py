@@ -41,10 +41,14 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 # ``needs_disproof`` is a QUARANTINE state (council 2026-06-01): the coder
 # investigated the finding, completed cleanly, and DECLINED to edit (a likely
 # false-positive / already-correct behaviour). It is removed from the fix loop so
-# we stop the infinite-retry bleed, but it is NOT a close — it awaits a
-# deterministic ground-truth repro to either reopen (real) or confirm false. It is
-# fix-owned so the noisy live finder cannot silently reopen it; only a deliberate
-# ground-truth sweep or a human audit should.
+# we stop the infinite-retry bleed, but it is NOT a close. There is deliberately
+# NO automatic transition out of it today: resolution is a HUMAN audit (edit the
+# ledger status after checking the coder's recorded conclusion) — the accused
+# coder can never self-acquit, and the noisy live finder cannot silently reopen
+# it. A future ground-truth bridge could reopen/confirm entries whose
+# suspect/route exactly matches a ``ground_truth_regression``, but until that is
+# built the queue is manual; BUGS.md surfaces each entry's quarantine age so the
+# backlog cannot pile up unseen.
 FIX_OWNED_STATUSES = {"fixing", "fixed", "wontfix", "verified-fixed", "needs_disproof"}
 
 
@@ -556,9 +560,10 @@ def quarantine_needs_disproof(fingerprint: str, *, conclusion: str, coder_attemp
     DECLINED to change anything (a likely false-positive / already-correct
     behaviour). This removes the finding from the fix loop so we stop burning ~900s
     per never-ending retry, WITHOUT closing it (not ``wontfix`` — the accused coder
-    does not get to self-acquit): it awaits a deterministic ground-truth repro to
-    reopen (real) or confirm false. Records the coder's own conclusion for audit.
-    Returns False for an unknown fingerprint."""
+    does not get to self-acquit): it then waits for a HUMAN audit to reopen (real)
+    or confirm false — no automatic transition out of quarantine exists today
+    (see the FIX_OWNED_STATUSES note). Records the coder's own conclusion for
+    that audit. Returns False for an unknown fingerprint."""
     ledger = load_ledger()
     entry = ledger["bugs"].get(fingerprint)
     if not entry:
@@ -786,19 +791,25 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
         out.append("")
 
     if needs_disproof:
+        oldest = min((b.get("needs_disproof") or {}).get("at", "") or "?"
+                     for b in needs_disproof)
         out.append("<details><summary>🔬 Needs-disproof — coder investigated &amp; "
-                   f"declined to edit; awaiting a ground-truth repro ({len(needs_disproof)})</summary>")
+                   f"declined to edit; awaiting a HUMAN audit ({len(needs_disproof)}, "
+                   f"oldest quarantined `{oldest[:10]}`)</summary>")
         out.append("")
         out.append("_The coder completed cleanly but made no edits — a likely "
                    "false-positive / already-correct behaviour. Quarantined from the fix "
-                   "loop (no more retries) but NOT closed: a deterministic seeded sweep or "
-                   "a human audit reopens it if real._")
+                   "loop (no more retries) but NOT closed. Nothing transitions these "
+                   "automatically: a human audit (checking the coder's conclusion below) "
+                   "must reopen each one if real, or retire it as verified-fixed if "
+                   "false — this queue only shrinks by hand._")
         out.append("")
         for b in needs_disproof:
             nd = b.get("needs_disproof") or {}
             concl = " ".join((nd.get("coder_conclusion") or "").split())[:240]
             out.append(f"- [{b.get('severity', '?').upper()}] {b['title']} · "
-                       f"`{b['fingerprint']}` ({b.get('category', '?')}) — after "
+                       f"`{b['fingerprint']}` ({b.get('category', '?')}) — "
+                       f"quarantined `{(nd.get('at') or '?')[:10]}`, after "
                        f"{nd.get('coder_attempts', '?')} attempt(s): {concl}")
         out.append("")
         out.append("</details>")

@@ -2,11 +2,15 @@
 
 The rules around the AI. Three jobs:
 
-- **Quotas** — counts how much AI each club uses (captions, palettes, photo
-  tagging, …) and can put a cap on it. By default there are no caps — usage is
-  just counted and shown. If the operator sets a limit for a feature, going over
-  it gives an honest "quota reached" message instead of quietly running up a
-  cloud bill. The raw counting lives next door in
+- **Quotas** — counts how much AI each club uses and can put a cap on it. By
+  default there are no caps — usage is just counted and shown. If the operator
+  sets a limit for a feature, going over it gives an honest "quota reached"
+  message instead of quietly running up a cloud bill. Honest status: today the
+  caption, translate and generative-imagery surfaces are wired through the
+  meter; brand interpretation, palette resolution, media tagging, brand-DNA
+  capture and web research are registered in `features.py` but **not yet
+  metered** — a `MEDIAHUB_QUOTA_*` limit for those cannot enforce until their
+  routes go through `context.feature_scope`. The raw counting lives next door in
   [`observability/feature_quota.py`](../observability/feature_quota.py); the
   rules about limits live here in `quota.py`. The signed-in developer/operator
   is fully exempt — never blocked, and their test runs are never counted against

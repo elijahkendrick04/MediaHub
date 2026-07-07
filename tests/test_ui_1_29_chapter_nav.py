@@ -35,7 +35,9 @@ _SKIP_BROWSER = os.environ.get("MEDIAHUB_SKIP_BROWSER_TESTS", "").lower() in (
     "true",
     "yes",
 )
-_PINNED_CHROMIUM = Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+from tests._pw_chromium import resolve_prebaked_chromium
+
+_PINNED_CHROMIUM = resolve_prebaked_chromium()
 
 
 def _playwright_available() -> bool:
@@ -215,6 +217,11 @@ class TestStickyCSS:
         assert ".mh-chapter-nav { display: none; }" in home_html
         assert "@media (min-width: 1240px)" in home_html
         assert "main.wrap.mh-has-chapnav {" in home_html
+
+    def test_hidden_attribute_beats_desktop_display_block(self, home_html):
+        # The JS guard sets [hidden] when no chapter ids resolve; this rule must
+        # win over the >=1240px display:block or an empty rail would still show.
+        assert ".mh-chapter-nav[hidden] { display: none; }" in home_html
 
     def test_active_marker_styling(self, home_html):
         assert ".mh-chapter-nav a.is-active {" in home_html

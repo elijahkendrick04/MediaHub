@@ -227,7 +227,7 @@ def test_catalog_includes_layered_texture_packs_and_roundtrips():
         assert sp.style_pack_from_id(p.id) == p, f"{p.id}: did not round-trip"
     # The widened vocabulary keeps the catalog well past its floors.
     assert sp.style_pack_count() > 1000
-    assert sp.template_count(A.list_archetypes()) > 10000
+    assert len(A.list_archetypes()) * sp.style_pack_count() > 10000
 
 
 def test_layered_textures_reach_deterministic_selection():

@@ -25,6 +25,18 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 
+def _tiny_jpeg() -> bytes:
+    """A real, decodable JPEG — ingest now verifies uploads actually decode."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+_JPEG_BYTES = _tiny_jpeg()
+
+
 @pytest.fixture
 def two_org_app(tmp_path, monkeypatch):
     """A fresh Flask app with two saved profiles + the org gate disabled.
@@ -61,7 +73,7 @@ def _seed_asset(tmp_path: Path, profile_id: str, filename: str = "p.jpg") -> tup
     from mediahub.media_library.models import MediaAsset
 
     asset_path = tmp_path / f"{profile_id}_{filename}"
-    asset_path.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+    asset_path.write_bytes(_JPEG_BYTES)
     store = get_store()
     asset = MediaAsset(
         id="",
@@ -113,6 +125,34 @@ class TestFileServeIsolation:
             "is enforced at the run level — got 403 unexpectedly"
         )
 
+    def test_served_file_carries_image_mime_and_nosniff(self, two_org_app):
+        """Served library files must never trust the uploader: image/* type
+        derived from the stored file, nosniff, inline disposition."""
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            alpha_id, _ = _seed_asset(tmp_path, "alpha")
+            resp = c.get(f"/api/media-library/file/{alpha_id}")
+        assert resp.status_code == 200
+        assert resp.headers["Content-Type"].startswith("image/jpeg")
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["Content-Disposition"].startswith("inline;")
+
+    def test_legacy_active_content_downloads_never_renders(self, two_org_app):
+        """A pre-allowlist legacy asset with an active-content suffix (.svg)
+        must come back as a plain download, never image/svg+xml inline."""
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            svg_id, _ = _seed_asset(tmp_path, "alpha", filename="legacy.svg")
+            resp = c.get(f"/api/media-library/file/{svg_id}")
+        assert resp.status_code == 200
+        ctype = resp.headers["Content-Type"]
+        assert "svg" not in ctype and "html" not in ctype, ctype
+        assert ctype.startswith("application/octet-stream")
+        assert resp.headers["Content-Disposition"].startswith("attachment")
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+
 
 class TestListJsonIsolation:
     """The /api/media-library/list.json route must scope to the active profile."""
@@ -154,7 +194,7 @@ class TestUploadIsolation:
             resp = c.post(
                 "/api/media-library",
                 data={
-                    "file": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"), "x.jpg"),
+                    "file": (io.BytesIO(_JPEG_BYTES), "x.jpg"),
                     "profile_id": "alpha",
                     "description": "test asset",
                     "asset_type": "athlete_photo",
@@ -167,6 +207,80 @@ class TestUploadIsolation:
             f"got {resp.status_code}"
         )
 
+    def test_upload_disallowed_extension_rejected(self, two_org_app):
+        """Active-content types (.svg/.html) must never enter the library —
+        files are served back same-origin, so a stored SVG/HTML would be a
+        stored-XSS vector. Nothing may be left on disk after rejection."""
+        app, tmp_path = two_org_app
+        payloads = [
+            (b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>", "x.svg"),
+            (b"<html><script>alert(1)</script></html>", "x.html"),
+        ]
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            for raw, name in payloads:
+                resp = c.post(
+                    "/api/media-library",
+                    data={
+                        "file": (io.BytesIO(raw), name),
+                        "profile_id": "alpha",
+                        "asset_type": "athlete_photo",
+                    },
+                    content_type="multipart/form-data",
+                    headers={"Accept": "application/json"},
+                )
+                assert resp.status_code == 415, (name, resp.status_code, resp.data)
+                assert json.loads(resp.data)["error"] == "unsupported_type"
+        leftovers = list((tmp_path / "uploads_v4" / "media_library").rglob("*")) if (
+            tmp_path / "uploads_v4" / "media_library"
+        ).exists() else []
+        assert not [p for p in leftovers if p.is_file()], leftovers
+
+    def test_upload_renamed_nonimage_rejected(self, two_org_app):
+        """A non-image renamed to .jpg fails the decode check (415), and the
+        rejected file is not left orphaned on disk."""
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.post(
+                "/api/media-library",
+                data={
+                    "file": (io.BytesIO(b"<html><script>alert(1)</script></html>"), "x.jpg"),
+                    "profile_id": "alpha",
+                    "asset_type": "athlete_photo",
+                },
+                content_type="multipart/form-data",
+                headers={"Accept": "application/json"},
+            )
+        assert resp.status_code == 415, (resp.status_code, resp.data)
+        assert json.loads(resp.data)["error"] == "unreadable_photo"
+        lib_dir = tmp_path / "uploads_v4" / "media_library"
+        leftovers = [p for p in lib_dir.rglob("*") if p.is_file()] if lib_dir.exists() else []
+        assert not leftovers, leftovers
+
+    def test_upload_corrupt_heic_rejected_no_orphan(self, two_org_app):
+        """A corrupt/truncated .heic must 415 honestly (never 500) and must
+        not leave the saved asset_*.heic orphaned in the uploads dir."""
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.post(
+                "/api/media-library",
+                data={
+                    "file": (io.BytesIO(b"truncated-heic-bytes"), "IMG_0001.heic"),
+                    "profile_id": "alpha",
+                    "asset_type": "athlete_photo",
+                },
+                content_type="multipart/form-data",
+                headers={"Accept": "application/json"},
+            )
+        assert resp.status_code == 415, (resp.status_code, resp.data)
+        # Decoder present → unreadable bytes; decoder absent → heic support.
+        assert json.loads(resp.data)["error"] in ("unreadable_photo", "heic_unsupported")
+        lib_dir = tmp_path / "uploads_v4" / "media_library"
+        leftovers = [p for p in lib_dir.rglob("*") if p.is_file()] if lib_dir.exists() else []
+        assert not leftovers, leftovers
+
     def test_upload_to_foreign_profile_is_forbidden(self, two_org_app):
         app, _ = two_org_app
         with app.test_client() as c:
@@ -174,7 +288,7 @@ class TestUploadIsolation:
             resp = c.post(
                 "/api/media-library",
                 data={
-                    "file": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"), "x.jpg"),
+                    "file": (io.BytesIO(_JPEG_BYTES), "x.jpg"),
                     "profile_id": "beta",
                     "description": "should be blocked",
                     "asset_type": "athlete_photo",

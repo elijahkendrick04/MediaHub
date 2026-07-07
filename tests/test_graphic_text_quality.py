@@ -243,3 +243,50 @@ def test_surname_font_short_name_keeps_design_size():
     base = int(height * 0.30)
     # A short surname comfortably fits at the design cap — keep the drama.
     assert _surname_font_px("NG", width, height, base) == base
+
+
+# ---------------------------------------------------------------------------
+# render.py — weekend-numbers stat tiles never fabricate filler
+# ---------------------------------------------------------------------------
+
+
+class _TilesBrief:
+    def __init__(self, layers):
+        self.text_layers = layers
+
+
+def _tile_values(repl):
+    import re as _re
+
+    return _re.findall(r'class="num"[^>]*>([^<]*)<', repl["STAT_TILES"])
+
+
+def test_weekend_numbers_never_pads_fabricated_tiles():
+    from mediahub.graphic_renderer.render import _fill_weekend_numbers
+
+    brief = _TilesBrief({"result_value": "58.34", "meet_name": "Spring Open"})
+    repl = _fill_weekend_numbers(brief, 1080, 1350, {})
+    values = _tile_values(repl)
+    # Only real/derived cells — no "24 HOURS" / "✓ COMPLETE" / "★ HIGHLIGHT".
+    for fabricated in ("✓", "★", "24"):
+        assert fabricated not in values, f"fabricated filler tile leaked: {fabricated!r}"
+    assert "HOURS" not in repl["STAT_TILES"]
+    assert "HIGHLIGHT" not in repl["STAT_TILES"]
+    assert "58.34" in values
+
+
+def test_weekend_numbers_grid_sizes_to_actual_count():
+    from mediahub.graphic_renderer.render import _fill_weekend_numbers
+
+    brief = _TilesBrief({"result_value": "58.34"})
+    repl = _fill_weekend_numbers(brief, 1080, 1350, {})
+    assert repl["STAT_TILES"].count("stat-tile") == 1
+
+
+def test_weekend_numbers_real_stats_untouched():
+    from mediahub.graphic_renderer.render import _fill_weekend_numbers
+
+    brief = _TilesBrief({"stat_pbs": "7", "stat_medals": "3"})
+    repl = _fill_weekend_numbers(brief, 1080, 1350, {})
+    values = _tile_values(repl)
+    assert values == ["7", "3"]

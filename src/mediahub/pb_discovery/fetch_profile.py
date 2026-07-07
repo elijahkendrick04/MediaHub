@@ -16,6 +16,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -47,36 +48,66 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
+_MAX_REDIRECT_HOPS = 5
+
+_FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; SwimPBDiscovery/7.5; " "+https://github.com/swim-media-hub)"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse automatic redirects — each hop is re-validated by the caller."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
 def _fetch_raw(url: str, timeout: int = 12) -> Optional[bytes]:
     """Fetch raw bytes from a URL via urllib.
 
-    SSRF-guarded: candidate URLs can come from web search and (when enabled) a
-    model, so refuse any URL that resolves to a private / loopback / link-local
-    / cloud-metadata address before opening a connection.
+    SSRF-guarded and FAIL-CLOSED: candidate URLs can come from web search and
+    (when enabled) a model, so refuse any URL that resolves to a private /
+    loopback / link-local / cloud-metadata address before opening a
+    connection — and if the guard itself cannot run, refuse the fetch rather
+    than proceeding unchecked. Redirects are never auto-followed: each hop is
+    re-validated with the same guard (urllib's default auto-follow would let a
+    public host redirect to an internal/metadata address past the initial
+    check).
     """
     try:
         from mediahub.web_research.safe_fetch import is_url_safe
-
-        if not is_url_safe(url):
-            return None
     except Exception:
-        pass
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (compatible; SwimPBDiscovery/7.5; "
-                    "+https://github.com/swim-media-hub)"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-GB,en;q=0.9",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read(500_000)
-    except (urllib.error.URLError, OSError, Exception):
-        return None
+        return None  # guard unavailable — fail closed, never fetch unchecked
+
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    current = url
+    for _ in range(_MAX_REDIRECT_HOPS):
+        try:
+            if not is_url_safe(current):
+                return None
+        except Exception:
+            return None  # guard errored — fail closed
+        try:
+            req = urllib.request.Request(current, headers=dict(_FETCH_HEADERS))
+            with opener.open(req, timeout=timeout) as resp:
+                return resp.read(500_000)
+        except urllib.error.HTTPError as exc:
+            # With auto-redirects disabled, a 3xx surfaces as HTTPError here;
+            # loop back so the next hop goes through the SSRF guard too.
+            if exc.code in (301, 302, 303, 307, 308):
+                loc = (exc.headers.get("Location") if exc.headers else None) or ""
+                if not loc:
+                    return None
+                current = urllib.parse.urljoin(current, loc)
+                continue
+            return None
+        except (urllib.error.URLError, OSError, Exception):
+            return None
+    return None  # too many redirects
 
 
 def _parse_html(raw_bytes: bytes, url: str) -> ProfilePage:

@@ -25,10 +25,17 @@
 
   function setStatus(text) { statusEl.textContent = text || ""; }
 
+  // A transient network blip must not abandon a still-running server job (the
+  // user's retry would kick a brand-new job): retry the status poll a few
+  // times with backoff before declaring the job lost.
+  var POLL_MAX_RETRIES = 3;
+  var pollRetries = 0;
+
   function poll(pollUrl) {
     fetch(pollUrl, { headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
       .then(function (j) {
+        pollRetries = 0; // any successful poll resets the retry budget
         if (j.status === "running") {
           setStatus("Exporting… " + (j.done || 0) + " / " + (j.total || "?"));
           setTimeout(function () { poll(pollUrl); }, 1200);
@@ -46,6 +53,13 @@
         }
       })
       .catch(function () {
+        if (pollRetries < POLL_MAX_RETRIES) {
+          pollRetries += 1;
+          var delay = 1000 * Math.pow(2, pollRetries); // 2s / 4s / 8s
+          setStatus("Connection hiccup — retrying… (" + pollRetries + "/" + POLL_MAX_RETRIES + ")");
+          setTimeout(function () { poll(pollUrl); }, delay);
+          return;
+        }
         startBtn.disabled = false;
         setStatus("Lost contact with the export job — try again.");
       });
@@ -93,6 +107,7 @@
     if (!formats.length) { setStatus("Pick at least one format."); return; }
     startBtn.disabled = true;
     resultEl.innerHTML = "";
+    pollRetries = 0;
     setStatus("Starting…");
     fetch(kickUrl, {
       method: "POST",

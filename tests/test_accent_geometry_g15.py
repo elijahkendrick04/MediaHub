@@ -60,7 +60,7 @@ def test_catalog_still_clears_the_thousand_template_floor():
     # The product requirement: ≥1000 unique templates remain available; the new
     # levers only multiply the deterministic catalog further.
     assert sp.style_pack_count() > 1000
-    assert sp.template_count(A.list_archetypes()) >= 1000
+    assert len(A.list_archetypes()) * sp.style_pack_count() >= 1000
     # ids stay unique after the expansion (no accidental collision)
     ids = [p.id for p in sp.list_style_packs()]
     assert len(ids) == len(set(ids))

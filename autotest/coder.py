@@ -53,10 +53,6 @@ def backend() -> str:
     return pref if pref in ("gemini", "claude") else "claude"
 
 
-def available() -> bool:
-    return backend() != "none"
-
-
 def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = None) -> tuple[bool, str]:
     """Drive the configured agentic coder headlessly to edit the repo. Returns
     (ok, output_tail). Never raises."""
@@ -73,7 +69,7 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         # Required for headless/automated runs in an untrusted checkout.
         env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
         cmd = ["gemini", "-p", prompt, "-m", model, *flags]
-    elif be == "claude":
+    else:  # "claude" — backend() only ever returns "gemini" or "claude"
         if not shutil.which("claude"):
             return False, "claude CLI not found (npm i -g @anthropic-ai/claude-code)"
         # Auth is read from the environment by the CLI: CLAUDE_CODE_OAUTH_TOKEN
@@ -106,8 +102,6 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         model = os.environ.get("AUTOTEST_CODER_MODEL_CLAUDE", "").strip()
         if model:
             cmd += ["--model", model]
-    else:
-        return False, "no coding agent available (install gemini-cli or claude-code)"
 
     try:
         # stdin=DEVNULL is critical: without it claude inherits a non-EOF pipe in
