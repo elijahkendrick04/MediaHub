@@ -393,12 +393,12 @@ def test_meet_reel_declares_outro_and_honest_stats():
     assert ".place" not in stats_fn
 
 
-def test_reel_duration_contract_unchanged():
-    """The Python duration maths is the reel's public contract — the outro
-    second was always budgeted (REEL_OUTRO_SEC); the TSX now renders a real
-    outro scene inside the same total, so cached durations stay valid."""
-    assert motion.reel_duration_for(3) == 15.0
-    assert motion.REEL_OUTRO_SEC == 1.0
+def test_reel_duration_contract():
+    """The Python duration maths is the reel's public contract. M17 extended
+    the default outro to 2.5s so the CTA close is legibly on screen; the TSX
+    rhythm default and the ffmpeg carve mirror the same seconds."""
+    assert motion.reel_duration_for(3) == 16.5
+    assert motion.REEL_OUTRO_SEC == 2.5
 
 
 # ---------------------------------------------------------------------------

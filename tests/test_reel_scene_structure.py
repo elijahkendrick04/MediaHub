@@ -55,22 +55,22 @@ def _card(i: int) -> dict:
 
 @pytest.mark.parametrize(
     "n,expected",
-    [(1, 7.0), (2, 11.0), (3, 15.0), (4, 19.0), (5, 23.0)],
+    [(1, 8.5), (2, 12.5), (3, 16.5), (4, 20.5), (5, 24.5)],
 )
 def test_reel_duration_follows_ranked_moments(n, expected):
     assert motion.reel_duration_for(n) == expected
 
 
 def test_reel_duration_clamps_to_route_range():
-    assert motion.reel_duration_for(0) == 7.0  # never a zero-length reel
-    assert motion.reel_duration_for(99) == 23.0  # capped at the 5-card max
+    assert motion.reel_duration_for(0) == 8.5  # never a zero-length reel
+    assert motion.reel_duration_for(99) == 24.5  # capped at the 5-card max
     durations = [motion.reel_duration_for(n) for n in range(1, 6)]
     assert durations == sorted(durations)  # strictly grows with moments
 
 
-def test_three_card_reel_keeps_historic_fifteen_seconds():
-    """Back-compat: the old fixed default was 15s for the top-3 reel."""
-    assert motion.reel_duration_for(3) == 15.0
+def test_three_card_reel_default_total():
+    """2s cover + 3×4s beats + the M17 2.5s legible outro."""
+    assert motion.reel_duration_for(3) == 16.5
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,9 @@ def _render_reel_capture(tmp_path, monkeypatch, cards, **kwargs):
 
 def test_reel_duration_is_data_driven_by_default(tmp_path, monkeypatch):
     one, _ = _render_reel_capture(tmp_path, monkeypatch, [_card(1)])
-    assert one["duration_sec"] == 7.0
+    assert one["duration_sec"] == 8.5
     four, _ = _render_reel_capture(tmp_path, monkeypatch, [_card(i) for i in range(4)])
-    assert four["duration_sec"] == 19.0
+    assert four["duration_sec"] == 20.5
     assert len(four["props"]["cards"]) == 4
 
 

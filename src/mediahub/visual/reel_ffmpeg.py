@@ -881,6 +881,7 @@ def _finalise(
     duration_sec: float = 6.0,
     audio_plan: Optional[dict] = None,
     n_cards: int = 0,
+    manifest: Optional[dict] = None,
     rhythm: Optional[dict] = None,
     audio_notes: Optional[dict] = None,
 ) -> Path:
@@ -890,10 +891,14 @@ def _finalise(
     shutil.move(str(tmp_mp4), str(cached))
     # Same finishing pass as the Remotion engine: planned audio (honest
     # silent fallback, beat grid moved by any custom rhythm) + the
-    # poster-frame sidecar, then publish.
-    from mediahub.visual.motion import _finish_cached_video, _publish
+    # poster-frame sidecar, then the explainability manifest (M22 — the
+    # ffmpeg engine writes the same sidecar shape the Remotion paths write,
+    # so an ffmpeg MP4 is never an unexplained "legacy render"), then
+    # publish (which ships the sidecars along).
+    from mediahub.visual.audio_mux import poster_path_for
+    from mediahub.visual.motion import _finish_cached_video, _publish, _write_render_manifest
 
-    _finish_cached_video(
+    audio_rec = _finish_cached_video(
         cached,
         kind=kind,
         plan=audio_plan,
@@ -902,6 +907,15 @@ def _finalise(
         rhythm=rhythm,
         audio_notes=audio_notes,
     )
+    if manifest is not None:
+        _write_render_manifest(
+            cached,
+            {
+                **manifest,
+                "audio": audio_rec,
+                "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
+            },
+        )
     return _publish(cached, out_path)
 
 
@@ -988,6 +1002,27 @@ def render_story_card_from_props(
                 height=height,
             )
         )
+        # M22 — the same explainability shape the Remotion story path writes,
+        # plus honest engine notes (a reduced-motion render must say so).
+        from mediahub.visual.motion import _caption_manifest, _card_manifest_axes
+
+        manifest = {
+            "kind": "story",
+            "engine": "ffmpeg",
+            "format": format_name,
+            "size": [width, height],
+            "duration_sec": duration_sec,
+            "card": _card_manifest_axes(card_props),
+            "kb_variant": variant,
+            "captions": _caption_manifest(str(card_props.get("captionsJson") or "")),
+            "notes": {
+                "engine_note": (
+                    "Rendered by the reduced-motion FFmpeg engine: the card's own "
+                    "approved still with a deterministic camera move — no text "
+                    "choreography or count-up."
+                ),
+            },
+        }
         return _finalise(
             tmp_mp4,
             cached,
@@ -995,6 +1030,7 @@ def render_story_card_from_props(
             kind="story",
             duration_sec=duration_sec,
             audio_plan=audio_plan,
+            manifest=manifest,
         )
 
 
@@ -1126,17 +1162,47 @@ def render_meet_reel_from_props(
 
         seg_durations = reel_segment_durations(len(cards_props), duration_sec, rhythm=rhythm)
         tmp_mp4 = work / "reel.mp4"
+        kb_variants = _reel_kb_variants(cards_props)
+        transitions = _reel_transition_names(cards_props)
         _run_ffmpeg(
             reel_ffmpeg_args(
                 stills,
                 tmp_mp4,
                 seg_durations,
-                kb_variants=_reel_kb_variants(cards_props),
-                transitions=_reel_transition_names(cards_props),
+                kb_variants=kb_variants,
+                transitions=transitions,
                 width=width,
                 height=height,
             )
         )
+        # M22 — the same explainability shape the Remotion reel path writes,
+        # plus honest capability notes: this engine renders pre-baked stills,
+        # so reel captions are unsupported and the cover's stat chips are
+        # static (no count-up).
+        from mediahub.visual.motion import _card_manifest_axes
+
+        manifest = {
+            "kind": "reel",
+            "engine": "ffmpeg",
+            "format": format_name,
+            "size": [width, height],
+            "duration_sec": duration_sec,
+            "meet_name": meet_name,
+            "rhythm": rhythm or "default",
+            "cards": [_card_manifest_axes(cp) for cp in cards_props],
+            "kb_variants": kb_variants,
+            "transitions": transitions,
+            "captions": {"status": "unsupported-on-engine"},
+            "notes": {
+                "captions": "unsupported-on-engine",
+                "stat_chips": "static-cover",
+                "engine_note": (
+                    "Rendered by the reduced-motion FFmpeg engine: each beat is "
+                    "the card's own approved still with a deterministic camera "
+                    "move — no text choreography, count-up, or burned captions."
+                ),
+            },
+        }
         return _finalise(
             tmp_mp4,
             cached,
@@ -1145,6 +1211,7 @@ def render_meet_reel_from_props(
             duration_sec=duration_sec,
             audio_plan=audio_plan,
             n_cards=len(cards_props),
+            manifest=manifest,
             rhythm=rhythm,
             audio_notes=audio_notes,
         )

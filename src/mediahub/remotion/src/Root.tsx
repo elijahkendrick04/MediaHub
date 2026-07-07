@@ -37,6 +37,7 @@ const defaultCard = {
   photoTreatment: "",
   photoSrc: "",
   photoPos: "",
+  photoSrcs: [] as string[],
   cutoutSrc: "",
   archetype: "",
   heroStat: "",
@@ -49,6 +50,7 @@ const defaultCard = {
   roleAccent: "",
   roleOnGround: "",
   captionsJson: "",
+  inReel: false,
   meshBg: "",
 };
 
@@ -82,6 +84,15 @@ export const RemotionRoot: React.FC = () => {
           // real sponsor / next-meet label when the club has one.
           sponsor: "",
           nextMeet: "",
+          // M18 brand-true cover/outro props. Blank by default → the legacy
+          // accent-on-primary pairing; production resolves them Python-side.
+          coverRoleGround: "",
+          coverRoleSurface: "",
+          coverRoleAccent: "",
+          coverRoleOnGround: "",
+          coverTypography: "",
+          coverPhotoSrc: "",
+          coverPhotoPos: "",
         }}
       />
     </>

@@ -225,7 +225,10 @@ def test_card_cut_times_mirror_the_reel_structure():
 def test_card_cut_times_scale_with_an_overridden_duration():
     base = audio_mux.card_cut_times(15.0, 3)
     doubled = audio_mux.card_cut_times(30.0, 3)
-    assert doubled == [round(b * 2, 3) for b in base], "cuts scale with the total"
+    # approx: each grid is independently rounded to 3 dp after scaling.
+    assert doubled == pytest.approx([b * 2 for b in base], abs=2e-3), (
+        "cuts scale with the total"
+    )
 
 
 def test_card_cut_times_follow_a_custom_rhythm():

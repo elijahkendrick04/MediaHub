@@ -58,8 +58,11 @@ def _cover_outro_region() -> str:
 class TestCoverVariants:
     def test_four_distinct_cover_variants_exist(self):
         src = _reel_src()
-        assert 'export type CoverVariant = "stack" | "masthead" | "spotlight" | "banner"' in src
-        for comp in ("StackCover", "MastheadCover", "SpotlightCover", "BannerCover"):
+        assert (
+            'export type CoverVariant = "stack" | "masthead" | "spotlight" | "banner" | "photo"'
+            in src
+        )
+        for comp in ("StackCover", "MastheadCover", "SpotlightCover", "BannerCover", "PhotoCover"):
             assert f"const {comp}" in src, f"cover variant component {comp} missing"
 
     def test_cover_is_chosen_deterministically_from_a_per_meet_seed(self):
