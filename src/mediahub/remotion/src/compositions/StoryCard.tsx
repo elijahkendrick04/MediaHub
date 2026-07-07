@@ -16,7 +16,12 @@ import {
   EXTRA_SCENES,
   EXTRA_SPRINGS,
 } from "./sprint/registry";
-import { photoGradeFilterFor } from "./sprint/layers/photo_filters";
+import {
+  PhotoFilterDefs,
+  photoGradeFilterFor,
+  photoHalftoneMaskFor,
+} from "./sprint/layers/photo_filters";
+import { StatChipsBlock } from "./sprint/sceneKit";
 
 // Exported for MeetReel: ONE schema for a card's props on both compositions,
 // so a field added here can never be silently zod-stripped on the reel path.
@@ -57,9 +62,63 @@ export const cardSchema = z.object({
   // inlined by motion.py as a PNG data URI. The cutout sprint layer
   // (sprint/layers/cutout.tsx) composites this as a parallax FOREGROUND plane
   // over the scrimmed full-bleed background photo, giving the card real depth.
-  // Empty = no prepared cutout (no sourced photo, or no background remover
-  // available), and the layer no-ops — byte-identical to the pre-R1.9 render.
+  // Empty = no prepared cutout (no sourced photo, no background remover,
+  // matte-gate rejection, or a "photo"-mode archetype) — the consumers no-op,
+  // byte-identical to the pre-R1.9 render.
   cutoutSrc: z.string().default(""),
+  // STILLS-2 / M8 parity: how this card's archetype consumes the athlete
+  // photo. "photo" = the still shows the ORIGINAL photograph (rectangular
+  // window / full-bleed stage) — the cutout plane must not composite. "" (and
+  // "cutout") keep the legacy R1.9 behaviour. Set by motion.py only when it
+  // resolved AND the card carries a photo, so cache keys stay stable.
+  photoMode: z.string().default(""),
+  // M10 crop-intent mirror: the still's --mh-photo-scale zoom (tight_portrait
+  // — alpha-bbox-derived, 1.06–1.30). Applied as a static wrapper scale with
+  // transform-origin at the saliency focus, multiplying into the cinematic
+  // push-in. 0 = no crop zoom (byte-identical).
+  photoScale: z.number().default(0),
+  // M12 layered-depth twins: the brief's decoration_strength for the
+  // role-coloured cutout depth filter. Only attached when non-default, so the
+  // schema default mirrors the still's 0.5 fallback.
+  decorationStrength: z.number().default(0.5),
+  // M10 true brand duotone — the exact ink hexes the still's SVG filter ramps
+  // between (shadow = render.darken(--mh-primary, 0.30), highlight = the
+  // resolved --mh-accent, medal tints included), computed Python-side by the
+  // same maths so the two surfaces can never drift. Empty = no duotone.
+  duotoneShadow: z.string().default(""),
+  duotoneHighlight: z.string().default(""),
+  // M10 real halftone — the mask tile px (round(14 + 18·decoration_strength),
+  // the still's _v2_photo_treatment_assets). 0 = no halftone.
+  halftoneTile: z.number().default(0),
+  // M11 data weight — the still's secondary-stat chip row (label/value pairs
+  // already selected + trimmed by the still's own tables) and the honest
+  // proportional PB bars, with the exact ink hex the still's bay uses.
+  // Empty/null = the slots collapse (byte-identical undirected cards).
+  statChips: z.array(z.object({ label: z.string(), value: z.string() })).default([]),
+  statInk: z.string().default(""),
+  pbBars: z
+    .object({
+      prev: z.string(),
+      now: z.string(),
+      nowPct: z.number(),
+      caption: z.string(),
+    })
+    .nullable()
+    .default(null),
+  // M12 band_break placement — computed Python-side from the still's maths
+  // (render._band_top_fraction + the stage-relative overlap fade stops) so
+  // both surfaces break the band at identical pixels. Defaults mirror the
+  // still template's CSS fallbacks (62% / 58% / 66%).
+  bandTopPct: z.number().default(62),
+  breakSolidPct: z.number().default(58),
+  breakFadePct: z.number().default(66),
+  // The resolved --mh-on-surface ink for archetypes whose band sits on the
+  // surface role (poster_name_behind). "" = fall back to roleOnGround.
+  roleOnSurface: z.string().default(""),
+  // The still's resolved --mh-outline hairline (a translucent on-colour),
+  // passed whenever a consumer renders it (stat chips, band_break's band
+  // underline) so no colour literal ever lives in the TSX.
+  roleOutline: z.string().default(""),
   // M16: true when this card renders as a beat INSIDE a meet reel. The reel
   // sets it in the TSX itself (never from Python, so cache keys are
   // untouched); it suppresses the story's closing self-fade because in a reel
@@ -947,27 +1006,51 @@ const PhotoLayer: React.FC<{ ctx: SceneCtx; scrim?: "bottom" | "full" }> = ({
   }
   // R1.10 photo grade (duotone/halftone/vignette) — photo-element-only, the
   // still's `_photo_treatment_css` scope. "" (no grade) leaves the style
-  // byte-identical.
+  // byte-identical. The exact M10 mirrors (duotone SVG filter / halftone
+  // mask) take over when motion.py passed their parameters.
   const grade = photoGradeFilterFor(card, frame, fps);
+  const mask = photoHalftoneMaskFor(card);
+  // M10 crop-intent mirror: the still's --mh-photo-scale zoom, applied on a
+  // static wrapper (transform-origin = the saliency focus) so it multiplies
+  // into the cinematic push-in without fighting the img's camera transform.
+  const cropScale = card.photoScale && card.photoScale > 1 ? card.photoScale : 1;
+  const img = (
+    <img
+      src={card.photoSrc}
+      alt=""
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        objectPosition: card.photoPos || "center 28%",
+        // M15 — the seed-chosen camera move: slow push plus (for the drift
+        // variants) a lateral travel in % of the photo's own box, small
+        // enough that the saliency framing always holds.
+        transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+        ...(grade ? { filter: grade } : {}),
+        ...(mask ?? {}),
+      }}
+    />
+  );
   return (
     <>
-      <img
-        src={card.photoSrc}
-        alt=""
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          objectPosition: card.photoPos || "center 28%",
-          // M15 — the seed-chosen camera move: slow push plus (for the drift
-          // variants) a lateral travel in % of the photo's own box, small
-          // enough that the saliency framing always holds.
-          transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
-          ...(grade ? { filter: grade } : {}),
-        }}
-      />
+      <PhotoFilterDefs card={card} />
+      {cropScale > 1 ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transform: `scale(${cropScale})`,
+            transformOrigin: card.photoPos || "center 28%",
+          }}
+        >
+          {img}
+        </div>
+      ) : (
+        img
+      )}
       <div
         style={{
           position: "absolute",
@@ -2239,6 +2322,10 @@ const GridScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
             </div>
           );
         })}
+        {/* M11 parity — the still's secondary-stat chips + honest PB bars
+            flow below the tiles (editorial_numbers_grid / stat_stack_sidebar);
+            both collapse to nothing when the props are absent. */}
+        <StatChipsBlock ctx={ctx} />
       </div>
 
       <BottomStrip ctx={ctx} />
@@ -2518,6 +2605,12 @@ const SplitScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
         }}
       >
         {ctx.event}
+      </div>
+
+      {/* M11 parity — triptych_progression's context-bay stat chips (the
+          still's {{STAT_CHIPS}} slot); collapses when the props are absent. */}
+      <div style={{ position: "absolute", left: 80, top: height * 0.68, width: width * 0.52 }}>
+        <StatChipsBlock ctx={ctx} />
       </div>
 
       {/* Result — on the wedge (right, lower). */}

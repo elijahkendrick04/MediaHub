@@ -78,7 +78,13 @@ def _storycard_src() -> str:
 
 
 class _StubRemover:
-    """A background remover that genuinely produces an alpha PNG."""
+    """A background remover that genuinely produces a plausible alpha matte.
+
+    The subject is a single bottom-anchored blob (~28% coverage, one connected
+    component, bottom-edge contact only) so it PASSES the M14 matte gate the
+    parity pass wired into motion's cutout resolution — a full-rectangle
+    passthrough would now be honestly rejected (see the gate tests below).
+    """
 
     def __init__(self) -> None:
         self.calls = 0
@@ -86,6 +92,28 @@ class _StubRemover:
 
     def is_available(self) -> bool:
         return self.available
+
+    def remove(self, src_path: str, dst_path: str) -> str:
+        self.calls += 1
+        from PIL import Image, ImageDraw
+
+        im = Image.new("RGBA", (600, 800), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(im)
+        # A person-ish silhouette: torso column touching the bottom edge.
+        draw.rectangle([200, 320, 400, 800], fill=(20, 60, 140, 255))
+        draw.ellipse([230, 180, 370, 340], fill=(20, 60, 140, 255))
+        im.save(dst_path, "PNG")
+        return dst_path
+
+
+class _PassthroughRemover:
+    """A dishonest 'remover' that returns the whole opaque rectangle."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def is_available(self) -> bool:
+        return True
 
     def remove(self, src_path: str, dst_path: str) -> str:
         self.calls += 1
@@ -202,6 +230,42 @@ def test_cutout_never_raises_on_provider_error(photo_brief, monkeypatch):
 
     monkeypatch.setattr("mediahub.media_ai.providers.get_bg_remover", lambda: _Boom())
     assert motion._cutout_data_uri_for_brief(photo_brief.brief) == ""
+
+
+# ---------------------------------------------------------------------------
+# Matte-gate parity (still ↔ motion): the SAME M14 gate the still runs
+# ---------------------------------------------------------------------------
+
+
+def test_matte_gate_rejects_a_passthrough_rectangle(photo_brief, monkeypatch):
+    """A full-rectangle 'cutout' (the background never removed) is the exact
+    matte the still's M14 gate rejects — motion must reject it identically and
+    fall back to the original-photo path, never a fake silhouette."""
+    remover = _PassthroughRemover()
+    monkeypatch.setattr("mediahub.media_ai.providers.get_bg_remover", lambda: remover)
+    assert motion._cutout_data_uri_for_brief(photo_brief.brief) == ""
+    assert remover.calls == 1
+
+
+def test_matte_gate_rejection_is_measured_once(photo_brief, monkeypatch):
+    """A rejection persists a .rejected.json marker beside the would-be cut,
+    so a bad matte is measured once — not re-matted every render (the still's
+    exact marker behaviour)."""
+    remover = _PassthroughRemover()
+    monkeypatch.setattr("mediahub.media_ai.providers.get_bg_remover", lambda: remover)
+    assert motion._cutout_data_uri_for_brief(photo_brief.brief) == ""
+    assert motion._cutout_data_uri_for_brief(photo_brief.brief) == ""
+    assert remover.calls == 1  # the second call short-circuits on the marker
+    markers = list((motion._cutout_cache_dir()).glob("*.rejected.json"))
+    assert markers, "the rejection must be persisted beside the would-be cut"
+
+
+def test_cutout_for_brief_returns_the_cut_path(photo_brief):
+    """The full-res cut path rides along for the band_break placement maths
+    (render._band_top_fraction) so both surfaces break at identical pixels."""
+    uri, cut_path = motion._cutout_for_brief(photo_brief.brief)
+    assert uri.startswith("data:image/png;base64,")
+    assert cut_path is not None and Path(cut_path).exists()
 
 
 def test_manifest_records_has_cutout_false_without_photo():

@@ -388,11 +388,19 @@ def test_subtitles_off_keeps_cache_key_byte_identical(tmp_path, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_REEL_MUSIC_DIR", raising=False)
     with mock.patch.object(motion, "_run_remotion", side_effect=_fake_run):
         motion.render_story_card(_card(1), BRAND, tmp_path / "out" / "s.mp4")
-    # The historic (pre-R1.3) key: card props with no captionsJson.
+    # The captions-off key: card props with no captionsJson. (The payload has
+    # carried the story composition revision since Phase C/M15 — same shape
+    # test_motion.py pins — so the contract here is purely "no caption field".)
     brand_dict = motion._brand_to_dict(BRAND)
     card_dict = motion._card_to_props(_card(1), variation_seed=0, brief=None, brand_kit=BRAND)
     expected = motion._content_hash(
-        {"card": card_dict, "brand": brand_dict, "duration": 6.0, "size": [1080, 1920]},
+        {
+            "card": card_dict,
+            "brand": brand_dict,
+            "duration": 6.0,
+            "size": [1080, 1920],
+            "rev": motion.STORY_COMPOSITION_REVISION,
+        },
         kind="story",
     )
     assert (motion._cache_dir() / f"{expected}.mp4").exists()

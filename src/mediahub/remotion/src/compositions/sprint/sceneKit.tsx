@@ -23,8 +23,13 @@
  * touching the shared composition file.
  */
 import React from "react";
+import { Easing, interpolate, useVideoConfig } from "remotion";
 import type { SceneCtx } from "./registry";
-import { photoGradeFilterFor } from "./layers/photo_filters";
+import {
+  PhotoFilterDefs,
+  photoGradeFilterFor,
+  photoHalftoneMaskFor,
+} from "./layers/photo_filters";
 
 // Append an 8-bit alpha to a #rrggbb role hex (the StoryCard scrim precedent,
 // e.g. `${roles.ground}B0`) — a named helper for scenes that build their own
@@ -195,7 +200,13 @@ export const PhotoFill: React.FC<{
     return null;
   }
   // R1.10 photo grade — photo-element-only, exactly the PhotoLayer precedent.
+  // The exact M10 mirrors (duotone SVG filter / halftone mask) take over when
+  // motion.py passed their parameters.
   const grade = photoGradeFilterFor(card, frame, fps);
+  const mask = photoHalftoneMaskFor(card);
+  // M10 crop-intent mirror — static wrapper scale at the saliency focus, so
+  // it multiplies into the camera push without fighting the img transform.
+  const cropScale = card.photoScale && card.photoScale > 1 ? card.photoScale : 1;
   const g = roles.ground;
   const boost = Math.round(Math.max(0, Math.min(1, strength)) * 40)
     .toString(16)
@@ -210,27 +221,234 @@ export const PhotoFill: React.FC<{
           : scrim === "none"
             ? `${g}${boost}`
             : `linear-gradient(180deg, ${g}40 0%, ${g}B0 55%, ${g}F0 100%)`;
+  const img = (
+    <img
+      src={card.photoSrc}
+      alt=""
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        objectPosition: card.photoPos || "center 28%",
+        // M15 — the shared seed-chosen camera move (push + lateral drift).
+        transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
+        ...(grade ? { filter: grade } : {}),
+        ...(mask ?? {}),
+      }}
+    />
+  );
   return (
     <>
-      <img
-        src={card.photoSrc}
-        alt=""
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          objectPosition: card.photoPos || "center 28%",
-          // M15 — the shared seed-chosen camera move (push + lateral drift).
-          transform: `translate(${anim.photoDriftX}%, ${anim.photoDriftY}%) scale(${anim.photoScale})`,
-          ...(grade ? { filter: grade } : {}),
-        }}
-      />
+      <PhotoFilterDefs card={card} />
+      {cropScale > 1 ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transform: `scale(${cropScale})`,
+            transformOrigin: card.photoPos || "center 28%",
+          }}
+        >
+          {img}
+        </div>
+      ) : (
+        img
+      )}
       <div style={{ position: "absolute", inset: 0, background: gradient }} />
       {boost !== "00" ? (
         <div style={{ position: "absolute", inset: 0, background: `${g}${boost}` }} />
       ) : null}
     </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// M11 parity — secondary-stat chips + honest proportional PB bars.
+//
+// The motion twin of the still's _stat_chips_html / _pb_bars_html: motion.py
+// already ran the still's own selection (secondary_stats ∩ hero_stat_options,
+// hero-line fact skipped, label-trimmed values, cap 4) and passes the finished
+// label/value pairs plus the exact ink hex the still's bay uses (`statInk`),
+// so this component only mirrors the GEOMETRY (the continuity grammar): a 1px
+// outline chip of Inter-caps label over JetBrains-Mono tnum value, and the
+// zero-based proportional before/after bars. Renders null when the card
+// carries neither prop — undirected cards stay byte-identical.
+//
+// Beat phase: the chips cascade in on the chip channel late in the build
+// (stagger by importance, whole sequence < 15 frames); the NOW bar draws to
+// its honest width through the early breathe and holds.
+// ---------------------------------------------------------------------------
+
+export const StatChipsBlock: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
+  const { card, roles, anim, ts, frame, fps } = ctx;
+  const { durationInFrames } = useVideoConfig();
+  const chips = (card.statChips || []).filter((c) => c && c.label && c.value);
+  const bars = card.pbBars || null;
+  if (chips.length === 0 && !bars) {
+    return null;
+  }
+  const ink = card.statInk || roles.onGround;
+  // The still's hairline --mh-outline, resolved Python-side and passed on the
+  // props (motion.py attaches it whenever chips/bars attach). Fallback: a
+  // translucent wash of the resolved ink role — never an invented colour.
+  const outline = card.roleOutline || withAlpha(ink, 0.2);
+  const at = (f: number) => 3 + (durationInFrames - 3) * f;
+  // NOW bar draw — resolves early in the breathe so the honest proportion is
+  // readable for most of the beat.
+  const draw = interpolate(frame, [at(0.22), at(0.4)], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.out(Easing.cubic),
+  });
+  const bar = (
+    label: string,
+    value: string,
+    pct: number,
+    fill: string,
+    valueInk: string,
+    grow: number,
+  ) => (
+    <div
+      key={label}
+      style={{ display: "flex", alignItems: "center", gap: Math.round(16 * ts), minWidth: 0 }}
+    >
+      <div
+        style={{
+          flex: `0 0 ${Math.round(108 * ts)}px`,
+          fontFamily: "'Inter', sans-serif",
+          fontWeight: 700,
+          fontSize: Math.round(15 * ts),
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          color: ink,
+          opacity: 0.78 * anim.chipOpacity,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+        <div
+          style={{
+            width: `${(pct * grow).toFixed(1)}%`,
+            height: Math.round(26 * ts),
+            background: fill,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            overflow: "hidden",
+            opacity: anim.chipOpacity,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontVariantNumeric: "tabular-nums",
+              fontWeight: 700,
+              fontSize: Math.round(17 * ts),
+              color: valueInk,
+              padding: `0 ${Math.round(10 * ts)}px`,
+              whiteSpace: "nowrap",
+              opacity: grow,
+            }}
+          >
+            {value}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      {chips.length > 0 ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: Math.round(14 * ts),
+            marginTop: Math.round(26 * ts),
+          }}
+        >
+          {chips.map((c, i) => {
+            // Importance-ordered cascade: 3-frame stagger keeps the whole
+            // row's entrance under 15 frames (motion-craft stagger bound).
+            const enter = interpolate(
+              frame,
+              [at(0.2) + i * 3, at(0.2) + i * 3 + Math.round(fps * 0.3)],
+              [0, 1],
+              {
+                extrapolateLeft: "clamp",
+                extrapolateRight: "clamp",
+                easing: Easing.out(Easing.exp),
+              },
+            );
+            return (
+              <div
+                key={`${c.label}-${i}`}
+                style={{
+                  border: `1px solid ${outline}`,
+                  padding: `${Math.round(18 * ts)}px ${Math.round(24 * ts)}px`,
+                  minWidth: 0,
+                  opacity: enter * anim.chipOpacity,
+                  transform: `translateY(${(1 - enter) * 18}px)`,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontWeight: 700,
+                    fontSize: Math.round(17 * ts),
+                    letterSpacing: "0.22em",
+                    textTransform: "uppercase",
+                    color: roles.accent,
+                    marginBottom: Math.round(8 * ts),
+                  }}
+                >
+                  {c.label}
+                </div>
+                <div
+                  style={{
+                    fontFamily: "'JetBrains Mono', 'Space Grotesk', monospace",
+                    fontVariantNumeric: "tabular-nums",
+                    fontWeight: 700,
+                    fontSize: Math.round(30 * ts),
+                    lineHeight: 1.05,
+                    color: ink,
+                  }}
+                >
+                  {c.value}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {bars ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: Math.round(10 * ts),
+            marginTop: Math.round(28 * ts),
+          }}
+        >
+          {bar("Previous", bars.prev, 100.0, withAlpha(ink, 0.26), ink, 1)}
+          {bar("Now", bars.now, bars.nowPct, roles.accent, roles.ground, draw)}
+          <div
+            style={{
+              fontFamily: "'Inter', sans-serif",
+              fontWeight: 600,
+              fontSize: Math.round(15 * ts),
+              color: roles.accent,
+              letterSpacing: "0.06em",
+              opacity: anim.chipOpacity,
+            }}
+          >
+            {bars.caption}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 };
